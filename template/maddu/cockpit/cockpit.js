@@ -977,6 +977,10 @@ function renderOperations() {
   root.appendChild(el('h2', {}, 'Operations'));
   root.appendChild(el('p', {}, ROUTES.operations.description));
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading slice timeline…'));
+  root.appendChild(panel('Activity', 'slice-stops + memory facts · last 7 days', summaryMount));
+
   const slicesMount = el('div', {});
   slicesMount.appendChild(loading('Fetching slice-stop ledger…'));
   root.appendChild(panel('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount));
@@ -992,10 +996,26 @@ function renderOperations() {
   function refresh() {
     fetchProjection().then((proj) => {
       slicesMount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!proj || !proj.sliceStops || proj.sliceStops.length === 0) {
         slicesMount.appendChild(placeholder('Empty', 'Run `maddu slice-stop` to append the first entry.'));
+        summaryMount.appendChild(placeholder('No activity', 'Slice-stops will appear here as they happen.'));
         return;
       }
+
+      // ── Activity summary: 7-day sparkline + tile grid ─────────────
+      const slices = proj.sliceStops || [];
+      const bins = binByTime(slices, 28, 'ts', 7 * 24 * 60 * 60 * 1000); // 7 days, 6h buckets
+      const last24h = bins.slice(-4).reduce((s, x) => s + x, 0);
+      const wrap = el('div', { class: 'widget-stat' });
+      const numLine = el('div', { class: 'widget-stat-num' });
+      numLine.appendChild(el('span', { class: 'widget-stat-value' }, String(slices.length)));
+      numLine.appendChild(el('span', { class: 'widget-stat-trend' + (last24h > 0 ? ' up' : '') }, `+${last24h} in 24h`));
+      wrap.appendChild(numLine);
+      wrap.appendChild(el('div', { class: 'widget-stat-label' }, 'slice-stops over the last 7 days'));
+      wrap.appendChild(sparkline(bins, { tone: 'accent', width: 480, height: 56 }));
+      summaryMount.appendChild(wrap);
+
       const list = el('div', {});
       for (const s of proj.sliceStops.slice().reverse()) {
         const row = el('div', { class: 'panel' }, [
@@ -1648,6 +1668,49 @@ function renderEvents() {
   root.appendChild(el('h2', {}, 'Events'));
   root.appendChild(el('p', {}, ROUTES.events.description));
 
+  // ── Summary widget: 60-min activity + type mix ──────────────────────
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading event tail…'));
+  root.appendChild(panel('Activity', 'last 60 min · 200-event type mix', summaryMount));
+  (async () => {
+    try {
+      const r = await fetch('/bridge/events/recent?limit=500', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      summaryMount.innerHTML = '';
+      if (!d || !(d.events || []).length) { summaryMount.appendChild(placeholder('No events', 'Spine is empty.')); return; }
+      const bins = binByTime(d.events, 24, 'ts', 60 * 60 * 1000);
+      const total = bins.reduce((s, x) => s + x, 0);
+      const peak = Math.max(...bins);
+      const wrap = el('div', { class: 'widget-stat' });
+      const num = el('div', { class: 'widget-stat-num' }, [
+        el('span', { class: 'widget-stat-value' }, String(total)),
+        el('span', { class: 'widget-stat-trend' }, `peak ${peak}/bin`)
+      ]);
+      wrap.appendChild(num);
+      wrap.appendChild(el('div', { class: 'widget-stat-label' }, `${d.total} total events on spine · last 60 min sample`));
+      wrap.appendChild(sparkline(bins, { tone: 'blue', width: 560, height: 56 }));
+      summaryMount.appendChild(wrap);
+
+      const tail = (d.events || []).slice(-200);
+      const buckets = { 't-framework': 0, 't-session': 0, 't-lane': 0, 't-approval': 0, 't-slice': 0, other: 0 };
+      for (const e of tail) {
+        const cls = classifyEvent(e.type || '');
+        if (cls in buckets) buckets[cls]++; else buckets.other++;
+      }
+      summaryMount.appendChild(segBar([
+        { label: 'framework', value: buckets['t-framework'], tone: 'accent' },
+        { label: 'session',   value: buckets['t-session'],   tone: 'blue' },
+        { label: 'lane',      value: buckets['t-lane'],      tone: 'ok' },
+        { label: 'approval',  value: buckets['t-approval'],  tone: 'warn' },
+        { label: 'slice',     value: buckets['t-slice'],     tone: 'danger' },
+        { label: 'other',     value: buckets.other,          tone: 'neutral' }
+      ]));
+    } catch (e) {
+      summaryMount.innerHTML = '';
+      summaryMount.appendChild(placeholder('Error', String(e)));
+    }
+  })();
+
   // Controls
   const filter = el('select', { class: '' });
   for (const t of ['(all)', 'FRAMEWORK_*', 'SESSION_*', 'LANE_*', 'SLICE_STOP', 'APPROVAL_*', 'DOCTOR_REPORT', 'INBOX_MESSAGE']) {
@@ -1744,6 +1807,10 @@ function renderMailbox() {
   root.appendChild(el('h2', {}, 'Mailbox'));
   root.appendChild(el('p', {}, ROUTES.mailbox.description));
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading mailbox counts…'));
+  root.appendChild(panel('Summary', 'unread distribution across lane mailboxes', summaryMount));
+
   let selectedLane = null;
   const lanesMount = el('div', {});
   const msgsMount = el('div', {});
@@ -1795,13 +1862,39 @@ function renderMailbox() {
 
   function loadLanes() {
     lanesMount.innerHTML = '';
+    summaryMount.innerHTML = '';
     lanesMount.appendChild(loading('Fetching lane mailboxes…'));
     fetchMailboxCounts().then((c) => {
       lanesMount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!c || Object.keys(c.counts).length === 0) {
         lanesMount.appendChild(placeholder('No lane mailboxes yet', 'Send the first message via `/mail <lane> <subject>` or `maddu mailbox send`.'));
+        summaryMount.appendChild(placeholder('No mailboxes', 'Distribution will appear once a lane gets its first message.'));
         return;
       }
+
+      // Summary: totals + per-lane unread bars
+      const lanes = Object.keys(c.counts);
+      const totalUnread = lanes.reduce((s, l) => s + (c.counts[l].unread || 0), 0);
+      const totalMsgs   = lanes.reduce((s, l) => s + (c.counts[l].total || 0), 0);
+      const lanesWithUnread = lanes.filter((l) => c.counts[l].unread > 0).length;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(statusGrid([
+        { value: lanes.length,        label: 'Lane mailboxes', tone: 'accent' },
+        { value: totalMsgs,           label: 'Total messages', tone: 'blue' },
+        { value: totalUnread,         label: 'Unread',         tone: totalUnread > 0 ? 'warn' : 'ok' },
+        { value: lanesWithUnread,     label: 'Lanes w/ unread', tone: lanesWithUnread > 0 ? 'warn' : 'ok' }
+      ]));
+      const bars = el('div', {});
+      const sorted = lanes.slice().sort((a, b) => (c.counts[b].unread || 0) - (c.counts[a].unread || 0));
+      const maxUnread = Math.max(1, ...sorted.map((l) => c.counts[l].unread || 0));
+      for (const lane of sorted.slice(0, 6)) {
+        const u = c.counts[lane].unread || 0;
+        bars.appendChild(meter(u, maxUnread, lane, { tone: u > 0 ? 'warn' : 'ok' }));
+      }
+      summary.appendChild(bars);
+      summaryMount.appendChild(summary);
+
       const list = el('div', {});
       for (const lane of Object.keys(c.counts).sort()) {
         const m = c.counts[lane];
@@ -1987,6 +2080,10 @@ function renderSkills() {
   root.appendChild(el('h2', {}, 'Skills'));
   root.appendChild(el('p', {}, ROUTES.skills.description));
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading skill registry…'));
+  root.appendChild(panel('Summary', 'gallery composition · tags · provenance', summaryMount));
+
   let selected = null;
 
   // create form
@@ -2026,14 +2123,41 @@ function renderSkills() {
 
   function refresh() {
     listMount.innerHTML = '';
+    summaryMount.innerHTML = '';
     listMount.appendChild(loading('Loading skills…'));
     fetchSkills().then((d) => {
       listMount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!d || d.skills.length === 0) {
         listMount.appendChild(placeholder('No skills yet', 'Create one above or run `maddu skill from-slice <eventId>`.'));
+        summaryMount.appendChild(placeholder('No skills', 'Distill a slice-stop into a skill to populate the gallery.'));
         detailMount.innerHTML = '';
         return;
       }
+
+      // Summary: total · from-slice · distinct tags + tag distribution bars
+      const skills = d.skills || [];
+      const fromSlice = skills.filter((s) => Array.isArray(s.provenance) && s.provenance.length > 0).length;
+      const tagCounts = {};
+      for (const s of skills) for (const t of (s.tags || [])) tagCounts[t] = (tagCounts[t] || 0) + 1;
+      const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(statusGrid([
+        { value: skills.length,             label: 'Skills',            tone: 'accent' },
+        { value: fromSlice,                 label: 'From slice-stop',   tone: 'blue' },
+        { value: Object.keys(tagCounts).length, label: 'Distinct tags', tone: 'ok' },
+        { value: skills.length - fromSlice, label: 'Authored direct',   tone: 'neutral' }
+      ]));
+      const tagBars = el('div', {});
+      if (topTags.length === 0) {
+        tagBars.appendChild(placeholder('No tags', 'Tag skills on creation to populate this chart.'));
+      } else {
+        const maxN = topTags[0][1];
+        for (const [tag, n] of topTags) tagBars.appendChild(meter(n, maxN, tag, { tone: 'blue' }));
+      }
+      summary.appendChild(tagBars);
+      summaryMount.appendChild(summary);
+
       for (const s of d.skills) {
         const isSel = selected === s.id;
         const row = el('div', {
@@ -2157,6 +2281,9 @@ function renderImports() {
     } finally { subBtn.disabled = false; }
   });
 
+  const summaryMount = el('div', {}); summaryMount.appendChild(loading('Reading import ledger…'));
+  root.appendChild(panel('Summary', 'accepted vs rejected · breakdown by kind', summaryMount));
+
   const accMount = el('div', {}); accMount.appendChild(loading('Loading…'));
   const rejMount = el('div', {});
   root.appendChild(panel('Accepted', '.maddu/imports/accepted.ndjson', accMount));
@@ -2164,9 +2291,33 @@ function renderImports() {
 
   function refresh() {
     fetchImports().then((d) => {
+      summaryMount.innerHTML = '';
       accMount.innerHTML = '';
       rejMount.innerHTML = '';
-      if (!d) { accMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+      if (!d) {
+        summaryMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+        accMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+        return;
+      }
+      const acc = d.accepted || [];
+      const rej = d.rejected || [];
+      const byKind = {};
+      for (const a of acc) byKind[a.kind] = (byKind[a.kind] || 0) + 1;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'accepted', value: acc.length, tone: 'ok' },
+        { label: 'rejected', value: rej.length, tone: 'danger' }
+      ], { centerLabel: 'imports' }));
+      const bars = el('div', {});
+      const total = acc.length + rej.length;
+      bars.appendChild(meter(acc.length, total, 'Accepted', { tone: 'ok' }));
+      bars.appendChild(meter(rej.length, total, 'Rejected (secrets)', { tone: 'danger' }));
+      for (const [kind, n] of Object.entries(byKind)) {
+        bars.appendChild(meter(n, acc.length, `Accepted: ${kind}`, { tone: 'blue' }));
+      }
+      summary.appendChild(bars);
+      summaryMount.appendChild(summary);
+
       if (d.accepted.length === 0) accMount.appendChild(placeholder('No imports yet', 'Compose a payload above and click Submit.'));
       else {
         for (const a of d.accepted) accMount.appendChild(el('div', { class: 'ledger-row' }, [
@@ -2222,6 +2373,10 @@ function renderAuth() {
     ])
   ]);
   root.appendChild(note);
+
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading auth state…'));
+  root.appendChild(panel('Summary', 'providers · keys · rate-limit state', summaryMount));
 
   let selectedProvider = null;
   const grid = el('div', { style: 'display:grid;grid-template-columns:280px 1fr;gap:12px;align-items:start;' });
@@ -2284,14 +2439,36 @@ function renderAuth() {
 
   function refresh() {
     listMount.innerHTML = '';
+    summaryMount.innerHTML = '';
     listMount.appendChild(loading('Fetching providers…'));
     fetchAuth().then((d) => {
       listMount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!d || d.providers.length === 0) {
         listMount.appendChild(placeholder('No providers', `Add a key via:\n  maddu auth add anthropic --label personal --value …\n\nStorage path:\n  ${d ? d.storage.path : '(unknown)'}`));
+        summaryMount.appendChild(placeholder('No providers', 'Add a key to populate the summary.'));
         detailMount.innerHTML = '';
         return;
       }
+
+      // Summary: total keys / providers / rate-limited count + per-provider bars
+      const totalKeys = d.providers.reduce((s, p) => s + (p.keyCount || 0), 0);
+      const limited = d.providers.reduce((s, p) => s + (p.rateLimitedCount || 0), 0);
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(statusGrid([
+        { value: d.providers.length, label: 'Providers',     tone: 'accent' },
+        { value: totalKeys,          label: 'Total keys',    tone: 'blue' },
+        { value: limited,            label: 'Rate-limited',  tone: limited > 0 ? 'warn' : 'ok' },
+        { value: d.providers.filter((p) => p.keyCount > 0).length, label: 'Active providers', tone: 'ok' }
+      ]));
+      const bars = el('div', {});
+      const maxKeys = Math.max(1, ...d.providers.map((p) => p.keyCount || 0));
+      for (const p of d.providers) {
+        bars.appendChild(meter(p.keyCount || 0, maxKeys, p.provider, { tone: 'blue' }));
+      }
+      summary.appendChild(bars);
+      summaryMount.appendChild(summary);
+
       for (const p of d.providers) {
         const isSel = selectedProvider === p.provider;
         const row = el('div', {
@@ -2365,18 +2542,43 @@ function renderSchedule() {
     } finally { createBtn.disabled = false; }
   });
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading schedules…'));
+  root.appendChild(panel('Summary', 'enabled · disabled · fire totals', summaryMount));
+
   const mount = el('div', {});
   root.appendChild(mount);
 
   function refresh() {
     mount.innerHTML = '';
+    summaryMount.innerHTML = '';
     mount.appendChild(loading('Fetching schedules…'));
     fetchSchedules().then((d) => {
       mount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!d || d.schedules.length === 0) {
         mount.appendChild(placeholder('No schedules yet', 'Create one above, or via `maddu schedule create --natural "every hour" --title "ping"`.'));
+        summaryMount.appendChild(placeholder('No schedules', 'Create one to populate this summary.'));
         return;
       }
+
+      // Summary
+      const sch = d.schedules || [];
+      const enabled = sch.filter((s) => s.enabled).length;
+      const fired = sch.reduce((t, s) => t + (s.fireCount || 0), 0);
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'enabled',  value: enabled,            tone: 'ok' },
+        { label: 'disabled', value: sch.length - enabled, tone: 'neutral' }
+      ], { centerLabel: 'schedules' }));
+      summary.appendChild(statusGrid([
+        { value: sch.length, label: 'Schedules',        tone: 'accent' },
+        { value: enabled,    label: 'Enabled',          tone: 'ok' },
+        { value: fired,      label: 'Total fires',      tone: 'blue' },
+        { value: sch.reduce((m, s) => Math.max(m, s.fireCount || 0), 0), label: 'Top fire count', tone: 'blue' }
+      ]));
+      summaryMount.appendChild(summary);
+
       for (const s of d.schedules) {
         const enabled = s.enabled;
         const card = el('div', { class: 'panel', style: enabled ? '' : 'opacity:0.55;' }, [
@@ -2483,18 +2685,48 @@ function renderMcp() {
     finally { allBtn.disabled = false; allBtn.textContent = 'Test all'; }
   });
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading MCP registry…'));
+  root.appendChild(panel('Summary', 'transports · enabled · health', summaryMount));
+
   const mount = el('div', {});
   root.appendChild(mount);
 
   function refresh() {
     mount.innerHTML = '';
+    summaryMount.innerHTML = '';
     mount.appendChild(loading('Fetching MCP registry…'));
     fetchMcp().then((d) => {
       mount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!d || d.mcp.length === 0) {
         mount.appendChild(placeholder('No MCP servers registered', 'Register one above, or via `maddu mcp register`.'));
+        summaryMount.appendChild(placeholder('No MCP servers', 'Register one to populate this summary.'));
         return;
       }
+
+      // Summary
+      const mcp = d.mcp || [];
+      const enabled = mcp.filter((s) => s.enabled).length;
+      const transports = { stdio: 0, sse: 0, http: 0, other: 0 };
+      for (const s of mcp) (transports[s.transport] != null ? transports[s.transport]++ : transports.other++);
+      const health = d.health || {};
+      const ok = Object.values(health).filter((h) => h && h.ok).length;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'stdio', value: transports.stdio, tone: 'accent' },
+        { label: 'sse',   value: transports.sse,   tone: 'blue' },
+        { label: 'http',  value: transports.http,  tone: 'ok' },
+        { label: 'other', value: transports.other, tone: 'neutral' }
+      ], { centerLabel: 'servers' }));
+      summary.appendChild(statusGrid([
+        { value: mcp.length,           label: 'Registered',    tone: 'accent' },
+        { value: enabled,              label: 'Enabled',       tone: 'ok' },
+        { value: ok,                   label: 'Healthy',       tone: ok > 0 ? 'ok' : 'neutral' },
+        { value: mcp.length - enabled, label: 'Disabled',      tone: 'neutral' }
+      ]));
+      summaryMount.appendChild(summary);
+
       for (const r of d.mcp) {
         const h = (d.health || {})[r.name];
         const enabled = r.enabled;
@@ -2599,18 +2831,46 @@ function renderRuntimes() {
     finally { allBtn.disabled = false; allBtn.textContent = 'Detect all'; }
   });
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading runtime adapters…'));
+  root.appendChild(panel('Summary', 'detected · capabilities · spawn surface', summaryMount));
+
   const mount = el('div', {});
   root.appendChild(mount);
 
   function refresh() {
     mount.innerHTML = '';
+    summaryMount.innerHTML = '';
     mount.appendChild(loading('Fetching runtimes…'));
     fetchRuntimes().then((d) => {
       mount.innerHTML = '';
+      summaryMount.innerHTML = '';
       if (!d || d.runtimes.length === 0) {
         mount.appendChild(placeholder('No runtimes registered', 'Register one above, or via `maddu runtime register --name … --binary …`.'));
+        summaryMount.appendChild(placeholder('No runtimes', 'Register one to populate this summary.'));
         return;
       }
+
+      // Summary
+      const rts = d.runtimes || [];
+      const health = d.health || {};
+      const detected = rts.filter((r) => health[r.name]?.ok).length;
+      const capMcp = rts.filter((r) => r.capabilities?.mcp).length;
+      const capTools = rts.filter((r) => r.capabilities?.tools).length;
+      const capStreaming = rts.filter((r) => r.capabilities?.streaming).length;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'detected',     value: detected,           tone: 'ok' },
+        { label: 'not detected', value: rts.length - detected, tone: 'neutral' }
+      ], { centerLabel: 'runtimes' }));
+      const bars = el('div', {});
+      bars.appendChild(meter(detected, rts.length, 'Detected on host', { tone: 'ok' }));
+      bars.appendChild(meter(capMcp, rts.length, 'MCP capable', { tone: 'blue' }));
+      bars.appendChild(meter(capTools, rts.length, 'Tools capable', { tone: 'accent' }));
+      bars.appendChild(meter(capStreaming, rts.length, 'Streaming capable', { tone: 'blue' }));
+      summary.appendChild(bars);
+      summaryMount.appendChild(summary);
+
       for (const r of d.runtimes) {
         const h = (d.health || {})[r.name];
         const status = h?.ok ? `<span class="signal live"></span>${h.version || 'detected'}` :
