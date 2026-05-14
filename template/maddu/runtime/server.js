@@ -881,6 +881,14 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { ok: true, added });
   }
 
+  // ── events: tail N most recent (no cursor) for charts/sparklines ──────
+  if (path === '/bridge/events/recent' && req.method === 'GET') {
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '200', 10), 1), 5000);
+    const all = await readAll(repoRoot);
+    const tail = all.slice(-limit);
+    return sendJson(res, 200, { events: tail, total: all.length });
+  }
+
   // ── events: poll-since-cursor (immediate return) ──────────────────────
   if (path === '/bridge/events/poll' && req.method === 'GET') {
     const after = url.searchParams.get('after');

@@ -249,6 +249,270 @@ function placeholder(name, planned) {
   ]);
 }
 
+// ─── Widget kit ─────────────────────────────────────────────────────────
+//
+// All widgets are pure inline SVG / DOM — no chart library (rule #4: no
+// broad new deps). Tones map to token CSS vars:
+//   ok     → --m-ok        warn  → --m-warn      danger → --m-danger
+//   accent → --m-accent    blue  → --m-accent-2  fg-3   → --m-fg-3 (neutral)
+//
+// The widget helpers return DOM nodes you can drop into a panel body.
+
+const TONE_VAR = {
+  ok: 'var(--m-ok)',
+  warn: 'var(--m-warn)',
+  danger: 'var(--m-danger)',
+  accent: 'var(--m-accent)',
+  blue: 'var(--m-accent-2)',
+  neutral: 'var(--m-fg-3)'
+};
+function toneColor(t) { return TONE_VAR[t] || TONE_VAR.neutral; }
+
+function svg(tag, attrs = {}, children = []) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of [].concat(children)) {
+    if (c == null) continue;
+    node.appendChild(c);
+  }
+  return node;
+}
+
+/**
+ * Large stat tile.  bigStat(value, label, { trend?, tone?, spark? })
+ *   trend: '+12%' / '-3' etc; rendered as a chip after the number
+ *   tone:  color of the number (default fg-0)
+ *   spark: optional array of numbers → renders a sparkline under the label
+ */
+function bigStat(value, label, opts = {}) {
+  const { trend, tone, spark } = opts;
+  const wrap = el('div', { class: 'widget-stat' });
+  const numLine = el('div', { class: 'widget-stat-num' });
+  const num = el('span', { class: 'widget-stat-value', style: tone ? `color:${toneColor(tone)}` : '' }, String(value));
+  numLine.appendChild(num);
+  if (trend) {
+    const t = el('span', { class: 'widget-stat-trend' }, trend);
+    if (typeof trend === 'string' && trend.startsWith('+')) t.classList.add('up');
+    if (typeof trend === 'string' && trend.startsWith('-')) t.classList.add('down');
+    numLine.appendChild(t);
+  }
+  wrap.appendChild(numLine);
+  wrap.appendChild(el('div', { class: 'widget-stat-label' }, label));
+  if (spark && spark.length) wrap.appendChild(sparkline(spark, { tone: tone || 'blue' }));
+  return wrap;
+}
+
+/**
+ * Status grid — N tiles in a responsive grid.
+ *   tiles: [{ value, label, tone?, trend?, spark?, onClick? }]
+ */
+function statusGrid(tiles) {
+  const wrap = el('div', { class: 'widget-grid' });
+  for (const t of tiles) {
+    const tile = bigStat(t.value, t.label, t);
+    if (t.onClick) {
+      tile.classList.add('clickable');
+      tile.addEventListener('click', t.onClick);
+    }
+    wrap.appendChild(tile);
+  }
+  return wrap;
+}
+
+/**
+ * Horizontal progress fill row.
+ *   bar(pct, label, { tone?, right? })  — pct in 0..1 or 0..100
+ */
+function bar(pct, label, opts = {}) {
+  const { tone = 'accent', right } = opts;
+  const v = Math.max(0, Math.min(100, pct > 1 ? pct : pct * 100));
+  const row = el('div', { class: 'widget-bar' });
+  const head = el('div', { class: 'widget-bar-head' }, [
+    el('span', { class: 'widget-bar-label' }, label),
+    el('span', { class: 'widget-bar-right' }, right != null ? String(right) : `${Math.round(v)}%`)
+  ]);
+  const track = el('div', { class: 'widget-bar-track' });
+  const fill = el('div', { class: 'widget-bar-fill', style: `width:${v}%; background:${toneColor(tone)}` });
+  track.appendChild(fill);
+  row.appendChild(head);
+  row.appendChild(track);
+  return row;
+}
+
+/**
+ * Stacked distribution row (single track, multi-segment).
+ *   segBar([{ label, value, tone }])
+ */
+function segBar(segments) {
+  const total = segments.reduce((s, x) => s + (x.value || 0), 0) || 1;
+  const wrap = el('div', { class: 'widget-segbar' });
+  const track = el('div', { class: 'widget-segbar-track' });
+  for (const s of segments) {
+    const w = ((s.value || 0) / total) * 100;
+    if (w <= 0) continue;
+    const seg = el('div', {
+      class: 'widget-segbar-seg',
+      style: `width:${w}%; background:${toneColor(s.tone)}`,
+      title: `${s.label}: ${s.value}`
+    });
+    track.appendChild(seg);
+  }
+  wrap.appendChild(track);
+  const legend = el('div', { class: 'widget-segbar-legend' });
+  for (const s of segments) {
+    legend.appendChild(el('span', { class: 'widget-segbar-chip' }, [
+      el('span', { class: 'widget-segbar-dot', style: `background:${toneColor(s.tone)}` }),
+      document.createTextNode(`${s.label} ${s.value}`)
+    ]));
+  }
+  wrap.appendChild(legend);
+  return wrap;
+}
+
+/**
+ * Donut chart (SVG).
+ *   donut([{label, value, tone}], { size?, hole?, center? })
+ *   center: optional center label (string) — defaults to total
+ */
+function donut(segments, opts = {}) {
+  const size = opts.size || 140;
+  const stroke = opts.stroke || 18;
+  const r = (size - stroke) / 2;
+  const cx = size / 2, cy = size / 2;
+  const C = 2 * Math.PI * r;
+  const total = segments.reduce((s, x) => s + (x.value || 0), 0);
+  const wrap = el('div', { class: 'widget-donut' });
+  const s = svg('svg', { width: String(size), height: String(size), viewBox: `0 0 ${size} ${size}` });
+  // Background ring
+  s.appendChild(svg('circle', { cx: String(cx), cy: String(cy), r: String(r), fill: 'none', stroke: 'var(--m-bg-3)', 'stroke-width': String(stroke) }));
+  if (total > 0) {
+    let offset = 0;
+    for (const seg of segments) {
+      const v = seg.value || 0;
+      if (v <= 0) continue;
+      const len = (v / total) * C;
+      const arc = svg('circle', {
+        cx: String(cx), cy: String(cy), r: String(r),
+        fill: 'none',
+        stroke: toneColor(seg.tone),
+        'stroke-width': String(stroke),
+        'stroke-dasharray': `${len} ${C - len}`,
+        'stroke-dashoffset': String(-offset),
+        transform: `rotate(-90 ${cx} ${cy})`
+      });
+      const title = svg('title', {});
+      title.textContent = `${seg.label}: ${v}`;
+      arc.appendChild(title);
+      s.appendChild(arc);
+      offset += len;
+    }
+  }
+  // Center label
+  const center = opts.center != null ? opts.center : String(total);
+  const cText = svg('text', {
+    x: String(cx), y: String(cy + 5),
+    'text-anchor': 'middle',
+    'font-family': "'IBM Plex Sans Condensed', sans-serif",
+    'font-weight': '600',
+    'font-size': '24',
+    fill: 'var(--m-fg-0)'
+  });
+  cText.textContent = center;
+  s.appendChild(cText);
+  if (opts.centerLabel) {
+    const lbl = svg('text', {
+      x: String(cx), y: String(cy + 22),
+      'text-anchor': 'middle',
+      'font-family': "'IBM Plex Sans', sans-serif",
+      'font-size': '10',
+      fill: 'var(--m-fg-3)',
+      'text-transform': 'uppercase',
+      'letter-spacing': '0.06em'
+    });
+    lbl.textContent = opts.centerLabel;
+    s.appendChild(lbl);
+  }
+  wrap.appendChild(s);
+  // Legend on the right
+  const legend = el('div', { class: 'widget-donut-legend' });
+  for (const seg of segments) {
+    if ((seg.value || 0) <= 0) continue;
+    const pct = total ? Math.round((seg.value / total) * 100) : 0;
+    legend.appendChild(el('div', { class: 'widget-donut-row' }, [
+      el('span', { class: 'widget-segbar-dot', style: `background:${toneColor(seg.tone)}` }),
+      el('span', { class: 'widget-donut-label' }, seg.label),
+      el('span', { class: 'widget-donut-val' }, `${seg.value} · ${pct}%`)
+    ]));
+  }
+  wrap.appendChild(legend);
+  return wrap;
+}
+
+/**
+ * Sparkline (inline SVG, no axes).
+ *   sparkline([n1,n2,...], { tone?, width?, height?, fill? })
+ */
+function sparkline(values, opts = {}) {
+  const w = opts.width || 120;
+  const h = opts.height || 28;
+  const tone = opts.tone || 'blue';
+  const fill = opts.fill !== false;
+  const max = Math.max(1, ...values);
+  const min = Math.min(0, ...values);
+  const range = max - min || 1;
+  const stepX = values.length > 1 ? w / (values.length - 1) : w;
+  const pts = values.map((v, i) => {
+    const x = i * stepX;
+    const y = h - ((v - min) / range) * (h - 2) - 1;
+    return [x, y];
+  });
+  const line = pts.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ');
+  const area = line + ` L ${w} ${h} L 0 ${h} Z`;
+  const s = svg('svg', { class: 'widget-spark', width: String(w), height: String(h), viewBox: `0 0 ${w} ${h}` });
+  if (fill) {
+    s.appendChild(svg('path', { d: area, fill: toneColor(tone), 'fill-opacity': '0.12', stroke: 'none' }));
+  }
+  s.appendChild(svg('path', { d: line, fill: 'none', stroke: toneColor(tone), 'stroke-width': '1.5', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+  return s;
+}
+
+/**
+ * Meter — single bar with explicit numerator/denominator label.
+ *   meter(value, max, label, { tone? })
+ */
+function meter(value, max, label, opts = {}) {
+  const tone = opts.tone || (value >= max ? 'warn' : 'accent');
+  return bar(max > 0 ? value / max : 0, label, { tone, right: `${value} / ${max}` });
+}
+
+/**
+ * Time-bin events into N buckets over the trailing window.
+ *   binByTime(events, n, fieldOrFn = 'createdAt', windowMs = 60*60*1000)
+ *   Returns array of N integers (most-recent at end).
+ */
+function binByTime(events, n = 24, fieldOrFn = 'createdAt', windowMs = 60 * 60 * 1000) {
+  const buckets = new Array(n).fill(0);
+  if (!events || !events.length) return buckets;
+  const now = Date.now();
+  const start = now - windowMs;
+  const span = windowMs / n;
+  const getTs = typeof fieldOrFn === 'function'
+    ? fieldOrFn
+    : (e) => {
+        const v = e && e[fieldOrFn];
+        if (!v) return null;
+        const t = typeof v === 'number' ? v : Date.parse(v);
+        return Number.isFinite(t) ? t : null;
+      };
+  for (const e of events) {
+    const t = getTs(e);
+    if (t == null || t < start) continue;
+    const idx = Math.min(n - 1, Math.max(0, Math.floor((t - start) / span)));
+    buckets[idx]++;
+  }
+  return buckets;
+}
+
 // ─── Workbench (Phase D1) ────────────────────────────────────────────────
 
 function renderWorkbench() {
@@ -532,38 +796,55 @@ function renderDashboard() {
 
   const status = bridgeStatus || {};
   const counts = status.counts || {};
-  const kv = el('dl', { class: 'kv' });
-  const rows = [
-    ['Bridge', bridgeOk ? 'online' : 'offline'],
-    ['Version', status.version || '—'],
-    ['Host', status.host || '127.0.0.1'],
-    ['Port', String(status.port || 4177)],
-    ['Repo root', status.repoRoot || '—'],
-    ['State', status.stateDir || '.maddu/'],
-    ['Uptime', formatUptime(status.uptimeMs)],
-    ['Events', String(counts.events ?? '—')],
-    ['Active sessions', String(counts.activeSessions ?? '—')],
-    ['Lane claims', String(counts.claims ?? '—')],
-    ['Slice-stops', String(counts.sliceStops ?? '—')],
-    ['Memory facts', String(counts.memoryFacts ?? '—')],
-    ['Mailbox unread', String(counts.unreadMail ?? '—')],
-    ['Open tasks', String(counts.openTasks ?? '—')],
-    ['Skills', String(counts.skills ?? '—')],
-    ['Workers (running)', String(counts.runningWorkers ?? '—')],
-    ['Stuck workers', String(counts.stuckWorkers ?? '—')],
-    ['Runtimes', String(counts.runtimes ?? '—')],
-    ['MCP servers', counts.mcpEnabled != null ? `${counts.mcpEnabled}/${counts.mcp}` : '—'],
-    ['Schedules', String(counts.enabledSchedules ?? '—')],
-    ['Checkpoints', String(counts.checkpoints ?? '—')],
-    ['Auth providers', String(counts.authProviders ?? '—')],
-    ['Imports', counts.importsAccepted != null ? `${counts.importsAccepted} ok · ${counts.importsRejected} rejected` : '—']
-  ];
-  for (const [k, v] of rows) {
-    kv.appendChild(el('dt', {}, k));
-    kv.appendChild(el('dd', {}, v));
-  }
-  root.appendChild(panel('Bridge status', 'GET /bridge/status', kv));
 
+  // ── Headline tiles (top-of-page status grid) ────────────────────────
+  // Populated immediately from cached bridgeStatus; sparklines fill in
+  // asynchronously once /bridge/events/recent returns.
+  const headline = statusGrid([
+    { value: counts.events ?? '—',          label: 'Events',          tone: 'blue',   onClick: () => location.hash = '#/events' },
+    { value: counts.activeSessions ?? '—',  label: 'Active sessions', tone: 'accent', onClick: () => location.hash = '#/swarm' },
+    { value: counts.openApprovals ?? '—',   label: 'Open approvals',  tone: (counts.openApprovals > 0 ? 'warn' : 'accent'), onClick: () => location.hash = '#/approvals' },
+    { value: counts.openTasks ?? '—',       label: 'Open tasks',      tone: 'accent', onClick: () => location.hash = '#/tasks' },
+    { value: counts.stuckWorkers ?? '—',    label: 'Stuck workers',   tone: (counts.stuckWorkers > 0 ? 'danger' : 'ok'), onClick: () => location.hash = '#/swarm' },
+    { value: counts.unreadMail ?? '—',      label: 'Mailbox unread',  tone: (counts.unreadMail > 0 ? 'warn' : 'accent'), onClick: () => location.hash = '#/mailbox' }
+  ]);
+  root.appendChild(headline);
+
+  // ── Distribution donuts (tasks + workers) ───────────────────────────
+  const donutRow = el('div', { class: 'widget-donut-row-pair' });
+  const tasksPanel = panel('Tasks by status', 'GET /bridge/projection', el('div', { class: 'placeholder' }, [el('strong', {}, 'Loading…'), document.createTextNode('')]));
+  const workersPanel = panel('Workers by status', 'GET /bridge/projection · 15 s stuck threshold', el('div', { class: 'placeholder' }, [el('strong', {}, 'Loading…'), document.createTextNode('')]));
+  donutRow.appendChild(tasksPanel);
+  donutRow.appendChild(workersPanel);
+  root.appendChild(donutRow);
+
+  // ── Activity sparkline panel (event rate over last 60 min) ──────────
+  const sparkBody = el('div', {});
+  sparkBody.appendChild(loading('Reading event timeline…'));
+  root.appendChild(panel('Event activity', 'last 60 min · 24 buckets · GET /bridge/events/recent', sparkBody));
+
+  // ── Capacity meters ─────────────────────────────────────────────────
+  const meters = el('div', {});
+  meters.appendChild(meter(counts.mcpEnabled ?? 0, counts.mcp ?? 0, 'MCP servers enabled', { tone: 'blue' }));
+  meters.appendChild(meter(counts.enabledSchedules ?? 0, counts.schedules ?? 0, 'Schedules enabled', { tone: 'accent' }));
+  meters.appendChild(meter(counts.importsAccepted ?? 0, (counts.importsAccepted ?? 0) + (counts.importsRejected ?? 0), 'Imports accepted vs total', { tone: 'ok' }));
+  if ((counts.runtimes ?? 0) > 0) {
+    meters.appendChild(meter(counts.runtimes ?? 0, counts.runtimes ?? 0, 'Runtimes registered', { tone: 'accent' }));
+  }
+  root.appendChild(panel('Capacity', 'enabled · accepted · registered', meters));
+
+  // ── Bridge identity (compact KV — the operator-relevant rows only) ──
+  const idKv = el('dl', { class: 'kv' }, [
+    el('dt', {}, 'bridge'),    el('dd', { html: bridgeOk ? '<span class="signal live"></span>online' : '<span class="signal"></span>offline' }),
+    el('dt', {}, 'version'),   el('dd', {}, status.version || '—'),
+    el('dt', {}, 'host'),      el('dd', {}, `${status.host || '127.0.0.1'}:${status.port || 4177}`),
+    el('dt', {}, 'uptime'),    el('dd', {}, formatUptime(status.uptimeMs)),
+    el('dt', {}, 'repo root'), el('dd', {}, status.repoRoot || '—'),
+    el('dt', {}, 'state'),     el('dd', {}, status.stateDir || '.maddu/')
+  ]);
+  root.appendChild(panel('Bridge', 'GET /bridge/status', idKv));
+
+  // ── Hard rules quick reference ──────────────────────────────────────
   const rules = el('ul', { class: 'hard-rules' }, [
     el('li', {}, 'Files-only state'),
     el('li', {}, 'No SQLite / DB'),
@@ -575,6 +856,87 @@ function renderDashboard() {
     el('li', {}, 'Lane ownership')
   ]);
   root.appendChild(panel('Hard rules', 'docs/hard-rules.md', rules));
+
+  // ── Async: fetch projection + recent events to populate widgets ─────
+  (async () => {
+    try {
+      const proj = await fetchProjection();
+      if (proj) {
+        // Tasks donut
+        const t = proj.tasks || [];
+        const tCounts = { todo: 0, in_progress: 0, blocked: 0, done: 0 };
+        for (const x of t) tCounts[x.status] = (tCounts[x.status] || 0) + 1;
+        const tasksDonut = donut([
+          { label: 'todo',        value: tCounts.todo,        tone: 'accent' },
+          { label: 'in_progress', value: tCounts.in_progress, tone: 'blue' },
+          { label: 'blocked',     value: tCounts.blocked,     tone: 'warn' },
+          { label: 'done',        value: tCounts.done,        tone: 'ok' }
+        ], { centerLabel: t.length === 1 ? 'task' : 'tasks' });
+        tasksPanel.replaceChild(tasksDonut, tasksPanel.lastChild);
+
+        // Workers donut
+        const w = proj.workers || [];
+        const wCounts = { running: 0, stuck: 0, exited: 0, killed: 0 };
+        for (const x of w) wCounts[x.status] = (wCounts[x.status] || 0) + 1;
+        const workersDonut = donut([
+          { label: 'running', value: wCounts.running, tone: 'ok' },
+          { label: 'stuck',   value: wCounts.stuck,   tone: 'danger' },
+          { label: 'exited',  value: wCounts.exited,  tone: 'neutral' },
+          { label: 'killed',  value: wCounts.killed,  tone: 'warn' }
+        ], { centerLabel: w.length === 1 ? 'worker' : 'workers' });
+        workersPanel.replaceChild(workersDonut, workersPanel.lastChild);
+      } else {
+        tasksPanel.replaceChild(placeholder('Offline', 'Bridge not reachable.'), tasksPanel.lastChild);
+        workersPanel.replaceChild(placeholder('Offline', 'Bridge not reachable.'), workersPanel.lastChild);
+      }
+    } catch (e) {
+      tasksPanel.replaceChild(placeholder('Error', String(e)), tasksPanel.lastChild);
+      workersPanel.replaceChild(placeholder('Error', String(e)), workersPanel.lastChild);
+    }
+
+    try {
+      const r = await fetch('/bridge/events/recent?limit=500', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      sparkBody.innerHTML = '';
+      if (!d || !d.events || d.events.length === 0) {
+        sparkBody.appendChild(placeholder('No events yet', 'Run `maddu session register` or any slice-stop.'));
+        return;
+      }
+      const bins = binByTime(d.events, 24, 'createdAt', 60 * 60 * 1000);
+      const total = bins.reduce((s, x) => s + x, 0);
+      const peak = Math.max(...bins);
+      const wrap = el('div', { class: 'widget-stat' });
+      const numLine = el('div', { class: 'widget-stat-num' });
+      numLine.appendChild(el('span', { class: 'widget-stat-value' }, String(total)));
+      numLine.appendChild(el('span', { class: 'widget-stat-trend' }, `peak ${peak}/bin`));
+      wrap.appendChild(numLine);
+      wrap.appendChild(el('div', { class: 'widget-stat-label' }, 'events in the last 60 minutes'));
+      wrap.appendChild(sparkline(bins, { tone: 'blue', width: 480, height: 56 }));
+      sparkBody.appendChild(wrap);
+
+      // Event-type segmented bar (most recent 200 grouped by classifyEvent palette)
+      const tail = d.events.slice(-200);
+      const buckets = { 't-framework': 0, 't-session': 0, 't-lane': 0, 't-approval': 0, 't-slice': 0, other: 0 };
+      for (const e of tail) {
+        const cls = classifyEvent(e.type || '');
+        if (cls in buckets) buckets[cls]++;
+        else buckets.other++;
+      }
+      const seg = segBar([
+        { label: 'framework', value: buckets['t-framework'], tone: 'accent' },
+        { label: 'session',   value: buckets['t-session'],   tone: 'blue' },
+        { label: 'lane',      value: buckets['t-lane'],      tone: 'ok' },
+        { label: 'approval',  value: buckets['t-approval'],  tone: 'warn' },
+        { label: 'slice',     value: buckets['t-slice'],     tone: 'danger' },
+        { label: 'other',     value: buckets.other,          tone: 'neutral' }
+      ]);
+      const segPanel = panel('Event type mix', 'last 200 events · classifyEvent palette', seg);
+      sparkBody.appendChild(segPanel);
+    } catch (e) {
+      sparkBody.innerHTML = '';
+      sparkBody.appendChild(placeholder('Error', String(e)));
+    }
+  })();
 
   return root;
 }
@@ -736,11 +1098,41 @@ function renderSwarm() {
   root.appendChild(el('h2', {}, 'Swarm'));
   root.appendChild(el('p', {}, ROUTES.swarm.description));
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading projection…'));
+  root.appendChild(panel('Summary', 'workers + sessions distribution', summaryMount));
+
   const lanesMount = el('div', {});
   lanesMount.appendChild(loading('Fetching lane catalog…'));
   root.appendChild(panel('Lane roster', 'GET /bridge/lanes', lanesMount));
 
   Promise.all([fetchLanes(), fetchProjection()]).then(([lanes, proj]) => {
+    // ── Summary panel (donut + grid) ─────────────────────────────────
+    summaryMount.innerHTML = '';
+    if (proj) {
+      const ws = proj.workers || [];
+      const wCounts = { running: 0, stuck: 0, exited: 0, killed: 0 };
+      for (const w of ws) wCounts[w.status] = (wCounts[w.status] || 0) + 1;
+      const claimedLanes = (lanes?.claims || []).length;
+      const totalLanes = (lanes?.catalog?.lanes || []).length;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'running', value: wCounts.running, tone: 'ok' },
+        { label: 'stuck',   value: wCounts.stuck,   tone: 'danger' },
+        { label: 'exited',  value: wCounts.exited,  tone: 'neutral' },
+        { label: 'killed',  value: wCounts.killed,  tone: 'warn' }
+      ], { centerLabel: ws.length === 1 ? 'worker' : 'workers' }));
+      summary.appendChild(statusGrid([
+        { value: (proj.activeSessions || []).length, label: 'Active sessions', tone: 'accent' },
+        { value: wCounts.running,                    label: 'Running workers', tone: 'ok' },
+        { value: wCounts.stuck,                      label: 'Stuck workers',   tone: wCounts.stuck > 0 ? 'danger' : 'ok' },
+        { value: `${claimedLanes}/${totalLanes}`,    label: 'Lanes claimed',   tone: 'blue' }
+      ]));
+      summaryMount.appendChild(summary);
+    } else {
+      summaryMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+    }
+
     lanesMount.innerHTML = '';
     if (!lanes) { lanesMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
     const claimed = new Map((lanes.claims || []).map((c) => [c.lane, c]));
@@ -1076,6 +1468,10 @@ function renderApprovals() {
   root.appendChild(el('h2', {}, 'Approvals'));
   root.appendChild(el('p', {}, ROUTES.approvals.description));
 
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading ledger…'));
+  root.appendChild(panel('Summary', 'open queue + decision distribution', summaryMount));
+
   const openMount = el('div', {});
   openMount.appendChild(loading('Fetching open approvals…'));
   root.appendChild(panel('Open queue', 'GET /bridge/approvals', openMount));
@@ -1088,13 +1484,33 @@ function renderApprovals() {
 
   function refresh() {
     fetchApprovals().then((a) => {
+      summaryMount.innerHTML = '';
       openMount.innerHTML = '';
       ledgerMount.innerHTML = '';
       policyMount.innerHTML = '';
       if (!a) {
         openMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+        summaryMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
         return;
       }
+      // Summary donut: decision distribution from ledger + open count
+      const ledger = a.ledger || [];
+      const dist = { 'allow-once': 0, 'allow-always': 0, deny: 0, 'deny-always': 0 };
+      for (const d of ledger) if (d.decision in dist) dist[d.decision]++;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'allow-once',   value: dist['allow-once'],   tone: 'ok' },
+        { label: 'allow-always', value: dist['allow-always'], tone: 'accent' },
+        { label: 'deny',         value: dist.deny,            tone: 'warn' },
+        { label: 'deny-always',  value: dist['deny-always'],  tone: 'danger' }
+      ], { centerLabel: 'decided' }));
+      summary.appendChild(statusGrid([
+        { value: a.open.length,                                    label: 'Open queue',  tone: (a.open.length > 0 ? 'warn' : 'ok') },
+        { value: ledger.length,                                    label: 'Decided',     tone: 'blue' },
+        { value: (a.policies || []).length,                        label: 'Standing policies', tone: 'accent' },
+        { value: (dist['allow-once'] + dist['allow-always']) || 0, label: 'Allow total', tone: 'ok' }
+      ]));
+      summaryMount.appendChild(summary);
       if (a.open.length === 0) {
         openMount.appendChild(placeholder('No pending approvals', 'A worker can request one via POST /bridge/approvals/request.'));
       } else {
@@ -1466,6 +1882,27 @@ function renderTasks() {
       boardMount.innerHTML = '';
       if (!t) { boardMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
       const tasks = t.tasks || [];
+
+      // Summary widget: status distribution
+      const counts = { 'in-progress': 0, todo: 0, blocked: 0, done: 0, cancelled: 0 };
+      for (const x of tasks) counts[x.status] = (counts[x.status] || 0) + 1;
+      const open = (counts.todo || 0) + (counts['in-progress'] || 0) + (counts.blocked || 0);
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;margin-bottom:14px;' });
+      summary.appendChild(donut([
+        { label: 'in-progress', value: counts['in-progress'], tone: 'blue' },
+        { label: 'todo',        value: counts.todo,           tone: 'accent' },
+        { label: 'blocked',     value: counts.blocked,        tone: 'warn' },
+        { label: 'done',        value: counts.done,           tone: 'ok' },
+        { label: 'cancelled',   value: counts.cancelled,      tone: 'neutral' }
+      ], { centerLabel: tasks.length === 1 ? 'task' : 'tasks' }));
+      summary.appendChild(statusGrid([
+        { value: open,                  label: 'Open',        tone: open > 0 ? 'warn' : 'ok' },
+        { value: counts['in-progress'], label: 'In progress', tone: 'blue' },
+        { value: counts.blocked,        label: 'Blocked',     tone: counts.blocked > 0 ? 'warn' : 'ok' },
+        { value: counts.done,           label: 'Done',        tone: 'ok' }
+      ]));
+      boardMount.appendChild(panel('Summary', `${tasks.length} total`, summary));
+
       const cols = ['in-progress', 'todo', 'blocked', 'done', 'cancelled'];
       const byStatus = new Map(cols.map((s) => [s, []]));
       for (const x of tasks) (byStatus.get(x.status) || (byStatus.set(x.status, []), byStatus.get(x.status))).push(x);

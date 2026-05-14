@@ -928,6 +928,146 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   100% { box-shadow: 0 0 0 0 rgba(97, 211, 148, 0); }
 }
 
+/* ── Widget kit (charts, stats, bars, donuts) ────────────────────────── */
+.widget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.widget-stat {
+  background: var(--m-bg-1);
+  border: 1px solid var(--m-bg-3);
+  border-radius: var(--m-radius-md, 6px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+}
+.widget-stat.clickable { cursor: pointer; transition: border-color .12s ease, background .12s ease; }
+.widget-stat.clickable:hover { border-color: var(--m-accent-2); background: var(--m-bg-2); }
+.widget-stat-num {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+}
+.widget-stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--m-fg-0);
+  line-height: 1.1;
+}
+.widget-stat-trend {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--m-bg-3);
+  color: var(--m-fg-2);
+  letter-spacing: 0.04em;
+}
+.widget-stat-trend.up   { background: rgba(97, 211, 148, 0.18); color: var(--m-ok); }
+.widget-stat-trend.down { background: rgba(255, 94, 122, 0.18); color: var(--m-danger); }
+.widget-stat-label {
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+  font-size: 11px;
+  color: var(--m-fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.widget-spark { display: block; margin-top: 4px; }
+
+/* Horizontal progress bar */
+.widget-bar { margin: 0 0 10px; }
+.widget-bar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+}
+.widget-bar-label { font-size: 13px; color: var(--m-fg-1); }
+.widget-bar-right { font-size: 12px; color: var(--m-fg-3); font-family: 'IBM Plex Mono', monospace; }
+.widget-bar-track {
+  height: 6px;
+  background: var(--m-bg-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.widget-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+
+/* Stacked-segment distribution bar */
+.widget-segbar { margin: 0 0 12px; }
+.widget-segbar-track {
+  display: flex;
+  height: 8px;
+  background: var(--m-bg-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.widget-segbar-seg { height: 100%; transition: width .3s ease; }
+.widget-segbar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+  font-size: 12px;
+  color: var(--m-fg-2);
+}
+.widget-segbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.widget-segbar-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* Donut chart */
+.widget-donut {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.widget-donut svg { flex-shrink: 0; }
+.widget-donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+  font-size: 12px;
+}
+.widget-donut-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  color: var(--m-fg-2);
+}
+.widget-donut-label { color: var(--m-fg-1); }
+.widget-donut-val { color: var(--m-fg-3); font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+
+/* Multi-donut row (e.g. dashboard "tasks + workers" pair) */
+.widget-donut-row-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
 /* ── Docs route ──────────────────────────────────────────────────────── */
 .docs-layout {
   display: grid;
