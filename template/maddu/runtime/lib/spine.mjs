@@ -1,0 +1,137 @@
+// Append-only NDJSON event spine.
+//
+// Layout: <repoRoot>/.maddu/events/000000000001.ndjson, 000000000002.ndjson, …
+// Roll segments when the current one exceeds ROLL_BYTES.
+//
+// Every event has shape:
+//   { v: 1, id: 'evt_<ts><rand>', ts: ISO-8601, type: TYPE, actor: id|null, lane: id|null, data: {…} }
+//
+// IDs are timestamp + 6 hex chars. Monotonic enough for human reading;
+// total ordering comes from segment file index + line number.
+
+import { mkdir, readFile, readdir, stat, writeFile, appendFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { pathsFor } from './paths.mjs';
+import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
+
+const ROLL_BYTES = 10 * 1024 * 1024;
+
+export const EVENT_TYPES = {
+  FRAMEWORK_BOOTED:     'FRAMEWORK_BOOTED',
+  SESSION_REGISTERED:   'SESSION_REGISTERED',
+  SESSION_HEARTBEAT:    'SESSION_HEARTBEAT',
+  SESSION_CLOSED:       'SESSION_CLOSED',
+  LANE_CLAIMED:         'LANE_CLAIMED',
+  LANE_RELEASED:        'LANE_RELEASED',
+  SLICE_STOP:           'SLICE_STOP',
+  INBOX_MESSAGE:        'INBOX_MESSAGE'
+};
+
+function genId(ts) {
+  const t = ts.replace(/[-:T.Z]/g, '').slice(0, 14);
+  const r = randomBytes(3).toString('hex');
+  return `evt_${t}_${r}`;
+}
+
+function genSessionId() {
+  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const r = randomBytes(3).toString('hex');
+  return `ses_${t}_${r}`;
+}
+
+async function ensureDirs(paths) {
+  await mkdir(paths.state, { recursive: true });
+  await mkdir(paths.events, { recursive: true });
+  await mkdir(paths.statePrjDir, { recursive: true });
+  await mkdir(paths.sessions, { recursive: true });
+  await mkdir(paths.lanes, { recursive: true });
+  await mkdir(paths.inbox, { recursive: true });
+  await mkdir(paths.archive, { recursive: true });
+}
+
+async function ensureCatalog(paths) {
+  try {
+    await stat(paths.laneCatalog);
+  } catch {
+    await writeFile(paths.laneCatalog, JSON.stringify(DEFAULT_LANE_CATALOG, null, 2) + '\n');
+  }
+  try {
+    await stat(paths.laneClaims);
+  } catch {
+    await writeFile(paths.laneClaims, JSON.stringify({ schemaVersion: 1, claims: [] }, null, 2) + '\n');
+  }
+}
+
+async function listSegments(paths) {
+  try {
+    const files = await readdir(paths.events);
+    return files.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+  } catch {
+    return [];
+  }
+}
+
+async function currentSegment(paths) {
+  const segs = await listSegments(paths);
+  if (segs.length === 0) {
+    const name = '000000000001.ndjson';
+    await writeFile(join(paths.events, name), '');
+    return name;
+  }
+  const last = segs[segs.length - 1];
+  const st = await stat(join(paths.events, last));
+  if (st.size < ROLL_BYTES) return last;
+  // Roll.
+  const next = String(parseInt(last.split('.')[0], 10) + 1).padStart(12, '0') + '.ndjson';
+  await writeFile(join(paths.events, next), '');
+  return next;
+}
+
+export async function ensureSpine(repoRoot) {
+  const paths = pathsFor(repoRoot);
+  await ensureDirs(paths);
+  await ensureCatalog(paths);
+  return paths;
+}
+
+export async function append(repoRoot, { type, actor = null, lane = null, data = {} }) {
+  if (!EVENT_TYPES[type]) {
+    throw new Error(`unknown event type: ${type}`);
+  }
+  const paths = await ensureSpine(repoRoot);
+  const ts = new Date().toISOString();
+  const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
+  const seg = await currentSegment(paths);
+  await appendFile(join(paths.events, seg), JSON.stringify(ev) + '\n');
+  return ev;
+}
+
+export async function readAll(repoRoot) {
+  const paths = await ensureSpine(repoRoot);
+  const segs = await listSegments(paths);
+  const out = [];
+  for (const seg of segs) {
+    const text = await readFile(join(paths.events, seg), 'utf8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line)); }
+      catch (err) { console.error(`spine: bad line in ${seg}:`, err.message); }
+    }
+  }
+  return out;
+}
+
+export async function readSince(repoRoot, afterId) {
+  const all = await readAll(repoRoot);
+  if (!afterId) return all;
+  const idx = all.findIndex((e) => e.id === afterId);
+  return idx < 0 ? all : all.slice(idx + 1);
+}
+
+export async function lastEventId(repoRoot) {
+  const all = await readAll(repoRoot);
+  return all.length ? all[all.length - 1].id : null;
+}
+
+export { genSessionId };

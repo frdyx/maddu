@@ -1,28 +1,23 @@
 // Máddu bridge — single Node process on 127.0.0.1:4177 by default.
 //
 // Hard-rule compliance (see docs/hard-rules.md):
-//   • Files-only state. The bridge reads from .maddu/ and writes events to .maddu/events/.
-//     No SQLite, no embedded DB.
-//   • No hosted backends. All provider calls happen in subprocess workers spawned by the
-//     bridge — never inside this process.
+//   • Files-only state. Spine in .maddu/events/*.ndjson. Projections recomputed on read.
+//   • No hosted backends. Provider calls happen in subprocesses, not here.
 //   • No provider SDKs imported here. Node stdlib only.
-//   • No token export. OAuth tokens stay device-bound; this bridge never serializes them.
-//
-// This is the Slice 2 baseline. Endpoints land incrementally in later slices:
-//   Slice 3 — /bridge/sessions/*, /bridge/lanes/*, /bridge/slice-stop, /events/poll
-//   Slice 4 — /bridge/doctor, /bridge/upgrade
-//   Slice 5+ — /bridge/approvals, /bridge/events/{poll,wait}, /bridge/hindsight, …
+//   • No token export. OAuth tokens device-bound; this bridge never serializes them.
 
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, dirname, extname, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { findRepoRoot, pathsFor } from './lib/paths.mjs';
+import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId } from './lib/spine.mjs';
+import { project } from './lib/projections.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const runtimeRoot = __dirname;                      // .../maddu/runtime
-const repoRoot = join(runtimeRoot, '..', '..');     // target-repo root
+const runtimeRoot = __dirname;
 const cockpitDir = join(runtimeRoot, '..', 'cockpit');
-const stateDir = join(repoRoot, '.maddu');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4177;
@@ -38,13 +33,21 @@ const MIME = {
   '.woff2': 'font/woff2'
 };
 
-async function readVersion() {
+// Repo root resolution: walk up from cwd to find .maddu/. If not found, fall
+// back to the runtime's grandparent (dev mode running from template/maddu/runtime/).
+async function resolveRepoRoot() {
+  const found = await findRepoRoot(process.cwd());
+  if (found) return found;
+  const devFallback = resolve(runtimeRoot, '..', '..');
+  return devFallback;
+}
+
+async function readVersion(repoRoot) {
   try {
     const v = JSON.parse(await readFile(join(repoRoot, 'maddu.json'), 'utf8'));
     return v.framework_version || v.version || 'unknown';
   } catch {
     try {
-      // Dev mode: running from inside the framework repo itself.
       const v = JSON.parse(await readFile(join(runtimeRoot, '..', '..', '..', 'version.json'), 'utf8'));
       return v.version + '-dev';
     } catch {
@@ -63,18 +66,29 @@ function sendJson(res, status, obj) {
   send(res, status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, JSON.stringify(obj));
 }
 
+async function readBody(req, maxBytes = 1024 * 1024) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) throw new Error('body too large');
+    chunks.push(chunk);
+  }
+  if (chunks.length === 0) return null;
+  const text = Buffer.concat(chunks).toString('utf8');
+  if (!text.trim()) return null;
+  try { return JSON.parse(text); }
+  catch { throw new Error('invalid JSON body'); }
+}
+
 async function serveStatic(res, urlPath) {
-  // Strip query string. SPA fallback: any path that's not a file gets index.html.
   const cleanPath = urlPath.split('?')[0].split('#')[0];
   const rel = cleanPath === '/' ? '/index.html' : cleanPath;
   const normalized = normalize(rel).replace(/^[\\/]+/, '');
-
-  // Path-traversal guard.
   const absolute = resolve(cockpitDir, normalized);
   if (!absolute.startsWith(cockpitDir + sep) && absolute !== cockpitDir) {
     return sendJson(res, 403, { error: 'forbidden' });
   }
-
   try {
     const st = await stat(absolute);
     if (!st.isFile()) throw new Error('not a file');
@@ -82,39 +96,179 @@ async function serveStatic(res, urlPath) {
     const mime = MIME[extname(absolute).toLowerCase()] || 'application/octet-stream';
     return send(res, 200, { 'content-type': mime, 'cache-control': 'no-store' }, buf);
   } catch {
-    // SPA fallback for routes that don't map to files.
     try {
       const buf = await readFile(join(cockpitDir, 'index.html'));
       return send(res, 200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' }, buf);
     } catch {
-      return sendJson(res, 404, { error: 'cockpit_missing', detail: 'index.html not found' });
+      return sendJson(res, 404, { error: 'cockpit_missing' });
     }
   }
 }
 
-async function handleBridge(req, res, url) {
+async function handleBridge(req, res, url, ctx) {
   const path = url.pathname;
+  const { repoRoot } = ctx;
 
-  if (path === '/bridge/status') {
-    const version = await readVersion();
+  // ── status / version / health ─────────────────────────────────────────
+  if (path === '/bridge/status' && req.method === 'GET') {
+    const version = await readVersion(repoRoot);
+    const proj = await project(repoRoot);
     return sendJson(res, 200, {
       ok: true,
       bridge: 'maddu',
       version,
       host: req.socket.localAddress,
       port: req.socket.localPort,
-      stateDir,
+      repoRoot,
+      stateDir: pathsFor(repoRoot).state,
       cockpitDir,
-      uptimeMs: Math.floor(process.uptime() * 1000)
+      uptimeMs: Math.floor(process.uptime() * 1000),
+      counts: {
+        events: proj.eventCount,
+        activeSessions: proj.activeSessions.length,
+        claims: proj.claims.length,
+        sliceStops: proj.sliceStops.length
+      }
     });
   }
-
-  if (path === '/bridge/version') {
-    return sendJson(res, 200, { version: await readVersion() });
+  if (path === '/bridge/version' && req.method === 'GET') {
+    return sendJson(res, 200, { version: await readVersion(repoRoot) });
+  }
+  if (path === '/bridge/health' && req.method === 'GET') {
+    return sendJson(res, 200, { ok: true });
   }
 
-  if (path === '/bridge/health') {
-    return sendJson(res, 200, { ok: true });
+  // ── sessions ──────────────────────────────────────────────────────────
+  if (path === '/bridge/sessions' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { sessions: proj.sessions, active: proj.activeSessions });
+  }
+  if (path === '/bridge/sessions/register' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const sessionId = body.id || genSessionId();
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.SESSION_REGISTERED,
+      actor: sessionId,
+      lane: null,
+      data: {
+        role: body.role || null,
+        label: body.label || null,
+        focus: body.focus || null,
+        runtime: body.runtime || null
+      }
+    });
+    return sendJson(res, 200, { ok: true, sessionId, event: ev });
+  }
+  if (path === '/bridge/sessions/heartbeat' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.sessionId) return sendJson(res, 400, { error: 'sessionId required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.SESSION_HEARTBEAT,
+      actor: body.sessionId,
+      lane: body.lane || null,
+      data: { focus: body.focus || null }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+  if (path === '/bridge/sessions/close' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.sessionId) return sendJson(res, 400, { error: 'sessionId required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.SESSION_CLOSED,
+      actor: body.sessionId,
+      lane: null,
+      data: { handoff: body.handoff || null }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+
+  // ── lanes ─────────────────────────────────────────────────────────────
+  if (path === '/bridge/lanes' && req.method === 'GET') {
+    const paths = pathsFor(repoRoot);
+    await ensureSpine(repoRoot);
+    const catalog = JSON.parse(await readFile(paths.laneCatalog, 'utf8'));
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { catalog, claims: proj.claims });
+  }
+  if (path === '/bridge/lanes/claim' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.lane || !body.sessionId) return sendJson(res, 400, { error: 'lane and sessionId required' });
+    const proj = await project(repoRoot);
+    const existing = proj.claims.find((c) => c.lane === body.lane);
+    if (existing && existing.sessionId !== body.sessionId) {
+      return sendJson(res, 409, { error: 'lane already claimed', currentClaim: existing });
+    }
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.LANE_CLAIMED,
+      actor: body.sessionId,
+      lane: body.lane,
+      data: { focus: body.focus || null }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+  if (path === '/bridge/lanes/release' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.lane || !body.sessionId) return sendJson(res, 400, { error: 'lane and sessionId required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.LANE_RELEASED,
+      actor: body.sessionId,
+      lane: body.lane,
+      data: {}
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+
+  // ── slice-stop ────────────────────────────────────────────────────────
+  if (path === '/bridge/slice-stop' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.sessionId) return sendJson(res, 400, { error: 'sessionId required' });
+    if (!body.summary) return sendJson(res, 400, { error: 'summary required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.SLICE_STOP,
+      actor: body.sessionId,
+      lane: body.lane || null,
+      data: {
+        summary: body.summary,
+        action: body.action || null,
+        targets: body.targets || [],
+        paths: body.paths || [],
+        gates: body.gates || [],
+        learnings: body.learnings || [],
+        next: body.next || [],
+        reason: body.reason || null
+      }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+
+  // ── inbox ─────────────────────────────────────────────────────────────
+  if (path === '/bridge/inbox' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { inbox: proj.inbox });
+  }
+  if (path === '/bridge/inbox' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.message) return sendJson(res, 400, { error: 'message required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.INBOX_MESSAGE,
+      actor: body.sessionId || null,
+      lane: body.lane || null,
+      data: { message: body.message, kind: body.kind || 'note' }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+
+  // ── events: poll-since-cursor (long-poll variant lands in Slice 6) ────
+  if (path === '/bridge/events/poll' && req.method === 'GET') {
+    const after = url.searchParams.get('after');
+    const since = await readSince(repoRoot, after);
+    return sendJson(res, 200, { events: since, lastEventId: since.length ? since[since.length - 1].id : after });
+  }
+
+  // ── projection ────────────────────────────────────────────────────────
+  if (path === '/bridge/projection' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, proj);
   }
 
   return sendJson(res, 404, { error: 'not_found', path });
@@ -128,12 +282,24 @@ function pickPort() {
 
 export async function start({ host = DEFAULT_HOST, port } = {}) {
   const finalPort = port || pickPort();
+  const repoRoot = await resolveRepoRoot();
+  await ensureSpine(repoRoot);
+
+  // Record startup in the spine.
+  await append(repoRoot, {
+    type: EVENT_TYPES.FRAMEWORK_BOOTED,
+    actor: null,
+    lane: null,
+    data: { host, port: finalPort, version: await readVersion(repoRoot), pid: process.pid }
+  });
+
+  const ctx = { repoRoot };
 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${host}:${finalPort}`);
       if (url.pathname.startsWith('/bridge/')) {
-        return await handleBridge(req, res, url);
+        return await handleBridge(req, res, url, ctx);
       }
       return await serveStatic(res, url.pathname);
     } catch (err) {
@@ -147,10 +313,11 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     server.listen(finalPort, host, res);
   });
 
-  const version = await readVersion();
+  const version = await readVersion(repoRoot);
   console.log(`Máddu bridge v${version} listening on http://${host}:${finalPort}`);
+  console.log(`  repo:    ${repoRoot}`);
+  console.log(`  state:   ${pathsFor(repoRoot).state}`);
   console.log(`  cockpit: ${cockpitDir}`);
-  console.log(`  state:   ${stateDir}`);
   console.log(`  Ctrl+C to stop.`);
 
   const shutdown = () => {
@@ -163,7 +330,6 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
   return server;
 }
 
-// Allow `node template/maddu/runtime/server.js` direct invocation for dev.
 const invokedDirectly = process.argv[1] && (
   import.meta.url === pathToFileURL(process.argv[1]).href ||
   process.argv[1].endsWith('server.js')

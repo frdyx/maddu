@@ -123,15 +123,20 @@ function renderDashboard() {
   root.appendChild(el('p', {}, ROUTES.dashboard.description));
 
   const status = bridgeStatus || {};
+  const counts = status.counts || {};
   const kv = el('dl', { class: 'kv' });
   const rows = [
     ['Bridge', bridgeOk ? 'online' : 'offline'],
     ['Version', status.version || '—'],
     ['Host', status.host || '127.0.0.1'],
     ['Port', String(status.port || 4177)],
+    ['Repo root', status.repoRoot || '—'],
     ['State', status.stateDir || '.maddu/'],
-    ['Cockpit', status.cockpitDir || '—'],
-    ['Uptime', formatUptime(status.uptimeMs)]
+    ['Uptime', formatUptime(status.uptimeMs)],
+    ['Events', String(counts.events ?? '—')],
+    ['Active sessions', String(counts.activeSessions ?? '—')],
+    ['Lane claims', String(counts.claims ?? '—')],
+    ['Slice-stops', String(counts.sliceStops ?? '—')]
   ];
   for (const [k, v] of rows) {
     kv.appendChild(el('dt', {}, k));
@@ -154,12 +159,63 @@ function renderDashboard() {
   return root;
 }
 
+async function fetchProjection() {
+  try {
+    const r = await fetch('/bridge/projection', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function fetchLanes() {
+  try {
+    const r = await fetch('/bridge/lanes', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function loading(text) {
+  return el('div', { class: 'placeholder' }, [
+    el('strong', {}, 'Loading…'),
+    document.createTextNode(text)
+  ]);
+}
+
 function renderOperations() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Operations'));
   root.appendChild(el('p', {}, ROUTES.operations.description));
-  root.appendChild(placeholder('Slice ledger', 'Lands in Slice 3 — slice-stop ritual + lane claims.'));
-  root.appendChild(placeholder('Verification reports', 'Lands in Slice 3 — focused-gate output.'));
+
+  const slicesMount = el('div', {});
+  slicesMount.appendChild(loading('Fetching slice-stop ledger…'));
+  root.appendChild(panel('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount));
+
+  fetchProjection().then((proj) => {
+    slicesMount.innerHTML = '';
+    if (!proj || !proj.sliceStops || proj.sliceStops.length === 0) {
+      slicesMount.appendChild(placeholder('Empty', 'Run `maddu slice-stop` to append the first entry.'));
+      return;
+    }
+    const list = el('div', {});
+    for (const s of proj.sliceStops.slice().reverse()) {
+      const row = el('div', { class: 'panel' }, [
+        el('div', { class: 'panel-head' }, [
+          el('span', { class: 'panel-title' }, `[${s.lane || '—'}]  ${s.summary}`),
+          el('span', { class: 'panel-aside' }, s.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
+        ]),
+        s.next && s.next.length
+          ? el('div', { class: 'view' }, [
+              el('div', { class: 'panel-title' }, 'NEXT'),
+              el('ul', { class: 'hard-rules' }, s.next.map((n) => el('li', {}, n)))
+            ])
+          : null
+      ]);
+      list.appendChild(row);
+    }
+    slicesMount.appendChild(list);
+  });
+
   return root;
 }
 
@@ -167,8 +223,40 @@ function renderSwarm() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Swarm'));
   root.appendChild(el('p', {}, ROUTES.swarm.description));
-  root.appendChild(placeholder('Lane roster', 'Lands in Slice 3 — claims + mailboxes.'));
-  root.appendChild(placeholder('Subprocess workers', 'Lands in Slice B5 — heartbeat watcher.'));
+
+  const lanesMount = el('div', {});
+  lanesMount.appendChild(loading('Fetching lane catalog…'));
+  root.appendChild(panel('Lane roster', 'GET /bridge/lanes', lanesMount));
+
+  Promise.all([fetchLanes(), fetchProjection()]).then(([lanes, proj]) => {
+    lanesMount.innerHTML = '';
+    if (!lanes) { lanesMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+    const claimed = new Map((lanes.claims || []).map((c) => [c.lane, c]));
+    const tbl = el('dl', { class: 'kv' });
+    for (const l of lanes.catalog.lanes) {
+      const c = claimed.get(l.id);
+      tbl.appendChild(el('dt', {}, l.id));
+      tbl.appendChild(el('dd', {}, c
+        ? `claimed by ${c.sessionId} · ${c.focus || l.scope}`
+        : l.scope));
+    }
+    lanesMount.appendChild(tbl);
+
+    if (proj && proj.activeSessions && proj.activeSessions.length) {
+      const sess = el('div', {});
+      for (const s of proj.activeSessions) {
+        const k = el('dl', { class: 'kv' }, [
+          el('dt', {}, 'role'),  el('dd', {}, s.role || '—'),
+          el('dt', {}, 'label'), el('dd', {}, s.label || '—'),
+          el('dt', {}, 'focus'), el('dd', {}, s.focus || '—'),
+          el('dt', {}, 'since'), el('dd', {}, s.registeredAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
+        ]);
+        sess.appendChild(panel(s.id, 'active session', k));
+      }
+      root.appendChild(panel('Active sessions', `${proj.activeSessions.length} live`, sess));
+    }
+  });
+
   return root;
 }
 
@@ -176,8 +264,34 @@ function renderChats() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Chats'));
   root.appendChild(el('p', {}, ROUTES.chats.description));
-  root.appendChild(placeholder('Conversation list', 'Lands in Slice 3 — session registrations.'));
-  root.appendChild(placeholder('History bridge', 'Lands in Phase B — Hermes-pattern messages_read.'));
+
+  const mount = el('div', {});
+  mount.appendChild(loading('Fetching sessions…'));
+  root.appendChild(panel('Sessions', 'GET /bridge/sessions', mount));
+
+  fetchProjection().then((proj) => {
+    mount.innerHTML = '';
+    if (!proj || proj.sessions.length === 0) {
+      mount.appendChild(placeholder('No sessions yet', 'Register one with `maddu session register`.'));
+      return;
+    }
+    const list = el('div', {});
+    for (const s of proj.sessions.slice().reverse()) {
+      const dot = s.status === 'active' ? '<span class="signal live"></span>' : '<span class="signal"></span>';
+      const head = el('div', { class: 'panel-head' }, [
+        el('span', { class: 'panel-title', html: `${dot} ${s.id}` }),
+        el('span', { class: 'panel-aside' }, s.status)
+      ]);
+      const kv = el('dl', { class: 'kv' }, [
+        el('dt', {}, 'role'),  el('dd', {}, s.role || '—'),
+        el('dt', {}, 'label'), el('dd', {}, s.label || '—'),
+        el('dt', {}, 'focus'), el('dd', {}, s.focus || '—')
+      ]);
+      list.appendChild(el('div', { class: 'panel' }, [head, kv]));
+    }
+    mount.appendChild(list);
+  });
+
   return root;
 }
 

@@ -6,7 +6,12 @@ import { readFile } from 'node:fs/promises';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
 
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop'];
+// Framework lifecycle (locked surface):
+//   init, upgrade, doctor, start, status, slice-stop
+// Operational surface (additive — agents and operators use these to participate
+// in the spine without needing the bridge running):
+//   session, lane
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -24,8 +29,10 @@ Commands:
   upgrade        Pull newer framework files in place; never touch project state.
   doctor         Verify install integrity, port, and hard-rule compliance.
   start          Boot the bridge server on 127.0.0.1:4177.
-  status         Print a state snapshot.
-  slice-stop     Run the slice-stop ritual at the end of a working session.
+  status         Print a state snapshot of the spine.
+  slice-stop     Append a structured slice-stop event to the spine.
+  session        Subcommands: register | heartbeat | close | list.
+  lane           Subcommands: claim | release | list.
 
 Flags:
   --version      Print framework version.

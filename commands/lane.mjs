@@ -1,0 +1,74 @@
+// `maddu lane <subcommand>` — claim / release / list.
+//
+// Usage:
+//   maddu lane claim --lane <id> --session <id> [--focus "..."]
+//   maddu lane release --lane <id> --session <id>
+//   maddu lane list
+
+import { readFile } from 'node:fs/promises';
+import { parseFlags, requireFlag } from './_args.mjs';
+import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+
+export default async function lane(argv) {
+  const sub = argv[0];
+  const rest = argv.slice(1);
+  const { paths, spine, projections } = await loadSpineLib();
+  const repoRoot = await resolveRepoRoot(paths);
+  const p = paths.pathsFor(repoRoot);
+  await spine.ensureSpine(repoRoot);
+
+  if (!sub) {
+    console.error('Usage: maddu lane <claim|release|list> [flags]');
+    process.exit(2);
+  }
+
+  if (sub === 'list') {
+    const cat = JSON.parse(await readFile(p.laneCatalog, 'utf8'));
+    const proj = await projections.project(repoRoot);
+    const claimed = new Map(proj.claims.map((c) => [c.lane, c]));
+    console.log(`\x1b[1mLANES  (${cat.lanes.length})\x1b[0m`);
+    for (const l of cat.lanes) {
+      const c = claimed.get(l.id);
+      const mark = c ? `  \x1b[33mclaimed by ${c.sessionId}\x1b[0m` : '';
+      console.log(`  ${l.id.padEnd(22)} ${l.scope}${mark}`);
+    }
+    return;
+  }
+
+  if (sub === 'claim') {
+    const { flags } = parseFlags(rest);
+    const lid = requireFlag(flags, 'lane');
+    const sid = requireFlag(flags, 'session');
+    const proj = await projections.project(repoRoot);
+    const existing = proj.claims.find((c) => c.lane === lid);
+    if (existing && existing.sessionId !== sid) {
+      console.error(`lane "${lid}" already claimed by ${existing.sessionId}`);
+      process.exit(3);
+    }
+    await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.LANE_CLAIMED,
+      actor: sid,
+      lane: lid,
+      data: { focus: flags.focus || null }
+    });
+    console.log(`claimed  ${lid}  by  ${sid}`);
+    return;
+  }
+
+  if (sub === 'release') {
+    const { flags } = parseFlags(rest);
+    const lid = requireFlag(flags, 'lane');
+    const sid = requireFlag(flags, 'session');
+    await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.LANE_RELEASED,
+      actor: sid,
+      lane: lid,
+      data: {}
+    });
+    console.log(`released  ${lid}`);
+    return;
+  }
+
+  console.error(`maddu lane: unknown subcommand "${sub}"`);
+  process.exit(2);
+}
