@@ -4,6 +4,7 @@
 const ROUTES = {
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
+  events:     { title: 'Events',     render: renderEvents,     description: 'Live cursor stream of the append-only spine. Filters by type. Pause/resume.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -26,6 +27,54 @@ const els = {
 
 let bridgeStatus = null;
 let bridgeOk = false;
+
+// ─── page-wide event stream (cursor long-poll) ───────────────────────────
+const stream = {
+  cursor: null,
+  active: false,
+  paused: false,
+  bus: new EventTarget()
+};
+
+async function streamLoop() {
+  if (stream.active) return;
+  stream.active = true;
+  try {
+    while (true) {
+      if (stream.paused) { await new Promise((r) => setTimeout(r, 500)); continue; }
+      let res;
+      try {
+        const u = new URL('/bridge/events/wait', location.href);
+        if (stream.cursor) u.searchParams.set('after', stream.cursor);
+        u.searchParams.set('timeout', '25000');
+        const r = await fetch(u, { cache: 'no-store' });
+        if (!r.ok) throw new Error('bridge ' + r.status);
+        res = await r.json();
+      } catch {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      for (const ev of res.events) {
+        stream.cursor = ev.id;
+        stream.bus.dispatchEvent(new CustomEvent('event', { detail: ev }));
+      }
+      if (!res.events.length && res.lastEventId) stream.cursor = res.lastEventId;
+      // Trigger one chrome refresh per wait turn so the badge/uptime stay live.
+      fetchBridgeStatus();
+    }
+  } finally {
+    stream.active = false;
+  }
+}
+
+async function seedCursor() {
+  try {
+    const r = await fetch('/bridge/events/poll', { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    stream.cursor = d.lastEventId || null;
+  } catch {}
+}
 
 async function fetchBridgeStatus() {
   try {
@@ -84,6 +133,9 @@ function renderRoute() {
   document.querySelectorAll('.rail-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === id);
   });
+
+  // Tell the previous view to tear down its stream subscriptions.
+  els.view.dispatchEvent(new Event('routechange'));
 
   els.title.textContent = route.title.toUpperCase();
   els.meta.textContent = id.toUpperCase();
@@ -425,12 +477,123 @@ function renderApprovals() {
   }
 
   refresh();
-  // Local poll in addition to the global chrome refresh, so the queue feels live.
-  const interval = setInterval(refresh, 3000);
-  // Best-effort cleanup when the view is replaced.
-  els.view.addEventListener('routechange', () => clearInterval(interval), { once: true });
+  // Refresh on every APPROVAL_* event from the page-wide stream.
+  const handler = (e) => {
+    if (e.detail.type && e.detail.type.startsWith('APPROVAL_')) refresh();
+  };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
 
   return root;
+}
+
+function classifyEvent(type) {
+  if (type === 'SLICE_STOP')              return 't-slice';
+  if (type === 'DOCTOR_REPORT')           return 't-doctor';
+  if (type === 'INBOX_MESSAGE')           return 't-inbox';
+  if (type.startsWith('FRAMEWORK_'))      return 't-framework';
+  if (type.startsWith('SESSION_'))        return 't-session';
+  if (type.startsWith('LANE_'))           return 't-lane';
+  if (type.startsWith('APPROVAL_'))       return 't-approval';
+  return '';
+}
+
+function summarize(ev) {
+  const d = ev.data || {};
+  switch (ev.type) {
+    case 'FRAMEWORK_INSTALLED': return `installed v${d.version} (${d.files} files)`;
+    case 'FRAMEWORK_UPGRADED':  return `${d.from} → ${d.to}  +${d.added} ~${d.updated} -${d.removed}`;
+    case 'FRAMEWORK_BOOTED':    return `bridge on :${d.port}`;
+    case 'DOCTOR_REPORT':       return `${d.counts.PASS} pass · ${d.counts.WARN} warn · ${d.counts.FAIL} fail`;
+    case 'SESSION_REGISTERED':  return `${d.role || '—'}  ${d.label || ''}`;
+    case 'SESSION_HEARTBEAT':   return d.focus || '';
+    case 'SESSION_CLOSED':      return d.handoff || '';
+    case 'LANE_CLAIMED':        return d.focus || '';
+    case 'LANE_RELEASED':       return '';
+    case 'SLICE_STOP':          return d.summary || '';
+    case 'INBOX_MESSAGE':       return d.message || '';
+    case 'APPROVAL_REQUESTED':  return `${d.tool}  ${d.action || ''}`;
+    case 'APPROVAL_DECIDED':    return `${d.decision}  ${d.tool || ''}`;
+    case 'APPROVAL_POLICY_SET': return `${d.decision}  ${d.tool}@${d.lane || '*'}`;
+    default: return '';
+  }
+}
+
+function eventRow(ev, fresh = false) {
+  const row = el('div', { class: 'event-row' + (fresh ? ' new' : '') }, [
+    el('span', { class: 'event-time' }, ev.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+    el('span', { class: `event-type ${classifyEvent(ev.type)}` }, ev.type),
+    el('span', { class: 'event-lane' }, ev.lane || '—'),
+    el('span', {}, [
+      el('span', { class: 'event-summary' }, summarize(ev) + '  '),
+      el('span', { class: 'event-actor' }, ev.actor ? `· ${ev.actor}` : '')
+    ])
+  ]);
+  return row;
+}
+
+function renderEvents() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Events'));
+  root.appendChild(el('p', {}, ROUTES.events.description));
+
+  // Controls
+  const filter = el('select', { class: '' });
+  for (const t of ['(all)', 'FRAMEWORK_*', 'SESSION_*', 'LANE_*', 'SLICE_STOP', 'APPROVAL_*', 'DOCTOR_REPORT', 'INBOX_MESSAGE']) {
+    const opt = el('option', { value: t === '(all)' ? '' : t }, t);
+    filter.appendChild(opt);
+  }
+  filter.style.cssText = 'font-family:var(--m-font-mono);font-size:12px;background:var(--m-bg-2);color:var(--m-fg-1);border:1px solid var(--m-line);padding:4px 8px;';
+  const pauseBtn = el('button', {}, stream.paused ? 'Resume' : 'Pause');
+  const clearBtn = el('button', {}, 'Clear');
+  const controls = el('div', { class: 'panel-head' }, [
+    el('span', { class: 'panel-title' }, 'Stream'),
+    el('span', {}, [filter, document.createTextNode(' '), pauseBtn, document.createTextNode(' '), clearBtn])
+  ]);
+
+  const list = el('div', { style: 'max-height: 70vh; overflow: auto; border:1px solid var(--m-line); background:var(--m-bg-1);' });
+  const block = el('div', { class: 'panel' }, [controls, list]);
+  root.appendChild(block);
+
+  // Seed with most recent 30 events.
+  fetch('/bridge/events/poll', { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((d) => {
+      const recent = (d.events || []).slice(-30);
+      for (const ev of recent) prepend(list, eventRow(ev, false));
+    });
+
+  function matchFilter(t) {
+    const f = filter.value;
+    if (!f) return true;
+    if (f.endsWith('*')) return t.startsWith(f.slice(0, -1));
+    return t === f;
+  }
+
+  const handler = (e) => {
+    if (!matchFilter(e.detail.type)) return;
+    prepend(list, eventRow(e.detail, true));
+    // Keep list bounded.
+    while (list.children.length > 500) list.removeChild(list.lastChild);
+  };
+  stream.bus.addEventListener('event', handler);
+
+  pauseBtn.addEventListener('click', () => {
+    stream.paused = !stream.paused;
+    pauseBtn.textContent = stream.paused ? 'Resume' : 'Pause';
+  });
+  clearBtn.addEventListener('click', () => { list.innerHTML = ''; });
+
+  els.view.addEventListener('routechange', () => {
+    stream.bus.removeEventListener('event', handler);
+  }, { once: true });
+
+  return root;
+}
+
+function prepend(parent, child) {
+  if (parent.firstChild) parent.insertBefore(child, parent.firstChild);
+  else parent.appendChild(child);
 }
 
 function makeDecisionButton(decision, label, klass, approvalId, onDone) {
@@ -466,8 +629,11 @@ window.addEventListener('hashchange', renderRoute);
 async function boot() {
   if (!location.hash) location.hash = '#/dashboard';
   await fetchBridgeStatus();
+  await seedCursor();
   renderRoute();
-  setInterval(fetchBridgeStatus, 5000);
+  streamLoop();
+  // Fallback chrome refresh in case stream stalls.
+  setInterval(fetchBridgeStatus, 15000);
 }
 
 boot();

@@ -339,11 +339,42 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
-  // ── events: poll-since-cursor (long-poll variant lands in Slice 6) ────
+  // ── events: poll-since-cursor (immediate return) ──────────────────────
   if (path === '/bridge/events/poll' && req.method === 'GET') {
     const after = url.searchParams.get('after');
     const since = await readSince(repoRoot, after);
     return sendJson(res, 200, { events: since, lastEventId: since.length ? since[since.length - 1].id : after });
+  }
+
+  // ── events: long-poll (holds the connection open until something lands) ─
+  if (path === '/bridge/events/wait' && req.method === 'GET') {
+    const after = url.searchParams.get('after');
+    const timeoutMs = Math.min(
+      Math.max(parseInt(url.searchParams.get('timeout') || '25000', 10), 100),
+      60000
+    );
+    const pollIntervalMs = 250;
+    const deadline = Date.now() + timeoutMs;
+
+    // Detect client disconnects so we stop polling.
+    let aborted = false;
+    req.on('close', () => { aborted = true; });
+
+    while (!aborted && Date.now() < deadline) {
+      const since = await readSince(repoRoot, after);
+      if (since.length > 0) {
+        return sendJson(res, 200, {
+          events: since,
+          lastEventId: since[since.length - 1].id,
+          timeout: false
+        });
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise((r) => setTimeout(r, Math.min(pollIntervalMs, remaining)));
+    }
+    if (aborted) return; // client gone — bail.
+    return sendJson(res, 200, { events: [], lastEventId: after, timeout: true });
   }
 
   // ── projection ────────────────────────────────────────────────────────

@@ -321,6 +321,39 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   letter-spacing: 0.04em;
 }
 
+/* live event stream */
+.event-row {
+  display: grid;
+  grid-template-columns: 130px 170px 110px 1fr;
+  gap: 12px;
+  font-family: var(--m-font-mono);
+  font-size: 12px;
+  color: var(--m-fg-2);
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--m-line-soft);
+  align-items: baseline;
+}
+.event-row:hover { background: var(--m-bg-2); }
+.event-row.new {
+  animation: flash 1.2s ease-out;
+}
+@keyframes flash {
+  0%   { background: rgba(195,208,212,0.10); }
+  100% { background: transparent; }
+}
+.event-time { color: var(--m-fg-4); }
+.event-type { color: var(--m-fg-1); letter-spacing: 0.04em; text-transform: uppercase; }
+.event-type.t-framework  { color: #c8a8d4; }
+.event-type.t-session    { color: #9fcbd8; }
+.event-type.t-lane       { color: #a8d4b8; }
+.event-type.t-slice      { color: var(--m-fg-0); font-weight: 600; }
+.event-type.t-approval   { color: var(--m-accent-warm); }
+.event-type.t-doctor     { color: #c8a8d4; }
+.event-type.t-inbox      { color: var(--m-fg-3); }
+.event-lane { color: var(--m-accent); }
+.event-summary { color: var(--m-fg-1); }
+.event-actor { color: var(--m-fg-4); }
+
 /* approval cards */
 .approval {
   display: grid;
