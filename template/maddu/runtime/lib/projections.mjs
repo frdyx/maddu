@@ -25,6 +25,12 @@ export async function project(repoRoot) {
   const approvalLedger = [];
   const policies = new Map();
 
+  // Tasks projection.
+  //   tasks         : taskId -> { id, title, description, status, owner, lane,
+  //                              blockedBy[], blocks[], tags, metadata,
+  //                              createdAt, updatedAt }
+  const tasks = new Map();
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -147,6 +153,76 @@ export async function project(repoRoot) {
         else policies.set(key, { tool, lane, decision, setAt: ev.ts, setBy: ev.actor });
         break;
       }
+      case 'TASK_CREATED':
+        tasks.set(ev.data.id, {
+          id: ev.data.id,
+          title: ev.data.title || '',
+          description: ev.data.description || '',
+          status: ev.data.status || 'todo',
+          owner: ev.data.owner || null,
+          lane: ev.lane || ev.data.lane || null,
+          blockedBy: Array.isArray(ev.data.blockedBy) ? [...ev.data.blockedBy] : [],
+          blocks: [],
+          tags: Array.isArray(ev.data.tags) ? [...ev.data.tags] : [],
+          metadata: ev.data.metadata || {},
+          createdAt: ev.ts,
+          updatedAt: ev.ts,
+          createdBy: ev.actor || null
+        });
+        break;
+      case 'TASK_UPDATED': {
+        const t = tasks.get(ev.data.id);
+        if (!t) break;
+        if (ev.data.title !== undefined) t.title = ev.data.title;
+        if (ev.data.description !== undefined) t.description = ev.data.description;
+        if (ev.data.status !== undefined) t.status = ev.data.status;
+        if (ev.data.owner !== undefined) t.owner = ev.data.owner;
+        if (ev.data.lane !== undefined) t.lane = ev.data.lane;
+        if (ev.data.tags !== undefined) t.tags = Array.isArray(ev.data.tags) ? [...ev.data.tags] : t.tags;
+        if (ev.data.metadata !== undefined) t.metadata = { ...t.metadata, ...ev.data.metadata };
+        if (ev.data.blockedBy !== undefined) t.blockedBy = Array.isArray(ev.data.blockedBy) ? [...ev.data.blockedBy] : t.blockedBy;
+        if (Array.isArray(ev.data.addBlockers)) {
+          for (const b of ev.data.addBlockers) if (!t.blockedBy.includes(b)) t.blockedBy.push(b);
+        }
+        if (Array.isArray(ev.data.removeBlockers)) {
+          t.blockedBy = t.blockedBy.filter((b) => !ev.data.removeBlockers.includes(b));
+        }
+        t.updatedAt = ev.ts;
+        break;
+      }
+      case 'TASK_COMPLETED': {
+        const t = tasks.get(ev.data.id);
+        if (!t) break;
+        t.status = 'done';
+        t.updatedAt = ev.ts;
+        t.completedAt = ev.ts;
+        t.completedBy = ev.actor || null;
+        break;
+      }
+    }
+  }
+
+  // Build reverse blocks[] map and auto-unblock tasks whose blockers are all done.
+  if (tasks.size > 0) {
+    // Reset blocks arrays first (since we rebuild from scratch each projection).
+    for (const t of tasks.values()) t.blocks = [];
+    for (const t of tasks.values()) {
+      for (const b of t.blockedBy) {
+        const blocker = tasks.get(b);
+        if (blocker && !blocker.blocks.includes(t.id)) blocker.blocks.push(t.id);
+      }
+    }
+    // checkUnblocks: if every blocker of a task is "done", strip those blocker
+    // ids from the runtime view of blockedBy and flip "blocked" → "todo".
+    for (const t of tasks.values()) {
+      const activeBlockers = t.blockedBy.filter((b) => {
+        const blocker = tasks.get(b);
+        return !blocker || blocker.status !== 'done';
+      });
+      t.activeBlockers = activeBlockers;
+      if (t.status === 'blocked' && activeBlockers.length === 0) {
+        t.status = 'todo';
+      }
     }
   }
 
@@ -162,7 +238,8 @@ export async function project(repoRoot) {
       open: Array.from(openApprovals.values()),
       ledger: approvalLedger.slice(-100),
       policies: Array.from(policies.values())
-    }
+    },
+    tasks: Array.from(tasks.values())
   };
 }
 

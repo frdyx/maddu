@@ -33,7 +33,10 @@ export const EVENT_TYPES = {
   APPROVAL_DECIDED:     'APPROVAL_DECIDED',
   APPROVAL_POLICY_SET:  'APPROVAL_POLICY_SET',
   MAILBOX_SENT:         'MAILBOX_SENT',
-  MAILBOX_READ:         'MAILBOX_READ'
+  MAILBOX_READ:         'MAILBOX_READ',
+  TASK_CREATED:         'TASK_CREATED',
+  TASK_UPDATED:         'TASK_UPDATED',
+  TASK_COMPLETED:       'TASK_COMPLETED'
 };
 
 function genId(ts) {
@@ -46,6 +49,12 @@ function genSessionId() {
   const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
   const r = randomBytes(3).toString('hex');
   return `ses_${t}_${r}`;
+}
+
+export function genTaskId() {
+  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const r = randomBytes(3).toString('hex');
+  return `tsk_${t}_${r}`;
 }
 
 async function ensureDirs(paths) {

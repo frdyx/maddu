@@ -12,7 +12,7 @@ import { join, dirname, extname, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
-import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId } from './lib/spine.mjs';
+import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
@@ -133,7 +133,9 @@ async function handleBridge(req, res, url, ctx) {
         openApprovals: proj.approvals.open.length,
         policies: proj.approvals.policies.length,
         memoryFacts: (await readMemory(repoRoot)).length,
-        unreadMail: await mailboxTotalUnread(repoRoot)
+        unreadMail: await mailboxTotalUnread(repoRoot),
+        tasks: proj.tasks.length,
+        openTasks: proj.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length
       }
     });
   }
@@ -340,6 +342,65 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── tasks (Phase B3) ──────────────────────────────────────────────────
+  if (path === '/bridge/tasks' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { tasks: proj.tasks });
+  }
+  if (path === '/bridge/tasks' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.title) return sendJson(res, 400, { error: 'title required' });
+    const id = body.id || genTaskId();
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.TASK_CREATED,
+      actor: body.createdBy || null,
+      lane: body.lane || null,
+      data: {
+        id,
+        title: body.title,
+        description: body.description || '',
+        status: body.status || 'todo',
+        owner: body.owner || null,
+        blockedBy: body.blockedBy || [],
+        tags: body.tags || [],
+        metadata: body.metadata || {}
+      }
+    });
+    return sendJson(res, 200, { ok: true, taskId: id, event: ev });
+  }
+  // /bridge/tasks/<id>/update | /bridge/tasks/<id>/complete | GET /bridge/tasks/<id>
+  if (path.startsWith('/bridge/tasks/')) {
+    const rest = path.slice('/bridge/tasks/'.length);
+    if (rest.endsWith('/complete') && req.method === 'POST') {
+      const id = rest.slice(0, -'/complete'.length);
+      const body = (await readBody(req)) || {};
+      const ev = await append(repoRoot, {
+        type: EVENT_TYPES.TASK_COMPLETED,
+        actor: body.by || null,
+        lane: null,
+        data: { id }
+      });
+      return sendJson(res, 200, { ok: true, event: ev });
+    }
+    if (rest.endsWith('/update') && req.method === 'POST') {
+      const id = rest.slice(0, -'/update'.length);
+      const body = (await readBody(req)) || {};
+      const ev = await append(repoRoot, {
+        type: EVENT_TYPES.TASK_UPDATED,
+        actor: body.by || null,
+        lane: body.lane !== undefined ? body.lane : null,
+        data: { id, ...body, by: undefined }
+      });
+      return sendJson(res, 200, { ok: true, event: ev });
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const proj = await project(repoRoot);
+      const t = proj.tasks.find((x) => x.id === rest);
+      if (!t) return sendJson(res, 404, { error: 'task not found', id: rest });
+      return sendJson(res, 200, t);
     }
   }
 

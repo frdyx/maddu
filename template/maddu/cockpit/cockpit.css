@@ -494,6 +494,61 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 .ledger-decision-allow { color: var(--m-signal); }
 .ledger-decision-deny  { color: #c8a878; }
 
+/* task board */
+.taskboard {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-top: 12px;
+}
+@media (max-width: 1200px) {
+  .taskboard { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 760px) {
+  .taskboard { grid-template-columns: 1fr; }
+}
+.task-col {
+  background: var(--m-bg-1);
+  border: 1px solid var(--m-line);
+  min-width: 0;
+}
+.task-col-head {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--m-line-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--m-font-cond);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12px;
+}
+.task-col-count { color: var(--m-fg-3); font-family: var(--m-font-mono); }
+.task-col-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.task-card {
+  background: var(--m-bg-2);
+  border: 1px solid var(--m-line);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.task-card-title { color: var(--m-fg-0); font-weight: 500; margin-bottom: 4px; }
+.task-card-meta {
+  font-family: var(--m-font-mono);
+  font-size: 10px;
+  color: var(--m-fg-3);
+  letter-spacing: 0.04em;
+}
+.task-card-blockers { color: var(--m-accent-warm); }
+.task-card-id { font-family: var(--m-font-mono); font-size: 10px; color: var(--m-fg-4); }
+.task-card-actions { display: flex; gap: 4px; margin-top: 6px; }
+.task-card-actions button { font-size: 10px; padding: 3px 8px; }
+.task-status-todo        { border-top: 2px solid #9fcbd8; }
+.task-status-in-progress { border-top: 2px solid #c8a8d4; }
+.task-status-blocked     { border-top: 2px solid var(--m-accent-warm); }
+.task-status-done        { border-top: 2px solid var(--m-signal); opacity: 0.7; }
+.task-status-cancelled   { border-top: 2px solid var(--m-fg-4); opacity: 0.5; }
+
 /* signal dot for live status */
 .signal {
   display: inline-block;

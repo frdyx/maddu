@@ -6,6 +6,7 @@ const ROUTES = {
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
   events:     { title: 'Events',     render: renderEvents,     description: 'Live cursor stream of the append-only spine. Filters by type. Pause/resume.' },
   mailbox:    { title: 'Mailbox',    render: renderMailbox,    description: 'Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.' },
+  tasks:      { title: 'Tasks',      render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -24,7 +25,8 @@ const els = {
   host: document.getElementById('status-host'),
   port: document.getElementById('status-port'),
   approvalsBadge: document.getElementById('approvals-badge'),
-  mailboxBadge: document.getElementById('mailbox-badge')
+  mailboxBadge: document.getElementById('mailbox-badge'),
+  tasksBadge: document.getElementById('tasks-badge')
 };
 
 let bridgeStatus = null;
@@ -107,12 +109,18 @@ function updateChrome() {
       if (unread && unread > 0) { els.mailboxBadge.hidden = false; els.mailboxBadge.textContent = String(unread); }
       else                      { els.mailboxBadge.hidden = true; }
     }
+    const openTasks = bridgeStatus.counts && bridgeStatus.counts.openTasks;
+    if (els.tasksBadge) {
+      if (openTasks && openTasks > 0) { els.tasksBadge.hidden = false; els.tasksBadge.textContent = String(openTasks); }
+      else                            { els.tasksBadge.hidden = true; }
+    }
   } else {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
     els.version.textContent = '—';
     els.uptime.textContent = '—';
     if (els.approvalsBadge) els.approvalsBadge.hidden = true;
     if (els.mailboxBadge)   els.mailboxBadge.hidden = true;
+    if (els.tasksBadge)     els.tasksBadge.hidden = true;
   }
 }
 
@@ -770,6 +778,127 @@ function renderMailbox() {
   return root;
 }
 
+async function fetchTasks() {
+  try {
+    const r = await fetch('/bridge/tasks', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function renderTasks() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Tasks'));
+  root.appendChild(el('p', {}, ROUTES.tasks.description));
+
+  // Create form
+  const titleInput = el('input', { type: 'text', placeholder: 'New task title…', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const laneInput = el('input', { type: 'text', placeholder: 'lane (opt)', style: 'width:140px;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const createBtn = el('button', {}, 'Create');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;' }, [titleInput, laneInput, createBtn]);
+  root.appendChild(form);
+
+  const boardMount = el('div', {});
+  root.appendChild(boardMount);
+
+  createBtn.addEventListener('click', async () => {
+    const title = titleInput.value.trim();
+    if (!title) return;
+    createBtn.disabled = true;
+    try {
+      await fetch('/bridge/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, lane: laneInput.value.trim() || null, createdBy: composer.currentSession || null })
+      });
+      titleInput.value = '';
+      laneInput.value = '';
+      refresh();
+    } finally {
+      createBtn.disabled = false;
+    }
+  });
+  titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') createBtn.click(); });
+
+  function refresh() {
+    boardMount.innerHTML = '';
+    boardMount.appendChild(loading('Fetching task graph…'));
+    fetchTasks().then((t) => {
+      boardMount.innerHTML = '';
+      if (!t) { boardMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+      const tasks = t.tasks || [];
+      const cols = ['in-progress', 'todo', 'blocked', 'done', 'cancelled'];
+      const byStatus = new Map(cols.map((s) => [s, []]));
+      for (const x of tasks) (byStatus.get(x.status) || (byStatus.set(x.status, []), byStatus.get(x.status))).push(x);
+
+      const board = el('div', { class: 'taskboard' });
+      for (const s of cols) {
+        const list = byStatus.get(s) || [];
+        const col = el('div', { class: 'task-col' }, [
+          el('div', { class: 'task-col-head' }, [
+            el('span', {}, s.replace('-', ' ')),
+            el('span', { class: 'task-col-count' }, String(list.length))
+          ]),
+          el('div', { class: 'task-col-body' }, list.map((x) => taskCard(x, refresh)))
+        ]);
+        board.appendChild(col);
+      }
+      boardMount.appendChild(board);
+    });
+  }
+
+  refresh();
+  const handler = (e) => {
+    if (e.detail.type && e.detail.type.startsWith('TASK_')) refresh();
+  };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+
+  return root;
+}
+
+function taskCard(t, onChange) {
+  const card = el('div', { class: 'task-card task-status-' + t.status }, [
+    el('div', { class: 'task-card-title' }, t.title),
+    el('div', { class: 'task-card-meta' }, [
+      t.lane ? `lane: ${t.lane}  ·  ` : '',
+      t.owner ? `owner: ${t.owner.slice(-12)}  ·  ` : '',
+      el('span', { class: 'task-card-id' }, t.id)
+    ]),
+    (t.activeBlockers && t.activeBlockers.length)
+      ? el('div', { class: 'task-card-meta task-card-blockers' }, `↩ blocked by ${t.activeBlockers.length}`)
+      : null,
+    (t.blocks && t.blocks.length)
+      ? el('div', { class: 'task-card-meta' }, `↦ blocks ${t.blocks.length}`)
+      : null
+  ]);
+  if (t.status !== 'done' && t.status !== 'cancelled') {
+    const actions = el('div', { class: 'task-card-actions' });
+    if (t.status === 'todo' && (!t.activeBlockers || t.activeBlockers.length === 0)) {
+      const start = el('button', {}, 'Start');
+      start.addEventListener('click', async () => {
+        await fetch(`/bridge/tasks/${t.id}/update`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'in-progress', by: composer.currentSession || null })
+        });
+        onChange();
+      });
+      actions.appendChild(start);
+    }
+    const done = el('button', { class: 'btn-allow' }, 'Done');
+    done.addEventListener('click', async () => {
+      await fetch(`/bridge/tasks/${t.id}/complete`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ by: composer.currentSession || null })
+      });
+      onChange();
+    });
+    actions.appendChild(done);
+    card.appendChild(actions);
+  }
+  return card;
+}
+
 function renderSettings() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Settings'));
@@ -811,6 +940,8 @@ const COMMANDS = [
   { name: 'inbox',   args: '<message>',                              desc: 'Append a note to the operator inbox.' },
   { name: 'mail',    args: '<lane> <subject>',                       desc: 'Send a quick mailbox note to a lane (uses current session as from).' },
   { name: 'mail-read', args: '<lane> <msgId>',                       desc: 'Mark a mailbox message read on a lane.' },
+  { name: 'task',    args: '<title>',                                desc: 'Quick-create a task (current session as creator).' },
+  { name: 'task-done', args: '<id>',                                 desc: 'Mark a task complete (auto-unblocks dependents).' },
   { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
   { name: 'skills',  args: '',                                       desc: 'Stub — skill gallery lands in Phase B4.' },
   { name: 'runtime', args: '',                                       desc: 'Stub — runtime adapters land in Phase C1.' },
@@ -1016,6 +1147,18 @@ async function runCommand(cmd) {
       const [, lane, mid] = m;
       await postJson(`/bridge/mailbox/${encodeURIComponent(lane)}/read`, { messageId: mid, by: sess });
       return showToast(`read ${mid}`, 'ok');
+    }
+    case 'task': {
+      const title = cmd.rest.trim();
+      if (!title) return showToast('usage: /task <title>', 'err');
+      const r = await postJson('/bridge/tasks', { title, createdBy: sess });
+      return showToast(`task created: ${r.taskId}`, 'ok');
+    }
+    case 'task-done': {
+      const id = cmd.rest.trim();
+      if (!id) return showToast('usage: /task-done <id>', 'err');
+      await postJson(`/bridge/tasks/${id}/complete`, { by: sess });
+      return showToast(`done ${id}`, 'ok');
     }
     case 'rollback':
       return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');
