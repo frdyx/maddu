@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 
@@ -52,7 +52,8 @@ async function main() {
     process.exit(2);
   }
 
-  const mod = await import(join(repoRoot, 'commands', `${raw}.mjs`));
+  const commandPath = join(repoRoot, 'commands', `${raw}.mjs`);
+  const mod = await import(pathToFileURL(commandPath).href);
   await mod.default(rest);
 }
 

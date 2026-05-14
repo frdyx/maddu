@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Máddu — the Source of local truth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/cockpit.css">
+</head>
+<body>
+  <div id="app" aria-busy="true">
+    <aside class="rail">
+      <div class="rail-mark">
+        <span class="rail-mark-glyph">◈</span>
+        <span class="rail-mark-name">Máddu</span>
+      </div>
+      <nav class="rail-nav" aria-label="Cockpit routes">
+        <a href="#/dashboard"  class="rail-link" data-route="dashboard"><span class="rail-link-glyph">◇</span><span>Dashboard</span></a>
+        <a href="#/operations" class="rail-link" data-route="operations"><span class="rail-link-glyph">◇</span><span>Operations</span></a>
+        <a href="#/swarm"      class="rail-link" data-route="swarm"><span class="rail-link-glyph">◇</span><span>Swarm</span></a>
+        <a href="#/chats"      class="rail-link" data-route="chats"><span class="rail-link-glyph">◇</span><span>Chats</span></a>
+        <a href="#/roadmap"    class="rail-link" data-route="roadmap"><span class="rail-link-glyph">◇</span><span>Roadmap</span></a>
+        <a href="#/settings"   class="rail-link" data-route="settings"><span class="rail-link-glyph">◇</span><span>Settings</span></a>
+      </nav>
+      <div class="rail-foot">
+        <div class="rail-foot-row"><span class="rail-foot-label">Bridge</span><span class="rail-foot-value" id="status-bridge">…</span></div>
+        <div class="rail-foot-row"><span class="rail-foot-label">Version</span><span class="rail-foot-value" id="status-version">…</span></div>
+        <div class="rail-foot-row"><span class="rail-foot-label">Uptime</span><span class="rail-foot-value" id="status-uptime">…</span></div>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <header class="stage-head">
+        <div class="stage-head-route">
+          <span class="stage-head-glyph">◈</span>
+          <span class="stage-head-title" id="route-title">Dashboard</span>
+        </div>
+        <div class="stage-head-meta" id="route-meta"></div>
+      </header>
+      <section class="stage-body" id="route-view" aria-live="polite"></section>
+      <footer class="stage-foot">
+        <span class="stage-foot-tagline">The Source of local truth.</span>
+        <span class="stage-foot-coord"><span id="status-host">127.0.0.1</span>:<span id="status-port">4177</span></span>
+      </footer>
+    </main>
+  </div>
+
+  <script type="module" src="/cockpit.js"></script>
+</body>
+</html>
