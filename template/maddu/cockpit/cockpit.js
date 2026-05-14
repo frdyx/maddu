@@ -2192,12 +2192,37 @@ const COMMANDS = [
   { name: 'clear',   args: '',                                       desc: 'Clear the composer.' }
 ];
 
+/**
+ * Push a transient toast into the floating top-right toast region.
+ *
+ *  text   — message body. Newlines preserved via white-space: pre-wrap.
+ *  level  — 'ok' | 'warn' | 'err' (default 'ok'; bare info uses default
+ *           accent-2 blue left-border).
+ *
+ * Toasts auto-dismiss after a duration scaled to message length, but cap
+ * at 9 s. Click anywhere on the toast to dismiss early. The region stacks
+ * vertically — multiple toasts coexist; oldest at top.
+ */
 function showToast(text, level = 'ok') {
-  composer.toast.hidden = false;
-  composer.toast.textContent = text;
-  composer.toast.className = 'composer-toast' + (level === 'err' ? ' err' : level === 'warn' ? ' warn' : '');
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => { composer.toast.hidden = true; }, 4500);
+  const region = document.getElementById('toast-region');
+  if (!region) return;
+  const t = document.createElement('div');
+  t.className = 'toast';
+  if (level === 'err' || level === 'warn' || level === 'ok') t.classList.add(level);
+  t.textContent = text;
+  // Scale visible-duration with content: ~3 s base + 35 ms per char, max 9 s.
+  const ms = Math.min(3000 + (text || '').length * 35, 9000);
+  const dismiss = () => {
+    if (t._dismissing) return;
+    t._dismissing = true;
+    t.classList.add('dismissing');
+    setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 240);
+  };
+  t.addEventListener('click', dismiss);
+  region.appendChild(t);
+  // Bound the stack so a burst of toasts doesn't paper the screen.
+  while (region.children.length > 5) region.removeChild(region.firstChild);
+  setTimeout(dismiss, ms);
 }
 
 function updateHint() {
@@ -2509,7 +2534,8 @@ async function runCommand(cmd) {
       composer.input.value = '';
       if (composer.fit) composer.fit();
       composer.suggest.hidden = true;
-      composer.toast.hidden = true;
+      // Sweep any visible toasts.
+      document.querySelectorAll('#toast-region .toast').forEach((t) => t.click());
       return;
     default:
       return showToast(`unknown command: /${cmd.name}  ·  /help for the list`, 'err');
@@ -2529,7 +2555,6 @@ function parseFlagsInline(s) {
 function initComposer() {
   composer.input = document.getElementById('composer-input');
   composer.suggest = document.getElementById('composer-suggest');
-  composer.toast = document.getElementById('composer-toast');
   composer.hint = document.getElementById('composer-hint');
   updateHint();
   composer.fit = () => {
@@ -2566,7 +2591,8 @@ function initComposer() {
       composer.input.value = '';
       composer.fit();
       composer.suggest.hidden = true;
-      composer.toast.hidden = true;
+      // Sweep any visible toasts on Escape.
+      document.querySelectorAll('#toast-region .toast').forEach((t) => t.click());
       composer.input.blur();
     } else if (e.key === 'ArrowUp') {
       if (!composer.suggest.hidden) {

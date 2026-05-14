@@ -493,26 +493,51 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 .composer-suggest-cmd { color: var(--m-accent); }
 .composer-suggest-desc { color: var(--m-fg-3); }
 
-.composer-toast {
-  position: absolute;
-  left: 20px;
-  right: 0;
-  bottom: calc(100% + 4px);
-  background: var(--m-bg-3);
+/* ── Floating toast region ────────────────────────────────────────────────
+ * Top-right corner, stackable, severity-aware, click-to-dismiss.
+ * One channel for transient action feedback across the whole cockpit.
+ * Persistent ambient state belongs in .stage-banner; toasts are fleeting.
+ */
+.toast-region {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  max-width: 460px;
+  pointer-events: none;          /* let clicks fall through the gaps */
+}
+.toast {
+  pointer-events: auto;
+  background: rgba(0, 8, 18, 0.86);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
   border: 1px solid var(--m-line);
-  border-left: 3px solid var(--m-signal);
-  padding: 8px 14px;
+  border-left: 3px solid var(--m-accent-2);
+  padding: 10px 14px;
   font-family: var(--m-font-mono);
   font-size: 12px;
+  line-height: 1.45;
   color: var(--m-fg-1);
-  z-index: 31;
-  white-space: pre-wrap;
-  max-height: 240px;
+  box-shadow: var(--m-shadow-md);
+  max-height: 320px;
   overflow: auto;
-  box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  animation: toast-in 200ms ease-out;
+  transition: opacity 220ms ease-out, transform 220ms ease-out;
 }
-.composer-toast.err  { border-left-color: var(--m-accent-warm); color: var(--m-accent-warm); }
-.composer-toast.warn { border-left-color: var(--m-accent-warm); color: var(--m-fg-1); }
+.toast.ok    { border-left-color: var(--m-ok); }
+.toast.warn  { border-left-color: var(--m-warn); color: var(--m-warn); }
+.toast.err   { border-left-color: var(--m-danger); color: var(--m-danger); }
+.toast.dismissing { opacity: 0; transform: translateX(16px); }
+@keyframes toast-in {
+  0%   { transform: translateX(20px); opacity: 0; }
+  100% { transform: translateX(0);     opacity: 1; }
+}
 
 /* ───────────────────── views ───────────────────── */
 

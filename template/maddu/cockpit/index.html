@@ -60,7 +60,6 @@
                     placeholder="/ to issue a slash-command  ·  /help for the list  ·  Shift+Enter for newline"></textarea>
           <span class="composer-hint" id="composer-hint"></span>
           <div class="composer-suggest" id="composer-suggest" hidden></div>
-          <div class="composer-toast" id="composer-toast" hidden></div>
         </div>
         <div class="stage-foot-meta">
           <span class="stage-foot-tagline">The Source of local truth.</span>
@@ -68,8 +67,8 @@
         </div>
       </footer>
     </main>
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
   </div>
-
   <script type="module" src="/cockpit.js"></script>
 </body>
 </html>
