@@ -176,7 +176,8 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 
 .stage {
   display: grid;
-  grid-template-rows: var(--m-head-h) 1fr var(--m-foot-h);
+  /* head · stuck-banner (auto, 0 when display:none) · route body · foot */
+  grid-template-rows: var(--m-head-h) auto 1fr var(--m-foot-h);
   min-width: 0;
 }
 
