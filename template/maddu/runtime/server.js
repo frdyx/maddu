@@ -925,7 +925,74 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, proj);
   }
 
+  // ── docs (in-cockpit help) ────────────────────────────────────────────
+  if (path === '/bridge/docs' && req.method === 'GET') {
+    return sendJson(res, 200, { docs: await listDocs() });
+  }
+  if (path.startsWith('/bridge/docs/') && req.method === 'GET') {
+    const slug = decodeURIComponent(path.slice('/bridge/docs/'.length));
+    const doc = await readDoc(slug);
+    if (!doc) return sendJson(res, 404, { error: 'doc_not_found', slug });
+    return sendJson(res, 200, doc);
+  }
+
   return sendJson(res, 404, { error: 'not_found', path });
+}
+
+// Docs resolution: try installed location first, then dev-source fallback.
+// Installed:  <repoRoot>/maddu/docs/           (runtimeRoot/../docs)
+// Dev source: <mddu-source>/docs/               (runtimeRoot/../../../docs)
+const DOCS_CANDIDATES = [
+  join(runtimeRoot, '..', 'docs'),
+  join(runtimeRoot, '..', '..', '..', 'docs')
+];
+let _docsDirCache = undefined;
+async function resolveDocsDir() {
+  if (_docsDirCache !== undefined) return _docsDirCache;
+  for (const d of DOCS_CANDIDATES) {
+    try { const st = await stat(d); if (st.isDirectory()) { _docsDirCache = d; return d; } } catch {}
+  }
+  _docsDirCache = null;
+  return null;
+}
+
+async function listDocs() {
+  const dir = await resolveDocsDir();
+  if (!dir) return [];
+  const { readdir } = await import('node:fs/promises');
+  let entries;
+  try { entries = await readdir(dir, { withFileTypes: true }); } catch { return []; }
+  const docs = [];
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.md')) continue;
+    const slug = e.name.slice(0, -3);
+    let title = slug;
+    try {
+      const head = (await readFile(join(dir, e.name), 'utf8')).split('\n').slice(0, 8).join('\n');
+      const m = head.match(/^#\s+(.+)$/m);
+      if (m) title = m[1].trim();
+    } catch {}
+    docs.push({ slug, file: e.name, title });
+  }
+  docs.sort((a, b) => a.file.localeCompare(b.file));
+  return docs;
+}
+
+async function readDoc(slug) {
+  const dir = await resolveDocsDir();
+  if (!dir) return null;
+  const safe = slug.replace(/[^a-zA-Z0-9_\-\.]/g, '');
+  if (!safe || safe.includes('..')) return null;
+  const filename = safe.endsWith('.md') ? safe : safe + '.md';
+  try {
+    const body = await readFile(join(dir, filename), 'utf8');
+    let title = filename;
+    const m = body.match(/^#\s+(.+)$/m);
+    if (m) title = m[1].trim();
+    return { slug: filename.slice(0, -3), file: filename, title, body };
+  } catch {
+    return null;
+  }
 }
 
 function pickPort() {

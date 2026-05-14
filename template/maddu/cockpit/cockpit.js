@@ -19,6 +19,7 @@ const ROUTES = {
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
   roadmap:    { title: 'Roadmap',    render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
+  docs:       { title: 'Docs',       render: renderDocs,       description: 'End-user manual. Install, concepts, CLI, cockpit tour, troubleshooting. Open from any route with ?' },
   settings:   { title: 'Settings',   render: renderSettings,   description: 'Bridge, lanes, providers, tokens, MCP registry.' }
 };
 
@@ -852,6 +853,205 @@ function renderRoadmap() {
   }
   root.appendChild(list);
   return root;
+}
+
+// ── Docs route ────────────────────────────────────────────────────────────
+//
+// Reads `<repoRoot>/docs/*.md` (or framework-bundled fallback) via the bridge.
+// Sidebar lists every page, right pane renders the chosen one.
+//
+// URL convention: #/docs                 → opens index (first page)
+//                 #/docs?p=<slug>         → opens a specific page
+
+function renderDocs() {
+  const root = el('div', { class: 'view' });
+  const layout = el('div', { class: 'docs-layout' });
+  const sidebar = el('aside', { class: 'docs-sidebar' });
+  const main = el('section', { class: 'docs-main' });
+  sidebar.appendChild(loading('Fetching docs…'));
+  main.appendChild(loading('Pick a page on the left.'));
+  layout.appendChild(sidebar);
+  layout.appendChild(main);
+  root.appendChild(layout);
+
+  let current = null;
+
+  function getRequestedSlug() {
+    const m = location.hash.match(/[?&]p=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function setSlugInHash(slug) {
+    const base = '#/docs';
+    location.hash = slug ? `${base}?p=${encodeURIComponent(slug)}` : base;
+  }
+
+  async function loadDoc(slug) {
+    main.innerHTML = '';
+    main.appendChild(loading('Loading…'));
+    try {
+      const r = await fetch(`/bridge/docs/${encodeURIComponent(slug)}`, { cache: 'no-store' });
+      if (!r.ok) { main.innerHTML = ''; main.appendChild(placeholder('Not found', `No doc named ${slug}`)); return; }
+      const doc = await r.json();
+      current = doc.slug;
+      main.innerHTML = '';
+      const article = el('article', { class: 'docs-article' });
+      article.innerHTML = renderMarkdown(doc.body);
+      main.appendChild(article);
+      // Intercept internal cross-links (./foo.md or foo.md) → switch page in-cockpit.
+      article.addEventListener('click', (e) => {
+        const a = e.target && e.target.closest && e.target.closest('a');
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/^\.?\/?([a-zA-Z0-9_\-]+)\.md$/);
+        if (m) { e.preventDefault(); setSlugInHash(m[1]); }
+      });
+      // Highlight active sidebar entry.
+      sidebar.querySelectorAll('a.docs-link').forEach((a) => {
+        if (a.dataset.slug === current) a.classList.add('active');
+        else a.classList.remove('active');
+      });
+      main.scrollTo?.({ top: 0 });
+    } catch (err) {
+      main.innerHTML = '';
+      main.appendChild(placeholder('Offline', String(err)));
+    }
+  }
+
+  (async () => {
+    try {
+      const r = await fetch('/bridge/docs', { cache: 'no-store' });
+      if (!r.ok) { sidebar.innerHTML = ''; sidebar.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+      const { docs } = await r.json();
+      sidebar.innerHTML = '';
+      if (!docs.length) { sidebar.appendChild(placeholder('No docs', 'No markdown files found under docs/.')); return; }
+      const nav = el('nav', { class: 'docs-nav' });
+      for (const d of docs) {
+        const a = el('a', { class: 'docs-link', href: '#', 'data-slug': d.slug });
+        a.textContent = d.title || d.slug;
+        a.addEventListener('click', (e) => { e.preventDefault(); setSlugInHash(d.slug); });
+        nav.appendChild(a);
+      }
+      sidebar.appendChild(nav);
+      const requested = getRequestedSlug();
+      const initial = requested && docs.find((d) => d.slug === requested) ? requested : docs[0].slug;
+      loadDoc(initial);
+    } catch (err) {
+      sidebar.innerHTML = '';
+      sidebar.appendChild(placeholder('Offline', String(err)));
+    }
+  })();
+
+  // React to hash-query changes while staying on #/docs.
+  const onHashChange = () => {
+    if (!location.hash.startsWith('#/docs')) { window.removeEventListener('hashchange', onHashChange); return; }
+    const slug = getRequestedSlug();
+    if (slug && slug !== current) loadDoc(slug);
+  };
+  window.addEventListener('hashchange', onHashChange);
+
+  return root;
+}
+
+// Tiny CommonMark-ish renderer. Handles:
+//   #/##/### headings · paragraphs · bold/italic · `code` · ```fenced``` · - / * lists
+//   1. ordered lists · > blockquotes · [text](url) links · --- horizontal rules · tables (pipe).
+// Escapes HTML by default; no raw HTML passthrough.
+function renderMarkdown(src) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = src.replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+
+  function inline(text) {
+    let s = esc(text);
+    s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[\s(])\*([^\s*][^*]*?)\*(?=[\s.,;:!?)]|$)/g, '$1<em>$2</em>');
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => `<a href="${h}">${t}</a>`);
+    return s;
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    // Fenced code block
+    const fence = line.match(/^```(\w*)\s*$/);
+    if (fence) {
+      const lang = fence[1] || '';
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++; // consume closing fence
+      out.push(`<pre class="md-code"${lang ? ` data-lang="${lang}"` : ''}><code>${esc(buf.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^---+\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+
+    // Headings
+    const h = line.match(/^(#{1,4})\s+(.+)$/);
+    if (h) {
+      const lvl = h[1].length;
+      out.push(`<h${lvl}>${inline(h[2])}</h${lvl}>`);
+      i++; continue;
+    }
+
+    // Blockquote
+    if (/^>\s?/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^>\s?/, '')); i++; }
+      out.push(`<blockquote>${inline(buf.join(' '))}</blockquote>`);
+      continue;
+    }
+
+    // Table (pipe). Heuristic: a line with at least two `|` then a separator row.
+    if (/\|/.test(line) && i + 1 < lines.length && /^[\s|:\-]+$/.test(lines[i + 1]) && /\|/.test(lines[i + 1])) {
+      const splitRow = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
+      const header = splitRow(line);
+      i += 2; // skip header + separator
+      const rows = [];
+      while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== '') { rows.push(splitRow(lines[i])); i++; }
+      const ths = header.map((c) => `<th>${inline(c)}</th>`).join('');
+      const trs = rows.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('');
+      out.push(`<table class="md-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`);
+      continue;
+    }
+
+    // Unordered list
+    if (/^\s*[-*]\s+/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        buf.push(`<li>${inline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ul>${buf.join('')}</ul>`);
+      continue;
+    }
+
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        buf.push(`<li>${inline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push(`<ol>${buf.join('')}</ol>`);
+      continue;
+    }
+
+    // Paragraph: collect contiguous non-blank, non-special lines.
+    const buf = [];
+    while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,4}\s|>\s?|```|---+\s*$|\s*[-*]\s+|\s*\d+\.\s+)/.test(lines[i])) {
+      buf.push(lines[i]);
+      i++;
+    }
+    if (buf.length) out.push(`<p>${inline(buf.join(' '))}</p>`);
+  }
+
+  return out.join('\n');
 }
 
 async function fetchApprovals() {
@@ -2652,6 +2852,15 @@ function initComposer() {
     if (!composer.input.value.startsWith('/')) composer.input.value = '/';
     composer.fit();
     renderSuggestions(composer.input.value);
+  });
+
+  // Global "?" opens the Docs route from anywhere (mirrors OMC's wiki popup).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '?') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    e.preventDefault();
+    if (!location.hash.startsWith('#/docs')) location.hash = '#/docs';
   });
 }
 
