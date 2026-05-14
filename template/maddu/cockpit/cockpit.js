@@ -297,6 +297,10 @@ function renderOperations() {
   memMount.appendChild(loading('Fetching hindsight facts…'));
   root.appendChild(panel('Hindsight memory', 'GET /bridge/memory · facts derived from slice-stops', memMount));
 
+  const cpMount = el('div', {});
+  cpMount.appendChild(loading('Fetching checkpoints…'));
+  root.appendChild(panel('Checkpoints', 'GET /bridge/checkpoints · git tags at maddu/checkpoint/<id>', cpMount));
+
   function refresh() {
     fetchProjection().then((proj) => {
       slicesMount.innerHTML = '';
@@ -339,6 +343,55 @@ function renderOperations() {
         ]));
       }
       memMount.appendChild(list);
+    });
+
+    fetch('/bridge/checkpoints', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((d) => {
+      cpMount.innerHTML = '';
+      if (!d) { cpMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+      if (!d.gitAvailable) { cpMount.appendChild(placeholder('No git work tree', 'Checkpoints require a git repo in the install root.')); return; }
+      const newBtn = el('button', { class: 'btn-allow' }, '+ checkpoint');
+      newBtn.addEventListener('click', async () => {
+        const title = prompt('Checkpoint title (optional):');
+        if (title === null) return;
+        await fetch('/bridge/checkpoints', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: title || null, by: composer.currentSession || null }) });
+        refresh();
+      });
+      cpMount.appendChild(el('div', { style: 'margin-bottom:8px;' }, [newBtn]));
+      if (d.checkpoints.length === 0) {
+        cpMount.appendChild(placeholder('No checkpoints', 'Click + to tag the current HEAD.'));
+        return;
+      }
+      const list = el('div', {});
+      for (const c of d.checkpoints) {
+        const row = el('div', { class: 'ledger-row' }, [
+          el('span', {}, c.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+          el('span', { class: 'event-type t-slice' }, c.commit.slice(0, 8)),
+          el('span', {}, [
+            el('div', { style: 'color:var(--m-fg-0);' }, c.title),
+            el('div', { class: 'event-actor' }, `${c.lane ? 'lane:' + c.lane + '  ·  ' : ''}${c.branch ? 'branch:' + c.branch : ''}`)
+          ]),
+          (() => {
+            const wrap = el('span', { style: 'display:flex;gap:4px;' });
+            const rb = el('button', {}, 'Rollback');
+            rb.addEventListener('click', async () => {
+              const r = await fetch(`/bridge/checkpoints/${encodeURIComponent(c.id)}/rollback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              const out = await r.json();
+              const lines = Object.entries(out.recovery || {}).map(([k, v]) => `${k}:\n  ${v.join('\n  ')}`).join('\n');
+              showToast(lines || 'no recovery commands', 'warn');
+            });
+            const rm = el('button', { class: 'btn-deny-hard' }, '×');
+            rm.addEventListener('click', async () => {
+              if (!confirm(`Remove checkpoint "${c.title}"?`)) return;
+              await fetch(`/bridge/checkpoints/${encodeURIComponent(c.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            wrap.appendChild(rb); wrap.appendChild(rm);
+            return wrap;
+          })()
+        ]);
+        list.appendChild(row);
+      }
+      cpMount.appendChild(list);
     });
   }
 
@@ -1551,7 +1604,8 @@ const COMMANDS = [
   { name: 'workers', args: '',                                       desc: 'List running / stuck workers.' },
   { name: 'kill',    args: '<workerId> [reason]',                    desc: 'Mark a worker killed (operator-initiated).' },
   { name: 'search',  args: '<query>',                                desc: 'Jump to /search prefilled with the query.' },
-  { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
+  { name: 'rollback',  args: '<checkpointId>',                       desc: 'Print rollback commands for a checkpoint (use `maddu checkpoint rollback --apply` to execute).' },
+  { name: 'checkpoint',args: '[<title>]',                            desc: 'Tag the current HEAD as a checkpoint.' },
   { name: 'skills',  args: '',                                       desc: 'List all skills in the gallery.' },
   { name: 'skill',   args: '<id>',                                   desc: 'Apply a skill to the current session.' },
   { name: 'runtime', args: '<name>',                                desc: 'Show a runtime adapter (or list if no name).' },
@@ -1794,8 +1848,18 @@ async function runCommand(cmd) {
       location.hash = `#/search?q=${encodeURIComponent(q)}`;
       return showToast(`→ /search?q=${q}`, 'ok');
     }
-    case 'rollback':
-      return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');
+    case 'rollback': {
+      const id = cmd.rest.trim();
+      if (!id) return showToast('usage: /rollback <checkpointId>', 'err');
+      const out = await postJson(`/bridge/checkpoints/${encodeURIComponent(id)}/rollback`, {});
+      const lines = Object.entries(out.recovery || {}).map(([k, v]) => `${k}:\n  ${v.join('\n  ')}`).join('\n');
+      return showToast(lines || 'no recovery commands', 'warn');
+    }
+    case 'checkpoint': {
+      const title = cmd.rest.trim();
+      const out = await postJson('/bridge/checkpoints', { title: title || null, by: sess });
+      return showToast(out.ok ? `${out.checkpoint.id}  ${out.checkpoint.commit.slice(0, 8)}` : `failed: ${out.error}`, out.ok ? 'ok' : 'err');
+    }
     case 'skills': {
       const d = await fetchJson('/bridge/skills');
       if (!d.skills.length) return showToast('(no skills yet)  ·  /task to make one, then /skill <id>', 'ok');

@@ -142,7 +142,19 @@ export default async function doctor(argv) {
     checks.push({ level: 'FAIL', label: 'rule #6 no token leaks under .maddu/', detail: tokenHits.join(', ') });
   }
 
-  // ── 6. Hard rule #8: no duplicate active lane claims ─────────────────────
+  // ── 6. State containment: no leaked state outside .maddu/ ───────────────
+  const FORBIDDEN_AT_ROOT = ['skills', 'mcp', 'runtimes', 'checkpoints'];
+  const leaks = [];
+  for (const name of FORBIDDEN_AT_ROOT) {
+    if (await exists(join(repoRoot, name))) leaks.push(name);
+  }
+  if (leaks.length === 0) {
+    checks.push({ level: 'PASS', label: 'state containment', detail: 'no Máddu state dirs leaked outside .maddu/' });
+  } else {
+    checks.push({ level: 'WARN', label: 'state containment', detail: `leaked at repo root: ${leaks.join(', ')} — move into .maddu/` });
+  }
+
+  // ── 7. Hard rule #8: no duplicate active lane claims ─────────────────────
   const claimsPath = join(repoRoot, '.maddu', 'lanes', 'claims.json');
   if (await exists(claimsPath)) {
     try {

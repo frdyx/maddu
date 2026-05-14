@@ -19,7 +19,7 @@ const TRANSPORTS = ['stdio', 'sse', 'http'];
 const DEFAULT_TEST_TIMEOUT_MS = 3000;
 
 function mcpDir(repoRoot) {
-  return join(pathsFor(repoRoot).state, '..', 'mcp'); // .maddu/mcp
+  return join(pathsFor(repoRoot).state, 'mcp'); // .maddu/mcp
 }
 function healthFile(repoRoot) {
   return join(pathsFor(repoRoot).statePrjDir, 'mcp-health.json');

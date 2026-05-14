@@ -26,7 +26,7 @@ import { append, EVENT_TYPES, genSkillId } from './spine.mjs';
 const SKILL_FIELDS = ['id', 'title', 'when', 'tags', 'provenance', 'created', 'updated'];
 
 function skillsDir(repoRoot) {
-  return join(pathsFor(repoRoot).state, '..', 'skills'); // → .maddu/skills
+  return join(pathsFor(repoRoot).state, 'skills'); // → .maddu/skills
 }
 function skillsFile(repoRoot, id) {
   return join(skillsDir(repoRoot), `${id}.md`);

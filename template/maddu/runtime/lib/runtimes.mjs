@@ -20,7 +20,7 @@ const DESCRIPTOR_SCHEMA = 1;
 const DEFAULT_DETECT_TIMEOUT_MS = 5000;
 
 function runtimesDir(repoRoot) {
-  return join(pathsFor(repoRoot).state, '..', 'runtimes'); // .maddu/runtimes
+  return join(pathsFor(repoRoot).state, 'runtimes'); // .maddu/runtimes
 }
 function logsDir(repoRoot) {
   return join(pathsFor(repoRoot).statePrjDir, 'worker-logs'); // .maddu/state/worker-logs

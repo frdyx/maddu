@@ -21,6 +21,7 @@ import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
 import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, parseNatural } from './lib/schedule.mjs';
+import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -148,7 +149,8 @@ async function handleBridge(req, res, url, ctx) {
         mcp: (await listMcp(repoRoot)).length,
         mcpEnabled: (await listMcp(repoRoot)).filter((m) => m.enabled).length,
         schedules: (await listSchedules(repoRoot)).length,
-        enabledSchedules: (await listSchedules(repoRoot)).filter((s) => s.enabled).length
+        enabledSchedules: (await listSchedules(repoRoot)).filter((s) => s.enabled).length,
+        checkpoints: (await listCheckpoints(repoRoot)).length
       }
     });
   }
@@ -355,6 +357,46 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── checkpoints (Phase C4) ────────────────────────────────────────────
+  if (path === '/bridge/checkpoints' && req.method === 'GET') {
+    const lane = url.searchParams.get('lane');
+    let all = await listCheckpoints(repoRoot);
+    if (lane) all = all.filter((c) => c.lane === lane);
+    return sendJson(res, 200, { checkpoints: all, gitAvailable: await gitAvailable(repoRoot) });
+  }
+  if (path === '/bridge/checkpoints' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const cp = await createCheckpoint(repoRoot, { lane: body.lane || null, title: body.title || null, by: body.by || null });
+      return sendJson(res, 200, { ok: true, checkpoint: cp });
+    } catch (err) { return sendJson(res, 400, { error: err.message }); }
+  }
+  if (path.startsWith('/bridge/checkpoints/')) {
+    const rest = path.slice('/bridge/checkpoints/'.length);
+    if (rest.endsWith('/worktree') && req.method === 'POST') {
+      const id = rest.slice(0, -'/worktree'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, await createWorktree(repoRoot, id, body.by || null)); }
+      catch (err) { return sendJson(res, 400, { error: err.message }); }
+    }
+    if (rest.endsWith('/rollback') && req.method === 'POST') {
+      const id = rest.slice(0, -'/rollback'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, await checkpointRollback(repoRoot, id, { apply: !!body.apply, mode: body.mode || 'inspect', by: body.by || null })); }
+      catch (err) { return sendJson(res, 400, { error: err.message }); }
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const c = await readCheckpoint(repoRoot, rest);
+      if (!c) return sendJson(res, 404, { error: 'checkpoint not found', id: rest });
+      return sendJson(res, 200, c);
+    }
+    if (req.method === 'DELETE' && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      await removeCheckpoint(repoRoot, rest, body.by || null);
+      return sendJson(res, 200, { ok: true });
     }
   }
 
