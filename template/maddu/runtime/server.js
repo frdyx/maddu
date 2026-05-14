@@ -23,6 +23,7 @@ import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, test
 import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, parseNatural } from './lib/schedule.mjs';
 import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
 import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
+import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -152,7 +153,9 @@ async function handleBridge(req, res, url, ctx) {
         schedules: (await listSchedules(repoRoot)).length,
         enabledSchedules: (await listSchedules(repoRoot)).filter((s) => s.enabled).length,
         checkpoints: (await listCheckpoints(repoRoot)).length,
-        authProviders: (await listProviders()).length
+        authProviders: (await listProviders()).length,
+        importsAccepted: (await importsCounts(repoRoot)).accepted,
+        importsRejected: (await importsCounts(repoRoot)).rejected
       }
     });
   }
@@ -360,6 +363,31 @@ async function handleBridge(req, res, url, ctx) {
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
     }
+  }
+
+  // ── imports (Phase D2) — secret-rejection gateway ─────────────────────
+  if (path === '/bridge/imports' && req.method === 'GET') {
+    const accepted = await listImportsAccepted(repoRoot, 50);
+    const rejected = await listImportsRejected(repoRoot, 50);
+    return sendJson(res, 200, { accepted, rejected, kinds: IMPORT_KINDS });
+  }
+  if (path === '/bridge/imports' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.kind) return sendJson(res, 400, { error: 'kind required' });
+    if (body.payload === undefined) return sendJson(res, 400, { error: 'payload required' });
+    try {
+      const out = await safeImport(repoRoot, { kind: body.kind, payload: body.payload, by: body.by || null });
+      return sendJson(res, 200, out);
+    } catch (err) { return sendJson(res, 400, { error: err.message }); }
+  }
+  if (path === '/bridge/imports/scan' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const hits = scanForSecrets(body.payload || {});
+    return sendJson(res, 200, { ok: hits.length === 0, hitCount: hits.length, hits });
+  }
+  if (path === '/bridge/imports/rejections' && req.method === 'GET') {
+    const limit = parseInt(url.searchParams.get('limit') || '100', 10) || 100;
+    return sendJson(res, 200, { rejections: await listImportsRejected(repoRoot, limit) });
   }
 
   // ── auth (Phase C5) — keys NEVER served raw over HTTP ─────────────────
