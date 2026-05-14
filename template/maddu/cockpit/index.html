@@ -56,13 +56,16 @@
       <footer class="stage-foot">
         <div class="composer">
           <span class="composer-glyph">▸</span>
-          <input id="composer-input" class="composer-input" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="/ to issue a slash-command  ·  /help for the list" />
+          <textarea id="composer-input" class="composer-input" rows="1" autocomplete="off" spellcheck="false"
+                    placeholder="/ to issue a slash-command  ·  /help for the list  ·  Shift+Enter for newline"></textarea>
           <span class="composer-hint" id="composer-hint"></span>
           <div class="composer-suggest" id="composer-suggest" hidden></div>
           <div class="composer-toast" id="composer-toast" hidden></div>
         </div>
-        <span class="stage-foot-coord"><span id="status-host">127.0.0.1</span>:<span id="status-port">4177</span></span>
+        <div class="stage-foot-meta">
+          <span class="stage-foot-tagline">The Source of local truth.</span>
+          <span class="stage-foot-coord"><span id="status-host">127.0.0.1</span>:<span id="status-port">4177</span></span>
+        </div>
       </footer>
     </main>
   </div>

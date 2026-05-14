@@ -2450,6 +2450,7 @@ async function runCommand(cmd) {
       return;
     case 'clear':
       composer.input.value = '';
+      if (composer.fit) composer.fit();
       composer.suggest.hidden = true;
       composer.toast.hidden = true;
       return;
@@ -2474,20 +2475,28 @@ function initComposer() {
   composer.toast = document.getElementById('composer-toast');
   composer.hint = document.getElementById('composer-hint');
   updateHint();
+  composer.fit = () => {
+    if (!composer.input) return;
+    composer.input.style.height = 'auto';
+    composer.input.style.height = Math.min(composer.input.scrollHeight, 240) + 'px';
+  };
 
   composer.input.addEventListener('input', () => {
+    composer.fit();
     composer.selectedSuggestion = 0;
     renderSuggestions(composer.input.value);
   });
 
   composer.input.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
+    // Enter submits. Shift+Enter inserts a newline (default textarea behavior).
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const line = composer.input.value.trim();
       if (!line) return;
       composer.history.push(line);
       composer.historyIdx = composer.history.length;
       composer.input.value = '';
+      composer.fit();
       composer.suggest.hidden = true;
       const cmd = parseCommand(line);
       if (!cmd) { showToast('commands must start with /', 'err'); return; }
@@ -2498,6 +2507,7 @@ function initComposer() {
       }
     } else if (e.key === 'Escape') {
       composer.input.value = '';
+      composer.fit();
       composer.suggest.hidden = true;
       composer.toast.hidden = true;
       composer.input.blur();
@@ -2508,10 +2518,13 @@ function initComposer() {
         renderSuggestions(composer.input.value);
         return;
       }
+      // Only navigate history when single-line; otherwise let the textarea move the caret.
+      if (composer.input.value.includes('\n')) return;
       if (composer.historyIdx > 0) {
         e.preventDefault();
         composer.historyIdx--;
         composer.input.value = composer.history[composer.historyIdx];
+        composer.fit();
       }
     } else if (e.key === 'ArrowDown') {
       if (!composer.suggest.hidden) {
@@ -2521,12 +2534,17 @@ function initComposer() {
         renderSuggestions(composer.input.value);
         return;
       }
+      if (composer.input.value.includes('\n')) return;
       if (composer.historyIdx < composer.history.length - 1) {
+        e.preventDefault();
         composer.historyIdx++;
         composer.input.value = composer.history[composer.historyIdx];
-      } else {
+        composer.fit();
+      } else if (composer.historyIdx < composer.history.length) {
+        e.preventDefault();
         composer.historyIdx = composer.history.length;
         composer.input.value = '';
+        composer.fit();
       }
     } else if (e.key === 'Tab') {
       e.preventDefault();
@@ -2535,6 +2553,7 @@ function initComposer() {
         const row = rows[composer.selectedSuggestion] || rows[0];
         const cmdName = row.querySelector('.composer-suggest-cmd').textContent.split(' ')[0];
         composer.input.value = cmdName + ' ';
+        composer.fit();
         renderSuggestions(composer.input.value);
       }
     }
@@ -2548,6 +2567,7 @@ function initComposer() {
     e.preventDefault();
     composer.input.focus();
     if (!composer.input.value.startsWith('/')) composer.input.value = '/';
+    composer.fit();
     renderSuggestions(composer.input.value);
   });
 }
