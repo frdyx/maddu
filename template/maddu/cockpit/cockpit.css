@@ -3,36 +3,81 @@
  */
 
 :root {
-  /* surface */
-  --m-bg-0: #0a0b0d;
-  --m-bg-1: #0f1114;
-  --m-bg-2: #15181c;
-  --m-bg-3: #1c2026;
-  --m-bg-4: #232830;
+  /* ─── SURFACES ─────────────────────────────────────────────────────────
+   * Pitch-black base. Surfaces above are blue-tinted transparency layers
+   * that composite for depth without harsh borders (OMC's design grammar).
+   * Order: bg-0 is the floor; bg-1..3 sit on top progressively brighter;
+   * bg-4 is the cool-blue hover halo. */
+  --m-bg-0: #000000;                          /* base — pitch black */
+  --m-bg-1: rgba(0, 8, 18, 0.54);             /* shell — rail, stage chrome */
+  --m-bg-2: rgba(3, 14, 30, 0.28);            /* section — panels */
+  --m-bg-3: rgba(4, 18, 38, 0.34);            /* nested cards, focused rows */
+  --m-bg-4: rgba(86, 184, 255, 0.055);        /* hover halo (blue glow tint) */
 
-  /* ink */
-  --m-fg-0: #f0f1f3;
-  --m-fg-1: #c9ccd1;
-  --m-fg-2: #8a8f97;
-  --m-fg-3: #5a5f67;
+  /* ─── INK ──────────────────────────────────────────────────────────────
+   * Cream on black, four legibility tiers. Less cold than the old
+   * stainless-steel ink, more "lit terminal" warm. */
+  --m-fg-0: #E8E6E3;
+  --m-fg-1: #B8B2AA;
+  --m-fg-2: #8A8A8A;
+  --m-fg-3: #6a7079;
   --m-fg-4: #3a3e45;
 
-  /* line */
-  --m-line: #23262b;
-  --m-line-soft: #1b1e22;
+  /* ─── LINES ────────────────────────────────────────────────────────────
+   * Blue-tinted rgba — dividers read as part of the same atmosphere
+   * as the surfaces, never as hard chrome. */
+  --m-line:      rgba(80, 113, 149, 0.36);
+  --m-line-soft: rgba(80, 113, 149, 0.18);
 
-  /* accent */
-  --m-accent: #c3d0d4;          /* cool steel highlight */
-  --m-accent-warm: #d4a96b;     /* amber for warnings/active states */
-  --m-accent-dim: #8a949a;
-  --m-signal: #6fa8a2;           /* live / online */
+  /* ─── ACCENT ───────────────────────────────────────────────────────────
+   * Dual-neon strategy: lime is THE primary interactive accent (focus,
+   * active states, primary CTAs, caret). Electric blue is the secondary
+   * — used for glow halos, info-only highlights, hover surfaces.
+   * Burnt orange is the brand mark colour — reserved for the rail glyph,
+   * almost never appears in chrome. */
+  --m-accent:     #D0FF00;
+  --m-accent-2:   #56B8FF;
+  --m-accent-dim: rgba(208, 255, 0, 0.45);
+  --m-brand:      #F04E23;
 
-  /* type */
+  /* ─── STATUS TRIAD ─────────────────────────────────────────────────────
+   * Traffic-light semantics applied uniformly across approvals, worker
+   * health, schedules, lane claims, imports. */
+  --m-ok:     #61D394;
+  --m-warn:   #F2BD5C;
+  --m-danger: #FF5E7A;
+
+  /* Backwards-compat aliases for class rules written pre-token-swap. */
+  --m-signal:      var(--m-ok);
+  --m-accent-warm: var(--m-warn);
+
+  /* ─── SHADOWS + GLOWS ──────────────────────────────────────────────────
+   * Glow tokens carry the dual-accent strategy. Used sparingly on chrome
+   * surfaces — never bloomed across every panel. */
+  --m-shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.35);
+  --m-shadow-md:     0 8px 24px rgba(0, 0, 0, 0.45);
+  --m-glow-accent:   0 0 24px rgba(208, 255, 0, 0.18);
+  --m-glow-accent-2: 0 0 24px rgba(86, 184, 255, 0.20);
+
+  /* ─── TYPOGRAPHY ───────────────────────────────────────────────────────
+   * Plex everywhere. OMC's operator-grade scale: dense, no display sizes,
+   * no tabular-nums per project preference. */
   --m-font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --m-font-cond: 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif;
   --m-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
-  /* metrics */
+  --m-type-xs:     11px;
+  --m-type-sm:     12px;
+  --m-type-body:   13px;
+  --m-type-row:    15px;
+  --m-type-h3:     15px;
+  --m-type-h2:     18px;
+  --m-type-h1:     28px;
+  --m-type-metric: 30px;
+  --m-line-tight:  1.04;
+  --m-line-body:   1.45;
+
+  /* ─── METRICS ──────────────────────────────────────────────────────────*/
   --m-rail-w: 220px;
   --m-foot-h: 36px;
   --m-head-h: 56px;
@@ -727,11 +772,12 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   margin-right: 6px;
   vertical-align: middle;
 }
-.signal.live { background: var(--m-signal); box-shadow: 0 0 0 0 var(--m-signal); animation: pulse 1.8s ease-out infinite; }
+.signal.live { background: var(--m-ok); box-shadow: 0 0 0 0 var(--m-ok); animation: pulse 1.8s ease-out infinite; }
 @keyframes pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(111,168,162,0.35); }
-  70%  { box-shadow: 0 0 0 6px rgba(111,168,162,0); }
-  100% { box-shadow: 0 0 0 0 rgba(111,168,162,0); }
+  /* halo matches --m-ok (#61D394) so the pulse reads as a green ping */
+  0%   { box-shadow: 0 0 0 0 rgba(97, 211, 148, 0.35); }
+  70%  { box-shadow: 0 0 0 6px rgba(97, 211, 148, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(97, 211, 148, 0); }
 }
 
 /* narrow viewport — collapse rail labels */
