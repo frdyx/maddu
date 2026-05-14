@@ -26,7 +26,7 @@ export default async function sliceStop(argv) {
   const summary = requireFlag(flags, 'summary');
   const sessionId = requireFlag(flags, 'session');
 
-  const { paths, spine } = await loadSpineLib();
+  const { paths, spine, hindsight } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   const ev = await spine.append(repoRoot, {
@@ -50,5 +50,13 @@ export default async function sliceStop(argv) {
   if (ev.data.next.length) {
     console.log(`  next:`);
     for (const n of ev.data.next) console.log(`    - ${n}`);
+  }
+
+  // Hindsight: auto-extract facts from this slice-stop into .maddu/memory.ndjson.
+  try {
+    const added = await hindsight.extractEvent(repoRoot, ev);
+    if (added > 0) console.log(`  hindsight: ${added} fact(s) → .maddu/state/memory.ndjson`);
+  } catch (err) {
+    console.error(`  hindsight failed (non-fatal): ${err.message}`);
   }
 }

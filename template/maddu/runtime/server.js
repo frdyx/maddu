@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
 import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
+import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -129,7 +130,8 @@ async function handleBridge(req, res, url, ctx) {
         claims: proj.claims.length,
         sliceStops: proj.sliceStops.length,
         openApprovals: proj.approvals.open.length,
-        policies: proj.approvals.policies.length
+        policies: proj.approvals.policies.length,
+        memoryFacts: (await readMemory(repoRoot)).length
       }
     });
   }
@@ -337,6 +339,35 @@ async function handleBridge(req, res, url, ctx) {
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
     }
+  }
+
+  // ── memory / hindsight (Phase A3) ─────────────────────────────────────
+  if (path === '/bridge/memory' && req.method === 'GET') {
+    const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
+    const kind = url.searchParams.get('kind') || null;
+    const facts = await searchMemory(repoRoot, '', { kind, limit });
+    return sendJson(res, 200, { facts, count: facts.length });
+  }
+  if (path === '/bridge/memory/search' && req.method === 'GET') {
+    const q = url.searchParams.get('q') || '';
+    const kind = url.searchParams.get('kind') || null;
+    const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
+    const facts = await searchMemory(repoRoot, q, { kind, limit });
+    return sendJson(res, 200, { query: q, kind, facts, count: facts.length });
+  }
+  if (path === '/bridge/memory/extract' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (body.rebuild) {
+      const n = await rebuildMemory(repoRoot);
+      return sendJson(res, 200, { ok: true, rebuilt: true, facts: n });
+    }
+    // Otherwise: re-extract incrementally (dedupe via deterministic ids).
+    const events = await readAll(repoRoot);
+    let added = 0;
+    for (const ev of events) {
+      if (ev.type === 'SLICE_STOP') added += await extractEvent(repoRoot, ev);
+    }
+    return sendJson(res, 200, { ok: true, added });
   }
 
   // ── events: poll-since-cursor (immediate return) ──────────────────────

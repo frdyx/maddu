@@ -196,7 +196,8 @@ function renderDashboard() {
     ['Events', String(counts.events ?? '—')],
     ['Active sessions', String(counts.activeSessions ?? '—')],
     ['Lane claims', String(counts.claims ?? '—')],
-    ['Slice-stops', String(counts.sliceStops ?? '—')]
+    ['Slice-stops', String(counts.sliceStops ?? '—')],
+    ['Memory facts', String(counts.memoryFacts ?? '—')]
   ];
   for (const [k, v] of rows) {
     kv.appendChild(el('dt', {}, k));
@@ -217,6 +218,14 @@ function renderDashboard() {
   root.appendChild(panel('Hard rules', 'docs/hard-rules.md', rules));
 
   return root;
+}
+
+async function fetchMemory(limit = 30) {
+  try {
+    const r = await fetch(`/bridge/memory?limit=${limit}`, { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
 async function fetchProjection() {
@@ -251,30 +260,61 @@ function renderOperations() {
   slicesMount.appendChild(loading('Fetching slice-stop ledger…'));
   root.appendChild(panel('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount));
 
-  fetchProjection().then((proj) => {
-    slicesMount.innerHTML = '';
-    if (!proj || !proj.sliceStops || proj.sliceStops.length === 0) {
-      slicesMount.appendChild(placeholder('Empty', 'Run `maddu slice-stop` to append the first entry.'));
-      return;
-    }
-    const list = el('div', {});
-    for (const s of proj.sliceStops.slice().reverse()) {
-      const row = el('div', { class: 'panel' }, [
-        el('div', { class: 'panel-head' }, [
-          el('span', { class: 'panel-title' }, `[${s.lane || '—'}]  ${s.summary}`),
-          el('span', { class: 'panel-aside' }, s.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
-        ]),
-        s.next && s.next.length
-          ? el('div', { class: 'view' }, [
-              el('div', { class: 'panel-title' }, 'NEXT'),
-              el('ul', { class: 'hard-rules' }, s.next.map((n) => el('li', {}, n)))
-            ])
-          : null
-      ]);
-      list.appendChild(row);
-    }
-    slicesMount.appendChild(list);
-  });
+  const memMount = el('div', {});
+  memMount.appendChild(loading('Fetching hindsight facts…'));
+  root.appendChild(panel('Hindsight memory', 'GET /bridge/memory · facts derived from slice-stops', memMount));
+
+  function refresh() {
+    fetchProjection().then((proj) => {
+      slicesMount.innerHTML = '';
+      if (!proj || !proj.sliceStops || proj.sliceStops.length === 0) {
+        slicesMount.appendChild(placeholder('Empty', 'Run `maddu slice-stop` to append the first entry.'));
+        return;
+      }
+      const list = el('div', {});
+      for (const s of proj.sliceStops.slice().reverse()) {
+        const row = el('div', { class: 'panel' }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, `[${s.lane || '—'}]  ${s.summary}`),
+            el('span', { class: 'panel-aside' }, s.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
+          ]),
+          s.next && s.next.length
+            ? el('div', { class: 'view' }, [
+                el('div', { class: 'panel-title' }, 'NEXT'),
+                el('ul', { class: 'hard-rules' }, s.next.map((n) => el('li', {}, n)))
+              ])
+            : null
+        ]);
+        list.appendChild(row);
+      }
+      slicesMount.appendChild(list);
+    });
+
+    fetchMemory(50).then((m) => {
+      memMount.innerHTML = '';
+      if (!m || m.facts.length === 0) {
+        memMount.appendChild(placeholder('No facts yet', 'Slice-stops auto-populate this. Try `maddu slice-stop --learnings "A; B" --next "C"`.'));
+        return;
+      }
+      const list = el('div', {});
+      for (const f of m.facts.slice().reverse()) {
+        list.appendChild(el('div', { class: 'ledger-row' }, [
+          el('span', {}, f.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+          el('span', { class: 'event-type t-' + (f.kind === 'rule' ? 'framework' : f.kind === 'constraint' ? 'approval' : f.kind === 'discovery' ? 'session' : f.kind === 'followup' ? 'approval' : f.kind === 'summary' ? 'slice' : '') }, f.kind),
+          el('span', {}, f.text),
+          el('span', { class: 'event-actor' }, f.tags.join(' '))
+        ]));
+      }
+      memMount.appendChild(list);
+    });
+  }
+
+  refresh();
+  const handler = (e) => {
+    if (e.detail.type === 'SLICE_STOP') refresh();
+  };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
 
   return root;
 }
