@@ -2336,9 +2336,223 @@ function renderSettings() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Settings'));
   root.appendChild(el('p', {}, ROUTES.settings.description));
-  root.appendChild(placeholder('Lane defaults', 'Lands in Slice 3 — .maddu/lanes/catalog.json.'));
-  root.appendChild(placeholder('Provider bindings', 'Lands in Slice 4 — auth + OAuth status panel.'));
-  root.appendChild(placeholder('MCP registry', 'Lands in Phase C2 — bridge-owned MCP visual registry.'));
+
+  // ── Bridge panel ─────────────────────────────────────────────────────
+  const bridgeMount = el('div', {});
+  bridgeMount.appendChild(loading('Reading bridge status…'));
+  root.appendChild(panel('Bridge', 'GET /bridge/status', bridgeMount));
+
+  // ── Lanes panel ──────────────────────────────────────────────────────
+  const lanesMount = el('div', {});
+  lanesMount.appendChild(loading('Fetching lane catalog…'));
+  root.appendChild(panel('Lanes', 'GET /bridge/lanes  ·  edit .maddu/lanes/catalog.json', lanesMount));
+
+  // ── Auth / providers panel ───────────────────────────────────────────
+  const authMount = el('div', {});
+  authMount.appendChild(loading('Fetching providers…'));
+  root.appendChild(panel('Providers', 'GET /bridge/auth  ·  full management in /auth', authMount));
+
+  // ── MCP registry panel ───────────────────────────────────────────────
+  const mcpMount = el('div', {});
+  mcpMount.appendChild(loading('Fetching MCP registry…'));
+  root.appendChild(panel('MCP registry', 'GET /bridge/mcp  ·  full management in /mcp', mcpMount));
+
+  // ── Runtimes panel ───────────────────────────────────────────────────
+  const rtMount = el('div', {});
+  rtMount.appendChild(loading('Fetching runtimes…'));
+  root.appendChild(panel('Runtimes', 'GET /bridge/runtimes  ·  full management in /runtimes', rtMount));
+
+  // ── Storage paths panel (static, from /bridge/status) ───────────────
+  const pathsMount = el('div', {});
+  pathsMount.appendChild(loading('Resolving paths…'));
+  root.appendChild(panel('Storage paths', 'Resolved at bridge boot', pathsMount));
+
+  // ── Hard rules + docs deep-link ─────────────────────────────────────
+  const rulesBody = el('div', {});
+  rulesBody.appendChild(el('p', { html:
+    'Máddu enforces eight invariants: files-only state, append-only spine, no hosted backends, no broad deps, no provider SDKs in app code, no token export, three-layer brand boundary, lane ownership. ' +
+    '<a href="#/docs?p=hard-rules" style="color:var(--m-accent-2)">Read the full rationale →</a>'
+  }));
+  const ruleBtns = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;' });
+  for (const [label, slug] of [
+    ['Hard rules', 'hard-rules'],
+    ['Getting started', '01-getting-started'],
+    ['Concepts', '02-concepts'],
+    ['CLI reference', '03-cli-reference'],
+    ['Architecture', '15-architecture']
+  ]) {
+    const b = el('button', {}, label);
+    b.addEventListener('click', () => { location.hash = `#/docs?p=${slug}`; });
+    ruleBtns.appendChild(b);
+  }
+  rulesBody.appendChild(ruleBtns);
+  root.appendChild(panel('Hard rules · Docs', 'Open the manual', rulesBody));
+
+  (async () => {
+    // Bridge
+    try {
+      const r = await fetch('/bridge/status', { cache: 'no-store' });
+      const s = r.ok ? await r.json() : null;
+      bridgeMount.innerHTML = '';
+      if (!s) { bridgeMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
+      else {
+        bridgeMount.appendChild(el('dl', { class: 'kv' }, [
+          el('dt', {}, 'status'),   el('dd', { html: '<span class="signal live"></span>online' }),
+          el('dt', {}, 'version'),  el('dd', {}, s.version || '—'),
+          el('dt', {}, 'host'),     el('dd', {}, `${s.host || '127.0.0.1'}:${s.port || '4177'}`),
+          el('dt', {}, 'uptime'),   el('dd', {}, formatUptime(s.uptimeMs)),
+          el('dt', {}, 'pid'),      el('dd', {}, String(s.pid || '—'))
+        ]));
+      }
+    } catch (e) { bridgeMount.innerHTML = ''; bridgeMount.appendChild(placeholder('Offline', String(e))); }
+
+    // Storage paths (from same status response)
+    try {
+      const r = await fetch('/bridge/status', { cache: 'no-store' });
+      const s = r.ok ? await r.json() : null;
+      pathsMount.innerHTML = '';
+      if (!s) { pathsMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
+      else {
+        pathsMount.appendChild(el('dl', { class: 'kv' }, [
+          el('dt', {}, 'repo root'),   el('dd', {}, s.repoRoot || '—'),
+          el('dt', {}, 'state dir'),   el('dd', {}, s.stateDir || '—'),
+          el('dt', {}, 'cockpit dir'), el('dd', {}, s.cockpitDir || '—'),
+          el('dt', {}, 'auth dir'),    el('dd', {}, s.authDir || '~/.config/maddu/auth/  ·  %APPDATA%\\maddu\\auth\\ on Windows')
+        ]));
+      }
+    } catch (e) { pathsMount.innerHTML = ''; pathsMount.appendChild(placeholder('Offline', String(e))); }
+
+    // Lanes
+    try {
+      const r = await fetch('/bridge/lanes', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      lanesMount.innerHTML = '';
+      if (!d) { lanesMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
+      else {
+        const lanes = (d.catalog && d.catalog.lanes) || [];
+        const claims = new Map((d.claims || []).map((c) => [c.lane, c]));
+        const head = el('div', { style: 'margin-bottom:8px;color:var(--m-fg-2);font-size:13px;' },
+          `${lanes.length} lane${lanes.length === 1 ? '' : 's'} defined  ·  ${d.claims?.length || 0} active claim${(d.claims?.length || 0) === 1 ? '' : 's'}`);
+        lanesMount.appendChild(head);
+        if (lanes.length === 0) {
+          lanesMount.appendChild(placeholder('No lanes', 'Define lanes in .maddu/lanes/catalog.json.'));
+        } else {
+          const kv = el('dl', { class: 'kv' });
+          for (const l of lanes) {
+            const c = claims.get(l.id);
+            kv.appendChild(el('dt', {}, l.id));
+            kv.appendChild(el('dd', { html:
+              c ? `<span style="color:var(--m-warn)">claimed</span> by ${c.sessionId} — ${c.focus || l.scope || ''}`
+                : `<span style="color:var(--m-fg-3)">free</span> — ${l.scope || '(no scope)'}`
+            }));
+          }
+          lanesMount.appendChild(kv);
+        }
+        const btn = el('button', {}, 'Open Swarm →');
+        btn.style.marginTop = '8px';
+        btn.addEventListener('click', () => { location.hash = '#/swarm'; });
+        lanesMount.appendChild(btn);
+      }
+    } catch (e) { lanesMount.innerHTML = ''; lanesMount.appendChild(placeholder('Offline', String(e))); }
+
+    // Auth / providers
+    try {
+      const r = await fetch('/bridge/auth', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      authMount.innerHTML = '';
+      if (!d) { authMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
+      else {
+        const providers = d.providers || [];
+        const head = el('div', { style: 'margin-bottom:8px;color:var(--m-fg-2);font-size:13px;' },
+          `${providers.length} provider${providers.length === 1 ? '' : 's'}  ·  tokens stay device-bound (rule #6)`);
+        authMount.appendChild(head);
+        if (providers.length === 0) {
+          authMount.appendChild(placeholder('No providers', 'Sign in via /auth or `maddu auth add --provider <p> --key …`.'));
+        } else {
+          const kv = el('dl', { class: 'kv' });
+          for (const p of providers) {
+            const keys = p.keys || [];
+            const active = keys.find((k) => k.active);
+            const dot = keys.length > 0 ? '<span class="signal live"></span>' : '<span class="signal"></span>';
+            kv.appendChild(el('dt', { html: `${dot}${p.name}` }));
+            kv.appendChild(el('dd', { html:
+              keys.length === 0 ? '<span style="color:var(--m-fg-3)">no keys</span>'
+                : `${keys.length} key${keys.length === 1 ? '' : 's'}` +
+                  (active ? ` · active …${(active.last4 || '????')}` : '') +
+                  (p.rateLimited ? ' · <span style="color:var(--m-warn)">rate-limited</span>' : '')
+            }));
+          }
+          authMount.appendChild(kv);
+        }
+        const btn = el('button', {}, 'Open Auth →');
+        btn.style.marginTop = '8px';
+        btn.addEventListener('click', () => { location.hash = '#/auth'; });
+        authMount.appendChild(btn);
+      }
+    } catch (e) { authMount.innerHTML = ''; authMount.appendChild(placeholder('Offline', String(e))); }
+
+    // MCP
+    try {
+      const r = await fetch('/bridge/mcp', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      mcpMount.innerHTML = '';
+      if (!d) { mcpMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
+      else {
+        const servers = d.servers || [];
+        const enabled = servers.filter((s) => s.enabled).length;
+        const head = el('div', { style: 'margin-bottom:8px;color:var(--m-fg-2);font-size:13px;' },
+          `${servers.length} server${servers.length === 1 ? '' : 's'} registered  ·  ${enabled} enabled  ·  bridge-owned (rule #5)`);
+        mcpMount.appendChild(head);
+        if (servers.length === 0) {
+          mcpMount.appendChild(placeholder('No MCP servers', 'Register one in /mcp or `maddu mcp add --name … --transport stdio --command …`.'));
+        } else {
+          const kv = el('dl', { class: 'kv' });
+          for (const s of servers) {
+            const dot = s.enabled ? '<span class="signal live"></span>' : '<span class="signal"></span>';
+            kv.appendChild(el('dt', { html: `${dot}${s.name}` }));
+            kv.appendChild(el('dd', {}, `${s.transport || 'stdio'} · ${s.command || s.url || '—'}`));
+          }
+          mcpMount.appendChild(kv);
+        }
+        const btn = el('button', {}, 'Open MCP →');
+        btn.style.marginTop = '8px';
+        btn.addEventListener('click', () => { location.hash = '#/mcp'; });
+        mcpMount.appendChild(btn);
+      }
+    } catch (e) { mcpMount.innerHTML = ''; mcpMount.appendChild(placeholder('Offline', String(e))); }
+
+    // Runtimes
+    try {
+      const r = await fetch('/bridge/runtimes', { cache: 'no-store' });
+      const d = r.ok ? await r.json() : null;
+      rtMount.innerHTML = '';
+      if (!d) { rtMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
+      else {
+        const rts = d.runtimes || [];
+        const detected = Object.values(d.health || {}).filter((h) => h && h.ok).length;
+        const head = el('div', { style: 'margin-bottom:8px;color:var(--m-fg-2);font-size:13px;' },
+          `${rts.length} runtime${rts.length === 1 ? '' : 's'} registered  ·  ${detected} detected on this host`);
+        rtMount.appendChild(head);
+        if (rts.length === 0) {
+          rtMount.appendChild(placeholder('No runtimes', 'Register one in /runtimes or `maddu runtime register --name … --binary …`.'));
+        } else {
+          const kv = el('dl', { class: 'kv' });
+          for (const r of rts) {
+            const h = (d.health || {})[r.name];
+            const dot = h?.ok ? '<span class="signal live"></span>' : '<span class="signal"></span>';
+            kv.appendChild(el('dt', { html: `${dot}${r.displayName || r.name}` }));
+            kv.appendChild(el('dd', {}, h?.ok ? (h.version || 'detected') : (h?.error || 'not detected')));
+          }
+          rtMount.appendChild(kv);
+        }
+        const btn = el('button', {}, 'Open Runtimes →');
+        btn.style.marginTop = '8px';
+        btn.addEventListener('click', () => { location.hash = '#/runtimes'; });
+        rtMount.appendChild(btn);
+      }
+    } catch (e) { rtMount.innerHTML = ''; rtMount.appendChild(placeholder('Offline', String(e))); }
+  })();
+
   return root;
 }
 
