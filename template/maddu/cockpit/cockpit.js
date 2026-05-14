@@ -10,6 +10,7 @@ const ROUTES = {
   skills:     { title: 'Skills',     render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
   search:     { title: 'Search',     render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
   runtimes:   { title: 'Runtimes',   render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
+  mcp:        { title: 'MCP',        render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -1049,6 +1050,136 @@ function renderSkills() {
   return root;
 }
 
+async function fetchMcp() {
+  try { const r = await fetch('/bridge/mcp', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+function renderMcp() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'MCP Registry'));
+  root.appendChild(el('p', {}, ROUTES.mcp.description));
+
+  // Compact register form
+  const nname = el('input', { type: 'text', placeholder: 'name', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const ntr = el('select', { style: 'background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  for (const t of ['stdio', 'sse', 'http']) ntr.appendChild(el('option', { value: t }, t));
+  const ncmd = el('input', { type: 'text', placeholder: 'command (stdio) or url (sse/http)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nargs = el('input', { type: 'text', placeholder: 'args (comma, stdio only)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nlanes = el('input', { type: 'text', placeholder: 'lanes (comma, * = any)', style: 'width:140px;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nbtn = el('button', {}, 'Register');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;' }, [nname, ntr, ncmd, nargs, nlanes, nbtn]);
+  const allBtn = el('button', {}, 'Test all');
+  const tools = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;' }, [allBtn]);
+  root.appendChild(form);
+  root.appendChild(tools);
+
+  nbtn.addEventListener('click', async () => {
+    const name = nname.value.trim();
+    if (!name) return;
+    const transport = ntr.value;
+    const body = {
+      name,
+      transport,
+      enabled: true,
+      lanes: nlanes.value.split(',').map((x) => x.trim()).filter(Boolean).length
+        ? nlanes.value.split(',').map((x) => x.trim()).filter(Boolean)
+        : ['*'],
+      by: composer.currentSession || null
+    };
+    if (transport === 'stdio') {
+      body.stdio = {
+        command: ncmd.value.trim() || null,
+        args: nargs.value.split(',').map((x) => x.trim()).filter(Boolean),
+        env: []
+      };
+    } else if (transport === 'sse') {
+      body.sse = { url: ncmd.value.trim() || null };
+    } else if (transport === 'http') {
+      body.http = { url: ncmd.value.trim() || null };
+    }
+    nbtn.disabled = true;
+    try {
+      await fetch('/bridge/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      nname.value = ''; ncmd.value = ''; nargs.value = ''; nlanes.value = '';
+      refresh();
+    } finally { nbtn.disabled = false; }
+  });
+  allBtn.addEventListener('click', async () => {
+    allBtn.disabled = true; allBtn.textContent = 'Testing…';
+    try { await fetch('/bridge/mcp/test-all', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); refresh(); }
+    finally { allBtn.disabled = false; allBtn.textContent = 'Test all'; }
+  });
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  function refresh() {
+    mount.innerHTML = '';
+    mount.appendChild(loading('Fetching MCP registry…'));
+    fetchMcp().then((d) => {
+      mount.innerHTML = '';
+      if (!d || d.mcp.length === 0) {
+        mount.appendChild(placeholder('No MCP servers registered', 'Register one above, or via `maddu mcp register`.'));
+        return;
+      }
+      for (const r of d.mcp) {
+        const h = (d.health || {})[r.name];
+        const enabled = r.enabled;
+        const status = h?.ok ? `<span class="signal live"></span>${h.status || h.note || 'ok'}` :
+                       h ? `<span class="signal"></span>${h.error || ('status ' + h.status)}` :
+                       `<span class="signal"></span>${enabled ? 'untested' : 'disabled'}`;
+        const detailLine = r.transport === 'stdio'
+          ? `${r.stdio?.command || '—'}  ${(r.stdio?.args || []).join(' ')}`
+          : `${r[r.transport]?.url || '—'}`;
+        const card = el('div', { class: 'panel', style: enabled ? '' : 'opacity:0.55;' }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, r.displayName || r.name),
+            el('span', { class: 'panel-aside', html: status })
+          ]),
+          el('dl', { class: 'kv' }, [
+            el('dt', {}, 'name'),      el('dd', {}, r.name),
+            el('dt', {}, 'transport'), el('dd', {}, r.transport),
+            el('dt', {}, 'lanes'),     el('dd', {}, (r.lanes || ['*']).join(', ')),
+            el('dt', {}, r.transport === 'stdio' ? 'command' : 'url'), el('dd', {}, detailLine),
+            r.notes ? el('dt', {}, 'notes') : null,
+            r.notes ? el('dd', {}, r.notes) : null
+          ]),
+          (() => {
+            const actions = el('div', { style: 'display:flex;gap:6px;margin-top:8px;' });
+            const tog = el('button', {}, enabled ? 'Disable' : 'Enable');
+            tog.addEventListener('click', async () => {
+              tog.disabled = true;
+              await fetch(`/bridge/mcp/${encodeURIComponent(r.name)}/${enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const tst = el('button', { class: 'btn-allow' }, 'Test');
+            tst.addEventListener('click', async () => {
+              tst.disabled = true; tst.textContent = '…';
+              await fetch(`/bridge/mcp/${encodeURIComponent(r.name)}/test`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
+            rem.addEventListener('click', async () => {
+              if (!confirm(`Remove MCP server "${r.name}"?`)) return;
+              await fetch(`/bridge/mcp/${encodeURIComponent(r.name)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            actions.appendChild(tog); actions.appendChild(tst); actions.appendChild(rem);
+            return actions;
+          })()
+        ]);
+        mount.appendChild(card);
+      }
+    });
+  }
+
+  refresh();
+  const handler = (e) => { if (e.detail.type && e.detail.type.startsWith('MCP_')) refresh(); };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+  return root;
+}
+
 async function fetchRuntimes() {
   try { const r = await fetch('/bridge/runtimes', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
 }
@@ -1317,6 +1448,8 @@ const COMMANDS = [
   { name: 'runtime', args: '<name>',                                desc: 'Show a runtime adapter (or list if no name).' },
   { name: 'spawn',   args: '<runtime>',                             desc: 'Spawn a worker from a registered runtime adapter.' },
   { name: 'detect',  args: '[<name>]',                              desc: 'Detect a runtime (or all if no name).' },
+  { name: 'mcp',     args: '[<name>]',                              desc: 'Show an MCP server (or list if no name).' },
+  { name: 'mcp-test',args: '[<name>]',                              desc: 'Test an MCP server (or all).' },
   { name: 'clear',   args: '',                                       desc: 'Clear the composer.' }
 ];
 
@@ -1591,6 +1724,27 @@ async function runCommand(cmd) {
       }
       const r = await postJson(`/bridge/runtimes/${encodeURIComponent(name)}/detect`, {});
       return showToast(r.ok ? `${name}  ✓ ${r.version || ''}` : `${name}  ✗ ${r.error || ('exit ' + r.exitCode)}`, r.ok ? 'ok' : 'err');
+    }
+    case 'mcp': {
+      const name = cmd.rest.trim();
+      if (!name) {
+        const d = await fetchJson('/bridge/mcp');
+        if (!d.mcp.length) return showToast('(no MCP servers registered)  ·  /mcp UI', 'ok');
+        return showToast(d.mcp.map((r) => `${r.name}  ${r.transport}  ${r.enabled ? 'on' : 'off'}`).join('\n'), 'ok');
+      }
+      const r = await fetchJson(`/bridge/mcp/${encodeURIComponent(name)}`);
+      const detail = r.transport === 'stdio' ? `${r.stdio?.command} ${(r.stdio?.args || []).join(' ')}` : (r[r.transport]?.url || '');
+      return showToast(`${r.name}  ${r.transport}  ${r.enabled ? 'on' : 'off'}\n  ${detail}\n  lanes: ${(r.lanes || []).join(', ')}\n  health: ${r.health?.ok ? '✓' : (r.health ? '✗ ' + (r.health.error || '') : 'untested')}`, 'ok');
+    }
+    case 'mcp-test': {
+      const name = cmd.rest.trim();
+      if (!name) {
+        const r = await postJson('/bridge/mcp/test-all', {});
+        const okN = r.results.filter((x) => x.ok).length;
+        return showToast(`mcp test-all: ${okN}/${r.results.length} ok`, okN ? 'ok' : 'warn');
+      }
+      const r = await postJson(`/bridge/mcp/${encodeURIComponent(name)}/test`, {});
+      return showToast(r.ok ? `${name}  ✓` : `${name}  ✗ ${r.error || ('status ' + r.status)}`, r.ok ? 'ok' : 'err');
     }
     case 'clear':
       composer.input.value = '';

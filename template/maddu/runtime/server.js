@@ -19,6 +19,7 @@ import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts a
 import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './lib/skills.mjs';
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
+import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -142,7 +143,9 @@ async function handleBridge(req, res, url, ctx) {
         skills: (await listSkills(repoRoot)).length,
         runningWorkers: proj.workers.filter((w) => w.status === 'running').length,
         stuckWorkers: proj.workers.filter((w) => w.status === 'stuck').length,
-        runtimes: (await listRuntimes(repoRoot)).length
+        runtimes: (await listRuntimes(repoRoot)).length,
+        mcp: (await listMcp(repoRoot)).length,
+        mcpEnabled: (await listMcp(repoRoot)).filter((m) => m.enabled).length
       }
     });
   }
@@ -349,6 +352,62 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── mcp registry (Phase C2) ───────────────────────────────────────────
+  if (path === '/bridge/mcp' && req.method === 'GET') {
+    const all = await listMcp(repoRoot);
+    const health = await mcpHealth(repoRoot);
+    return sendJson(res, 200, { mcp: all, health });
+  }
+  if (path === '/bridge/mcp' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.name) return sendJson(res, 400, { error: 'name required' });
+    try {
+      const saved = await saveMcp(repoRoot, body, body.by || null);
+      return sendJson(res, 200, { ok: true, mcp: saved });
+    } catch (err) { return sendJson(res, 400, { error: err.message }); }
+  }
+  if (path === '/bridge/mcp/test-all' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const results = await mcpTestAll(repoRoot, body.by || null);
+    return sendJson(res, 200, { results });
+  }
+  if (path.startsWith('/bridge/mcp/visible/') && req.method === 'GET') {
+    const lane = decodeURIComponent(path.slice('/bridge/mcp/visible/'.length));
+    return sendJson(res, 200, { lane, visible: await mcpVisibleFor(repoRoot, lane) });
+  }
+  if (path.startsWith('/bridge/mcp/')) {
+    const rest = path.slice('/bridge/mcp/'.length);
+    if (rest.endsWith('/test') && req.method === 'POST') {
+      const name = rest.slice(0, -'/test'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, await testMcp(repoRoot, name, body.by || null)); }
+      catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (rest.endsWith('/enable') && req.method === 'POST') {
+      const name = rest.slice(0, -'/enable'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, { ok: true, mcp: await mcpSetEnabled(repoRoot, name, true, body.by || null) }); }
+      catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (rest.endsWith('/disable') && req.method === 'POST') {
+      const name = rest.slice(0, -'/disable'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, { ok: true, mcp: await mcpSetEnabled(repoRoot, name, false, body.by || null) }); }
+      catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const r = await readMcp(repoRoot, rest);
+      if (!r) return sendJson(res, 404, { error: 'mcp not found', name: rest });
+      const h = (await mcpHealth(repoRoot))[rest] || null;
+      return sendJson(res, 200, { ...r, health: h });
+    }
+    if (req.method === 'DELETE' && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      await removeMcp(repoRoot, rest, body.by || null);
+      return sendJson(res, 200, { ok: true });
     }
   }
 
