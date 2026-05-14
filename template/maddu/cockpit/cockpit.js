@@ -926,13 +926,35 @@ function renderApprovals() {
 }
 
 function classifyEvent(type) {
+  // SINGLE-EVENT specials first
   if (type === 'SLICE_STOP')              return 't-slice';
   if (type === 'DOCTOR_REPORT')           return 't-doctor';
   if (type === 'INBOX_MESSAGE')           return 't-inbox';
+
+  // Lifecycle & versioning ops — lavender (framework family)
   if (type.startsWith('FRAMEWORK_'))      return 't-framework';
+  if (type.startsWith('CHECKPOINT_'))     return 't-framework';
+
+  // Session & infrastructure runtime — cyan
   if (type.startsWith('SESSION_'))        return 't-session';
+  if (type.startsWith('WORKER_'))         return 't-session';
+  if (type.startsWith('RUNTIME_'))        return 't-session';
+  if (type.startsWith('MCP_'))            return 't-session';
+  if (type.startsWith('SCHEDULE_'))       return 't-session';
+
+  // Lane work — mint green
   if (type.startsWith('LANE_'))           return 't-lane';
+  if (type.startsWith('MAILBOX_'))        return 't-lane';
+  if (type.startsWith('TASK_'))           return 't-lane';
+
+  // Sensitive ops (approvals, auth, imports) — amber warn
   if (type.startsWith('APPROVAL_'))       return 't-approval';
+  if (type.startsWith('AUTH_KEY_'))       return 't-approval';
+  if (type.startsWith('IMPORT_'))         return 't-approval';
+
+  // Knowledge work — bold cream (slice family)
+  if (type.startsWith('SKILL_'))          return 't-slice';
+
   return '';
 }
 
