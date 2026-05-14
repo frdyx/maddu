@@ -5,6 +5,7 @@ const ROUTES = {
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
   events:     { title: 'Events',     render: renderEvents,     description: 'Live cursor stream of the append-only spine. Filters by type. Pause/resume.' },
+  mailbox:    { title: 'Mailbox',    render: renderMailbox,    description: 'Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -22,7 +23,8 @@ const els = {
   uptime: document.getElementById('status-uptime'),
   host: document.getElementById('status-host'),
   port: document.getElementById('status-port'),
-  approvalsBadge: document.getElementById('approvals-badge')
+  approvalsBadge: document.getElementById('approvals-badge'),
+  mailboxBadge: document.getElementById('mailbox-badge')
 };
 
 let bridgeStatus = null;
@@ -100,11 +102,17 @@ function updateChrome() {
       if (open && open > 0) { els.approvalsBadge.hidden = false; els.approvalsBadge.textContent = String(open); }
       else                  { els.approvalsBadge.hidden = true; }
     }
+    const unread = bridgeStatus.counts && bridgeStatus.counts.unreadMail;
+    if (els.mailboxBadge) {
+      if (unread && unread > 0) { els.mailboxBadge.hidden = false; els.mailboxBadge.textContent = String(unread); }
+      else                      { els.mailboxBadge.hidden = true; }
+    }
   } else {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
     els.version.textContent = '—';
     els.uptime.textContent = '—';
     if (els.approvalsBadge) els.approvalsBadge.hidden = true;
+    if (els.mailboxBadge)   els.mailboxBadge.hidden = true;
   }
 }
 
@@ -652,6 +660,116 @@ function makeDecisionButton(decision, label, klass, approvalId, onDone) {
   return btn;
 }
 
+async function fetchMailboxCounts() {
+  try {
+    const r = await fetch('/bridge/mailbox-counts', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function fetchMailbox(lane) {
+  try {
+    const r = await fetch(`/bridge/mailbox/${encodeURIComponent(lane)}`, { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+function renderMailbox() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Mailbox'));
+  root.appendChild(el('p', {}, ROUTES.mailbox.description));
+
+  let selectedLane = null;
+  const lanesMount = el('div', {});
+  const msgsMount = el('div', {});
+  root.appendChild(panel('Lanes', 'GET /bridge/mailbox-counts', lanesMount));
+  root.appendChild(panel('Messages', 'select a lane', msgsMount));
+
+  function loadMessages(lane) {
+    selectedLane = lane;
+    msgsMount.innerHTML = '';
+    msgsMount.appendChild(loading(`Fetching mailbox for ${lane}…`));
+    fetchMailbox(lane).then((m) => {
+      msgsMount.innerHTML = '';
+      if (!m || m.messages.length === 0) {
+        msgsMount.appendChild(placeholder(`Empty mailbox`, `Run \`maddu mailbox send ${lane} --subject "..."\``));
+        return;
+      }
+      for (const msg of m.messages.slice().reverse()) {
+        const dot = msg.read ? '' : '<span class="signal live"></span>';
+        const head = el('div', { class: 'panel-head' }, [
+          el('span', { class: 'panel-title', html: `${dot} ${msg.subject || '(no subject)'}` }),
+          el('span', { class: 'panel-aside' }, `${msg.type} · ${msg.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}`)
+        ]);
+        const meta = el('div', { class: 'approval-meta' }, [
+          `from ${msg.from || 'anon'}  ·  ${msg.id}` + (msg.read ? `  ·  read by ${msg.readBy || '?'}` : '')
+        ]);
+        const summary = msg.summary ? el('div', { class: 'approval-summary' }, msg.summary) : null;
+        const body = msg.body ? el('pre', { style: 'font-size:11px;color:var(--m-fg-2);background:var(--m-bg-3);padding:8px;margin-top:6px;overflow:auto;white-space:pre-wrap;' }, msg.body) : null;
+        const actions = msg.read ? null : el('div', { style: 'margin-top:8px;' }, [
+          (() => {
+            const b = el('button', {}, 'Mark read');
+            b.addEventListener('click', async () => {
+              b.disabled = true; b.textContent = '…';
+              try {
+                await fetch(`/bridge/mailbox/${encodeURIComponent(lane)}/read`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ messageId: msg.id, by: composer.currentSession || null })
+                });
+                loadMessages(lane);
+              } catch (err) { b.textContent = 'error'; console.error(err); }
+            });
+            return b;
+          })()
+        ]);
+        msgsMount.appendChild(el('div', { class: 'panel' }, [head, meta, summary, body, actions]));
+      }
+    });
+  }
+
+  function loadLanes() {
+    lanesMount.innerHTML = '';
+    lanesMount.appendChild(loading('Fetching lane mailboxes…'));
+    fetchMailboxCounts().then((c) => {
+      lanesMount.innerHTML = '';
+      if (!c || Object.keys(c.counts).length === 0) {
+        lanesMount.appendChild(placeholder('No lane mailboxes yet', 'Send the first message via `/mail <lane> <subject>` or `maddu mailbox send`.'));
+        return;
+      }
+      const list = el('div', {});
+      for (const lane of Object.keys(c.counts).sort()) {
+        const m = c.counts[lane];
+        const dot = m.unread > 0 ? '<span class="signal live"></span>' : '<span class="signal"></span>';
+        const row = el('div', { class: 'ledger-row', style: 'cursor:pointer;' + (selectedLane === lane ? 'background:var(--m-bg-3);' : '') }, [
+          el('span', { html: dot }),
+          el('span', { class: 'event-type' }, lane),
+          el('span', { class: m.unread > 0 ? 'event-type t-approval' : 'event-actor' }, m.unread > 0 ? `${m.unread} unread` : 'all read'),
+          el('span', { class: 'event-actor' }, `${m.total} total`)
+        ]);
+        row.addEventListener('click', () => loadMessages(lane));
+        list.appendChild(row);
+      }
+      lanesMount.appendChild(list);
+    });
+  }
+
+  loadLanes();
+  // Live refresh on any MAILBOX_* event.
+  const handler = (e) => {
+    if (e.detail.type && e.detail.type.startsWith('MAILBOX_')) {
+      loadLanes();
+      if (selectedLane) loadMessages(selectedLane);
+    }
+  };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+
+  return root;
+}
+
 function renderSettings() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Settings'));
@@ -691,6 +809,8 @@ const COMMANDS = [
   { name: 'resume',  args: '[sessionId]',                            desc: 'Heartbeat "resumed" on a session.' },
   { name: 'stop',    args: '[sessionId] [handoff]',                  desc: 'Close the current session.' },
   { name: 'inbox',   args: '<message>',                              desc: 'Append a note to the operator inbox.' },
+  { name: 'mail',    args: '<lane> <subject>',                       desc: 'Send a quick mailbox note to a lane (uses current session as from).' },
+  { name: 'mail-read', args: '<lane> <msgId>',                       desc: 'Mark a mailbox message read on a lane.' },
   { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
   { name: 'skills',  args: '',                                       desc: 'Stub — skill gallery lands in Phase B4.' },
   { name: 'runtime', args: '',                                       desc: 'Stub — runtime adapters land in Phase C1.' },
@@ -880,6 +1000,22 @@ async function runCommand(cmd) {
       if (!message) return showToast('usage: /inbox <message>', 'err');
       await postJson('/bridge/inbox', { message, sessionId: sess, kind: 'operator' });
       return showToast(`inbox: ${message}`, 'ok');
+    }
+    case 'mail': {
+      const m = cmd.rest.match(/^(\S+)\s+(.+)$/);
+      if (!m) return showToast('usage: /mail <lane> <subject>', 'err');
+      const [, lane, subject] = m;
+      const r = await postJson(`/bridge/mailbox/${encodeURIComponent(lane)}`, {
+        subject, type: 'note', from: sess
+      });
+      return showToast(`mail → ${lane}: ${r.message.id}`, 'ok');
+    }
+    case 'mail-read': {
+      const m = cmd.rest.match(/^(\S+)\s+(\S+)$/);
+      if (!m) return showToast('usage: /mail-read <lane> <msgId>', 'err');
+      const [, lane, mid] = m;
+      await postJson(`/bridge/mailbox/${encodeURIComponent(lane)}/read`, { messageId: mid, by: sess });
+      return showToast(`read ${mid}`, 'ok');
     }
     case 'rollback':
       return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');

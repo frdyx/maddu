@@ -15,6 +15,7 @@ import { findRepoRoot, pathsFor } from './lib/paths.mjs';
 import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
+import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -131,7 +132,8 @@ async function handleBridge(req, res, url, ctx) {
         sliceStops: proj.sliceStops.length,
         openApprovals: proj.approvals.open.length,
         policies: proj.approvals.policies.length,
-        memoryFacts: (await readMemory(repoRoot)).length
+        memoryFacts: (await readMemory(repoRoot)).length,
+        unreadMail: await mailboxTotalUnread(repoRoot)
       }
     });
   }
@@ -338,6 +340,46 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── mailbox (Phase B2) ────────────────────────────────────────────────
+  if (path === '/bridge/mailbox-counts' && req.method === 'GET') {
+    const c = await mailboxCounts(repoRoot);
+    return sendJson(res, 200, { counts: c, total: Object.values(c).reduce((s, v) => s + v.unread, 0) });
+  }
+  if (path.startsWith('/bridge/mailbox/') && req.method === 'GET') {
+    const rest = decodeURIComponent(path.slice('/bridge/mailbox/'.length));
+    if (rest && !rest.includes('/')) {
+      const msgs = await readMailbox(repoRoot, rest);
+      return sendJson(res, 200, { lane: rest, messages: msgs });
+    }
+  }
+  if (path.startsWith('/bridge/mailbox/') && req.method === 'POST') {
+    const rest = decodeURIComponent(path.slice('/bridge/mailbox/'.length));
+    // /bridge/mailbox/<lane>/read  vs  /bridge/mailbox/<lane>
+    if (rest.endsWith('/read')) {
+      const lane = rest.slice(0, -'/read'.length);
+      const body = (await readBody(req)) || {};
+      if (!body.messageId) return sendJson(res, 400, { error: 'messageId required' });
+      const r = await mailboxMarkRead(repoRoot, lane, body.messageId, body.by || null);
+      return sendJson(res, 200, r);
+    }
+    if (rest && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      if (!body.subject) return sendJson(res, 400, { error: 'subject required' });
+      try {
+        const msg = await mailboxSend(repoRoot, rest, {
+          from: body.from || null,
+          type: body.type || 'note',
+          subject: body.subject,
+          summary: body.summary || '',
+          body: body.body || ''
+        });
+        return sendJson(res, 200, { ok: true, message: msg });
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
     }
   }
 
