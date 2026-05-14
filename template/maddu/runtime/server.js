@@ -20,6 +20,7 @@ import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSli
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
+import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, parseNatural } from './lib/schedule.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -145,7 +146,9 @@ async function handleBridge(req, res, url, ctx) {
         stuckWorkers: proj.workers.filter((w) => w.status === 'stuck').length,
         runtimes: (await listRuntimes(repoRoot)).length,
         mcp: (await listMcp(repoRoot)).length,
-        mcpEnabled: (await listMcp(repoRoot)).filter((m) => m.enabled).length
+        mcpEnabled: (await listMcp(repoRoot)).filter((m) => m.enabled).length,
+        schedules: (await listSchedules(repoRoot)).length,
+        enabledSchedules: (await listSchedules(repoRoot)).filter((s) => s.enabled).length
       }
     });
   }
@@ -352,6 +355,49 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── schedule (Phase C3) ───────────────────────────────────────────────
+  if (path === '/bridge/schedules' && req.method === 'GET') {
+    return sendJson(res, 200, { schedules: await listSchedules(repoRoot) });
+  }
+  if (path === '/bridge/schedules' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const saved = await saveSchedule(repoRoot, body, body.by || null);
+      return sendJson(res, 200, { ok: true, schedule: saved });
+    } catch (err) { return sendJson(res, 400, { error: err.message }); }
+  }
+  if (path === '/bridge/schedules/parse' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.natural) return sendJson(res, 400, { error: 'natural required' });
+    const cron = parseNatural(body.natural);
+    return sendJson(res, 200, { natural: body.natural, cron, ok: !!cron });
+  }
+  if (path.startsWith('/bridge/schedules/')) {
+    const rest = path.slice('/bridge/schedules/'.length);
+    if (rest.endsWith('/enable') && req.method === 'POST') {
+      const id = rest.slice(0, -'/enable'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, { ok: true, schedule: await scheduleSetEnabled(repoRoot, id, true, body.by || null) }); }
+      catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (rest.endsWith('/disable') && req.method === 'POST') {
+      const id = rest.slice(0, -'/disable'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, { ok: true, schedule: await scheduleSetEnabled(repoRoot, id, false, body.by || null) }); }
+      catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const s = await readSchedule(repoRoot, rest);
+      if (!s) return sendJson(res, 404, { error: 'schedule not found', id: rest });
+      return sendJson(res, 200, s);
+    }
+    if (req.method === 'DELETE' && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      await removeSchedule(repoRoot, rest, body.by || null);
+      return sendJson(res, 200, { ok: true });
     }
   }
 
@@ -815,8 +861,33 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
   console.log(`  cockpit: ${cockpitDir}`);
   console.log(`  Ctrl+C to stop.`);
 
+  // Schedule poller — every 30 s, check all enabled schedules. Default action
+  // is to write to the inbox so the operator sees scheduled fires.
+  const scheduleTimer = setInterval(async () => {
+    try {
+      const fired = await scheduleTick(repoRoot, new Date(), {
+        onFire: async (s) => {
+          try {
+            const act = s.action || {};
+            if (act.kind === 'inbox') {
+              await append(repoRoot, {
+                type: EVENT_TYPES.INBOX_MESSAGE,
+                actor: 'scheduler', lane: null,
+                data: { message: `[scheduled] ${act.value || s.title}`, kind: 'scheduled', scheduleId: s.id }
+              });
+            }
+          } catch (err) { console.error('schedule.onFire failed:', err.message); }
+        }
+      });
+      if (fired.length) console.log(`[scheduler] fired ${fired.length}: ${fired.map((s) => s.id).join(', ')}`);
+    } catch (err) { console.error('[scheduler] tick failed:', err.message); }
+  }, 30000);
+  // Also run once at startup so brand-new entries don't wait 30 s.
+  setTimeout(() => scheduleTick(repoRoot).catch(() => {}), 200);
+
   const shutdown = () => {
     console.log('\nShutting down…');
+    clearInterval(scheduleTimer);
     server.close(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);

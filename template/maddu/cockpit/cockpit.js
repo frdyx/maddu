@@ -11,6 +11,7 @@ const ROUTES = {
   search:     { title: 'Search',     render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
   runtimes:   { title: 'Runtimes',   render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
   mcp:        { title: 'MCP',        render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
+  schedule:   { title: 'Schedule',   render: renderSchedule,   description: 'NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note).' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -1050,6 +1051,114 @@ function renderSkills() {
   return root;
 }
 
+async function fetchSchedules() {
+  try { const r = await fetch('/bridge/schedules', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+function renderSchedule() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Schedule'));
+  root.appendChild(el('p', {}, ROUTES.schedule.description));
+
+  const inpTitle = el('input', { type: 'text', placeholder: 'title (e.g. Daily summary)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const inpNL = el('input', { type: 'text', placeholder: 'natural (e.g. every evening at 6pm)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const preview = el('span', { style: 'font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);min-width:160px;' }, '');
+  const createBtn = el('button', {}, 'Create');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;align-items:center;' }, [inpTitle, inpNL, preview, createBtn]);
+  root.appendChild(form);
+
+  // Live preview of NL→cron
+  let previewTimer = null;
+  inpNL.addEventListener('input', () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const text = inpNL.value.trim();
+      if (!text) { preview.textContent = ''; preview.style.color = 'var(--m-fg-3)'; return; }
+      try {
+        const r = await fetch('/bridge/schedules/parse', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ natural: text })
+        });
+        const d = await r.json();
+        if (d.ok) { preview.textContent = `→ ${d.cron}`; preview.style.color = 'var(--m-signal)'; }
+        else      { preview.textContent = '↪ unparseable'; preview.style.color = 'var(--m-accent-warm)'; }
+      } catch { preview.textContent = ''; }
+    }, 200);
+  });
+
+  createBtn.addEventListener('click', async () => {
+    const title = inpTitle.value.trim();
+    const nat = inpNL.value.trim();
+    if (!title || !nat) return;
+    createBtn.disabled = true;
+    try {
+      const r = await fetch('/bridge/schedules', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, natural: nat, by: composer.currentSession || null })
+      });
+      if (r.ok) { inpTitle.value = ''; inpNL.value = ''; preview.textContent = ''; refresh(); }
+      else { const d = await r.json().catch(() => ({})); showToast(`create failed: ${d.error || 'unknown'}`, 'err'); }
+    } finally { createBtn.disabled = false; }
+  });
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  function refresh() {
+    mount.innerHTML = '';
+    mount.appendChild(loading('Fetching schedules…'));
+    fetchSchedules().then((d) => {
+      mount.innerHTML = '';
+      if (!d || d.schedules.length === 0) {
+        mount.appendChild(placeholder('No schedules yet', 'Create one above, or via `maddu schedule create --natural "every hour" --title "ping"`.'));
+        return;
+      }
+      for (const s of d.schedules) {
+        const enabled = s.enabled;
+        const card = el('div', { class: 'panel', style: enabled ? '' : 'opacity:0.55;' }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, s.title),
+            el('span', { class: 'panel-aside' }, `fired ${s.fireCount} time${s.fireCount === 1 ? '' : 's'}`)
+          ]),
+          el('dl', { class: 'kv' }, [
+            el('dt', {}, 'cron'),    el('dd', {}, s.cron),
+            s.natural ? el('dt', {}, 'natural') : null,
+            s.natural ? el('dd', {}, s.natural) : null,
+            el('dt', {}, 'action'),  el('dd', {}, `${s.action?.kind}: ${s.action?.value || '—'}`),
+            el('dt', {}, 'last'),    el('dd', {}, s.lastRun ? s.lastRun.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'),
+            el('dt', {}, 'id'),      el('dd', {}, s.id)
+          ]),
+          (() => {
+            const actions = el('div', { style: 'display:flex;gap:6px;margin-top:8px;' });
+            const tog = el('button', {}, enabled ? 'Disable' : 'Enable');
+            tog.addEventListener('click', async () => {
+              tog.disabled = true;
+              await fetch(`/bridge/schedules/${encodeURIComponent(s.id)}/${enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
+            rem.addEventListener('click', async () => {
+              if (!confirm(`Remove schedule "${s.title}"?`)) return;
+              await fetch(`/bridge/schedules/${encodeURIComponent(s.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            actions.appendChild(tog); actions.appendChild(rem);
+            return actions;
+          })()
+        ]);
+        mount.appendChild(card);
+      }
+    });
+  }
+
+  refresh();
+  const handler = (e) => { if (e.detail.type && e.detail.type.startsWith('SCHEDULE_')) refresh(); };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+  setTimeout(() => inpTitle.focus(), 0);
+  return root;
+}
+
 async function fetchMcp() {
   try { const r = await fetch('/bridge/mcp', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
 }
@@ -1450,6 +1559,7 @@ const COMMANDS = [
   { name: 'detect',  args: '[<name>]',                              desc: 'Detect a runtime (or all if no name).' },
   { name: 'mcp',     args: '[<name>]',                              desc: 'Show an MCP server (or list if no name).' },
   { name: 'mcp-test',args: '[<name>]',                              desc: 'Test an MCP server (or all).' },
+  { name: 'at',      args: '<natural> -- <title>',                  desc: 'Create a schedule (e.g. /at every evening at 6pm -- Daily summary).' },
   { name: 'clear',   args: '',                                       desc: 'Clear the composer.' }
 ];
 
@@ -1745,6 +1855,13 @@ async function runCommand(cmd) {
       }
       const r = await postJson(`/bridge/mcp/${encodeURIComponent(name)}/test`, {});
       return showToast(r.ok ? `${name}  ✓` : `${name}  ✗ ${r.error || ('status ' + r.status)}`, r.ok ? 'ok' : 'err');
+    }
+    case 'at': {
+      const m = cmd.rest.match(/^(.+?)\s*--\s*(.+)$/);
+      if (!m) return showToast('usage: /at <natural> -- <title>', 'err');
+      const [, natural, title] = m;
+      const r = await postJson('/bridge/schedules', { natural: natural.trim(), title: title.trim(), by: sess });
+      return showToast(r.ok ? `${r.schedule.id}  ${r.schedule.cron}` : `failed: ${r.error}`, r.ok ? 'ok' : 'err');
     }
     case 'clear':
       composer.input.value = '';

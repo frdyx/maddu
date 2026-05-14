@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -43,6 +43,7 @@ Commands:
   search         Cross-corpus search over events, memory, skills, mailbox. (Phase B6)
   runtime        Subcommands: list | show | register | detect | spawn | remove. (Phase C1)
   mcp            Subcommands: list | show | register | enable | disable | test | remove | visible. (Phase C2)
+  schedule       Subcommands: list | show | create | parse | enable | disable | tick | remove. (Phase C3)
 
 Flags:
   --version      Print framework version.
