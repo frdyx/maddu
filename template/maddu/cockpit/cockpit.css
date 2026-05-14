@@ -208,6 +208,25 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   letter-spacing: 0.05em;
 }
 
+.stage-banner {
+  background: rgba(212, 169, 107, 0.10);
+  border-bottom: 1px solid rgba(212, 169, 107, 0.35);
+  border-top: 1px solid rgba(212, 169, 107, 0.20);
+  padding: 8px 24px;
+  font-family: var(--m-font-mono);
+  font-size: 12px;
+  color: var(--m-accent-warm);
+  letter-spacing: 0.03em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.stage-banner a {
+  color: var(--m-accent-warm);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
 .stage-body {
   padding: 24px;
   overflow: auto;

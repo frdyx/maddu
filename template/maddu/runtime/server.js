@@ -12,7 +12,7 @@ import { join, dirname, extname, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
-import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId } from './lib/spine.mjs';
+import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId, genWorkerId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
@@ -137,7 +137,9 @@ async function handleBridge(req, res, url, ctx) {
         unreadMail: await mailboxTotalUnread(repoRoot),
         tasks: proj.tasks.length,
         openTasks: proj.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
-        skills: (await listSkills(repoRoot)).length
+        skills: (await listSkills(repoRoot)).length,
+        runningWorkers: proj.workers.filter((w) => w.status === 'running').length,
+        stuckWorkers: proj.workers.filter((w) => w.status === 'stuck').length
       }
     });
   }
@@ -347,7 +349,73 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
+  // ── workers / heartbeat (Phase B5) ────────────────────────────────────
+  if (path === '/bridge/workers' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { workers: proj.workers });
+  }
+  if (path === '/bridge/workers' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const id = body.id || genWorkerId();
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.WORKER_SPAWNED,
+      actor: body.sessionId || null,
+      lane: body.lane || null,
+      data: {
+        id,
+        command: body.command || null,
+        args: body.args || [],
+        pid: body.pid || null,
+        sessionId: body.sessionId || null
+      }
+    });
+    return sendJson(res, 200, { ok: true, workerId: id, event: ev });
+  }
+  if (path.startsWith('/bridge/workers/')) {
+    const rest = path.slice('/bridge/workers/'.length);
+    if (rest.endsWith('/heartbeat') && req.method === 'POST') {
+      const id = rest.slice(0, -'/heartbeat'.length);
+      const body = (await readBody(req)) || {};
+      await append(repoRoot, {
+        type: EVENT_TYPES.WORKER_HEARTBEAT,
+        actor: body.sessionId || null,
+        lane: null,
+        data: { id, focus: body.focus || null }
+      });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (rest.endsWith('/exit') && req.method === 'POST') {
+      const id = rest.slice(0, -'/exit'.length);
+      const body = (await readBody(req)) || {};
+      await append(repoRoot, {
+        type: EVENT_TYPES.WORKER_EXITED,
+        actor: body.sessionId || null,
+        lane: null,
+        data: { id, exitCode: body.exitCode ?? 0 }
+      });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (rest.endsWith('/kill') && req.method === 'POST') {
+      const id = rest.slice(0, -'/kill'.length);
+      const body = (await readBody(req)) || {};
+      await append(repoRoot, {
+        type: EVENT_TYPES.WORKER_KILLED,
+        actor: body.by || null,
+        lane: null,
+        data: { id, reason: body.reason || null }
+      });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const proj = await project(repoRoot);
+      const w = proj.workers.find((x) => x.id === rest);
+      if (!w) return sendJson(res, 404, { error: 'worker not found', id: rest });
+      return sendJson(res, 200, w);
+    }
+  }
+
   // ── skills (Phase B4) ─────────────────────────────────────────────────
+
   if (path === '/bridge/skills' && req.method === 'GET') {
     const all = await listSkills(repoRoot);
     return sendJson(res, 200, { skills: all });

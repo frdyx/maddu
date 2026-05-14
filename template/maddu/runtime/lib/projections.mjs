@@ -7,7 +7,7 @@
 // once the spine grows. None of these projections are persisted — they're
 // recomputed on each call. Persistence comes in Slice 4 with maddu doctor.
 
-import { readAll } from './spine.mjs';
+import { readAll, STUCK_THRESHOLD_MS } from './spine.mjs';
 
 export async function project(repoRoot) {
   const events = await readAll(repoRoot);
@@ -30,6 +30,11 @@ export async function project(repoRoot) {
   //                              blockedBy[], blocks[], tags, metadata,
   //                              createdAt, updatedAt }
   const tasks = new Map();
+
+  // Workers projection.
+  //   workers       : workerId -> { id, sessionId, lane, command, pid, startedAt,
+  //                                 lastHeartbeat, status, exitCode }
+  const workers = new Map();
 
   let lastEventId = null;
 
@@ -199,6 +204,45 @@ export async function project(repoRoot) {
         t.completedBy = ev.actor || null;
         break;
       }
+      case 'WORKER_SPAWNED':
+        workers.set(ev.data.id, {
+          id: ev.data.id,
+          sessionId: ev.actor || ev.data.sessionId || null,
+          lane: ev.lane || null,
+          command: ev.data.command || null,
+          args: ev.data.args || [],
+          pid: ev.data.pid || null,
+          startedAt: ev.ts,
+          lastHeartbeat: ev.ts,
+          status: 'running',
+          exitCode: null,
+          exitedAt: null
+        });
+        break;
+      case 'WORKER_HEARTBEAT': {
+        const w = workers.get(ev.data.id);
+        if (w && w.status === 'running') {
+          w.lastHeartbeat = ev.ts;
+          if (ev.data.focus) w.focus = ev.data.focus;
+        }
+        break;
+      }
+      case 'WORKER_EXITED': {
+        const w = workers.get(ev.data.id);
+        if (!w) break;
+        w.status = 'exited';
+        w.exitedAt = ev.ts;
+        w.exitCode = ev.data.exitCode ?? null;
+        break;
+      }
+      case 'WORKER_KILLED': {
+        const w = workers.get(ev.data.id);
+        if (!w) break;
+        w.status = 'killed';
+        w.exitedAt = ev.ts;
+        w.killedBy = ev.actor || null;
+        break;
+      }
     }
   }
 
@@ -239,8 +283,21 @@ export async function project(repoRoot) {
       ledger: approvalLedger.slice(-100),
       policies: Array.from(policies.values())
     },
-    tasks: Array.from(tasks.values())
+    tasks: Array.from(tasks.values()),
+    workers: Array.from(workers.values()).map((w) => annotateWorker(w))
   };
+}
+
+// Read-time status derivation: a worker that hasn't heartbeat'd in
+// STUCK_THRESHOLD_MS while still nominally "running" is reported as "stuck".
+function annotateWorker(w) {
+  if (w.status !== 'running') return w;
+  const last = new Date(w.lastHeartbeat || w.startedAt).getTime();
+  const ageMs = Date.now() - last;
+  if (ageMs > STUCK_THRESHOLD_MS) {
+    return { ...w, status: 'stuck', ageMs };
+  }
+  return { ...w, ageMs };
 }
 
 function policyKeyFor(tool, lane) {

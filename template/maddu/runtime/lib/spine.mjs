@@ -40,8 +40,14 @@ export const EVENT_TYPES = {
   SKILL_CREATED:        'SKILL_CREATED',
   SKILL_UPDATED:        'SKILL_UPDATED',
   SKILL_DELETED:        'SKILL_DELETED',
-  SKILL_APPLIED:        'SKILL_APPLIED'
+  SKILL_APPLIED:        'SKILL_APPLIED',
+  WORKER_SPAWNED:       'WORKER_SPAWNED',
+  WORKER_HEARTBEAT:     'WORKER_HEARTBEAT',
+  WORKER_EXITED:        'WORKER_EXITED',
+  WORKER_KILLED:        'WORKER_KILLED'
 };
+
+export const STUCK_THRESHOLD_MS = 15000;
 
 function genId(ts) {
   const t = ts.replace(/[-:T.Z]/g, '').slice(0, 14);
@@ -65,6 +71,12 @@ export function genSkillId() {
   const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
   const r = randomBytes(3).toString('hex');
   return `skl_${t}_${r}`;
+}
+
+export function genWorkerId() {
+  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const r = randomBytes(3).toString('hex');
+  return `wrk_${t}_${r}`;
 }
 
 async function ensureDirs(paths) {

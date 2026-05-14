@@ -27,7 +27,8 @@ const els = {
   port: document.getElementById('status-port'),
   approvalsBadge: document.getElementById('approvals-badge'),
   mailboxBadge: document.getElementById('mailbox-badge'),
-  tasksBadge: document.getElementById('tasks-badge')
+  tasksBadge: document.getElementById('tasks-badge'),
+  stuckBanner: document.getElementById('stuck-banner')
 };
 
 let bridgeStatus = null;
@@ -115,6 +116,15 @@ function updateChrome() {
       if (openTasks && openTasks > 0) { els.tasksBadge.hidden = false; els.tasksBadge.textContent = String(openTasks); }
       else                            { els.tasksBadge.hidden = true; }
     }
+    const stuck = bridgeStatus.counts && bridgeStatus.counts.stuckWorkers;
+    if (els.stuckBanner) {
+      if (stuck && stuck > 0) {
+        els.stuckBanner.hidden = false;
+        els.stuckBanner.innerHTML = `<span>⚠  ${stuck} worker${stuck === 1 ? '' : 's'} silent &gt; 15 s — possible hang</span><a href="#/swarm">View in Swarm →</a>`;
+      } else {
+        els.stuckBanner.hidden = true;
+      }
+    }
   } else {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
     els.version.textContent = '—';
@@ -122,6 +132,7 @@ function updateChrome() {
     if (els.approvalsBadge) els.approvalsBadge.hidden = true;
     if (els.mailboxBadge)   els.mailboxBadge.hidden = true;
     if (els.tasksBadge)     els.tasksBadge.hidden = true;
+    if (els.stuckBanner)    els.stuckBanner.hidden = true;
   }
 }
 
@@ -371,6 +382,28 @@ function renderSwarm() {
         sess.appendChild(panel(s.id, 'active session', k));
       }
       root.appendChild(panel('Active sessions', `${proj.activeSessions.length} live`, sess));
+    }
+
+    // Workers panel (Phase B5) — surface stuck workers prominently.
+    if (proj && proj.workers && proj.workers.length) {
+      const ws = proj.workers;
+      const wrap = el('div', {});
+      const order = ['stuck', 'running', 'exited', 'killed'];
+      for (const status of order) {
+        const list = ws.filter((w) => w.status === status);
+        if (!list.length) continue;
+        const ccls = { stuck: 't-approval', running: 't-lane', exited: 't-inbox', killed: 't-approval' }[status] || '';
+        for (const w of list) {
+          const ageStr = w.ageMs != null ? (w.ageMs < 1000 ? `${w.ageMs}ms` : w.ageMs < 60000 ? `${Math.floor(w.ageMs / 1000)}s` : `${Math.floor(w.ageMs / 60000)}m`) : '—';
+          wrap.appendChild(el('div', { class: 'ledger-row' }, [
+            el('span', { class: `event-type ${ccls}` }, status),
+            el('span', {}, w.id),
+            el('span', {}, w.command ? w.command.slice(0, 60) : '—'),
+            el('span', { class: 'event-actor' }, `age ${ageStr}  ${w.lane ? '· ' + w.lane : ''}  ${w.pid ? '· pid ' + w.pid : ''}`)
+          ]));
+        }
+      }
+      root.appendChild(panel(`Workers  (${ws.length})`, 'GET /bridge/workers · heartbeat threshold 15 s', wrap));
     }
   });
 
@@ -1056,6 +1089,8 @@ const COMMANDS = [
   { name: 'mail-read', args: '<lane> <msgId>',                       desc: 'Mark a mailbox message read on a lane.' },
   { name: 'task',    args: '<title>',                                desc: 'Quick-create a task (current session as creator).' },
   { name: 'task-done', args: '<id>',                                 desc: 'Mark a task complete (auto-unblocks dependents).' },
+  { name: 'workers', args: '',                                       desc: 'List running / stuck workers.' },
+  { name: 'kill',    args: '<workerId> [reason]',                    desc: 'Mark a worker killed (operator-initiated).' },
   { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
   { name: 'skills',  args: '',                                       desc: 'List all skills in the gallery.' },
   { name: 'skill',   args: '<id>',                                   desc: 'Apply a skill to the current session.' },
@@ -1274,6 +1309,19 @@ async function runCommand(cmd) {
       if (!id) return showToast('usage: /task-done <id>', 'err');
       await postJson(`/bridge/tasks/${id}/complete`, { by: sess });
       return showToast(`done ${id}`, 'ok');
+    }
+    case 'workers': {
+      const d = await fetchJson('/bridge/workers');
+      if (!d.workers.length) return showToast('(no workers registered)', 'ok');
+      const lines = d.workers.map((w) => `${w.status.padEnd(8)} ${w.id}  ${(w.command || '').slice(0, 50)}`).join('\n');
+      return showToast(lines, 'ok');
+    }
+    case 'kill': {
+      const m = cmd.rest.match(/^(\S+)(?:\s+(.+))?$/);
+      if (!m) return showToast('usage: /kill <workerId> [reason]', 'err');
+      const [, id, reason] = m;
+      await postJson(`/bridge/workers/${id}/kill`, { reason: reason || null, by: sess });
+      return showToast(`killed ${id}`, 'ok');
     }
     case 'rollback':
       return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');
