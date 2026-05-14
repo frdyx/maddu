@@ -1,0 +1,6 @@
+{
+  "name": "maddu-runtime",
+  "private": true,
+  "type": "module",
+  "description": "Máddu runtime + cockpit installed into this repo. Scopes all .js under maddu/ as ES modules. Do not edit by hand — managed by `maddu upgrade`."
+}
