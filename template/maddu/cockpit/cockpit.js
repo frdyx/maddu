@@ -246,6 +246,7 @@ function renderWorkbench() {
     ])
   ]));
   const laneList = el('div', { class: 'wb-pane-body' });
+  laneList.appendChild(loading('Fetching lanes…'));
   left.appendChild(laneList);
 
   function renderLanes(catalog, claims, eventsByLane) {
@@ -277,6 +278,7 @@ function renderWorkbench() {
     el('span', { class: 'wb-list-count', id: 'wb-sess-count' }, '0')
   ]);
   const sessList = el('div', { class: 'wb-pane-body', style: 'max-height:200px;flex:none;' });
+  sessList.appendChild(loading('Fetching sessions…'));
   left.appendChild(sessHeader);
   left.appendChild(sessList);
 
@@ -331,6 +333,7 @@ function renderWorkbench() {
     el('span', { id: 'wb-status-version' }, '')
   ]));
   const statusBody = el('div', { style: 'overflow:auto;flex:1;' });
+  statusBody.appendChild(loading('Fetching status…'));
   right.appendChild(statusBody);
 
   function renderStatus(s) {
@@ -506,7 +509,18 @@ function renderDashboard() {
     ['Active sessions', String(counts.activeSessions ?? '—')],
     ['Lane claims', String(counts.claims ?? '—')],
     ['Slice-stops', String(counts.sliceStops ?? '—')],
-    ['Memory facts', String(counts.memoryFacts ?? '—')]
+    ['Memory facts', String(counts.memoryFacts ?? '—')],
+    ['Mailbox unread', String(counts.unreadMail ?? '—')],
+    ['Open tasks', String(counts.openTasks ?? '—')],
+    ['Skills', String(counts.skills ?? '—')],
+    ['Workers (running)', String(counts.runningWorkers ?? '—')],
+    ['Stuck workers', String(counts.stuckWorkers ?? '—')],
+    ['Runtimes', String(counts.runtimes ?? '—')],
+    ['MCP servers', counts.mcpEnabled != null ? `${counts.mcpEnabled}/${counts.mcp}` : '—'],
+    ['Schedules', String(counts.enabledSchedules ?? '—')],
+    ['Checkpoints', String(counts.checkpoints ?? '—')],
+    ['Auth providers', String(counts.authProviders ?? '—')],
+    ['Imports', counts.importsAccepted != null ? `${counts.importsAccepted} ok · ${counts.importsRejected} rejected` : '—']
   ];
   for (const [k, v] of rows) {
     kv.appendChild(el('dt', {}, k));
