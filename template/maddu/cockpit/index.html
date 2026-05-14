@@ -43,7 +43,14 @@
       </header>
       <section class="stage-body" id="route-view" aria-live="polite"></section>
       <footer class="stage-foot">
-        <span class="stage-foot-tagline">The Source of local truth.</span>
+        <div class="composer">
+          <span class="composer-glyph">▸</span>
+          <input id="composer-input" class="composer-input" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="/ to issue a slash-command  ·  /help for the list" />
+          <span class="composer-hint" id="composer-hint"></span>
+          <div class="composer-suggest" id="composer-suggest" hidden></div>
+          <div class="composer-toast" id="composer-toast" hidden></div>
+        </div>
         <span class="stage-foot-coord"><span id="status-host">127.0.0.1</span>:<span id="status-port">4177</span></span>
       </footer>
     </main>

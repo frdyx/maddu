@@ -666,12 +666,338 @@ function renderSettings() {
 
 window.addEventListener('hashchange', renderRoute);
 
+// ─── Composer / slash-command palette ────────────────────────────────────
+
+const composer = {
+  input: null,
+  suggest: null,
+  toast: null,
+  hint: null,
+  currentSession: null,        // sticky session pointer set via `/use <id>`
+  history: [],                 // command history (in-memory; survives within tab session)
+  historyIdx: -1,
+  selectedSuggestion: 0
+};
+
+const COMMANDS = [
+  { name: 'help',    args: '',                                       desc: 'List all slash-commands.' },
+  { name: 'usage',   args: '',                                       desc: 'Show bridge counts (events, sessions, claims, approvals).' },
+  { name: 'use',     args: '<sessionId>',                            desc: 'Set the sticky session id used by other commands.' },
+  { name: 'session', args: 'register|close|list <args>',             desc: 'Manage sessions (register / close / list).' },
+  { name: 'lane',    args: 'claim|release|list <lane> [session]',    desc: 'Manage lane claims.' },
+  { name: 'approve', args: '<approvalId> <decision>',                desc: 'allow-once | allow-always | deny | deny-always.' },
+  { name: 'goal',    args: '<text>',                                 desc: 'Pin a goal on the current session (logs as heartbeat focus).' },
+  { name: 'steer',   args: '<text>',                                 desc: 'Mid-turn nudge for the current session.' },
+  { name: 'resume',  args: '[sessionId]',                            desc: 'Heartbeat "resumed" on a session.' },
+  { name: 'stop',    args: '[sessionId] [handoff]',                  desc: 'Close the current session.' },
+  { name: 'inbox',   args: '<message>',                              desc: 'Append a note to the operator inbox.' },
+  { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
+  { name: 'skills',  args: '',                                       desc: 'Stub — skill gallery lands in Phase B4.' },
+  { name: 'runtime', args: '',                                       desc: 'Stub — runtime adapters land in Phase C1.' },
+  { name: 'clear',   args: '',                                       desc: 'Clear the composer.' }
+];
+
+function showToast(text, level = 'ok') {
+  composer.toast.hidden = false;
+  composer.toast.textContent = text;
+  composer.toast.className = 'composer-toast' + (level === 'err' ? ' err' : level === 'warn' ? ' warn' : '');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { composer.toast.hidden = true; }, 4500);
+}
+
+function updateHint() {
+  const sess = composer.currentSession ? `as: ${composer.currentSession.slice(0, 22)}…` : 'no session set ·  /use <id>';
+  composer.hint.textContent = sess;
+}
+
+function renderSuggestions(input) {
+  if (!input.startsWith('/')) { composer.suggest.hidden = true; return; }
+  const q = input.slice(1).split(/\s+/)[0].toLowerCase();
+  const matches = COMMANDS.filter((c) => c.name.startsWith(q));
+  if (matches.length === 0 || (matches.length === 1 && matches[0].name === q)) {
+    // Show args hint when command is fully typed.
+    if (matches.length === 1) {
+      composer.suggest.hidden = false;
+      composer.suggest.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'composer-suggest-row active';
+      row.innerHTML = `<span class="composer-suggest-cmd">/${matches[0].name} ${matches[0].args}</span><span class="composer-suggest-desc">${matches[0].desc}</span>`;
+      composer.suggest.appendChild(row);
+      return;
+    }
+    composer.suggest.hidden = true;
+    return;
+  }
+  composer.suggest.hidden = false;
+  composer.suggest.innerHTML = '';
+  composer.selectedSuggestion = Math.min(composer.selectedSuggestion, matches.length - 1);
+  matches.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'composer-suggest-row' + (i === composer.selectedSuggestion ? ' active' : '');
+    row.innerHTML = `<span class="composer-suggest-cmd">/${c.name} ${c.args}</span><span class="composer-suggest-desc">${c.desc}</span>`;
+    row.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      composer.input.value = '/' + c.name + ' ';
+      composer.input.focus();
+      renderSuggestions(composer.input.value);
+    });
+    composer.suggest.appendChild(row);
+  });
+}
+
+function parseCommand(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('/')) return null;
+  const stripped = trimmed.slice(1);
+  const m = stripped.match(/^(\S+)\s*(.*)$/);
+  if (!m) return null;
+  return { name: m[1].toLowerCase(), rest: m[2] };
+}
+
+async function postJson(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  const text = await r.text();
+  let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  if (!r.ok) throw new Error(data.error || data.detail || `bridge ${r.status}`);
+  return data;
+}
+
+async function fetchJson(path) {
+  const r = await fetch(path, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`bridge ${r.status}`);
+  return r.json();
+}
+
+async function runCommand(cmd) {
+  const sess = composer.currentSession;
+  switch (cmd.name) {
+    case 'help': {
+      const lines = COMMANDS.map((c) => `/${c.name} ${c.args}  —  ${c.desc}`).join('\n');
+      return showToast(lines, 'ok');
+    }
+    case 'usage': {
+      const s = await fetchJson('/bridge/status');
+      const c = s.counts || {};
+      return showToast(
+        `version ${s.version}  ·  uptime ${formatUptime(s.uptimeMs)}\n` +
+        `events ${c.events}  ·  active sessions ${c.activeSessions}  ·  claims ${c.claims}\n` +
+        `slice-stops ${c.sliceStops}  ·  open approvals ${c.openApprovals}  ·  memory ${c.memoryFacts}`,
+        'ok'
+      );
+    }
+    case 'use': {
+      const id = cmd.rest.trim();
+      if (!id) return showToast('usage: /use <sessionId>', 'err');
+      composer.currentSession = id;
+      updateHint();
+      return showToast(`session set: ${id}`, 'ok');
+    }
+    case 'session': {
+      const m = cmd.rest.match(/^(register|close|list)\s*(.*)$/i);
+      if (!m) return showToast('usage: /session register|close|list ...', 'err');
+      const sub = m[1].toLowerCase();
+      const args = m[2].trim();
+      if (sub === 'list') {
+        const s = await fetchJson('/bridge/sessions');
+        const lines = s.active.map((x) => `${x.id}  ${x.role || '—'}  ${x.label || ''}`).join('\n');
+        return showToast(lines || '(no active sessions)', 'ok');
+      }
+      if (sub === 'register') {
+        // freeform: --role X --label Y --focus Z
+        const flags = parseFlagsInline(args);
+        const r = await postJson('/bridge/sessions/register', flags);
+        composer.currentSession = r.sessionId;
+        updateHint();
+        return showToast(`registered ${r.sessionId}`, 'ok');
+      }
+      if (sub === 'close') {
+        const id = args || sess;
+        if (!id) return showToast('usage: /session close <id>  (or /use first)', 'err');
+        await postJson('/bridge/sessions/close', { sessionId: id });
+        if (id === sess) { composer.currentSession = null; updateHint(); }
+        return showToast(`closed ${id}`, 'ok');
+      }
+      return;
+    }
+    case 'lane': {
+      const m = cmd.rest.match(/^(claim|release|list)\s*(.*)$/i);
+      if (!m) return showToast('usage: /lane claim|release|list <lane> [sessionId]', 'err');
+      const sub = m[1].toLowerCase();
+      const args = m[2].trim().split(/\s+/).filter(Boolean);
+      if (sub === 'list') {
+        const r = await fetchJson('/bridge/lanes');
+        const claims = new Map(r.claims.map((c) => [c.lane, c]));
+        const lines = r.catalog.lanes.map((l) => {
+          const c = claims.get(l.id);
+          return `${l.id.padEnd(22)} ${c ? '★ claimed by ' + c.sessionId : ''}`;
+        }).join('\n');
+        return showToast(lines, 'ok');
+      }
+      const lane = args[0];
+      const sid = args[1] || sess;
+      if (!lane || !sid) return showToast(`usage: /lane ${sub} <lane> [sessionId]  (or /use first)`, 'err');
+      await postJson(`/bridge/lanes/${sub}`, { lane, sessionId: sid });
+      return showToast(`${sub} ${lane}`, 'ok');
+    }
+    case 'approve': {
+      const args = cmd.rest.trim().split(/\s+/);
+      if (args.length < 2) return showToast('usage: /approve <approvalId> <decision>', 'err');
+      const [id, decision] = args;
+      await postJson('/bridge/approvals/respond', { approvalId: id, decision });
+      return showToast(`${decision} ${id}`, 'ok');
+    }
+    case 'goal':
+    case 'steer': {
+      if (!sess) return showToast('no session set — run /use <id> first', 'err');
+      const focus = cmd.rest.trim();
+      if (!focus) return showToast(`usage: /${cmd.name} <text>`, 'err');
+      await postJson('/bridge/sessions/heartbeat', { sessionId: sess, focus: cmd.name === 'goal' ? `goal: ${focus}` : focus });
+      return showToast(`${cmd.name} ${focus}`, 'ok');
+    }
+    case 'resume': {
+      const id = cmd.rest.trim() || sess;
+      if (!id) return showToast('no session set — /resume <id> or /use first', 'err');
+      await postJson('/bridge/sessions/heartbeat', { sessionId: id, focus: 'resumed' });
+      composer.currentSession = id;
+      updateHint();
+      return showToast(`resumed ${id}`, 'ok');
+    }
+    case 'stop': {
+      const args = cmd.rest.trim().split(/\s+/).filter(Boolean);
+      const id = args[0] || sess;
+      const handoff = args.slice(1).join(' ');
+      if (!id) return showToast('usage: /stop [sessionId] [handoff]', 'err');
+      await postJson('/bridge/sessions/close', { sessionId: id, handoff: handoff || null });
+      if (id === sess) { composer.currentSession = null; updateHint(); }
+      return showToast(`closed ${id}`, 'ok');
+    }
+    case 'inbox': {
+      const message = cmd.rest.trim();
+      if (!message) return showToast('usage: /inbox <message>', 'err');
+      await postJson('/bridge/inbox', { message, sessionId: sess, kind: 'operator' });
+      return showToast(`inbox: ${message}`, 'ok');
+    }
+    case 'rollback':
+      return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');
+    case 'skills':
+      return showToast('skills gallery lands in Phase B4. Try /usage or /lane list for now.', 'warn');
+    case 'runtime':
+      return showToast('runtime adapters land in Phase C1. Try /usage for now.', 'warn');
+    case 'clear':
+      composer.input.value = '';
+      composer.suggest.hidden = true;
+      composer.toast.hidden = true;
+      return;
+    default:
+      return showToast(`unknown command: /${cmd.name}  ·  /help for the list`, 'err');
+  }
+}
+
+function parseFlagsInline(s) {
+  const out = {};
+  const re = /--(\S+)\s+(?:"([^"]*)"|(\S+))/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    out[m[1]] = m[2] !== undefined ? m[2] : m[3];
+  }
+  return out;
+}
+
+function initComposer() {
+  composer.input = document.getElementById('composer-input');
+  composer.suggest = document.getElementById('composer-suggest');
+  composer.toast = document.getElementById('composer-toast');
+  composer.hint = document.getElementById('composer-hint');
+  updateHint();
+
+  composer.input.addEventListener('input', () => {
+    composer.selectedSuggestion = 0;
+    renderSuggestions(composer.input.value);
+  });
+
+  composer.input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const line = composer.input.value.trim();
+      if (!line) return;
+      composer.history.push(line);
+      composer.historyIdx = composer.history.length;
+      composer.input.value = '';
+      composer.suggest.hidden = true;
+      const cmd = parseCommand(line);
+      if (!cmd) { showToast('commands must start with /', 'err'); return; }
+      try {
+        await runCommand(cmd);
+      } catch (err) {
+        showToast(err?.message || String(err), 'err');
+      }
+    } else if (e.key === 'Escape') {
+      composer.input.value = '';
+      composer.suggest.hidden = true;
+      composer.toast.hidden = true;
+      composer.input.blur();
+    } else if (e.key === 'ArrowUp') {
+      if (!composer.suggest.hidden) {
+        e.preventDefault();
+        composer.selectedSuggestion = Math.max(0, composer.selectedSuggestion - 1);
+        renderSuggestions(composer.input.value);
+        return;
+      }
+      if (composer.historyIdx > 0) {
+        e.preventDefault();
+        composer.historyIdx--;
+        composer.input.value = composer.history[composer.historyIdx];
+      }
+    } else if (e.key === 'ArrowDown') {
+      if (!composer.suggest.hidden) {
+        e.preventDefault();
+        const rows = composer.suggest.querySelectorAll('.composer-suggest-row').length;
+        composer.selectedSuggestion = Math.min(rows - 1, composer.selectedSuggestion + 1);
+        renderSuggestions(composer.input.value);
+        return;
+      }
+      if (composer.historyIdx < composer.history.length - 1) {
+        composer.historyIdx++;
+        composer.input.value = composer.history[composer.historyIdx];
+      } else {
+        composer.historyIdx = composer.history.length;
+        composer.input.value = '';
+      }
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const rows = composer.suggest.querySelectorAll('.composer-suggest-row');
+      if (rows.length > 0) {
+        const row = rows[composer.selectedSuggestion] || rows[0];
+        const cmdName = row.querySelector('.composer-suggest-cmd').textContent.split(' ')[0];
+        composer.input.value = cmdName + ' ';
+        renderSuggestions(composer.input.value);
+      }
+    }
+  });
+
+  // Global "/" focuses the composer unless another input/textarea is focused.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    e.preventDefault();
+    composer.input.focus();
+    if (!composer.input.value.startsWith('/')) composer.input.value = '/';
+    renderSuggestions(composer.input.value);
+  });
+}
+
 async function boot() {
   if (!location.hash) location.hash = '#/dashboard';
   await fetchBridgeStatus();
   await seedCursor();
   renderRoute();
   streamLoop();
+  initComposer();
   // Fallback chrome refresh in case stream stalls.
   setInterval(fetchBridgeStatus, 15000);
 }
