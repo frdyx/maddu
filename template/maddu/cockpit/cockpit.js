@@ -124,13 +124,10 @@ function updateChrome() {
       else                            { els.tasksBadge.hidden = true; }
     }
     const stuck = bridgeStatus.counts && bridgeStatus.counts.stuckWorkers;
-    if (els.stuckBanner) {
-      if (stuck && stuck > 0) {
-        els.stuckBanner.hidden = false;
-        els.stuckBanner.innerHTML = `<span>⚠  ${stuck} worker${stuck === 1 ? '' : 's'} silent &gt; 15 s — possible hang</span><a href="#/swarm">View in Swarm →</a>`;
-      } else {
-        els.stuckBanner.hidden = true;
-      }
+    if (stuck && stuck > 0) {
+      setBanner(`<span>⚠  ${stuck} worker${stuck === 1 ? '' : 's'} silent &gt; 15 s — possible hang</span><a href="#/swarm">View in Swarm →</a>`, 'warn');
+    } else {
+      setBanner('');
     }
   } else {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
@@ -139,7 +136,45 @@ function updateChrome() {
     if (els.approvalsBadge) els.approvalsBadge.hidden = true;
     if (els.mailboxBadge)   els.mailboxBadge.hidden = true;
     if (els.tasksBadge)     els.tasksBadge.hidden = true;
-    if (els.stuckBanner)    els.stuckBanner.hidden = true;
+    setBanner('');
+  }
+}
+
+/**
+ * Set the persistent .stage-banner content with severity + activity pulse.
+ *
+ * The banner is an info channel, not a permanent alarm — at rest there is
+ * no glow. Whenever the inner HTML changes we add `.pulse` for ~1.5 s so
+ * operators see an activity flash, then it settles back to a quiet strip
+ * of severity-tinted colour.
+ *
+ *  text     — innerHTML to render. Empty/falsey hides the banner.
+ *  severity — 'info' (default, blue), 'warn' (amber), 'danger' (red).
+ */
+function setBanner(text, severity = 'info') {
+  const el = els.stuckBanner;
+  if (!el) return;
+  if (!text) {
+    el.hidden = true;
+    el.classList.remove('warn', 'danger', 'pulse');
+    el.innerHTML = '';
+    if (el._pulseTimer) { clearTimeout(el._pulseTimer); el._pulseTimer = null; }
+    return;
+  }
+  const wasHidden = el.hidden;
+  const prev = el.innerHTML;
+  el.hidden = false;
+  el.classList.remove('warn', 'danger');
+  if (severity === 'warn' || severity === 'danger') el.classList.add(severity);
+  el.innerHTML = text;
+  // Activity pulse on appear or content change.
+  if (wasHidden || prev !== text) {
+    el.classList.remove('pulse');
+    // Force a reflow so the animation restarts even on rapid content changes.
+    void el.offsetWidth;
+    el.classList.add('pulse');
+    if (el._pulseTimer) clearTimeout(el._pulseTimer);
+    el._pulseTimer = setTimeout(() => el.classList.remove('pulse'), 1500);
   }
 }
 

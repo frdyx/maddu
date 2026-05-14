@@ -313,25 +313,66 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   letter-spacing: 0.05em;
 }
 
+/* Stage banner — info channel.
+ *
+ * Default tone is blue (info). It sits quietly at rest, no standing glow.
+ * Severity is communicated through modifier classes (.warn, .danger).
+ * Glow is reserved as an ACTIVITY indicator — fires once on content change
+ * via the .pulse class (added by JS, auto-removed after the animation).
+ */
 .stage-banner {
-  background: var(--m-warn-bg);
-  border-bottom: 1px solid var(--m-warn-border);
-  border-top: 1px solid var(--m-line-soft);
+  background: rgba(86, 184, 255, 0.06);                /* subtle electric-blue wash */
+  border-top:    1px solid var(--m-line-soft);
+  border-bottom: 1px solid rgba(86, 184, 255, 0.22);
   padding: 8px 24px;
   font-family: var(--m-font-mono);
   font-size: 12px;
-  color: var(--m-warn);
+  color: var(--m-accent-2);
   letter-spacing: 0.03em;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: inset 0 -1px 0 0 var(--m-warn-border), var(--m-glow-warn);
+  transition: box-shadow 240ms ease-out;
+  /* No standing glow — see .pulse / .warn / .danger modifiers below. */
 }
 .stage-banner a {
-  color: var(--m-warn);
+  color: inherit;
   text-decoration: underline;
   font-weight: 600;
 }
+
+/* Severity modifiers — re-stain background + ink + bottom rule. */
+.stage-banner.warn {
+  background: var(--m-warn-bg);
+  border-bottom-color: var(--m-warn-border);
+  color: var(--m-warn);
+}
+.stage-banner.danger {
+  background: var(--m-danger-bg);
+  border-bottom-color: var(--m-danger-border);
+  color: var(--m-danger);
+}
+
+/* Activity pulse — fires when content lands. Decays in 1.5 s.
+ * Hue follows the active severity modifier; default is electric blue. */
+@keyframes banner-pulse-info {
+  0%   { box-shadow: 0 0 0 0 rgba(86, 184, 255, 0.40); }
+  60%  { box-shadow: 0 0 28px 2px rgba(86, 184, 255, 0.22); }
+  100% { box-shadow: 0 0 0 0 rgba(86, 184, 255, 0); }
+}
+@keyframes banner-pulse-warn {
+  0%   { box-shadow: 0 0 0 0 rgba(242, 189, 92, 0.40); }
+  60%  { box-shadow: 0 0 28px 2px rgba(242, 189, 92, 0.22); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 189, 92, 0); }
+}
+@keyframes banner-pulse-danger {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 94, 122, 0.45); }
+  60%  { box-shadow: 0 0 28px 2px rgba(255, 94, 122, 0.24); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 94, 122, 0); }
+}
+.stage-banner.pulse           { animation: banner-pulse-info   1.5s ease-out; }
+.stage-banner.warn.pulse      { animation: banner-pulse-warn   1.5s ease-out; }
+.stage-banner.danger.pulse    { animation: banner-pulse-danger 1.5s ease-out; }
 
 .stage-body {
   padding: 24px;
