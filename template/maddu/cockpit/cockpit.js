@@ -12,6 +12,7 @@ const ROUTES = {
   runtimes:   { title: 'Runtimes',   render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
   mcp:        { title: 'MCP',        render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
   schedule:   { title: 'Schedule',   render: renderSchedule,   description: 'NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note).' },
+  auth:       { title: 'Auth',       render: renderAuth,       description: 'Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -1099,6 +1100,120 @@ function renderSkills() {
 
   refresh();
   const handler = (e) => { if (e.detail.type && e.detail.type.startsWith('SKILL_')) refresh(); };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+  return root;
+}
+
+async function fetchAuth() {
+  try { const r = await fetch('/bridge/auth', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+async function fetchAuthProvider(provider) {
+  try { const r = await fetch(`/bridge/auth/${encodeURIComponent(provider)}`, { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+function renderAuth() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Auth'));
+  root.appendChild(el('p', {}, ROUTES.auth.description));
+
+  const note = el('div', { class: 'panel', style: 'border-left:3px solid var(--m-accent-warm);' }, [
+    el('div', { class: 'panel-title', style: 'color:var(--m-accent-warm);' }, 'TOKEN BOUNDARY'),
+    el('div', { class: 'event-actor', style: 'margin-top:6px;color:var(--m-fg-2);' }, [
+      'Raw key values are never returned by /bridge/auth. The cockpit only sees label + last-4 chars. ',
+      'To add a key, use the CLI: ',
+      el('code', { style: 'color:var(--m-fg-0);' }, 'echo sk-… | maddu auth add <provider> --label "personal"')
+    ])
+  ]);
+  root.appendChild(note);
+
+  let selectedProvider = null;
+  const grid = el('div', { style: 'display:grid;grid-template-columns:280px 1fr;gap:12px;align-items:start;' });
+  const listMount = el('div', {});
+  const detailMount = el('div', {});
+  grid.appendChild(listMount);
+  grid.appendChild(detailMount);
+  root.appendChild(grid);
+
+  function loadDetail(provider) {
+    detailMount.innerHTML = '';
+    detailMount.appendChild(loading(`Fetching keys for ${provider}…`));
+    fetchAuthProvider(provider).then((d) => {
+      detailMount.innerHTML = '';
+      if (!d) { detailMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+      detailMount.appendChild(el('div', { class: 'panel' }, [
+        el('div', { class: 'panel-head' }, [
+          el('span', { class: 'panel-title' }, provider),
+          el('span', { class: 'panel-aside' }, `${d.keys.length} key${d.keys.length === 1 ? '' : 's'} · active …${d.active?.tail || '—'}`)
+        ]),
+        (() => {
+          const wrap = el('div', {});
+          for (const k of d.keys) {
+            const limited = k.rateLimitedUntil && new Date(k.rateLimitedUntil) > new Date();
+            wrap.appendChild(el('div', { class: 'ledger-row' }, [
+              el('span', {}, `…${k.tail}`),
+              el('span', { class: 'event-type ' + (limited ? 't-approval' : 't-lane') }, limited ? 'rate-limited' : 'ready'),
+              el('span', {}, [
+                el('div', { style: 'color:var(--m-fg-0);' }, k.label),
+                el('div', { class: 'event-actor' }, `${k.id}  ·  added ${k.addedAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}`)
+              ]),
+              (() => {
+                const wrap = el('span', { style: 'display:flex;gap:4px;' });
+                const rate = el('button', {}, '↯ rate-limit');
+                rate.addEventListener('click', async () => {
+                  if (!confirm(`Mark ${k.label} as rate-limited for 5 minutes?`)) return;
+                  await fetch(`/bridge/auth/${encodeURIComponent(provider)}/rate-limit`, {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ keyId: k.id, until: new Date(Date.now() + 5 * 60_000).toISOString() })
+                  });
+                  loadDetail(provider);
+                });
+                const rm = el('button', { class: 'btn-deny-hard' }, '×');
+                rm.addEventListener('click', async () => {
+                  if (!confirm(`Remove key ${k.label} (…${k.tail})?`)) return;
+                  await fetch(`/bridge/auth/${encodeURIComponent(provider)}/keys/${encodeURIComponent(k.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+                  refresh();
+                });
+                wrap.appendChild(rate); wrap.appendChild(rm);
+                return wrap;
+              })()
+            ]));
+          }
+          if (d.keys.length === 0) wrap.appendChild(placeholder('No keys', 'Add via CLI.'));
+          return wrap;
+        })()
+      ]));
+    });
+  }
+
+  function refresh() {
+    listMount.innerHTML = '';
+    listMount.appendChild(loading('Fetching providers…'));
+    fetchAuth().then((d) => {
+      listMount.innerHTML = '';
+      if (!d || d.providers.length === 0) {
+        listMount.appendChild(placeholder('No providers', `Add a key via:\n  maddu auth add anthropic --label personal --value …\n\nStorage path:\n  ${d ? d.storage.path : '(unknown)'}`));
+        detailMount.innerHTML = '';
+        return;
+      }
+      for (const p of d.providers) {
+        const isSel = selectedProvider === p.provider;
+        const row = el('div', {
+          style: 'padding:8px 10px;border-bottom:1px solid var(--m-line-soft);cursor:pointer;' + (isSel ? 'background:var(--m-bg-3);' : '')
+        }, [
+          el('div', { style: 'font-family:var(--m-font-cond);color:var(--m-fg-0);font-size:14px;letter-spacing:0.03em;text-transform:uppercase;' }, p.provider),
+          el('div', { class: 'event-actor', style: 'margin-top:2px;' }, `${p.keyCount} key${p.keyCount === 1 ? '' : 's'} · active …${p.activeKeyTail || '—'}`)
+        ]);
+        row.addEventListener('click', () => { selectedProvider = p.provider; refresh(); });
+        listMount.appendChild(row);
+      }
+      if (!selectedProvider) selectedProvider = d.providers[0].provider;
+      loadDetail(selectedProvider);
+    });
+  }
+
+  refresh();
+  const handler = (e) => { if (e.detail.type && e.detail.type.startsWith('AUTH_KEY_')) refresh(); };
   stream.bus.addEventListener('event', handler);
   els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
   return root;

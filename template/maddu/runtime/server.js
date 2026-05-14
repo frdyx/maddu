@@ -22,6 +22,7 @@ import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, d
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
 import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, parseNatural } from './lib/schedule.mjs';
 import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
+import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -150,7 +151,8 @@ async function handleBridge(req, res, url, ctx) {
         mcpEnabled: (await listMcp(repoRoot)).filter((m) => m.enabled).length,
         schedules: (await listSchedules(repoRoot)).length,
         enabledSchedules: (await listSchedules(repoRoot)).filter((s) => s.enabled).length,
-        checkpoints: (await listCheckpoints(repoRoot)).length
+        checkpoints: (await listCheckpoints(repoRoot)).length,
+        authProviders: (await listProviders()).length
       }
     });
   }
@@ -357,6 +359,47 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── auth (Phase C5) — keys NEVER served raw over HTTP ─────────────────
+  if (path === '/bridge/auth' && req.method === 'GET') {
+    return sendJson(res, 200, { providers: await listProviders(), storage: authDirInfo() });
+  }
+  if (path.startsWith('/bridge/auth/')) {
+    const rest = path.slice('/bridge/auth/'.length);
+    const m = rest.match(/^([^/]+)(?:\/(keys|active|rate-limit|keys\/[^/]+))?$/);
+    if (m) {
+      const provider = decodeURIComponent(m[1]);
+      const sub = m[2];
+      if (!sub && req.method === 'GET') {
+        return sendJson(res, 200, { provider, keys: await listKeys(provider), active: await activeMasked(provider) });
+      }
+      if (sub === 'keys' && req.method === 'POST') {
+        const body = (await readBody(req)) || {};
+        if (!body.value) return sendJson(res, 400, { error: 'value required' });
+        try {
+          const rec = await addKey(repoRoot, { provider, value: body.value, label: body.label || null }, body.by || null);
+          return sendJson(res, 200, { ok: true, key: rec });
+        } catch (err) { return sendJson(res, 400, { error: err.message }); }
+      }
+      if (sub && sub.startsWith('keys/') && req.method === 'DELETE') {
+        const keyId = decodeURIComponent(sub.slice('keys/'.length));
+        const body = (await readBody(req)) || {};
+        const ok = await removeKey(repoRoot, provider, keyId, body.by || null);
+        return sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'key not found' });
+      }
+      if (sub === 'rate-limit' && req.method === 'POST') {
+        const body = (await readBody(req)) || {};
+        if (!body.keyId) return sendJson(res, 400, { error: 'keyId required' });
+        try {
+          const rec = await markRateLimited(repoRoot, provider, body.keyId, body.until || null, body.by || null);
+          return sendJson(res, 200, { ok: true, key: rec });
+        } catch (err) { return sendJson(res, 404, { error: err.message }); }
+      }
+      if (sub === 'active' && req.method === 'GET') {
+        return sendJson(res, 200, { provider, active: await activeMasked(provider) });
+      }
     }
   }
 
