@@ -1,0 +1,39 @@
+{
+  "name": "maddu",
+  "version": "0.0.1",
+  "description": "The Source of local truth — a files-only, local-first orchestration framework for AI agents inside any git repo.",
+  "type": "module",
+  "bin": {
+    "maddu": "./bin/maddu.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "doctor": "node ./bin/maddu.mjs doctor"
+  },
+  "files": [
+    "bin/",
+    "commands/",
+    "template/",
+    "docs/",
+    "version.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frdyx/maddu.git"
+  },
+  "keywords": [
+    "agent",
+    "orchestration",
+    "local-first",
+    "files-only",
+    "cockpit",
+    "claude",
+    "codex"
+  ],
+  "author": "Máddu contributors"
+}
