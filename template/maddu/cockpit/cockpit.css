@@ -40,6 +40,11 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must always win — class rules with explicit
+ * `display: flex/grid/block` would otherwise outrank the implicit
+ * [hidden] { display: none } from the user-agent stylesheet. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
