@@ -9,6 +9,7 @@ const ROUTES = {
   tasks:      { title: 'Tasks',      render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
   skills:     { title: 'Skills',     render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
   search:     { title: 'Search',     render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
+  runtimes:   { title: 'Runtimes',   render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -1048,6 +1049,127 @@ function renderSkills() {
   return root;
 }
 
+async function fetchRuntimes() {
+  try { const r = await fetch('/bridge/runtimes', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+function renderRuntimes() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Runtimes'));
+  root.appendChild(el('p', {}, ROUTES.runtimes.description));
+
+  // Register form
+  const nname = el('input', { type: 'text', placeholder: 'name (e.g. claude-code)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nbin = el('input', { type: 'text', placeholder: 'binary', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nargs = el('input', { type: 'text', placeholder: 'args (comma)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const ndet = el('input', { type: 'text', placeholder: 'detect command (e.g. claude --version)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nbtn = el('button', {}, 'Register');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:8px;' }, [nname, nbin, nargs, ndet, nbtn]);
+  const allBtn = el('button', {}, 'Detect all');
+  const tools = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;' }, [allBtn]);
+  root.appendChild(form);
+  root.appendChild(tools);
+
+  nbtn.addEventListener('click', async () => {
+    const name = nname.value.trim();
+    if (!name) return;
+    nbtn.disabled = true;
+    try {
+      await fetch('/bridge/runtimes', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          binary: nbin.value.trim() || null,
+          args: nargs.value.split(',').map((x) => x.trim()).filter(Boolean),
+          detect: { command: ndet.value.trim() || null, expectExit: 0 },
+          by: composer.currentSession || null
+        })
+      });
+      nname.value = ''; nbin.value = ''; nargs.value = ''; ndet.value = '';
+      refresh();
+    } finally { nbtn.disabled = false; }
+  });
+  allBtn.addEventListener('click', async () => {
+    allBtn.disabled = true; allBtn.textContent = 'Detecting…';
+    try { await fetch('/bridge/runtimes/detect-all', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); refresh(); }
+    finally { allBtn.disabled = false; allBtn.textContent = 'Detect all'; }
+  });
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  function refresh() {
+    mount.innerHTML = '';
+    mount.appendChild(loading('Fetching runtimes…'));
+    fetchRuntimes().then((d) => {
+      mount.innerHTML = '';
+      if (!d || d.runtimes.length === 0) {
+        mount.appendChild(placeholder('No runtimes registered', 'Register one above, or via `maddu runtime register --name … --binary …`.'));
+        return;
+      }
+      for (const r of d.runtimes) {
+        const h = (d.health || {})[r.name];
+        const status = h?.ok ? `<span class="signal live"></span>${h.version || 'detected'}` :
+                       h ? `<span class="signal"></span>${h.error || 'exit ' + h.exitCode}` :
+                       `<span class="signal"></span>not detected`;
+        const card = el('div', { class: 'panel' }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, r.displayName || r.name),
+            el('span', { class: 'panel-aside', html: status })
+          ]),
+          el('dl', { class: 'kv' }, [
+            el('dt', {}, 'name'),         el('dd', {}, r.name),
+            el('dt', {}, 'binary'),       el('dd', {}, r.binary || '—'),
+            el('dt', {}, 'args'),         el('dd', {}, (r.args || []).join(' ') || '—'),
+            el('dt', {}, 'protocol'),     el('dd', {}, r.protocol || '—'),
+            el('dt', {}, 'capabilities'), el('dd', {}, `mcp:${r.capabilities?.mcp ? 'yes' : 'no'}  tools:${r.capabilities?.tools ? 'yes' : 'no'}  streaming:${r.capabilities?.streaming ? 'yes' : 'no'}  approval:${r.capabilities?.approval || '—'}`),
+            el('dt', {}, 'detect'),       el('dd', {}, r.detect?.command || '—'),
+            r.notes ? el('dt', {}, 'notes') : null,
+            r.notes ? el('dd', {}, r.notes) : null
+          ]),
+          (() => {
+            const actions = el('div', { style: 'display:flex;gap:6px;margin-top:8px;' });
+            const det = el('button', {}, 'Detect');
+            det.addEventListener('click', async () => {
+              det.disabled = true; det.textContent = '…';
+              await fetch(`/bridge/runtimes/${encodeURIComponent(r.name)}/detect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const spw = el('button', { class: 'btn-allow' }, 'Spawn');
+            spw.addEventListener('click', async () => {
+              spw.disabled = true; spw.textContent = '…';
+              try {
+                const rr = await fetch(`/bridge/runtimes/${encodeURIComponent(r.name)}/spawn`, {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ sessionId: composer.currentSession || null })
+                });
+                const o = await rr.json();
+                spw.textContent = o.ok ? `✓ ${o.workerId.slice(-12)}` : '✗';
+              } catch { spw.textContent = '✗'; }
+              setTimeout(() => { spw.disabled = false; spw.textContent = 'Spawn'; }, 2000);
+            });
+            const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
+            rem.addEventListener('click', async () => {
+              if (!confirm(`Remove runtime "${r.name}"?`)) return;
+              await fetch(`/bridge/runtimes/${encodeURIComponent(r.name)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            actions.appendChild(det); actions.appendChild(spw); actions.appendChild(rem);
+            return actions;
+          })()
+        ]);
+        mount.appendChild(card);
+      }
+    });
+  }
+
+  refresh();
+  const handler = (e) => { if (e.detail.type && (e.detail.type.startsWith('RUNTIME_') || e.detail.type.startsWith('WORKER_'))) refresh(); };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+  return root;
+}
+
 function renderSearch() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Search'));
@@ -1192,7 +1314,9 @@ const COMMANDS = [
   { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
   { name: 'skills',  args: '',                                       desc: 'List all skills in the gallery.' },
   { name: 'skill',   args: '<id>',                                   desc: 'Apply a skill to the current session.' },
-  { name: 'runtime', args: '',                                       desc: 'Stub — runtime adapters land in Phase C1.' },
+  { name: 'runtime', args: '<name>',                                desc: 'Show a runtime adapter (or list if no name).' },
+  { name: 'spawn',   args: '<runtime>',                             desc: 'Spawn a worker from a registered runtime adapter.' },
+  { name: 'detect',  args: '[<name>]',                              desc: 'Detect a runtime (or all if no name).' },
   { name: 'clear',   args: '',                                       desc: 'Clear the composer.' }
 ];
 
@@ -1441,8 +1565,33 @@ async function runCommand(cmd) {
       const r = await postJson(`/bridge/skills/${encodeURIComponent(id)}/apply`, { sessionId: sess, by: sess });
       return showToast(`applied: ${r.applied.title}`, 'ok');
     }
-    case 'runtime':
-      return showToast('runtime adapters land in Phase C1. Try /usage for now.', 'warn');
+    case 'runtime': {
+      const name = cmd.rest.trim();
+      if (!name) {
+        const d = await fetchJson('/bridge/runtimes');
+        if (!d.runtimes.length) return showToast('(no runtimes registered)  ·  /runtimes for the UI', 'ok');
+        return showToast(d.runtimes.map((r) => `${r.name}  ${r.binary || '—'}`).join('\n'), 'ok');
+      }
+      const r = await fetchJson(`/bridge/runtimes/${encodeURIComponent(name)}`);
+      const cap = r.capabilities || {};
+      return showToast(`${r.name}  ${r.binary || '—'}\n  capabilities: ${Object.entries(cap).map(([k,v]) => `${k}:${v}`).join(' ')}\n  health: ${r.health?.ok ? '✓ ' + (r.health.version || '') : (r.health ? '✗' : 'not detected')}`, 'ok');
+    }
+    case 'spawn': {
+      const name = cmd.rest.trim();
+      if (!name) return showToast('usage: /spawn <runtime>', 'err');
+      const r = await postJson(`/bridge/runtimes/${encodeURIComponent(name)}/spawn`, { sessionId: sess });
+      return showToast(r.ok ? `spawned ${r.workerId}  pid:${r.pid}` : `spawn failed: ${r.error}`, r.ok ? 'ok' : 'err');
+    }
+    case 'detect': {
+      const name = cmd.rest.trim();
+      if (!name) {
+        const r = await postJson('/bridge/runtimes/detect-all', {});
+        const okN = r.results.filter((x) => x.ok).length;
+        return showToast(`detect-all: ${okN}/${r.results.length} ok`, 'ok');
+      }
+      const r = await postJson(`/bridge/runtimes/${encodeURIComponent(name)}/detect`, {});
+      return showToast(r.ok ? `${name}  ✓ ${r.version || ''}` : `${name}  ✗ ${r.error || ('exit ' + r.exitCode)}`, r.ok ? 'ok' : 'err');
+    }
     case 'clear':
       composer.input.value = '';
       composer.suggest.hidden = true;

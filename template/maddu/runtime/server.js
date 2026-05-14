@@ -18,6 +18,7 @@ import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hin
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
 import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './lib/skills.mjs';
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
+import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -140,7 +141,8 @@ async function handleBridge(req, res, url, ctx) {
         openTasks: proj.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
         skills: (await listSkills(repoRoot)).length,
         runningWorkers: proj.workers.filter((w) => w.status === 'running').length,
-        stuckWorkers: proj.workers.filter((w) => w.status === 'stuck').length
+        stuckWorkers: proj.workers.filter((w) => w.status === 'stuck').length,
+        runtimes: (await listRuntimes(repoRoot)).length
       }
     });
   }
@@ -347,6 +349,57 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── runtimes (Phase C1) ───────────────────────────────────────────────
+  if (path === '/bridge/runtimes' && req.method === 'GET') {
+    const all = await listRuntimes(repoRoot);
+    const health = await runtimesHealth(repoRoot);
+    return sendJson(res, 200, { runtimes: all, health });
+  }
+  if (path === '/bridge/runtimes' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.name) return sendJson(res, 400, { error: 'name required' });
+    const saved = await saveRuntime(repoRoot, body, body.by || null);
+    return sendJson(res, 200, { ok: true, runtime: saved });
+  }
+  if (path === '/bridge/runtimes/detect-all' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const results = await detectAll(repoRoot, body.by || null);
+    return sendJson(res, 200, { results });
+  }
+  if (path.startsWith('/bridge/runtimes/')) {
+    const rest = path.slice('/bridge/runtimes/'.length);
+    if (rest.endsWith('/detect') && req.method === 'POST') {
+      const name = rest.slice(0, -'/detect'.length);
+      const body = (await readBody(req)) || {};
+      try { return sendJson(res, 200, await detectRuntime(repoRoot, name, body.by || null)); }
+      catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (rest.endsWith('/spawn') && req.method === 'POST') {
+      const name = rest.slice(0, -'/spawn'.length);
+      const body = (await readBody(req)) || {};
+      try {
+        const out = await spawnWorker(repoRoot, name, {
+          session: body.sessionId || null,
+          lane: body.lane || null,
+          extraArgs: body.args || [],
+          bridgeUrl: `http://${req.socket.localAddress}:${req.socket.localPort}`
+        });
+        return sendJson(res, 200, { ok: !out.error, ...out });
+      } catch (err) { return sendJson(res, 400, { error: err.message }); }
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const r = await readRuntime(repoRoot, rest);
+      if (!r) return sendJson(res, 404, { error: 'runtime not found', name: rest });
+      const health = (await runtimesHealth(repoRoot))[rest] || null;
+      return sendJson(res, 200, { ...r, health });
+    }
+    if (req.method === 'DELETE' && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      await removeRuntime(repoRoot, rest, body.by || null);
+      return sendJson(res, 200, { ok: true });
     }
   }
 
