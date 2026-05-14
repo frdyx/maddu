@@ -3285,38 +3285,149 @@ function renderSettings() {
       }
     } catch (e) { pathsMount.innerHTML = ''; pathsMount.appendChild(placeholder('Offline', String(e))); }
 
-    // Lanes
+    // Lanes — editable defaults table (runtime + model bindings per lane).
+    let availableRuntimes = [];
     try {
-      const r = await fetch('/bridge/lanes', { cache: 'no-store' });
-      const d = r.ok ? await r.json() : null;
-      lanesMount.innerHTML = '';
-      if (!d) { lanesMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
-      else {
+      const rtR = await fetch('/bridge/runtimes', { cache: 'no-store' });
+      const rtD = rtR.ok ? await rtR.json() : null;
+      availableRuntimes = (rtD && rtD.runtimes) ? rtD.runtimes.map((r) => r.name) : [];
+    } catch {}
+
+    function renderLanes() {
+      return (async () => {
+        const r = await fetch('/bridge/lanes', { cache: 'no-store' });
+        const d = r.ok ? await r.json() : null;
+        lanesMount.innerHTML = '';
+        if (!d) { lanesMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
         const lanes = (d.catalog && d.catalog.lanes) || [];
         const claims = new Map((d.claims || []).map((c) => [c.lane, c]));
-        const head = el('div', { style: 'margin-bottom:8px;color:var(--m-fg-2);font-size:13px;' },
-          `${lanes.length} lane${lanes.length === 1 ? '' : 's'} defined  ·  ${d.claims?.length || 0} active claim${(d.claims?.length || 0) === 1 ? '' : 's'}`);
+        const withDefaults = lanes.filter((l) => l.defaults && Object.keys(l.defaults).length > 0).length;
+
+        const head = el('div', { style: 'margin-bottom:10px;color:var(--m-fg-2);font-size:13px;display:flex;justify-content:space-between;align-items:center;' }, [
+          el('span', {}, `${lanes.length} lane${lanes.length === 1 ? '' : 's'}  ·  ${d.claims?.length || 0} claimed  ·  ${withDefaults} with runtime bindings`),
+          (() => {
+            const btn = el('button', {}, 'Open Swarm →');
+            btn.addEventListener('click', () => { location.hash = '#/swarm'; });
+            return btn;
+          })()
+        ]);
         lanesMount.appendChild(head);
+
         if (lanes.length === 0) {
           lanesMount.appendChild(placeholder('No lanes', 'Define lanes in .maddu/lanes/catalog.json.'));
         } else {
-          const kv = el('dl', { class: 'kv' });
+          const table = el('div', { class: 'lanes-table' });
           for (const l of lanes) {
-            const c = claims.get(l.id);
-            kv.appendChild(el('dt', {}, l.id));
-            kv.appendChild(el('dd', { html:
-              c ? `<span style="color:var(--m-warn)">claimed</span> by ${c.sessionId} — ${c.focus || l.scope || ''}`
-                : `<span style="color:var(--m-fg-3)">free</span> — ${l.scope || '(no scope)'}`
-            }));
+            const claim = claims.get(l.id);
+            const def = l.defaults || {};
+            const row = el('div', { class: 'lanes-row' });
+
+            // Lane id + scope
+            row.appendChild(el('div', { class: 'lanes-cell lanes-cell-id' }, [
+              el('div', { class: 'lanes-id' }, l.id),
+              el('div', { class: 'lanes-scope' }, l.scope || '(no scope)')
+            ]));
+
+            // Claim status
+            row.appendChild(el('div', { class: 'lanes-cell lanes-cell-claim' }, claim
+              ? el('span', { class: 'lanes-claim-pill warn' }, `claimed · ${claim.sessionId.slice(-12)}`)
+              : el('span', { class: 'lanes-claim-pill ok' }, 'free')));
+
+            // Defaults (read mode) + edit affordance
+            const defRead = el('div', { class: 'lanes-cell lanes-cell-defaults' });
+            const summary = def.runtime || def.model || def.provider
+              ? `${def.runtime || '—'}  ·  ${def.model || '—'}` + (def.provider ? `  ·  ${def.provider}` : '')
+              : el('span', { style: 'color:var(--m-fg-3)' }, 'inherit global default');
+            const summarySpan = typeof summary === 'string' ? el('span', { class: 'lanes-defaults-summary' }, summary) : summary;
+            const editBtn = el('button', { class: 'lanes-edit-btn' }, def.runtime || def.model ? 'Edit' : 'Bind');
+            defRead.appendChild(summarySpan);
+            defRead.appendChild(editBtn);
+            row.appendChild(defRead);
+
+            // Edit form (hidden until clicked)
+            const editForm = el('div', { class: 'lanes-edit-form', style: 'display:none;' });
+            const rtSel = el('select', { class: 'lanes-edit-select' });
+            rtSel.appendChild(el('option', { value: '' }, '— inherit —'));
+            for (const rt of availableRuntimes) {
+              const opt = el('option', { value: rt }, rt);
+              if (def.runtime === rt) opt.selected = true;
+              rtSel.appendChild(opt);
+            }
+            const modelInp = el('input', { type: 'text', class: 'lanes-edit-input', placeholder: 'model (e.g. claude-opus-4-7)', value: def.model || '' });
+            const provInp = el('input', { type: 'text', class: 'lanes-edit-input lanes-edit-input-narrow', placeholder: 'provider', value: def.provider || '' });
+            const saveBtn = el('button', { class: 'btn-allow' }, 'Save');
+            const cancelBtn = el('button', {}, 'Cancel');
+            const removeBtn = el('button', { class: 'btn-deny-hard' }, '×');
+            editForm.appendChild(rtSel);
+            editForm.appendChild(modelInp);
+            editForm.appendChild(provInp);
+            editForm.appendChild(saveBtn);
+            editForm.appendChild(cancelBtn);
+            editForm.appendChild(removeBtn);
+
+            editBtn.addEventListener('click', () => {
+              defRead.style.display = 'none';
+              editForm.style.display = 'flex';
+            });
+            cancelBtn.addEventListener('click', () => {
+              defRead.style.display = '';
+              editForm.style.display = 'none';
+            });
+            saveBtn.addEventListener('click', async () => {
+              saveBtn.disabled = true;
+              try {
+                const resp = await fetch('/bridge/lanes/defaults', {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    lane: l.id,
+                    runtime: rtSel.value || null,
+                    model: modelInp.value.trim() || null,
+                    provider: provInp.value.trim() || null
+                  })
+                });
+                if (resp.ok) { showToast(`Saved defaults for ${l.id}`, 'ok'); renderLanes(); }
+                else { const e = await resp.json().catch(() => ({})); showToast(`save failed: ${e.error || resp.status}`, 'err'); }
+              } finally { saveBtn.disabled = false; }
+            });
+            removeBtn.addEventListener('click', async () => {
+              if (!confirm(`Remove lane "${l.id}"? This rewrites catalog.json. Refuses if currently claimed.`)) return;
+              const resp = await fetch(`/bridge/lanes/${encodeURIComponent(l.id)}`, { method: 'DELETE' });
+              const e = resp.ok ? null : (await resp.json().catch(() => ({})));
+              if (resp.ok) { showToast(`Removed lane ${l.id}`, 'ok'); renderLanes(); }
+              else showToast(`remove failed: ${e?.error || resp.status}`, 'err');
+            });
+
+            row.appendChild(editForm);
+            table.appendChild(row);
           }
-          lanesMount.appendChild(kv);
+          lanesMount.appendChild(table);
         }
-        const btn = el('button', {}, 'Open Swarm →');
-        btn.style.marginTop = '8px';
-        btn.addEventListener('click', () => { location.hash = '#/swarm'; });
-        lanesMount.appendChild(btn);
-      }
-    } catch (e) { lanesMount.innerHTML = ''; lanesMount.appendChild(placeholder('Offline', String(e))); }
+
+        // Add-lane form
+        const addWrap = el('div', { class: 'lanes-add' });
+        const idInp = el('input', { type: 'text', placeholder: 'new-lane-id', class: 'lanes-edit-input lanes-edit-input-narrow' });
+        const scopeInp = el('input', { type: 'text', placeholder: 'scope description', class: 'lanes-edit-input' });
+        const addBtn = el('button', { class: 'btn-allow' }, 'Add lane');
+        addBtn.addEventListener('click', async () => {
+          const id = idInp.value.trim();
+          if (!id) return;
+          addBtn.disabled = true;
+          try {
+            const resp = await fetch('/bridge/lanes', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id, scope: scopeInp.value.trim() })
+            });
+            if (resp.ok) { showToast(`Added lane ${id}`, 'ok'); idInp.value = ''; scopeInp.value = ''; renderLanes(); }
+            else { const e = await resp.json().catch(() => ({})); showToast(`add failed: ${e.error || resp.status}`, 'err'); }
+          } finally { addBtn.disabled = false; }
+        });
+        addWrap.appendChild(idInp);
+        addWrap.appendChild(scopeInp);
+        addWrap.appendChild(addBtn);
+        lanesMount.appendChild(addWrap);
+      })().catch((e) => { lanesMount.innerHTML = ''; lanesMount.appendChild(placeholder('Offline', String(e))); });
+    }
+    renderLanes();
 
     // Auth / providers
     try {
@@ -3354,35 +3465,66 @@ function renderSettings() {
       }
     } catch (e) { authMount.innerHTML = ''; authMount.appendChild(placeholder('Offline', String(e))); }
 
-    // MCP
-    try {
-      const r = await fetch('/bridge/mcp', { cache: 'no-store' });
-      const d = r.ok ? await r.json() : null;
-      mcpMount.innerHTML = '';
-      if (!d) { mcpMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); }
-      else {
-        const servers = d.servers || [];
+    // MCP — inline enable/disable + open-in-/mcp deep-link
+    function renderMcpPanel() {
+      return (async () => {
+        const r = await fetch('/bridge/mcp', { cache: 'no-store' });
+        const d = r.ok ? await r.json() : null;
+        mcpMount.innerHTML = '';
+        if (!d) { mcpMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
+        const servers = d.mcp || d.servers || [];
         const enabled = servers.filter((s) => s.enabled).length;
-        const head = el('div', { style: 'margin-bottom:8px;color:var(--m-fg-2);font-size:13px;' },
-          `${servers.length} server${servers.length === 1 ? '' : 's'} registered  ·  ${enabled} enabled  ·  bridge-owned (rule #5)`);
+        const head = el('div', { style: 'margin-bottom:10px;color:var(--m-fg-2);font-size:13px;display:flex;justify-content:space-between;align-items:center;' }, [
+          el('span', {}, `${servers.length} server${servers.length === 1 ? '' : 's'}  ·  ${enabled} enabled  ·  bridge-owned (rule #5)`),
+          (() => {
+            const btn = el('button', {}, 'Open MCP →');
+            btn.addEventListener('click', () => { location.hash = '#/mcp'; });
+            return btn;
+          })()
+        ]);
         mcpMount.appendChild(head);
+
         if (servers.length === 0) {
           mcpMount.appendChild(placeholder('No MCP servers', 'Register one in /mcp or `maddu mcp add --name … --transport stdio --command …`.'));
-        } else {
-          const kv = el('dl', { class: 'kv' });
-          for (const s of servers) {
-            const dot = s.enabled ? '<span class="signal live"></span>' : '<span class="signal"></span>';
-            kv.appendChild(el('dt', { html: `${dot}${s.name}` }));
-            kv.appendChild(el('dd', {}, `${s.transport || 'stdio'} · ${s.command || s.url || '—'}`));
-          }
-          mcpMount.appendChild(kv);
+          return;
         }
-        const btn = el('button', {}, 'Open MCP →');
-        btn.style.marginTop = '8px';
-        btn.addEventListener('click', () => { location.hash = '#/mcp'; });
-        mcpMount.appendChild(btn);
-      }
-    } catch (e) { mcpMount.innerHTML = ''; mcpMount.appendChild(placeholder('Offline', String(e))); }
+
+        const table = el('div', { class: 'lanes-table' });
+        for (const s of servers) {
+          const h = (d.health || {})[s.name];
+          const row = el('div', { class: 'lanes-row' });
+          row.appendChild(el('div', { class: 'lanes-cell lanes-cell-id' }, [
+            el('div', { class: 'lanes-id' }, [
+              el('span', { html: s.enabled ? '<span class="signal live"></span>' : '<span class="signal"></span>' }),
+              document.createTextNode(s.name)
+            ]),
+            el('div', { class: 'lanes-scope' }, `${s.transport || 'stdio'} · ${s.stdio?.command || s[s.transport]?.url || s.command || '—'}`)
+          ]));
+          row.appendChild(el('div', { class: 'lanes-cell lanes-cell-claim' }, [
+            el('span', { class: 'lanes-claim-pill ' + (h?.ok ? 'ok' : 'warn') }, h?.ok ? 'healthy' : (h?.error ? 'error' : 'untested'))
+          ]));
+          const actions = el('div', { class: 'lanes-cell lanes-cell-defaults' });
+          const tog = el('button', {}, s.enabled ? 'Disable' : 'Enable');
+          tog.addEventListener('click', async () => {
+            tog.disabled = true;
+            await fetch(`/bridge/mcp/${encodeURIComponent(s.name)}/${s.enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+            renderMcpPanel();
+          });
+          const tst = el('button', { class: 'btn-allow' }, 'Test');
+          tst.addEventListener('click', async () => {
+            tst.disabled = true; tst.textContent = '…';
+            await fetch(`/bridge/mcp/${encodeURIComponent(s.name)}/test`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+            renderMcpPanel();
+          });
+          actions.appendChild(tog);
+          actions.appendChild(tst);
+          row.appendChild(actions);
+          table.appendChild(row);
+        }
+        mcpMount.appendChild(table);
+      })().catch((e) => { mcpMount.innerHTML = ''; mcpMount.appendChild(placeholder('Offline', String(e))); });
+    }
+    renderMcpPanel();
 
     // Runtimes
     try {

@@ -7,7 +7,7 @@
 //   • No token export. OAuth tokens device-bound; this bridge never serializes them.
 
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join, dirname, extname, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -244,6 +244,64 @@ async function handleBridge(req, res, url, ctx) {
       data: {}
     });
     return sendJson(res, 200, { ok: true, event: ev });
+  }
+  // Set per-lane defaults: runtime, model, optional provider.
+  if (path === '/bridge/lanes/defaults' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.lane) return sendJson(res, 400, { error: 'lane required' });
+    const paths = pathsFor(repoRoot);
+    let catalog;
+    try { catalog = JSON.parse(await readFile(paths.laneCatalog, 'utf8')); }
+    catch (e) { return sendJson(res, 500, { error: 'cannot read catalog', detail: String(e) }); }
+    const lane = (catalog.lanes || []).find((l) => l.id === body.lane);
+    if (!lane) return sendJson(res, 404, { error: 'lane not found', id: body.lane });
+    const defaults = lane.defaults || {};
+    if ('runtime' in body)  defaults.runtime  = body.runtime  || null;
+    if ('model' in body)    defaults.model    = body.model    || null;
+    if ('provider' in body) defaults.provider = body.provider || null;
+    // Drop nulls so the shape stays clean.
+    for (const k of Object.keys(defaults)) if (defaults[k] == null) delete defaults[k];
+    if (Object.keys(defaults).length === 0) delete lane.defaults;
+    else lane.defaults = defaults;
+    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await append(repoRoot, {
+      type: 'LANE_DEFAULTS_SET',
+      actor: body.by || null,
+      lane: body.lane,
+      data: { defaults: lane.defaults || null }
+    });
+    return sendJson(res, 200, { ok: true, lane });
+  }
+  // Add a new lane to the catalog.
+  if (path === '/bridge/lanes' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.id || !/^[a-z][a-z0-9\-]{1,40}$/.test(body.id)) {
+      return sendJson(res, 400, { error: 'id required: ^[a-z][a-z0-9-]{1,40}$' });
+    }
+    const paths = pathsFor(repoRoot);
+    const catalog = JSON.parse(await readFile(paths.laneCatalog, 'utf8'));
+    if ((catalog.lanes || []).some((l) => l.id === body.id)) return sendJson(res, 409, { error: 'lane already exists' });
+    const lane = { id: body.id, scope: body.scope || '' };
+    if (body.defaults && typeof body.defaults === 'object') lane.defaults = body.defaults;
+    catalog.lanes = catalog.lanes || [];
+    catalog.lanes.push(lane);
+    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await append(repoRoot, { type: 'LANE_ADDED', actor: body.by || null, lane: lane.id, data: { lane } });
+    return sendJson(res, 200, { ok: true, lane });
+  }
+  // Remove a lane (refuses if currently claimed).
+  if (path.startsWith('/bridge/lanes/') && req.method === 'DELETE') {
+    const id = path.slice('/bridge/lanes/'.length);
+    const paths = pathsFor(repoRoot);
+    const proj = await project(repoRoot);
+    if (proj.claims.some((c) => c.lane === id)) return sendJson(res, 409, { error: 'lane currently claimed; release first' });
+    const catalog = JSON.parse(await readFile(paths.laneCatalog, 'utf8'));
+    const before = (catalog.lanes || []).length;
+    catalog.lanes = (catalog.lanes || []).filter((l) => l.id !== id);
+    if (catalog.lanes.length === before) return sendJson(res, 404, { error: 'lane not found' });
+    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await append(repoRoot, { type: 'LANE_REMOVED', actor: null, lane: id, data: {} });
+    return sendJson(res, 200, { ok: true });
   }
 
   // ── slice-stop ────────────────────────────────────────────────────────
