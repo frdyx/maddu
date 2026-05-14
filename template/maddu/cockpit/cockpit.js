@@ -3,6 +3,7 @@
 
 const ROUTES = {
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
+  approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -19,7 +20,8 @@ const els = {
   version: document.getElementById('status-version'),
   uptime: document.getElementById('status-uptime'),
   host: document.getElementById('status-host'),
-  port: document.getElementById('status-port')
+  port: document.getElementById('status-port'),
+  approvalsBadge: document.getElementById('approvals-badge')
 };
 
 let bridgeStatus = null;
@@ -44,10 +46,16 @@ function updateChrome() {
     els.version.textContent = bridgeStatus.version || 'unknown';
     els.uptime.textContent = formatUptime(bridgeStatus.uptimeMs);
     if (bridgeStatus.port) els.port.textContent = bridgeStatus.port;
+    const open = bridgeStatus.counts && bridgeStatus.counts.openApprovals;
+    if (els.approvalsBadge) {
+      if (open && open > 0) { els.approvalsBadge.hidden = false; els.approvalsBadge.textContent = String(open); }
+      else                  { els.approvalsBadge.hidden = true; }
+    }
   } else {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
     els.version.textContent = '—';
     els.uptime.textContent = '—';
+    if (els.approvalsBadge) els.approvalsBadge.hidden = true;
   }
 }
 
@@ -319,6 +327,126 @@ function renderRoadmap() {
   }
   root.appendChild(list);
   return root;
+}
+
+async function fetchApprovals() {
+  try {
+    const r = await fetch('/bridge/approvals', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function postApprovalDecision(approvalId, decision, reason) {
+  const r = await fetch('/bridge/approvals/respond', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ approvalId, decision, reason })
+  });
+  return r.json();
+}
+
+function renderApprovals() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Approvals'));
+  root.appendChild(el('p', {}, ROUTES.approvals.description));
+
+  const openMount = el('div', {});
+  openMount.appendChild(loading('Fetching open approvals…'));
+  root.appendChild(panel('Open queue', 'GET /bridge/approvals', openMount));
+
+  const ledgerMount = el('div', {});
+  root.appendChild(panel('Decision ledger', '.maddu/events/*.ndjson · APPROVAL_DECIDED', ledgerMount));
+
+  const policyMount = el('div', {});
+  root.appendChild(panel('Standing policies', 'APPROVAL_POLICY_SET', policyMount));
+
+  function refresh() {
+    fetchApprovals().then((a) => {
+      openMount.innerHTML = '';
+      ledgerMount.innerHTML = '';
+      policyMount.innerHTML = '';
+      if (!a) {
+        openMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+        return;
+      }
+      if (a.open.length === 0) {
+        openMount.appendChild(placeholder('No pending approvals', 'A worker can request one via POST /bridge/approvals/request.'));
+      } else {
+        for (const ap of a.open) {
+          const card = el('div', { class: 'approval' }, [
+            el('div', { class: 'approval-body' }, [
+              el('div', { class: 'approval-tool' }, ap.tool),
+              el('div', { class: 'approval-meta' }, [
+                `lane: ${ap.lane || '—'}  ·  asked by: ${ap.actor || 'anon'}  ·  ${ap.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}`
+              ]),
+              ap.action  ? el('div', { class: 'approval-action' }, ap.action) : null,
+              ap.summary ? el('div', { class: 'approval-summary' }, ap.summary) : null
+            ]),
+            el('div', { class: 'approval-actions' }, [
+              makeDecisionButton('allow-once', 'Allow once', 'btn-allow', ap.approvalId, refresh),
+              makeDecisionButton('allow-always', 'Allow always', 'btn-allow', ap.approvalId, refresh),
+              makeDecisionButton('deny', 'Deny', 'btn-deny', ap.approvalId, refresh),
+              makeDecisionButton('deny-always', 'Deny always', 'btn-deny-hard', ap.approvalId, refresh)
+            ])
+          ]);
+          openMount.appendChild(card);
+        }
+      }
+
+      if (a.ledger.length === 0) {
+        ledgerMount.appendChild(placeholder('No decisions yet', 'Decisions appended as APPROVAL_DECIDED events.'));
+      } else {
+        for (const d of a.ledger.slice().reverse()) {
+          const cls = d.decision.startsWith('allow') ? 'ledger-decision-allow' : 'ledger-decision-deny';
+          ledgerMount.appendChild(el('div', { class: 'ledger-row' }, [
+            el('span', {}, d.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+            el('span', { class: cls }, d.decision),
+            el('span', {}, `${d.tool || '—'}@${d.lane || '—'}`),
+            el('span', {}, d.reason || '')
+          ]));
+        }
+      }
+
+      if (a.policies.length === 0) {
+        policyMount.appendChild(placeholder('No standing policies', 'Choose "Allow always" or "Deny always" on a decision, or set via `maddu approval policy`.'));
+      } else {
+        for (const p of a.policies) {
+          const cls = p.decision === 'allow-always' ? 'ledger-decision-allow' : 'ledger-decision-deny';
+          policyMount.appendChild(el('div', { class: 'ledger-row' }, [
+            el('span', {}, p.setAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+            el('span', { class: cls }, p.decision),
+            el('span', {}, `${p.tool || '*'}@${p.lane || '*'}`),
+            el('span', {}, p.setBy || '')
+          ]));
+        }
+      }
+    });
+  }
+
+  refresh();
+  // Local poll in addition to the global chrome refresh, so the queue feels live.
+  const interval = setInterval(refresh, 3000);
+  // Best-effort cleanup when the view is replaced.
+  els.view.addEventListener('routechange', () => clearInterval(interval), { once: true });
+
+  return root;
+}
+
+function makeDecisionButton(decision, label, klass, approvalId, onDone) {
+  const btn = el('button', { class: klass }, label);
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      await postApprovalDecision(approvalId, decision, null);
+      onDone();
+    } catch (err) {
+      btn.textContent = 'error';
+      console.error(err);
+    }
+  });
+  return btn;
 }
 
 function renderSettings() {

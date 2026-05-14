@@ -113,7 +113,7 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 
 .rail-link {
   display: grid;
-  grid-template-columns: 20px 1fr;
+  grid-template-columns: 20px 1fr auto;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
@@ -124,6 +124,17 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   text-transform: uppercase;
   border-left: 2px solid transparent;
   transition: color 90ms, background 90ms, border-color 90ms;
+}
+.rail-link-badge {
+  font-family: var(--m-font-mono);
+  font-size: 10px;
+  background: var(--m-accent-warm);
+  color: var(--m-bg-0);
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 16px;
+  text-align: center;
+  letter-spacing: 0;
 }
 .rail-link:hover {
   color: var(--m-fg-0);
@@ -309,6 +320,63 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   margin-bottom: 6px;
   letter-spacing: 0.04em;
 }
+
+/* approval cards */
+.approval {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  background: var(--m-bg-2);
+  border: 1px solid var(--m-line);
+  border-left: 3px solid var(--m-accent-warm);
+  padding: 14px 18px;
+  margin-bottom: 12px;
+}
+.approval-body { min-width: 0; }
+.approval-tool {
+  font-family: var(--m-font-cond);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--m-fg-0);
+  text-transform: uppercase;
+  font-size: 14px;
+}
+.approval-meta {
+  font-family: var(--m-font-mono);
+  font-size: 11px;
+  color: var(--m-fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+.approval-action { color: var(--m-fg-1); margin-top: 6px; font-size: 13px; }
+.approval-summary { color: var(--m-fg-2); margin-top: 4px; font-size: 13px; }
+.approval-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 130px;
+}
+.btn-allow      { border-color: rgba(111,168,162,0.4); color: var(--m-signal); }
+.btn-allow:hover{ background: rgba(111,168,162,0.1); }
+.btn-deny       { border-color: rgba(212,169,107,0.4); color: var(--m-accent-warm); }
+.btn-deny:hover { background: rgba(212,169,107,0.1); }
+.btn-deny-hard  { border-color: rgba(180,90,90,0.6); color: #c0a0a0; }
+.btn-deny-hard:hover { background: rgba(180,90,90,0.1); }
+
+/* ledger row */
+.ledger-row {
+  display: grid;
+  grid-template-columns: 110px 100px 1fr auto;
+  gap: 12px;
+  font-family: var(--m-font-mono);
+  font-size: 12px;
+  color: var(--m-fg-2);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--m-line-soft);
+}
+.ledger-decision-allow { color: var(--m-signal); }
+.ledger-decision-deny  { color: #c8a878; }
 
 /* signal dot for live status */
 .signal {

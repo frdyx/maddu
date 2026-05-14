@@ -127,7 +127,9 @@ async function handleBridge(req, res, url, ctx) {
         events: proj.eventCount,
         activeSessions: proj.activeSessions.length,
         claims: proj.claims.length,
-        sliceStops: proj.sliceStops.length
+        sliceStops: proj.sliceStops.length,
+        openApprovals: proj.approvals.open.length,
+        policies: proj.approvals.policies.length
       }
     });
   }
@@ -256,6 +258,85 @@ async function handleBridge(req, res, url, ctx) {
       data: { message: body.message, kind: body.kind || 'note' }
     });
     return sendJson(res, 200, { ok: true, event: ev });
+  }
+
+  // ── approvals (Phase A1) ──────────────────────────────────────────────
+  if (path === '/bridge/approvals' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, proj.approvals);
+  }
+  if (path === '/bridge/approvals/request' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.tool) return sendJson(res, 400, { error: 'tool required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.APPROVAL_REQUESTED,
+      actor: body.sessionId || null,
+      lane: body.lane || null,
+      data: {
+        tool: body.tool,
+        action: body.action || null,
+        summary: body.summary || null,
+        payload: body.payload || null
+      }
+    });
+    // Re-project so callers see if a policy auto-decided this approval.
+    const proj = await project(repoRoot);
+    const open = proj.approvals.open.find((a) => a.approvalId === ev.id);
+    const dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
+    return sendJson(res, 200, {
+      approvalId: ev.id,
+      status: dec ? 'decided' : 'open',
+      decision: dec ? dec.decision : null,
+      autoDecided: dec ? dec.reason && dec.reason.startsWith('policy:') : false,
+      open: open || null
+    });
+  }
+  if (path === '/bridge/approvals/respond' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.approvalId) return sendJson(res, 400, { error: 'approvalId required' });
+    if (!body.decision) return sendJson(res, 400, { error: 'decision required' });
+    const valid = ['allow-once', 'allow-always', 'deny', 'deny-always'];
+    if (!valid.includes(body.decision)) return sendJson(res, 400, { error: `decision must be one of ${valid.join('|')}` });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.APPROVAL_DECIDED,
+      actor: body.actor || 'operator',
+      lane: body.lane || null,
+      data: {
+        approvalId: body.approvalId,
+        decision: body.decision,
+        reason: body.reason || null,
+        // Carry through tool/lane on the decision so a request that was already
+        // auto-resolved by policy still surfaces in the ledger row.
+        tool: body.tool || null
+      }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+  if (path === '/bridge/approvals/policies' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.tool) return sendJson(res, 400, { error: 'tool required (use "*" for any tool)' });
+    if (!body.decision) return sendJson(res, 400, { error: 'decision required' });
+    const valid = ['allow-always', 'deny', 'clear'];
+    if (!valid.includes(body.decision)) return sendJson(res, 400, { error: `decision must be one of ${valid.join('|')}` });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.APPROVAL_POLICY_SET,
+      actor: body.actor || 'operator',
+      lane: body.lane || null,
+      data: { tool: body.tool, lane: body.lane || null, decision: body.decision }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+  // Approval status by id: /bridge/approvals/<approvalId>
+  if (path.startsWith('/bridge/approvals/') && req.method === 'GET') {
+    const id = path.slice('/bridge/approvals/'.length);
+    if (id && !id.includes('/')) {
+      const proj = await project(repoRoot);
+      const open = proj.approvals.open.find((a) => a.approvalId === id);
+      if (open) return sendJson(res, 200, { status: 'open', ...open });
+      const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
+      if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
+      return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
   }
 
   // ── events: poll-since-cursor (long-poll variant lands in Slice 6) ────
