@@ -935,7 +935,9 @@ async function handleBridge(req, res, url, ctx) {
 
   // ── docs (in-cockpit help) ────────────────────────────────────────────
   if (path === '/bridge/docs' && req.method === 'GET') {
-    return sendJson(res, 200, { docs: await listDocs() });
+    const docs = await listDocs();
+    const backlinks = await buildBacklinks(docs);
+    return sendJson(res, 200, { docs, backlinks });
   }
   if (path.startsWith('/bridge/docs/') && req.method === 'GET') {
     const slug = decodeURIComponent(path.slice('/bridge/docs/'.length));
@@ -1001,6 +1003,34 @@ async function readDoc(slug) {
   } catch {
     return null;
   }
+}
+
+// Scan every doc body for [text](other.md[#anchor]) cross-refs and return
+// a { targetSlug: [{ from, fromTitle, anchor }] } map. Used by the cockpit
+// to render "Referenced by" footers without needing to load every page.
+let _backlinksCache = null;
+let _backlinksCachedAt = 0;
+async function buildBacklinks(docsList) {
+  // 10-second cache. Doc edits are infrequent; this lookup runs on every
+  // /bridge/docs request from the cockpit.
+  if (_backlinksCache && Date.now() - _backlinksCachedAt < 10_000) return _backlinksCache;
+  const dir = await resolveDocsDir();
+  if (!dir) return {};
+  const out = {};
+  for (const d of docsList) {
+    let body;
+    try { body = await readFile(join(dir, d.file), 'utf8'); } catch { continue; }
+    const re = /\[([^\]]+)\]\(\.?\/?([a-zA-Z0-9_\-]+)\.md(?:#([a-zA-Z0-9_\-]+))?\)/g;
+    let m;
+    while ((m = re.exec(body)) !== null) {
+      const targetSlug = m[2];
+      if (targetSlug === d.slug) continue; // self
+      (out[targetSlug] ||= []).push({ from: d.slug, fromTitle: d.title || d.slug, anchor: m[3] || null, linkText: m[1] });
+    }
+  }
+  _backlinksCache = out;
+  _backlinksCachedAt = Date.now();
+  return out;
 }
 
 function pickPort() {
