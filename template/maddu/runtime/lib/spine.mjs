@@ -36,7 +36,11 @@ export const EVENT_TYPES = {
   MAILBOX_READ:         'MAILBOX_READ',
   TASK_CREATED:         'TASK_CREATED',
   TASK_UPDATED:         'TASK_UPDATED',
-  TASK_COMPLETED:       'TASK_COMPLETED'
+  TASK_COMPLETED:       'TASK_COMPLETED',
+  SKILL_CREATED:        'SKILL_CREATED',
+  SKILL_UPDATED:        'SKILL_UPDATED',
+  SKILL_DELETED:        'SKILL_DELETED',
+  SKILL_APPLIED:        'SKILL_APPLIED'
 };
 
 function genId(ts) {
@@ -55,6 +59,12 @@ export function genTaskId() {
   const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
   const r = randomBytes(3).toString('hex');
   return `tsk_${t}_${r}`;
+}
+
+export function genSkillId() {
+  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const r = randomBytes(3).toString('hex');
+  return `skl_${t}_${r}`;
 }
 
 async function ensureDirs(paths) {

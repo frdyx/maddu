@@ -16,6 +16,7 @@ import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, gen
 import { project } from './lib/projections.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
+import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './lib/skills.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -135,7 +136,8 @@ async function handleBridge(req, res, url, ctx) {
         memoryFacts: (await readMemory(repoRoot)).length,
         unreadMail: await mailboxTotalUnread(repoRoot),
         tasks: proj.tasks.length,
-        openTasks: proj.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length
+        openTasks: proj.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
+        skills: (await listSkills(repoRoot)).length
       }
     });
   }
@@ -342,6 +344,61 @@ async function handleBridge(req, res, url, ctx) {
       const dec = proj.approvals.ledger.find((l) => l.approvalId === id);
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
+    }
+  }
+
+  // ── skills (Phase B4) ─────────────────────────────────────────────────
+  if (path === '/bridge/skills' && req.method === 'GET') {
+    const all = await listSkills(repoRoot);
+    return sendJson(res, 200, { skills: all });
+  }
+  if (path === '/bridge/skills' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.title) return sendJson(res, 400, { error: 'title required' });
+    const saved = await saveSkill(repoRoot, body);
+    return sendJson(res, 200, { ok: true, skill: saved });
+  }
+  if (path === '/bridge/skills/from-slice' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.eventId) return sendJson(res, 400, { error: 'eventId required' });
+    const all = await readAll(repoRoot);
+    const ev = all.find((e) => e.id === body.eventId);
+    if (!ev) return sendJson(res, 404, { error: 'event not found' });
+    if (ev.type !== 'SLICE_STOP') return sendJson(res, 400, { error: 'event is not a SLICE_STOP' });
+    const draft = draftFromSliceStop(ev);
+    const saved = await saveSkill(repoRoot, {
+      ...draft,
+      title: body.title || draft.title,
+      when: body.when || draft.when,
+      tags: body.tags || draft.tags,
+      by: body.by || null
+    });
+    return sendJson(res, 200, { ok: true, skill: saved });
+  }
+  if (path.startsWith('/bridge/skills/')) {
+    const rest = path.slice('/bridge/skills/'.length);
+    if (rest.endsWith('/apply') && req.method === 'POST') {
+      const id = rest.slice(0, -'/apply'.length);
+      const body = (await readBody(req)) || {};
+      try {
+        const s = await applySkill(repoRoot, id, body.by || null, body.sessionId || null);
+        return sendJson(res, 200, { ok: true, applied: { id, title: s.title } });
+      } catch (err) { return sendJson(res, 404, { error: err.message }); }
+    }
+    if (req.method === 'GET' && !rest.includes('/')) {
+      const s = await readSkill(repoRoot, rest);
+      if (!s) return sendJson(res, 404, { error: 'skill not found', id: rest });
+      return sendJson(res, 200, s);
+    }
+    if (req.method === 'POST' && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      const saved = await saveSkill(repoRoot, { ...body, id: rest });
+      return sendJson(res, 200, { ok: true, skill: saved });
+    }
+    if (req.method === 'DELETE' && !rest.includes('/')) {
+      const body = (await readBody(req)) || {};
+      await deleteSkill(repoRoot, rest, body.by || null);
+      return sendJson(res, 200, { ok: true });
     }
   }
 

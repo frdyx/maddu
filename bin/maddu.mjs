@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -38,6 +38,7 @@ Commands:
   memory         Subcommands: list | search | extract.              (Phase A3)
   mailbox        Subcommands: counts | list | send | read.           (Phase B2)
   task           Subcommands: list | show | create | update | complete. (Phase B3)
+  skill          Subcommands: list | show | create | from-slice | apply | delete. (Phase B4)
 
 Flags:
   --version      Print framework version.

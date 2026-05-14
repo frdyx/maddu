@@ -26,7 +26,8 @@ export async function loadSpineLib() {
   const projections = await import(pathToFileURL(join(dir, 'projections.mjs')).href);
   const hindsight = await import(pathToFileURL(join(dir, 'hindsight.mjs')).href);
   const mailbox = await import(pathToFileURL(join(dir, 'mailbox.mjs')).href);
-  return { paths, spine, projections, hindsight, mailbox };
+  const skills = await import(pathToFileURL(join(dir, 'skills.mjs')).href);
+  return { paths, spine, projections, hindsight, mailbox, skills };
 }
 
 export async function resolveRepoRoot(paths) {

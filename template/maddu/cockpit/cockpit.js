@@ -7,6 +7,7 @@ const ROUTES = {
   events:     { title: 'Events',     render: renderEvents,     description: 'Live cursor stream of the append-only spine. Filters by type. Pause/resume.' },
   mailbox:    { title: 'Mailbox',    render: renderMailbox,    description: 'Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.' },
   tasks:      { title: 'Tasks',      render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
+  skills:     { title: 'Skills',     render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -899,6 +900,119 @@ function taskCard(t, onChange) {
   return card;
 }
 
+async function fetchSkills() {
+  try { const r = await fetch('/bridge/skills', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+async function fetchSkill(id) {
+  try { const r = await fetch(`/bridge/skills/${encodeURIComponent(id)}`, { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+function renderSkills() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Skills'));
+  root.appendChild(el('p', {}, ROUTES.skills.description));
+
+  let selected = null;
+
+  // create form
+  const ftitle = el('input', { type: 'text', placeholder: 'Skill title…', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const fwhen = el('input', { type: 'text', placeholder: 'when (one line)…', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const ftags = el('input', { type: 'text', placeholder: 'tags (comma)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const fbtn = el('button', {}, 'Create');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;' }, [ftitle, fwhen, ftags, fbtn]);
+  root.appendChild(form);
+
+  const grid = el('div', { style: 'display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start;' });
+  const listMount = el('div', {});
+  const detailMount = el('div', {});
+  grid.appendChild(listMount);
+  grid.appendChild(detailMount);
+  root.appendChild(grid);
+
+  fbtn.addEventListener('click', async () => {
+    const title = ftitle.value.trim();
+    if (!title) return;
+    fbtn.disabled = true;
+    try {
+      const r = await fetch('/bridge/skills', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title, when: fwhen.value.trim(),
+          tags: ftags.value.split(',').map((x) => x.trim()).filter(Boolean),
+          by: composer.currentSession || null
+        })
+      });
+      const d = await r.json();
+      ftitle.value = ''; fwhen.value = ''; ftags.value = '';
+      selected = d.skill.id;
+      refresh();
+    } finally { fbtn.disabled = false; }
+  });
+
+  function refresh() {
+    listMount.innerHTML = '';
+    listMount.appendChild(loading('Loading skills…'));
+    fetchSkills().then((d) => {
+      listMount.innerHTML = '';
+      if (!d || d.skills.length === 0) {
+        listMount.appendChild(placeholder('No skills yet', 'Create one above or run `maddu skill from-slice <eventId>`.'));
+        detailMount.innerHTML = '';
+        return;
+      }
+      for (const s of d.skills) {
+        const isSel = selected === s.id;
+        const row = el('div', {
+          style: 'padding:8px 10px;border-bottom:1px solid var(--m-line-soft);cursor:pointer;' + (isSel ? 'background:var(--m-bg-3);' : '')
+        }, [
+          el('div', { style: 'font-family:var(--m-font-cond);font-weight:500;color:var(--m-fg-0);font-size:13px;letter-spacing:0.03em;' }, s.title),
+          el('div', { class: 'event-actor', style: 'margin-top:2px;' }, s.id),
+          s.when ? el('div', { class: 'approval-summary' }, s.when) : null,
+          s.tags.length ? el('div', { class: 'event-actor' }, s.tags.join(' · ')) : null
+        ]);
+        row.addEventListener('click', () => { selected = s.id; refresh(); });
+        listMount.appendChild(row);
+      }
+      if (!selected) selected = d.skills[0].id;
+      loadDetail(selected);
+    });
+  }
+
+  function loadDetail(id) {
+    detailMount.innerHTML = '';
+    detailMount.appendChild(loading('Loading skill…'));
+    fetchSkill(id).then((s) => {
+      detailMount.innerHTML = '';
+      if (!s) { detailMount.appendChild(placeholder('Not found', id)); return; }
+      const applyBtn = el('button', { class: 'btn-allow' }, 'Apply');
+      applyBtn.addEventListener('click', async () => {
+        applyBtn.disabled = true; applyBtn.textContent = '…';
+        try {
+          await fetch(`/bridge/skills/${encodeURIComponent(id)}/apply`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ by: composer.currentSession || null, sessionId: composer.currentSession || null })
+          });
+          applyBtn.textContent = '✓ applied';
+          setTimeout(() => { applyBtn.disabled = false; applyBtn.textContent = 'Apply'; }, 1500);
+        } catch (err) { applyBtn.textContent = 'error'; console.error(err); }
+      });
+
+      detailMount.appendChild(panel(s.title, s.id, el('div', {}, [
+        s.when ? el('div', { class: 'approval-meta' }, `WHEN: ${s.when}`) : null,
+        Array.isArray(s.tags) && s.tags.length ? el('div', { class: 'event-actor', style: 'margin-top:4px;' }, `tags: ${s.tags.join(', ')}`) : null,
+        Array.isArray(s.provenance) && s.provenance.length ? el('div', { class: 'event-actor', style: 'margin-top:4px;' }, `provenance: ${s.provenance.length} slice(s) — ${s.provenance.map((p) => p.event).join(', ')}`) : null,
+        el('div', { style: 'margin:12px 0;' }, applyBtn),
+        el('pre', { style: 'background:var(--m-bg-2);border:1px solid var(--m-line);padding:14px;font-size:12px;color:var(--m-fg-1);overflow:auto;white-space:pre-wrap;' }, s.body || '(empty body)')
+      ])));
+    });
+  }
+
+  refresh();
+  const handler = (e) => { if (e.detail.type && e.detail.type.startsWith('SKILL_')) refresh(); };
+  stream.bus.addEventListener('event', handler);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
+  return root;
+}
+
 function renderSettings() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Settings'));
@@ -943,7 +1057,8 @@ const COMMANDS = [
   { name: 'task',    args: '<title>',                                desc: 'Quick-create a task (current session as creator).' },
   { name: 'task-done', args: '<id>',                                 desc: 'Mark a task complete (auto-unblocks dependents).' },
   { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
-  { name: 'skills',  args: '',                                       desc: 'Stub — skill gallery lands in Phase B4.' },
+  { name: 'skills',  args: '',                                       desc: 'List all skills in the gallery.' },
+  { name: 'skill',   args: '<id>',                                   desc: 'Apply a skill to the current session.' },
   { name: 'runtime', args: '',                                       desc: 'Stub — runtime adapters land in Phase C1.' },
   { name: 'clear',   args: '',                                       desc: 'Clear the composer.' }
 ];
@@ -1162,8 +1277,18 @@ async function runCommand(cmd) {
     }
     case 'rollback':
       return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');
-    case 'skills':
-      return showToast('skills gallery lands in Phase B4. Try /usage or /lane list for now.', 'warn');
+    case 'skills': {
+      const d = await fetchJson('/bridge/skills');
+      if (!d.skills.length) return showToast('(no skills yet)  ·  /task to make one, then /skill <id>', 'ok');
+      const lines = d.skills.map((s) => `${s.id}  ${s.title}${s.when ? '  ·  ' + s.when : ''}`).join('\n');
+      return showToast(lines, 'ok');
+    }
+    case 'skill': {
+      const id = cmd.rest.trim();
+      if (!id) return showToast('usage: /skill <id>', 'err');
+      const r = await postJson(`/bridge/skills/${encodeURIComponent(id)}/apply`, { sessionId: sess, by: sess });
+      return showToast(`applied: ${r.applied.title}`, 'ok');
+    }
     case 'runtime':
       return showToast('runtime adapters land in Phase C1. Try /usage for now.', 'warn');
     case 'clear':
