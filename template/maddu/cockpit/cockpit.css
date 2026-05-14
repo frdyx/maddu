@@ -274,9 +274,11 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 
 .stage {
   display: grid;
-  /* head · stuck-banner (auto, 0 when display:none) · route body (1fr) ·
-   * footer-composer (auto — grows with content up to .composer-input max-height) */
-  grid-template-rows: var(--m-head-h) auto 1fr auto;
+  /* Three explicit rows now — the footer-composer is NOT in the grid flow;
+   * it's absolute-positioned over the body so growing the textarea overlays
+   * route content instead of pushing it (the body always stays put). */
+  grid-template-rows: var(--m-head-h) auto 1fr;
+  position: relative;
   min-width: 0;
 }
 
@@ -375,16 +377,32 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 .stage-banner.danger.pulse    { animation: banner-pulse-danger 1.5s ease-out; }
 
 .stage-body {
-  padding: 24px;
+  /* extra bottom padding reserves space for the resting composer footer
+   * (~80 px = 48 composer + 24 meta + breathing room) so the last bit of
+   * route content isn't permanently hidden underneath the overlay. When
+   * the composer is expanded, content above 80 px from the bottom gets
+   * temporarily covered until the user submits/clears. */
+  padding: 24px 24px 96px;
   overflow: auto;
   background: var(--m-bg-0);
 }
 
 .stage-foot {
+  /* Floats over the body — grows upward as the textarea expands. Glassy
+   * backdrop so route content shows through, blurred, while the composer
+   * is the foreground surface. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
   display: flex;
   flex-direction: column;
-  background: var(--m-bg-1);
+  background: rgba(0, 8, 18, 0.78);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
   border-top: 1px solid var(--m-line);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.55);
   font-family: var(--m-font-mono);
   color: var(--m-fg-3);
   letter-spacing: 0.04em;
