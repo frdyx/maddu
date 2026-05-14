@@ -8,6 +8,7 @@ const ROUTES = {
   mailbox:    { title: 'Mailbox',    render: renderMailbox,    description: 'Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.' },
   tasks:      { title: 'Tasks',      render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
   skills:     { title: 'Skills',     render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
+  search:     { title: 'Search',     render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
   operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
   chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
@@ -150,7 +151,8 @@ function formatUptime(ms) {
 
 function currentRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
-  const id = raw.split('/')[0];
+  // Split on / or ? so #/search?q=foo resolves to "search".
+  const id = raw.split(/[/?]/)[0];
   return ROUTES[id] ? id : 'dashboard';
 }
 
@@ -1046,6 +1048,101 @@ function renderSkills() {
   return root;
 }
 
+function renderSearch() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Search'));
+  root.appendChild(el('p', {}, ROUTES.search.description));
+
+  const KINDS = ['event', 'slice', 'memory', 'skill', 'mailbox', 'inbox'];
+  const input = el('input', {
+    type: 'text', placeholder: 'Type to search across all corpora…',
+    style: 'width:100%;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:8px 12px;font-family:var(--m-font-mono);font-size:13px;'
+  });
+  // Kind filter checkboxes
+  const filterBox = el('div', { style: 'display:flex;gap:12px;margin:8px 0;flex-wrap:wrap;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-2);' });
+  const checks = {};
+  for (const k of KINDS) {
+    const id = `k-${k}`;
+    const cb = el('input', { type: 'checkbox', id, checked: 'checked', style: 'margin-right:4px;' });
+    cb.checked = true;
+    checks[k] = cb;
+    const lbl = el('label', { for: id, style: 'cursor:pointer;color:var(--m-fg-2);' });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(k));
+    filterBox.appendChild(lbl);
+  }
+
+  root.appendChild(input);
+  root.appendChild(filterBox);
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  let debounceTimer = null;
+  let lastQuery = '';
+
+  async function run() {
+    const q = input.value.trim();
+    lastQuery = q;
+    if (!q) { mount.innerHTML = ''; mount.appendChild(placeholder('Type a query', 'Substring match across events, slice-stops, memory, skills, mailbox, inbox.')); return; }
+    const enabled = KINDS.filter((k) => checks[k].checked);
+    mount.innerHTML = '';
+    mount.appendChild(loading(`Searching for "${q}"…`));
+    try {
+      const r = await fetch(`/bridge/search?q=${encodeURIComponent(q)}&kinds=${enabled.join(',')}&limit=200`, { cache: 'no-store' });
+      if (q !== lastQuery) return;
+      const d = await r.json();
+      mount.innerHTML = '';
+      if (d.count === 0) { mount.appendChild(placeholder('No matches', 'Try a different query or expand the kind filters.')); return; }
+      mount.appendChild(panel(`${d.count} match${d.count === 1 ? '' : 'es'}`, `GET /bridge/search?q=${encodeURIComponent(q)}`, (() => {
+        const list = el('div', {});
+        // Group by kind
+        const groups = {};
+        for (const r of d.results) (groups[r.kind] || (groups[r.kind] = [])).push(r);
+        for (const kind of ['slice', 'memory', 'skill', 'mailbox', 'inbox', 'event']) {
+          const g = groups[kind];
+          if (!g || g.length === 0) continue;
+          const ccls = { event: 't-session', slice: 't-slice', memory: 't-framework', skill: 't-lane', mailbox: 't-approval', inbox: 't-inbox' }[kind] || '';
+          list.appendChild(el('div', { class: 'panel-title', style: 'margin:12px 0 6px;' }, `${kind.toUpperCase()}  (${g.length})`));
+          for (const r of g) {
+            list.appendChild(el('div', { class: 'ledger-row' }, [
+              el('span', {}, r.ts ? r.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'),
+              el('span', { class: `event-type ${ccls}` }, r.kind),
+              el('span', {}, [
+                el('div', { style: 'color:var(--m-fg-0);' }, r.title || r.id),
+                r.snippet && r.snippet !== r.title ? el('div', { class: 'event-actor' }, r.snippet) : null
+              ]),
+              el('span', { class: 'event-actor' }, r.lane || '')
+            ]));
+          }
+        }
+        return list;
+      })()));
+    } catch (err) {
+      mount.innerHTML = '';
+      mount.appendChild(placeholder('Search error', err.message || String(err)));
+    }
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(run, 250);
+  });
+  for (const k of KINDS) checks[k].addEventListener('change', run);
+
+  // Allow prefilling via #/search?q=foo
+  const hash = location.hash;
+  const qm = hash.match(/[?&]q=([^&]+)/);
+  if (qm) {
+    input.value = decodeURIComponent(qm[1]);
+    setTimeout(run, 0);
+  } else {
+    run();
+  }
+  setTimeout(() => input.focus(), 0);
+  return root;
+}
+
 function renderSettings() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Settings'));
@@ -1091,6 +1188,7 @@ const COMMANDS = [
   { name: 'task-done', args: '<id>',                                 desc: 'Mark a task complete (auto-unblocks dependents).' },
   { name: 'workers', args: '',                                       desc: 'List running / stuck workers.' },
   { name: 'kill',    args: '<workerId> [reason]',                    desc: 'Mark a worker killed (operator-initiated).' },
+  { name: 'search',  args: '<query>',                                desc: 'Jump to /search prefilled with the query.' },
   { name: 'rollback',args: '<event-or-approval-id>',                 desc: 'Stub — full git-worktree rollback lands in Phase C4.' },
   { name: 'skills',  args: '',                                       desc: 'List all skills in the gallery.' },
   { name: 'skill',   args: '<id>',                                   desc: 'Apply a skill to the current session.' },
@@ -1322,6 +1420,12 @@ async function runCommand(cmd) {
       const [, id, reason] = m;
       await postJson(`/bridge/workers/${id}/kill`, { reason: reason || null, by: sess });
       return showToast(`killed ${id}`, 'ok');
+    }
+    case 'search': {
+      const q = cmd.rest.trim();
+      if (!q) return showToast('usage: /search <query>', 'err');
+      location.hash = `#/search?q=${encodeURIComponent(q)}`;
+      return showToast(`→ /search?q=${q}`, 'ok');
     }
     case 'rollback':
       return showToast('rollback is a stub — full implementation lands in Phase C4 (git-worktree).', 'warn');

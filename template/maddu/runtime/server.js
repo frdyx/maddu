@@ -17,6 +17,7 @@ import { project } from './lib/projections.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
 import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './lib/skills.mjs';
+import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -347,6 +348,17 @@ async function handleBridge(req, res, url, ctx) {
       if (dec) return sendJson(res, 200, { status: 'decided', ...dec });
       return sendJson(res, 404, { error: 'approval not found', approvalId: id });
     }
+  }
+
+  // ── search (Phase B6) ─────────────────────────────────────────────────
+  if (path === '/bridge/search' && req.method === 'GET') {
+    const q = url.searchParams.get('q') || '';
+    const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
+    const kindsParam = url.searchParams.get('kinds');
+    const kinds = kindsParam ? kindsParam.split(',').map((x) => x.trim()).filter(Boolean) : null;
+    if (!q.trim()) return sendJson(res, 200, { query: q, results: [], count: 0, kinds: SEARCH_KINDS });
+    const out = await crossSearch(repoRoot, q, { kinds, limit });
+    return sendJson(res, 200, { ...out, kinds: SEARCH_KINDS });
   }
 
   // ── workers / heartbeat (Phase B5) ────────────────────────────────────
