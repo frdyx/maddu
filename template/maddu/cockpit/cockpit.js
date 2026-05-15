@@ -2,6 +2,7 @@
 // Hash-routed; views render into #route-view.
 
 const ROUTES = {
+  conductor:  { title: 'Conductor',  render: renderConductor,  description: 'Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.' },
   workbench:  { title: 'Workbench',  render: renderWorkbench,  description: 'OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.' },
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
@@ -191,11 +192,199 @@ function formatUptime(ms) {
   return d + 'd ' + (h % 24) + 'h';
 }
 
+// ─── Inspector (persistent right panel) ─────────────────────────────────
+//
+// Detail surface for any entity. Tabs: overview · evidence · actions ·
+// related · raw. Render is by-kind; renderers below dispatch on entity kind.
+// No modals — Inspector lives in #inspector-panel and slides in.
+
+const inspector = {
+  open: false,
+  entity: null,    // { kind, id, data }
+  tab: 'overview',
+  el: null,
+  bodyEl: null,
+  titleEl: null,
+  subEl: null,
+  tabsEl: null
+};
+
+function ensureInspector() {
+  if (inspector.el) return inspector.el;
+  const panelEl = document.createElement('aside');
+  panelEl.id = 'inspector-panel';
+  panelEl.className = 'inspector';
+  panelEl.hidden = true;
+  panelEl.innerHTML = `
+    <div class="inspector-head">
+      <div class="inspector-titles">
+        <div class="inspector-title" id="inspector-title">—</div>
+        <div class="inspector-sub" id="inspector-sub">no selection</div>
+      </div>
+      <button type="button" class="inspector-close" id="inspector-close" aria-label="Close inspector">×</button>
+    </div>
+    <nav class="inspector-tabs" id="inspector-tabs"></nav>
+    <div class="inspector-body" id="inspector-body"></div>
+  `;
+  document.getElementById('app').appendChild(panelEl);
+  inspector.el = panelEl;
+  inspector.bodyEl = panelEl.querySelector('#inspector-body');
+  inspector.titleEl = panelEl.querySelector('#inspector-title');
+  inspector.subEl = panelEl.querySelector('#inspector-sub');
+  inspector.tabsEl = panelEl.querySelector('#inspector-tabs');
+  panelEl.querySelector('#inspector-close').addEventListener('click', closeInspector);
+  // Escape closes.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && inspector.open && !e.defaultPrevented) closeInspector();
+  });
+  return panelEl;
+}
+
+function openInspector(entity) {
+  ensureInspector();
+  inspector.entity = entity;
+  inspector.open = true;
+  inspector.tab = 'overview';
+  inspector.el.hidden = false;
+  document.getElementById('app').classList.add('inspector-open');
+  renderInspector();
+}
+
+function closeInspector() {
+  if (!inspector.el) return;
+  inspector.open = false;
+  inspector.entity = null;
+  inspector.el.hidden = true;
+  document.getElementById('app').classList.remove('inspector-open');
+}
+
+function renderInspector() {
+  const e = inspector.entity;
+  if (!e) return;
+  const label = inspectorLabel(e);
+  inspector.titleEl.textContent = label.title;
+  inspector.subEl.textContent = label.sub;
+  inspector.tabsEl.replaceChildren(...INSPECTOR_TABS.map((t) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'inspector-tab' + (t === inspector.tab ? ' active' : '');
+    b.textContent = t;
+    b.addEventListener('click', () => { inspector.tab = t; renderInspector(); });
+    return b;
+  }));
+  inspector.bodyEl.replaceChildren(renderInspectorTab(e, inspector.tab));
+}
+
+const INSPECTOR_TABS = ['overview', 'evidence', 'actions', 'related', 'raw'];
+
+function inspectorLabel(e) {
+  if (!e) return { title: '—', sub: '' };
+  if (e.kind === 'task')      return { title: e.data?.title || e.id || 'task', sub: `task · ${e.data?.lane || 'no lane'} · ${e.data?.status || ''}` };
+  if (e.kind === 'lane')      return { title: e.id || 'lane', sub: `lane · ${e.data?.reasonCode || ''}` };
+  if (e.kind === 'session')   return { title: e.data?.label || e.id, sub: `session · ${e.data?.role || ''}` };
+  if (e.kind === 'claim')     return { title: e.data?.lane || e.id, sub: `claim · ${e.data?.actor || ''}` };
+  if (e.kind === 'approval')  return { title: e.data?.tool || e.id, sub: `approval · ${e.data?.lane || ''}` };
+  if (e.kind === 'event')     return { title: e.data?.type || e.id, sub: `event · ${e.data?.actor || ''}` };
+  if (e.kind === 'sliceStop') return { title: e.data?.summary || e.id, sub: `slice-stop · ${e.data?.actor || ''}` };
+  return { title: e.id || e.kind, sub: e.kind };
+}
+
+function renderInspectorTab(entity, tab) {
+  const fn = INSPECTOR_RENDERERS[tab] || INSPECTOR_RENDERERS.raw;
+  try { return fn(entity); }
+  catch (err) { return placeholder('Inspector error', err.message || String(err)); }
+}
+
+const INSPECTOR_RENDERERS = {
+  overview(e) {
+    const d = e.data || {};
+    const wrap = el('div', {});
+    // Human-labels-first KV list. System refs go in the 'raw' tab.
+    if (e.kind === 'task') {
+      wrap.appendChild(el('dl', { class: 'kv' }, [
+        el('dt', {}, 'title'),       el('dd', {}, d.title || '—'),
+        el('dt', {}, 'lane'),        el('dd', {}, d.lane || '—'),
+        el('dt', {}, 'owner'),       el('dd', {}, d.owner || '—'),
+        el('dt', {}, 'status'),      el('dd', {}, d.status || '—'),
+        el('dt', {}, 'description'), el('dd', {}, d.description || '—')
+      ]));
+    } else if (e.kind === 'lane') {
+      wrap.appendChild(el('dl', { class: 'kv' }, [
+        el('dt', {}, 'lane'),        el('dd', {}, e.id || '—'),
+        el('dt', {}, 'scope'),       el('dd', {}, d.scope || '—'),
+        el('dt', {}, 'progress'),    el('dd', {}, `${Math.round((d.progress || 0) * 100)}%`),
+        el('dt', {}, 'done / total'),el('dd', {}, `${d.done ?? 0} / ${d.total ?? 0}`),
+        el('dt', {}, 'open'),        el('dd', {}, String(d.open ?? 0)),
+        el('dt', {}, 'claims held'), el('dd', {}, String(d.claimsHeld ?? 0)),
+        el('dt', {}, 'reason'),      el('dd', {}, REASON_CODE_LABEL[d.reasonCode] || d.reasonCode || '—')
+      ]));
+    } else {
+      const kv = [];
+      for (const k of Object.keys(d)) {
+        if (typeof d[k] === 'object') continue;
+        kv.push(el('dt', {}, k));
+        kv.push(el('dd', {}, String(d[k] ?? '—')));
+      }
+      wrap.appendChild(el('dl', { class: 'kv' }, kv));
+    }
+    return wrap;
+  },
+  evidence(e) {
+    // Generic: show ts, id, source refs. Specific kinds may extend later.
+    const d = e.data || {};
+    const items = [];
+    if (d.id) items.push(['id', d.id]);
+    if (d.ts) items.push(['ts', formatTs(d.ts)]);
+    if (d.createdAt) items.push(['createdAt', formatTs(d.createdAt)]);
+    if (d.updatedAt) items.push(['updatedAt', formatTs(d.updatedAt)]);
+    if (Array.isArray(d.blockedBy) && d.blockedBy.length) items.push(['blockedBy', d.blockedBy.join(', ')]);
+    if (Array.isArray(d.activeBlockers) && d.activeBlockers.length) items.push(['activeBlockers', d.activeBlockers.join(', ')]);
+    if (!items.length) return placeholder('No evidence', 'No timestamped refs to show for this entity.');
+    const kv = [];
+    for (const [k, v] of items) { kv.push(el('dt', {}, k)); kv.push(el('dd', {}, String(v))); }
+    return el('dl', { class: 'kv' }, kv);
+  },
+  actions(e) {
+    const wrap = el('div', { class: 'inspector-actions' });
+    if (e.kind === 'task') {
+      wrap.appendChild(el('button', { class: 'm-btn', type: 'button' }, 'Open in Tasks'))
+         .addEventListener('click', () => { location.hash = `#/tasks?focus=${encodeURIComponent(e.id)}`; closeInspector(); });
+    } else if (e.kind === 'lane') {
+      wrap.appendChild(el('button', { class: 'm-btn', type: 'button' }, 'Open Swarm'))
+         .addEventListener('click', () => { location.hash = '#/swarm'; closeInspector(); });
+    } else if (e.kind === 'approval') {
+      wrap.appendChild(el('button', { class: 'm-btn', type: 'button' }, 'Open Approvals'))
+         .addEventListener('click', () => { location.hash = '#/approvals'; closeInspector(); });
+    }
+    if (!wrap.children.length) wrap.appendChild(placeholder('No actions', 'No quick actions defined for this entity kind yet.'));
+    return wrap;
+  },
+  related(e) {
+    // Best-effort by kind. Tasks → blockers/blocks. Lane → tasks in lane.
+    const d = e.data || {};
+    if (e.kind === 'task') {
+      const lines = [];
+      if (Array.isArray(d.blockedBy) && d.blockedBy.length) lines.push(['blocked by', d.blockedBy.join(', ')]);
+      if (Array.isArray(d.blocks) && d.blocks.length) lines.push(['blocks', d.blocks.join(', ')]);
+      if (!lines.length) return placeholder('No relations', 'This task has no blockers or dependents.');
+      const kv = [];
+      for (const [k, v] of lines) { kv.push(el('dt', {}, k)); kv.push(el('dd', {}, v)); }
+      return el('dl', { class: 'kv' }, kv);
+    }
+    return placeholder('No relations', 'No related entities indexed for this kind yet.');
+  },
+  raw(e) {
+    const pre = el('pre', { class: 'inspector-raw' });
+    pre.textContent = JSON.stringify(e.data || e, null, 2);
+    return pre;
+  }
+};
+
 function currentRoute() {
-  const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
+  const raw = location.hash.replace(/^#\/?/, '') || 'conductor';
   // Split on / or ? so #/search?q=foo resolves to "search".
   const id = raw.split(/[/?]/)[0];
-  return ROUTES[id] ? id : 'dashboard';
+  return ROUTES[id] ? id : 'conductor';
 }
 
 function renderRoute() {
@@ -787,6 +976,233 @@ function renderWorkbench() {
   }, { once: true });
 
   return root;
+}
+
+// ─── Conductor (Slice α default landing) ────────────────────────────────
+//
+// Operator's command-control surface. Reads GET /bridge/conductor for a
+// derived view: KPI strip, "Next Command" (safe-next-action), Operation
+// Score Matrix (per-lane progress + reason codes), and Now/Next/Waiting/Done
+// task board. Everything reflects canonical state — no UI memory.
+
+function renderConductor() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Conductor'));
+  root.appendChild(el('p', {}, ROUTES.conductor.description));
+
+  // ── Next Command strip (front and center) ──
+  const nextHost = el('div', { class: 'conductor-next' });
+  nextHost.appendChild(loading('Computing safe next action…'));
+  root.appendChild(nextHost);
+
+  // ── KPI strip ──
+  const kpiHost = el('div', {});
+  root.appendChild(kpiHost);
+
+  // ── Now / Next / Waiting / Done board ──
+  const boardHost = el('div', { class: 'conductor-board' });
+  boardHost.appendChild(loading('Loading task board…'));
+  root.appendChild(panel('Now · Next · Waiting · Done', 'GET /bridge/conductor', boardHost));
+
+  // ── Operation Score Matrix ──
+  const matrixHost = el('div', {});
+  matrixHost.appendChild(loading('Loading per-lane score matrix…'));
+  root.appendChild(panel('Operation Score Matrix', 'per-lane progress · claims · reason codes', matrixHost));
+
+  // ── Recent slice-stop summary ──
+  const sliceHost = el('div', {});
+  root.appendChild(panel('Last slice-stop', 'most recent ritual close', sliceHost));
+
+  let dataLoaded = false;
+  const load = async () => {
+    let view;
+    try {
+      const r = await fetch('/bridge/conductor', { cache: 'no-store' });
+      view = await r.json();
+    } catch {
+      nextHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    dataLoaded = true;
+
+    // Next Command
+    nextHost.replaceChildren(renderNextCommand(view.nextCommand));
+
+    // KPI strip
+    const k = view.kpi || {};
+    kpiHost.replaceChildren(statusGrid([
+      { value: k.activeClaims ?? '—',  label: 'Active claims',    tone: (k.activeClaims > 0 ? 'accent' : 'neutral'), onClick: () => { location.hash = '#/swarm'; } },
+      { value: k.openApprovals ?? '—', label: 'Open approvals',   tone: (k.openApprovals > 0 ? 'warn' : 'ok'),       onClick: () => { location.hash = '#/approvals'; } },
+      { value: k.stuckWorkers ?? '—',  label: 'Stuck workers',    tone: (k.stuckWorkers > 0 ? 'danger' : 'ok'),      onClick: () => { location.hash = '#/swarm'; } },
+      { value: k.idleSessions ?? '—',  label: 'Idle sessions',    tone: (k.idleSessions > 0 ? 'warn' : 'ok'),        onClick: () => { location.hash = '#/swarm'; } },
+      { value: k.openTasks ?? '—',     label: 'Open tasks',       tone: 'accent',                                    onClick: () => { location.hash = '#/tasks'; } },
+      { value: formatAge(k.lastSliceAgeMs), label: 'Last slice-stop', tone: ageTone(k.lastSliceAgeMs),               onClick: () => { location.hash = '#/operations'; } }
+    ]));
+
+    // Board
+    boardHost.replaceChildren(renderConductorBoard(view.board || {}));
+
+    // Score matrix
+    matrixHost.replaceChildren(renderScoreMatrix(view.scoreMatrix || []));
+
+    // Last slice
+    if (k.lastSlice) {
+      sliceHost.replaceChildren(
+        el('dl', { class: 'kv' }, [
+          el('dt', {}, 'id'),      el('dd', {}, k.lastSlice.id || '—'),
+          el('dt', {}, 'when'),    el('dd', {}, formatTs(k.lastSlice.ts)),
+          el('dt', {}, 'age'),     el('dd', {}, formatAge(k.lastSliceAgeMs)),
+          el('dt', {}, 'summary'), el('dd', {}, k.lastSlice.summary || '(no summary)')
+        ])
+      );
+    } else {
+      sliceHost.replaceChildren(placeholder('No slice-stops yet', 'Run your first slice-stop to start writing learnings into the spine.'));
+    }
+  };
+  load();
+
+  // Refresh whenever a new event lands. Debounce by skipping if a load is in flight.
+  let pending = false;
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+
+  return root;
+}
+
+const REASON_CODE_TONE = {
+  approvals_pending: 'warn',
+  workers_stuck:     'danger',
+  task_ready:        'accent',
+  task_blocked:      'warn',
+  slice_stale:       'warn',
+  slice_never:       'blue',
+  all_clear:         'ok',
+  lane_active:       'accent',
+  lane_unclaimed:    'warn',
+  lane_idle:         'ok',
+  lane_empty:        'neutral'
+};
+const REASON_CODE_LABEL = {
+  approvals_pending: 'approvals pending',
+  workers_stuck:     'workers stuck',
+  task_ready:        'task ready',
+  task_blocked:      'task blocked',
+  slice_stale:       'slice stale',
+  slice_never:       'first slice',
+  all_clear:         'all clear',
+  lane_active:       'active',
+  lane_unclaimed:    'unclaimed',
+  lane_idle:         'idle',
+  lane_empty:        'empty'
+};
+
+function renderNextCommand(nc) {
+  if (!nc) return placeholder('No signal', 'Bridge returned no next-command.');
+  const tone = REASON_CODE_TONE[nc.reasonCode] || 'accent';
+  const wrap = el('div', { class: `next-command tone-${tone}` });
+  wrap.appendChild(el('span', { class: 'next-command-glyph' }, '▸'));
+  const body = el('div', { class: 'next-command-body' });
+  body.appendChild(el('div', { class: 'next-command-text' }, nc.text || ''));
+  if (nc.hint) body.appendChild(el('div', { class: 'next-command-hint' }, nc.hint));
+  const meta = el('div', { class: 'next-command-meta' }, [
+    el('span', { class: `next-command-pill tone-${tone}` }, REASON_CODE_LABEL[nc.reasonCode] || nc.reasonCode || 'unknown'),
+    nc.route ? el('span', { class: 'next-command-route' }, `→ /${nc.route}`) : null
+  ]);
+  body.appendChild(meta);
+  wrap.appendChild(body);
+  if (nc.route) {
+    wrap.style.cursor = 'pointer';
+    wrap.addEventListener('click', () => {
+      if (nc.ref && nc.ref.kind === 'task' && nc.ref.id) {
+        location.hash = `#/tasks?inspect=task:${encodeURIComponent(nc.ref.id)}`;
+      } else {
+        location.hash = `#/${nc.route}`;
+      }
+    });
+  }
+  return wrap;
+}
+
+function renderConductorBoard(board) {
+  const wrap = el('div', { class: 'board-grid' });
+  const columns = [
+    { id: 'now',     title: 'Now',     tone: 'blue',    items: board.now || [],     hint: 'in-progress' },
+    { id: 'next',    title: 'Next',    tone: 'accent',  items: board.next || [],    hint: 'ready · no blockers' },
+    { id: 'waiting', title: 'Waiting', tone: 'warn',    items: board.waiting || [], hint: 'blocked on dependency' },
+    { id: 'done',    title: 'Done',    tone: 'ok',      items: board.done || [],    hint: 'recent · last 8' }
+  ];
+  for (const col of columns) {
+    const c = el('div', { class: 'board-col' });
+    c.appendChild(el('div', { class: `board-col-head tone-${col.tone}` }, [
+      el('span', { class: 'board-col-title' }, col.title),
+      el('span', { class: 'board-col-count' }, String(col.items.length))
+    ]));
+    c.appendChild(el('div', { class: 'board-col-hint' }, col.hint));
+    if (col.items.length === 0) {
+      c.appendChild(el('div', { class: 'board-empty' }, '—'));
+    } else {
+      for (const t of col.items.slice(0, 12)) {
+        const card = el('div', { class: 'board-card' });
+        card.appendChild(el('div', { class: 'board-card-title' }, t.title || '(untitled)'));
+        const metaParts = [];
+        if (t.lane) metaParts.push(t.lane);
+        if (t.owner) metaParts.push(`@${t.owner}`);
+        if ((t.activeBlockers || []).length > 0) metaParts.push(`blocked×${t.activeBlockers.length}`);
+        card.appendChild(el('div', { class: 'board-card-meta' }, metaParts.join(' · ') || '—'));
+        card.addEventListener('click', () => openInspector({ kind: 'task', id: t.id, data: t }));
+        c.appendChild(card);
+      }
+    }
+    wrap.appendChild(c);
+  }
+  return wrap;
+}
+
+function renderScoreMatrix(rows) {
+  if (!rows.length) return placeholder('No lanes', 'Lane catalog is empty.');
+  const wrap = el('div', { class: 'score-matrix' });
+  for (const r of rows) {
+    const tone = REASON_CODE_TONE[r.reasonCode] || 'neutral';
+    const row = el('div', { class: 'score-row' });
+    const head = el('div', { class: 'score-head' }, [
+      el('span', { class: 'score-lane' }, r.lane),
+      el('span', { class: `score-pill tone-${tone}` }, REASON_CODE_LABEL[r.reasonCode] || r.reasonCode),
+      el('span', { class: 'score-counts' }, `${r.done}/${r.total}${r.claimsHeld ? ` · claims ×${r.claimsHeld}` : ''}`)
+    ]);
+    row.appendChild(head);
+    row.appendChild(bar(r.progress * 100, r.scope || '', { tone, right: `${Math.round(r.progress * 100)}%` }));
+    row.addEventListener('click', () => openInspector({ kind: 'lane', id: r.lane, data: r }));
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+function formatAge(ms) {
+  if (ms == null) return '—';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+function ageTone(ms) {
+  if (ms == null) return 'neutral';
+  if (ms < 60 * 60 * 1000) return 'ok';
+  if (ms < 4 * 60 * 60 * 1000) return 'accent';
+  if (ms < 24 * 60 * 60 * 1000) return 'warn';
+  return 'danger';
+}
+function formatTs(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z'); }
+  catch { return iso; }
 }
 
 function renderDashboard() {

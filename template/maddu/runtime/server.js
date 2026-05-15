@@ -991,6 +991,12 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, proj);
   }
 
+  // ── conductor (Slice α: signal-of-record for "what is safe next?") ────
+  if (path === '/bridge/conductor' && req.method === 'GET') {
+    const view = await buildConductor(repoRoot);
+    return sendJson(res, 200, view);
+  }
+
   // ── docs (in-cockpit help) ────────────────────────────────────────────
   if (path === '/bridge/docs' && req.method === 'GET') {
     const docs = await listDocs();
@@ -1005,6 +1011,185 @@ async function handleBridge(req, res, url, ctx) {
   }
 
   return sendJson(res, 404, { error: 'not_found', path });
+}
+
+// ── Conductor view assembly ──────────────────────────────────────────────
+// Reads projection + lanes catalog and derives a "what is safe next?" answer
+// the cockpit can render without computing it client-side. All fields are
+// derived from canonical state; no UI memory.
+async function buildConductor(repoRoot) {
+  const proj = await project(repoRoot);
+  const lanes = await readLanesCatalog(repoRoot);
+  const now = Date.now();
+
+  // ── KPI strip ──
+  const activeClaims = proj.claims.length;
+  const openApprovals = proj.approvals.open.length;
+  const stuckWorkers = proj.workers.filter((w) => w.status === 'stuck').length;
+  const runningWorkers = proj.workers.filter((w) => w.status === 'running').length;
+  const activeSessions = proj.activeSessions.length;
+  // Idle sessions: registered + active but no heartbeat in 60s
+  const idleSessions = proj.activeSessions.filter((s) => {
+    const last = new Date(s.lastHeartbeat || s.startedAt || 0).getTime();
+    return now - last > 60_000;
+  }).length;
+  const lastSlice = proj.sliceStops[proj.sliceStops.length - 1] || null;
+  const lastSliceAgeMs = lastSlice ? now - new Date(lastSlice.ts).getTime() : null;
+
+  // ── Now / Next / Waiting / Done board ──
+  const boardNow = proj.tasks.filter((t) => t.status === 'in_progress');
+  const boardNext = proj.tasks.filter((t) => t.status === 'todo' && (t.activeBlockers || []).length === 0);
+  const boardWaiting = proj.tasks.filter((t) => t.status === 'blocked' || ((t.activeBlockers || []).length > 0 && t.status !== 'done'));
+  const boardDone = proj.tasks
+    .filter((t) => t.status === 'done')
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 8);
+
+  // ── Operation Score Matrix: per-lane bars + reason codes ──
+  const tasksByLane = new Map();
+  for (const t of proj.tasks) {
+    const k = t.lane || 'unassigned';
+    if (!tasksByLane.has(k)) tasksByLane.set(k, []);
+    tasksByLane.get(k).push(t);
+  }
+  const claimsByLane = new Map();
+  for (const c of proj.claims) {
+    const k = c.lane || 'unassigned';
+    claimsByLane.set(k, (claimsByLane.get(k) || 0) + 1);
+  }
+  const laneIds = new Set([
+    ...lanes.map((l) => l.id),
+    ...tasksByLane.keys(),
+    ...claimsByLane.keys()
+  ]);
+  const scoreMatrix = [];
+  for (const id of laneIds) {
+    const ts = tasksByLane.get(id) || [];
+    const done = ts.filter((t) => t.status === 'done').length;
+    const open = ts.length - done;
+    const total = ts.length;
+    const progress = total === 0 ? 0 : done / total;
+    const claimsHeld = claimsByLane.get(id) || 0;
+    let reasonCode = 'lane_empty';
+    if (claimsHeld > 0) reasonCode = 'lane_active';
+    else if (open > 0) reasonCode = 'lane_unclaimed';
+    else if (total > 0) reasonCode = 'lane_idle';
+    const laneMeta = lanes.find((l) => l.id === id);
+    scoreMatrix.push({
+      lane: id,
+      scope: laneMeta ? laneMeta.scope : null,
+      total,
+      done,
+      open,
+      progress,
+      claimsHeld,
+      reasonCode
+    });
+  }
+  scoreMatrix.sort((a, b) => {
+    const order = { lane_active: 0, lane_unclaimed: 1, lane_idle: 2, lane_empty: 3 };
+    return (order[a.reasonCode] - order[b.reasonCode]) || a.lane.localeCompare(b.lane);
+  });
+
+  // ── Next Command: safe-next-action derivation ──
+  let nextCommand;
+  if (openApprovals > 0) {
+    const a = proj.approvals.open[0];
+    nextCommand = {
+      text: openApprovals === 1
+        ? `Review the open approval for ${a.tool || 'an action'}.`
+        : `Review ${openApprovals} open approvals.`,
+      action: 'open-approvals',
+      route: 'approvals',
+      reasonCode: 'approvals_pending',
+      hint: 'Approvals block downstream work — clear them first.'
+    };
+  } else if (stuckWorkers > 0) {
+    nextCommand = {
+      text: `Resolve ${stuckWorkers} stuck worker${stuckWorkers === 1 ? '' : 's'}.`,
+      action: 'open-swarm',
+      route: 'swarm',
+      reasonCode: 'workers_stuck',
+      hint: 'Workers without heartbeat in 15s+ may be holding claims.'
+    };
+  } else if (boardNext.length > 0) {
+    const pick = boardNext[0];
+    nextCommand = {
+      text: `Pick up "${pick.title}"${pick.lane ? ` on lane ${pick.lane}` : ''}.`,
+      action: 'open-task',
+      route: 'tasks',
+      ref: { kind: 'task', id: pick.id },
+      reasonCode: 'task_ready',
+      hint: 'No blockers — claim and start.'
+    };
+  } else if (boardWaiting.length > 0) {
+    const pick = boardWaiting[0];
+    nextCommand = {
+      text: `Unblock "${pick.title}".`,
+      action: 'open-task',
+      route: 'tasks',
+      ref: { kind: 'task', id: pick.id },
+      reasonCode: 'task_blocked',
+      hint: 'All ready work is blocked — resolve dependencies.'
+    };
+  } else if (lastSliceAgeMs !== null && lastSliceAgeMs > 2 * 60 * 60 * 1000) {
+    nextCommand = {
+      text: 'Close the current slice with a slice-stop.',
+      action: 'open-slice-stop',
+      route: 'operations',
+      reasonCode: 'slice_stale',
+      hint: 'Slice-stop ritual writes learnings and updates the wiki.'
+    };
+  } else if (lastSliceAgeMs === null && proj.eventCount > 5) {
+    nextCommand = {
+      text: 'Run your first slice-stop to capture learnings.',
+      action: 'open-slice-stop',
+      route: 'operations',
+      reasonCode: 'slice_never',
+      hint: 'Spine has events but no slice-stop on record yet.'
+    };
+  } else {
+    nextCommand = {
+      text: 'All clear — propose a new task or run a focused gate.',
+      action: 'open-tasks',
+      route: 'tasks',
+      reasonCode: 'all_clear',
+      hint: 'No pending approvals, blockers, or stuck workers.'
+    };
+  }
+
+  return {
+    ok: true,
+    kpi: {
+      activeClaims,
+      openApprovals,
+      stuckWorkers,
+      runningWorkers,
+      activeSessions,
+      idleSessions,
+      lastSliceAgeMs,
+      lastSlice: lastSlice ? { id: lastSlice.id, ts: lastSlice.ts, summary: lastSlice.summary || lastSlice.text || null } : null,
+      openTasks: proj.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
+      unreadMail: await mailboxTotalUnread(repoRoot)
+    },
+    nextCommand,
+    scoreMatrix,
+    board: {
+      now: boardNow,
+      next: boardNext,
+      waiting: boardWaiting,
+      done: boardDone
+    }
+  };
+}
+
+async function readLanesCatalog(repoRoot) {
+  try {
+    const p = join(repoRoot, '.maddu', 'lanes', 'catalog.json');
+    const raw = await readFile(p, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.lanes) ? parsed.lanes : [];
+  } catch { return []; }
 }
 
 // Docs resolution: try installed location first, then dev-source fallback.
