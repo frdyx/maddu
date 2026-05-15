@@ -3,6 +3,8 @@
 
 const ROUTES = {
   conductor:  { title: 'Conductor',  render: renderConductor,  description: 'Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.' },
+  queue:      { title: 'Queue Board', render: renderQueueBoard, description: 'Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.' },
+  claims:     { title: 'Claim Map',  render: renderClaimMap,   description: 'Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.' },
   workbench:  { title: 'Workbench',  render: renderWorkbench,  description: 'OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.' },
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
@@ -1004,6 +1006,14 @@ function renderConductor() {
   boardHost.appendChild(loading('Loading task board…'));
   root.appendChild(panel('Now · Next · Waiting · Done', 'GET /bridge/conductor', boardHost));
 
+  // ── Queue Board summary card ──
+  const queueHost = el('div', {});
+  queueHost.appendChild(loading('Loading queue counts…'));
+  const queueCard = panel('Queue Board', 'scheduler · queue · dispatch · preflights', queueHost);
+  queueCard.style.cursor = 'pointer';
+  queueCard.addEventListener('click', () => { location.hash = '#/queue'; });
+  root.appendChild(queueCard);
+
   // ── Operation Score Matrix ──
   const matrixHost = el('div', {});
   matrixHost.appendChild(loading('Loading per-lane score matrix…'));
@@ -1044,6 +1054,23 @@ function renderConductor() {
 
     // Score matrix
     matrixHost.replaceChildren(renderScoreMatrix(view.scoreMatrix || []));
+
+    // Queue Board summary (counts per column)
+    try {
+      const qr = await fetch('/bridge/queue', { cache: 'no-store' });
+      if (qr.ok) {
+        const qv = await qr.json();
+        const segs = (qv.columns || []).map((col) => {
+          const toneMap = { scheduler: 'blue', queue: 'accent', dispatch: 'ok', preflights: 'warn' };
+          return { label: col.title, value: col.items.length, tone: toneMap[col.id] || 'neutral' };
+        });
+        queueHost.replaceChildren(segBar(segs));
+      } else {
+        queueHost.replaceChildren(placeholder('Offline', 'Queue endpoint unavailable.'));
+      }
+    } catch {
+      queueHost.replaceChildren(placeholder('Offline', 'Queue endpoint unavailable.'));
+    }
 
     // Last slice
     if (k.lastSlice) {
@@ -1203,6 +1230,236 @@ function formatTs(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z'); }
   catch { return iso; }
+}
+
+// ─── Queue Board (Slice β) ──────────────────────────────────────────────
+//
+// Four-lane kanban — Scheduler · Queue · Dispatch · Preflights. Reads
+// GET /bridge/queue. Every parked card carries its reason code and a
+// safe next action affordance.
+
+const QUEUE_REASON_TONE = {
+  scheduled_next:     'blue',
+  scheduled_paused:   'neutral',
+  queue_ready:        'accent',
+  queue_blocked:      'warn',
+  dispatch_running:   'ok',
+  dispatch_stuck:     'danger',
+  preflight_pending:  'warn'
+};
+const QUEUE_REASON_LABEL = {
+  scheduled_next:    'scheduled',
+  scheduled_paused:  'paused',
+  queue_ready:       'ready',
+  queue_blocked:     'blocked',
+  dispatch_running:  'running',
+  dispatch_stuck:    'stuck',
+  preflight_pending: 'pending'
+};
+
+function renderQueueBoard() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Queue Board'));
+  root.appendChild(el('p', {}, ROUTES.queue.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading queue view…'));
+  root.appendChild(host);
+
+  const legend = el('div', { class: 'queue-legend' }, [
+    el('span', { class: 'next-command-pill tone-blue' }, 'Scheduler · scheduled / paused'),
+    el('span', { class: 'next-command-pill tone-accent' }, 'Queue · ready / blocked'),
+    el('span', { class: 'next-command-pill tone-ok' }, 'Dispatch · running / stuck'),
+    el('span', { class: 'next-command-pill tone-warn' }, 'Preflights · pending')
+  ]);
+  root.appendChild(panel('Reason codes', 'every parked card carries one', legend));
+
+  let pending = false;
+  const load = async () => {
+    let view;
+    try {
+      const r = await fetch('/bridge/queue', { cache: 'no-store' });
+      view = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    host.replaceChildren(renderQueueColumns(view.columns || []));
+  };
+  load();
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+
+  return root;
+}
+
+function renderQueueColumns(columns) {
+  const wrap = el('div', { class: 'queue-grid' });
+  for (const col of columns) {
+    const c = el('div', { class: 'queue-col' });
+    c.appendChild(el('div', { class: `queue-col-head tone-${col.tone}` }, [
+      el('span', { class: 'queue-col-title' }, col.title),
+      el('span', { class: 'queue-col-count' }, String(col.items.length))
+    ]));
+    c.appendChild(el('div', { class: 'queue-col-hint' }, col.hint));
+    if (col.items.length === 0) {
+      c.appendChild(el('div', { class: 'queue-empty' }, '—'));
+    } else {
+      for (const item of col.items) {
+        c.appendChild(renderQueueCard(item, col.id));
+      }
+    }
+    wrap.appendChild(c);
+  }
+  return wrap;
+}
+
+function renderQueueCard(item, columnId) {
+  const tone = QUEUE_REASON_TONE[item.reasonCode] || 'neutral';
+  const card = el('div', { class: 'queue-card' });
+  card.appendChild(el('div', { class: 'queue-card-label' }, item.label || '(untitled)'));
+  if (item.detail) card.appendChild(el('div', { class: 'queue-card-detail' }, item.detail));
+  if (item.summary) card.appendChild(el('div', { class: 'queue-card-summary' }, item.summary));
+  const meta = el('div', { class: 'queue-card-meta' }, [
+    el('span', { class: `next-command-pill tone-${tone}` }, QUEUE_REASON_LABEL[item.reasonCode] || item.reasonCode || 'unknown'),
+    item.nextFireTs ? el('span', { class: 'queue-card-next' }, `next: ${formatTs(item.nextFireTs)}`) : null,
+    (item.blockers && item.blockers.length) ? el('span', { class: 'queue-card-blockers' }, `blocked by ${item.blockers.length}`) : null
+  ]);
+  card.appendChild(meta);
+  if (item.action && item.route) {
+    const btn = el('button', { class: 'm-btn queue-card-btn', type: 'button' }, item.action);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      location.hash = `#/${item.route}`;
+    });
+    card.appendChild(btn);
+  }
+  card.addEventListener('click', () => {
+    openInspector({
+      kind: columnId === 'preflights' ? 'approval' : (item.kind || (columnId === 'scheduler' ? 'schedule' : 'task')),
+      id: item.id,
+      data: item
+    });
+  });
+  return card;
+}
+
+// ─── Claim Map (Slice β) ────────────────────────────────────────────────
+//
+// Active claims by lane. Joins claims with session info; surfaces lease
+// state and heartbeat age. Operator can request a handoff with one click.
+
+const CLAIM_REASON_TONE = {
+  claim_healthy: 'ok',
+  claim_idle:    'accent',
+  claim_stale:   'warn',
+  claim_expired: 'danger'
+};
+const CLAIM_REASON_LABEL = {
+  claim_healthy: 'healthy',
+  claim_idle:    'idle',
+  claim_stale:   'stale',
+  claim_expired: 'expired'
+};
+
+function renderClaimMap() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Claim Map'));
+  root.appendChild(el('p', {}, ROUTES.claims.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading active claims…'));
+  root.appendChild(host);
+
+  let pending = false;
+  const load = async () => {
+    let view;
+    try {
+      const r = await fetch('/bridge/claims', { cache: 'no-store' });
+      view = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    if (!view.claims || view.claims.length === 0) {
+      host.replaceChildren(placeholder('No active claims', 'No lanes are claimed right now. Claims appear here as sessions register and claim lanes.'));
+      return;
+    }
+    host.replaceChildren(renderClaimsTable(view.claims, load));
+  };
+  load();
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+
+  return root;
+}
+
+function renderClaimsTable(claims, reload) {
+  const wrap = el('div', { class: 'claims-table' });
+  // Header row
+  wrap.appendChild(el('div', { class: 'claims-row claims-row-head' }, [
+    el('span', {}, 'lane'),
+    el('span', {}, 'session'),
+    el('span', {}, 'focus'),
+    el('span', {}, 'claimed'),
+    el('span', {}, 'heartbeat'),
+    el('span', {}, 'lease'),
+    el('span', {}, 'state'),
+    el('span', {}, 'action')
+  ]));
+  for (const c of claims) {
+    const tone = CLAIM_REASON_TONE[c.reasonCode] || 'neutral';
+    const leaseLabel = c.leaseSeconds
+      ? (c.leaseLeftMs == null ? `${c.leaseSeconds}s` : (c.leaseLeftMs < 0 ? `expired ${formatAge(-c.leaseLeftMs)}` : `${formatAge(c.leaseLeftMs)} left`))
+      : '—';
+    const row = el('div', { class: `claims-row tone-${tone}` }, [
+      el('span', { class: 'claims-lane' }, c.lane),
+      el('span', { class: 'claims-session' }, c.sessionLabel || c.sessionId),
+      el('span', { class: 'claims-focus' }, c.focus || '—'),
+      el('span', { class: 'claims-age' }, formatAge(c.claimAgeMs)),
+      el('span', { class: 'claims-heartbeat' }, c.heartbeatAgeMs == null ? '—' : formatAge(c.heartbeatAgeMs)),
+      el('span', { class: 'claims-lease' }, leaseLabel),
+      el('span', { class: `next-command-pill tone-${tone}` }, CLAIM_REASON_LABEL[c.reasonCode] || c.reasonCode),
+      (() => {
+        const btn = el('button', { class: 'm-btn', type: 'button' }, 'request handoff');
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const reason = prompt('Handoff reason (shown to the holding session):', 'operator request') || '';
+          if (!reason) return;
+          try {
+            const r = await fetch('/bridge/claims/handoff', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ lane: c.lane, reason, from: 'operator' })
+            });
+            if (!r.ok) {
+              const d = await r.json().catch(() => ({}));
+              showToast(`Handoff failed: ${d.error || r.statusText}`, 'err');
+            } else {
+              showToast(`Handoff requested for ${c.lane}`, 'ok');
+              reload();
+            }
+          } catch (err) {
+            showToast(`Handoff failed: ${err.message}`, 'err');
+          }
+        });
+        return btn;
+      })()
+    ]);
+    row.addEventListener('click', () => openInspector({ kind: 'claim', id: c.lane, data: c }));
+    wrap.appendChild(row);
+  }
+  return wrap;
 }
 
 function renderDashboard() {
@@ -3814,6 +4071,47 @@ function renderSettings() {
             });
 
             row.appendChild(editForm);
+
+            // ── Claim policy strip (Slice β) ──
+            const pol = l.policy || {};
+            const policyRow = el('div', { class: 'lanes-policy-row' });
+            policyRow.appendChild(el('span', { class: 'lanes-policy-label' }, 'claim policy'));
+            const zonesInp = el('input', {
+              type: 'text', class: 'lanes-edit-input',
+              placeholder: 'zones (comma-sep, e.g. src/auth/**, server/**)',
+              value: Array.isArray(pol.zones) ? pol.zones.join(', ') : ''
+            });
+            const leaseInp = el('input', {
+              type: 'number', class: 'lanes-edit-input lanes-edit-input-narrow',
+              placeholder: 'lease s', min: '60', step: '60',
+              value: pol.leaseSeconds || ''
+            });
+            const handoffSel = el('select', { class: 'lanes-edit-select' });
+            for (const opt of ['manual', 'auto', 'refuse']) {
+              const o = el('option', { value: opt }, `handoff: ${opt}`);
+              if ((pol.handoffRule || 'manual') === opt) o.selected = true;
+              handoffSel.appendChild(o);
+            }
+            const polSaveBtn = el('button', { class: 'btn-allow' }, 'Save policy');
+            polSaveBtn.addEventListener('click', async () => {
+              polSaveBtn.disabled = true;
+              try {
+                const zones = zonesInp.value.split(',').map((s) => s.trim()).filter(Boolean);
+                const leaseSeconds = leaseInp.value ? Number(leaseInp.value) : null;
+                const resp = await fetch(`/bridge/lanes/${encodeURIComponent(l.id)}/policy`, {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ zones, leaseSeconds, handoffRule: handoffSel.value })
+                });
+                if (resp.ok) { showToast(`Policy saved for ${l.id}`, 'ok'); renderLanes(); }
+                else { const e = await resp.json().catch(() => ({})); showToast(`policy save failed: ${e.error || resp.status}`, 'err'); }
+              } finally { polSaveBtn.disabled = false; }
+            });
+            policyRow.appendChild(zonesInp);
+            policyRow.appendChild(leaseInp);
+            policyRow.appendChild(handoffSel);
+            policyRow.appendChild(polSaveBtn);
+            row.appendChild(policyRow);
+
             table.appendChild(row);
           }
           lanesMount.appendChild(table);

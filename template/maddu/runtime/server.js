@@ -289,6 +289,55 @@ async function handleBridge(req, res, url, ctx) {
     await append(repoRoot, { type: 'LANE_ADDED', actor: body.by || null, lane: lane.id, data: { lane } });
     return sendJson(res, 200, { ok: true, lane });
   }
+  // Set per-lane claim policy (zones, leaseSeconds, handoffRule).
+  if (path.startsWith('/bridge/lanes/') && path.endsWith('/policy') && req.method === 'POST') {
+    const id = path.slice('/bridge/lanes/'.length, -('/policy'.length));
+    const body = (await readBody(req)) || {};
+    const paths = pathsFor(repoRoot);
+    const catalog = JSON.parse(await readFile(paths.laneCatalog, 'utf8'));
+    const lane = (catalog.lanes || []).find((l) => l.id === id);
+    if (!lane) return sendJson(res, 404, { error: 'lane not found', id });
+    const policy = lane.policy || {};
+    if ('zones' in body) {
+      policy.zones = Array.isArray(body.zones) ? body.zones.map(String) : [];
+    }
+    if ('leaseSeconds' in body) {
+      const n = Number(body.leaseSeconds);
+      if (Number.isFinite(n) && n > 0) policy.leaseSeconds = Math.floor(n);
+      else delete policy.leaseSeconds;
+    }
+    if ('handoffRule' in body) {
+      if (body.handoffRule === 'auto' || body.handoffRule === 'manual' || body.handoffRule === 'refuse') policy.handoffRule = body.handoffRule;
+      else delete policy.handoffRule;
+    }
+    if (Object.keys(policy).length === 0) delete lane.policy;
+    else lane.policy = policy;
+    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await append(repoRoot, { type: 'LANE_POLICY_SET', actor: body.by || null, lane: id, data: { policy: lane.policy || null } });
+    return sendJson(res, 200, { ok: true, lane });
+  }
+  // Request a handoff from the holder of a lane. Appends an inbox message
+  // targeted at the holding session. No state mutation beyond the inbox.
+  if (path === '/bridge/claims/handoff' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.lane) return sendJson(res, 400, { error: 'lane required' });
+    const proj = await project(repoRoot);
+    const claim = proj.claims.find((c) => c.lane === body.lane);
+    if (!claim) return sendJson(res, 404, { error: 'no active claim on lane', lane: body.lane });
+    const reason = body.reason || 'handoff requested';
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.INBOX_MESSAGE,
+      actor: body.from || 'operator',
+      lane: body.lane,
+      data: {
+        to: claim.sessionId,
+        kind: 'handoff_request',
+        text: `HANDOFF REQUEST · lane ${body.lane} held by ${claim.sessionId}. Reason: ${reason}`,
+        reason
+      }
+    });
+    return sendJson(res, 200, { ok: true, event: ev, claim });
+  }
   // Remove a lane (refuses if currently claimed).
   if (path.startsWith('/bridge/lanes/') && req.method === 'DELETE') {
     const id = path.slice('/bridge/lanes/'.length);
@@ -997,6 +1046,18 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, view);
   }
 
+  // ── queue board (Slice β: scheduler / queue / dispatch / preflights) ──
+  if (path === '/bridge/queue' && req.method === 'GET') {
+    const view = await buildQueueBoard(repoRoot);
+    return sendJson(res, 200, view);
+  }
+
+  // ── claims (Slice β: extended view with session info + lease + heartbeat) ──
+  if (path === '/bridge/claims' && req.method === 'GET') {
+    const view = await buildClaimMap(repoRoot);
+    return sendJson(res, 200, view);
+  }
+
   // ── docs (in-cockpit help) ────────────────────────────────────────────
   if (path === '/bridge/docs' && req.method === 'GET') {
     const docs = await listDocs();
@@ -1181,6 +1242,146 @@ async function buildConductor(repoRoot) {
       done: boardDone
     }
   };
+}
+
+// ── Queue Board view (Slice β) ──────────────────────────────────────────
+// Four lanes operator can read at a glance:
+//   • Scheduler  — enabled schedules, next fire time
+//   • Queue      — todo tasks (ready or blocked)
+//   • Dispatch   — in_progress tasks + running workers
+//   • Preflights — open approvals waiting for a decision
+// Every card carries a reasonCode + a safe next action.
+async function buildQueueBoard(repoRoot) {
+  const proj = await project(repoRoot);
+  const schedules = await listSchedules(repoRoot);
+  const now = Date.now();
+
+  const scheduler = [];
+  for (const s of schedules) {
+    const enabled = !!s.enabled;
+    scheduler.push({
+      id: s.id,
+      label: s.name || s.id,
+      detail: s.nl || s.cron || null,
+      nextFireTs: s.nextFireAt || null,
+      reasonCode: enabled ? 'scheduled_next' : 'scheduled_paused',
+      action: enabled ? null : 'enable',
+      route: 'schedule'
+    });
+  }
+
+  const queue = [];
+  for (const t of proj.tasks) {
+    if (t.status !== 'todo') continue;
+    const blocked = (t.activeBlockers || []).length > 0;
+    queue.push({
+      id: t.id,
+      label: t.title || '(untitled)',
+      detail: [t.lane, t.owner ? `@${t.owner}` : null].filter(Boolean).join(' · '),
+      reasonCode: blocked ? 'queue_blocked' : 'queue_ready',
+      blockers: t.activeBlockers || [],
+      action: blocked ? 'unblock' : 'claim',
+      route: 'tasks'
+    });
+  }
+  queue.sort((a, b) => (a.reasonCode === b.reasonCode ? 0 : a.reasonCode === 'queue_ready' ? -1 : 1));
+
+  const dispatch = [];
+  for (const t of proj.tasks) {
+    if (t.status !== 'in_progress') continue;
+    dispatch.push({
+      id: t.id,
+      kind: 'task',
+      label: t.title || '(untitled)',
+      detail: [t.lane, t.owner ? `@${t.owner}` : null].filter(Boolean).join(' · '),
+      reasonCode: 'dispatch_running',
+      action: 'open',
+      route: 'tasks'
+    });
+  }
+  for (const w of proj.workers) {
+    if (w.status !== 'running' && w.status !== 'stuck') continue;
+    dispatch.push({
+      id: w.id,
+      kind: 'worker',
+      label: w.command || w.id,
+      detail: [w.lane, w.runtime].filter(Boolean).join(' · '),
+      reasonCode: w.status === 'stuck' ? 'dispatch_stuck' : 'dispatch_running',
+      action: w.status === 'stuck' ? 'kill' : 'open',
+      route: 'swarm'
+    });
+  }
+
+  const preflights = proj.approvals.open.map((a) => ({
+    id: a.approvalId,
+    label: a.tool || a.action || a.approvalId,
+    detail: [a.lane, a.actor].filter(Boolean).join(' · '),
+    reasonCode: 'preflight_pending',
+    action: 'decide',
+    route: 'approvals',
+    summary: a.summary || null
+  }));
+
+  return {
+    ok: true,
+    columns: [
+      { id: 'scheduler',  title: 'Scheduler',  hint: 'enabled · upcoming fire times', tone: 'blue',   items: scheduler },
+      { id: 'queue',      title: 'Queue',      hint: 'todo · ready or blocked',        tone: 'accent', items: queue },
+      { id: 'dispatch',   title: 'Dispatch',   hint: 'in-progress + workers',          tone: 'ok',     items: dispatch },
+      { id: 'preflights', title: 'Preflights', hint: 'approvals awaiting decision',    tone: 'warn',   items: preflights }
+    ]
+  };
+}
+
+// ── Claim Map view (Slice β) ────────────────────────────────────────────
+// Active claims with derived lease/heartbeat state. Joins claims with the
+// session that holds them so the operator sees who, focus, age, lease left.
+async function buildClaimMap(repoRoot) {
+  const proj = await project(repoRoot);
+  const lanes = await readLanesCatalog(repoRoot);
+  const now = Date.now();
+
+  const sessionsById = new Map(proj.sessions.map((s) => [s.id, s]));
+  const lanesById = new Map(lanes.map((l) => [l.id, l]));
+
+  const claims = proj.claims.map((c) => {
+    const session = sessionsById.get(c.sessionId) || null;
+    const lane = lanesById.get(c.lane) || null;
+    const leaseSeconds = lane && lane.policy && lane.policy.leaseSeconds || null;
+    const claimedAtMs = new Date(c.claimedAt).getTime();
+    const claimAgeMs = now - claimedAtMs;
+    const leaseExpiresAtMs = leaseSeconds ? claimedAtMs + leaseSeconds * 1000 : null;
+    const leaseLeftMs = leaseExpiresAtMs ? leaseExpiresAtMs - now : null;
+    const lastHeartbeatAt = session ? session.lastHeartbeatAt : null;
+    const heartbeatAgeMs = lastHeartbeatAt ? now - new Date(lastHeartbeatAt).getTime() : null;
+    let reasonCode = 'claim_healthy';
+    if (heartbeatAgeMs !== null && heartbeatAgeMs > 60_000) reasonCode = 'claim_idle';
+    if (heartbeatAgeMs !== null && heartbeatAgeMs > 5 * 60_000) reasonCode = 'claim_stale';
+    if (leaseLeftMs !== null && leaseLeftMs < 0) reasonCode = 'claim_expired';
+    return {
+      lane: c.lane,
+      sessionId: c.sessionId,
+      sessionLabel: session ? (session.label || session.id) : c.sessionId,
+      sessionRole: session ? session.role : null,
+      focus: c.focus || (session ? session.focus : null),
+      zones: lane && lane.policy && Array.isArray(lane.policy.zones) ? lane.policy.zones : [],
+      handoffRule: lane && lane.policy && lane.policy.handoffRule || 'manual',
+      claimedAt: c.claimedAt,
+      claimAgeMs,
+      leaseSeconds,
+      leaseExpiresAtMs,
+      leaseLeftMs,
+      lastHeartbeatAt,
+      heartbeatAgeMs,
+      reasonCode
+    };
+  });
+  claims.sort((a, b) => {
+    const order = { claim_expired: 0, claim_stale: 1, claim_idle: 2, claim_healthy: 3 };
+    return (order[a.reasonCode] - order[b.reasonCode]) || a.lane.localeCompare(b.lane);
+  });
+
+  return { ok: true, claims, totals: { active: claims.length } };
 }
 
 async function readLanesCatalog(repoRoot) {

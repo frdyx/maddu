@@ -1732,3 +1732,162 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   .inspector { width: 100%; }
   #app.inspector-open .stage { padding-right: 0; }
 }
+
+/* ── Queue Board (Slice β) ──────────────────────────────────────────── */
+.queue-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.queue-col {
+  background: var(--m-bg-3);
+  border: 1px solid var(--m-bg-4, var(--m-bg-3));
+  border-radius: 3px;
+  padding: 10px;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+}
+.queue-col-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--m-bg-4, var(--m-bg-3));
+  margin-bottom: 6px;
+}
+.queue-col-head.tone-blue   { border-bottom-color: rgba(86, 184, 255, 0.36); }
+.queue-col-head.tone-accent { border-bottom-color: var(--m-accent-dim); }
+.queue-col-head.tone-ok     { border-bottom-color: var(--m-ok-border); }
+.queue-col-head.tone-warn   { border-bottom-color: rgba(255, 184, 0, 0.36); }
+.queue-col-title {
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+  color: var(--m-fg-0);
+}
+.queue-col-head.tone-blue   .queue-col-title { color: var(--m-accent-2); }
+.queue-col-head.tone-accent .queue-col-title { color: var(--m-accent); }
+.queue-col-head.tone-ok     .queue-col-title { color: var(--m-ok); }
+.queue-col-head.tone-warn   .queue-col-title { color: var(--m-warn); }
+.queue-col-count {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--m-fg-2);
+}
+.queue-col-hint {
+  font-size: 11px;
+  color: var(--m-fg-3);
+  margin-bottom: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.queue-empty {
+  color: var(--m-fg-4);
+  text-align: center;
+  padding: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.queue-card {
+  background: var(--m-bg-1);
+  border: 1px solid var(--m-bg-4, var(--m-bg-3));
+  border-radius: 2px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.queue-card:hover { border-color: var(--m-accent-dim); background: var(--m-bg-2); }
+.queue-card-label { color: var(--m-fg-0); font-size: 13px; line-height: 1.35; }
+.queue-card-detail,
+.queue-card-summary {
+  margin-top: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--m-fg-3);
+}
+.queue-card-summary { color: var(--m-fg-2); }
+.queue-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+}
+.queue-card-next,
+.queue-card-blockers {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--m-fg-3);
+}
+.queue-card-btn { margin-top: 6px; align-self: flex-start; }
+.queue-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 1100px) {
+  .queue-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Claim Map (Slice β) ────────────────────────────────────────────── */
+.claims-table {
+  display: flex;
+  flex-direction: column;
+}
+.claims-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 2fr 0.7fr 0.7fr 1fr 0.8fr auto;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--m-bg-3);
+  border-top: none;
+  background: var(--m-bg-2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--m-fg-1);
+  align-items: center;
+  cursor: pointer;
+}
+.claims-row:first-child { border-top: 1px solid var(--m-bg-3); }
+.claims-row:hover { background: var(--m-bg-3); }
+.claims-row-head {
+  background: var(--m-bg-1);
+  color: var(--m-fg-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  cursor: default;
+}
+.claims-row.tone-warn    { border-left: 3px solid var(--m-warn); }
+.claims-row.tone-danger  { border-left: 3px solid var(--m-danger); }
+.claims-row.tone-ok      { border-left: 3px solid var(--m-ok); }
+.claims-row.tone-accent  { border-left: 3px solid var(--m-accent); }
+.claims-lane    { color: var(--m-fg-0); }
+.claims-session { color: var(--m-fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.claims-focus   { color: var(--m-fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) {
+  .claims-row { grid-template-columns: 1fr 1fr 1fr; row-gap: 4px; }
+  .claims-row > span:nth-child(n+4) { font-size: 11px; color: var(--m-fg-3); }
+}
+
+/* ── Lane policy strip (Settings, Slice β) ──────────────────────────── */
+.lanes-policy-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--m-bg-4, var(--m-bg-3));
+}
+.lanes-policy-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--m-fg-3);
+  margin-right: 4px;
+}
