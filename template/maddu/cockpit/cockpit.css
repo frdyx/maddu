@@ -2117,6 +2117,15 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   min-height: 60px;
 }
 .boss-composer-text:focus { outline: none; border-color: var(--m-accent); }
+.boss-composer-fields { align-items: center; gap: 6px; }
+.boss-field-hint {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--m-fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-left: 4px;
+}
 
 @media (max-width: 900px) {
   .boss-strip-row { grid-template-columns: repeat(2, 1fr); }

@@ -1693,34 +1693,178 @@ function renderProposalCard(p) {
   return card;
 }
 
+// Which extra Enforcer-input fields a given action kind needs. The composer
+// shows just these inputs — pickers populate from live state when possible.
+const ACTION_FIELDS = {
+  'claim-lane':       ['lane', 'sessionId'],
+  'release-lane':     ['lane', 'sessionId'],
+  'slice-stop':       ['sessionId'],
+  'request-handoff':  ['lane'],
+  'approve':          ['approvalId', 'decision'],
+  'run-focused-gate': ['gate'],
+  'write-file':       ['path']
+};
+
 function renderBossComposer(reload) {
   const wrap = el('form', { class: 'boss-composer' });
   wrap.dataset.bossSession = 'default';
+
+  // Top row: action + risk
   const top = el('div', { class: 'boss-composer-row' });
   const actionSel = el('select', { class: 'lanes-edit-select' });
   actionSel.appendChild(el('option', { value: '' }, '— freeform message —'));
   for (const k of ENFORCER_ACTION_KINDS) actionSel.appendChild(el('option', { value: k }, k));
-  const laneInp = el('input', { type: 'text', class: 'lanes-edit-input lanes-edit-input-narrow', placeholder: 'lane (optional)' });
   const riskSel = el('select', { class: 'lanes-edit-select' });
   for (const r of ['low', 'medium', 'high']) riskSel.appendChild(el('option', { value: r }, `risk: ${r}`));
   riskSel.value = 'medium';
   top.appendChild(actionSel);
-  top.appendChild(laneInp);
   top.appendChild(riskSel);
+  wrap.appendChild(top);
+
+  // Per-action fields (rebuilt on action change). Lives in its own row so
+  // the layout stays clean for freeform messages.
+  const fieldsRow = el('div', { class: 'boss-composer-row boss-composer-fields' });
+  wrap.appendChild(fieldsRow);
+
+  // Fields cache so values stick across kind changes (e.g. when you pick the
+  // same lane again).
+  const values = { lane: '', sessionId: '', approvalId: '', decision: 'allow-once', gate: '', path: '' };
+
+  // Live data for dropdowns. Refreshed whenever we render fields.
+  let liveSessions = [];
+  let liveLanes = [];
+  let liveApprovals = [];
+
+  async function refreshLive() {
+    try {
+      const [proj, lanes] = await Promise.all([
+        fetch('/bridge/projection', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        fetch('/bridge/lanes', { cache: 'no-store' }).then((r) => r.json()).catch(() => null)
+      ]);
+      liveSessions = (proj && proj.activeSessions) ? proj.activeSessions : [];
+      liveLanes = (lanes && lanes.catalog && Array.isArray(lanes.catalog.lanes)) ? lanes.catalog.lanes
+                : (lanes && Array.isArray(lanes.lanes)) ? lanes.lanes
+                : [];
+      liveApprovals = (proj && proj.approvals && proj.approvals.open) ? proj.approvals.open : [];
+    } catch {}
+  }
+
+  function makeFieldInput(name) {
+    if (name === 'lane') {
+      if (liveLanes.length) {
+        const sel = el('select', { class: 'lanes-edit-select boss-field' });
+        sel.appendChild(el('option', { value: '' }, '— lane —'));
+        for (const l of liveLanes) {
+          const o = el('option', { value: l.id }, l.id);
+          if (values.lane === l.id) o.selected = true;
+          sel.appendChild(o);
+        }
+        sel.addEventListener('change', () => { values.lane = sel.value; });
+        return sel;
+      }
+      const inp = el('input', { type: 'text', class: 'lanes-edit-input lanes-edit-input-narrow boss-field', placeholder: 'lane', value: values.lane });
+      inp.addEventListener('input', () => { values.lane = inp.value.trim(); });
+      return inp;
+    }
+    if (name === 'sessionId') {
+      if (liveSessions.length) {
+        const sel = el('select', { class: 'lanes-edit-select boss-field' });
+        sel.appendChild(el('option', { value: '' }, '— sessionId —'));
+        for (const s of liveSessions) {
+          const label = `${s.label || s.id} (${s.role || 'session'})`;
+          const o = el('option', { value: s.id }, label);
+          if (values.sessionId === s.id) o.selected = true;
+          sel.appendChild(o);
+        }
+        sel.addEventListener('change', () => { values.sessionId = sel.value; });
+        return sel;
+      }
+      const inp = el('input', { type: 'text', class: 'lanes-edit-input boss-field', placeholder: 'sessionId (no active sessions — register one first)', value: values.sessionId });
+      inp.addEventListener('input', () => { values.sessionId = inp.value.trim(); });
+      return inp;
+    }
+    if (name === 'approvalId') {
+      if (liveApprovals.length) {
+        const sel = el('select', { class: 'lanes-edit-select boss-field' });
+        sel.appendChild(el('option', { value: '' }, '— approvalId —'));
+        for (const a of liveApprovals) {
+          sel.appendChild(el('option', { value: a.approvalId }, `${a.tool || a.action || a.approvalId} · ${a.lane || ''}`));
+        }
+        sel.addEventListener('change', () => { values.approvalId = sel.value; });
+        return sel;
+      }
+      const inp = el('input', { type: 'text', class: 'lanes-edit-input boss-field', placeholder: 'approvalId (no open approvals)', value: values.approvalId });
+      inp.addEventListener('input', () => { values.approvalId = inp.value.trim(); });
+      return inp;
+    }
+    if (name === 'decision') {
+      const sel = el('select', { class: 'lanes-edit-select boss-field' });
+      for (const d of ['allow-once', 'allow-always', 'deny']) {
+        const o = el('option', { value: d }, d);
+        if (values.decision === d) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => { values.decision = sel.value; });
+      return sel;
+    }
+    if (name === 'gate') {
+      const inp = el('input', { type: 'text', class: 'lanes-edit-input boss-field', placeholder: 'gate id (free-form)', value: values.gate });
+      inp.addEventListener('input', () => { values.gate = inp.value.trim(); });
+      return inp;
+    }
+    if (name === 'path') {
+      const inp = el('input', { type: 'text', class: 'lanes-edit-input boss-field', placeholder: 'path (relative to repo root)', value: values.path });
+      inp.addEventListener('input', () => { values.path = inp.value.trim(); });
+      return inp;
+    }
+    return null;
+  }
+
+  async function renderFields() {
+    await refreshLive();
+    fieldsRow.replaceChildren();
+    const kind = actionSel.value;
+    if (!kind) {
+      fieldsRow.appendChild(el('span', { class: 'boss-field-hint' }, 'freeform — no enforcer fields'));
+      return;
+    }
+    const need = ACTION_FIELDS[kind] || [];
+    if (!need.length) {
+      fieldsRow.appendChild(el('span', { class: 'boss-field-hint' }, 'no extra fields required'));
+      return;
+    }
+    for (const f of need) {
+      const node = makeFieldInput(f);
+      if (node) fieldsRow.appendChild(node);
+    }
+    // Tip line so the operator knows what's required.
+    fieldsRow.appendChild(el('span', { class: 'boss-field-hint' }, `required: ${need.join(' · ')}`));
+  }
+  actionSel.addEventListener('change', renderFields);
+  renderFields();
+
   const textarea = el('textarea', { class: 'boss-composer-text', placeholder: 'Propose an action or say something. Shift+Enter for newline.', rows: '3' });
   const checkBtn = el('button', { type: 'button', class: 'm-btn' }, 'Pre-check (Enforcer)');
   const sendBtn = el('button', { type: 'submit', class: 'btn-allow' }, 'Send proposal');
   const sayBtn = el('button', { type: 'button', class: 'm-btn' }, 'Just say it');
   const bottom = el('div', { class: 'boss-composer-row' }, [checkBtn, sayBtn, sendBtn]);
-  wrap.appendChild(top);
   wrap.appendChild(textarea);
   wrap.appendChild(bottom);
 
+  function buildAction() {
+    const kind = actionSel.value;
+    if (!kind) return null;
+    const action = { kind };
+    for (const f of ACTION_FIELDS[kind] || []) {
+      if (values[f]) action[f] = values[f];
+    }
+    return action;
+  }
+
   // Pre-check uses the Enforcer endpoint without creating a proposal.
   checkBtn.addEventListener('click', async () => {
-    const kind = actionSel.value;
-    if (!kind) { showToast('Pick an action kind first', 'warn'); return; }
-    const action = { kind, lane: laneInp.value.trim() || undefined };
+    const action = buildAction();
+    if (!action) { showToast('Pick an action kind first', 'warn'); return; }
     try {
       const r = await fetch('/bridge/enforcer/check', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1749,15 +1893,17 @@ function renderBossComposer(reload) {
     e.preventDefault();
     const summary = textarea.value.trim();
     if (!summary) { showToast('Summary required', 'warn'); return; }
+    const action = buildAction();
     const body = {
       summary,
-      lane: laneInp.value.trim() || null,
+      lane: values.lane || null,
       risk: riskSel.value,
       bossSessionId: wrap.dataset.bossSession
     };
-    if (actionSel.value) {
-      body.action = actionSel.value;
-      body.actionFields = { lane: laneInp.value.trim() || undefined };
+    if (action) {
+      body.action = action.kind;
+      body.actionFields = { ...action };
+      delete body.actionFields.kind;
     }
     try {
       const r = await fetch('/bridge/proposals', {
