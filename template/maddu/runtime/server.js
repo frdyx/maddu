@@ -24,6 +24,7 @@ import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled a
 import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
 import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
 import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
+import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -1056,6 +1057,152 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/claims' && req.method === 'GET') {
     const view = await buildClaimMap(repoRoot);
     return sendJson(res, 200, view);
+  }
+
+  // ── Enforcer / Proposals / BOSS (Slice γ) ──
+  // Deterministic check: never mutates state, never appends to spine.
+  if (path === '/bridge/enforcer/check' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const proj = await project(repoRoot);
+    const decision = enforcerCheck(body.action || body, proj);
+    return sendJson(res, 200, { ok: true, decision, action: body.action || body });
+  }
+  if (path === '/bridge/enforcer/rules' && req.method === 'GET') {
+    return sendJson(res, 200, { rules: ENFORCER_RULES });
+  }
+  // Proposals: list, create, decide.
+  if (path === '/bridge/proposals' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const all = proj.proposals || [];
+    const open = all.filter((p) => p.status === 'open');
+    const recent = all
+      .filter((p) => p.status !== 'open')
+      .sort((a, b) => new Date(b.decidedAt || b.ts).getTime() - new Date(a.decidedAt || a.ts).getTime())
+      .slice(0, 40);
+    return sendJson(res, 200, { open, recent });
+  }
+  if (path === '/bridge/proposals' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.summary && !body.action) return sendJson(res, 400, { error: 'summary or action required' });
+    const proj = await project(repoRoot);
+    const action = body.actionPayload || (body.action ? { kind: body.action, ...body.actionFields } : null);
+    const enforcerView = action ? enforcerCheck(action, proj) : null;
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.PROPOSAL_CREATED,
+      actor: body.actor || 'operator',
+      lane: body.lane || null,
+      data: {
+        id: 'prop_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        bossSessionId: body.bossSessionId || 'default',
+        action: body.action || null,
+        actionPayload: action,
+        summary: body.summary || null,
+        risk: ['low', 'medium', 'high'].includes(body.risk) ? body.risk : 'medium',
+        preconditions: Array.isArray(body.preconditions) ? body.preconditions : [],
+        enforcer: enforcerView
+      }
+    });
+    // Mirror to transcript so the BOSS view renders it inline.
+    await append(repoRoot, {
+      type: EVENT_TYPES.BOSS_MESSAGE,
+      actor: body.actor || 'operator',
+      lane: body.lane || null,
+      data: {
+        bossSessionId: body.bossSessionId || 'default',
+        role: 'proposal',
+        text: body.summary || body.action || 'proposal',
+        proposalId: ev.data.id
+      }
+    });
+    // Mirror Enforcer view as a deterministic reply.
+    if (enforcerView) {
+      await append(repoRoot, {
+        type: EVENT_TYPES.BOSS_MESSAGE,
+        actor: 'enforcer',
+        lane: body.lane || null,
+        data: {
+          bossSessionId: body.bossSessionId || 'default',
+          role: 'enforcer',
+          text: enforcerView.hint || (enforcerView.allow ? 'allowed' : 'refused'),
+          proposalId: ev.data.id,
+          reasonCode: enforcerView.reasonCode,
+          citedRule: enforcerView.citedRule || null
+        }
+      });
+    }
+    return sendJson(res, 200, { ok: true, proposalId: ev.data.id, enforcer: enforcerView });
+  }
+  if (path.startsWith('/bridge/proposals/') && path.endsWith('/decide') && req.method === 'POST') {
+    const id = path.slice('/bridge/proposals/'.length, -'/decide'.length);
+    const body = (await readBody(req)) || {};
+    const decision = body.decision;
+    if (!['approved', 'rejected', 'negotiating'].includes(decision)) {
+      return sendJson(res, 400, { error: 'decision must be approved | rejected | negotiating' });
+    }
+    const proj = await project(repoRoot);
+    const p = (proj.proposals || []).find((x) => x.id === id);
+    if (!p) return sendJson(res, 404, { error: 'proposal not found', id });
+    if (p.status !== 'open') return sendJson(res, 409, { error: 'proposal already decided', currentStatus: p.status });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.PROPOSAL_DECIDED,
+      actor: body.by || 'operator',
+      lane: p.lane,
+      data: { id, decision, reason: body.reason || null }
+    });
+    // Mirror into transcript.
+    await append(repoRoot, {
+      type: EVENT_TYPES.BOSS_MESSAGE,
+      actor: body.by || 'operator',
+      lane: p.lane,
+      data: {
+        bossSessionId: p.bossSessionId || 'default',
+        role: 'decision',
+        text: `${decision}${body.reason ? ` — ${body.reason}` : ''}`,
+        proposalId: id
+      }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
+  }
+  // BOSS transcript: list sessions, fetch a session, post a freeform message.
+  if (path === '/bridge/boss/sessions' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const t = proj.bossTranscripts || {};
+    const sessions = Object.keys(t).map((id) => {
+      const msgs = t[id];
+      const last = msgs[msgs.length - 1];
+      const props = (proj.proposals || []).filter((p) => p.bossSessionId === id);
+      return {
+        id,
+        messageCount: msgs.length,
+        lastMessageTs: last ? last.ts : null,
+        openProposals: props.filter((p) => p.status === 'open').length,
+        totalProposals: props.length
+      };
+    });
+    if (!sessions.find((s) => s.id === 'default')) sessions.unshift({ id: 'default', messageCount: 0, lastMessageTs: null, openProposals: 0, totalProposals: 0 });
+    return sendJson(res, 200, { sessions });
+  }
+  if (path.startsWith('/bridge/boss/sessions/') && req.method === 'GET') {
+    const id = path.slice('/bridge/boss/sessions/'.length);
+    const proj = await project(repoRoot);
+    const transcript = (proj.bossTranscripts || {})[id] || [];
+    const proposals = (proj.proposals || []).filter((p) => p.bossSessionId === id);
+    return sendJson(res, 200, { id, transcript, proposals });
+  }
+  if (path === '/bridge/boss/message' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.text) return sendJson(res, 400, { error: 'text required' });
+    const ev = await append(repoRoot, {
+      type: EVENT_TYPES.BOSS_MESSAGE,
+      actor: body.actor || 'operator',
+      lane: body.lane || null,
+      data: {
+        bossSessionId: body.bossSessionId || 'default',
+        role: body.role || 'operator',
+        text: body.text
+      }
+    });
+    return sendJson(res, 200, { ok: true, event: ev });
   }
 
   // ── docs (in-cockpit help) ────────────────────────────────────────────

@@ -5,6 +5,7 @@ const ROUTES = {
   conductor:  { title: 'Conductor',  render: renderConductor,  description: 'Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.' },
   queue:      { title: 'Queue Board', render: renderQueueBoard, description: 'Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.' },
   claims:     { title: 'Claim Map',  render: renderClaimMap,   description: 'Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.' },
+  boss:       { title: 'BOSS',       render: renderBoss,       description: 'BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate.' },
   workbench:  { title: 'Workbench',  render: renderWorkbench,  description: 'OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.' },
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
@@ -1459,6 +1460,316 @@ function renderClaimsTable(claims, reload) {
     row.addEventListener('click', () => openInspector({ kind: 'claim', id: c.lane, data: c }));
     wrap.appendChild(row);
   }
+  return wrap;
+}
+
+// ─── BOSS (Slice γ) ──────────────────────────────────────────────────────
+//
+// BOSS proposes · Enforcer cites · Operator decides. Terminal-style
+// transcript (no chat bubbles). Composer creates proposals through
+// /bridge/proposals; the Enforcer's deterministic reply is mirrored into
+// the same transcript distinguished by glyph. Operator strip surfaces
+// claims, approvals, and parked items so decisions are state-grounded.
+
+const PROPOSAL_RISK_TONE = { low: 'ok', medium: 'warn', high: 'danger' };
+const ENFORCER_ACTION_KINDS = ['claim-lane', 'release-lane', 'slice-stop', 'request-handoff', 'approve', 'run-focused-gate', 'write-file'];
+
+function renderBoss() {
+  const root = el('div', { class: 'view boss-view' });
+  root.appendChild(el('h2', {}, 'BOSS'));
+  root.appendChild(el('p', {}, ROUTES.boss.description));
+
+  // ── Operator strip (state-grounded context, refreshes on each load) ──
+  const stripHost = el('div', { class: 'boss-strip' });
+  stripHost.appendChild(loading('Loading operator context…'));
+  root.appendChild(stripHost);
+
+  // ── Session selector ──
+  const sessionRow = el('div', { class: 'boss-sessions' });
+  root.appendChild(sessionRow);
+
+  // ── Transcript ──
+  const transcript = el('div', { class: 'boss-transcript' });
+  transcript.appendChild(loading('Loading transcript…'));
+  root.appendChild(transcript);
+
+  // ── Composer ──
+  const composer = renderBossComposer(() => load());
+  root.appendChild(composer);
+
+  let currentSession = 'default';
+  let pending = false;
+  let view;
+
+  const load = async () => {
+    try {
+      const [stripRes, sessionsRes, viewRes] = await Promise.all([
+        fetch('/bridge/conductor', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        fetch('/bridge/boss/sessions', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        fetch(`/bridge/boss/sessions/${encodeURIComponent(currentSession)}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null)
+      ]);
+      if (stripRes && stripRes.kpi) renderBossStrip(stripHost, stripRes);
+      else stripHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      if (sessionsRes && sessionsRes.sessions) renderBossSessions(sessionRow, sessionsRes.sessions, currentSession, (id) => { currentSession = id; load(); });
+      view = viewRes;
+      if (view && view.transcript) renderBossTranscript(transcript, view);
+      else transcript.replaceChildren(placeholder('Empty transcript', 'No messages on this session yet. Use the composer to propose an action.'));
+      // Sync composer's bossSessionId.
+      composer.dataset.bossSession = currentSession;
+    } catch (e) {
+      transcript.replaceChildren(placeholder('Offline', e.message || 'Bridge not reachable.'));
+    }
+  };
+  load();
+
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 300);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+
+  return root;
+}
+
+function renderBossStrip(host, conductor) {
+  const k = conductor.kpi || {};
+  const tile = (label, value, tone) => el('div', { class: `boss-strip-tile tone-${tone || 'neutral'}` }, [
+    el('div', { class: 'boss-strip-value' }, String(value)),
+    el('div', { class: 'boss-strip-label' }, label)
+  ]);
+  const strip = el('div', { class: 'boss-strip-row' }, [
+    tile('Active claims', k.activeClaims ?? 0,    k.activeClaims > 0 ? 'accent' : 'neutral'),
+    tile('Open approvals', k.openApprovals ?? 0,  k.openApprovals > 0 ? 'warn' : 'ok'),
+    tile('Stuck workers', k.stuckWorkers ?? 0,    k.stuckWorkers > 0 ? 'danger' : 'ok'),
+    tile('Open tasks', k.openTasks ?? 0,          'accent'),
+    tile('Last slice', formatAge(k.lastSliceAgeMs), ageTone(k.lastSliceAgeMs))
+  ]);
+  // Next command echoed as a one-liner.
+  const nc = conductor.nextCommand;
+  const ncEl = nc ? el('div', { class: `boss-strip-next tone-${REASON_CODE_TONE[nc.reasonCode] || 'accent'}` }, [
+    el('span', { class: 'boss-strip-next-glyph' }, '▸'),
+    el('span', { class: 'boss-strip-next-text' }, nc.text || ''),
+    el('span', { class: `next-command-pill tone-${REASON_CODE_TONE[nc.reasonCode] || 'accent'}` }, REASON_CODE_LABEL[nc.reasonCode] || nc.reasonCode)
+  ]) : null;
+  host.replaceChildren(strip);
+  if (ncEl) host.appendChild(ncEl);
+}
+
+function renderBossSessions(host, sessions, currentId, onPick) {
+  host.replaceChildren();
+  for (const s of sessions) {
+    const tab = el('button', {
+      type: 'button',
+      class: 'boss-session-tab' + (s.id === currentId ? ' active' : '')
+    }, [
+      el('span', { class: 'boss-session-id' }, s.id),
+      el('span', { class: 'boss-session-count' }, `${s.messageCount} msg${s.openProposals ? ` · ${s.openProposals} open` : ''}`)
+    ]);
+    tab.addEventListener('click', () => onPick(s.id));
+    host.appendChild(tab);
+  }
+}
+
+function renderBossTranscript(host, view) {
+  const wrap = el('div', { class: 'boss-transcript-inner' });
+  const proposalById = new Map((view.proposals || []).map((p) => [p.id, p]));
+  for (const msg of view.transcript || []) {
+    if (msg.role === 'proposal' && msg.proposalId && proposalById.has(msg.proposalId)) {
+      wrap.appendChild(renderProposalCard(proposalById.get(msg.proposalId)));
+    } else if (msg.role === 'enforcer') {
+      wrap.appendChild(renderEnforcerLine(msg));
+    } else if (msg.role === 'decision') {
+      wrap.appendChild(renderDecisionLine(msg));
+    } else {
+      wrap.appendChild(renderOperatorLine(msg));
+    }
+  }
+  if (!wrap.children.length) {
+    wrap.appendChild(placeholder('Empty transcript', 'No messages on this session yet.'));
+  }
+  host.replaceChildren(wrap);
+  host.scrollTop = host.scrollHeight;
+}
+
+function renderOperatorLine(msg) {
+  return el('div', { class: 'boss-line role-operator' }, [
+    el('span', { class: 'boss-line-glyph' }, '·'),
+    el('span', { class: 'boss-line-actor' }, msg.actor || 'operator'),
+    el('span', { class: 'boss-line-text' }, msg.text || ''),
+    el('span', { class: 'boss-line-ts' }, formatTs(msg.ts))
+  ]);
+}
+
+function renderEnforcerLine(msg) {
+  return el('div', { class: 'boss-line role-enforcer' }, [
+    el('span', { class: 'boss-line-glyph' }, '◆'),
+    el('span', { class: 'boss-line-actor' }, 'enforcer'),
+    el('span', { class: 'boss-line-text' }, [
+      el('span', { class: 'boss-enforcer-code' }, msg.reasonCode || '—'),
+      document.createTextNode(' · '),
+      document.createTextNode(msg.text || ''),
+      msg.citedRule ? el('span', { class: 'boss-enforcer-rule' }, ` (${msg.citedRule})`) : null
+    ]),
+    el('span', { class: 'boss-line-ts' }, formatTs(msg.ts))
+  ]);
+}
+
+function renderDecisionLine(msg) {
+  return el('div', { class: 'boss-line role-decision' }, [
+    el('span', { class: 'boss-line-glyph' }, '▸'),
+    el('span', { class: 'boss-line-actor' }, msg.actor || 'operator'),
+    el('span', { class: 'boss-line-text' }, `decision: ${msg.text}`),
+    el('span', { class: 'boss-line-ts' }, formatTs(msg.ts))
+  ]);
+}
+
+function renderProposalCard(p) {
+  const riskTone = PROPOSAL_RISK_TONE[p.risk] || 'warn';
+  const statusTone = p.status === 'open' ? 'accent' : (p.status === 'approved' ? 'ok' : (p.status === 'rejected' ? 'danger' : 'warn'));
+  const enforcerTone = p.enforcer ? (p.enforcer.allow ? 'ok' : 'danger') : 'neutral';
+  const card = el('div', { class: `proposal-card tone-${statusTone}` });
+  // Head row: risk + status + lane
+  card.appendChild(el('div', { class: 'proposal-head' }, [
+    el('span', { class: `next-command-pill tone-${riskTone}` }, `risk: ${p.risk}`),
+    el('span', { class: `next-command-pill tone-${statusTone}` }, p.status),
+    p.lane ? el('span', { class: 'proposal-lane' }, p.lane) : null,
+    p.action ? el('span', { class: 'proposal-action' }, p.action) : null
+  ]));
+  // Summary
+  card.appendChild(el('div', { class: 'proposal-summary' }, p.summary || '(no summary)'));
+  // Enforcer verdict
+  if (p.enforcer) {
+    card.appendChild(el('div', { class: `proposal-enforcer tone-${enforcerTone}` }, [
+      el('span', { class: 'boss-line-glyph' }, '◆'),
+      el('span', { class: 'boss-enforcer-code' }, p.enforcer.reasonCode),
+      document.createTextNode(' · '),
+      document.createTextNode(p.enforcer.hint || (p.enforcer.allow ? 'allowed' : 'refused')),
+      p.enforcer.citedRule ? el('span', { class: 'boss-enforcer-rule' }, ` (${p.enforcer.citedRule})`) : null
+    ]));
+  }
+  // Preconditions
+  if ((p.preconditions || []).length) {
+    const list = el('ul', { class: 'proposal-precs' });
+    for (const pc of p.preconditions) list.appendChild(el('li', {}, String(pc)));
+    card.appendChild(list);
+  }
+  // Decision row
+  if (p.status === 'open') {
+    const row = el('div', { class: 'proposal-decision' });
+    const mk = (cls, label, decision) => {
+      const b = el('button', { class: `m-btn proposal-btn ${cls}`, type: 'button' }, label);
+      b.addEventListener('click', async () => {
+        const reason = decision === 'approved' ? null : (prompt(`Reason for ${decision}:`, '') || '');
+        try {
+          const r = await fetch(`/bridge/proposals/${encodeURIComponent(p.id)}/decide`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ decision, reason })
+          });
+          if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(`Decision failed: ${d.error || r.statusText}`, 'err'); }
+          else { showToast(`Proposal ${decision}`, decision === 'approved' ? 'ok' : 'warn'); }
+        } catch (err) { showToast(`Decision failed: ${err.message}`, 'err'); }
+      });
+      return b;
+    };
+    row.appendChild(mk('btn-allow', 'approve', 'approved'));
+    row.appendChild(mk('btn-deny-soft', 'negotiate', 'negotiating'));
+    row.appendChild(mk('btn-deny-hard', 'reject', 'rejected'));
+    card.appendChild(row);
+  } else {
+    card.appendChild(el('div', { class: 'proposal-decided' }, [
+      el('span', { class: 'boss-line-actor' }, p.decidedBy || 'operator'),
+      document.createTextNode(' · '),
+      el('span', {}, formatTs(p.decidedAt)),
+      p.reason ? el('span', { class: 'proposal-reason' }, ` — ${p.reason}`) : null
+    ]));
+  }
+  card.addEventListener('click', (e) => {
+    // Don't intercept button clicks.
+    if (e.target.closest('button')) return;
+    openInspector({ kind: 'proposal', id: p.id, data: p });
+  });
+  return card;
+}
+
+function renderBossComposer(reload) {
+  const wrap = el('form', { class: 'boss-composer' });
+  wrap.dataset.bossSession = 'default';
+  const top = el('div', { class: 'boss-composer-row' });
+  const actionSel = el('select', { class: 'lanes-edit-select' });
+  actionSel.appendChild(el('option', { value: '' }, '— freeform message —'));
+  for (const k of ENFORCER_ACTION_KINDS) actionSel.appendChild(el('option', { value: k }, k));
+  const laneInp = el('input', { type: 'text', class: 'lanes-edit-input lanes-edit-input-narrow', placeholder: 'lane (optional)' });
+  const riskSel = el('select', { class: 'lanes-edit-select' });
+  for (const r of ['low', 'medium', 'high']) riskSel.appendChild(el('option', { value: r }, `risk: ${r}`));
+  riskSel.value = 'medium';
+  top.appendChild(actionSel);
+  top.appendChild(laneInp);
+  top.appendChild(riskSel);
+  const textarea = el('textarea', { class: 'boss-composer-text', placeholder: 'Propose an action or say something. Shift+Enter for newline.', rows: '3' });
+  const checkBtn = el('button', { type: 'button', class: 'm-btn' }, 'Pre-check (Enforcer)');
+  const sendBtn = el('button', { type: 'submit', class: 'btn-allow' }, 'Send proposal');
+  const sayBtn = el('button', { type: 'button', class: 'm-btn' }, 'Just say it');
+  const bottom = el('div', { class: 'boss-composer-row' }, [checkBtn, sayBtn, sendBtn]);
+  wrap.appendChild(top);
+  wrap.appendChild(textarea);
+  wrap.appendChild(bottom);
+
+  // Pre-check uses the Enforcer endpoint without creating a proposal.
+  checkBtn.addEventListener('click', async () => {
+    const kind = actionSel.value;
+    if (!kind) { showToast('Pick an action kind first', 'warn'); return; }
+    const action = { kind, lane: laneInp.value.trim() || undefined };
+    try {
+      const r = await fetch('/bridge/enforcer/check', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+      const d = await r.json();
+      const dec = d.decision || {};
+      showToast(`${dec.allow ? '✓' : '✗'} ${dec.reasonCode} — ${dec.hint || ''}`, dec.allow ? 'ok' : 'err');
+    } catch (e) { showToast(`Pre-check failed: ${e.message}`, 'err'); }
+  });
+
+  sayBtn.addEventListener('click', async () => {
+    const text = textarea.value.trim();
+    if (!text) return;
+    try {
+      await fetch('/bridge/boss/message', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, bossSessionId: wrap.dataset.bossSession, role: 'operator' })
+      });
+      textarea.value = '';
+      reload();
+    } catch (e) { showToast(`Send failed: ${e.message}`, 'err'); }
+  });
+
+  wrap.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const summary = textarea.value.trim();
+    if (!summary) { showToast('Summary required', 'warn'); return; }
+    const body = {
+      summary,
+      lane: laneInp.value.trim() || null,
+      risk: riskSel.value,
+      bossSessionId: wrap.dataset.bossSession
+    };
+    if (actionSel.value) {
+      body.action = actionSel.value;
+      body.actionFields = { lane: laneInp.value.trim() || undefined };
+    }
+    try {
+      const r = await fetch('/bridge/proposals', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(`Proposal failed: ${d.error || r.statusText}`, 'err'); return; }
+      textarea.value = '';
+      reload();
+    } catch (err) { showToast(`Proposal failed: ${err.message}`, 'err'); }
+  });
+
   return wrap;
 }
 

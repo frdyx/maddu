@@ -36,6 +36,15 @@ export async function project(repoRoot) {
   //                                 lastHeartbeat, status, exitCode }
   const workers = new Map();
 
+  // Proposals projection (Slice γ).
+  //   proposals     : proposalId -> { id, ts, actor, lane, action, summary, risk,
+  //                                   preconditions, status: 'open'|'approved'|'rejected'|'negotiating',
+  //                                   decidedAt, decidedBy, reason }
+  const proposals = new Map();
+
+  // BOSS transcript fragments (Slice γ) — keyed by sessionId, append-only.
+  const bossTranscripts = new Map();
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -243,6 +252,50 @@ export async function project(repoRoot) {
         w.killedBy = ev.actor || null;
         break;
       }
+      case 'PROPOSAL_CREATED': {
+        const id = ev.data.id || ev.id;
+        proposals.set(id, {
+          id,
+          ts: ev.ts,
+          bossSessionId: ev.data.bossSessionId || null,
+          actor: ev.actor || null,
+          lane: ev.lane || ev.data.lane || null,
+          action: ev.data.action || null,
+          summary: ev.data.summary || null,
+          risk: ev.data.risk || 'medium',
+          preconditions: Array.isArray(ev.data.preconditions) ? ev.data.preconditions : [],
+          status: 'open',
+          decidedAt: null,
+          decidedBy: null,
+          reason: null,
+          enforcer: ev.data.enforcer || null
+        });
+        break;
+      }
+      case 'PROPOSAL_DECIDED': {
+        const p = proposals.get(ev.data.id);
+        if (!p) break;
+        p.status = ev.data.decision || 'rejected';
+        p.decidedAt = ev.ts;
+        p.decidedBy = ev.actor || null;
+        p.reason = ev.data.reason || null;
+        break;
+      }
+      case 'BOSS_MESSAGE': {
+        const sid = ev.data.bossSessionId || 'default';
+        if (!bossTranscripts.has(sid)) bossTranscripts.set(sid, []);
+        bossTranscripts.get(sid).push({
+          id: ev.id,
+          ts: ev.ts,
+          actor: ev.actor || null,
+          role: ev.data.role || 'operator',
+          text: ev.data.text || '',
+          proposalId: ev.data.proposalId || null,
+          reasonCode: ev.data.reasonCode || null,
+          citedRule: ev.data.citedRule || null
+        });
+        break;
+      }
     }
   }
 
@@ -284,7 +337,9 @@ export async function project(repoRoot) {
       policies: Array.from(policies.values())
     },
     tasks: Array.from(tasks.values()),
-    workers: Array.from(workers.values()).map((w) => annotateWorker(w))
+    workers: Array.from(workers.values()).map((w) => annotateWorker(w)),
+    proposals: Array.from(proposals.values()),
+    bossTranscripts: Object.fromEntries(bossTranscripts)
   };
 }
 
