@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Máddu vertical lockup on navy">
+  <title>Máddu vertical lockup on navy</title>
+  
+  
+  
+  <rect width="200" height="200" fill="#050B17"/>
+  <g transform="translate(61 24) scale(1.21875)" color="#F04E23"><path fill="currentColor" fill-rule="evenodd" d="M32 4L60 32L32 60L4 32Z M15 24H49L43 31H21Z M20 40H44L39 47H25Z"/></g>
+  <text x="100" y="132" text-anchor="middle" fill="#F5F1E8" font-family="'IBM Plex Sans Condensed','Arial Narrow','Nimbus Sans Narrow',Arial,sans-serif" font-size="35" font-weight="600" letter-spacing="-0.01em">Máddu</text>
+  <text x="100" y="154" text-anchor="middle" fill="#F5F1E8" opacity="0.74" font-family="'IBM Plex Mono','Menlo','Consolas',monospace" font-size="9.5" font-weight="400" letter-spacing="0.05em">The Source of local truth.</text>
+
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 40" width="240" height="40" role="img" aria-label="Máddu horizontal lockup on white">
+  <title>Máddu horizontal lockup on white</title>
+  
+  
+  
+  <rect width="240" height="40" fill="#FFFFFF"/>
+  <g transform="translate(8 6) scale(0.4375)" color="#000000"><path fill="currentColor" fill-rule="evenodd" d="M32 4L60 32L32 60L4 32Z M15 24H49L43 31H21Z M20 40H44L39 47H25Z"/></g>
+  <text x="43" y="28" fill="#000000" font-family="'IBM Plex Sans Condensed','Arial Narrow','Nimbus Sans Narrow',Arial,sans-serif" font-size="24" font-weight="600" letter-spacing="-0.01em">Máddu</text>
+
+</svg>

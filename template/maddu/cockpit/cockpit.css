@@ -186,7 +186,7 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 
 .rail-mark {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   padding: 18px 18px 22px;
   border-bottom: 1px solid var(--m-line-soft);
@@ -196,6 +196,13 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   color: var(--m-brand);                /* burnt orange ghost accent — brand anchor */
   font-size: 18px;
   text-shadow: var(--m-glow-brand);     /* subtle orange bloom on the glyph only */
+}
+.rail-mark-svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  filter: drop-shadow(0 0 6px rgba(240, 78, 35, 0.45));
 }
 .rail-mark-name {
   font-family: var(--m-font-cond);
