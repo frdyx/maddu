@@ -27,12 +27,15 @@ const ROUTES = {
   operations: { title: 'Operations', group: 'verify',    rank: 4,                 render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
   search:     { title: 'Search',     group: 'verify',    rank: 5,                 render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
 
-  runtimes:   { title: 'Runtimes',   group: 'connect',   rank: 1,                 render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
+  runtimes:   { title: 'Runtimes',   group: 'connect',   rank: 1,                 render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.',
+                keywords: 'claude codex hermes worker subprocess spawn provider' },
   mcp:        { title: 'MCP',        group: 'connect',   rank: 2,                 render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
-  auth:       { title: 'Auth',       group: 'connect',   rank: 3,                 render: renderAuth,       description: 'Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.' },
+  auth:       { title: 'Auth',       group: 'connect',   rank: 3,                 render: renderAuth,       description: 'Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.',
+                keywords: 'api key keys token oauth credentials secret rotation anthropic openai' },
   imports:    { title: 'Imports',    group: 'connect',   rank: 4,                 render: renderImports,    description: 'Safe import gateway. Foreign artifacts in — provider secrets always out. Rejected payloads are logged with paths + pattern names only.' },
   schedule:   { title: 'Schedule',   group: 'connect',   rank: 5,                 render: renderSchedule,   description: 'NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note).' },
-  settings:   { title: 'Settings',   group: 'connect',   rank: 6,                 render: renderSettings,   description: 'Bridge, lanes, providers, tokens, integrations, MCP registry.' },
+  settings:   { title: 'Settings',   group: 'connect',   rank: 6,                 render: renderSettings,   description: 'Bridge, lanes, providers, tokens, integrations, MCP registry.',
+                keywords: 'telegram discord email smtp integrations bot chat notifications dropbox imap outbound webhook' },
 
   dashboard:  { title: 'Dashboard',  group: 'reference', rank: 1,                 render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   roadmap:    { title: 'Roadmap',    group: 'reference', rank: 2,                 render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
@@ -6536,14 +6539,26 @@ function paletteItems(query) {
   const q = (query || '').toLowerCase().trim();
   const out = [];
   for (const [id, r] of Object.entries(ROUTES)) {
-    const hay = `${r.title} ${id} ${r.group || ''} ${r.description || ''}`.toLowerCase();
+    const titleLc = r.title.toLowerCase();
+    const idLc = id.toLowerCase();
+    const groupLc = (r.group || '').toLowerCase();
+    const descLc = (r.description || '').toLowerCase();
+    const kwLc = (r.keywords || '').toLowerCase();
+    const hay = `${titleLc} ${idLc} ${groupLc} ${descLc} ${kwLc}`;
     if (!q || hay.includes(q)) {
-      const score = q ? (
-        r.title.toLowerCase().startsWith(q) ? 0 :
-        r.title.toLowerCase().includes(q) ? 1 :
-        id.includes(q) ? 2 : 3
-      ) : (r.anchor ? 0 : 1);
-      out.push({ kind: 'route', id, title: r.title, group: r.group, anchor: r.anchor, desc: r.description, score });
+      let score, matchedOn = null;
+      if (!q) {
+        score = r.anchor ? 0 : 1;
+      } else if (titleLc.startsWith(q)) { score = 0; }
+      else if (titleLc.includes(q))     { score = 1; }
+      else if (idLc.includes(q))        { score = 2; }
+      else if (kwLc.includes(q))        { score = 3; matchedOn = 'keyword'; }
+      else                              { score = 4; matchedOn = 'description'; }
+      out.push({
+        kind: 'route', id,
+        title: r.title, group: r.group, anchor: r.anchor,
+        desc: r.description, matchedOn, score
+      });
     }
   }
   out.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
@@ -6560,6 +6575,14 @@ function renderPaletteResults() {
     return;
   }
   palette.items.forEach((it, i) => {
+    const titleNode = el('div', { class: 'palette-row-title' }, [
+      document.createTextNode(it.title)
+    ]);
+    if (it.matchedOn === 'keyword') {
+      titleNode.appendChild(el('span', { class: 'palette-row-match' }, ' · keyword match'));
+    } else if (it.matchedOn === 'description') {
+      titleNode.appendChild(el('span', { class: 'palette-row-match' }, ' · in description'));
+    }
     const row = el('div', {
       class: 'palette-row' + (i === palette.active ? ' active' : ''),
       role: 'option',
@@ -6568,7 +6591,7 @@ function renderPaletteResults() {
     }, [
       el('span', { class: 'palette-row-glyph' }, it.anchor ? '◆' : '◇'),
       el('div', { class: 'palette-row-text' }, [
-        el('div', { class: 'palette-row-title' }, it.title),
+        titleNode,
         el('div', { class: 'palette-row-desc' }, it.desc || '')
       ]),
       el('span', { class: 'palette-row-group' }, (it.group || '').toUpperCase())

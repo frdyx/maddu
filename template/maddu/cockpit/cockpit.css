@@ -2864,6 +2864,16 @@ select option:hover,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.palette-row-match {
+  font-family: var(--m-font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--m-accent-2);
+  text-transform: none;
+  margin-left: 6px;
+  opacity: 0.85;
+}
 .palette-row-desc {
   font-size: 11.5px;
   color: var(--m-fg-3);
