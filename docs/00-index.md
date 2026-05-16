@@ -41,7 +41,10 @@ Current version: **v0.12.0** ([changelog](../CHANGELOG.md)). License: Apache-2.0
 Reference docs that are not in the numbered series:
 
 - [`installation.md`](installation.md) — install requirements and steps.
-- [`hard-rules.md`](hard-rules.md) — the 8 invariants in full.
+- [`hard-rules.md`](hard-rules.md) — the 8 invariants in full, plus the
+  do-not-copy reference (including the distinction between forbidden
+  cloud-gateway chat bridges and the local long-poll / outbound-only
+  integrations that ship in v0.9.0+).
 - [`lanes.md`](lanes.md) — default lane catalog.
 - [`upgrade-policy.md`](upgrade-policy.md) — what `maddu upgrade` touches.
 - [`maddu-v0.3-roadmap.md`](maddu-v0.3-roadmap.md) — phase A/B/C/D feature plan.

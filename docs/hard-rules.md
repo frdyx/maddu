@@ -80,10 +80,55 @@ The patterns below were observed in studied systems and are explicitly forbidden
 | `localStorage` for non-trivial UI state | AionUi renderer | #1 files-only |
 | Electron + Rust standalone backend | AionUi | #4 no broad deps |
 | Native provider SDKs in core runtime | Hermes `run_agent.py` (Anthropic, Bedrock transports) | #5 no SDK in app code |
-| Gateway → Telegram/Slack/Discord bridges | Hermes `gateway/` | #7 brand boundary, security |
+| **Cloud gateway** for Telegram/Slack/Discord (hosted webhook relay) | Hermes `gateway/` | #3 hosted backends, #6 token export, #7 brand boundary |
 | Pastebin upload (`/debug share`) | Hermes | #3 no hosted backends |
 | Google Desktop OAuth for built-in agent | AionUi | #6 no token-leaking flows |
 | API-key import during migration | Hermes OpenClaw migration | #6 no token export |
 | Remote WebUI / browser-based agent runtime | AionUi optional mode | #3 local-only |
 | Broad optional extras (`google`, `homeassistant`, `sms`, `youtube`) | Hermes | #4 no broad deps |
 | Provider configs written into installed CLI backends from renderer/app state | AionUi `McpService` | #5 (bridge-owned, not app-owned) |
+
+### What is and isn't a "cloud gateway"
+
+The first row of the table above prohibits the **Hermes pattern**: a hosted
+service that receives webhooks from Telegram / Slack / Discord, holds bot
+tokens for many users, and relays messages between agents. That violates
+hard rules #3 (hosted backend), #6 (token export), and #7 (brand boundary
+— the gateway dictates how messages render across platforms, blurring
+cockpit / app / content layers).
+
+It does **not** prohibit chat integrations as a category. The integrations
+shipped in v0.9.0 (Telegram) and v0.10.0 (Discord, Email) explicitly take
+the *opposite* shape from the Hermes gateway, and `maddu doctor` will not
+flag them. Specifically, every Máddu integration must:
+
+1. **Run locally.** All polling and sending happens inside
+   `runtime/server.js` on the operator's machine. There is no public webhook
+   URL anywhere.
+2. **Use the provider's API directly.** Telegram via long-poll
+   (`getUpdates`); Discord via REST `POST /channels/{id}/messages`; Email
+   via direct SMTP. Built-in `fetch` and `node:tls` only — no provider
+   SDK (`python-telegram-bot`, `discord.js`, `nodemailer`, etc.).
+3. **Store tokens device-bound.** Every credential lives under
+   `%APPDATA%\maddu\auth\*.json` (Windows) or `~/.config/maddu/auth/`
+   (POSIX), per the existing `auth.mjs` contract. The HTTP surface returns
+   the masked tail (`****1234`) only.
+4. **Be off by default.** Enable is refused until a token AND a non-empty
+   allowlist (chat ids / channel ids / recipient addresses) are both
+   configured.
+5. **Allowlist senders or recipients.** Telegram drops content from
+   non-allowlisted chat ids silently; Discord refuses to post to non-
+   allowlisted channels; Email refuses to send to non-allowlisted
+   recipients. Re-checked at both queue-time and send-time.
+6. **Never run inbound-as-command.** Messages from allowlisted senders are
+   appended to `.maddu/chats/<provider>/*.ndjson` and emit a typed event,
+   but no action is taken on the content. "Approve via Telegram" or
+   similar inbound→action mappings are a separate explicit-opt-in slice
+   gated by the Enforcer, never default behavior.
+
+The operator-visible trade these integrations require — and the
+Settings panel surfaces this verbatim — is that **message content travels
+through the provider's servers**. The hard rules protect feature state
+and tokens; they don't pretend a chat platform doesn't see its own
+messages. That trade is documented at point of enable, and the bridge
+remains off until the operator accepts it by enabling it.

@@ -94,7 +94,7 @@
 - **RPC-backed Python interpreter** — collapses complex tool workflows into single turns via isolated Python scripts over sockets. High feasibility.
 - **agentskills.io skill standard** — portable, human-readable format for agent behavior + specialized capabilities. High feasibility.
 - **Git Worktree isolation** — disposable worktrees prevent parallel-agent clobbering. Medium feasibility.
-- **Multi-platform gateway sync** — single conversation thread across Telegram/Slack/Discord with cross-channel resume. Medium feasibility (do-not-copy for cloud bridges, but local-pubsub adaptation is interesting).
+- **Multi-platform gateway sync** — single conversation thread across Telegram/Slack/Discord with cross-channel resume. Medium feasibility (do-not-copy for cloud bridges, but local-pubsub adaptation is interesting). **Shipped as v0.9.0 (Telegram) and v0.10.0 (Discord/Email) using the local-pubsub adaptation — see [`hard-rules.md`](../hard-rules.md#what-is-and-isnt-a-cloud-gateway) for the distinction between what was banned and what was built.**
 
 ## 10. Weaknesses / Gaps
 
