@@ -27,6 +27,8 @@ import { safeImport, listAccepted as listImportsAccepted, listRejected as listIm
 import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
 import * as telegram from './lib/telegram.mjs';
+import * as discord from './lib/discord.mjs';
+import * as emailBridge from './lib/email.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -1082,6 +1084,91 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { chatId: Number(cid), messages: await telegram.readChatLog(repoRoot, cid, limit) });
   }
 
+  // ── discord (Slice η) ─ outbound-only, allowlisted, off by default ────
+  if (path === '/bridge/discord/status' && req.method === 'GET') {
+    return sendJson(res, 200, await discord.status(repoRoot));
+  }
+  if (path === '/bridge/discord/token' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const masked = await discord.setToken(repoRoot, body.value, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, masked });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/discord/allowlist' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!Array.isArray(body.channelIds)) return sendJson(res, 400, { error: 'channelIds[] required' });
+    try {
+      const s = await discord.setAllowlist(repoRoot, body.channelIds, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, allowedChannelIds: s.allowedChannelIds });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/discord/enable' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const s = await discord.enable(repoRoot, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, state: { enabled: s.enabled, allowedChannelIds: s.allowedChannelIds } });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/discord/disable' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const s = await discord.disable(repoRoot, body.sessionId || null);
+    return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
+  }
+  if (path === '/bridge/discord/send' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const rec = await discord.enqueueOutbound(repoRoot, { channelId: body.channelId, text: body.text }, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, queued: { ts: rec.ts, channelId: rec.channelId, length: rec.text.length } });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+
+  // ── email (Slice η) ─ outbound-only SMTP, allowlisted, off by default ─
+  if (path === '/bridge/email/status' && req.method === 'GET') {
+    return sendJson(res, 200, await emailBridge.status(repoRoot));
+  }
+  if (path === '/bridge/email/config' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const s = await emailBridge.setConfig(repoRoot, body, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, config: s.config });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/email/password' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const masked = await emailBridge.setPassword(repoRoot, body.value, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, masked });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/email/allowlist' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!Array.isArray(body.recipients)) return sendJson(res, 400, { error: 'recipients[] required' });
+    try {
+      const s = await emailBridge.setAllowlist(repoRoot, body.recipients, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, allowedRecipients: s.allowedRecipients });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/email/enable' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const s = await emailBridge.enable(repoRoot, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/email/disable' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const s = await emailBridge.disable(repoRoot, body.sessionId || null);
+    return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
+  }
+  if (path === '/bridge/email/send' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const rec = await emailBridge.enqueueOutbound(repoRoot, { to: body.to, subject: body.subject, text: body.text }, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, queued: { ts: rec.ts, to: rec.to, subject: rec.subject } });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+
   // ── events: tail N most recent (no cursor) for charts/sparklines ──────
   if (path === '/bridge/events/recent' && req.method === 'GET') {
     const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '200', 10), 1), 5000);
@@ -1795,6 +1882,8 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     if (telegramStopping) return;
     try { await telegram.tickPoll(repoRoot); } catch (err) { console.error('[telegram poll]', err.message); }
     try { await telegram.tickSend(repoRoot); } catch (err) { console.error('[telegram send]', err.message); }
+    try { await discord.tickSend(repoRoot); }  catch (err) { console.error('[discord send]', err.message); }
+    try { await emailBridge.tickSend(repoRoot); } catch (err) { console.error('[email send]', err.message); }
     if (telegramStopping) return;
     // When disabled the tick is cheap (early return), so we can poll the state
     // every few seconds without hitting Telegram. When enabled the long-poll
