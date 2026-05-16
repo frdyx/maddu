@@ -10,7 +10,7 @@
 A local-first, files-only framework for orchestrating AI agents inside any git repo.
 
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-D0FF00?style=flat-square&labelColor=050B17)](LICENSE)
-[![Version 0.3.2](https://img.shields.io/badge/version-0.3.2-56B8FF?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.12.0](https://img.shields.io/badge/version-0.12.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-F04E23?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Files-only](https://img.shields.io/badge/state-files--only-F5F1E8?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
 [![No cloud](https://img.shields.io/badge/cloud-no-FF5E7A?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
@@ -124,7 +124,7 @@ Every route that has aggregable data gets a summary widget at the top — built 
 $ npx github:frdyx/maddu init
 ✓ .maddu/ skeleton created
 ✓ maddu/ runtime + cockpit installed
-✓ maddu.json written  (framework 0.3.2)
+✓ maddu.json written  (framework 0.12.0)
 
 # 2.  Verify install integrity + hard-rule compliance
 $ maddu doctor
@@ -136,7 +136,7 @@ $ maddu doctor
 
 # 3.  Boot the bridge
 $ maddu start
-Máddu  v0.3.2  ·  http://127.0.0.1:4177  ·  pid 84711
+Máddu  v0.12.0  ·  http://127.0.0.1:4177  ·  pid 84711
 
 # 4.  Open the cockpit in your browser
 $ open http://127.0.0.1:4177
@@ -226,20 +226,55 @@ Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
 |---|---|---|---|
 | [Installation](docs/installation.md) | [Concepts](docs/02-concepts.md) | [CLI](docs/03-cli-reference.md) | [Architecture](docs/15-architecture.md) |
 | [Getting started](docs/01-getting-started.md) | [Lanes & sessions](docs/07-lanes-and-sessions.md) | [Bridge endpoints](docs/05-bridge-endpoints.md) | [Widget kit](docs/16-widget-kit.md) |
-| [Cockpit tour](docs/04-cockpit-tour.md) | [Slice-stop ritual](docs/08-slice-stop-ritual.md) | [Hard rules](docs/06-hard-rules.md) | [Upgrade policy](docs/upgrade-policy.md) |
-| [Troubleshooting](docs/13-troubleshooting.md) | [Approvals & permissions](docs/09-approvals-and-permissions.md) | [Lanes](docs/lanes.md) | [Auth & imports](docs/12-auth-and-imports.md) |
-|  | [Skills & hindsight](docs/10-skills-and-hindsight.md) | [Roadmap](docs/maddu-v0.3-roadmap.md) | [Runtimes & MCP](docs/11-runtimes-and-mcp.md) |
+| [Five-minute tour](docs/18-first-slice.md) | [Slice-stop ritual](docs/08-slice-stop-ritual.md) | [Hard rules](docs/06-hard-rules.md) | [Upgrade policy](docs/upgrade-policy.md) |
+| [Cockpit tour](docs/04-cockpit-tour.md) | [Approvals & permissions](docs/09-approvals-and-permissions.md) | [Lanes](docs/lanes.md) | [Auth & imports](docs/12-auth-and-imports.md) |
+| [Troubleshooting](docs/13-troubleshooting.md) | [Skills & hindsight](docs/10-skills-and-hindsight.md) | [Validation checklist](docs/17-validation-checklist.md) | [Runtimes & MCP](docs/11-runtimes-and-mcp.md) |
+|  |  | [Changelog](CHANGELOG.md) |  |
 
 ---
 
 ## Roadmap status
+
+**v0.3.x — original synthesis roadmap** *(complete)*
 
 - ✓ **Phase A — Foundations.** `/approvals` ledger, `/events/live` cursor stream, hindsight extraction worker.
 - ✓ **Phase B — Operator productivity.** Slash-command composer, mailbox bus, dependency-aware tasks, skills gallery, heartbeat watcher, cross-corpus search.
 - ✓ **Phase C — Power user.** Runtime adapter contract, MCP visual registry, NL→cron scheduler, checkpoint timeline, multi-key rotation.
 - ◻ **Phase D — Vision.** `/workbench` shell ✓, `/imports` gateway ✓, office-artifact preview pane (deferred).
 
-Detail: [`docs/maddu-v0.3-roadmap.md`](docs/maddu-v0.3-roadmap.md).
+**v0.4–v0.8 — depth-upgrade plan** *(complete)*
+
+- ✓ **Slice α** — Conductor + Inspector (`v0.4.0`)
+- ✓ **Slice β** — Queue Board + Claim Map (`v0.5.0`)
+- ✓ **Slice γ** — BOSS / Enforcer duality (`v0.6.0`)
+- ✓ **Slice δ** — Learning Memory + Wiki Updater (`v0.7.0`)
+- ✓ **Slice ε** — Workflows + Roadmap depth + Agents + Teams (`v0.8.0`)
+
+**v0.9–v0.10 — optional integrations** *(off by default, allowlisted)*
+
+- ✓ **Slice ζ** — Telegram bridge (long-poll, no public webhook) (`v0.9.0`)
+- ✓ **Slice η** — Discord + Email outbound-only bridges (`v0.10.0`)
+
+**v0.11–v0.12 — cockpit polish + sub-target system** *(complete)*
+
+- ✓ Grouped rail (5 phase-of-work clusters), tablet-collapse, mobile dock
+- ✓ `Ctrl+K` command palette with route / sub-target / action results
+- ✓ Inspector responsive: persistent → slide-over → bottom-sheet
+- ✓ Signature motion: 900 ms lime line on every `SLICE_STOP`
+- ✓ Design-system alignment for scrollbars, buttons, inputs, focus rings
+- ✓ Sub-target programmatic registry — every searchable entity in the
+  cockpit reachable by typing its own name (`Ctrl+K` → "anthropic",
+  "telegram", "<session-label>", any lane name, any open task title…)
+- ✓ Shape-aware skeleton bones (`loadingFor`) so panels don't reflow
+
+**Next**
+
+- ◻ `v1.0.0` — gated on the validation walkthrough at
+  [`docs/17-validation-checklist.md`](docs/17-validation-checklist.md).
+  Real-world Telegram/Discord/Email smoke + the lime-line motion check.
+
+Full per-version notes: [`CHANGELOG.md`](CHANGELOG.md). Original
+synthesis detail: [`docs/maddu-v0.3-roadmap.md`](docs/maddu-v0.3-roadmap.md).
 
 ---
 

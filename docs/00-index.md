@@ -4,7 +4,7 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v0.3.2**. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v0.12.0** ([changelog](../CHANGELOG.md)). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
 
 ## 60-second overview
 
@@ -34,6 +34,9 @@ Current version: **v0.3.2**. License: Apache-2.0. Repo: <https://github.com/frdy
 | 13 | [13-troubleshooting.md](13-troubleshooting.md) | Common problems and fixes. |
 | 14 | [14-upgrading.md](14-upgrading.md) | Upgrade policy (alias of `upgrade-policy.md`). |
 | 15 | [15-architecture.md](15-architecture.md) | Deep dive: two-process model, event flow, lifecycle. |
+| 16 | [16-widget-kit.md](16-widget-kit.md) | The pure-SVG widget kit used across the cockpit. |
+| 17 | [17-validation-checklist.md](17-validation-checklist.md) | Pre-v1.0.0 walkthrough — cockpit, motion, integrations, hard-rule spot checks. |
+| 18 | [18-first-slice.md](18-first-slice.md) | Five-minute new-operator tour. **Start here if you just installed.** |
 
 Reference docs that are not in the numbered series:
 
