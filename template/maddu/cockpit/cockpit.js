@@ -335,14 +335,21 @@ const INSPECTOR_TABS = ['overview', 'evidence', 'actions', 'related', 'raw'];
 
 function inspectorLabel(e) {
   if (!e) return { title: '—', sub: '' };
+  // Prefer the route-supplied label when present.
+  if (e.label) return { title: e.label, sub: e.kind || '' };
   if (e.kind === 'task')      return { title: e.data?.title || e.id || 'task', sub: `task · ${e.data?.lane || 'no lane'} · ${e.data?.status || ''}` };
   if (e.kind === 'lane')      return { title: e.id || 'lane', sub: `lane · ${e.data?.reasonCode || ''}` };
-  if (e.kind === 'session')   return { title: e.data?.label || e.id, sub: `session · ${e.data?.role || ''}` };
+  if (e.kind === 'session')   return { title: e.data?.label || e.raw?.label || e.id, sub: `session · ${e.data?.role || e.raw?.role || ''}` };
   if (e.kind === 'claim')     return { title: e.data?.lane || e.id, sub: `claim · ${e.data?.actor || ''}` };
   if (e.kind === 'approval')  return { title: e.data?.tool || e.id, sub: `approval · ${e.data?.lane || ''}` };
   if (e.kind === 'event')     return { title: e.data?.type || e.id, sub: `event · ${e.data?.actor || ''}` };
-  if (e.kind === 'sliceStop') return { title: e.data?.summary || e.id, sub: `slice-stop · ${e.data?.actor || ''}` };
-  return { title: e.id || e.kind, sub: e.kind };
+  if (e.kind === 'sliceStop' || e.kind === 'slice-stop') {
+    const s = e.data || e.raw || {};
+    return { title: s.summary || e.id, sub: `slice-stop · ${s.actor || ''}` };
+  }
+  if (e.kind === 'finding')        return { title: e.id || 'finding', sub: 'learning finding' };
+  if (e.kind === 'workflow-node')  return { title: e.id || 'node', sub: 'workflow blueprint' };
+  return { title: e.id || e.kind || '—', sub: e.kind || '' };
 }
 
 function renderInspectorTab(entity, tab) {
@@ -351,11 +358,39 @@ function renderInspectorTab(entity, tab) {
   catch (err) { return placeholder('Inspector error', err.message || String(err)); }
 }
 
+// Inspector entity shape — two flavours coexist:
+//   Legacy (task/lane/approval/event/sliceStop): { kind, id, data: {...} }
+//   New     (finding/slice-stop/workflow-node/session/claim/lane from
+//            depth-upgrade routes):
+//            { kind, id, label, raw, evidence:[{label,value}], actions:[{label,run}], related:[{kind,id,label}] }
+// Each renderer normalizes by preferring top-level explicit arrays/refs
+// when present, and falling back to the legacy e.data shape otherwise.
+
+function inspectorPayload(e) {
+  // Best-effort merged view: prefer top-level explicit slots, then raw,
+  // then data, then the entity itself.
+  return e.raw || e.data || e || {};
+}
+
 const INSPECTOR_RENDERERS = {
   overview(e) {
-    const d = e.data || {};
     const wrap = el('div', {});
-    // Human-labels-first KV list. System refs go in the 'raw' tab.
+    const d = inspectorPayload(e);
+
+    // 1. Top-level evidence array — used by new routes (Learning, Agents,
+    //    Teams, Workflows, Roadmap slice index). This is the curated
+    //    overview the route author wanted to show.
+    if (Array.isArray(e.evidence) && e.evidence.length) {
+      const kv = [];
+      for (const it of e.evidence) {
+        kv.push(el('dt', {}, it.label || ''));
+        kv.push(el('dd', {}, it.value == null ? '—' : String(it.value)));
+      }
+      wrap.appendChild(el('dl', { class: 'kv' }, kv));
+      return wrap;
+    }
+
+    // 2. Legacy kind-specific renderers.
     if (e.kind === 'task') {
       wrap.appendChild(el('dl', { class: 'kv' }, [
         el('dt', {}, 'title'),       el('dd', {}, d.title || '—'),
@@ -364,7 +399,9 @@ const INSPECTOR_RENDERERS = {
         el('dt', {}, 'status'),      el('dd', {}, d.status || '—'),
         el('dt', {}, 'description'), el('dd', {}, d.description || '—')
       ]));
-    } else if (e.kind === 'lane') {
+      return wrap;
+    }
+    if (e.kind === 'lane') {
       wrap.appendChild(el('dl', { class: 'kv' }, [
         el('dt', {}, 'lane'),        el('dd', {}, e.id || '—'),
         el('dt', {}, 'scope'),       el('dd', {}, d.scope || '—'),
@@ -374,22 +411,42 @@ const INSPECTOR_RENDERERS = {
         el('dt', {}, 'claims held'), el('dd', {}, String(d.claimsHeld ?? 0)),
         el('dt', {}, 'reason'),      el('dd', {}, REASON_CODE_LABEL[d.reasonCode] || d.reasonCode || '—')
       ]));
-    } else {
-      const kv = [];
-      for (const k of Object.keys(d)) {
-        if (typeof d[k] === 'object') continue;
-        kv.push(el('dt', {}, k));
-        kv.push(el('dd', {}, String(d[k] ?? '—')));
-      }
-      wrap.appendChild(el('dl', { class: 'kv' }, kv));
+      return wrap;
     }
+
+    // 3. Generic — walk scalar fields of the payload.
+    const kv = [];
+    if (e.id) { kv.push(el('dt', {}, 'id')); kv.push(el('dd', {}, String(e.id))); }
+    if (e.label && e.label !== e.id) { kv.push(el('dt', {}, 'label')); kv.push(el('dd', {}, String(e.label))); }
+    for (const k of Object.keys(d)) {
+      const v = d[k];
+      if (v && typeof v === 'object') continue; // objects belong in raw
+      if (k === 'id' && String(v) === String(e.id)) continue; // dup
+      kv.push(el('dt', {}, k));
+      kv.push(el('dd', {}, v == null ? '—' : String(v)));
+    }
+    if (!kv.length) {
+      return placeholder('No overview', 'This entity exposed no scalar fields. See the Raw tab for the full payload.');
+    }
+    wrap.appendChild(el('dl', { class: 'kv' }, kv));
     return wrap;
   },
+
   evidence(e) {
-    // Generic: show ts, id, source refs. Specific kinds may extend later.
-    const d = e.data || {};
+    // Top-level evidence array wins. Same shape the route author passed.
+    if (Array.isArray(e.evidence) && e.evidence.length) {
+      const kv = [];
+      for (const it of e.evidence) {
+        kv.push(el('dt', {}, it.label || ''));
+        const v = it.value;
+        kv.push(el('dd', {}, v == null ? '—' : (typeof v === 'object' ? JSON.stringify(v) : String(v))));
+      }
+      return el('dl', { class: 'kv' }, kv);
+    }
+    // Legacy: pull timestamps + ids out of the payload.
+    const d = inspectorPayload(e);
     const items = [];
-    if (d.id) items.push(['id', d.id]);
+    if (d.id || e.id) items.push(['id', d.id || e.id]);
     if (d.ts) items.push(['ts', formatTs(d.ts)]);
     if (d.createdAt) items.push(['createdAt', formatTs(d.createdAt)]);
     if (d.updatedAt) items.push(['updatedAt', formatTs(d.updatedAt)]);
@@ -400,24 +457,55 @@ const INSPECTOR_RENDERERS = {
     for (const [k, v] of items) { kv.push(el('dt', {}, k)); kv.push(el('dd', {}, String(v))); }
     return el('dl', { class: 'kv' }, kv);
   },
+
   actions(e) {
     const wrap = el('div', { class: 'inspector-actions' });
-    if (e.kind === 'task') {
-      wrap.appendChild(el('button', { class: 'm-btn', type: 'button' }, 'Open in Tasks'))
-         .addEventListener('click', () => { location.hash = `#/tasks?focus=${encodeURIComponent(e.id)}`; closeInspector(); });
-    } else if (e.kind === 'lane') {
-      wrap.appendChild(el('button', { class: 'm-btn', type: 'button' }, 'Open Swarm'))
-         .addEventListener('click', () => { location.hash = '#/swarm'; closeInspector(); });
-    } else if (e.kind === 'approval') {
-      wrap.appendChild(el('button', { class: 'm-btn', type: 'button' }, 'Open Approvals'))
-         .addEventListener('click', () => { location.hash = '#/approvals'; closeInspector(); });
+    // Top-level actions array — author-supplied {label, run} pairs.
+    if (Array.isArray(e.actions) && e.actions.length) {
+      for (const a of e.actions) {
+        const btn = el('button', { class: 'm-btn', type: 'button' }, a.label || 'Run');
+        btn.addEventListener('click', () => {
+          try { Promise.resolve(a.run && a.run()).catch((err) => console.error('[inspector action]', err)); }
+          catch (err) { console.error('[inspector action]', err); }
+          if (a.closeOnRun !== false) closeInspector();
+        });
+        wrap.appendChild(btn);
+      }
+      return wrap;
     }
-    if (!wrap.children.length) wrap.appendChild(placeholder('No actions', 'No quick actions defined for this entity kind yet.'));
+    // Legacy hardcoded jumps.
+    if (e.kind === 'task') {
+      const b = el('button', { class: 'm-btn', type: 'button' }, 'Open in Tasks');
+      b.addEventListener('click', () => { location.hash = `#/tasks?focus=${encodeURIComponent(e.id)}`; closeInspector(); });
+      wrap.appendChild(b);
+    } else if (e.kind === 'lane') {
+      const b = el('button', { class: 'm-btn', type: 'button' }, 'Open Swarm');
+      b.addEventListener('click', () => { location.hash = '#/swarm'; closeInspector(); });
+      wrap.appendChild(b);
+    } else if (e.kind === 'approval') {
+      const b = el('button', { class: 'm-btn', type: 'button' }, 'Open Approvals');
+      b.addEventListener('click', () => { location.hash = '#/approvals'; closeInspector(); });
+      wrap.appendChild(b);
+    }
+    if (!wrap.children.length) wrap.appendChild(placeholder('No actions', 'No quick actions defined for this entity yet.'));
     return wrap;
   },
+
   related(e) {
-    // Best-effort by kind. Tasks → blockers/blocks. Lane → tasks in lane.
-    const d = e.data || {};
+    // Top-level related array — author-supplied {kind, id, label} entries.
+    if (Array.isArray(e.related) && e.related.length) {
+      const list = el('div', { class: 'inspector-related' });
+      for (const r of e.related) {
+        const row = el('div', { class: 'inspector-related-row' }, [
+          el('span', { class: 'mono panel-aside' }, (r.kind || '').toUpperCase()),
+          el('span', {}, r.label || r.id || '—')
+        ]);
+        list.appendChild(row);
+      }
+      return list;
+    }
+    // Legacy task blocker/blocks.
+    const d = inspectorPayload(e);
     if (e.kind === 'task') {
       const lines = [];
       if (Array.isArray(d.blockedBy) && d.blockedBy.length) lines.push(['blocked by', d.blockedBy.join(', ')]);
@@ -429,9 +517,12 @@ const INSPECTOR_RENDERERS = {
     }
     return placeholder('No relations', 'No related entities indexed for this kind yet.');
   },
+
   raw(e) {
     const pre = el('pre', { class: 'inspector-raw' });
-    pre.textContent = JSON.stringify(e.data || e, null, 2);
+    // Raw shows the full entity (raw + data + top-level slots) so nothing
+    // is hidden when the operator drops to this tab.
+    pre.textContent = JSON.stringify(e.raw || e.data || e, null, 2);
     return pre;
   }
 };
