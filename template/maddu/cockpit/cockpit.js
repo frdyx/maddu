@@ -293,6 +293,20 @@ function ensureInspector() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && inspector.open && !e.defaultPrevented) closeInspector();
   });
+  // Outside-click closes. pointerdown unifies mouse/touch/pen and fires
+  // before the subsequent click, so a card-click that opens a different
+  // entity still works (close → reopen with new content in one gesture).
+  document.addEventListener('pointerdown', (e) => {
+    if (!inspector.open) return;
+    const t = e.target;
+    if (!t || !(t instanceof Node)) return;
+    // Inside the panel — keep open.
+    if (panelEl.contains(t)) return;
+    // Palette / dock-sheet / first-run banner all have their own scrim
+    // close behavior; clicking them is "outside" the inspector and should
+    // dismiss it too.
+    closeInspector();
+  });
   return panelEl;
 }
 
