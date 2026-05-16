@@ -55,6 +55,41 @@ const NAV_GROUPS = [
   { id: 'reference', label: 'Reference', glyph: '☷', summary: 'dashboard, docs, roadmap' }
 ];
 
+// Sub-targets — first-class palette destinations that live INSIDE another
+// route's panel. Each one gets its own title, description, glyph, and group
+// in the palette, but commits as `#/<route>?focus=<key>` and the host route
+// scroll-focuses the matching panel on render. Adding a sub-target here
+// makes it instantly searchable by its own name.
+const SUB_TARGETS = [
+  {
+    id: 'sub-telegram',
+    title: 'Telegram',
+    route: 'settings',
+    focus: 'telegram',
+    group: 'connect',
+    description: 'Long-poll bot bridge · allowlisted · off by default · message bodies route via Telegram.',
+    keywords: 'telegram tg messenger chat phone notification mobile bot integrations'
+  },
+  {
+    id: 'sub-discord',
+    title: 'Discord',
+    route: 'settings',
+    focus: 'discord',
+    group: 'connect',
+    description: 'Outbound-only REST (no gateway) · channel allowlist · @everyone blocked.',
+    keywords: 'discord channel server guild bot integrations notifications'
+  },
+  {
+    id: 'sub-email',
+    title: 'Email',
+    route: 'settings',
+    focus: 'email',
+    group: 'connect',
+    description: 'Outbound-only SMTP · TLS required (port 465/587) · recipient allowlist · no IMAP.',
+    keywords: 'email smtp mail gmail outlook fastmail notifications outbound webhook imap'
+  }
+];
+
 function routesInGroup(groupId) {
   return Object.entries(ROUTES)
     .filter(([, r]) => r.group === groupId)
@@ -6548,33 +6583,53 @@ const palette = {
 function paletteItems(query) {
   const q = (query || '').toLowerCase().trim();
   const out = [];
+
+  // Routes — top-level destinations.
   for (const [id, r] of Object.entries(ROUTES)) {
     const titleLc = r.title.toLowerCase();
     const idLc = id.toLowerCase();
-    const groupLc = (r.group || '').toLowerCase();
     const descLc = (r.description || '').toLowerCase();
     const kwLc = (r.keywords || '').toLowerCase();
-    const hay = `${titleLc} ${idLc} ${groupLc} ${descLc} ${kwLc}`;
+    const hay = `${titleLc} ${idLc} ${r.group || ''} ${descLc} ${kwLc}`;
     if (!q || hay.includes(q)) {
-      let score, matchedOn = null, matchedKeyword = null;
-      if (!q) {
-        score = r.anchor ? 0 : 1;
-      } else if (titleLc.startsWith(q)) { score = 0; }
-      else if (titleLc.includes(q))     { score = 1; }
-      else if (idLc.includes(q))        { score = 2; }
-      else if (kwLc.includes(q)) {
-        score = 3; matchedOn = 'keyword';
-        // Surface the specific keyword token that matched so commit can
-        // pass it as a focus hint (e.g. "tele" → "telegram").
-        matchedKeyword = (r.keywords || '').split(/\s+/).find((k) => k.toLowerCase().includes(q)) || null;
-      } else                            { score = 4; matchedOn = 'description'; }
+      let score;
+      if (!q)                            score = r.anchor ? 0 : 1;
+      else if (titleLc.startsWith(q))    score = 0;
+      else if (titleLc.includes(q))      score = 1;
+      else if (idLc.includes(q))         score = 2;
+      else if (kwLc.includes(q))         score = 3;
+      else                               score = 5; // route via description = lower than sub-target
       out.push({
         kind: 'route', id,
         title: r.title, group: r.group, anchor: r.anchor,
-        desc: r.description, matchedOn, matchedKeyword, score
+        desc: r.description, score
       });
     }
   }
+
+  // Sub-targets — first-class panel entries inside routes.
+  for (const s of SUB_TARGETS) {
+    const titleLc = s.title.toLowerCase();
+    const kwLc = (s.keywords || '').toLowerCase();
+    const descLc = (s.description || '').toLowerCase();
+    const hay = `${titleLc} ${kwLc} ${descLc}`;
+    if (!q || hay.includes(q)) {
+      let score;
+      if (!q)                            score = 2; // appear after anchors, before non-anchor routes
+      else if (titleLc.startsWith(q))    score = 0; // "tele" → Telegram beats Settings
+      else if (titleLc.includes(q))      score = 1;
+      else if (kwLc.includes(q))         score = 2;
+      else                               score = 4;
+      out.push({
+        kind: 'sub', id: s.id,
+        title: s.title, group: s.group, anchor: true,
+        desc: s.description,
+        targetRoute: s.route, focus: s.focus,
+        score
+      });
+    }
+  }
+
   out.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
   return out.slice(0, 24);
 }
@@ -6592,23 +6647,22 @@ function renderPaletteResults() {
     const titleNode = el('div', { class: 'palette-row-title' }, [
       document.createTextNode(it.title)
     ]);
-    if (it.matchedOn === 'keyword') {
-      titleNode.appendChild(el('span', { class: 'palette-row-match' }, ' · keyword match'));
-    } else if (it.matchedOn === 'description') {
-      titleNode.appendChild(el('span', { class: 'palette-row-match' }, ' · in description'));
+    if (it.kind === 'sub') {
+      titleNode.appendChild(el('span', { class: 'palette-row-match' }, ` · in ${(it.targetRoute || '').toUpperCase()}`));
     }
+    const groupLabel = (it.group || '').toUpperCase();
     const row = el('div', {
-      class: 'palette-row' + (i === palette.active ? ' active' : ''),
+      class: 'palette-row' + (i === palette.active ? ' active' : '') + (it.kind === 'sub' ? ' sub' : ''),
       role: 'option',
       'aria-selected': i === palette.active ? 'true' : 'false',
       'data-index': String(i)
     }, [
-      el('span', { class: 'palette-row-glyph' }, it.anchor ? '◆' : '◇'),
+      el('span', { class: 'palette-row-glyph' }, it.kind === 'sub' ? '▸' : (it.anchor ? '◆' : '◇')),
       el('div', { class: 'palette-row-text' }, [
         titleNode,
         el('div', { class: 'palette-row-desc' }, it.desc || '')
       ]),
-      el('span', { class: 'palette-row-group' }, (it.group || '').toUpperCase())
+      el('span', { class: 'palette-row-group' }, groupLabel)
     ]);
     row.addEventListener('click', () => commitPalette(i));
     row.addEventListener('mousemove', () => { palette.active = i; refreshPaletteActive(); });
@@ -6655,8 +6709,11 @@ function commitPalette(i) {
   const it = palette.items[i];
   if (!it) return;
   closePalette();
-  const focus = it.matchedKeyword;
-  location.hash = focus ? `#/${it.id}?focus=${encodeURIComponent(focus)}` : `#/${it.id}`;
+  if (it.kind === 'sub') {
+    location.hash = `#/${it.targetRoute}?focus=${encodeURIComponent(it.focus)}`;
+  } else {
+    location.hash = `#/${it.id}`;
+  }
 }
 
 // Read ?focus=<keyword> from the current hash. Used by route renderers
@@ -6669,22 +6726,42 @@ function paletteFocus() {
 // Find the panel whose data-focus list includes the keyword, scroll into
 // view, and add a brief lime border flash. Called from renderSettings on
 // next tick (after the DOM mounts).
+// Find the panel whose data-focus list contains the keyword. Scroll-focus
+// is retried on a backoff (50/250/600/1200 ms) so async panel content that
+// arrives after the first mount can't leave the panel off-screen.
 function focusPanelByKeyword(root, keyword) {
   if (!root || !keyword) return;
-  const panels = root.querySelectorAll('[data-focus]');
-  for (const p of panels) {
-    const keys = (p.getAttribute('data-focus') || '').toLowerCase().split(/\s+/);
-    if (keys.includes(keyword)) {
-      requestAnimationFrame(() => {
-        p.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        p.classList.remove('panel-focus');
-        void p.offsetWidth;
-        p.classList.add('panel-focus');
-        setTimeout(() => p.classList.remove('panel-focus'), 1600);
-      });
-      return;
+  const k = String(keyword).toLowerCase();
+  function findPanel() {
+    const inDoc = document.body.contains(root) ? root : document.getElementById('route-view');
+    const panels = (inDoc || document).querySelectorAll('[data-focus]');
+    for (const p of panels) {
+      const keys = (p.getAttribute('data-focus') || '').toLowerCase().split(/\s+/);
+      if (keys.includes(k)) return p;
     }
+    return null;
   }
+  function doScroll() {
+    const p = findPanel();
+    if (!p) return false;
+    // ScrollIntoView with start alignment respects scroll-margin-top (set
+    // in CSS to clear the sticky stage-head).
+    p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  }
+  function flash() {
+    const p = findPanel();
+    if (!p) return;
+    p.classList.remove('panel-focus');
+    void p.offsetWidth;
+    p.classList.add('panel-focus');
+    setTimeout(() => p.classList.remove('panel-focus'), 1600);
+  }
+  // Initial RAF + 3 retry passes after async panel content typically settles.
+  requestAnimationFrame(() => { doScroll(); flash(); });
+  setTimeout(doScroll,  250);
+  setTimeout(doScroll,  600);
+  setTimeout(doScroll, 1200);
 }
 
 function initPalette() {

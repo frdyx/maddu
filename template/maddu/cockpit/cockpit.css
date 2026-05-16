@@ -2867,7 +2867,10 @@ select option:hover,
 /* Brief lime-outline flash when the palette focuses a specific panel. */
 .panel-focus {
   animation: maddu-panel-focus 1600ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  scroll-margin-top: 70px;
+}
+[data-focus] { scroll-margin-top: 96px; }
+@media (max-width: 767px) {
+  [data-focus] { scroll-margin-top: 64px; }
 }
 @keyframes maddu-panel-focus {
   0%   { box-shadow: 0 0 0 0 var(--m-accent), 0 0 0 0 rgba(208, 255, 0, 0); }
@@ -2885,6 +2888,11 @@ select option:hover,
   margin-left: 6px;
   opacity: 0.85;
 }
+.palette-row.sub .palette-row-glyph {
+  color: var(--m-accent);
+  font-weight: 600;
+}
+.palette-row.sub.active .palette-row-glyph { color: var(--m-accent); }
 .palette-row-desc {
   font-size: 11.5px;
   color: var(--m-fg-3);
