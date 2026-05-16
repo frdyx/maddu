@@ -169,8 +169,21 @@ function updateChrome() {
       else                            { els.tasksBadge.hidden = true; }
     }
     const stuck = bridgeStatus.counts && bridgeStatus.counts.stuckWorkers;
+    const sliceStops = (bridgeStatus.counts && bridgeStatus.counts.sliceStops) || 0;
+    const dismissed = (() => {
+      try { return localStorage.getItem('maddu.firstRunDismissed') === '1'; } catch { return false; }
+    })();
     if (stuck && stuck > 0) {
       setBanner(`<span>⚠  ${stuck} worker${stuck === 1 ? '' : 's'} silent &gt; 15 s — possible hang</span><a href="#/swarm">View in Swarm →</a>`, 'warn');
+    } else if (sliceStops === 0 && !dismissed) {
+      // First-run hint — clears the moment the operator runs a slice-stop,
+      // or when they dismiss it explicitly. Stored in localStorage so it
+      // doesn't reappear across reloads after dismissal.
+      setBanner(
+        '<span>👋  First time here? <a href="#/docs?p=18-first-slice">Take the five-minute tour →</a></span>' +
+        '<a href="#" data-first-run-dismiss="1">dismiss</a>',
+        'info'
+      );
     } else {
       setBanner('');
     }
@@ -917,6 +930,14 @@ const ACTIONS = [
     keywords: 'roadmap kpi metric',
     group: 'reference',
     run: () => { location.hash = '#/roadmap?focus=kpis'; }
+  },
+  {
+    id: 'first-slice-tour',
+    title: 'Open the five-minute tour',
+    description: 'First-time walkthrough: register a session, claim a lane, make a slice-stop, watch the lime line fire.',
+    keywords: 'tour onboarding first slice walkthrough getting started new install help',
+    group: 'reference',
+    run: () => { location.hash = '#/docs?p=18-first-slice'; }
   },
   {
     id: 'reload-cockpit',
@@ -7175,6 +7196,16 @@ async function boot() {
   if (!location.hash) location.hash = '#/conductor';
   loadManifest();
   refreshDataSubTargets();
+  // First-run banner dismiss — event-delegated so the link survives banner
+  // re-renders. Persisted to localStorage; resets when the user clears site
+  // data.
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest && e.target.closest('[data-first-run-dismiss]');
+    if (!a) return;
+    e.preventDefault();
+    try { localStorage.setItem('maddu.firstRunDismissed', '1'); } catch {}
+    setBanner('');
+  });
   buildRail();
   buildDock();
   initDock();
