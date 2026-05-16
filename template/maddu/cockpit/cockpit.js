@@ -806,6 +806,156 @@ async function refreshDataSubTargets() {
   } catch {}
 }
 
+// ─── Action palette entries ─────────────────────────────────────────────
+// Verbs the cockpit can do, exposed as palette results so the operator
+// types the intent instead of hunting for the route. Shown as a second
+// tier behind a divider; commit invokes run() directly. Use sparingly —
+// only actions where the right path is unambiguous and a confirmation
+// isn't necessary.
+const ACTIONS = [
+  {
+    id: 'wiki-rebuild',
+    title: 'Rebuild wiki from spine',
+    description: 'POST /bridge/wiki/rebuild — replays every SLICE_STOP into .maddu/wiki/.',
+    keywords: 'wiki rebuild regenerate sync drift refresh',
+    group: 'verify',
+    run: async () => {
+      try {
+        const r = await fetch('/bridge/wiki/rebuild', { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (typeof showToast === 'function') showToast(`Wiki rebuilt · ${j.pagesWritten} page(s)`, 'ok');
+      } catch (e) { if (typeof showToast === 'function') showToast(`Rebuild failed: ${e.message}`, 'err'); }
+    }
+  },
+  {
+    id: 'memory-extract',
+    title: 'Re-extract hindsight memory',
+    description: 'POST /bridge/memory/extract — replays SLICE_STOPs into memory.ndjson (idempotent).',
+    keywords: 'memory hindsight extract re-extract refresh facts learnings',
+    group: 'verify',
+    run: async () => {
+      try {
+        const r = await fetch('/bridge/memory/extract', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (typeof showToast === 'function') showToast(`+${j.added} fact(s)`, 'ok');
+      } catch (e) { if (typeof showToast === 'function') showToast(`Extract failed: ${e.message}`, 'err'); }
+    }
+  },
+  {
+    id: 'memory-rebuild',
+    title: 'Rebuild memory from scratch',
+    description: 'POST /bridge/memory/extract with rebuild=true — truncates memory.ndjson then replays.',
+    keywords: 'memory rebuild reset truncate fresh',
+    group: 'verify',
+    run: async () => {
+      if (!confirm('Rebuild memory.ndjson from the spine? This truncates the file then replays every SLICE_STOP.')) return;
+      try {
+        const r = await fetch('/bridge/memory/extract', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rebuild: true }) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (typeof showToast === 'function') showToast(`Memory rebuilt · ${j.facts} facts`, 'ok');
+      } catch (e) { if (typeof showToast === 'function') showToast(`Rebuild failed: ${e.message}`, 'err'); }
+    }
+  },
+  {
+    id: 'stream-pause',
+    title: 'Pause / resume event stream',
+    description: 'Toggle the long-poll loop. Useful when reading a noisy stream on /events.',
+    keywords: 'stream pause resume events live freeze',
+    group: 'verify',
+    run: () => {
+      stream.paused = !stream.paused;
+      if (typeof showToast === 'function') showToast(stream.paused ? 'Stream paused' : 'Stream resumed', 'ok');
+    }
+  },
+  {
+    id: 'inspector-close',
+    title: 'Close Inspector',
+    description: 'Dismiss the right-side detail panel if it’s open.',
+    keywords: 'inspector close hide dismiss panel detail',
+    group: 'operate',
+    run: () => { if (typeof closeInspector === 'function') closeInspector(); }
+  },
+  {
+    id: 'open-hard-rules',
+    title: 'Open hard rules',
+    description: 'Jump to docs/hard-rules.md — the eight invariants.',
+    keywords: 'hard rules invariants compliance files-only sqlite hosted deps sdk token brand lane',
+    group: 'reference',
+    run: () => { location.hash = '#/docs?p=hard-rules'; }
+  },
+  {
+    id: 'telegram-test',
+    title: 'Open Telegram test sender',
+    description: 'Settings → Telegram bridge (must be enabled with an allowlisted chat to send).',
+    keywords: 'telegram test send try ping',
+    group: 'connect',
+    run: () => { location.hash = '#/settings?focus=telegram'; }
+  },
+  {
+    id: 'discord-test',
+    title: 'Open Discord test sender',
+    description: 'Settings → Discord bridge (must be enabled with an allowlisted channel to send).',
+    keywords: 'discord test send try ping',
+    group: 'connect',
+    run: () => { location.hash = '#/settings?focus=discord'; }
+  },
+  {
+    id: 'email-test',
+    title: 'Open email test sender',
+    description: 'Settings → Email bridge (must be enabled with an allowlisted recipient to send).',
+    keywords: 'email test send try ping smtp mail',
+    group: 'connect',
+    run: () => { location.hash = '#/settings?focus=email'; }
+  },
+  {
+    id: 'roadmap-open',
+    title: 'Open Roadmap → KPIs',
+    description: 'Jump to Roadmap and focus the KPI strip.',
+    keywords: 'roadmap kpi metric',
+    group: 'reference',
+    run: () => { location.hash = '#/roadmap?focus=kpis'; }
+  },
+  {
+    id: 'reload-cockpit',
+    title: 'Reload cockpit',
+    description: 'Hard refresh the cockpit page (Ctrl+Shift+R equivalent).',
+    keywords: 'reload refresh hard reset cockpit page',
+    group: 'reference',
+    run: () => { location.reload(); }
+  }
+];
+
+function actionItems(query) {
+  const q = (query || '').toLowerCase().trim();
+  const out = [];
+  for (const a of ACTIONS) {
+    const titleLc = a.title.toLowerCase();
+    const kwLc = (a.keywords || '').toLowerCase();
+    const descLc = (a.description || '').toLowerCase();
+    const hay = `${titleLc} ${kwLc} ${descLc} ${a.id}`;
+    if (!q || hay.includes(q)) {
+      let score;
+      if (!q)                            score = 6; // bottom of empty palette
+      else if (titleLc.startsWith(q))    score = 0;
+      else if (titleLc.includes(q))      score = 1;
+      else if (kwLc.includes(q))         score = 2;
+      else                               score = 5;
+      // Bias action results slightly below routes/sub-targets when the
+      // user is searching for a destination, but let strong matches win.
+      out.push({
+        kind: 'action', id: a.id,
+        title: a.title, group: a.group, desc: a.description,
+        run: a.run, score: score + 0.5
+      });
+    }
+  }
+  out.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
+  return out;
+}
+
 function loadManifest() {
   for (const [route, entries] of Object.entries(SUB_TARGET_MANIFEST)) {
     for (const e of entries) {
@@ -6831,8 +6981,11 @@ function paletteItems(query) {
     }
   }
 
+  // Actions — verbs the cockpit can run directly.
+  for (const a of actionItems(q)) out.push(a);
+
   out.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
-  return out.slice(0, 24);
+  return out.slice(0, 28);
 }
 
 function renderPaletteResults() {
@@ -6850,15 +7003,21 @@ function renderPaletteResults() {
     ]);
     if (it.kind === 'sub') {
       titleNode.appendChild(el('span', { class: 'palette-row-match' }, ` · in ${(it.targetRoute || '').toUpperCase()}`));
+    } else if (it.kind === 'action') {
+      titleNode.appendChild(el('span', { class: 'palette-row-match' }, ' · action'));
     }
     const groupLabel = (it.group || '').toUpperCase();
+    let glyph;
+    if (it.kind === 'action')   glyph = '▷';
+    else if (it.kind === 'sub') glyph = '▸';
+    else                        glyph = it.anchor ? '◆' : '◇';
     const row = el('div', {
-      class: 'palette-row' + (i === palette.active ? ' active' : '') + (it.kind === 'sub' ? ' sub' : ''),
+      class: 'palette-row' + (i === palette.active ? ' active' : '') + (it.kind === 'sub' ? ' sub' : '') + (it.kind === 'action' ? ' action' : ''),
       role: 'option',
       'aria-selected': i === palette.active ? 'true' : 'false',
       'data-index': String(i)
     }, [
-      el('span', { class: 'palette-row-glyph' }, it.kind === 'sub' ? '▸' : (it.anchor ? '◆' : '◇')),
+      el('span', { class: 'palette-row-glyph' }, glyph),
       el('div', { class: 'palette-row-text' }, [
         titleNode,
         el('div', { class: 'palette-row-desc' }, it.desc || '')
@@ -6918,7 +7077,10 @@ function commitPalette(i) {
   const it = palette.items[i];
   if (!it) return;
   closePalette();
-  if (it.kind === 'sub') {
+  if (it.kind === 'action') {
+    try { Promise.resolve(it.run()).catch((e) => console.error('[action]', it.id, e)); }
+    catch (e) { console.error('[action]', it.id, e); }
+  } else if (it.kind === 'sub') {
     location.hash = `#/${it.targetRoute}?focus=${encodeURIComponent(it.focus)}`;
   } else {
     location.hash = `#/${it.id}`;

@@ -2893,6 +2893,8 @@ select option:hover,
   font-weight: 600;
 }
 .palette-row.sub.active .palette-row-glyph { color: var(--m-accent); }
+.palette-row.action .palette-row-glyph { color: var(--m-accent-2); font-weight: 600; }
+.palette-row.action.active .palette-row-glyph { color: var(--m-accent-2); }
 .palette-row-desc {
   font-size: 11.5px;
   color: var(--m-fg-3);
