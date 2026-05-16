@@ -1594,7 +1594,7 @@ function renderConductor() {
 
   // ── Operation Score Matrix ──
   const matrixHost = el('div', {});
-  matrixHost.appendChild(loading('Loading per-lane score matrix…'));
+  matrixHost.appendChild(loadingFor('table', 'Loading per-lane score matrix…'));
   root.appendChild(panelFocus('Operation Score Matrix', 'per-lane progress · claims · reason codes', matrixHost,
     { id: 'score', keywords: 'score matrix progress per-lane claims reason' }));
 
@@ -2675,14 +2675,87 @@ async function fetchLanes() {
 }
 
 // Phase 5 — Skeleton shimmer in place of static "Loading…" text.
+// loading() — default 3-line skeleton. Use for narrative/prose blocks
+// (slice ledger entries, wiki body, learning facts).
 function loading(text) {
-  const node = el('div', { class: 'skel-state' }, [
+  return el('div', { class: 'skel-state' }, [
     el('div', { class: 'skel-line skel-line-lg' }),
     el('div', { class: 'skel-line skel-line-md' }),
     el('div', { class: 'skel-line skel-line-sm' }),
     el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…')
   ]);
-  return node;
+}
+// loadingFor(kind, text) — shape-aware variants. Falls back to default
+// for unknown kinds. Each returns the same outer .skel-state container
+// so existing CSS that targets the parent still applies.
+//   'kpi'     — horizontal strip of 4 tiles (Conductor/Roadmap KPIs)
+//   'grid'    — 6-card responsive grid (Agents, Teams, MCP, Runtimes)
+//   'table'   — 5 ledger-row stripes (Events, Approvals, Slice index)
+//   'donut'   — donut + 4 meters (Mailbox/Imports/Auth summary)
+//   'card'    — single card with title+lines (Inspector body, single-pane fetches)
+//   'default' / unknown — same as loading(text)
+function loadingFor(kind, text) {
+  const caption = el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…');
+  const wrap = (children) => el('div', { class: 'skel-state' }, [...children, caption]);
+  switch (kind) {
+    case 'kpi': {
+      const strip = el('div', { class: 'skel-kpi-strip' });
+      for (let i = 0; i < 4; i++) {
+        strip.appendChild(el('div', { class: 'skel-kpi-tile' }, [
+          el('div', { class: 'skel-line skel-line-num' }),
+          el('div', { class: 'skel-line skel-line-tag' })
+        ]));
+      }
+      return wrap([strip]);
+    }
+    case 'grid': {
+      const grid = el('div', { class: 'skel-grid' });
+      for (let i = 0; i < 6; i++) {
+        grid.appendChild(el('div', { class: 'skel-card' }, [
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-sm' }),
+          el('div', { class: 'skel-line skel-line-lg' })
+        ]));
+      }
+      return wrap([grid]);
+    }
+    case 'table': {
+      const rows = el('div', { class: 'skel-table' });
+      for (let i = 0; i < 5; i++) {
+        rows.appendChild(el('div', { class: 'skel-row' }, [
+          el('div', { class: 'skel-line skel-line-cell-sm' }),
+          el('div', { class: 'skel-line skel-line-cell-md' }),
+          el('div', { class: 'skel-line skel-line-cell-lg' }),
+          el('div', { class: 'skel-line skel-line-cell-sm' })
+        ]));
+      }
+      return wrap([rows]);
+    }
+    case 'donut': {
+      const layout = el('div', { class: 'skel-donut-layout' }, [
+        el('div', { class: 'skel-donut' }),
+        el('div', { class: 'skel-meters' }, [
+          el('div', { class: 'skel-line skel-line-lg' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-sm' })
+        ])
+      ]);
+      return wrap([layout]);
+    }
+    case 'card': {
+      return wrap([
+        el('div', { class: 'skel-card' }, [
+          el('div', { class: 'skel-line skel-line-lg' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-sm' })
+        ])
+      ]);
+    }
+    default:
+      return loading(text);
+  }
 }
 
 function renderOperations() {
@@ -2696,12 +2769,12 @@ function renderOperations() {
     { id: 'activity', keywords: 'activity slice-stops memory facts 7-day timeline' }));
 
   const slicesMount = el('div', {});
-  slicesMount.appendChild(loading('Fetching slice-stop ledger…'));
+  slicesMount.appendChild(loadingFor('table', 'Fetching slice-stop ledger…'));
   root.appendChild(panelFocus('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount,
     { id: 'slice-ledger', keywords: 'slice ledger SLICE_STOP events history' }));
 
   const memMount = el('div', {});
-  memMount.appendChild(loading('Fetching hindsight facts…'));
+  memMount.appendChild(loadingFor('table', 'Fetching hindsight facts…'));
   root.appendChild(panelFocus('Hindsight memory', 'GET /bridge/memory · facts derived from slice-stops', memMount,
     { id: 'hindsight', keywords: 'hindsight memory facts learnings extraction' }));
 
@@ -2964,7 +3037,7 @@ function renderRoadmap() {
   root.appendChild(el('p', {}, ROUTES.roadmap.description));
 
   const kpiMount = el('div', {});
-  kpiMount.appendChild(loading('Reading slice timeline…'));
+  kpiMount.appendChild(loadingFor('kpi', 'Reading slice timeline…'));
   root.appendChild(panelFocus('Roadmap KPIs', 'derived from spine SLICE_STOPs', kpiMount,
     { id: 'kpis', keywords: 'kpi roadmap total last lanes age metric' }));
 
@@ -2979,7 +3052,7 @@ function renderRoadmap() {
     { id: 'mix', keywords: 'mix lanes status distribution sessions' }));
 
   const indexMount = el('div', {});
-  indexMount.appendChild(loading('Reading slice index…'));
+  indexMount.appendChild(loadingFor('table', 'Reading slice index…'));
   root.appendChild(panelFocus('Slice index', 'every slice-stop · click to open in Inspector', indexMount,
     { id: 'slice-index', keywords: 'slice index history list ledger every-stop' }));
 
@@ -3514,7 +3587,7 @@ function renderApprovals() {
     { id: 'summary', keywords: 'summary open decisions distribution overview' }));
 
   const openMount = el('div', {});
-  openMount.appendChild(loading('Fetching open approvals…'));
+  openMount.appendChild(loadingFor('table', 'Fetching open approvals…'));
   root.appendChild(panelFocus('Open queue', 'GET /bridge/approvals', openMount,
     { id: 'open-queue', keywords: 'open queue pending awaiting decision' }));
 
@@ -6425,7 +6498,7 @@ function renderAgents() {
   root.appendChild(el('p', {}, ROUTES.agents.description));
 
   const gridBody = el('div', {});
-  gridBody.appendChild(loading('Fetching active sessions…'));
+  gridBody.appendChild(loadingFor('grid', 'Fetching active sessions…'));
   root.appendChild(panel('Coworker grid', 'GET /bridge/projection · activeSessions × claims × slice-stops', gridBody));
 
   (async () => {
@@ -6514,7 +6587,7 @@ function renderTeams() {
   root.appendChild(el('p', {}, ROUTES.teams.description));
 
   const mapBody = el('div', {});
-  mapBody.appendChild(loading('Building ownership map…'));
+  mapBody.appendChild(loadingFor('grid', 'Building ownership map…'));
   root.appendChild(panel('Lane ownership', 'lanes catalog × active claims × slice-stop frequency', mapBody));
 
   (async () => {

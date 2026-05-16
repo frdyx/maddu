@@ -3217,6 +3217,89 @@ select option:hover,
   100% { background-position: -200% 0; }
 }
 
+/* Shape-aware skeleton variants — same shimmer animation, layout matches
+   the eventual content so the load doesn't reflow. */
+.skel-kpi-strip {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.skel-kpi-tile {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+}
+.skel-line-num { width: 60%; height: 22px; }
+.skel-line-tag { width: 70%; height: 8px; }
+
+.skel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.skel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+}
+
+.skel-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.skel-row {
+  display: grid;
+  grid-template-columns: 120px 140px 1fr 80px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--m-line-soft);
+}
+.skel-line-cell-sm { height: 8px; }
+.skel-line-cell-md { height: 8px; }
+.skel-line-cell-lg { height: 8px; }
+
+.skel-donut-layout {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.skel-donut {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: conic-gradient(var(--m-bg-2) 0% 30%, var(--m-bg-3) 30% 60%, var(--m-bg-2) 60% 100%);
+  position: relative;
+  animation: maddu-shimmer 1.4s linear infinite;
+  background-size: 200% 100%;
+}
+.skel-donut::after {
+  content: "";
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: var(--m-bg-1);
+}
+.skel-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    Phase 6 — Motion (the restrained kind)
    ════════════════════════════════════════════════════════════════════════ */
