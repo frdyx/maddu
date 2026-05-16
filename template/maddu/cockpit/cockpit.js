@@ -1,36 +1,67 @@
 // Máddu cockpit — vanilla SPA. No framework, no build step.
 // Hash-routed; views render into #route-view.
 
+// Phase 1 of the polish pass — every route carries group + rank so the rail
+// can be built dynamically and the same registry powers desktop rail, tablet
+// glyphs, and the mobile dock. Anchor routes (the five depth-upgrade
+// signatures) carry anchor:true and render with the filled ◆ glyph.
 const ROUTES = {
-  conductor:  { title: 'Conductor',  render: renderConductor,  description: 'Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.' },
-  queue:      { title: 'Queue Board', render: renderQueueBoard, description: 'Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.' },
-  claims:     { title: 'Claim Map',  render: renderClaimMap,   description: 'Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.' },
-  boss:       { title: 'BOSS',       render: renderBoss,       description: 'BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate.' },
-  learning:   { title: 'Learning',   render: renderLearning,   description: 'Durable findings distilled from slice-stops. Browse by kind, lane, recency. Hindsight worker writes; nothing here is hand-edited.' },
-  wiki:       { title: 'Wiki',       render: renderWiki,       description: 'Auto-maintained per-lane wiki. The Wiki Updater syncs pages from slice-stops; the Drift Drawer flags pages that fell behind.' },
-  workflows:  { title: 'Workflows',  render: renderWorkflows,  description: 'Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.' },
-  agents:     { title: 'Agents',     render: renderAgents,     description: 'Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.' },
-  teams:      { title: 'Teams',      render: renderTeams,      description: 'Lane ownership map — who is responsible for what, who is currently writing, who scored last.' },
-  workbench:  { title: 'Workbench',  render: renderWorkbench,  description: 'OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.' },
-  dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
-  approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
-  events:     { title: 'Events',     render: renderEvents,     description: 'Live cursor stream of the append-only spine. Filters by type. Pause/resume.' },
-  mailbox:    { title: 'Mailbox',    render: renderMailbox,    description: 'Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.' },
-  tasks:      { title: 'Tasks',      render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
-  skills:     { title: 'Skills',     render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
-  search:     { title: 'Search',     render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
-  runtimes:   { title: 'Runtimes',   render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
-  mcp:        { title: 'MCP',        render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
-  schedule:   { title: 'Schedule',   render: renderSchedule,   description: 'NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note).' },
-  auth:       { title: 'Auth',       render: renderAuth,       description: 'Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.' },
-  imports:    { title: 'Imports',    render: renderImports,    description: 'Safe import gateway. Foreign artifacts in — provider secrets always out. Rejected payloads are logged with paths + pattern names only.' },
-  operations: { title: 'Operations', render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
-  swarm:      { title: 'Swarm',      render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
-  chats:      { title: 'Chats',      render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
-  roadmap:    { title: 'Roadmap',    render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
-  docs:       { title: 'Docs',       render: renderDocs,       description: 'End-user manual. Install, concepts, CLI, cockpit tour, troubleshooting. Open from any route with ?' },
-  settings:   { title: 'Settings',   render: renderSettings,   description: 'Bridge, lanes, providers, tokens, MCP registry.' }
+  conductor:  { title: 'Conductor',  group: 'decide',    anchor: true,  rank: 1,  render: renderConductor,  description: 'Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.' },
+  boss:       { title: 'BOSS',       group: 'decide',    anchor: true,  rank: 2,  render: renderBoss,       description: 'BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate.' },
+  queue:      { title: 'Queue',      group: 'decide',    rank: 3,                 render: renderQueueBoard, description: 'Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.' },
+  claims:     { title: 'Claims',     group: 'decide',    rank: 4,                 render: renderClaimMap,   description: 'Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.' },
+  approvals:  { title: 'Approvals',  group: 'decide',    rank: 5,                 render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
+  tasks:      { title: 'Tasks',      group: 'decide',    rank: 6,                 render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
+
+  workflows:  { title: 'Workflows',  group: 'operate',   anchor: true,  rank: 1,  render: renderWorkflows,  description: 'Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.' },
+  agents:     { title: 'Agents',     group: 'operate',   rank: 2,                 render: renderAgents,     description: 'Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.' },
+  teams:      { title: 'Teams',      group: 'operate',   rank: 3,                 render: renderTeams,      description: 'Lane ownership map — who is responsible for what, who is currently writing, who scored last.' },
+  workbench:  { title: 'Workbench',  group: 'operate',   rank: 4,                 render: renderWorkbench,  description: 'OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.' },
+  chats:      { title: 'Chats',      group: 'operate',   rank: 5,                 render: renderChats,      description: 'Conversation surfaces. History, attachments, replay.' },
+  mailbox:    { title: 'Mailbox',    group: 'operate',   rank: 6,                 render: renderMailbox,    description: 'Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.' },
+  swarm:      { title: 'Swarm',      group: 'operate',   rank: 7,                 render: renderSwarm,      description: 'Multi-agent fan-out. Lane-bound workers and their mailboxes.' },
+
+  learning:   { title: 'Learning',   group: 'verify',    anchor: true,  rank: 1,  render: renderLearning,   description: 'Durable findings distilled from slice-stops. Browse by kind, lane, recency. Hindsight worker writes; nothing here is hand-edited.' },
+  wiki:       { title: 'Wiki',       group: 'verify',    anchor: true,  rank: 2,  render: renderWiki,       description: 'Auto-maintained per-lane wiki. The Wiki Updater syncs pages from slice-stops; the Drift Drawer flags pages that fell behind.' },
+  events:     { title: 'Events',     group: 'verify',    rank: 3,                 render: renderEvents,     description: 'Live cursor stream of the append-only spine. Filters by type. Pause/resume.' },
+  operations: { title: 'Operations', group: 'verify',    rank: 4,                 render: renderOperations, description: 'Live work in flight. Slice-stops, verifications, checkpoints.' },
+  search:     { title: 'Search',     group: 'verify',    rank: 5,                 render: renderSearch,     description: 'Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.' },
+
+  runtimes:   { title: 'Runtimes',   group: 'connect',   rank: 1,                 render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.' },
+  mcp:        { title: 'MCP',        group: 'connect',   rank: 2,                 render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
+  auth:       { title: 'Auth',       group: 'connect',   rank: 3,                 render: renderAuth,       description: 'Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.' },
+  imports:    { title: 'Imports',    group: 'connect',   rank: 4,                 render: renderImports,    description: 'Safe import gateway. Foreign artifacts in — provider secrets always out. Rejected payloads are logged with paths + pattern names only.' },
+  schedule:   { title: 'Schedule',   group: 'connect',   rank: 5,                 render: renderSchedule,   description: 'NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note).' },
+  settings:   { title: 'Settings',   group: 'connect',   rank: 6,                 render: renderSettings,   description: 'Bridge, lanes, providers, tokens, integrations, MCP registry.' },
+
+  dashboard:  { title: 'Dashboard',  group: 'reference', rank: 1,                 render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
+  roadmap:    { title: 'Roadmap',    group: 'reference', rank: 2,                 render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
+  skills:     { title: 'Skills',     group: 'reference', rank: 3,                 render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
+  docs:       { title: 'Docs',       group: 'reference', rank: 4,                 render: renderDocs,       description: 'End-user manual. Install, concepts, CLI, cockpit tour, troubleshooting. Open from any route with ?' }
 };
+
+// Five clusters that map every route to a phase-of-work. Order is the order
+// they appear in the rail, top to bottom on desktop and left to right on the
+// mobile dock. Each glyph is a single geometric primitive so the visual
+// vocabulary stays restrained (Scandinavian noir, not iconographic).
+const NAV_GROUPS = [
+  { id: 'decide',    label: 'Decide',    glyph: '◆', summary: 'what is safe to do next' },
+  { id: 'operate',   label: 'Operate',   glyph: '◈', summary: 'agents, lanes, conversations' },
+  { id: 'verify',    label: 'Verify',    glyph: '⌬', summary: 'evidence, memory, wiki' },
+  { id: 'connect',   label: 'Connect',   glyph: '⌗', summary: 'runtimes, auth, integrations' },
+  { id: 'reference', label: 'Reference', glyph: '☷', summary: 'dashboard, docs, roadmap' }
+];
+
+function routesInGroup(groupId) {
+  return Object.entries(ROUTES)
+    .filter(([, r]) => r.group === groupId)
+    .sort((a, b) => (a[1].rank || 99) - (b[1].rank || 99))
+    .map(([id, r]) => ({ id, ...r }));
+}
+
+function groupOf(routeId) {
+  return ROUTES[routeId] && ROUTES[routeId].group;
+}
 
 const els = {
   app: document.getElementById('app'),
@@ -395,6 +426,139 @@ function currentRoute() {
   return ROUTES[id] ? id : 'conductor';
 }
 
+// ─── Phase 1+2 — build the rail dynamically from ROUTES + NAV_GROUPS ──
+function railCollapseState() {
+  try { return JSON.parse(localStorage.getItem('maddu.railGroups') || '{}'); }
+  catch { return {}; }
+}
+function setRailCollapsed(groupId, collapsed) {
+  const s = railCollapseState();
+  if (collapsed) s[groupId] = true; else delete s[groupId];
+  try { localStorage.setItem('maddu.railGroups', JSON.stringify(s)); } catch {}
+}
+
+function buildRail() {
+  const nav = document.querySelector('.rail-nav');
+  if (!nav) return;
+  nav.innerHTML = '';
+  const collapsed = railCollapseState();
+  for (const g of NAV_GROUPS) {
+    const routes = routesInGroup(g.id);
+    if (!routes.length) continue;
+    const isCollapsed = !!collapsed[g.id];
+    const groupEl = el('div', { class: 'rail-group' + (isCollapsed ? ' collapsed' : ''), 'data-group': g.id });
+    const head = el('button', {
+      class: 'rail-group-head',
+      type: 'button',
+      'aria-expanded': isCollapsed ? 'false' : 'true',
+      'aria-controls': `rail-group-${g.id}`
+    }, [
+      el('span', { class: 'rail-group-tick', 'aria-hidden': 'true' }),
+      el('span', { class: 'rail-group-glyph', 'aria-hidden': 'true' }, g.glyph),
+      el('span', { class: 'rail-group-label' }, g.label.toUpperCase()),
+      el('span', { class: 'rail-group-chev', 'aria-hidden': 'true' }, '›')
+    ]);
+    head.addEventListener('click', () => {
+      const willCollapse = !groupEl.classList.contains('collapsed');
+      groupEl.classList.toggle('collapsed', willCollapse);
+      head.setAttribute('aria-expanded', willCollapse ? 'false' : 'true');
+      setRailCollapsed(g.id, willCollapse);
+    });
+    groupEl.appendChild(head);
+    const list = el('div', { class: 'rail-group-list', id: `rail-group-${g.id}` });
+    for (const r of routes) {
+      const link = el('a', {
+        href: `#/${r.id}`,
+        class: 'rail-link' + (r.anchor ? ' anchor' : ''),
+        'data-route': r.id,
+        title: r.description
+      }, [
+        el('span', { class: 'rail-link-glyph', 'aria-hidden': 'true' }, r.anchor ? '◆' : '◇'),
+        el('span', { class: 'rail-link-label' }, r.title)
+      ]);
+      if (r.id === 'approvals') link.appendChild(el('span', { class: 'rail-link-badge', id: 'approvals-badge', hidden: '' }, '0'));
+      if (r.id === 'mailbox')   link.appendChild(el('span', { class: 'rail-link-badge', id: 'mailbox-badge',   hidden: '' }, '0'));
+      if (r.id === 'tasks')     link.appendChild(el('span', { class: 'rail-link-badge', id: 'tasks-badge',     hidden: '' }, '0'));
+      list.appendChild(link);
+    }
+    groupEl.appendChild(list);
+    nav.appendChild(groupEl);
+  }
+}
+
+// ─── Phase 2 — mobile dock + group sheet ────────────────────────────────
+function buildDock() {
+  const dock = document.getElementById('dock');
+  if (!dock) return;
+  dock.innerHTML = '';
+  for (const g of NAV_GROUPS) {
+    const routes = routesInGroup(g.id);
+    if (!routes.length) continue;
+    const btn = el('button', {
+      class: 'dock-btn',
+      type: 'button',
+      'data-group': g.id,
+      'aria-label': `${g.label} — ${g.summary}`
+    }, [
+      el('span', { class: 'dock-btn-glyph', 'aria-hidden': 'true' }, g.glyph),
+      el('span', { class: 'dock-btn-label' }, g.label)
+    ]);
+    btn.addEventListener('click', () => openDockSheet(g.id));
+    dock.appendChild(btn);
+  }
+}
+
+function openDockSheet(groupId) {
+  const g = NAV_GROUPS.find((x) => x.id === groupId);
+  if (!g) return;
+  const sheet = document.getElementById('dock-sheet');
+  const body  = document.getElementById('dock-sheet-body');
+  document.getElementById('dock-sheet-title').textContent = g.label;
+  document.getElementById('dock-sheet-summary').textContent = g.summary;
+  document.getElementById('dock-sheet-glyph').textContent = g.glyph;
+  body.innerHTML = '';
+  for (const r of routesInGroup(groupId)) {
+    const link = el('a', {
+      href: `#/${r.id}`,
+      class: 'dock-sheet-link' + (r.anchor ? ' anchor' : '')
+    }, [
+      el('span', { class: 'dock-sheet-link-glyph', 'aria-hidden': 'true' }, r.anchor ? '◆' : '◇'),
+      el('div', { class: 'dock-sheet-link-text' }, [
+        el('div', { class: 'dock-sheet-link-title' }, r.title),
+        el('div', { class: 'dock-sheet-link-desc' }, r.description)
+      ])
+    ]);
+    link.addEventListener('click', () => { closeDockSheet(); });
+    body.appendChild(link);
+  }
+  sheet.hidden = false;
+  // Force layout then animate in
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+function closeDockSheet() {
+  const sheet = document.getElementById('dock-sheet');
+  if (!sheet) return;
+  sheet.classList.remove('open');
+  setTimeout(() => { sheet.hidden = true; }, 200);
+}
+function initDock() {
+  document.getElementById('dock-sheet-scrim')?.addEventListener('click', closeDockSheet);
+  document.getElementById('dock-sheet-close')?.addEventListener('click', closeDockSheet);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDockSheet();
+  });
+}
+
+function highlightActiveGroup(routeId) {
+  const g = groupOf(routeId);
+  document.querySelectorAll('.rail-group').forEach((el) => {
+    el.classList.toggle('has-active', el.dataset.group === g);
+  });
+  document.querySelectorAll('.dock-btn').forEach((el) => {
+    el.classList.toggle('active', el.dataset.group === g);
+  });
+}
+
 function renderRoute() {
   const id = currentRoute();
   const route = ROUTES[id];
@@ -402,6 +566,7 @@ function renderRoute() {
   document.querySelectorAll('.rail-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === id);
   });
+  highlightActiveGroup(id);
 
   // Tell the previous view to tear down its stream subscriptions.
   els.view.dispatchEvent(new Event('routechange'));
@@ -6342,7 +6507,10 @@ async function renderEmailPanel(mount) {
 }
 
 async function boot() {
-  if (!location.hash) location.hash = '#/dashboard';
+  if (!location.hash) location.hash = '#/conductor';
+  buildRail();
+  buildDock();
+  initDock();
   await fetchBridgeStatus();
   await seedCursor();
   renderRoute();

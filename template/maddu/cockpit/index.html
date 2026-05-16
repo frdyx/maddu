@@ -20,36 +20,7 @@
         <img class="rail-mark-svg" src="/brand-mark.svg" alt="" aria-hidden="true" width="22" height="22">
         <span class="rail-mark-name">Máddu</span>
       </div>
-      <nav class="rail-nav" aria-label="Cockpit routes">
-        <a href="#/conductor"  class="rail-link" data-route="conductor"><span class="rail-link-glyph">◆</span><span>Conductor</span></a>
-        <a href="#/queue"      class="rail-link" data-route="queue"><span class="rail-link-glyph">◇</span><span>Queue</span></a>
-        <a href="#/claims"     class="rail-link" data-route="claims"><span class="rail-link-glyph">◇</span><span>Claims</span></a>
-        <a href="#/boss"       class="rail-link" data-route="boss"><span class="rail-link-glyph">◆</span><span>BOSS</span></a>
-        <a href="#/learning"   class="rail-link" data-route="learning"><span class="rail-link-glyph">◆</span><span>Learning</span></a>
-        <a href="#/wiki"       class="rail-link" data-route="wiki"><span class="rail-link-glyph">◆</span><span>Wiki</span></a>
-        <a href="#/workflows"  class="rail-link" data-route="workflows"><span class="rail-link-glyph">◆</span><span>Workflows</span></a>
-        <a href="#/agents"     class="rail-link" data-route="agents"><span class="rail-link-glyph">◆</span><span>Agents</span></a>
-        <a href="#/teams"      class="rail-link" data-route="teams"><span class="rail-link-glyph">◆</span><span>Teams</span></a>
-        <a href="#/workbench"  class="rail-link" data-route="workbench"><span class="rail-link-glyph">◇</span><span>Workbench</span></a>
-        <a href="#/dashboard"  class="rail-link" data-route="dashboard"><span class="rail-link-glyph">◇</span><span>Dashboard</span></a>
-        <a href="#/approvals"  class="rail-link" data-route="approvals"><span class="rail-link-glyph">◇</span><span>Approvals</span><span class="rail-link-badge" id="approvals-badge" hidden>0</span></a>
-        <a href="#/events"     class="rail-link" data-route="events"><span class="rail-link-glyph">◇</span><span>Events</span></a>
-        <a href="#/mailbox"    class="rail-link" data-route="mailbox"><span class="rail-link-glyph">◇</span><span>Mailbox</span><span class="rail-link-badge" id="mailbox-badge" hidden>0</span></a>
-        <a href="#/tasks"      class="rail-link" data-route="tasks"><span class="rail-link-glyph">◇</span><span>Tasks</span><span class="rail-link-badge" id="tasks-badge" hidden>0</span></a>
-        <a href="#/skills"     class="rail-link" data-route="skills"><span class="rail-link-glyph">◇</span><span>Skills</span></a>
-        <a href="#/search"     class="rail-link" data-route="search"><span class="rail-link-glyph">◇</span><span>Search</span></a>
-        <a href="#/runtimes"   class="rail-link" data-route="runtimes"><span class="rail-link-glyph">◇</span><span>Runtimes</span></a>
-        <a href="#/mcp"        class="rail-link" data-route="mcp"><span class="rail-link-glyph">◇</span><span>MCP</span></a>
-        <a href="#/schedule"   class="rail-link" data-route="schedule"><span class="rail-link-glyph">◇</span><span>Schedule</span></a>
-        <a href="#/auth"       class="rail-link" data-route="auth"><span class="rail-link-glyph">◇</span><span>Auth</span></a>
-        <a href="#/imports"    class="rail-link" data-route="imports"><span class="rail-link-glyph">◇</span><span>Imports</span></a>
-        <a href="#/operations" class="rail-link" data-route="operations"><span class="rail-link-glyph">◇</span><span>Operations</span></a>
-        <a href="#/swarm"      class="rail-link" data-route="swarm"><span class="rail-link-glyph">◇</span><span>Swarm</span></a>
-        <a href="#/chats"      class="rail-link" data-route="chats"><span class="rail-link-glyph">◇</span><span>Chats</span></a>
-        <a href="#/roadmap"    class="rail-link" data-route="roadmap"><span class="rail-link-glyph">◇</span><span>Roadmap</span></a>
-        <a href="#/docs"       class="rail-link" data-route="docs"><span class="rail-link-glyph">◇</span><span>Docs</span></a>
-        <a href="#/settings"   class="rail-link" data-route="settings"><span class="rail-link-glyph">◇</span><span>Settings</span></a>
-      </nav>
+      <nav class="rail-nav" aria-label="Cockpit routes"></nav>
       <div class="rail-foot">
         <div class="rail-foot-row"><span class="rail-foot-label">Bridge</span><span class="rail-foot-value" id="status-bridge">…</span></div>
         <div class="rail-foot-row"><span class="rail-foot-label">Version</span><span class="rail-foot-value" id="status-version">…</span></div>
@@ -81,6 +52,19 @@
         </div>
       </footer>
     </main>
+    <nav class="dock" id="dock" aria-label="Mobile groups" hidden></nav>
+    <div class="dock-sheet" id="dock-sheet" role="dialog" aria-modal="true" hidden>
+      <div class="dock-sheet-scrim" id="dock-sheet-scrim"></div>
+      <div class="dock-sheet-panel">
+        <div class="dock-sheet-head">
+          <span class="dock-sheet-glyph" id="dock-sheet-glyph">◆</span>
+          <span class="dock-sheet-title" id="dock-sheet-title">Decide</span>
+          <span class="dock-sheet-summary" id="dock-sheet-summary"></span>
+          <button class="dock-sheet-close" id="dock-sheet-close" aria-label="Close">✕</button>
+        </div>
+        <div class="dock-sheet-body" id="dock-sheet-body"></div>
+      </div>
+    </div>
     <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
   </div>
   <script type="module" src="/cockpit.js"></script>
