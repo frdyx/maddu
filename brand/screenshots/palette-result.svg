@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 88" role="img" aria-label="Command palette result row — Telegram sub-target, active">
+  <title>Command palette · active result row</title>
+  <defs>
+    <style>
+      .canvas { fill: #0A1224; }
+      .row-active { fill: #11203C; stroke: #D0FF00; stroke-width: 1; }
+      .fg-0 { fill: #E8E6E3; }
+      .fg-3 { fill: #6a7079; }
+      .fg-4 { fill: #3a3e45; }
+      .accent  { fill: #D0FF00; }
+      .accent2 { fill: #56B8FF; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; }
+      .cond-b { font-weight: 600; }
+      .mono   { font-family: 'IBM Plex Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="580" height="88"/>
+
+  <g transform="translate(8,8)">
+    <rect width="564" height="72" class="row-active" rx="6"/>
+
+    <!-- sub-target glyph (lime triangle) -->
+    <text x="22" y="44" class="mono accent" font-size="15" font-weight="600" text-anchor="middle">▸</text>
+
+    <!-- title -->
+    <text x="44" y="32" class="cond-b fg-0" font-size="14" letter-spacing="0.04em">TELEGRAM</text>
+    <!-- secondary location hint -->
+    <text x="138" y="32" class="mono accent2" font-size="10" opacity="0.9">· in SETTINGS</text>
+
+    <!-- description -->
+    <text x="44" y="50" class="mono fg-3" font-size="11">Long-poll bot bridge · allowlisted · off by default · message bodies route via</text>
+    <text x="44" y="64" class="mono fg-3" font-size="11">Telegram.</text>
+
+    <!-- group chip -->
+    <text x="548" y="32" class="mono fg-4" font-size="9" letter-spacing="0.12em" text-anchor="end">CONNECT</text>
+  </g>
+</svg>

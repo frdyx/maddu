@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 110" role="img" aria-label="Conductor next-command strip with dispatch button">
+  <title>Conductor · Next Command — safe to run</title>
+  <defs>
+    <style>
+      .canvas { fill: #050B17; }
+      .panel { fill: #0F1828; stroke: #D0FF00; stroke-width: 1; }
+      .fg-0 { fill: #E8E6E3; }
+      .fg-3 { fill: #6a7079; }
+      .accent  { fill: #D0FF00; }
+      .accent2 { fill: #56B8FF; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; }
+      .cond-b { font-weight: 600; }
+      .mono   { font-family: 'IBM Plex Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="1120" height="110"/>
+
+  <g transform="translate(16,17)">
+    <rect width="1088" height="76" class="panel" rx="6"/>
+    <text x="22" y="26" class="mono fg-3" font-size="10" letter-spacing="0.12em">NEXT COMMAND · SAFE TO RUN</text>
+    <text x="22" y="58" class="cond-b fg-0" font-size="20">▸ Claim lane <tspan class="accent">"cockpit-shell"</tspan> with session <tspan class="mono accent2" font-size="14">ses_20260517_174b16</tspan></text>
+
+    <!-- Dispatch CTA -->
+    <rect x="940" y="20" width="128" height="38" class="accent" rx="4"/>
+    <text x="1004" y="44" class="cond-b" font-size="11" fill="#050B17" text-anchor="middle" letter-spacing="0.10em">DISPATCH</text>
+  </g>
+</svg>

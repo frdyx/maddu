@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 60" role="img" aria-label="Inspector tab strip — overview / evidence / actions / related / raw">
+  <title>Inspector · Tab strip</title>
+  <defs>
+    <style>
+      .canvas { fill: #0A1224; }
+      .underline-active { stroke: #D0FF00; stroke-width: 2; fill: none; }
+      .underline-soft { stroke: rgba(80,113,149,0.18); stroke-width: 1; fill: none; }
+      .fg-0 { fill: #E8E6E3; }
+      .fg-2 { fill: #8A8A8A; }
+      .accent { fill: #D0FF00; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; }
+      .cond-b { font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="520" height="60"/>
+
+  <!-- baseline -->
+  <line x1="0" y1="48" x2="520" y2="48" class="underline-soft"/>
+
+  <!-- overview (active) -->
+  <text x="20" y="32" class="cond-b accent" font-size="12" letter-spacing="0.10em">OVERVIEW</text>
+  <line x1="14" y1="48" x2="114" y2="48" class="underline-active"/>
+
+  <!-- evidence -->
+  <text x="130" y="32" class="cond fg-2" font-size="12" letter-spacing="0.10em">EVIDENCE</text>
+
+  <!-- actions -->
+  <text x="232" y="32" class="cond fg-2" font-size="12" letter-spacing="0.10em">ACTIONS</text>
+
+  <!-- related -->
+  <text x="318" y="32" class="cond fg-2" font-size="12" letter-spacing="0.10em">RELATED</text>
+
+  <!-- raw -->
+  <text x="410" y="32" class="cond fg-2" font-size="12" letter-spacing="0.10em">RAW</text>
+</svg>

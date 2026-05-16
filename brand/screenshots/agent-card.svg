@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 224" role="img" aria-label="A single coworker profile card from the Agents route">
+  <title>Agents · Coworker card</title>
+  <defs>
+    <style>
+      .canvas { fill: #050B17; }
+      .card { fill: #0C1428; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .pill-ok     { fill: rgba(111,168,162,0.10); stroke: #6FA8A2; stroke-width: 0.7; }
+      .pill-accent { fill: rgba(208,255,0,0.10);   stroke: #D0FF00; stroke-width: 0.7; }
+      .pill-blue   { fill: rgba(86,184,255,0.10);  stroke: #56B8FF; stroke-width: 0.7; }
+      .fg-0 { fill: #E8E6E3; }
+      .fg-1 { fill: #B8B2AA; }
+      .fg-3 { fill: #6a7079; }
+      .accent  { fill: #D0FF00; }
+      .accent2 { fill: #56B8FF; }
+      .ok      { fill: #6FA8A2; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; }
+      .cond-b { font-weight: 600; }
+      .sans   { font-family: 'IBM Plex Sans','Inter',sans-serif; }
+      .mono   { font-family: 'IBM Plex Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="320" height="224"/>
+
+  <!-- card body -->
+  <g transform="translate(8,8)">
+    <rect width="304" height="208" class="card" rx="8"/>
+
+    <!-- head row -->
+    <g transform="translate(12,18)">
+      <rect x="0" y="0" width="42" height="16" class="pill-ok" rx="2"/>
+      <text x="21" y="11" class="mono ok" font-size="9" text-anchor="middle" letter-spacing="0.06em">ACTIVE</text>
+
+      <text x="52" y="12" class="cond-b fg-0" font-size="12">Claude Code · slice ζ</text>
+      <text x="270" y="12" class="mono fg-3" font-size="10" text-anchor="end">implementer</text>
+    </g>
+
+    <!-- session id -->
+    <text x="20" y="56" class="mono fg-3" font-size="10">ses_20260517_174b16</text>
+
+    <!-- focus -->
+    <text x="20" y="80" class="sans fg-1" font-size="12">Slice η — Telegram bridge wiring</text>
+    <text x="20" y="96" class="sans fg-1" font-size="12">and allowlist enforcer pass</text>
+
+    <!-- stats row -->
+    <g transform="translate(20,118)">
+      <rect x="0" y="0" width="54" height="16" class="pill-accent" rx="2"/>
+      <text x="27" y="11" class="mono accent" font-size="9" text-anchor="middle" letter-spacing="0.06em">SCORE 12</text>
+
+      <rect x="62" y="0" width="60" height="16" class="pill-blue" rx="2"/>
+      <text x="92" y="11" class="mono accent2" font-size="9" text-anchor="middle" letter-spacing="0.06em">1 CLAIM</text>
+
+      <text x="270" y="11" class="mono fg-3" font-size="10" text-anchor="end">hb 4s ago</text>
+    </g>
+
+    <!-- claims held -->
+    <text x="20" y="158" class="mono accent2" font-size="11">cockpit-shell</text>
+
+    <!-- last slice -->
+    <text x="20" y="184" class="mono fg-3" font-size="10">14:22 · Slice ζ — Telegram bridge shipped</text>
+  </g>
+</svg>

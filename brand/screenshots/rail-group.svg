@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 248 340" role="img" aria-label="The rail's DECIDE group expanded with active route highlight">
+  <title>Rail · Decide group expanded · active Conductor</title>
+  <defs>
+    <style>
+      .shell      { fill: #0A1224; }
+      .row-active { fill: #0E1730; }
+      .line-soft  { stroke: rgba(80,113,149,0.18); stroke-width: 1; fill: none; }
+      .fg-0 { fill: #E8E6E3; }
+      .fg-2 { fill: #8A8A8A; }
+      .fg-3 { fill: #6a7079; }
+      .fg-4 { fill: #3a3e45; }
+      .accent  { fill: #D0FF00; }
+      .accent2 { fill: #56B8FF; }
+      .warn-bg { fill: #F2BD5C; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; }
+      .cond-b { font-weight: 600; }
+      .mono   { font-family: 'IBM Plex Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <!-- panel surface (rail strip) -->
+  <rect class="shell" width="248" height="340"/>
+  <line x1="248" y1="0" x2="248" y2="340" class="line-soft"/>
+
+  <!-- Group head: DECIDE · has-active (lime tick) -->
+  <g transform="translate(12,18)">
+    <rect x="0" y="2" width="2" height="10" class="accent"/>
+    <text x="14" y="11" class="cond fg-3" font-size="10" letter-spacing="0.14em">◆  DECIDE</text>
+    <text x="218" y="11" class="mono fg-4" font-size="11" text-anchor="end">⌄</text>
+  </g>
+
+  <!-- Active route: Conductor -->
+  <g transform="translate(8,42)">
+    <rect x="6" y="0" width="226" height="28" class="row-active" rx="2"/>
+    <rect x="6" y="0" width="2" height="28" class="accent"/>
+    <text x="22" y="18" class="mono accent2" font-size="12" text-anchor="middle">◆</text>
+    <text x="38" y="19" class="cond-b fg-0" font-size="12" letter-spacing="0.05em">CONDUCTOR</text>
+  </g>
+
+  <!-- BOSS (anchor) -->
+  <g transform="translate(8,76)">
+    <text x="22" y="15" class="mono accent2" font-size="11" text-anchor="middle">◆</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">BOSS</text>
+  </g>
+
+  <!-- Queue -->
+  <g transform="translate(8,100)">
+    <text x="22" y="15" class="mono fg-4" font-size="11" text-anchor="middle">◇</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">QUEUE</text>
+  </g>
+
+  <!-- Claims -->
+  <g transform="translate(8,124)">
+    <text x="22" y="15" class="mono fg-4" font-size="11" text-anchor="middle">◇</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">CLAIMS</text>
+  </g>
+
+  <!-- Approvals with badge -->
+  <g transform="translate(8,148)">
+    <text x="22" y="15" class="mono fg-4" font-size="11" text-anchor="middle">◇</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">APPROVALS</text>
+    <rect x="196" y="3" width="22" height="14" rx="7" class="warn-bg"/>
+    <text x="207" y="13" class="mono" font-size="9" fill="#050B17" text-anchor="middle">3</text>
+  </g>
+
+  <!-- Tasks -->
+  <g transform="translate(8,172)">
+    <text x="22" y="15" class="mono fg-4" font-size="11" text-anchor="middle">◇</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">TASKS</text>
+  </g>
+
+  <!-- Spacer / next group head: OPERATE (no lime tick — not active) -->
+  <g transform="translate(12,210)">
+    <rect x="0" y="2" width="2" height="10" fill="transparent"/>
+    <text x="14" y="11" class="cond fg-3" font-size="10" letter-spacing="0.14em">◈  OPERATE</text>
+    <text x="218" y="11" class="mono fg-4" font-size="11" text-anchor="end">›</text>
+  </g>
+
+  <!-- A few OPERATE items previewed -->
+  <g transform="translate(8,234)">
+    <text x="22" y="15" class="mono accent2" font-size="11" text-anchor="middle">◆</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">WORKFLOWS</text>
+  </g>
+  <g transform="translate(8,258)">
+    <text x="22" y="15" class="mono fg-4" font-size="11" text-anchor="middle">◇</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">AGENTS</text>
+  </g>
+  <g transform="translate(8,282)">
+    <text x="22" y="15" class="mono fg-4" font-size="11" text-anchor="middle">◇</text>
+    <text x="38" y="16" class="cond fg-2" font-size="12">TEAMS</text>
+  </g>
+</svg>

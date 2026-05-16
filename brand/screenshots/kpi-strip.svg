@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1248 124" role="img" aria-label="Conductor KPI strip — 4 tiles">
+  <title>Conductor · KPI strip</title>
+  <defs>
+    <style>
+      .canvas { fill: #050B17; }
+      .tile        { fill: #0C1428; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .tile-accent { fill: #0C1428; stroke: #D0FF00; stroke-width: 1; }
+      .tile-blue   { fill: #0C1428; stroke: #56B8FF; stroke-width: 1; }
+      .tile-warn   { fill: #0C1428; stroke: #F2BD5C; stroke-width: 1; }
+      .tile-ok     { fill: #0C1428; stroke: #6FA8A2; stroke-width: 1; }
+      .fg-0 { fill: #E8E6E3; }
+      .fg-2 { fill: #8A8A8A; }
+      .fg-3 { fill: #6a7079; }
+      .accent  { fill: #D0FF00; }
+      .accent2 { fill: #56B8FF; }
+      .warn    { fill: #F2BD5C; }
+      .ok      { fill: #6FA8A2; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; }
+      .cond-b { font-weight: 600; }
+      .mono   { font-family: 'IBM Plex Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="1248" height="124"/>
+
+  <!-- Tile 1 -->
+  <g transform="translate(16,16)">
+    <rect class="tile-accent" width="296" height="92" rx="8"/>
+    <text x="16" y="40" class="cond-b accent" font-size="30">3</text>
+    <text x="16" y="64" class="mono fg-3" font-size="10" letter-spacing="0.08em">ACTIVE CLAIMS</text>
+    <text x="16" y="82" class="mono fg-2" font-size="11">cockpit-shell · harness · learning</text>
+  </g>
+
+  <!-- Tile 2 -->
+  <g transform="translate(328,16)">
+    <rect class="tile-warn" width="296" height="92" rx="8"/>
+    <text x="16" y="40" class="cond-b warn" font-size="30">2</text>
+    <text x="16" y="64" class="mono fg-3" font-size="10" letter-spacing="0.08em">PARKED GATES</text>
+    <text x="16" y="82" class="mono fg-2" font-size="11">queue_head_ready · no_allowed_slot</text>
+  </g>
+
+  <!-- Tile 3 -->
+  <g transform="translate(640,16)">
+    <rect class="tile-blue" width="296" height="92" rx="8"/>
+    <text x="16" y="40" class="cond-b accent2" font-size="30">7</text>
+    <text x="16" y="64" class="mono fg-3" font-size="10" letter-spacing="0.08em">OPEN APPROVALS</text>
+    <text x="16" y="82" class="mono fg-2" font-size="11">tool · subprocess · write</text>
+  </g>
+
+  <!-- Tile 4 -->
+  <g transform="translate(952,16)">
+    <rect class="tile-ok" width="296" height="92" rx="8"/>
+    <text x="16" y="40" class="cond-b ok" font-size="30">3m</text>
+    <text x="16" y="64" class="mono fg-3" font-size="10" letter-spacing="0.08em">SINCE LAST SLICE</text>
+    <text x="16" y="82" class="mono fg-2" font-size="11">Slice ζ — Telegram bridge shipped</text>
+  </g>
+</svg>
