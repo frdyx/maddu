@@ -2412,3 +2412,34 @@ select option:hover,
 .lanes-edit-select option:hover {
   background-color: var(--m-bg-2);
 }
+
+/* ─── Slice ζ — Telegram panel ─────────────────────────────────────── */
+.tg-warning {
+  border: 1px solid var(--m-warn);
+  background: color-mix(in srgb, var(--m-warn) 8%, transparent);
+  color: var(--m-fg-0);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.tg-status {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 12px;
+  padding: 10px 12px;
+  background: var(--m-bg-1);
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.tg-status .pill { font-size: 10px; }
+.tg-err { grid-column: 1 / -1; color: var(--m-danger); }
+.tg-row {
+  display: flex; gap: 8px; align-items: center;
+  padding: 8px 0;
+}
+.tg-row > .panel-aside { width: 110px; flex: 0 0 110px; }
+.tg-row .m-input { background: var(--m-bg-0); border: 1px solid var(--m-bg-3); color: var(--m-fg-0); padding: 6px 10px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.tg-row .m-input:focus { border-color: var(--m-accent); outline: none; }

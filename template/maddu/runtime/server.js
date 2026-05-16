@@ -26,6 +26,7 @@ import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMask
 import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
 import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
+import * as telegram from './lib/telegram.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -1031,6 +1032,56 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { ok: true, pagesWritten: n });
   }
 
+  // ── telegram (Slice ζ) ────────────────────────────────────────────────
+  // Safety: token never returned over HTTP. Inbound from non-allowlisted
+  // chat_ids is silently dropped. Subsystem is off by default.
+  if (path === '/bridge/telegram/status' && req.method === 'GET') {
+    return sendJson(res, 200, await telegram.status(repoRoot));
+  }
+  if (path === '/bridge/telegram/token' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const masked = await telegram.setToken(repoRoot, body.value, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, masked });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/telegram/allowlist' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!Array.isArray(body.chatIds)) return sendJson(res, 400, { error: 'chatIds[] required' });
+    try {
+      const s = await telegram.setAllowlist(repoRoot, body.chatIds, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, allowedChatIds: s.allowedChatIds });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/telegram/enable' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const s = await telegram.enable(repoRoot, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, state: { enabled: s.enabled, allowedChatIds: s.allowedChatIds } });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/telegram/disable' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const s = await telegram.disable(repoRoot, body.sessionId || null);
+    return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
+  }
+  if (path === '/bridge/telegram/send' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const rec = await telegram.enqueueOutbound(repoRoot, { chatId: body.chatId, text: body.text }, body.sessionId || null);
+      return sendJson(res, 200, { ok: true, queued: { ts: rec.ts, chatId: rec.chatId, length: rec.text.length } });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/telegram/chats' && req.method === 'GET') {
+    return sendJson(res, 200, { chats: await telegram.listChats(repoRoot) });
+  }
+  if (path === '/bridge/telegram/chat' && req.method === 'GET') {
+    const cid = url.searchParams.get('chatId');
+    if (!cid) return sendJson(res, 400, { error: 'chatId required' });
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 500);
+    return sendJson(res, 200, { chatId: Number(cid), messages: await telegram.readChatLog(repoRoot, cid, limit) });
+  }
+
   // ── events: tail N most recent (no cursor) for charts/sparklines ──────
   if (path === '/bridge/events/recent' && req.method === 'GET') {
     const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '200', 10), 1), 5000);
@@ -1736,8 +1787,25 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
   // Also run once at startup so brand-new entries don't wait 30 s.
   setTimeout(() => scheduleTick(repoRoot).catch(() => {}), 200);
 
+  // Telegram embedded poller — only ticks when state.enabled.
+  // Loop pattern: chain self-scheduled timeouts (not setInterval) so a long
+  // long-poll never overlaps with the next tick.
+  let telegramStopping = false;
+  async function telegramLoop() {
+    if (telegramStopping) return;
+    try { await telegram.tickPoll(repoRoot); } catch (err) { console.error('[telegram poll]', err.message); }
+    try { await telegram.tickSend(repoRoot); } catch (err) { console.error('[telegram send]', err.message); }
+    if (telegramStopping) return;
+    // When disabled the tick is cheap (early return), so we can poll the state
+    // every few seconds without hitting Telegram. When enabled the long-poll
+    // itself blocks for up to 25 s so the loop naturally throttles.
+    setTimeout(telegramLoop, 1500);
+  }
+  setTimeout(telegramLoop, 1000);
+
   const shutdown = () => {
     console.log('\nShutting down…');
+    telegramStopping = true;
     clearInterval(scheduleTimer);
     server.close(() => process.exit(0));
   };

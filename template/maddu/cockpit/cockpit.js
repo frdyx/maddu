@@ -4492,6 +4492,12 @@ function renderSettings() {
   rtMount.appendChild(loading('Fetching runtimes…'));
   root.appendChild(panel('Runtimes', 'GET /bridge/runtimes  ·  full management in /runtimes', rtMount));
 
+  // ── Telegram (Slice ζ) ───────────────────────────────────────────────
+  const tgMount = el('div', {});
+  tgMount.appendChild(loading('Reading Telegram status…'));
+  root.appendChild(panel('Telegram bridge', 'GET /bridge/telegram/status · off by default · message bodies route via Telegram', tgMount));
+  renderTelegramPanel(tgMount);
+
   // ── Storage paths panel (static, from /bridge/status) ───────────────
   const pathsMount = el('div', {});
   pathsMount.appendChild(loading('Resolving paths…'));
@@ -5952,6 +5958,141 @@ function renderTeams() {
   })();
 
   return root;
+}
+
+// ─── Slice ζ — Telegram settings panel ──────────────────────────────────
+async function renderTelegramPanel(mount) {
+  mount.innerHTML = '';
+  let st;
+  try {
+    const r = await fetch('/bridge/telegram/status', { cache: 'no-store' });
+    st = await r.json();
+  } catch (e) {
+    mount.appendChild(placeholder('Error', String(e)));
+    return;
+  }
+
+  const warning = el('div', { class: 'tg-warning' }, [
+    el('strong', {}, 'Trust note · '),
+    document.createTextNode(
+      'Telegram routes message bodies through their servers. Hard rules protect tokens and feature state, not message content. ' +
+      'Only enable this if you accept that trade. Token is stored device-bound in the OS auth dir and is never returned over HTTP.'
+    )
+  ]);
+  mount.appendChild(warning);
+
+  const statusGrid = el('div', { class: 'tg-status' }, [
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'enabled '), el('span', { class: 'pill tone-' + (st.enabled ? 'ok' : 'warn') }, st.enabled ? 'YES' : 'no')]),
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'token '), el('span', { class: 'mono' }, st.tokenConfigured ? `set · ****${st.tokenTail}` : '(none)')]),
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'allowlist '), el('span', { class: 'mono' }, st.allowedChatIds.length ? st.allowedChatIds.join(', ') : '(empty)')]),
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'inbound '), el('span', { class: 'mono' }, String(st.counts.inbound))]),
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'dropped '), el('span', { class: 'mono' }, String(st.counts.dropped))]),
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'outbound '), el('span', { class: 'mono' }, `${st.counts.outboundSent} sent · ${st.counts.outboundFailed} failed`)]),
+    el('div', {}, [el('span', { class: 'panel-aside' }, 'last poll '), el('span', { class: 'mono' }, st.lastPolledAt || '(never)')]),
+    st.lastError ? el('div', { class: 'tg-err' }, [el('span', { class: 'panel-aside' }, 'last error '), el('span', { class: 'mono' }, st.lastError)]) : null
+  ]);
+  mount.appendChild(statusGrid);
+
+  // Token entry
+  const tokRow = el('div', { class: 'tg-row' });
+  const tokIn = el('input', { type: 'password', class: 'm-input', placeholder: '<digits>:<secret> from @BotFather', autocomplete: 'off' });
+  tokIn.style.flex = '1';
+  const tokBtn = el('button', { class: 'm-btn' }, 'Save token');
+  tokBtn.addEventListener('click', async () => {
+    if (!tokIn.value.trim()) return;
+    tokBtn.disabled = true;
+    try {
+      const r = await fetch('/bridge/telegram/token', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ value: tokIn.value.trim() })
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (typeof showToast === 'function') showToast(`Token stored · ****${j.masked.tail}`, 'ok');
+      tokIn.value = '';
+      await renderTelegramPanel(mount);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(`Save failed: ${e.message}`, 'err');
+    } finally { tokBtn.disabled = false; }
+  });
+  tokRow.appendChild(el('span', { class: 'panel-aside' }, 'Bot token'));
+  tokRow.appendChild(tokIn);
+  tokRow.appendChild(tokBtn);
+  mount.appendChild(tokRow);
+
+  // Allowlist
+  const alRow = el('div', { class: 'tg-row' });
+  const alIn = el('input', { class: 'm-input', placeholder: 'comma-separated chat_ids (numeric)', value: st.allowedChatIds.join(', ') });
+  alIn.style.flex = '1';
+  const alBtn = el('button', { class: 'm-btn' }, 'Save allowlist');
+  alBtn.addEventListener('click', async () => {
+    const ids = alIn.value.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
+    alBtn.disabled = true;
+    try {
+      const r = await fetch('/bridge/telegram/allowlist', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatIds: ids })
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (typeof showToast === 'function') showToast(`Allowlist saved (${j.allowedChatIds.length} chat_ids)`, 'ok');
+      await renderTelegramPanel(mount);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(`Save failed: ${e.message}`, 'err');
+    } finally { alBtn.disabled = false; }
+  });
+  alRow.appendChild(el('span', { class: 'panel-aside' }, 'Allowed chats'));
+  alRow.appendChild(alIn);
+  alRow.appendChild(alBtn);
+  mount.appendChild(alRow);
+
+  // Enable / Disable
+  const actRow = el('div', { class: 'tg-row' });
+  const enBtn = el('button', { class: 'm-btn' }, st.enabled ? 'Disable' : 'Enable');
+  enBtn.addEventListener('click', async () => {
+    enBtn.disabled = true;
+    try {
+      const r = await fetch(`/bridge/telegram/${st.enabled ? 'disable' : 'enable'}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (typeof showToast === 'function') showToast(`Telegram ${st.enabled ? 'disabled' : 'enabled'}`, 'ok');
+      await renderTelegramPanel(mount);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(`Toggle failed: ${e.message}`, 'err');
+    } finally { enBtn.disabled = false; }
+  });
+  actRow.appendChild(enBtn);
+
+  // Test send (requires enabled + at least one allowlisted chat)
+  if (st.enabled && st.allowedChatIds.length) {
+    const sendChat = el('select', { class: 'm-select' });
+    for (const cid of st.allowedChatIds) sendChat.appendChild(el('option', { value: String(cid) }, String(cid)));
+    const sendIn = el('input', { class: 'm-input', placeholder: 'Test message…' });
+    sendIn.style.flex = '1';
+    const sendBtn = el('button', { class: 'm-btn' }, 'Send test');
+    sendBtn.addEventListener('click', async () => {
+      if (!sendIn.value.trim()) return;
+      sendBtn.disabled = true;
+      try {
+        const r = await fetch('/bridge/telegram/send', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chatId: Number(sendChat.value), text: sendIn.value.trim() })
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (typeof showToast === 'function') showToast(`Queued · ${j.queued.length} chars`, 'ok');
+        sendIn.value = '';
+      } catch (e) {
+        if (typeof showToast === 'function') showToast(`Send failed: ${e.message}`, 'err');
+      } finally { sendBtn.disabled = false; }
+    });
+    actRow.appendChild(sendChat);
+    actRow.appendChild(sendIn);
+    actRow.appendChild(sendBtn);
+  }
+  mount.appendChild(actRow);
 }
 
 async function boot() {
