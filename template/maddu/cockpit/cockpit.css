@@ -155,6 +155,54 @@ html, body {
   text-rendering: geometricPrecision;
 }
 
+/* ─── Scrollbar design system ────────────────────────────────────────────
+   Every scrollable surface in the cockpit gets the same restrained
+   treatment: thin track, brand-neutral thumb, hover lifts to the secondary
+   accent (electric blue). Firefox uses scrollbar-* (cascades), WebKit
+   browsers get the pseudo-element overrides. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--m-bg-3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--m-bg-3);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 120ms;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--m-accent-2);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* Horizontal scrollers (pill rows, chip rows, tabs) read better with a
+   ghost-thin scrollbar that disappears when idle. */
+.rail-nav,
+.palette-results,
+.dock-sheet-body,
+.inspector-body,
+.stage-body {
+  scrollbar-gutter: stable;
+}
+/* Reduce visual noise on small inline scrollers — they hide their
+   scrollbar entirely and rely on touch/wheel. */
+.h-scroll, .wb-tabs, .inspector-tabs {
+  scrollbar-width: none;
+}
+.h-scroll::-webkit-scrollbar,
+.wb-tabs::-webkit-scrollbar,
+.inspector-tabs::-webkit-scrollbar { display: none; }
+
 a { color: var(--m-fg-1); text-decoration: none; }
 a:hover { color: var(--m-fg-0); }
 
@@ -2452,11 +2500,7 @@ select option:hover,
   gap: 4px;
   padding: 10px 6px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--m-bg-3) transparent;
 }
-.rail-nav::-webkit-scrollbar { width: 6px; }
-.rail-nav::-webkit-scrollbar-thumb { background: var(--m-bg-3); border-radius: 3px; }
 
 .rail-group { display: flex; flex-direction: column; margin: 2px 0; }
 .rail-group-head {
