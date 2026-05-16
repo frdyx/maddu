@@ -4682,18 +4682,28 @@ function renderSettings() {
   // ── Integrations (Slice ζ + η) — all optional, off by default ────────
   const tgMount = el('div', {});
   tgMount.appendChild(loading('Reading Telegram status…'));
-  root.appendChild(panel('Telegram bridge', 'optional · long-poll, allowlisted · message bodies route via Telegram', tgMount));
+  const tgPanel = panel('Telegram bridge', 'optional · long-poll, allowlisted · message bodies route via Telegram', tgMount);
+  tgPanel.setAttribute('data-focus', 'telegram integrations chat notifications bot');
+  root.appendChild(tgPanel);
   renderTelegramPanel(tgMount);
 
   const dcMount = el('div', {});
   dcMount.appendChild(loading('Reading Discord status…'));
-  root.appendChild(panel('Discord bridge', 'optional · outbound-only (no gateway) · message bodies route via Discord', dcMount));
+  const dcPanel = panel('Discord bridge', 'optional · outbound-only (no gateway) · message bodies route via Discord', dcMount);
+  dcPanel.setAttribute('data-focus', 'discord integrations bot');
+  root.appendChild(dcPanel);
   renderDiscordPanel(dcMount);
 
   const emMount = el('div', {});
   emMount.appendChild(loading('Reading email status…'));
-  root.appendChild(panel('Email bridge', 'optional · outbound-only SMTP · TLS required (port 465/587)', emMount));
+  const emPanel = panel('Email bridge', 'optional · outbound-only SMTP · TLS required (port 465/587)', emMount);
+  emPanel.setAttribute('data-focus', 'email smtp integrations notifications outbound webhook imap');
+  root.appendChild(emPanel);
   renderEmailPanel(emMount);
+
+  // Honor ?focus=<keyword> from the palette (Phase 3 follow-up).
+  const focus = paletteFocus();
+  if (focus) focusPanelByKeyword(root, focus);
 
   // ── Storage paths panel (static, from /bridge/status) ───────────────
   const pathsMount = el('div', {});
@@ -6546,18 +6556,22 @@ function paletteItems(query) {
     const kwLc = (r.keywords || '').toLowerCase();
     const hay = `${titleLc} ${idLc} ${groupLc} ${descLc} ${kwLc}`;
     if (!q || hay.includes(q)) {
-      let score, matchedOn = null;
+      let score, matchedOn = null, matchedKeyword = null;
       if (!q) {
         score = r.anchor ? 0 : 1;
       } else if (titleLc.startsWith(q)) { score = 0; }
       else if (titleLc.includes(q))     { score = 1; }
       else if (idLc.includes(q))        { score = 2; }
-      else if (kwLc.includes(q))        { score = 3; matchedOn = 'keyword'; }
-      else                              { score = 4; matchedOn = 'description'; }
+      else if (kwLc.includes(q)) {
+        score = 3; matchedOn = 'keyword';
+        // Surface the specific keyword token that matched so commit can
+        // pass it as a focus hint (e.g. "tele" → "telegram").
+        matchedKeyword = (r.keywords || '').split(/\s+/).find((k) => k.toLowerCase().includes(q)) || null;
+      } else                            { score = 4; matchedOn = 'description'; }
       out.push({
         kind: 'route', id,
         title: r.title, group: r.group, anchor: r.anchor,
-        desc: r.description, matchedOn, score
+        desc: r.description, matchedOn, matchedKeyword, score
       });
     }
   }
@@ -6641,7 +6655,36 @@ function commitPalette(i) {
   const it = palette.items[i];
   if (!it) return;
   closePalette();
-  location.hash = `#/${it.id}`;
+  const focus = it.matchedKeyword;
+  location.hash = focus ? `#/${it.id}?focus=${encodeURIComponent(focus)}` : `#/${it.id}`;
+}
+
+// Read ?focus=<keyword> from the current hash. Used by route renderers
+// (currently Settings) to scroll-flash a specific panel.
+function paletteFocus() {
+  const m = location.hash.match(/[?&]focus=([^&]+)/);
+  return m ? decodeURIComponent(m[1]).toLowerCase() : null;
+}
+
+// Find the panel whose data-focus list includes the keyword, scroll into
+// view, and add a brief lime border flash. Called from renderSettings on
+// next tick (after the DOM mounts).
+function focusPanelByKeyword(root, keyword) {
+  if (!root || !keyword) return;
+  const panels = root.querySelectorAll('[data-focus]');
+  for (const p of panels) {
+    const keys = (p.getAttribute('data-focus') || '').toLowerCase().split(/\s+/);
+    if (keys.includes(keyword)) {
+      requestAnimationFrame(() => {
+        p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        p.classList.remove('panel-focus');
+        void p.offsetWidth;
+        p.classList.add('panel-focus');
+        setTimeout(() => p.classList.remove('panel-focus'), 1600);
+      });
+      return;
+    }
+  }
 }
 
 function initPalette() {
