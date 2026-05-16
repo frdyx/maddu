@@ -55,41 +55,6 @@ const NAV_GROUPS = [
   { id: 'reference', label: 'Reference', glyph: '☷', summary: 'dashboard, docs, roadmap' }
 ];
 
-// Sub-targets — first-class palette destinations that live INSIDE another
-// route's panel. Each one gets its own title, description, glyph, and group
-// in the palette, but commits as `#/<route>?focus=<key>` and the host route
-// scroll-focuses the matching panel on render. Adding a sub-target here
-// makes it instantly searchable by its own name.
-const SUB_TARGETS = [
-  {
-    id: 'sub-telegram',
-    title: 'Telegram',
-    route: 'settings',
-    focus: 'telegram',
-    group: 'connect',
-    description: 'Long-poll bot bridge · allowlisted · off by default · message bodies route via Telegram.',
-    keywords: 'telegram tg messenger chat phone notification mobile bot integrations'
-  },
-  {
-    id: 'sub-discord',
-    title: 'Discord',
-    route: 'settings',
-    focus: 'discord',
-    group: 'connect',
-    description: 'Outbound-only REST (no gateway) · channel allowlist · @everyone blocked.',
-    keywords: 'discord channel server guild bot integrations notifications'
-  },
-  {
-    id: 'sub-email',
-    title: 'Email',
-    route: 'settings',
-    focus: 'email',
-    group: 'connect',
-    description: 'Outbound-only SMTP · TLS required (port 465/587) · recipient allowlist · no IMAP.',
-    keywords: 'email smtp mail gmail outlook fastmail notifications outbound webhook imap'
-  }
-];
-
 function routesInGroup(groupId) {
   return Object.entries(ROUTES)
     .filter(([, r]) => r.group === groupId)
@@ -655,6 +620,80 @@ function placeholder(name, planned) {
     el('div', { class: 'empty-state-title' }, name),
     el('div', { class: 'empty-state-hint' }, planned || '')
   ]);
+}
+
+// ─── Sub-target system (programmatic) ───────────────────────────────────
+// Runtime registry — every searchable sub-target the cockpit knows about.
+// Static manifest entries land here at boot; DOM-discovered ones land here
+// when a route renders. Keyed `<route>:<id>` to allow same-id reuse across
+// routes.
+const SUB_REGISTRY = new Map();
+
+function registerSubTarget(entry) {
+  const key = `${entry.route}:${entry.id}`;
+  // Static manifest entries beat DOM-discovered ones (they have curated
+  // titles/descriptions).
+  const existing = SUB_REGISTRY.get(key);
+  if (existing && existing.source === 'manifest' && entry.source !== 'manifest') return;
+  SUB_REGISTRY.set(key, entry);
+}
+
+// panelFocus(): drop-in replacement for panel() that stamps data-focus and
+// self-registers the sub-target. Use this whenever a panel should be
+// reachable from the command palette.
+function panelFocus(title, aside, body, opts) {
+  opts = opts || {};
+  const id = opts.id || String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const node = panel(title, aside, body);
+  const tokens = `${id} ${opts.keywords || ''}`.trim();
+  node.setAttribute('data-focus', tokens);
+  // Discovery on render — populate the registry as soon as the route runs
+  // so subsequent palette searches see it.
+  const route = (location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]) || 'conductor';
+  registerSubTarget({
+    source: 'render',
+    id,
+    route,
+    title,
+    description: opts.description || (typeof aside === 'string' ? aside : ''),
+    keywords: opts.keywords || '',
+    group: ROUTES[route] && ROUTES[route].group
+  });
+  return node;
+}
+
+// Static manifest — declared once, indexable before any route has rendered.
+// Use this for sub-targets the operator might search for from a cold cockpit
+// (i.e. before they've visited the host route).
+const SUB_TARGET_MANIFEST = {
+  settings: [
+    { id: 'telegram',  title: 'Telegram',  description: 'Long-poll bot bridge · allowlisted · off by default · message bodies route via Telegram.',     keywords: 'telegram tg messenger chat phone notification mobile bot integrations' },
+    { id: 'discord',   title: 'Discord',   description: 'Outbound-only REST (no gateway) · channel allowlist · @everyone blocked.',                      keywords: 'discord channel server guild bot integrations notifications' },
+    { id: 'email',     title: 'Email',     description: 'Outbound-only SMTP · TLS required (port 465/587) · recipient allowlist · no IMAP.',             keywords: 'email smtp mail gmail outlook fastmail notifications outbound webhook imap' },
+    { id: 'bridge',    title: 'Bridge',    description: 'HTTP server status, port, repo path, uptime.',                                                  keywords: 'bridge http server port host status' },
+    { id: 'lanes',     title: 'Lanes',     description: 'Lane catalog & policies — zones, lease, handoff.',                                              keywords: 'lanes zones lease handoff policy catalog' },
+    { id: 'providers', title: 'Providers', description: 'API key store summary — full management in /auth.',                                             keywords: 'providers anthropic openai api keys credentials' },
+    { id: 'mcp',       title: 'MCP',       description: 'Bridge-owned MCP server registry.',                                                             keywords: 'mcp model-context-protocol servers tools' },
+    { id: 'runtimes',  title: 'Runtimes',  description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes.',                                    keywords: 'runtimes workers claude codex hermes spawn' },
+    { id: 'paths',     title: 'Storage',   description: 'Resolved paths for repo, state dir, cockpit dir.',                                              keywords: 'storage paths repo state cockpit directory' },
+    { id: 'hardrules', title: 'Hard rules', description: 'Files-only · no SQLite · no hosted backends · no broad deps · no SDK in app · no token export.', keywords: 'hard rules invariants compliance security boundary' }
+  ]
+};
+
+function loadManifest() {
+  for (const [route, entries] of Object.entries(SUB_TARGET_MANIFEST)) {
+    for (const e of entries) {
+      registerSubTarget({
+        source: 'manifest', route,
+        id: e.id, title: e.title, description: e.description, keywords: e.keywords,
+        group: ROUTES[route] && ROUTES[route].group
+      });
+    }
+  }
+}
+
+function allSubTargets() {
+  return Array.from(SUB_REGISTRY.values());
 }
 function errorState(title, detail) {
   return el('div', { class: 'empty-state error' }, [
@@ -4689,61 +4728,56 @@ function renderSettings() {
   root.appendChild(el('h2', {}, 'Settings'));
   root.appendChild(el('p', {}, ROUTES.settings.description));
 
-  // ── Bridge panel ─────────────────────────────────────────────────────
+  // Each panel below uses panelFocus() — stamps data-focus and registers
+  // the sub-target. Keys match SUB_TARGET_MANIFEST.settings for parity.
   const bridgeMount = el('div', {});
   bridgeMount.appendChild(loading('Reading bridge status…'));
-  root.appendChild(panel('Bridge', 'GET /bridge/status', bridgeMount));
+  root.appendChild(panelFocus('Bridge', 'GET /bridge/status', bridgeMount,
+    { id: 'bridge', keywords: 'bridge http server port host status uptime version' }));
 
-  // ── Lanes panel ──────────────────────────────────────────────────────
   const lanesMount = el('div', {});
   lanesMount.appendChild(loading('Fetching lane catalog…'));
-  root.appendChild(panel('Lanes', 'GET /bridge/lanes  ·  edit .maddu/lanes/catalog.json', lanesMount));
+  root.appendChild(panelFocus('Lanes', 'GET /bridge/lanes  ·  edit .maddu/lanes/catalog.json', lanesMount,
+    { id: 'lanes', keywords: 'lanes zones lease handoff policy catalog' }));
 
-  // ── Auth / providers panel ───────────────────────────────────────────
   const authMount = el('div', {});
   authMount.appendChild(loading('Fetching providers…'));
-  root.appendChild(panel('Providers', 'GET /bridge/auth  ·  full management in /auth', authMount));
+  root.appendChild(panelFocus('Providers', 'GET /bridge/auth  ·  full management in /auth', authMount,
+    { id: 'providers', keywords: 'providers anthropic openai api keys credentials oauth tokens' }));
 
-  // ── MCP registry panel ───────────────────────────────────────────────
   const mcpMount = el('div', {});
   mcpMount.appendChild(loading('Fetching MCP registry…'));
-  root.appendChild(panel('MCP registry', 'GET /bridge/mcp  ·  full management in /mcp', mcpMount));
+  root.appendChild(panelFocus('MCP registry', 'GET /bridge/mcp  ·  full management in /mcp', mcpMount,
+    { id: 'mcp', keywords: 'mcp model-context-protocol servers tools stdio sse' }));
 
-  // ── Runtimes panel ───────────────────────────────────────────────────
   const rtMount = el('div', {});
   rtMount.appendChild(loading('Fetching runtimes…'));
-  root.appendChild(panel('Runtimes', 'GET /bridge/runtimes  ·  full management in /runtimes', rtMount));
+  root.appendChild(panelFocus('Runtimes', 'GET /bridge/runtimes  ·  full management in /runtimes', rtMount,
+    { id: 'runtimes', keywords: 'runtimes workers claude codex hermes spawn subprocess' }));
 
   // ── Integrations (Slice ζ + η) — all optional, off by default ────────
   const tgMount = el('div', {});
   tgMount.appendChild(loading('Reading Telegram status…'));
-  const tgPanel = panel('Telegram bridge', 'optional · long-poll, allowlisted · message bodies route via Telegram', tgMount);
-  tgPanel.setAttribute('data-focus', 'telegram integrations chat notifications bot');
-  root.appendChild(tgPanel);
+  root.appendChild(panelFocus('Telegram bridge', 'optional · long-poll, allowlisted · message bodies route via Telegram', tgMount,
+    { id: 'telegram', keywords: 'telegram tg messenger chat phone notification mobile bot integrations' }));
   renderTelegramPanel(tgMount);
 
   const dcMount = el('div', {});
   dcMount.appendChild(loading('Reading Discord status…'));
-  const dcPanel = panel('Discord bridge', 'optional · outbound-only (no gateway) · message bodies route via Discord', dcMount);
-  dcPanel.setAttribute('data-focus', 'discord integrations bot');
-  root.appendChild(dcPanel);
+  root.appendChild(panelFocus('Discord bridge', 'optional · outbound-only (no gateway) · message bodies route via Discord', dcMount,
+    { id: 'discord', keywords: 'discord channel server guild bot integrations notifications' }));
   renderDiscordPanel(dcMount);
 
   const emMount = el('div', {});
   emMount.appendChild(loading('Reading email status…'));
-  const emPanel = panel('Email bridge', 'optional · outbound-only SMTP · TLS required (port 465/587)', emMount);
-  emPanel.setAttribute('data-focus', 'email smtp integrations notifications outbound webhook imap');
-  root.appendChild(emPanel);
+  root.appendChild(panelFocus('Email bridge', 'optional · outbound-only SMTP · TLS required (port 465/587)', emMount,
+    { id: 'email', keywords: 'email smtp mail gmail outlook fastmail notifications outbound webhook imap' }));
   renderEmailPanel(emMount);
 
-  // Honor ?focus=<keyword> from the palette (Phase 3 follow-up).
-  const focus = paletteFocus();
-  if (focus) focusPanelByKeyword(root, focus);
-
-  // ── Storage paths panel (static, from /bridge/status) ───────────────
   const pathsMount = el('div', {});
   pathsMount.appendChild(loading('Resolving paths…'));
-  root.appendChild(panel('Storage paths', 'Resolved at bridge boot', pathsMount));
+  root.appendChild(panelFocus('Storage paths', 'Resolved at bridge boot', pathsMount,
+    { id: 'paths', keywords: 'storage paths repo state cockpit directory' }));
 
   // ── Hard rules + docs deep-link ─────────────────────────────────────
   const rulesBody = el('div', {});
@@ -4764,7 +4798,13 @@ function renderSettings() {
     ruleBtns.appendChild(b);
   }
   rulesBody.appendChild(ruleBtns);
-  root.appendChild(panel('Hard rules · Docs', 'Open the manual', rulesBody));
+  root.appendChild(panelFocus('Hard rules · Docs', 'Open the manual', rulesBody,
+    { id: 'hardrules', keywords: 'hard rules invariants compliance security boundary files-only sqlite hosted deps sdk token export brand lane ownership' }));
+
+  // Honor ?focus=<keyword> from the palette — placed last so every panel
+  // is in the DOM before the scroll-flash fires.
+  const focus = paletteFocus();
+  if (focus) focusPanelByKeyword(root, focus);
 
   (async () => {
     // Bridge
@@ -6607,24 +6647,31 @@ function paletteItems(query) {
     }
   }
 
-  // Sub-targets — first-class panel entries inside routes.
-  for (const s of SUB_TARGETS) {
+  // Sub-targets — first-class panel entries inside routes. Sourced from the
+  // runtime registry (static manifest + render-discovered + future data-
+  // driven entries). Same key (`<route>:<id>`) dedupes naturally.
+  for (const s of allSubTargets()) {
     const titleLc = s.title.toLowerCase();
     const kwLc = (s.keywords || '').toLowerCase();
     const descLc = (s.description || '').toLowerCase();
-    const hay = `${titleLc} ${kwLc} ${descLc}`;
+    const hay = `${titleLc} ${kwLc} ${descLc} ${s.id}`;
     if (!q || hay.includes(q)) {
       let score;
-      if (!q)                            score = 2; // appear after anchors, before non-anchor routes
-      else if (titleLc.startsWith(q))    score = 0; // "tele" → Telegram beats Settings
+      if (!q)                            score = 2;
+      else if (titleLc.startsWith(q))    score = 0;
       else if (titleLc.includes(q))      score = 1;
+      else if (s.id.toLowerCase().includes(q)) score = 2;
       else if (kwLc.includes(q))         score = 2;
       else                               score = 4;
       out.push({
-        kind: 'sub', id: s.id,
-        title: s.title, group: s.group, anchor: true,
+        kind: 'sub',
+        id: `${s.route}:${s.id}`,
+        title: s.title,
+        group: s.group || ROUTES[s.route]?.group,
+        anchor: true,
         desc: s.description,
-        targetRoute: s.route, focus: s.focus,
+        targetRoute: s.route,
+        focus: s.id,
         score
       });
     }
@@ -6802,6 +6849,7 @@ function flashSliceLine() {
 
 async function boot() {
   if (!location.hash) location.hash = '#/conductor';
+  loadManifest();
   buildRail();
   buildDock();
   initDock();
