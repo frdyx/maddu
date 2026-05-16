@@ -19,9 +19,17 @@ A local-first, files-only framework for orchestrating AI agents inside any git r
 npx github:frdyx/maddu init
 ```
 
-[Get started](docs/01-getting-started.md)  ·  [Concepts](docs/02-concepts.md)  ·  [Cockpit tour](docs/04-cockpit-tour.md)  ·  [Hard rules](docs/06-hard-rules.md)  ·  [CLI reference](docs/03-cli-reference.md)
+[Get started](docs/01-getting-started.md)  ·  [Five-minute tour](docs/18-first-slice.md)  ·  [Cockpit tour](docs/04-cockpit-tour.md)  ·  [Hard rules](docs/06-hard-rules.md)  ·  [CLI reference](docs/03-cli-reference.md)
 
 </div>
+
+<br/>
+
+<picture>
+  <img alt="Máddu cockpit on the Conductor route — rail with five phase-of-work groups, KPI strip, score matrix, Now/Next/Waiting/Done board, last slice-stop summary, and the signature lime line at the very top." src="brand/screenshots/cockpit-hero.svg">
+</picture>
+
+<sub align="center"><i>The cockpit at <code>127.0.0.1:4177</code> · Conductor route · live data, no chart library, pure SVG · Scandinavian sci-fi dark noir.</i></sub>
 
 ---
 
@@ -32,6 +40,63 @@ npx github:frdyx/maddu init
 | **Local-first** | Máddu runs as a single Node process on your machine. It talks to vendor APIs directly via subprocess workers, with no cloud relay and no telemetry beacon. |
 | **Files-only state** | Every fact is an NDJSON event or a JSON projection on disk under `.maddu/`. No SQLite. No embedded DB. No schema migrations. `cat`, `grep`, `git` are the only tools you need to audit it. |
 | **Multi-agent native** | Lanes, mailboxes, approvals, hindsight memory, runtime adapters, and a slice-stop ritual are built in — not bolted on. Claude Code and Codex CLI are spawned as workers; Máddu itself imports zero provider SDKs. |
+
+---
+
+## What it looks like
+
+Four signature surfaces. Everything below renders as **pure SVG / DOM in the cockpit** — no chart library, no design framework, no `<canvas>`. The mockups here are screenshots, but you can produce them yourself in 30 seconds: `npx github:frdyx/maddu init && maddu start`.
+
+<table width="100%">
+<tr>
+<td width="50%" valign="top">
+
+**Conductor** — *"what is safe to do next?"*
+
+<picture><img alt="Conductor route" src="brand/screenshots/cockpit-hero.svg"></picture>
+
+KPI strip, score matrix per lane, Now/Next/Waiting/Done board, the last slice-stop summary with auto-extracted learnings.
+
+</td>
+<td width="50%" valign="top">
+
+**Command palette** — `Ctrl + K` / `⌘ K`
+
+<picture><img alt="Command palette" src="brand/screenshots/command-palette.svg"></picture>
+
+Fuzzy search across every route, every panel, every action, every Auth provider, every active session, every lane.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Workflows blueprint** — the mental model
+
+<picture><img alt="Workflows blueprint" src="brand/screenshots/workflows-blueprint.svg"></picture>
+
+Operator → BOSS / Enforcer → Queue / Claims → Fleet → Gates / Reports → Learning / Wiki. Every node is a route. Every edge is an event type on the spine.
+
+</td>
+<td width="50%" valign="top">
+
+**BOSS / Enforcer duality** — propose · cite · decide
+
+<picture><img alt="BOSS and Enforcer transcript" src="brand/screenshots/boss-enforcer.svg"></picture>
+
+BOSS (LLM voice, electric blue) proposes. Enforcer (deterministic, amber) cites the rule that allows or refuses. Operator approves with one click.
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+**Signature motion** — *the cockpit's tell*
+
+<picture><img alt="The 900 ms lime line that traces across the stage on every slice-stop" src="brand/screenshots/slice-stop-flourish.svg"></picture>
+
+One single 2 px lime line traces left → right across the viewport in ~900 ms on every `SLICE_STOP` event. Visible from every route. Honors `prefers-reduced-motion`. That's the whole motion budget — no confetti, no toasts, no spinners. Just the line.
 
 ---
 
@@ -72,31 +137,49 @@ Nothing else in your repo is touched. `.gitignore` gets one stanza added for OS 
 
 ## The cockpit
 
-A single-page web app on `http://127.0.0.1:4177`. Nineteen routes covering every surface the framework exposes. Press `?` from anywhere to open the in-cockpit docs.
+A single-page web app on `http://127.0.0.1:4177`. **27 routes** grouped into five phase-of-work clusters in the left rail — `DECIDE → OPERATE → VERIFY → CONNECT → REFERENCE`. The rail shrinks to glyph-only on tablets and becomes a bottom dock on mobile. Press `?` from anywhere to open the in-cockpit docs. Press `Ctrl + K` to jump anywhere.
 
-| Route | What it does |
-|---|---|
-| `/dashboard` | At-a-glance status. 6 clickable stat tiles, donut pair (tasks + workers), event-activity sparkline, type-mix bar, capacity meters. |
-| `/workbench` | Three-pane OS shell. Lanes + sessions on the left, live event stream in the middle, status counts on the right. |
-| `/operations` | Slice-stop ledger, hindsight memory, checkpoint timeline. |
-| `/swarm` | Lane roster, worker status donut, claim resolution. |
-| `/chats` | Conversation surfaces with history + replay. |
-| `/events` | Long-polled live cursor over the spine, filterable by type. |
-| `/approvals` | Pending permission requests + decision ledger + standing policies. |
-| `/tasks` | Dependency-aware task board with auto-unblocking. |
-| `/mailbox` | Per-lane mailbox bus for async cross-lane handoffs. |
-| `/skills` | Reusable agent recipes distilled from slice-stops. |
-| `/search` | Cross-corpus search over spine, slice-stops, memory, skills, mailbox, inbox. |
-| `/runtimes` | Pluggable subprocess adapter contract. Detect, spawn, test. |
-| `/mcp` | Bridge-owned MCP server registry with slot-tagged env injection. |
-| `/schedule` | Natural-language → cron. Bridge polls every 30 s. |
-| `/auth` | Multi-key OAuth store with rotation. Tokens never leave the device. |
-| `/imports` | Foreign-artifact gateway with secret-shape rejection. |
-| `/settings` | Lane defaults, provider bindings, MCP toggles, paths. |
-| `/docs` | Full end-user manual, anchor-deep-linkable, with backlinks. |
-| `/roadmap` | Phases A → D + tagged versions. |
+<table width="100%">
+<tr><th align="left" colspan="2">◆ DECIDE  <sub><i>what is safe to do next</i></sub></th></tr>
+<tr><td width="22%"><code>/conductor</code> ◆</td><td>KPI strip, next-command, score matrix, Now/Next/Waiting/Done board.</td></tr>
+<tr><td><code>/boss</code> ◆</td><td>BOSS proposes · Enforcer cites · operator decides. Action-proposal cards with risk pill.</td></tr>
+<tr><td><code>/queue</code></td><td>Scheduler / Queue / Dispatch / Preflights kanban with reason codes.</td></tr>
+<tr><td><code>/claims</code></td><td>Active claims by lane with lease state, heartbeat age, handoff button.</td></tr>
+<tr><td><code>/approvals</code></td><td>Pending permission requests + decision ledger + standing policies.</td></tr>
+<tr><td><code>/tasks</code></td><td>Dependency-aware task board with auto-unblocking.</td></tr>
 
-Every route that has aggregable data gets a summary widget at the top — built from a pure-SVG widget kit (no chart library, [hard rule #4](docs/06-hard-rules.md)).
+<tr><th align="left" colspan="2">◈ OPERATE  <sub><i>agents, lanes, conversations</i></sub></th></tr>
+<tr><td><code>/workflows</code> ◆</td><td>Pure-SVG blueprint of the framework as a system. Every node opens its route.</td></tr>
+<tr><td><code>/agents</code></td><td>Coworker profile grid — role, focus, claims held, score, heartbeat, last slice.</td></tr>
+<tr><td><code>/teams</code></td><td>Lane ownership map with held/free pills + policy strip.</td></tr>
+<tr><td><code>/workbench</code></td><td>OS-style three-pane shell. Lanes + sessions · live stream · status counts.</td></tr>
+<tr><td><code>/chats</code></td><td>Conversation surfaces with history + replay.</td></tr>
+<tr><td><code>/mailbox</code></td><td>Per-lane mailbox bus for async cross-lane handoffs.</td></tr>
+<tr><td><code>/swarm</code></td><td>Lane roster, worker status donut, claim resolution.</td></tr>
+
+<tr><th align="left" colspan="2">⌬ VERIFY  <sub><i>evidence, memory, wiki</i></sub></th></tr>
+<tr><td><code>/learning</code> ◆</td><td>Hindsight memory — facts distilled from slice-stops. Filter by kind / lane / query.</td></tr>
+<tr><td><code>/wiki</code> ◆</td><td>Auto-maintained per-lane wiki. Drift drawer flags pages that fell behind the spine.</td></tr>
+<tr><td><code>/events</code></td><td>Long-poll cursor over the spine, filterable by type. Pause/resume.</td></tr>
+<tr><td><code>/operations</code></td><td>Slice-stop ledger, hindsight memory, checkpoint timeline.</td></tr>
+<tr><td><code>/search</code></td><td>Cross-corpus search — events, slice-stops, memory, skills, mailbox, inbox.</td></tr>
+
+<tr><th align="left" colspan="2">⌗ CONNECT  <sub><i>runtimes, auth, integrations</i></sub></th></tr>
+<tr><td><code>/runtimes</code></td><td>Pluggable subprocess adapters — Claude Code, Codex, future agents.</td></tr>
+<tr><td><code>/mcp</code></td><td>Bridge-owned MCP server registry. stdio / sse / http.</td></tr>
+<tr><td><code>/auth</code></td><td>Multi-key OAuth store with rotation. Tokens never leave the device.</td></tr>
+<tr><td><code>/imports</code></td><td>Foreign-artifact gateway with secret-shape rejection.</td></tr>
+<tr><td><code>/schedule</code></td><td>Natural-language → cron. Bridge polls every 30 s.</td></tr>
+<tr><td><code>/settings</code></td><td>Bridge, lanes, providers, Telegram / Discord / Email bridges, MCP, paths, hard rules.</td></tr>
+
+<tr><th align="left" colspan="2">☷ REFERENCE  <sub><i>dashboard, docs, roadmap</i></sub></th></tr>
+<tr><td><code>/dashboard</code></td><td>At-a-glance status. Donut pair, sparklines, capacity meters.</td></tr>
+<tr><td><code>/roadmap</code></td><td>Roadmap KPIs, 28-day closure cadence, lane mix, clickable slice index.</td></tr>
+<tr><td><code>/skills</code></td><td>Reusable agent recipes distilled from slice-stops (`SKILL.md` format).</td></tr>
+<tr><td><code>/docs</code></td><td>Full end-user manual, anchor-deep-linkable, with backlinks.</td></tr>
+</table>
+
+Every route renders summary widgets via a **pure-SVG widget kit** (no chart library, per [hard rule #4](docs/06-hard-rules.md)). Routes marked ◆ are *anchor* routes — the five depth-upgrade signatures that every other surface plugs into.
 
 ---
 

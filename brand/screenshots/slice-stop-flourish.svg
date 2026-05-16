@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" role="img" aria-label="The slice-stop lime line — Máddu's signature motion">
+  <title>Slice-stop signature motion — a 900 ms lime line traces across the stage on every SLICE_STOP</title>
+  <defs>
+    <style>
+      .canvas    { fill: #050B17; }
+      .panel     { fill: #0C1428; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .fg-0      { fill: #E8E6E3; }
+      .fg-1      { fill: #B8B2AA; }
+      .fg-3      { fill: #6a7079; }
+      .accent    { fill: #D0FF00; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+    <linearGradient id="lime-line" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"  stop-color="#D0FF00" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#D0FF00" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#D0FF00" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="lime-glow" x="-20%" y="-200%" width="140%" height="500%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+
+  <rect class="canvas" width="1200" height="280"/>
+
+  <!-- The line, mid-trace, with glow underneath -->
+  <g>
+    <rect x="220" y="36" width="620" height="2" fill="url(#lime-line)" filter="url(#lime-glow)" opacity="0.7"/>
+    <rect x="220" y="36" width="620" height="2" fill="url(#lime-line)"/>
+  </g>
+
+  <!-- Frame markers (showing the motion progression) -->
+  <g class="mono fg-3" font-size="9" letter-spacing="0.06em">
+    <text x="60"   y="14">0 MS</text>
+    <text x="350"  y="14">~200 MS</text>
+    <text x="700"  y="14">~600 MS</text>
+    <text x="1090" y="14">~900 MS</text>
+  </g>
+  <g stroke="rgba(80,113,149,0.18)" stroke-width="1">
+    <line x1="60"   y1="18" x2="60"   y2="80"/>
+    <line x1="350"  y1="18" x2="350"  y2="80"/>
+    <line x1="700"  y1="18" x2="700"  y2="80"/>
+    <line x1="1090" y1="18" x2="1090" y2="80"/>
+  </g>
+
+  <!-- Caption block -->
+  <g transform="translate(60,120)">
+    <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◆ SIGNATURE MOTION</text>
+    <text x="0" y="28" class="cond-b fg-0" font-size="22">The cockpit's tell that something happened</text>
+    <text x="0" y="58" class="mono fg-1" font-size="13">On every SLICE_STOP event, a single 2 px lime line traces left → right</text>
+    <text x="0" y="78" class="mono fg-1" font-size="13">across the top of the viewport in ~900 ms and dissolves. That's it.</text>
+    <text x="0" y="98" class="mono fg-1" font-size="13">No confetti, no toast — just the line.</text>
+    <text x="0" y="132" class="mono fg-3" font-size="11">Fires from every route. Honors prefers-reduced-motion. Wired into</text>
+    <text x="0" y="148" class="mono fg-3" font-size="11">streamLoop() so any client connected to /bridge/events/wait sees it.</text>
+  </g>
+
+  <!-- Stage strip ghost -->
+  <g transform="translate(60,210)" opacity="0.4">
+    <rect width="1080" height="42" fill="#0A1224" stroke="rgba(80,113,149,0.30)" rx="4"/>
+    <text x="20" y="26" class="cond-b fg-0" font-size="12">CONDUCTOR</text>
+    <text x="1060" y="26" class="mono fg-3" font-size="10" text-anchor="end">slice-stop received · 3m ago</text>
+  </g>
+</svg>

@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 540" role="img" aria-label="Máddu workflows blueprint">
+  <title>Máddu workflows — operator → BOSS/Enforcer → claims → fleet → gates → reports → learning/wiki</title>
+  <defs>
+    <style>
+      .canvas    { fill: #050B17; }
+      .panel     { fill: #0C1428; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .node-rect { fill: #0A1224; stroke: #D0FF00; stroke-width: 1.2; }
+      .node-rect.boss   { stroke: #56B8FF; }
+      .node-rect.warm   { stroke: #F2BD5C; }
+      .edge      { fill: none; stroke: rgba(80,113,149,0.55); stroke-width: 1.5; opacity: 0.85; }
+      .edge.live { stroke: #D0FF00; stroke-width: 2; opacity: 0.75; }
+      .fg-0      { fill: #E8E6E3; }
+      .fg-3      { fill: #6a7079; }
+      .accent    { fill: #D0FF00; }
+      .accent2   { fill: #56B8FF; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="1400" height="540"/>
+
+  <!-- Title strip -->
+  <g transform="translate(40,30)">
+    <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◈ WORKFLOWS</text>
+    <text x="0" y="22" class="cond-b fg-0" font-size="20">Blueprint of how Máddu thinks</text>
+    <text x="0" y="42" class="mono fg-3" font-size="11">operator → BOSS / Enforcer → claims → fleet → gates → reports → learning / wiki</text>
+  </g>
+
+  <!-- Bezier edges -->
+  <g>
+    <!-- operator → BOSS -->
+    <path d="M 220 200 C 280 200, 280 140, 340 140" class="edge live"/>
+    <!-- operator → Enforcer -->
+    <path d="M 220 200 C 280 200, 280 260, 340 260" class="edge"/>
+    <!-- BOSS → Queue -->
+    <path d="M 460 140 C 520 140, 520 140, 580 140" class="edge live"/>
+    <!-- BOSS → Claims -->
+    <path d="M 460 140 C 520 140, 520 260, 580 260" class="edge"/>
+    <!-- Enforcer → Queue -->
+    <path d="M 460 260 C 520 260, 520 140, 580 140" class="edge"/>
+    <!-- Enforcer → Claims -->
+    <path d="M 460 260 C 520 260, 520 260, 580 260" class="edge"/>
+    <!-- Queue → Fleet -->
+    <path d="M 700 140 C 760 140, 760 200, 820 200" class="edge live"/>
+    <!-- Claims → Fleet -->
+    <path d="M 700 260 C 760 260, 760 200, 820 200" class="edge"/>
+    <!-- Fleet → Gates -->
+    <path d="M 940 200 C 1000 200, 1000 140, 1060 140" class="edge"/>
+    <!-- Fleet → Reports -->
+    <path d="M 940 200 C 1000 200, 1000 260, 1060 260" class="edge live"/>
+    <!-- Gates → Reports -->
+    <path d="M 1180 140 C 1180 200, 1180 200, 1060 260" class="edge" opacity="0.4"/>
+    <!-- Reports → Learning -->
+    <path d="M 1180 260 C 1220 260, 1220 140, 1260 140" class="edge live"/>
+    <!-- Reports → Wiki -->
+    <path d="M 1180 260 C 1220 260, 1220 260, 1260 260" class="edge live"/>
+  </g>
+
+  <!-- Nodes -->
+  <g class="cond-b fg-0" font-size="14" text-anchor="middle">
+    <!-- Operator (left, centered) -->
+    <g transform="translate(100,178)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">OPERATOR</text>
+    </g>
+
+    <!-- BOSS -->
+    <g transform="translate(340,118)">
+      <rect class="node-rect boss" width="120" height="44" rx="6"/>
+      <text x="60" y="28" fill="#56B8FF">BOSS</text>
+    </g>
+    <!-- Enforcer -->
+    <g transform="translate(340,238)">
+      <rect class="node-rect warm" width="120" height="44" rx="6"/>
+      <text x="60" y="28" fill="#F2BD5C">ENFORCER</text>
+    </g>
+
+    <!-- Queue -->
+    <g transform="translate(580,118)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">QUEUE</text>
+    </g>
+    <!-- Claims -->
+    <g transform="translate(580,238)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">CLAIMS</text>
+    </g>
+
+    <!-- Fleet -->
+    <g transform="translate(820,178)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">FLEET</text>
+    </g>
+
+    <!-- Gates -->
+    <g transform="translate(1060,118)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">GATES</text>
+    </g>
+    <!-- Reports -->
+    <g transform="translate(1060,238)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">REPORTS</text>
+    </g>
+
+    <!-- Learning -->
+    <g transform="translate(1260,118)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28" fill="#D0FF00">LEARNING</text>
+    </g>
+    <!-- Wiki -->
+    <g transform="translate(1260,238)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28" fill="#D0FF00">WIKI</text>
+    </g>
+  </g>
+
+  <!-- Legend strip below -->
+  <g transform="translate(40,400)">
+    <text x="0" y="0" class="cond-b fg-3" font-size="10" letter-spacing="0.10em">LEGEND</text>
+    <line x1="0" y1="20" x2="1320" y2="20" stroke="rgba(80,113,149,0.18)" stroke-width="1"/>
+    <g transform="translate(0,40)">
+      <rect width="14" height="2" fill="#D0FF00"/>
+      <text x="22" y="6" class="mono fg-3" font-size="11">primary flow (live)</text>
+    </g>
+    <g transform="translate(200,40)">
+      <rect width="14" height="2" fill="rgba(80,113,149,0.55)"/>
+      <text x="22" y="6" class="mono fg-3" font-size="11">secondary edge</text>
+    </g>
+    <g transform="translate(380,40)">
+      <rect width="12" height="12" fill="#0A1224" stroke="#D0FF00"/>
+      <text x="22" y="11" class="mono fg-3" font-size="11">canonical surface — clickable in cockpit</text>
+    </g>
+    <g transform="translate(740,40)">
+      <rect width="12" height="12" fill="#0A1224" stroke="#56B8FF"/>
+      <text x="22" y="11" class="mono fg-3" font-size="11">BOSS · LLM voice (proposes)</text>
+    </g>
+    <g transform="translate(1020,40)">
+      <rect width="12" height="12" fill="#0A1224" stroke="#F2BD5C"/>
+      <text x="22" y="11" class="mono fg-3" font-size="11">ENFORCER · deterministic (refuses)</text>
+    </g>
+  </g>
+
+  <!-- Tagline -->
+  <g transform="translate(700,500)">
+    <text x="0" y="0" class="mono fg-3" font-size="10" text-anchor="middle" letter-spacing="0.08em">EVERY EDGE IS AN NDJSON EVENT · EVERY NODE IS A COCKPIT ROUTE</text>
+  </g>
+</svg>

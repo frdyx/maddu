@@ -1,0 +1,296 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" role="img" aria-label="Máddu cockpit on the Conductor route">
+  <title>Máddu cockpit — Conductor route</title>
+  <defs>
+    <style>
+      .canvas    { fill: #050B17; }
+      .shell     { fill: #0A1224; }
+      .panel     { fill: #0C1428; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .panel-d   { fill: #0E1730; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .line-soft { stroke: rgba(80,113,149,0.18); stroke-width: 1; fill: none; }
+      .fg-0      { fill: #E8E6E3; }
+      .fg-1      { fill: #B8B2AA; }
+      .fg-2      { fill: #8A8A8A; }
+      .fg-3      { fill: #6a7079; }
+      .fg-4      { fill: #3a3e45; }
+      .accent    { fill: #D0FF00; }
+      .accent-s  { stroke: #D0FF00; }
+      .accent2   { fill: #56B8FF; }
+      .ok        { fill: #6FA8A2; }
+      .warn      { fill: #F2BD5C; }
+      .brand     { fill: #F04E23; }
+      .cond, .cond-b {
+        font-family: 'IBM Plex Sans Condensed', 'Inter', 'Helvetica Neue', sans-serif;
+        letter-spacing: 0.06em;
+      }
+      .cond-b    { font-weight: 600; }
+      .sans      { font-family: 'IBM Plex Sans', 'Inter', sans-serif; }
+      .mono      { font-family: 'IBM Plex Mono', 'JetBrains Mono', 'Consolas', monospace; }
+      .upper     { text-transform: uppercase; }
+    </style>
+  </defs>
+
+  <!-- Canvas -->
+  <rect class="canvas" width="1600" height="920"/>
+
+  <!-- Signature lime line at the very top (the slice-stop flourish, mid-trace) -->
+  <rect x="280" y="0" width="640" height="2" class="accent" opacity="0.7"/>
+  <rect x="380" y="0" width="380" height="2" class="accent" opacity="0.9"/>
+
+  <!-- RAIL (left) ─────────────────────────────────────────────────────── -->
+  <rect class="shell" x="0" y="0" width="240" height="920"/>
+  <line x1="240" y1="0" x2="240" y2="920" class="line-soft"/>
+
+  <!-- Rail brand mark -->
+  <g transform="translate(20,28)">
+    <rect class="brand" width="22" height="22" rx="3"/>
+    <text x="32" y="16" class="cond-b fg-0" font-size="14">MÁDDU</text>
+  </g>
+  <line x1="20" y1="64" x2="220" y2="64" class="line-soft"/>
+
+  <!-- Group: DECIDE (active group has lime tick) -->
+  <g transform="translate(12,84)">
+    <rect x="0" y="2" width="2" height="10" class="accent"/>
+    <text x="14" y="11" class="cond fg-3" font-size="10">◆ DECIDE</text>
+  </g>
+  <!-- Active route: Conductor -->
+  <g transform="translate(8,108)">
+    <rect x="6" y="0" width="216" height="26" fill="#0E1730" rx="2"/>
+    <rect x="6" y="0" width="2" height="26" class="accent"/>
+    <text x="22" y="17" class="mono fg-0" font-size="12">◆</text>
+    <text x="40" y="17" class="cond-b fg-0" font-size="12.5" letter-spacing="0.05em">CONDUCTOR</text>
+  </g>
+  <g transform="translate(8,140)">
+    <text x="22" y="14" class="mono accent2" font-size="11">◆</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">BOSS</text>
+  </g>
+  <g transform="translate(8,162)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">QUEUE</text>
+  </g>
+  <g transform="translate(8,184)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">CLAIMS</text>
+  </g>
+  <g transform="translate(8,206)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">APPROVALS</text>
+    <rect x="180" y="2" width="20" height="14" rx="7" fill="#F2BD5C"/>
+    <text x="187" y="13" class="mono" font-size="9" fill="#050B17">3</text>
+  </g>
+
+  <!-- Group: OPERATE -->
+  <g transform="translate(12,244)">
+    <text x="14" y="11" class="cond fg-3" font-size="10">◈ OPERATE</text>
+  </g>
+  <g transform="translate(8,266)">
+    <text x="22" y="14" class="mono accent2" font-size="11">◆</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">WORKFLOWS</text>
+  </g>
+  <g transform="translate(8,288)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">AGENTS</text>
+  </g>
+  <g transform="translate(8,310)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">TEAMS</text>
+  </g>
+
+  <!-- Group: VERIFY -->
+  <g transform="translate(12,344)">
+    <text x="14" y="11" class="cond fg-3" font-size="10">⌬ VERIFY</text>
+  </g>
+  <g transform="translate(8,366)">
+    <text x="22" y="14" class="mono accent2" font-size="11">◆</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">LEARNING</text>
+  </g>
+  <g transform="translate(8,388)">
+    <text x="22" y="14" class="mono accent2" font-size="11">◆</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">WIKI</text>
+  </g>
+  <g transform="translate(8,410)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">EVENTS</text>
+  </g>
+
+  <!-- Group: CONNECT -->
+  <g transform="translate(12,444)">
+    <text x="14" y="11" class="cond fg-3" font-size="10">⌗ CONNECT</text>
+  </g>
+  <g transform="translate(8,466)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">RUNTIMES</text>
+  </g>
+  <g transform="translate(8,488)">
+    <text x="22" y="14" class="mono fg-4" font-size="11">◇</text>
+    <text x="40" y="14" class="cond fg-2" font-size="12">SETTINGS</text>
+  </g>
+
+  <!-- Rail foot -->
+  <line x1="20" y1="836" x2="220" y2="836" class="line-soft"/>
+  <g transform="translate(20,852)">
+    <text x="0" y="0" class="mono fg-4" font-size="10">BRIDGE</text>
+    <text x="200" y="0" class="mono fg-1" font-size="10" text-anchor="end">● online</text>
+    <text x="0" y="16" class="mono fg-4" font-size="10">VERSION</text>
+    <text x="200" y="16" class="mono fg-1" font-size="10" text-anchor="end">v0.12.0</text>
+    <text x="0" y="32" class="mono fg-4" font-size="10">UPTIME</text>
+    <text x="200" y="32" class="mono fg-1" font-size="10" text-anchor="end">2h 14m</text>
+  </g>
+
+  <!-- STAGE ─────────────────────────────────────────────────────────────── -->
+  <g transform="translate(240,0)">
+    <!-- Stage head -->
+    <g transform="translate(0,0)">
+      <line x1="0" y1="56" x2="1360" y2="56" class="line-soft"/>
+      <text x="28" y="36" class="mono accent" font-size="14">◈</text>
+      <text x="50" y="36" class="cond-b fg-0" font-size="18">CONDUCTOR</text>
+      <text x="1340" y="36" class="mono fg-3" font-size="11" text-anchor="end">CONDUCTOR</text>
+    </g>
+
+    <!-- KPI strip (4 tiles) -->
+    <g transform="translate(28,82)">
+      <!-- Tile 1: active claims -->
+      <rect x="0"   y="0" width="316" height="92" class="panel" rx="6"/>
+      <text x="16" y="32" class="cond-b accent" font-size="30">3</text>
+      <text x="16" y="58" class="mono fg-3" font-size="10" letter-spacing="0.08em">ACTIVE CLAIMS</text>
+      <text x="16" y="78" class="mono fg-2" font-size="11">cockpit-shell · harness · learning</text>
+
+      <!-- Tile 2: parked gates -->
+      <rect x="332" y="0" width="316" height="92" class="panel" rx="6"/>
+      <text x="348" y="32" class="cond-b warn" font-size="30">2</text>
+      <text x="348" y="58" class="mono fg-3" font-size="10" letter-spacing="0.08em">PARKED GATES</text>
+      <text x="348" y="78" class="mono fg-2" font-size="11">queue_head_ready · no_allowed_slot</text>
+
+      <!-- Tile 3: open approvals -->
+      <rect x="664" y="0" width="316" height="92" class="panel" rx="6"/>
+      <text x="680" y="32" class="cond-b accent2" font-size="30">7</text>
+      <text x="680" y="58" class="mono fg-3" font-size="10" letter-spacing="0.08em">OPEN APPROVALS</text>
+      <text x="680" y="78" class="mono fg-2" font-size="11">tool · subprocess · write</text>
+
+      <!-- Tile 4: last slice-stop -->
+      <rect x="996" y="0" width="316" height="92" class="panel" rx="6"/>
+      <text x="1012" y="32" class="cond-b ok" font-size="30">3m</text>
+      <text x="1012" y="58" class="mono fg-3" font-size="10" letter-spacing="0.08em">SINCE LAST SLICE</text>
+      <text x="1012" y="78" class="mono fg-2" font-size="11">Slice ζ — Telegram bridge shipped</text>
+    </g>
+
+    <!-- Next command strip (large, lime) -->
+    <g transform="translate(28,196)">
+      <rect width="1312" height="76" fill="#0F1828" stroke="#D0FF00" stroke-width="1" rx="6" opacity="0.95"/>
+      <text x="20" y="24" class="mono fg-3" font-size="10" letter-spacing="0.10em">NEXT COMMAND · safe to run</text>
+      <text x="20" y="56" class="cond-b fg-0" font-size="20">▸ Claim lane <tspan class="accent">"cockpit-shell"</tspan> with session <tspan class="mono accent2" font-size="14">ses_20260517_174b16</tspan></text>
+      <rect x="1184" y="20" width="112" height="36" class="accent" rx="4"/>
+      <text x="1240" y="44" class="cond-b" font-size="11" fill="#050B17" text-anchor="middle" letter-spacing="0.08em">DISPATCH</text>
+    </g>
+
+    <!-- Operation Score Matrix -->
+    <g transform="translate(28,296)">
+      <rect width="640" height="376" class="panel" rx="6"/>
+      <text x="20" y="28" class="cond-b fg-0" font-size="13" letter-spacing="0.05em">OPERATION SCORE MATRIX</text>
+      <text x="620" y="28" class="mono fg-3" font-size="10" text-anchor="end">per-lane progress · reason codes</text>
+      <line x1="20" y1="40" x2="620" y2="40" class="line-soft"/>
+      <!-- bars -->
+      <g transform="translate(20,58)">
+        <!-- row -->
+        <text x="0" y="12" class="cond fg-1" font-size="12">cockpit-shell</text>
+        <rect x="140" y="2" width="460" height="14" fill="#10182A" rx="2"/>
+        <rect x="140" y="2" width="402" height="14" class="accent" rx="2"/>
+        <text x="608" y="14" class="mono fg-1" font-size="11" text-anchor="end">87%</text>
+        <text x="0" y="30" class="mono fg-4" font-size="10">claim_healthy</text>
+      </g>
+      <g transform="translate(20,108)">
+        <text x="0" y="12" class="cond fg-1" font-size="12">harness</text>
+        <rect x="140" y="2" width="460" height="14" fill="#10182A" rx="2"/>
+        <rect x="140" y="2" width="294" height="14" class="ok" rx="2"/>
+        <text x="608" y="14" class="mono fg-1" font-size="11" text-anchor="end">64%</text>
+        <text x="0" y="30" class="mono fg-4" font-size="10">progressing</text>
+      </g>
+      <g transform="translate(20,158)">
+        <text x="0" y="12" class="cond fg-1" font-size="12">learning</text>
+        <rect x="140" y="2" width="460" height="14" fill="#10182A" rx="2"/>
+        <rect x="140" y="2" width="184" height="14" class="accent2" rx="2"/>
+        <text x="608" y="14" class="mono fg-1" font-size="11" text-anchor="end">40%</text>
+        <text x="0" y="30" class="mono fg-4" font-size="10">awaiting hindsight</text>
+      </g>
+      <g transform="translate(20,208)">
+        <text x="0" y="12" class="cond fg-1" font-size="12">architecture</text>
+        <rect x="140" y="2" width="460" height="14" fill="#10182A" rx="2"/>
+        <rect x="140" y="2" width="92" height="14" class="warn" rx="2"/>
+        <text x="608" y="14" class="mono fg-1" font-size="11" text-anchor="end">20%</text>
+        <text x="0" y="30" class="mono fg-4" font-size="10">queue_head_ready · waiting for dispatch</text>
+      </g>
+      <g transform="translate(20,258)">
+        <text x="0" y="12" class="cond fg-1" font-size="12">bridge-server</text>
+        <rect x="140" y="2" width="460" height="14" fill="#10182A" rx="2"/>
+        <rect x="140" y="2" width="0" height="14" class="fg-3" rx="2"/>
+        <text x="608" y="14" class="mono fg-3" font-size="11" text-anchor="end">free</text>
+        <text x="0" y="30" class="mono fg-4" font-size="10">idle · no claims</text>
+      </g>
+    </g>
+
+    <!-- Board: Now / Next / Waiting / Done -->
+    <g transform="translate(692,296)">
+      <rect width="648" height="376" class="panel" rx="6"/>
+      <text x="20" y="28" class="cond-b fg-0" font-size="13" letter-spacing="0.05em">NOW · NEXT · WAITING · DONE</text>
+      <text x="628" y="28" class="mono fg-3" font-size="10" text-anchor="end">work in flight</text>
+      <line x1="20" y1="40" x2="628" y2="40" class="line-soft"/>
+
+      <!-- 4 columns -->
+      <g transform="translate(20,58)">
+        <!-- NOW -->
+        <text x="0"   y="12" class="cond fg-3" font-size="10" letter-spacing="0.10em">NOW</text>
+        <rect x="0"   y="22" width="140" height="62" class="panel-d" rx="4"/>
+        <text x="8"   y="38" class="cond-b fg-0" font-size="11">Telegram smoke</text>
+        <text x="8"   y="54" class="mono fg-3" font-size="9">ses_20260517 · cockpit-shell</text>
+        <rect x="8"   y="64" width="46" height="14" fill="rgba(208,255,0,0.10)" stroke="#D0FF00" stroke-width="0.7" rx="2"/>
+        <text x="31"  y="74" class="mono accent" font-size="9" text-anchor="middle">ACTIVE</text>
+
+        <!-- NEXT -->
+        <text x="156" y="12" class="cond fg-3" font-size="10" letter-spacing="0.10em">NEXT</text>
+        <rect x="156" y="22" width="140" height="62" class="panel-d" rx="4"/>
+        <text x="164" y="38" class="cond-b fg-0" font-size="11">Hindsight re-extract</text>
+        <text x="164" y="54" class="mono fg-3" font-size="9">memory.ndjson</text>
+        <rect x="164" y="64" width="58" height="14" fill="rgba(86,184,255,0.10)" stroke="#56B8FF" stroke-width="0.7" rx="2"/>
+        <text x="193" y="74" class="mono accent2" font-size="9" text-anchor="middle">DISPATCH</text>
+
+        <!-- WAITING -->
+        <text x="312" y="12" class="cond fg-3" font-size="10" letter-spacing="0.10em">WAITING</text>
+        <rect x="312" y="22" width="140" height="62" class="panel-d" rx="4"/>
+        <text x="320" y="38" class="cond-b fg-0" font-size="11">Discord channel review</text>
+        <text x="320" y="54" class="mono fg-3" font-size="9">awaiting allowlist</text>
+        <rect x="320" y="64" width="58" height="14" fill="rgba(242,189,92,0.10)" stroke="#F2BD5C" stroke-width="0.7" rx="2"/>
+        <text x="349" y="74" class="mono warn" font-size="9" text-anchor="middle">PARKED</text>
+
+        <!-- DONE -->
+        <text x="468" y="12" class="cond fg-3" font-size="10" letter-spacing="0.10em">DONE</text>
+        <rect x="468" y="22" width="140" height="62" class="panel-d" rx="4"/>
+        <text x="476" y="38" class="cond-b fg-0" font-size="11">Polish η · scrollbars</text>
+        <text x="476" y="54" class="mono fg-3" font-size="9">v0.12.0 tagged</text>
+        <rect x="476" y="64" width="46" height="14" fill="rgba(111,168,162,0.10)" stroke="#6FA8A2" stroke-width="0.7" rx="2"/>
+        <text x="499" y="74" class="mono ok" font-size="9" text-anchor="middle">SHIPPED</text>
+      </g>
+
+      <!-- Last slice-stop strip -->
+      <g transform="translate(20,180)">
+        <text x="0" y="0" class="cond fg-3" font-size="10" letter-spacing="0.10em">LAST SLICE-STOP · 3 MIN AGO</text>
+        <rect x="0" y="14" width="608" height="172" class="panel-d" rx="4"/>
+        <text x="14" y="36" class="cond-b fg-0" font-size="13">Slice ζ — Telegram bridge shipped</text>
+        <text x="14" y="56" class="mono fg-3" font-size="10">lane: bridge-server · actor: ses_20260517_174b16</text>
+        <line x1="14" y1="68" x2="594" y2="68" class="line-soft"/>
+        <text x="14" y="88" class="cond fg-3" font-size="10" letter-spacing="0.06em">LEARNINGS</text>
+        <text x="14" y="106" class="sans fg-1" font-size="11">• rule: every integration must be off-by-default and refuse to</text>
+        <text x="14" y="120" class="sans fg-1" font-size="11">  enable until the allowlist is non-empty</text>
+        <text x="14" y="138" class="sans fg-1" font-size="11">• discovery: long-poll setTimeout chain avoids overlap with the</text>
+        <text x="14" y="152" class="sans fg-1" font-size="11">  25 s getUpdates blocking call</text>
+        <text x="14" y="172" class="cond accent" font-size="10" letter-spacing="0.06em">12 NEW HINDSIGHT FACTS · WIKI UPDATED</text>
+      </g>
+    </g>
+
+    <!-- Composer (bottom) -->
+    <g transform="translate(0,840)">
+      <line x1="28" y1="0" x2="1332" y2="0" class="line-soft"/>
+      <rect x="28" y="16" width="1304" height="38" fill="#0A1224" stroke="rgba(80,113,149,0.30)" rx="4"/>
+      <text x="42" y="40" class="mono accent" font-size="13">▸</text>
+      <text x="64" y="40" class="mono fg-3" font-size="12">/  to issue a slash-command  ·  /help for the list  ·  Ctrl+K for the palette</text>
+    </g>
+  </g>
+</svg>

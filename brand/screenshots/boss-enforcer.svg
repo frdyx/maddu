@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-label="BOSS and Enforcer transcript">
+  <title>Máddu cockpit — BOSS proposes · Enforcer cites · Operator decides</title>
+  <defs>
+    <style>
+      .canvas    { fill: #050B17; }
+      .panel     { fill: #0C1428; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .panel-d   { fill: #0E1730; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .line-soft { stroke: rgba(80,113,149,0.18); stroke-width: 1; fill: none; }
+      .fg-0      { fill: #E8E6E3; }
+      .fg-1      { fill: #B8B2AA; }
+      .fg-2      { fill: #8A8A8A; }
+      .fg-3      { fill: #6a7079; }
+      .fg-4      { fill: #3a3e45; }
+      .accent    { fill: #D0FF00; }
+      .accent2   { fill: #56B8FF; }
+      .warn      { fill: #F2BD5C; }
+      .danger    { fill: #FF5E7A; }
+      .ok        { fill: #6FA8A2; }
+      .cond, .cond-b { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; letter-spacing: 0.05em; }
+      .cond-b    { font-weight: 600; }
+      .sans      { font-family: 'IBM Plex Sans','Inter',sans-serif; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="1200" height="720"/>
+
+  <!-- Header -->
+  <g transform="translate(40,30)">
+    <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◆ BOSS</text>
+    <text x="0" y="22" class="cond-b fg-0" font-size="20">BOSS proposes · Enforcer cites · Operator decides</text>
+    <text x="0" y="42" class="mono fg-3" font-size="11">terminal transcript · proposal cards with risk pill · approve / reject / negotiate</text>
+  </g>
+
+  <!-- Transcript -->
+  <g transform="translate(40,100)">
+    <rect width="780" height="560" class="panel" rx="6"/>
+    <text x="20" y="28" class="cond-b fg-0" font-size="12" letter-spacing="0.05em">TRANSCRIPT · session #ses_20260517_174b16</text>
+    <line x1="20" y1="40" x2="760" y2="40" class="line-soft"/>
+
+    <!-- Operator line -->
+    <g transform="translate(20,60)">
+      <text x="0" y="14" class="mono accent" font-size="11">▸</text>
+      <text x="20" y="14" class="cond-b fg-3" font-size="10" letter-spacing="0.10em">OPERATOR · 14:22:08</text>
+      <text x="0" y="36" class="sans fg-0" font-size="13">Claim "cockpit-shell" and start the polish pass.</text>
+    </g>
+
+    <!-- BOSS line -->
+    <g transform="translate(20,116)">
+      <text x="0" y="14" class="mono accent2" font-size="11">◆</text>
+      <text x="20" y="14" class="cond-b accent2" font-size="10" letter-spacing="0.10em">BOSS · 14:22:09</text>
+      <text x="0" y="36" class="sans fg-0" font-size="13">Proposing two slices: claim-lane on cockpit-shell, then a focused-gate</text>
+      <text x="0" y="52" class="sans fg-0" font-size="13">run for the design-system check. Low risk on both.</text>
+    </g>
+
+    <!-- Proposal card (low risk, approved) -->
+    <g transform="translate(20,188)">
+      <rect width="740" height="86" fill="rgba(111,168,162,0.06)" stroke="#6FA8A2" stroke-width="1" rx="6"/>
+      <text x="14" y="22" class="cond-b ok" font-size="10" letter-spacing="0.14em">PROPOSAL · prop_mp75n059_0t8r · LOW RISK</text>
+      <text x="14" y="44" class="cond-b fg-0" font-size="13">claim-lane "cockpit-shell" → ses_20260517_174b16</text>
+      <text x="14" y="62" class="mono fg-3" font-size="11">preconditions: lane is free · session is active · holder has heartbeat &lt; 15s</text>
+      <!-- Buttons -->
+      <g transform="translate(14,68)">
+        <rect width="74" height="20" fill="#D0FF00" rx="3"/>
+        <text x="37" y="14" class="cond-b" font-size="10" fill="#050B17" text-anchor="middle">APPROVED</text>
+        <rect x="84" y="0" width="64" height="20" fill="transparent" stroke="rgba(80,113,149,0.30)" rx="3"/>
+        <text x="116" y="14" class="cond fg-3" font-size="10" text-anchor="middle">reject</text>
+        <rect x="156" y="0" width="84" height="20" fill="transparent" stroke="rgba(80,113,149,0.30)" rx="3"/>
+        <text x="198" y="14" class="cond fg-3" font-size="10" text-anchor="middle">negotiate</text>
+      </g>
+    </g>
+
+    <!-- Enforcer line -->
+    <g transform="translate(20,302)">
+      <text x="0" y="14" class="mono warn" font-size="11">⏺</text>
+      <text x="20" y="14" class="cond-b warn" font-size="10" letter-spacing="0.10em">ENFORCER · 14:22:09 · DETERMINISTIC</text>
+      <text x="0" y="36" class="sans fg-0" font-size="13">✓ claim_ok · Lane free, claim is safe.</text>
+    </g>
+
+    <!-- Second proposal (refused) -->
+    <g transform="translate(20,358)">
+      <rect width="740" height="100" fill="rgba(255,94,122,0.06)" stroke="#FF5E7A" stroke-width="1" rx="6"/>
+      <text x="14" y="22" class="cond-b danger" font-size="10" letter-spacing="0.14em">PROPOSAL · prop_8h2k0e4q_9w3p · REFUSED</text>
+      <text x="14" y="44" class="cond-b fg-0" font-size="13">write-file ".maddu/auth/codex-tokens.json"</text>
+      <text x="14" y="64" class="mono fg-3" font-size="11">enforcer: ✗ write_to_auth_dir</text>
+      <text x="14" y="80" class="mono fg-3" font-size="11">cites: docs/hard-rules.md#no-token-export — auth/ is OS-owned</text>
+    </g>
+
+    <!-- Composer (bottom of transcript) -->
+    <g transform="translate(20,500)">
+      <rect width="740" height="38" fill="#0A1224" stroke="rgba(80,113,149,0.30)" rx="4"/>
+      <text x="14" y="24" class="mono accent" font-size="13">▸</text>
+      <text x="36" y="24" class="mono fg-3" font-size="11">propose an action, or type / for a command…</text>
+    </g>
+  </g>
+
+  <!-- Operator state strip (right) -->
+  <g transform="translate(840,100)">
+    <rect width="320" height="560" class="panel" rx="6"/>
+    <text x="20" y="28" class="cond-b fg-0" font-size="12" letter-spacing="0.05em">OPERATOR STRIP</text>
+    <line x1="20" y1="40" x2="300" y2="40" class="line-soft"/>
+
+    <g transform="translate(20,60)">
+      <text x="0" y="0" class="cond fg-3" font-size="10" letter-spacing="0.10em">CURRENT CLAIMS</text>
+      <rect x="0" y="14" width="280" height="36" fill="#0E1730" rx="4"/>
+      <text x="12" y="32" class="cond-b accent" font-size="12">cockpit-shell</text>
+      <text x="270" y="32" class="mono fg-3" font-size="10" text-anchor="end">just now</text>
+    </g>
+
+    <g transform="translate(20,124)">
+      <text x="0" y="0" class="cond fg-3" font-size="10" letter-spacing="0.10em">OPEN APPROVALS · 7</text>
+      <rect x="0" y="14" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="32" class="cond fg-1" font-size="11">subprocess: claude exec</text>
+      <rect x="0" y="46" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="64" class="cond fg-1" font-size="11">write: .maddu/wiki/lane-harness.md</text>
+      <rect x="0" y="78" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="96" class="cond fg-1" font-size="11">tool: WebFetch / docs.anthropic.com</text>
+    </g>
+
+    <g transform="translate(20,256)">
+      <text x="0" y="0" class="cond fg-3" font-size="10" letter-spacing="0.10em">PARKED · 2</text>
+      <rect x="0" y="14" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="32" class="cond fg-1" font-size="11">queue_head_ready</text>
+      <rect x="0" y="46" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="64" class="cond fg-1" font-size="11">no_allowed_router_gate</text>
+    </g>
+
+    <g transform="translate(20,360)">
+      <text x="0" y="0" class="cond fg-3" font-size="10" letter-spacing="0.10em">SESSIONS</text>
+      <rect x="0" y="14" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="32" class="cond fg-1" font-size="11">● Claude Code · ses_20260517_174b16</text>
+      <rect x="0" y="46" width="280" height="28" fill="#0E1730" rx="4"/>
+      <text x="12" y="64" class="cond fg-3" font-size="11">○ Codex · ses_20260516_aaa321 (closed)</text>
+    </g>
+  </g>
+</svg>
