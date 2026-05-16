@@ -79,6 +79,33 @@ $ echo "sk-..." | maddu auth add anthropic --label "fix"
 
 If the file exists but the worker still fails, check permissions — files must be `0600`, dirs `0700` on POSIX.
 
+## `WSL ... execvpe(/bin/bash) failed: No such file or directory` (Windows)
+
+Symptom from a dev tool or shell-driven script on Windows:
+
+```
+<3>WSL (NN - Relay) ERROR: CreateProcessCommon:818: execvpe(/bin/bash) failed: No such file or directory
+```
+
+**This is not a Máddu error.** Máddu itself runs on plain Node and never invokes bash. The error comes from the Windows Subsystem for Linux layer when something asks it to spawn `/bin/bash` but the active WSL distro is Docker Desktop's internal `docker-desktop` image — which is Alpine-based and only ships `/bin/sh`.
+
+Diagnose:
+
+```powershell
+wsl --list --verbose
+```
+
+If the only entry is `docker-desktop` (or it's marked the default with a `*`), that's the culprit. Fix by installing a glibc-based distro and making it default:
+
+```powershell
+wsl --install -d Ubuntu
+wsl --set-default Ubuntu
+```
+
+Open the Ubuntu Start-menu app once to set a username and password (one-time). Re-run whatever errored — bash is back.
+
+Máddu's bridge, cockpit, and CLI continue to work whether or not WSL is configured.
+
 ## ESM import errors on Windows
 
 ```

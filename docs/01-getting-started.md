@@ -6,7 +6,9 @@ Ten minutes from zero to your first slice-stop.
 
 - Node.js 20 or newer.
 - Git.
-- A terminal.
+- A terminal — PowerShell, bash, zsh, whatever you prefer.
+
+On Windows, Máddu runs natively in PowerShell — no WSL required. If you separately use a bash-driven dev tool (Claude Code, etc.), see the [Windows notes in installation.md](installation.md#windows-notes) for the one WSL gotcha worth knowing about.
 
 See [installation.md](installation.md) for the full requirements list.
 

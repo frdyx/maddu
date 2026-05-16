@@ -6,6 +6,8 @@ before tagging `v1.0.0`. Most checks take under a minute each.
 
 Where the cockpit is referenced, assume `http://127.0.0.1:4177/`.
 
+> **Windows note** — every `curl` command below works in both bash and PowerShell. On Windows, use `curl.exe` explicitly if PowerShell's built-in alias trips you up, or use the cockpit's command palette (▷ action entries) which avoids shell quoting entirely. If you hit `execvpe(/bin/bash) failed`, see [13-troubleshooting.md](13-troubleshooting.md#wsl--execvpebinbash-failed-no-such-file-or-directory-windows).
+
 ---
 
 ## 1 · Cockpit shell
