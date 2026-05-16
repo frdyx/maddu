@@ -666,6 +666,30 @@ function panelFocus(title, aside, body, opts) {
 // Use this for sub-targets the operator might search for from a cold cockpit
 // (i.e. before they've visited the host route).
 const SUB_TARGET_MANIFEST = {
+  conductor: [
+    { id: 'board',      title: 'Now · Next · Waiting · Done', description: 'Kanban board of work in flight.',     keywords: 'board kanban now next waiting done flight work' },
+    { id: 'queue',      title: 'Queue card',                   description: 'Scheduler / Queue / Dispatch / Preflights summary card.', keywords: 'queue scheduler dispatch preflight parked' },
+    { id: 'score',      title: 'Score matrix',                 description: 'Per-lane progress and reason codes.', keywords: 'score matrix per-lane progress reason claims' },
+    { id: 'last-slice', title: 'Last slice-stop',              description: 'Most recent ritual close.',            keywords: 'last slice-stop recent ritual learning' }
+  ],
+  roadmap: [
+    { id: 'kpis',         title: 'Roadmap KPIs',         description: 'Total slice-stops, last 24h/7d, lanes touched, age.', keywords: 'kpi roadmap total recent age metric' },
+    { id: 'cadence',      title: 'Closure cadence',      description: '28-day bar chart of slice-stop frequency.',           keywords: 'cadence closure 28-day bar chart' },
+    { id: 'mix',          title: 'Lane mix',             description: 'Slice-stops per lane, ranked.',                       keywords: 'mix lanes distribution per-lane' },
+    { id: 'slice-index',  title: 'Slice index',          description: 'Every slice-stop, click to open in Inspector.',       keywords: 'slice index history ledger every-stop' },
+    { id: 'plan',         title: 'Slice plan',           description: 'The approved depth-upgrade plan (α–ε).',              keywords: 'plan alpha beta gamma delta epsilon zeta eta versions' }
+  ],
+  approvals: [
+    { id: 'open-queue', title: 'Open queue',           description: 'Pending tool / subprocess approvals.',     keywords: 'open queue pending awaiting decision' },
+    { id: 'ledger',     title: 'Decision ledger',      description: 'APPROVAL_DECIDED events.',                  keywords: 'ledger decided audit history' },
+    { id: 'policies',   title: 'Standing policies',    description: 'Allow-always / deny rules.',                keywords: 'standing policies allow-always allow-once deny rules' }
+  ],
+  operations: [
+    { id: 'activity',     title: 'Activity',           description: 'Slice-stops + memory facts (last 7 days).', keywords: 'activity slice-stops memory facts 7-day timeline' },
+    { id: 'slice-ledger', title: 'Slice ledger',       description: 'SLICE_STOP events from the projection.',    keywords: 'slice ledger events history' },
+    { id: 'hindsight',    title: 'Hindsight memory',   description: 'Facts derived from slice-stops.',           keywords: 'hindsight memory facts learnings extraction' },
+    { id: 'checkpoints',  title: 'Checkpoints',        description: 'Git tags at maddu/checkpoint/<id>.',        keywords: 'checkpoints git tags rollback restore' }
+  ],
   settings: [
     { id: 'telegram',  title: 'Telegram',  description: 'Long-poll bot bridge · allowlisted · off by default · message bodies route via Telegram.',     keywords: 'telegram tg messenger chat phone notification mobile bot integrations' },
     { id: 'discord',   title: 'Discord',   description: 'Outbound-only REST (no gateway) · channel allowlist · @everyone blocked.',                      keywords: 'discord channel server guild bot integrations notifications' },
@@ -679,6 +703,108 @@ const SUB_TARGET_MANIFEST = {
     { id: 'hardrules', title: 'Hard rules', description: 'Files-only · no SQLite · no hosted backends · no broad deps · no SDK in app · no token export.', keywords: 'hard rules invariants compliance security boundary' }
   ]
 };
+
+// Phase B — data-driven sub-targets. Fetches /bridge/{auth,mcp,runtimes}
+// and registers one sub-target per row. Called at boot and before each
+// palette open so freshly-added providers/servers/runtimes are searchable
+// immediately. The id matches the row's data-focus token so per-row
+// scroll-flash works once renderAuth/renderMcp/renderRuntimes stamp them.
+async function refreshDataSubTargets() {
+  // Drop previously-discovered dynamic entries so removals stick.
+  for (const [k, v] of SUB_REGISTRY.entries()) {
+    if (v.source === 'data') SUB_REGISTRY.delete(k);
+  }
+  try {
+    const r = await fetch('/bridge/auth', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      for (const p of (d.providers || [])) {
+        registerSubTarget({
+          source: 'data', route: 'auth', id: p.provider,
+          title: p.provider.charAt(0).toUpperCase() + p.provider.slice(1),
+          description: `API key store · ${p.keyCount} key${p.keyCount === 1 ? '' : 's'}${p.activeKeyTail ? ` · active ****${p.activeKeyTail}` : ''}`,
+          keywords: `${p.provider} api key tokens credentials oauth`,
+          group: 'connect'
+        });
+      }
+    }
+  } catch {}
+  try {
+    const r = await fetch('/bridge/mcp', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      for (const m of (d.mcp || [])) {
+        registerSubTarget({
+          source: 'data', route: 'mcp', id: m.id || m.name,
+          title: m.name || m.id,
+          description: `${m.transport || 'mcp'} transport${m.enabled ? '' : ' · disabled'}`,
+          keywords: `${m.name || ''} ${m.id || ''} ${m.transport || ''} mcp server tool`.trim(),
+          group: 'connect'
+        });
+      }
+    }
+  } catch {}
+  try {
+    const r = await fetch('/bridge/runtimes', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      for (const rt of (d.runtimes || [])) {
+        registerSubTarget({
+          source: 'data', route: 'runtimes', id: rt.id || rt.name,
+          title: rt.name || rt.id,
+          description: rt.detected ? 'detected · ready to spawn' : 'registered · not yet detected',
+          keywords: `${rt.name || ''} ${rt.id || ''} ${rt.kind || ''} runtime worker`.trim(),
+          group: 'connect'
+        });
+      }
+    }
+  } catch {}
+  // Phase D — Agents / Teams / Skills from the projection.
+  try {
+    const r = await fetch('/bridge/projection', { cache: 'no-store' });
+    if (r.ok) {
+      const proj = await r.json();
+      for (const s of (proj.activeSessions || [])) {
+        registerSubTarget({
+          source: 'data', route: 'agents', id: s.id,
+          title: s.label || s.id,
+          description: `${s.role || 'agent'} · ${s.focus || '(no focus)'}`,
+          keywords: `${s.id} ${s.label || ''} ${s.role || ''} ${s.focus || ''}`.toLowerCase(),
+          group: 'operate'
+        });
+      }
+      // Lanes for Teams — read from catalog if available, fall back to
+      // unique lanes seen in claims/slices.
+      const lanesSeen = new Set();
+      for (const c of (proj.claims || [])) if (c.lane) lanesSeen.add(c.lane);
+      for (const s of (proj.sliceStops || [])) if (s.lane) lanesSeen.add(s.lane);
+      for (const lane of lanesSeen) {
+        registerSubTarget({
+          source: 'data', route: 'teams', id: lane,
+          title: lane,
+          description: `Lane · ownership and recent activity.`,
+          keywords: `${lane} lane team ownership`,
+          group: 'operate'
+        });
+      }
+    }
+  } catch {}
+  try {
+    const r = await fetch('/bridge/skills', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      for (const sk of (d.skills || [])) {
+        registerSubTarget({
+          source: 'data', route: 'skills', id: sk.id || sk.name,
+          title: sk.name || sk.id,
+          description: sk.summary || sk.description || 'Reusable recipe from slice-stops.',
+          keywords: `${sk.name || ''} ${sk.id || ''} skill recipe ${sk.tags ? sk.tags.join(' ') : ''}`.trim(),
+          group: 'reference'
+        });
+      }
+    }
+  } catch {}
+}
 
 function loadManifest() {
   for (const [route, entries] of Object.entries(SUB_TARGET_MANIFEST)) {
@@ -1267,12 +1393,14 @@ function renderConductor() {
   // ── Now / Next / Waiting / Done board ──
   const boardHost = el('div', { class: 'conductor-board' });
   boardHost.appendChild(loading('Loading task board…'));
-  root.appendChild(panel('Now · Next · Waiting · Done', 'GET /bridge/conductor', boardHost));
+  root.appendChild(panelFocus('Now · Next · Waiting · Done', 'GET /bridge/conductor', boardHost,
+    { id: 'board', keywords: 'now next waiting done board kanban work-in-flight' }));
 
   // ── Queue Board summary card ──
   const queueHost = el('div', {});
   queueHost.appendChild(loading('Loading queue counts…'));
-  const queueCard = panel('Queue Board', 'scheduler · queue · dispatch · preflights', queueHost);
+  const queueCard = panelFocus('Queue Board', 'scheduler · queue · dispatch · preflights', queueHost,
+    { id: 'queue', keywords: 'queue scheduler dispatch preflight parked reason-code' });
   queueCard.style.cursor = 'pointer';
   queueCard.addEventListener('click', () => { location.hash = '#/queue'; });
   root.appendChild(queueCard);
@@ -1280,11 +1408,13 @@ function renderConductor() {
   // ── Operation Score Matrix ──
   const matrixHost = el('div', {});
   matrixHost.appendChild(loading('Loading per-lane score matrix…'));
-  root.appendChild(panel('Operation Score Matrix', 'per-lane progress · claims · reason codes', matrixHost));
+  root.appendChild(panelFocus('Operation Score Matrix', 'per-lane progress · claims · reason codes', matrixHost,
+    { id: 'score', keywords: 'score matrix progress per-lane claims reason' }));
 
   // ── Recent slice-stop summary ──
   const sliceHost = el('div', {});
-  root.appendChild(panel('Last slice-stop', 'most recent ritual close', sliceHost));
+  root.appendChild(panelFocus('Last slice-stop', 'most recent ritual close', sliceHost,
+    { id: 'last-slice', keywords: 'last slice-stop recent ritual learning' }));
 
   let dataLoaded = false;
   const load = async () => {
@@ -2375,19 +2505,23 @@ function renderOperations() {
 
   const summaryMount = el('div', {});
   summaryMount.appendChild(loading('Reading slice timeline…'));
-  root.appendChild(panel('Activity', 'slice-stops + memory facts · last 7 days', summaryMount));
+  root.appendChild(panelFocus('Activity', 'slice-stops + memory facts · last 7 days', summaryMount,
+    { id: 'activity', keywords: 'activity slice-stops memory facts 7-day timeline' }));
 
   const slicesMount = el('div', {});
   slicesMount.appendChild(loading('Fetching slice-stop ledger…'));
-  root.appendChild(panel('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount));
+  root.appendChild(panelFocus('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount,
+    { id: 'slice-ledger', keywords: 'slice ledger SLICE_STOP events history' }));
 
   const memMount = el('div', {});
   memMount.appendChild(loading('Fetching hindsight facts…'));
-  root.appendChild(panel('Hindsight memory', 'GET /bridge/memory · facts derived from slice-stops', memMount));
+  root.appendChild(panelFocus('Hindsight memory', 'GET /bridge/memory · facts derived from slice-stops', memMount,
+    { id: 'hindsight', keywords: 'hindsight memory facts learnings extraction' }));
 
   const cpMount = el('div', {});
   cpMount.appendChild(loading('Fetching checkpoints…'));
-  root.appendChild(panel('Checkpoints', 'GET /bridge/checkpoints · git tags at maddu/checkpoint/<id>', cpMount));
+  root.appendChild(panelFocus('Checkpoints', 'GET /bridge/checkpoints · git tags at maddu/checkpoint/<id>', cpMount,
+    { id: 'checkpoints', keywords: 'checkpoints git tags rollback restore' }));
 
   function refresh() {
     fetchProjection().then((proj) => {
@@ -2644,19 +2778,23 @@ function renderRoadmap() {
 
   const kpiMount = el('div', {});
   kpiMount.appendChild(loading('Reading slice timeline…'));
-  root.appendChild(panel('Roadmap KPIs', 'derived from spine SLICE_STOPs', kpiMount));
+  root.appendChild(panelFocus('Roadmap KPIs', 'derived from spine SLICE_STOPs', kpiMount,
+    { id: 'kpis', keywords: 'kpi roadmap total last lanes age metric' }));
 
   const cadenceMount = el('div', {});
   cadenceMount.appendChild(loading('Charting closure cadence…'));
-  root.appendChild(panel('Slice closure cadence', 'last 28 days · 1 bar = 1 day', cadenceMount));
+  root.appendChild(panelFocus('Slice closure cadence', 'last 28 days · 1 bar = 1 day', cadenceMount,
+    { id: 'cadence', keywords: 'cadence closure 28-day bar chart frequency' }));
 
   const mixMount = el('div', {});
   mixMount.appendChild(loading('Computing lane mix…'));
-  root.appendChild(panel('Status & lane mix', 'sessions × lanes', mixMount));
+  root.appendChild(panelFocus('Status & lane mix', 'sessions × lanes', mixMount,
+    { id: 'mix', keywords: 'mix lanes status distribution sessions' }));
 
   const indexMount = el('div', {});
   indexMount.appendChild(loading('Reading slice index…'));
-  root.appendChild(panel('Slice index', 'every slice-stop · click to open in Inspector', indexMount));
+  root.appendChild(panelFocus('Slice index', 'every slice-stop · click to open in Inspector', indexMount,
+    { id: 'slice-index', keywords: 'slice index history list ledger every-stop' }));
 
   const slicesPlan = [
     ['v0.4.0 · Slice α', 'Conductor + Inspector'],
@@ -2672,7 +2810,8 @@ function renderRoadmap() {
       el('span', {}, body)
     ]));
   }
-  root.appendChild(panel('Slice plan', 'approved depth-upgrade plan', planList));
+  root.appendChild(panelFocus('Slice plan', 'approved depth-upgrade plan', planList,
+    { id: 'plan', keywords: 'plan slices alpha beta gamma delta epsilon zeta eta versions' }));
 
   (async () => {
     const proj = await fetchProjection();
@@ -3184,17 +3323,21 @@ function renderApprovals() {
 
   const summaryMount = el('div', {});
   summaryMount.appendChild(loading('Reading ledger…'));
-  root.appendChild(panel('Summary', 'open queue + decision distribution', summaryMount));
+  root.appendChild(panelFocus('Summary', 'open queue + decision distribution', summaryMount,
+    { id: 'summary', keywords: 'summary open decisions distribution overview' }));
 
   const openMount = el('div', {});
   openMount.appendChild(loading('Fetching open approvals…'));
-  root.appendChild(panel('Open queue', 'GET /bridge/approvals', openMount));
+  root.appendChild(panelFocus('Open queue', 'GET /bridge/approvals', openMount,
+    { id: 'open-queue', keywords: 'open queue pending awaiting decision' }));
 
   const ledgerMount = el('div', {});
-  root.appendChild(panel('Decision ledger', '.maddu/events/*.ndjson · APPROVAL_DECIDED', ledgerMount));
+  root.appendChild(panelFocus('Decision ledger', '.maddu/events/*.ndjson · APPROVAL_DECIDED', ledgerMount,
+    { id: 'ledger', keywords: 'ledger decided audit history approval' }));
 
   const policyMount = el('div', {});
-  root.appendChild(panel('Standing policies', 'APPROVAL_POLICY_SET', policyMount));
+  root.appendChild(panelFocus('Standing policies', 'APPROVAL_POLICY_SET', policyMount,
+    { id: 'policies', keywords: 'standing policies allow-always allow-once deny rules' }));
 
   function refresh() {
     fetchApprovals().then((a) => {
@@ -4072,7 +4215,8 @@ function renderAuth() {
   summaryMount.appendChild(loading('Reading auth state…'));
   root.appendChild(panel('Summary', 'providers · keys · rate-limit state', summaryMount));
 
-  let selectedProvider = null;
+  // Honor ?focus=<provider> from the palette — pre-select before first render.
+  let selectedProvider = paletteFocus();
   const grid = el('div', { style: 'display:grid;grid-template-columns:280px 1fr;gap:12px;align-items:start;' });
   const listMount = el('div', {});
   const detailMount = el('div', {});
@@ -4166,6 +4310,7 @@ function renderAuth() {
       for (const p of d.providers) {
         const isSel = selectedProvider === p.provider;
         const row = el('div', {
+          'data-focus': p.provider,
           style: 'padding:8px 10px;border-bottom:1px solid var(--m-line-soft);cursor:pointer;' + (isSel ? 'background:var(--m-bg-3);' : '')
         }, [
           el('div', { style: 'font-family:var(--m-font-cond);color:var(--m-fg-0);font-size:14px;letter-spacing:0.03em;text-transform:uppercase;' }, p.provider),
@@ -4174,8 +4319,13 @@ function renderAuth() {
         row.addEventListener('click', () => { selectedProvider = p.provider; refresh(); });
         listMount.appendChild(row);
       }
-      if (!selectedProvider) selectedProvider = d.providers[0].provider;
+      if (!selectedProvider || !d.providers.find((p) => p.provider === selectedProvider)) {
+        selectedProvider = d.providers[0].provider;
+      }
       loadDetail(selectedProvider);
+      // Honor palette focus: flash the matching provider row.
+      const f = paletteFocus();
+      if (f) focusPanelByKeyword(root, f);
     });
   }
 
@@ -6107,7 +6257,7 @@ function renderAgents() {
     for (const s of sessions) {
       const held = claims.filter((c) => c.sessionId === s.id);
       const lastSlice = lastSliceBy.get(s.id) || null;
-      const card = el('div', { class: 'agent-card', tabindex: '0', role: 'button' }, [
+      const card = el('div', { class: 'agent-card', 'data-focus': s.id, tabindex: '0', role: 'button' }, [
         el('div', { class: 'agent-card-head' }, [
           el('span', { class: 'pill tone-ok' }, s.status || 'active'),
           el('span', { class: 'agent-card-label' }, s.label || '(unlabeled)'),
@@ -6147,6 +6297,8 @@ function renderAgents() {
       grid.appendChild(card);
     }
     gridBody.appendChild(grid);
+    const f = paletteFocus();
+    if (f) focusPanelByKeyword(root, f);
   })();
 
   return root;
@@ -6196,7 +6348,7 @@ function renderTeams() {
       const claim = claimByLane[lane.id];
       const lastSlice = lastSliceByLane[lane.id];
       const claimSess = claim ? sessById[claim.sessionId] : null;
-      const card = el('div', { class: 'team-lane-card' + (claim ? ' active' : '') }, [
+      const card = el('div', { class: 'team-lane-card' + (claim ? ' active' : ''), 'data-focus': lane.id }, [
         el('div', { class: 'team-lane-head' }, [
           el('span', { class: 'pill tone-accent' }, lane.id),
           claim ? el('span', { class: 'pill tone-ok' }, 'held') : el('span', { class: 'pill tone-fg-3' }, 'free'),
@@ -6237,6 +6389,8 @@ function renderTeams() {
       list.appendChild(card);
     }
     mapBody.appendChild(list);
+    const f = paletteFocus();
+    if (f) focusPanelByKeyword(root, f);
   })();
 
   return root;
@@ -6732,6 +6886,14 @@ function openPalette() {
   if (palette.open) return;
   palette.open = true;
   palette.active = 0;
+  // Refresh data-driven sub-targets in the background — UI doesn't wait
+  // (manifest entries cover the common cases on first open).
+  refreshDataSubTargets().then(() => {
+    if (palette.open) {
+      palette.items = paletteItems(document.getElementById('palette-input').value || '');
+      renderPaletteResults();
+    }
+  });
   palette.items = paletteItems('');
   const node = document.getElementById('palette');
   const input = document.getElementById('palette-input');
@@ -6850,6 +7012,7 @@ function flashSliceLine() {
 async function boot() {
   if (!location.hash) location.hash = '#/conductor';
   loadManifest();
+  refreshDataSubTargets();
   buildRail();
   buildDock();
   initDock();
