@@ -111,6 +111,7 @@ async function streamLoop() {
       for (const ev of res.events) {
         stream.cursor = ev.id;
         stream.bus.dispatchEvent(new CustomEvent('event', { detail: ev }));
+        if (ev.type === 'SLICE_STOP') flashSliceLine();
       }
       if (!res.events.length && res.lastEventId) stream.cursor = res.lastEventId;
       // Trigger one chrome refresh per wait turn so the badge/uptime stay live.
@@ -574,7 +575,11 @@ function renderRoute() {
   els.title.textContent = route.title.toUpperCase();
   els.meta.textContent = id.toUpperCase();
   els.view.innerHTML = '';
+  els.view.classList.remove('fade-in');
   els.view.appendChild(route.render());
+  // Re-trigger entrance animation on every route change.
+  void els.view.offsetWidth;
+  els.view.classList.add('fade-in');
   els.app.removeAttribute('aria-busy');
 }
 
@@ -604,10 +609,20 @@ function panel(title, aside, body) {
   ]);
 }
 
+// Phase 5 — Unified empty state. Same signature as the old placeholder()
+// helper so every call site upgrades automatically.
 function placeholder(name, planned) {
-  return el('div', { class: 'placeholder' }, [
-    el('strong', {}, name),
-    document.createTextNode(planned)
+  return el('div', { class: 'empty-state' }, [
+    el('div', { class: 'empty-state-glyph', 'aria-hidden': 'true' }, '◌'),
+    el('div', { class: 'empty-state-title' }, name),
+    el('div', { class: 'empty-state-hint' }, planned || '')
+  ]);
+}
+function errorState(title, detail) {
+  return el('div', { class: 'empty-state error' }, [
+    el('div', { class: 'empty-state-glyph', 'aria-hidden': 'true' }, '⨯'),
+    el('div', { class: 'empty-state-title' }, title),
+    el('div', { class: 'empty-state-hint' }, detail || '')
   ]);
 }
 
@@ -2265,11 +2280,15 @@ async function fetchLanes() {
   } catch { return null; }
 }
 
+// Phase 5 — Skeleton shimmer in place of static "Loading…" text.
 function loading(text) {
-  return el('div', { class: 'placeholder' }, [
-    el('strong', {}, 'Loading…'),
-    document.createTextNode(text)
+  const node = el('div', { class: 'skel-state' }, [
+    el('div', { class: 'skel-line skel-line-lg' }),
+    el('div', { class: 'skel-line skel-line-md' }),
+    el('div', { class: 'skel-line skel-line-sm' }),
+    el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…')
   ]);
+  return node;
 }
 
 function renderOperations() {
@@ -6506,11 +6525,144 @@ async function renderEmailPanel(mount) {
   mount.appendChild(actRow);
 }
 
+// ─── Phase 3 — Command palette (⌘K / Ctrl+K) ────────────────────────────
+const palette = {
+  open: false,
+  items: [],
+  active: 0
+};
+
+function paletteItems(query) {
+  const q = (query || '').toLowerCase().trim();
+  const out = [];
+  for (const [id, r] of Object.entries(ROUTES)) {
+    const hay = `${r.title} ${id} ${r.group || ''} ${r.description || ''}`.toLowerCase();
+    if (!q || hay.includes(q)) {
+      const score = q ? (
+        r.title.toLowerCase().startsWith(q) ? 0 :
+        r.title.toLowerCase().includes(q) ? 1 :
+        id.includes(q) ? 2 : 3
+      ) : (r.anchor ? 0 : 1);
+      out.push({ kind: 'route', id, title: r.title, group: r.group, anchor: r.anchor, desc: r.description, score });
+    }
+  }
+  out.sort((a, b) => a.score - b.score || a.title.localeCompare(b.title));
+  return out.slice(0, 24);
+}
+
+function renderPaletteResults() {
+  const host = document.getElementById('palette-results');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!palette.items.length) {
+    host.appendChild(el('div', { class: 'palette-empty' }, 'No matches. Try a route name, group, or keyword.'));
+    document.getElementById('palette-foot-hint').textContent = '';
+    return;
+  }
+  palette.items.forEach((it, i) => {
+    const row = el('div', {
+      class: 'palette-row' + (i === palette.active ? ' active' : ''),
+      role: 'option',
+      'aria-selected': i === palette.active ? 'true' : 'false',
+      'data-index': String(i)
+    }, [
+      el('span', { class: 'palette-row-glyph' }, it.anchor ? '◆' : '◇'),
+      el('div', { class: 'palette-row-text' }, [
+        el('div', { class: 'palette-row-title' }, it.title),
+        el('div', { class: 'palette-row-desc' }, it.desc || '')
+      ]),
+      el('span', { class: 'palette-row-group' }, (it.group || '').toUpperCase())
+    ]);
+    row.addEventListener('click', () => commitPalette(i));
+    row.addEventListener('mousemove', () => { palette.active = i; refreshPaletteActive(); });
+    host.appendChild(row);
+  });
+  const it = palette.items[palette.active];
+  if (it) document.getElementById('palette-foot-hint').textContent = `→ ${it.title}`;
+}
+
+function refreshPaletteActive() {
+  document.querySelectorAll('.palette-row').forEach((r, i) => {
+    r.classList.toggle('active', i === palette.active);
+    r.setAttribute('aria-selected', i === palette.active ? 'true' : 'false');
+  });
+  const it = palette.items[palette.active];
+  if (it) document.getElementById('palette-foot-hint').textContent = `→ ${it.title}`;
+}
+
+function openPalette() {
+  if (palette.open) return;
+  palette.open = true;
+  palette.active = 0;
+  palette.items = paletteItems('');
+  const node = document.getElementById('palette');
+  const input = document.getElementById('palette-input');
+  node.hidden = false;
+  renderPaletteResults();
+  requestAnimationFrame(() => {
+    node.classList.add('open');
+    input.value = '';
+    input.focus();
+  });
+}
+
+function closePalette() {
+  if (!palette.open) return;
+  palette.open = false;
+  const node = document.getElementById('palette');
+  node.classList.remove('open');
+  setTimeout(() => { node.hidden = true; }, 160);
+}
+
+function commitPalette(i) {
+  const it = palette.items[i];
+  if (!it) return;
+  closePalette();
+  location.hash = `#/${it.id}`;
+}
+
+function initPalette() {
+  const input = document.getElementById('palette-input');
+  const scrim = document.getElementById('palette-scrim');
+  if (!input || !scrim) return;
+  scrim.addEventListener('click', closePalette);
+  input.addEventListener('input', () => {
+    palette.items = paletteItems(input.value);
+    palette.active = 0;
+    renderPaletteResults();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); palette.active = Math.min(palette.items.length - 1, palette.active + 1); refreshPaletteActive(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); palette.active = Math.max(0, palette.active - 1); refreshPaletteActive(); }
+    else if (e.key === 'Enter') { e.preventDefault(); commitPalette(palette.active); }
+    else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      palette.open ? closePalette() : openPalette();
+    } else if (e.key === 'Escape' && palette.open) {
+      closePalette();
+    }
+  });
+}
+
+// ─── Phase 6 — Signature lime line on slice-stop ────────────────────────
+function flashSliceLine() {
+  const line = document.getElementById('slice-line');
+  if (!line) return;
+  line.classList.remove('flash');
+  // Force reflow so the animation re-fires.
+  void line.offsetWidth;
+  line.classList.add('flash');
+}
+
 async function boot() {
   if (!location.hash) location.hash = '#/conductor';
   buildRail();
   buildDock();
   initDock();
+  initPalette();
   await fetchBridgeStatus();
   await seedCursor();
   renderRoute();

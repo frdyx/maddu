@@ -52,6 +52,23 @@
         </div>
       </footer>
     </main>
+    <div class="slice-line" id="slice-line" aria-hidden="true"></div>
+    <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+      <div class="palette-scrim" id="palette-scrim"></div>
+      <div class="palette-panel">
+        <div class="palette-head">
+          <span class="palette-glyph" aria-hidden="true">⌕</span>
+          <input class="palette-input" id="palette-input" type="text" placeholder="Type a route, group, or action — Enter to go, Esc to close" autocomplete="off" spellcheck="false">
+          <kbd class="palette-kbd">esc</kbd>
+        </div>
+        <div class="palette-results" id="palette-results" role="listbox"></div>
+        <div class="palette-foot">
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>↵</kbd> open</span>
+          <span class="palette-foot-hint" id="palette-foot-hint"></span>
+        </div>
+      </div>
+    </div>
     <nav class="dock" id="dock" aria-label="Mobile groups" hidden></nav>
     <div class="dock-sheet" id="dock-sheet" role="dialog" aria-modal="true" hidden>
       <div class="dock-sheet-scrim" id="dock-sheet-scrim"></div>
