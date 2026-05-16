@@ -803,6 +803,22 @@ async function refreshDataSubTargets() {
     }
   } catch {}
   try {
+    const r = await fetch('/bridge/tasks', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      for (const t of (d.tasks || [])) {
+        if (t.status === 'done' || t.status === 'cancelled') continue;
+        registerSubTarget({
+          source: 'data', route: 'tasks', id: t.id,
+          title: t.title,
+          description: `${t.status}${t.lane ? ' · lane ' + t.lane : ''}${t.activeBlockers && t.activeBlockers.length ? ' · blocked' : ''}`,
+          keywords: `${t.id} ${t.title} ${t.lane || ''} ${t.status} task`.toLowerCase(),
+          group: 'decide'
+        });
+      }
+    }
+  } catch {}
+  try {
     const r = await fetch('/bridge/skills', { cache: 'no-store' });
     if (r.ok) {
       const d = await r.json();
@@ -3907,7 +3923,7 @@ function renderMailbox() {
       for (const lane of Object.keys(c.counts).sort()) {
         const m = c.counts[lane];
         const dot = m.unread > 0 ? '<span class="signal live"></span>' : '<span class="signal"></span>';
-        const row = el('div', { class: 'ledger-row', style: 'cursor:pointer;' + (selectedLane === lane ? 'background:var(--m-bg-3);' : '') }, [
+        const row = el('div', { class: 'ledger-row', 'data-focus': lane, style: 'cursor:pointer;' + (selectedLane === lane ? 'background:var(--m-bg-3);' : '') }, [
           el('span', { html: dot }),
           el('span', { class: 'event-type' }, lane),
           el('span', { class: m.unread > 0 ? 'event-type t-approval' : 'event-actor' }, m.unread > 0 ? `${m.unread} unread` : 'all read'),
@@ -3917,6 +3933,11 @@ function renderMailbox() {
         list.appendChild(row);
       }
       lanesMount.appendChild(list);
+      const f = paletteFocus();
+      if (f) {
+        if (Object.keys(c.counts).includes(f)) loadMessages(f);
+        focusPanelByKeyword(root, f);
+      }
     });
   }
 
@@ -4021,6 +4042,8 @@ function renderTasks() {
         board.appendChild(col);
       }
       boardMount.appendChild(board);
+      const f = paletteFocus();
+      if (f) focusPanelByKeyword(root, f);
     });
   }
 
@@ -4035,7 +4058,7 @@ function renderTasks() {
 }
 
 function taskCard(t, onChange) {
-  const card = el('div', { class: 'task-card task-status-' + t.status }, [
+  const card = el('div', { class: 'task-card task-status-' + t.status, 'data-focus': t.id }, [
     el('div', { class: 'task-card-title' }, t.title),
     el('div', { class: 'task-card-meta' }, [
       t.lane ? `lane: ${t.lane}  ·  ` : '',
@@ -4092,7 +4115,7 @@ function renderSkills() {
   summaryMount.appendChild(loading('Reading skill registry…'));
   root.appendChild(panel('Summary', 'gallery composition · tags · provenance', summaryMount));
 
-  let selected = null;
+  let selected = paletteFocus();
 
   // create form
   const ftitle = el('input', { type: 'text', placeholder: 'Skill title…', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
@@ -4169,6 +4192,7 @@ function renderSkills() {
       for (const s of d.skills) {
         const isSel = selected === s.id;
         const row = el('div', {
+          'data-focus': s.id,
           style: 'padding:8px 10px;border-bottom:1px solid var(--m-line-soft);cursor:pointer;' + (isSel ? 'background:var(--m-bg-3);' : '')
         }, [
           el('div', { style: 'font-family:var(--m-font-cond);font-weight:500;color:var(--m-fg-0);font-size:13px;letter-spacing:0.03em;' }, s.title),
@@ -4179,8 +4203,12 @@ function renderSkills() {
         row.addEventListener('click', () => { selected = s.id; refresh(); });
         listMount.appendChild(row);
       }
-      if (!selected) selected = d.skills[0].id;
-      loadDetail(selected);
+      if (!selected || !d.skills.find((s) => s.id === selected)) {
+        selected = d.skills[0] && d.skills[0].id;
+      }
+      if (selected) loadDetail(selected);
+      const f = paletteFocus();
+      if (f) focusPanelByKeyword(root, f);
     });
   }
 
@@ -4751,7 +4779,7 @@ function renderMcp() {
         const detailLine = r.transport === 'stdio'
           ? `${r.stdio?.command || '—'}  ${(r.stdio?.args || []).join(' ')}`
           : `${r[r.transport]?.url || '—'}`;
-        const card = el('div', { class: 'panel', style: enabled ? '' : 'opacity:0.55;' }, [
+        const card = el('div', { class: 'panel', 'data-focus': r.name, style: enabled ? '' : 'opacity:0.55;' }, [
           el('div', { class: 'panel-head' }, [
             el('span', { class: 'panel-title' }, r.displayName || r.name),
             el('span', { class: 'panel-aside', html: status })
@@ -4790,6 +4818,8 @@ function renderMcp() {
         ]);
         mount.appendChild(card);
       }
+      const f = paletteFocus();
+      if (f) focusPanelByKeyword(root, f);
     });
   }
 
@@ -4891,7 +4921,7 @@ function renderRuntimes() {
         const status = h?.ok ? `<span class="signal live"></span>${h.version || 'detected'}` :
                        h ? `<span class="signal"></span>${h.error || 'exit ' + h.exitCode}` :
                        `<span class="signal"></span>not detected`;
-        const card = el('div', { class: 'panel' }, [
+        const card = el('div', { class: 'panel', 'data-focus': r.name }, [
           el('div', { class: 'panel-head' }, [
             el('span', { class: 'panel-title' }, r.displayName || r.name),
             el('span', { class: 'panel-aside', html: status })
@@ -4939,6 +4969,8 @@ function renderRuntimes() {
         ]);
         mount.appendChild(card);
       }
+      const f = paletteFocus();
+      if (f) focusPanelByKeyword(root, f);
     });
   }
 
