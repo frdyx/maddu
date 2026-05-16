@@ -6,6 +6,11 @@ const ROUTES = {
   queue:      { title: 'Queue Board', render: renderQueueBoard, description: 'Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.' },
   claims:     { title: 'Claim Map',  render: renderClaimMap,   description: 'Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.' },
   boss:       { title: 'BOSS',       render: renderBoss,       description: 'BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate.' },
+  learning:   { title: 'Learning',   render: renderLearning,   description: 'Durable findings distilled from slice-stops. Browse by kind, lane, recency. Hindsight worker writes; nothing here is hand-edited.' },
+  wiki:       { title: 'Wiki',       render: renderWiki,       description: 'Auto-maintained per-lane wiki. The Wiki Updater syncs pages from slice-stops; the Drift Drawer flags pages that fell behind.' },
+  workflows:  { title: 'Workflows',  render: renderWorkflows,  description: 'Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.' },
+  agents:     { title: 'Agents',     render: renderAgents,     description: 'Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.' },
+  teams:      { title: 'Teams',      render: renderTeams,      description: 'Lane ownership map — who is responsible for what, who is currently writing, who scored last.' },
   workbench:  { title: 'Workbench',  render: renderWorkbench,  description: 'OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.' },
   dashboard:  { title: 'Dashboard',  render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   approvals:  { title: 'Approvals',  render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
@@ -2376,24 +2381,156 @@ function renderRoadmap() {
   root.appendChild(el('h2', {}, 'Roadmap'));
   root.appendChild(el('p', {}, ROUTES.roadmap.description));
 
-  const phases = [
-    ['A — Foundations', 'A1 /approvals · A2 /events/live · A3 hindsight'],
-    ['B — Operator productivity', 'B1–B6 slash commands · mailbox · tasks · skills · heartbeat · search'],
-    ['C — Power user', 'C1–C5 runtimes · MCP registry · NL→cron · checkpoint timeline · key rotation'],
-    ['D — Vision', 'D1 /workbench · D2 /imports · D3 office preview']
+  const kpiMount = el('div', {});
+  kpiMount.appendChild(loading('Reading slice timeline…'));
+  root.appendChild(panel('Roadmap KPIs', 'derived from spine SLICE_STOPs', kpiMount));
+
+  const cadenceMount = el('div', {});
+  cadenceMount.appendChild(loading('Charting closure cadence…'));
+  root.appendChild(panel('Slice closure cadence', 'last 28 days · 1 bar = 1 day', cadenceMount));
+
+  const mixMount = el('div', {});
+  mixMount.appendChild(loading('Computing lane mix…'));
+  root.appendChild(panel('Status & lane mix', 'sessions × lanes', mixMount));
+
+  const indexMount = el('div', {});
+  indexMount.appendChild(loading('Reading slice index…'));
+  root.appendChild(panel('Slice index', 'every slice-stop · click to open in Inspector', indexMount));
+
+  const slicesPlan = [
+    ['v0.4.0 · Slice α', 'Conductor + Inspector'],
+    ['v0.5.0 · Slice β', 'Queue Board + Claim Map'],
+    ['v0.6.0 · Slice γ', 'BOSS/Enforcer duality'],
+    ['v0.7.0 · Slice δ', 'Learning Memory + Wiki Updater'],
+    ['v0.8.0 · Slice ε', 'Workflows + Roadmap depth + Agents/Teams']
   ];
-  const list = el('div', {});
-  for (const [name, body] of phases) {
-    const row = el('div', { class: 'panel' }, [
-      el('div', { class: 'panel-head' }, [
-        el('span', { class: 'panel-title' }, name),
-        el('span', { class: 'panel-aside' }, 'docs/maddu-v0.3-roadmap.md')
-      ]),
-      el('div', { class: 'view' }, body)
-    ]);
-    list.appendChild(row);
+  const planList = el('div', { class: 'roadmap-plan' });
+  for (const [tag, body] of slicesPlan) {
+    planList.appendChild(el('div', { class: 'roadmap-plan-row' }, [
+      el('span', { class: 'pill tone-accent' }, tag),
+      el('span', {}, body)
+    ]));
   }
-  root.appendChild(list);
+  root.appendChild(panel('Slice plan', 'approved depth-upgrade plan', planList));
+
+  (async () => {
+    const proj = await fetchProjection();
+    if (!proj) {
+      kpiMount.innerHTML = '';
+      kpiMount.appendChild(placeholder('Error', 'Could not fetch projection.'));
+      return;
+    }
+    const slices = proj.sliceStops || [];
+    const total = slices.length;
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const last7 = slices.filter((s) => now - new Date(s.ts).getTime() < 7 * day).length;
+    const last24 = slices.filter((s) => now - new Date(s.ts).getTime() < day).length;
+    const lanes = new Set(slices.map((s) => s.lane).filter(Boolean));
+    const lastSlice = slices.length ? slices[slices.length - 1] : null;
+
+    kpiMount.innerHTML = '';
+    const tiles = el('div', { class: 'kpi-strip' });
+    tiles.appendChild(el('div', { class: 'kpi-tile' }, [
+      el('div', { class: 'kpi-num' }, String(total)),
+      el('div', { class: 'kpi-lbl' }, 'slice-stops total')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile tone-accent' }, [
+      el('div', { class: 'kpi-num' }, String(last7)),
+      el('div', { class: 'kpi-lbl' }, 'last 7 days')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile tone-ok' }, [
+      el('div', { class: 'kpi-num' }, String(last24)),
+      el('div', { class: 'kpi-lbl' }, 'last 24h')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile tone-blue' }, [
+      el('div', { class: 'kpi-num' }, String(lanes.size)),
+      el('div', { class: 'kpi-lbl' }, 'lanes touched')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile' }, [
+      el('div', { class: 'kpi-num mono' }, lastSlice ? (formatAge ? formatAge(lastSlice.ts) : lastSlice.ts) : 'n/a'),
+      el('div', { class: 'kpi-lbl' }, 'since last slice')
+    ]));
+    kpiMount.appendChild(tiles);
+
+    // Cadence: 28-day bar
+    cadenceMount.innerHTML = '';
+    const bins = new Array(28).fill(0);
+    for (const s of slices) {
+      const age = Math.floor((now - new Date(s.ts).getTime()) / day);
+      if (age >= 0 && age < 28) bins[27 - age]++;
+    }
+    const max = Math.max(1, ...bins);
+    const bar = el('div', { class: 'cadence-bar' });
+    for (const v of bins) {
+      const h = Math.round((v / max) * 100);
+      bar.appendChild(el('div', { class: 'cadence-cell', style: `height:${h}%` }, [
+        el('span', { class: 'cadence-cell-fill', style: `height:${h}%` })
+      ]));
+    }
+    cadenceMount.appendChild(bar);
+
+    // Lane mix table
+    mixMount.innerHTML = '';
+    const byLane = {};
+    for (const s of slices) {
+      const l = s.lane || '(none)';
+      byLane[l] = (byLane[l] || 0) + 1;
+    }
+    const mixTable = el('div', { class: 'lane-mix' });
+    const sortedLanes = Object.entries(byLane).sort((a, b) => b[1] - a[1]);
+    if (!sortedLanes.length) {
+      mixMount.appendChild(placeholder('No data', 'No slice-stops yet.'));
+    } else {
+      const maxN = sortedLanes[0][1];
+      for (const [lane, n] of sortedLanes) {
+        mixTable.appendChild(el('div', { class: 'lane-mix-row' }, [
+          el('span', { class: 'lane-mix-name mono' }, lane),
+          el('span', { class: 'lane-mix-bar' }, [
+            el('span', { class: 'lane-mix-fill', style: `width:${Math.round((n / maxN) * 100)}%` })
+          ]),
+          el('span', { class: 'lane-mix-num mono' }, String(n))
+        ]));
+      }
+      mixMount.appendChild(mixTable);
+    }
+
+    // Slice index
+    indexMount.innerHTML = '';
+    if (!slices.length) {
+      indexMount.appendChild(placeholder('Empty', 'No slice-stops yet.'));
+    } else {
+      const list = el('div', { class: 'slice-index' });
+      const sorted = [...slices].sort((a, b) => (a.ts < b.ts ? 1 : -1));
+      for (const s of sorted) {
+        const row = el('div', { class: 'slice-index-row', tabindex: '0', role: 'button' }, [
+          el('span', { class: 'mono panel-aside' }, formatTs ? formatTs(s.ts) : s.ts),
+          el('span', { class: 'pill tone-accent' }, s.lane || '(no lane)'),
+          el('span', {}, s.summary || s.id),
+          el('span', { class: 'panel-aside mono' }, `${(s.learnings || []).length}L · ${(s.gates || []).length}G`)
+        ]);
+        row.addEventListener('click', () => {
+          if (typeof openInspector === 'function') {
+            openInspector({
+              kind: 'slice-stop',
+              label: s.summary || s.id,
+              id: s.id,
+              raw: s,
+              evidence: [
+                { label: 'Event id', value: s.id },
+                { label: 'Lane', value: s.lane || '(none)' },
+                { label: 'Actor', value: s.actor }
+              ],
+              related: []
+            });
+          }
+        });
+        list.appendChild(row);
+      }
+      indexMount.appendChild(list);
+    }
+  })();
+
   return root;
 }
 
@@ -5252,6 +5389,569 @@ function initComposer() {
     e.preventDefault();
     if (!location.hash.startsWith('#/docs')) location.hash = '#/docs';
   });
+}
+
+// ─── Slice δ — Learning route ───────────────────────────────────────────
+const LEARNING_KIND_TONE = {
+  rule:       'accent',
+  constraint: 'warn',
+  discovery:  'blue',
+  followup:   'ok',
+  touched:    'fg-3',
+  gate:       'fg-3',
+  summary:    'accent'
+};
+
+function laneFromFact(f) {
+  return (f && f.source && f.source.lane) || null;
+}
+
+function renderLearning() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Learning'));
+  root.appendChild(el('p', {}, ROUTES.learning.description));
+
+  const state = { kind: '', lane: '', q: '' };
+
+  const controls = el('div', { class: 'panel-head', style: 'gap:8px;flex-wrap:wrap;' });
+  const kindSel = el('select', { class: 'm-select', 'aria-label': 'Kind filter' });
+  kindSel.appendChild(el('option', { value: '' }, 'all kinds'));
+  for (const k of ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary']) {
+    kindSel.appendChild(el('option', { value: k }, k));
+  }
+  const laneSel = el('select', { class: 'm-select', 'aria-label': 'Lane filter' });
+  laneSel.appendChild(el('option', { value: '' }, 'all lanes'));
+  const qIn = el('input', { class: 'm-input', placeholder: 'substring query…', 'aria-label': 'Query' });
+  const reextract = el('button', { class: 'm-btn' }, 'Re-extract');
+  controls.appendChild(kindSel);
+  controls.appendChild(laneSel);
+  controls.appendChild(qIn);
+  controls.appendChild(reextract);
+
+  const summaryBody = el('div', {});
+  const summary = panel('Findings', 'GET /bridge/learning · grouped by kind + lane', summaryBody);
+  summary.querySelector('.panel-head').appendChild(controls);
+
+  const factsBody = el('div', {});
+  factsBody.appendChild(loading('Fetching findings…'));
+  const facts = panel('Recent findings', 'click a row to open in Inspector', factsBody);
+
+  root.appendChild(summary);
+  root.appendChild(facts);
+
+  async function refresh() {
+    const qs = new URLSearchParams();
+    qs.set('limit', '500');
+    if (state.kind) qs.set('kind', state.kind);
+    if (state.lane) qs.set('lane', state.lane);
+    if (state.q)    qs.set('q', state.q);
+    factsBody.innerHTML = '';
+    factsBody.appendChild(loading('Fetching findings…'));
+    let data;
+    try {
+      const r = await fetch(`/bridge/learning?${qs.toString()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      data = await r.json();
+    } catch (e) {
+      factsBody.innerHTML = '';
+      factsBody.appendChild(placeholder('Error', String(e)));
+      return;
+    }
+
+    // Summary tiles
+    summaryBody.innerHTML = '';
+    const tiles = el('div', { class: 'kpi-strip' });
+    tiles.appendChild(el('div', { class: 'kpi-tile' }, [
+      el('div', { class: 'kpi-num' }, String(data.count)),
+      el('div', { class: 'kpi-lbl' }, 'facts')
+    ]));
+    for (const [k, n] of Object.entries(data.byKind || {})) {
+      const tone = LEARNING_KIND_TONE[k] || 'fg-3';
+      tiles.appendChild(el('div', { class: `kpi-tile tone-${tone}` }, [
+        el('div', { class: 'kpi-num' }, String(n)),
+        el('div', { class: 'kpi-lbl' }, k)
+      ]));
+    }
+    summaryBody.appendChild(tiles);
+
+    // Repopulate lane filter from observed lanes
+    const lanes = Object.keys(data.byLane || {}).sort();
+    const prev = laneSel.value;
+    laneSel.innerHTML = '';
+    laneSel.appendChild(el('option', { value: '' }, 'all lanes'));
+    for (const l of lanes) laneSel.appendChild(el('option', { value: l === '(none)' ? '' : l }, l));
+    if (prev) laneSel.value = prev;
+
+    // Facts list (newest first)
+    factsBody.innerHTML = '';
+    if (!data.facts.length) {
+      factsBody.appendChild(placeholder('No findings', 'Run a slice-stop with --learnings to populate this.'));
+      return;
+    }
+    const list = el('div', { class: 'learning-list' });
+    const sorted = [...data.facts].sort((a, b) => (a.ts < b.ts ? 1 : -1));
+    for (const f of sorted) {
+      const tone = LEARNING_KIND_TONE[f.kind] || 'fg-3';
+      const row = el('div', { class: 'learning-row', tabindex: '0', role: 'button' }, [
+        el('div', { class: 'learning-head' }, [
+          el('span', { class: `pill tone-${tone}` }, f.kind),
+          el('span', { class: 'learning-lane' }, laneFromFact(f) || '(no lane)'),
+          el('span', { class: 'learning-ts mono' }, formatTs ? formatTs(f.ts) : f.ts)
+        ]),
+        el('div', { class: 'learning-text' }, f.text),
+        el('div', { class: 'learning-tags mono' }, (f.tags || []).join(' · '))
+      ]);
+      row.addEventListener('click', () => {
+        if (typeof openInspector === 'function') {
+          openInspector({
+            kind: 'finding',
+            label: f.text,
+            id: f.id,
+            raw: f,
+            evidence: [{ label: 'Source event', value: f.source && f.source.event }],
+            related: f.source && f.source.event ? [{ kind: 'event', id: f.source.event, label: f.source.event }] : []
+          });
+        }
+      });
+      list.appendChild(row);
+    }
+    factsBody.appendChild(list);
+  }
+
+  kindSel.addEventListener('change', () => { state.kind = kindSel.value; refresh(); });
+  laneSel.addEventListener('change', () => { state.lane = laneSel.value; refresh(); });
+  qIn.addEventListener('input', () => { state.q = qIn.value; clearTimeout(qIn._t); qIn._t = setTimeout(refresh, 250); });
+  reextract.addEventListener('click', async () => {
+    reextract.disabled = true;
+    try {
+      const r = await fetch('/bridge/memory/extract', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      const j = await r.json();
+      if (typeof showToast === 'function') showToast(`Re-extracted · +${j.added} facts`, 'ok');
+      await refresh();
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(`Re-extract failed: ${e}`, 'err');
+    } finally { reextract.disabled = false; }
+  });
+
+  refresh();
+  return root;
+}
+
+// ─── Slice δ — Wiki route ───────────────────────────────────────────────
+function renderWiki() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Wiki'));
+  root.appendChild(el('p', {}, ROUTES.wiki.description));
+
+  const driftBody = el('div', {});
+  driftBody.appendChild(loading('Computing drift…'));
+  const driftPanel = panel('Drift Drawer', 'GET /bridge/wiki · pages older than the latest slice-stop on their lane', driftBody);
+
+  const pagesBody = el('div', {});
+  pagesBody.appendChild(loading('Listing wiki pages…'));
+  const pagesPanel = panel('Pages', 'one page per lane · auto-stamped on slice-stop', pagesBody);
+
+  const viewBody = el('div', {});
+  viewBody.appendChild(placeholder('Pick a page', 'Click a page on the left to read its rendered markdown.'));
+  const viewPanel = panel('Page', 'GET /bridge/wiki/page', viewBody);
+
+  const head = panel('Actions', 'Rebuild rewrites every page from the spine — safe, idempotent.', el('div', { style: 'display:flex;gap:8px;align-items:center;' }, [
+    (() => {
+      const btn = el('button', { class: 'm-btn' }, 'Rebuild wiki');
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          const r = await fetch('/bridge/wiki/rebuild', { method: 'POST' });
+          const j = await r.json();
+          if (typeof showToast === 'function') showToast(`Rebuilt · ${j.pagesWritten} page(s)`, 'ok');
+          await refresh();
+        } catch (e) {
+          if (typeof showToast === 'function') showToast(`Rebuild failed: ${e}`, 'err');
+        } finally { btn.disabled = false; }
+      });
+      return btn;
+    })()
+  ]));
+
+  root.appendChild(head);
+  root.appendChild(driftPanel);
+  root.appendChild(pagesPanel);
+  root.appendChild(viewPanel);
+
+  async function loadPage(page) {
+    viewBody.innerHTML = '';
+    viewBody.appendChild(loading(`Reading ${page}…`));
+    try {
+      const r = await fetch(`/bridge/wiki/page?page=${encodeURIComponent(page)}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      viewBody.innerHTML = '';
+      const head = el('div', { class: 'wiki-page-head' }, [
+        el('span', { class: 'mono' }, page),
+        el('span', { class: 'panel-aside' }, `${(j.body || '').length} bytes`)
+      ]);
+      viewBody.appendChild(head);
+      const pre = el('pre', { class: 'wiki-page-body mono' }, j.body || '');
+      viewBody.appendChild(pre);
+    } catch (e) {
+      viewBody.innerHTML = '';
+      viewBody.appendChild(placeholder('Error', String(e)));
+    }
+  }
+
+  async function refresh() {
+    let data;
+    try {
+      const r = await fetch('/bridge/wiki', { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      data = await r.json();
+    } catch (e) {
+      driftBody.innerHTML = '';
+      driftBody.appendChild(placeholder('Error', String(e)));
+      return;
+    }
+
+    const pages = data.pages || [];
+    const drifted = pages.filter((p) => p.drifted);
+
+    driftBody.innerHTML = '';
+    if (!drifted.length) {
+      driftBody.appendChild(placeholder('No drift', 'Every wiki page is at least as fresh as its lane\'s last slice-stop.'));
+    } else {
+      const list = el('div', { class: 'wiki-drift' });
+      for (const p of drifted) {
+        const row = el('div', { class: 'wiki-drift-row' }, [
+          el('span', { class: 'pill tone-warn' }, p.missing ? 'missing' : 'stale'),
+          el('span', { class: 'mono' }, p.page),
+          el('span', { class: 'panel-aside' }, `lane: ${p.lane || '(none)'} · last slice: ${p.lastSlice || 'n/a'}`)
+        ]);
+        list.appendChild(row);
+      }
+      driftBody.appendChild(list);
+    }
+
+    pagesBody.innerHTML = '';
+    if (!pages.length) {
+      pagesBody.appendChild(placeholder('No pages', 'Run a slice-stop or POST /bridge/wiki/rebuild.'));
+    } else {
+      const list = el('div', { class: 'wiki-pages' });
+      for (const p of pages) {
+        const row = el('div', { class: 'wiki-page-row', tabindex: '0', role: 'button' }, [
+          el('span', { class: 'mono' }, p.page),
+          el('span', { class: 'panel-aside' }, `${p.bytes || 0} B · lane ${p.lane || '(none)'}${p.drifted ? ' · drift' : ''}`)
+        ]);
+        if (p.drifted) row.classList.add('drift');
+        row.addEventListener('click', () => loadPage(p.page));
+        list.appendChild(row);
+      }
+      pagesBody.appendChild(list);
+    }
+  }
+
+  refresh();
+  return root;
+}
+
+// ─── Slice ε — Workflows blueprint ──────────────────────────────────────
+const WORKFLOW_NODES = [
+  { id: 'operator', x:  60, y: 120, label: 'Operator',  desc: 'Drives every slice via Conductor + composer.' },
+  { id: 'boss',     x: 240, y:  60, label: 'BOSS',      desc: 'Proposes low-risk handoffs and slices (LLM voice).' },
+  { id: 'enforcer', x: 240, y: 180, label: 'Enforcer',  desc: 'Deterministic — cites state, refuses unsafe actions.' },
+  { id: 'queue',    x: 440, y:  60, label: 'Queue',     desc: 'Scheduler / Queue / Dispatch / Preflights — every parked card has a reason code.' },
+  { id: 'claims',   x: 440, y: 180, label: 'Claims',    desc: 'Active lane claims by session — write-lock + handoff.' },
+  { id: 'fleet',    x: 640, y: 120, label: 'Fleet',     desc: 'Sessions on lanes — claude-code, codex, hermes, future agents.' },
+  { id: 'gates',    x: 820, y:  60, label: 'Gates',     desc: 'Focused verification — scoped checks instead of full cycles.' },
+  { id: 'reports',  x: 820, y: 180, label: 'Reports',   desc: 'Slice-stop ledger, approvals ledger, verification reports.' },
+  { id: 'learning', x: 1000, y: 60, label: 'Learning',  desc: 'Hindsight memory — facts distilled from slice-stops.' },
+  { id: 'wiki',     x: 1000, y: 180, label: 'Wiki',     desc: 'Wiki Updater — auto-stamps per-lane pages on every slice-stop.' }
+];
+const WORKFLOW_EDGES = [
+  ['operator', 'boss'], ['operator', 'enforcer'],
+  ['boss', 'queue'],    ['boss', 'claims'],
+  ['enforcer', 'queue'], ['enforcer', 'claims'],
+  ['queue', 'fleet'],   ['claims', 'fleet'],
+  ['fleet', 'gates'],   ['fleet', 'reports'],
+  ['reports', 'learning'], ['reports', 'wiki'],
+  ['gates', 'reports']
+];
+const WORKFLOW_NODE_ROUTE = {
+  operator: '#/conductor', boss: '#/boss', enforcer: '#/boss',
+  queue: '#/queue', claims: '#/claims', fleet: '#/agents',
+  gates: '#/operations', reports: '#/events',
+  learning: '#/learning', wiki: '#/wiki'
+};
+
+function renderWorkflows() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Workflows'));
+  root.appendChild(el('p', {}, ROUTES.workflows.description));
+
+  const W = 1100;
+  const H = 260;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('class', 'workflow-svg');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+  const nodeById = Object.fromEntries(WORKFLOW_NODES.map((n) => [n.id, n]));
+
+  // Edges
+  const edgeG = document.createElementNS(svgNS, 'g');
+  edgeG.setAttribute('class', 'workflow-edges');
+  for (const [a, b] of WORKFLOW_EDGES) {
+    const na = nodeById[a]; const nb = nodeById[b];
+    if (!na || !nb) continue;
+    const line = document.createElementNS(svgNS, 'path');
+    const dx = (nb.x - na.x) / 2;
+    const d = `M ${na.x + 60} ${na.y} C ${na.x + 60 + dx} ${na.y}, ${nb.x - dx} ${nb.y}, ${nb.x - 60} ${nb.y}`;
+    line.setAttribute('d', d);
+    line.setAttribute('class', 'workflow-edge');
+    edgeG.appendChild(line);
+  }
+  svg.appendChild(edgeG);
+
+  // Nodes
+  const nodeG = document.createElementNS(svgNS, 'g');
+  nodeG.setAttribute('class', 'workflow-nodes');
+  for (const n of WORKFLOW_NODES) {
+    const g = document.createElementNS(svgNS, 'g');
+    g.setAttribute('class', 'workflow-node');
+    g.setAttribute('transform', `translate(${n.x - 60}, ${n.y - 22})`);
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'button');
+    g.setAttribute('aria-label', n.label);
+    const rect = document.createElementNS(svgNS, 'rect');
+    rect.setAttribute('width', '120');
+    rect.setAttribute('height', '44');
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('class', 'workflow-node-rect');
+    g.appendChild(rect);
+    const text = document.createElementNS(svgNS, 'text');
+    text.setAttribute('x', '60');
+    text.setAttribute('y', '27');
+    text.setAttribute('class', 'workflow-node-label');
+    text.setAttribute('text-anchor', 'middle');
+    text.textContent = n.label;
+    g.appendChild(text);
+    g.addEventListener('click', () => {
+      if (typeof openInspector === 'function') {
+        openInspector({
+          kind: 'workflow-node',
+          label: n.label,
+          id: n.id,
+          raw: n,
+          evidence: [{ label: 'Route', value: WORKFLOW_NODE_ROUTE[n.id] || '(none)' }],
+          actions: [
+            { label: `Open ${n.label}`, run: () => { location.hash = WORKFLOW_NODE_ROUTE[n.id] || '#/conductor'; } }
+          ],
+          related: []
+        });
+      } else {
+        location.hash = WORKFLOW_NODE_ROUTE[n.id] || '#/conductor';
+      }
+    });
+    g.addEventListener('keydown', (e) => { if (e.key === 'Enter') g.dispatchEvent(new Event('click')); });
+    nodeG.appendChild(g);
+  }
+  svg.appendChild(nodeG);
+
+  const wrap = el('div', { class: 'workflow-wrap' });
+  wrap.appendChild(svg);
+  root.appendChild(panel('Blueprint', 'click any node to open its route', wrap));
+
+  // Legend
+  const legend = el('div', { class: 'workflow-legend' });
+  for (const n of WORKFLOW_NODES) {
+    legend.appendChild(el('div', { class: 'workflow-legend-row' }, [
+      el('span', { class: 'pill tone-accent' }, n.label),
+      el('span', {}, n.desc),
+      (() => {
+        const a = el('a', { href: WORKFLOW_NODE_ROUTE[n.id] || '#/conductor', class: 'workflow-legend-go mono' }, WORKFLOW_NODE_ROUTE[n.id] || '');
+        return a;
+      })()
+    ]));
+  }
+  root.appendChild(panel('Legend', 'every node maps to a route', legend));
+
+  return root;
+}
+
+// ─── Slice ε — Agents (coworker profile grid) ───────────────────────────
+function renderAgents() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Agents'));
+  root.appendChild(el('p', {}, ROUTES.agents.description));
+
+  const gridBody = el('div', {});
+  gridBody.appendChild(loading('Fetching active sessions…'));
+  root.appendChild(panel('Coworker grid', 'GET /bridge/projection · activeSessions × claims × slice-stops', gridBody));
+
+  (async () => {
+    const proj = await fetchProjection();
+    if (!proj) {
+      gridBody.innerHTML = '';
+      gridBody.appendChild(placeholder('Error', 'Could not fetch projection.'));
+      return;
+    }
+    const sessions = proj.activeSessions || [];
+    const claims = proj.claims || [];
+    const slices = proj.sliceStops || [];
+
+    // Build per-session score: 1 point per slice-stop, +1 per learning, +1 per held claim.
+    const score = new Map();
+    const lastSliceBy = new Map();
+    for (const s of slices) {
+      const sid = s.actor;
+      score.set(sid, (score.get(sid) || 0) + 1 + (s.learnings || []).length);
+      const prev = lastSliceBy.get(sid);
+      if (!prev || prev.ts < s.ts) lastSliceBy.set(sid, s);
+    }
+    for (const c of claims) score.set(c.sessionId, (score.get(c.sessionId) || 0) + 1);
+
+    gridBody.innerHTML = '';
+    if (!sessions.length) {
+      gridBody.appendChild(placeholder('No active sessions', 'Register a session with `maddu session register`.'));
+      return;
+    }
+
+    const grid = el('div', { class: 'agent-grid' });
+    for (const s of sessions) {
+      const held = claims.filter((c) => c.sessionId === s.id);
+      const lastSlice = lastSliceBy.get(s.id) || null;
+      const card = el('div', { class: 'agent-card', tabindex: '0', role: 'button' }, [
+        el('div', { class: 'agent-card-head' }, [
+          el('span', { class: 'pill tone-ok' }, s.status || 'active'),
+          el('span', { class: 'agent-card-label' }, s.label || '(unlabeled)'),
+          el('span', { class: 'panel-aside mono' }, s.role || 'agent')
+        ]),
+        el('div', { class: 'agent-card-id mono' }, s.id),
+        el('div', { class: 'agent-card-focus' }, s.focus || '(no current focus)'),
+        el('div', { class: 'agent-card-stats' }, [
+          el('span', { class: 'pill tone-accent' }, `score ${score.get(s.id) || 0}`),
+          el('span', { class: 'pill tone-blue' }, `${held.length} claim${held.length === 1 ? '' : 's'}`),
+          el('span', { class: 'panel-aside mono' }, `hb ${formatAge ? formatAge(s.lastHeartbeatAt) : (s.lastHeartbeatAt || 'n/a')}`)
+        ]),
+        held.length ? el('div', { class: 'agent-card-claims mono' }, held.map((c) => c.lane).join(' · ')) : null,
+        lastSlice ? el('div', { class: 'agent-card-last panel-aside' }, [
+          el('span', { class: 'mono' }, formatTs ? formatTs(lastSlice.ts) : lastSlice.ts),
+          document.createTextNode(' · '),
+          document.createTextNode(lastSlice.summary || '(no summary)')
+        ]) : null
+      ]);
+      card.addEventListener('click', () => {
+        if (typeof openInspector === 'function') {
+          openInspector({
+            kind: 'session',
+            label: s.label || s.id,
+            id: s.id,
+            raw: s,
+            evidence: [
+              { label: 'Role', value: s.role },
+              { label: 'Registered', value: s.registeredAt },
+              { label: 'Last heartbeat', value: s.lastHeartbeatAt },
+              { label: 'Claims held', value: held.map((c) => c.lane).join(', ') || '(none)' }
+            ],
+            related: held.map((c) => ({ kind: 'lane', id: c.lane, label: c.lane }))
+          });
+        }
+      });
+      grid.appendChild(card);
+    }
+    gridBody.appendChild(grid);
+  })();
+
+  return root;
+}
+
+// ─── Slice ε — Teams (lane ownership map) ───────────────────────────────
+function renderTeams() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Teams'));
+  root.appendChild(el('p', {}, ROUTES.teams.description));
+
+  const mapBody = el('div', {});
+  mapBody.appendChild(loading('Building ownership map…'));
+  root.appendChild(panel('Lane ownership', 'lanes catalog × active claims × slice-stop frequency', mapBody));
+
+  (async () => {
+    const [lanes, proj] = await Promise.all([fetchLanes(), fetchProjection()]);
+    if (!lanes || !proj) {
+      mapBody.innerHTML = '';
+      mapBody.appendChild(placeholder('Error', 'Could not fetch lanes or projection.'));
+      return;
+    }
+    const catalog = (lanes.catalog && lanes.catalog.lanes) || [];
+    const claims = proj.claims || [];
+    const slices = proj.sliceStops || [];
+    const sessions = proj.activeSessions || [];
+    const sessById = Object.fromEntries(sessions.map((s) => [s.id, s]));
+
+    // Stats per lane
+    const sliceCountByLane = {};
+    const lastSliceByLane = {};
+    for (const s of slices) {
+      const l = s.lane || '(none)';
+      sliceCountByLane[l] = (sliceCountByLane[l] || 0) + 1;
+      const prev = lastSliceByLane[l];
+      if (!prev || prev.ts < s.ts) lastSliceByLane[l] = s;
+    }
+    const claimByLane = Object.fromEntries(claims.map((c) => [c.lane, c]));
+
+    mapBody.innerHTML = '';
+    if (!catalog.length) {
+      mapBody.appendChild(placeholder('No lanes', 'Add lanes via Settings or .maddu/lanes/catalog.json.'));
+      return;
+    }
+    const list = el('div', { class: 'team-map' });
+    for (const lane of catalog) {
+      const claim = claimByLane[lane.id];
+      const lastSlice = lastSliceByLane[lane.id];
+      const claimSess = claim ? sessById[claim.sessionId] : null;
+      const card = el('div', { class: 'team-lane-card' + (claim ? ' active' : '') }, [
+        el('div', { class: 'team-lane-head' }, [
+          el('span', { class: 'pill tone-accent' }, lane.id),
+          claim ? el('span', { class: 'pill tone-ok' }, 'held') : el('span', { class: 'pill tone-fg-3' }, 'free'),
+          el('span', { class: 'panel-aside' }, `${sliceCountByLane[lane.id] || 0} slice${(sliceCountByLane[lane.id] || 0) === 1 ? '' : 's'}`)
+        ]),
+        el('div', { class: 'team-lane-scope' }, lane.scope || '(no scope)'),
+        claim ? el('div', { class: 'team-lane-holder' }, [
+          el('span', { class: 'panel-aside' }, 'held by: '),
+          el('span', { class: 'mono' }, claimSess ? (claimSess.label || claim.sessionId) : claim.sessionId),
+          el('span', { class: 'panel-aside mono' }, `· ${claim.focus || '(no focus)'}`)
+        ]) : null,
+        lastSlice ? el('div', { class: 'team-lane-last panel-aside' }, [
+          el('span', {}, 'last slice: '),
+          el('span', { class: 'mono' }, formatTs ? formatTs(lastSlice.ts) : lastSlice.ts),
+          document.createTextNode(' · '),
+          document.createTextNode(lastSlice.summary || '')
+        ]) : null,
+        lane.policy ? el('div', { class: 'team-lane-policy panel-aside mono' },
+          `zones: ${(lane.policy.zones || []).join(', ') || 'n/a'} · lease ${lane.policy.leaseSeconds || 0}s · handoff ${lane.policy.handoffRule || 'n/a'}`
+        ) : null
+      ]);
+      card.addEventListener('click', () => {
+        if (typeof openInspector === 'function') {
+          openInspector({
+            kind: 'lane',
+            label: lane.id,
+            id: lane.id,
+            raw: { lane, claim, lastSlice },
+            evidence: [
+              { label: 'Scope', value: lane.scope },
+              { label: 'Held by', value: claim ? claim.sessionId : '(free)' },
+              { label: 'Last slice', value: lastSlice ? lastSlice.summary : '(none)' }
+            ],
+            related: []
+          });
+        }
+      });
+      list.appendChild(card);
+    }
+    mapBody.appendChild(list);
+  })();
+
+  return root;
 }
 
 async function boot() {

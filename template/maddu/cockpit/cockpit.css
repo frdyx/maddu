@@ -2132,3 +2132,283 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   .boss-line { grid-template-columns: 16px 1fr; }
   .boss-line-ts, .boss-line-actor { grid-column: 2; font-size: 10px; }
 }
+
+/* ─── Slice δ — Learning + Wiki ─────────────────────────────────────── */
+.learning-list { display: flex; flex-direction: column; gap: 8px; }
+.learning-row {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.learning-row:hover, .learning-row:focus-visible {
+  border-color: var(--m-accent);
+  background: var(--m-bg-2);
+  outline: none;
+}
+.learning-head { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.learning-lane { color: var(--m-fg-2); }
+.learning-ts { color: var(--m-fg-3); margin-left: auto; }
+.learning-text { color: var(--m-fg-0); font-size: 13px; line-height: 1.5; }
+.learning-tags { color: var(--m-fg-3); font-size: 10px; }
+
+.wiki-pages, .wiki-drift { display: flex; flex-direction: column; gap: 6px; }
+.wiki-page-row, .wiki-drift-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+  background: var(--m-bg-1);
+}
+.wiki-page-row { cursor: pointer; transition: border-color 120ms; }
+.wiki-page-row:hover, .wiki-page-row:focus-visible {
+  border-color: var(--m-accent);
+  outline: none;
+}
+.wiki-page-row.drift { border-color: var(--m-warn); }
+.wiki-page-head {
+  display: flex; align-items: center; gap: 12px;
+  padding-bottom: 8px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--m-bg-2);
+}
+.wiki-page-body {
+  background: var(--m-bg-0);
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--m-fg-1);
+}
+
+/* ─── Slice ε — Workflows / Roadmap / Agents / Teams ────────────────── */
+
+/* Workflows blueprint */
+.workflow-wrap { padding: 8px; }
+.workflow-svg { width: 100%; height: auto; display: block; }
+.workflow-edge { fill: none; stroke: var(--m-bg-3); stroke-width: 1.5; opacity: 0.65; }
+.workflow-node-rect {
+  fill: var(--m-bg-1); stroke: var(--m-accent); stroke-width: 1.2;
+  transition: fill 120ms, stroke-width 120ms;
+}
+.workflow-node-label {
+  fill: var(--m-fg-0);
+  font-family: 'IBM Plex Sans Condensed', sans-serif;
+  font-size: 14px; font-weight: 600;
+  user-select: none;
+}
+.workflow-node { cursor: pointer; }
+.workflow-node:hover .workflow-node-rect,
+.workflow-node:focus-visible .workflow-node-rect {
+  fill: var(--m-bg-2);
+  stroke-width: 2;
+}
+.workflow-legend { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.workflow-legend-row {
+  display: grid; grid-template-columns: 130px 1fr 160px;
+  gap: 10px; align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+  background: var(--m-bg-1);
+  font-size: 12px;
+}
+.workflow-legend-go { color: var(--m-accent-2); text-align: right; }
+
+/* Roadmap depth */
+.kpi-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.kpi-tile {
+  flex: 1 1 140px;
+  padding: 10px 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+}
+.kpi-tile.tone-accent { border-color: var(--m-accent); }
+.kpi-tile.tone-ok     { border-color: var(--m-ok); }
+.kpi-tile.tone-blue   { border-color: var(--m-accent-2); }
+.kpi-tile.tone-warn   { border-color: var(--m-warn); }
+.kpi-num { font-family: 'IBM Plex Sans Condensed', sans-serif; font-size: 22px; font-weight: 600; color: var(--m-fg-0); }
+.kpi-lbl { font-size: 11px; color: var(--m-fg-2); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.cadence-bar {
+  display: grid; grid-template-columns: repeat(28, 1fr);
+  gap: 3px; align-items: end;
+  height: 80px;
+  padding: 6px;
+  background: var(--m-bg-0);
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+}
+.cadence-cell { height: 100%; position: relative; }
+.cadence-cell-fill {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: var(--m-accent);
+  border-radius: 2px;
+  min-height: 2px;
+}
+
+.lane-mix { display: flex; flex-direction: column; gap: 4px; }
+.lane-mix-row {
+  display: grid; grid-template-columns: 200px 1fr 60px;
+  gap: 8px; align-items: center;
+  font-size: 12px;
+}
+.lane-mix-name { color: var(--m-fg-1); }
+.lane-mix-bar { height: 8px; background: var(--m-bg-2); border-radius: 4px; overflow: hidden; }
+.lane-mix-fill { display: block; height: 100%; background: var(--m-accent); border-radius: 4px; }
+.lane-mix-num { color: var(--m-fg-2); text-align: right; }
+
+.slice-index { display: flex; flex-direction: column; gap: 4px; }
+.slice-index-row {
+  display: grid; grid-template-columns: 140px 140px 1fr 90px;
+  gap: 10px; align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+  background: var(--m-bg-1);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms;
+}
+.slice-index-row:hover, .slice-index-row:focus-visible {
+  border-color: var(--m-accent);
+  outline: none;
+}
+
+.roadmap-plan { display: flex; flex-direction: column; gap: 6px; }
+.roadmap-plan-row {
+  display: flex; gap: 12px; align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 6px;
+  background: var(--m-bg-1);
+  font-size: 13px;
+}
+
+/* Agents */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.agent-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.agent-card:hover, .agent-card:focus-visible {
+  border-color: var(--m-accent);
+  background: var(--m-bg-2);
+  outline: none;
+}
+.agent-card-head { display: flex; align-items: center; gap: 8px; }
+.agent-card-label { font-weight: 600; color: var(--m-fg-0); flex: 1; }
+.agent-card-id { font-size: 11px; color: var(--m-fg-3); }
+.agent-card-focus { font-size: 12px; color: var(--m-fg-1); line-height: 1.45; }
+.agent-card-stats { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; }
+.agent-card-claims { font-size: 11px; color: var(--m-accent-2); }
+.agent-card-last { font-size: 11px; }
+
+/* Teams */
+.team-map {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+}
+.team-lane-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+  cursor: pointer;
+  transition: border-color 120ms;
+}
+.team-lane-card.active { border-color: var(--m-ok); }
+.team-lane-card:hover, .team-lane-card:focus-visible {
+  border-color: var(--m-accent);
+  outline: none;
+}
+.team-lane-head { display: flex; align-items: center; gap: 8px; }
+.team-lane-scope { font-size: 12px; color: var(--m-fg-1); line-height: 1.45; }
+.team-lane-holder { font-size: 12px; color: var(--m-fg-0); }
+.team-lane-last { font-size: 11px; }
+.team-lane-policy { font-size: 10px; }
+
+.pill.tone-fg-3 { background: transparent; border: 1px solid var(--m-bg-3); color: var(--m-fg-3); }
+
+/* ─── Task #13 — Native select brand pass ──────────────────────────────
+   Applies to every <select> in the cockpit. Trigger gets appearance:none
+   + a custom SVG chevron. Option list inherits navy from <option>; this
+   works on Chromium-based browsers (the cockpit's runtime context). */
+select,
+.m-select,
+.lanes-edit-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--m-bg-1);
+  color: var(--m-fg-0);
+  border: 1px solid var(--m-bg-3);
+  border-radius: 4px;
+  padding: 6px 28px 6px 10px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23D0FF00' stroke-width='1.6'><path d='M3 6l5 5 5-5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  transition: border-color 120ms, background-color 120ms;
+}
+select:hover,
+.m-select:hover,
+.lanes-edit-select:hover {
+  border-color: var(--m-accent);
+  background-color: var(--m-bg-2);
+}
+select:focus,
+.m-select:focus,
+.lanes-edit-select:focus {
+  outline: none;
+  border-color: var(--m-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--m-accent) 25%, transparent);
+}
+select:disabled,
+.m-select:disabled,
+.lanes-edit-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* Option list — Chromium honors these on the popup; Firefox/Safari fall back
+   to OS chrome (acceptable: cockpit's runtime context is Chromium-based). */
+select option,
+.m-select option,
+.lanes-edit-select option {
+  background-color: var(--m-bg-0);
+  color: var(--m-fg-0);
+  padding: 6px 10px;
+}
+select option:checked,
+.m-select option:checked,
+.lanes-edit-select option:checked {
+  background: linear-gradient(var(--m-accent), var(--m-accent));
+  color: var(--m-bg-0);
+}
+select option:hover,
+.m-select option:hover,
+.lanes-edit-select option:hover {
+  background-color: var(--m-bg-2);
+}

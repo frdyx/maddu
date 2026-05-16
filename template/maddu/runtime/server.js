@@ -25,6 +25,7 @@ import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, roll
 import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
 import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
 import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
+import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -374,7 +375,12 @@ async function handleBridge(req, res, url, ctx) {
         reason: body.reason || null
       }
     });
-    return sendJson(res, 200, { ok: true, event: ev });
+    // Slice δ — Hindsight + Wiki Updater fire on every slice-stop.
+    let memoryAdded = 0;
+    let wikiPage = null;
+    try { memoryAdded = await extractEvent(repoRoot, ev); } catch {}
+    try { const w = await wikiAppend(repoRoot, ev); if (w) wikiPage = w.page; } catch {}
+    return sendJson(res, 200, { ok: true, event: ev, memoryAdded, wikiPage });
   }
 
   // ── inbox ─────────────────────────────────────────────────────────────
@@ -987,6 +993,42 @@ async function handleBridge(req, res, url, ctx) {
       if (ev.type === 'SLICE_STOP') added += await extractEvent(repoRoot, ev);
     }
     return sendJson(res, 200, { ok: true, added });
+  }
+
+  // ── learning (Slice δ) ────────────────────────────────────────────────
+  // Hindsight memory grouped + filtered for the cockpit Learning route.
+  if (path === '/bridge/learning' && req.method === 'GET') {
+    const limit = parseInt(url.searchParams.get('limit') || '500', 10) || 500;
+    const kind = url.searchParams.get('kind') || null;
+    const lane = url.searchParams.get('lane') || null;
+    const q = url.searchParams.get('q') || '';
+    let facts = await searchMemory(repoRoot, q, { kind, limit });
+    if (lane) facts = facts.filter((f) => (f.source && f.source.lane === lane));
+    const byKind = {};
+    const laneTally = {};
+    for (const f of facts) {
+      byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+      const ln = (f.source && f.source.lane) || '(none)';
+      laneTally[ln] = (laneTally[ln] || 0) + 1;
+    }
+    return sendJson(res, 200, { facts, count: facts.length, byKind, byLane: laneTally });
+  }
+
+  // ── wiki (Slice δ) ────────────────────────────────────────────────────
+  if (path === '/bridge/wiki' && req.method === 'GET') {
+    const drift = await wikiDrift(repoRoot);
+    return sendJson(res, 200, { pages: drift });
+  }
+  if (path === '/bridge/wiki/page' && req.method === 'GET') {
+    const page = url.searchParams.get('page');
+    if (!page) return sendJson(res, 400, { error: 'page required' });
+    const body = await wikiRead(repoRoot, page);
+    if (body == null) return sendJson(res, 404, { error: 'not_found' });
+    return sendJson(res, 200, { page, body });
+  }
+  if (path === '/bridge/wiki/rebuild' && req.method === 'POST') {
+    const n = await rebuildWiki(repoRoot);
+    return sendJson(res, 200, { ok: true, pagesWritten: n });
   }
 
   // ── events: tail N most recent (no cursor) for charts/sparklines ──────
