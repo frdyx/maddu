@@ -206,16 +206,86 @@ html, body {
 a { color: var(--m-fg-1); text-decoration: none; }
 a:hover { color: var(--m-fg-0); }
 
-button {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--m-line);
+/* ─── Buttons — brand-aligned base + modifiers ──────────────────────────
+   Every <button> in the cockpit inherits this look. .m-btn remains as an
+   explicit class for clarity but produces no extra rules of its own.
+   Modifiers: .is-primary (lime CTA), .is-danger (deny/destructive),
+   .is-ghost (transparent, used inside compact rows). */
+button, .m-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--m-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--m-fg-0);
+  background: var(--m-bg-2);
+  border: 1px solid var(--m-bg-3);
+  border-radius: 4px;
   padding: 6px 12px;
   cursor: pointer;
-  letter-spacing: 0.02em;
+  line-height: 1.4;
+  transition: border-color 120ms, color 120ms, background 120ms;
 }
-button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
+button:hover, .m-btn:hover {
+  border-color: var(--m-accent);
+  color: var(--m-accent);
+  background: var(--m-bg-2);
+}
+button:focus-visible, .m-btn:focus-visible {
+  outline: none;
+  border-color: var(--m-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--m-accent) 28%, transparent);
+}
+button:active, .m-btn:active {
+  transform: translateY(0.5px);
+}
+button:disabled, .m-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:disabled:hover, .m-btn:disabled:hover {
+  border-color: var(--m-bg-3);
+  color: var(--m-fg-0);
+}
+
+/* Primary CTA — sparingly. The lime fill should be reserved for the one
+   action the operator is most expected to take on a given panel. */
+button.is-primary, .m-btn.is-primary {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: var(--m-bg-0);
+}
+button.is-primary:hover, .m-btn.is-primary:hover {
+  background: color-mix(in srgb, var(--m-accent) 88%, var(--m-fg-0));
+  color: var(--m-bg-0);
+}
+button.is-primary:focus-visible, .m-btn.is-primary:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--m-accent) 50%, transparent);
+}
+
+/* Danger — destructive actions. */
+button.is-danger, .m-btn.is-danger {
+  color: var(--m-danger);
+  border-color: var(--m-danger-border, var(--m-danger));
+}
+button.is-danger:hover, .m-btn.is-danger:hover {
+  background: var(--m-danger-bg, color-mix(in srgb, var(--m-danger) 12%, transparent));
+  color: var(--m-danger);
+  border-color: var(--m-danger);
+}
+
+/* Ghost — quiet inline button, no border until hover. */
+button.is-ghost, .m-btn.is-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--m-fg-2);
+}
+button.is-ghost:hover, .m-btn.is-ghost:hover {
+  background: var(--m-bg-2);
+  border-color: var(--m-bg-3);
+  color: var(--m-fg-0);
+}
 
 #app {
   display: grid;
@@ -1188,16 +1258,8 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
   border-top: 1px dashed var(--m-bg-3);
   flex-wrap: wrap;
 }
-.lanes-edit-select,
-.lanes-edit-input {
-  background: var(--m-bg-2);
-  color: var(--m-fg-0);
-  border: 1px solid var(--m-bg-3);
-  padding: 4px 8px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  border-radius: 3px;
-}
+/* .lanes-edit-input / .lanes-edit-select inherit from the global
+   input/select baseline. Only the flex/width sizing lives here. */
 .lanes-edit-input { flex: 1; min-width: 180px; }
 .lanes-edit-input-narrow { flex: 0 0 140px; min-width: 0; }
 .lanes-add {
@@ -1753,18 +1815,81 @@ button:hover { background: var(--m-bg-3); border-color: var(--m-fg-4); }
 }
 .inspector-body .kv { margin: 0; }
 .inspector-actions { display: flex; flex-direction: column; gap: 8px; }
-.m-btn {
-  background: var(--m-bg-2);
-  border: 1px solid var(--m-bg-4, var(--m-bg-3));
+/* .m-btn is unified with base <button> at the top of this file. */
+
+/* ─── Inputs — brand-aligned base ──────────────────────────────────────
+   Applies to bare <input> / <textarea>, plus the existing .m-input and
+   .lanes-edit-input classes so per-route inline styles can be removed
+   over time without breaking anything. */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="email"],
+input[type="search"],
+input[type="url"],
+input:not([type]),
+textarea,
+.m-input,
+.lanes-edit-input,
+.lanes-edit-input-narrow {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--m-font-mono);
+  font-size: 12px;
   color: var(--m-fg-0);
+  background: var(--m-bg-0);
+  border: 1px solid var(--m-bg-3);
+  border-radius: 4px;
   padding: 6px 10px;
-  cursor: pointer;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
+  line-height: 1.4;
+  transition: border-color 120ms, background 120ms;
 }
-.m-btn:hover { border-color: var(--m-accent-dim); color: var(--m-accent); }
+input[type="text"]::placeholder,
+input[type="password"]::placeholder,
+input[type="email"]::placeholder,
+input[type="search"]::placeholder,
+input[type="url"]::placeholder,
+input:not([type])::placeholder,
+textarea::placeholder,
+.m-input::placeholder {
+  color: var(--m-fg-4);
+}
+input:hover,
+textarea:hover,
+.m-input:hover {
+  border-color: var(--m-fg-4);
+}
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+.m-input:focus,
+.m-input:focus-visible,
+.lanes-edit-input:focus,
+.lanes-edit-input-narrow:focus {
+  outline: none;
+  border-color: var(--m-accent);
+  background: var(--m-bg-0);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--m-accent) 22%, transparent);
+}
+input:disabled,
+textarea:disabled,
+.m-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Search variant — slightly taller, supports a leading glyph via the
+   ::before pseudo-element on the wrapping label. */
+input[type="search"] {
+  padding-left: 30px;
+}
+
+/* Checkbox + radio — keep native chrome but tint to brand. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--m-accent);
+}
 .inspector-raw {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;

@@ -6634,7 +6634,7 @@ async function renderTelegramPanel(mount) {
 
   // Enable / Disable
   const actRow = el('div', { class: 'tg-row' });
-  const enBtn = el('button', { class: 'm-btn' }, st.enabled ? 'Disable' : 'Enable');
+  const enBtn = el("button", { class: "m-btn " + (st.enabled ? "is-danger" : "is-primary") }, st.enabled ? "Disable" : "Enable");
   enBtn.addEventListener('click', async () => {
     enBtn.disabled = true;
     try {
@@ -6750,7 +6750,7 @@ async function renderDiscordPanel(mount) {
 
   // Enable/Disable + test send
   const actRow = el('div', { class: 'tg-row' });
-  const enBtn = el('button', { class: 'm-btn' }, st.enabled ? 'Disable' : 'Enable');
+  const enBtn = el("button", { class: "m-btn " + (st.enabled ? "is-danger" : "is-primary") }, st.enabled ? "Disable" : "Enable");
   enBtn.addEventListener('click', async () => {
     enBtn.disabled = true;
     try {
@@ -6880,7 +6880,7 @@ async function renderEmailPanel(mount) {
 
   // Enable + test send
   const actRow = el('div', { class: 'tg-row' });
-  const enBtn = el('button', { class: 'm-btn' }, st.enabled ? 'Disable' : 'Enable');
+  const enBtn = el("button", { class: "m-btn " + (st.enabled ? "is-danger" : "is-primary") }, st.enabled ? "Disable" : "Enable");
   enBtn.addEventListener('click', async () => {
     enBtn.disabled = true;
     try {
