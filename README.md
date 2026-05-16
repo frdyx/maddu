@@ -27,8 +27,11 @@ npx github:frdyx/maddu init
 
 <!--
   Demo video — the README references brand/screenshots/cockpit-demo.mp4.
-  To produce it, run the Remotion project in marketing/video/:
-      cd marketing/video && npm install && npm run render
+  To produce it, run the Remotion project in marketing/video/. PowerShell:
+      cd marketing/video
+      npm install
+      npm run render
+  Bash / zsh works the same way (one command per line).
   The render lands the MP4 at the path below, then this `<video>` block
   plays it inline on the GitHub repo landing page. Until you've rendered
   it, the markdown gracefully shows the workflow blueprint instead.
@@ -37,7 +40,7 @@ npx github:frdyx/maddu init
 
 <video src="brand/screenshots/cockpit-demo.mp4" controls autoplay loop muted playsinline width="960">
   <source src="brand/screenshots/cockpit-demo.mp4" type="video/mp4">
-  <a href="marketing/video/README.md">▶  22-second cockpit demo</a> — run <code>cd marketing/video && npm install && npm run render</code> to produce it.
+  <a href="marketing/video/README.md">▶  22-second cockpit demo</a> — see <a href="marketing/video/README.md">marketing/video/README.md</a> for how to render it.
 </video>
 
 <sub align="center"><i>22 seconds. Empty cockpit → first session → lane claim → BOSS proposal → slice-stop with the lime line tracing across. Rendered live from React/CSS via <a href="marketing/video/">Remotion</a>, in lockstep with <a href="docs/DESIGN-SYSTEM.md">the design system</a>. No screenshots, no fakes.</i></sub>

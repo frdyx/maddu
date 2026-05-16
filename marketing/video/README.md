@@ -34,13 +34,30 @@ the root README can reference it via a relative path that survives
 
 ## Install
 
+Run **one command per line** (PowerShell treats `#` as part of the command,
+not as a comment marker, so don't paste inline `#`-style notes from elsewhere
+in this doc):
+
+```powershell
+cd marketing/video
+npm install
+```
+
+Bash / zsh works the same way:
+
 ```bash
 cd marketing/video
 npm install
 ```
 
-First install takes 1–2 minutes (Remotion downloads its bundled Chromium
-build). Subsequent installs reuse the cache.
+First install takes ~1–2 minutes — Remotion downloads its bundled Chromium
+headless build (~150 MB) and resolves React + the TypeScript toolchain.
+Subsequent installs reuse the cache.
+
+If the install ever errors with `ETARGET / No matching version found`, the
+package.json may have pinned a published version that's since been removed.
+Bump the affected line to `"^4.0.0"` (or whatever the current major is) and
+retry.
 
 ## Live-edit in the studio
 
