@@ -1,13 +1,10 @@
 # Máddu design system
 
 This document is the canonical reference for how Máddu looks, moves, and reads.
-It is also the source of truth the marketing video (`marketing/video/`) reads
-from to stay in sync with the cockpit.
 
 The cockpit's working stylesheet is `template/maddu/cockpit/cockpit.css`. Every
 token, scale, and class documented here exists in that file. When a token
-changes, change it there first; this doc and the video components both
-reference it by name.
+changes, change it there first; this doc names every one of them by name.
 
 ---
 
@@ -403,18 +400,8 @@ so content doesn't shift when the scrollbar appears.
 
 ---
 
-## Marketing video alignment
+## Keeping this in sync
 
-The Remotion video under `marketing/video/` reads from this document. Every
-color it uses is a token here; every component it animates has its anatomy
-here. When the cockpit's CSS changes, update this doc first, then update the
-video's `src/tokens.ts` to match, then re-render.
-
-The video tells **one story in ~22 seconds**: an empty cockpit accepting its
-first session, claiming a lane, receiving a BOSS proposal, hitting a slice-
-stop, and watching Hindsight + Wiki populate. It uses the same easings, the
-same colors, the same fonts, the same components. The point is not to
-*advertise* Máddu — it's to *show what Máddu feels like in motion* in less
-time than it takes to read this paragraph.
-
-See `marketing/video/README.md` for how to render it.
+When the cockpit's CSS shifts, update this doc first, then update the token
+in `template/maddu/cockpit/cockpit.css` to match. The two must always agree;
+if they disagree, the CSS wins because that's what ships.

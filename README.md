@@ -1,13 +1,10 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="brand/refined/maddu-horizontal-tagline-360x80-dark.svg">
-  <img alt="Máddu — The Source of local truth." src="brand/refined/maddu-horizontal-tagline-360x80-dark.svg" width="420">
-</picture>
+# Máddu
 
 ### *root · origin · ancestry* — North Sámi, pronounced **MOD-doo**
 
-A local-first, files-only framework for orchestrating AI agents inside any git repo.
+**The Source of local truth.** A local-first, files-only framework for orchestrating AI agents inside any git repo.
 
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-D0FF00?style=flat-square&labelColor=050B17)](LICENSE)
 [![Version 0.12.0](https://img.shields.io/badge/version-0.12.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
@@ -23,28 +20,6 @@ npx github:frdyx/maddu init
 
 </div>
 
-<br/>
-
-<!--
-  Demo video — the README references brand/screenshots/cockpit-demo.mp4.
-  To produce it, run the Remotion project in marketing/video/. PowerShell:
-      cd marketing/video
-      npm install
-      npm run render
-  Bash / zsh works the same way (one command per line).
-  The render lands the MP4 at the path below, then this `<video>` block
-  plays it inline on the GitHub repo landing page. Until you've rendered
-  it, the markdown gracefully shows the workflow blueprint instead.
-  See docs/DESIGN-SYSTEM.md and marketing/video/README.md.
--->
-
-<video src="brand/screenshots/cockpit-demo.mp4" controls autoplay loop muted playsinline width="960">
-  <source src="brand/screenshots/cockpit-demo.mp4" type="video/mp4">
-  <a href="marketing/video/README.md">▶  22-second cockpit demo</a> — see <a href="marketing/video/README.md">marketing/video/README.md</a> for how to render it.
-</video>
-
-<sub align="center"><i>22 seconds. Empty cockpit → first session → lane claim → BOSS proposal → slice-stop with the lime line tracing across. Rendered live from React/CSS via <a href="marketing/video/">Remotion</a>, in lockstep with <a href="docs/DESIGN-SYSTEM.md">the design system</a>. No screenshots, no fakes.</i></sub>
-
 ---
 
 ## The 30-second pitch
@@ -57,21 +32,17 @@ npx github:frdyx/maddu init
 
 ---
 
-## How it looks · how it moves
+## How it thinks · how it looks
 
-The 22-second demo above is the cockpit in motion — *live React/CSS, not screenshots*. If your client doesn't play the video inline, here are the two anchors that explain the rest of the visual language:
-
-- **[`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md)** — the canonical reference for every brand token (canvas, accents, typography), every component anatomy (rail group, KPI tile, palette row, proposal card, inspector tabs, …), the eight motion rules, the three responsive poses, the keyboard contract.
-
-- **The Workflows blueprint** — the cockpit's pure-SVG diagram of how Máddu thinks. Every node is a clickable route, every edge is an event type on the spine:
+The cockpit's mental model rendered as a pure-SVG diagram. Every node below is a clickable route in the running cockpit. Every edge is an event type on the append-only spine.
 
 <br/>
 
-<picture><img alt="Workflows blueprint — operator → BOSS / Enforcer → queue / claims → fleet → gates / reports → learning / wiki" src="brand/screenshots/workflows-blueprint.svg"></picture>
+<picture><img alt="Workflows blueprint — operator → BOSS / Enforcer → queue / claims → fleet → gates / reports → learning / wiki" src="docs/images/workflows-blueprint.svg"></picture>
 
 <br/>
 
-The video and the design-system doc are kept in lockstep. Tokens live in `template/maddu/cockpit/cockpit.css`, are mirrored to `marketing/video/src/tokens.ts`, and the design-system doc names every one of them. When the cockpit shifts, the doc and the video shift with it.
+For the rest of the visual language — every brand token, component anatomy, motion rule, responsive pose, and the keyboard contract — see **[`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md)**. It's the canonical reference that `template/maddu/cockpit/cockpit.css` writes against.
 
 ---
 
@@ -287,8 +258,7 @@ Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
 | [Five-minute tour](docs/18-first-slice.md) | [Slice-stop ritual](docs/08-slice-stop-ritual.md) | [Hard rules](docs/06-hard-rules.md) | [Upgrade policy](docs/upgrade-policy.md) |
 | [Cockpit tour](docs/04-cockpit-tour.md) | [Approvals & permissions](docs/09-approvals-and-permissions.md) | [Lanes](docs/lanes.md) | [Auth & imports](docs/12-auth-and-imports.md) |
 | [Troubleshooting](docs/13-troubleshooting.md) | [Skills & hindsight](docs/10-skills-and-hindsight.md) | [Validation checklist](docs/17-validation-checklist.md) | [Runtimes & MCP](docs/11-runtimes-and-mcp.md) |
-|  |  | [Design system](docs/DESIGN-SYSTEM.md) | [Marketing video](marketing/video/README.md) |
-|  |  | [Changelog](CHANGELOG.md) |  |
+|  |  | [Design system](docs/DESIGN-SYSTEM.md) | [Changelog](CHANGELOG.md) |
 
 ---
 
@@ -402,5 +372,3 @@ The framework is a witness, not an actor. It records what happens; it does not p
 **License:** Apache-2.0. See [`LICENSE`](LICENSE).
 
 **Contributing:** issues and PRs welcome. The framework is pre-1.0; expect tag-boundary changes. Slice-stops are how we record decisions — if you contribute a non-trivial change, run `maddu slice-stop` and include the summary in the PR description.
-
-**Brand assets:** [`brand/README.md`](brand/README.md). The mark is Spine Seal — a sealed lozenge segmented by two angular cuts; reads as seal, spine, and root in one primitive.
