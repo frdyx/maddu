@@ -45,6 +45,10 @@ Reference docs that are not in the numbered series:
   do-not-copy reference (including the distinction between forbidden
   cloud-gateway chat bridges and the local long-poll / outbound-only
   integrations that ship in v0.9.0+).
+- [`DESIGN-SYSTEM.md`](DESIGN-SYSTEM.md) — the canonical reference for
+  every brand token, component anatomy, motion principle, layout pose,
+  and accessibility commitment. Source of truth for both `cockpit.css`
+  and the marketing video.
 - [`lanes.md`](lanes.md) — default lane catalog.
 - [`upgrade-policy.md`](upgrade-policy.md) — what `maddu upgrade` touches.
 - [`maddu-v0.3-roadmap.md`](maddu-v0.3-roadmap.md) — phase A/B/C/D feature plan.

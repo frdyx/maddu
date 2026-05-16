@@ -25,11 +25,22 @@ npx github:frdyx/maddu init
 
 <br/>
 
-<picture>
-  <img alt="The four Conductor KPI tiles — active claims · parked gates · open approvals · time since last slice-stop" src="brand/screenshots/kpi-strip.svg">
-</picture>
+<!--
+  Demo video — the README references brand/screenshots/cockpit-demo.mp4.
+  To produce it, run the Remotion project in marketing/video/:
+      cd marketing/video && npm install && npm run render
+  The render lands the MP4 at the path below, then this `<video>` block
+  plays it inline on the GitHub repo landing page. Until you've rendered
+  it, the markdown gracefully shows the workflow blueprint instead.
+  See docs/DESIGN-SYSTEM.md and marketing/video/README.md.
+-->
 
-<sub align="center"><i>The Conductor route's KPI strip — first thing an operator sees on every boot. Pure SVG. Renders at <code>127.0.0.1:4177</code>.</i></sub>
+<video src="brand/screenshots/cockpit-demo.mp4" controls autoplay loop muted playsinline width="960">
+  <source src="brand/screenshots/cockpit-demo.mp4" type="video/mp4">
+  <a href="marketing/video/README.md">▶  22-second cockpit demo</a> — run <code>cd marketing/video && npm install && npm run render</code> to produce it.
+</video>
+
+<sub align="center"><i>22 seconds. Empty cockpit → first session → lane claim → BOSS proposal → slice-stop with the lime line tracing across. Rendered live from React/CSS via <a href="marketing/video/">Remotion</a>, in lockstep with <a href="docs/DESIGN-SYSTEM.md">the design system</a>. No screenshots, no fakes.</i></sub>
 
 ---
 
@@ -43,87 +54,21 @@ npx github:frdyx/maddu init
 
 ---
 
-## What it looks like
+## How it looks · how it moves
 
-Every component below renders inside the cockpit as **pure SVG / DOM** — no chart library, no design framework, no `<canvas>`. The previews here are the actual visual result, rendered at native size, using the same brand tokens that ship in `cockpit.css`.
+The 22-second demo above is the cockpit in motion — *live React/CSS, not screenshots*. If your client doesn't play the video inline, here are the two anchors that explain the rest of the visual language:
 
-### The Conductor surface
+- **[`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md)** — the canonical reference for every brand token (canvas, accents, typography), every component anatomy (rail group, KPI tile, palette row, proposal card, inspector tabs, …), the eight motion rules, the three responsive poses, the keyboard contract.
 
-<table width="100%">
-<tr>
-<td width="38%" valign="top" align="center">
-<picture><img alt="Left rail with the Decide group expanded — Conductor active, lime tick on the group heading, Approvals badge in amber" src="brand/screenshots/rail-group.svg" width="240"></picture>
-<br/><sub><b>Grouped rail.</b> Five phase-of-work clusters · active route gets a 2 px lime gutter · group heading gains a tick when its active route is selected.</sub>
-</td>
-<td width="62%" valign="top" align="center">
-<picture><img alt="Conductor next-command strip — claim cockpit-shell · dispatch button in lime" src="brand/screenshots/next-command.svg"></picture>
-<br/><sub><b>Next command.</b> The cockpit's one-line answer to <i>"what is safe to do next?"</i> — proposed action, session id, dispatch button. Reserved-lime CTA.</sub>
-</td>
-</tr>
-</table>
-
-<br/>
-
-<picture><img alt="Operation Score Matrix — three lane rows with progress bars and reason codes" src="brand/screenshots/score-matrix.svg"></picture>
-
-<sub><b>Operation Score Matrix.</b> Per-lane progress with reason codes. Tone reflects state — lime for healthy claims, ok-green for progressing, amber for parked at the queue head.</sub>
-
-### Command palette · sub-targets
-
-<table width="100%">
-<tr>
-<td width="50%" valign="top" align="center">
-<picture><img alt="Active palette result — Telegram sub-target in Settings · lime border · ▸ glyph · CONNECT group chip" src="brand/screenshots/palette-result.svg"></picture>
-<br/><sub><b>Active palette row.</b> <code>Ctrl + K</code> · type <code>tele</code> → <b>Telegram</b> surfaces as a sub-target with its own description, not the host Settings route.</sub>
-</td>
-<td width="50%" valign="top" align="center">
-<picture><img alt="Inspector tab strip with overview active" src="brand/screenshots/inspector-tabs.svg"></picture>
-<br/><sub><b>Inspector tabs.</b> Overview · Evidence · Actions · Related · Raw. Persistent right panel on desktop · slide-over on tablet · bottom sheet on mobile.</sub>
-</td>
-</tr>
-</table>
-
-### BOSS proposes · Enforcer cites
-
-<table width="100%">
-<tr>
-<td width="50%" valign="top" align="center">
-<picture><img alt="BOSS proposal card · low risk · approved" src="brand/screenshots/proposal-allowed.svg"></picture>
-<br/><sub><b>Allowed.</b> BOSS proposes <code>claim-lane</code> · Enforcer returns <code>claim_ok</code> · operator approves in one click. Approved proposals stay visible as audit trail.</sub>
-</td>
-<td width="50%" valign="top" align="center">
-<picture><img alt="BOSS proposal refused by the Enforcer — cites docs/hard-rules.md#no-token-export" src="brand/screenshots/proposal-refused.svg"></picture>
-<br/><sub><b>Refused.</b> Same operator, different proposal. Enforcer cites <code>docs/hard-rules.md#no-token-export</code> — the deterministic half points to a rule the operator can read.</sub>
-</td>
-</tr>
-</table>
-
-### Memory · agents · workflow
-
-<table width="100%">
-<tr>
-<td width="50%" valign="top" align="center">
-<picture><img alt="A single Learning fact row with rule kind pill and lane tag" src="brand/screenshots/learning-fact.svg"></picture>
-<br/><sub><b>Hindsight fact.</b> Every slice-stop's <code>--learnings</code> are auto-classified into <i>rule / constraint / discovery</i> and indexed under <code>.maddu/state/memory.ndjson</code>.</sub>
-</td>
-<td width="50%" valign="top" align="center">
-<picture><img alt="A single Agents coworker profile card with status pills" src="brand/screenshots/agent-card.svg"></picture>
-<br/><sub><b>Coworker card.</b> Role · current focus · score · claims held · heartbeat age · last slice summary. Every active session is searchable in the palette by its label.</sub>
-</td>
-</tr>
-</table>
+- **The Workflows blueprint** — the cockpit's pure-SVG diagram of how Máddu thinks. Every node is a clickable route, every edge is an event type on the spine:
 
 <br/>
 
 <picture><img alt="Workflows blueprint — operator → BOSS / Enforcer → queue / claims → fleet → gates / reports → learning / wiki" src="brand/screenshots/workflows-blueprint.svg"></picture>
 
-<sub><b>Workflows blueprint.</b> The mental model rendered as a pure-SVG diagram inside the cockpit. Every node is a clickable route. Every edge is an event type on the spine.</sub>
+<br/>
 
-### Signature motion
-
-<picture><img alt="The signature lime line at the top of the cockpit — fires for ~900 ms on every SLICE_STOP" src="brand/screenshots/slice-line.svg"></picture>
-
-<sub><b>The lime line.</b> One 2 px line traces left → right across the viewport top in ~900 ms on every <code>SLICE_STOP</code> event. Fires from every route. Honors <code>prefers-reduced-motion</code>. That's the whole motion budget — no confetti, no toasts, no spinners.</sub>
+The video and the design-system doc are kept in lockstep. Tokens live in `template/maddu/cockpit/cockpit.css`, are mirrored to `marketing/video/src/tokens.ts`, and the design-system doc names every one of them. When the cockpit shifts, the doc and the video shift with it.
 
 ---
 
@@ -339,6 +284,7 @@ Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
 | [Five-minute tour](docs/18-first-slice.md) | [Slice-stop ritual](docs/08-slice-stop-ritual.md) | [Hard rules](docs/06-hard-rules.md) | [Upgrade policy](docs/upgrade-policy.md) |
 | [Cockpit tour](docs/04-cockpit-tour.md) | [Approvals & permissions](docs/09-approvals-and-permissions.md) | [Lanes](docs/lanes.md) | [Auth & imports](docs/12-auth-and-imports.md) |
 | [Troubleshooting](docs/13-troubleshooting.md) | [Skills & hindsight](docs/10-skills-and-hindsight.md) | [Validation checklist](docs/17-validation-checklist.md) | [Runtimes & MCP](docs/11-runtimes-and-mcp.md) |
+|  |  | [Design system](docs/DESIGN-SYSTEM.md) | [Marketing video](marketing/video/README.md) |
 |  |  | [Changelog](CHANGELOG.md) |  |
 
 ---
