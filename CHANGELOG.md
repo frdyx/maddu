@@ -11,7 +11,51 @@ narrative summary.
 
 ---
 
-## [Unreleased] · spine-authoritative approvals (hard-rule-#2 alignment)
+## [Unreleased]
+
+### Spine integrity verifier
+
+**Trust the spine — and prove it.** With the previous slice making the
+spine the sole source of truth for approval decisions, the cost of
+silent spine corruption (botched manual edit, partial write on power
+loss, bad `git merge` resolution, disk-level surprise) just went up.
+This slice closes the audit chain: a read-only verifier that walks
+every NDJSON segment and confirms the spine is the well-formed,
+internally-consistent artifact the rest of the framework assumes it is.
+
+- **New `lib/verify.mjs::verifySpine()`** — single-pass walker over
+  every segment under `.maddu/events/`. Checks: parseability, envelope
+  shape (`v`/`id`/`ts`/`type`/`actor`/`lane`/`data`), event-id uniqueness
+  + format (exempts well-known fixed suffixes like `evt_…_init00`),
+  timestamp monotonicity within each segment, timestamp sanity (not >
+  now+60s, not before FRAMEWORK_INSTALLED), schema version (`v === 1`),
+  segment continuity (`…001` to `…N` with no gaps), and referential
+  integrity (orphan `APPROVAL_DECIDED`, dangling `LANE_RELEASED`,
+  unknown-session `SESSION_CLOSED`, missing `TASK_CREATED` for updates,
+  etc.). Doesn't call the projector — owns its own pass so verifier
+  failures surface even if the projector is broken.
+- **New `maddu spine` CLI verb** with two subcommands:
+  - `maddu spine verify [--json]` — walk + report. Exit `1` on FAIL,
+    `0` on PASS or WARN-only. `--json` emits the raw result for CI.
+  - `maddu spine show <eventId>` — pretty-print a single event from
+    the spine without piping NDJSON through `grep`. Useful when
+    `verify` flags something.
+- **Doctor `spine integrity` check** — runs `verifySpine` with a 50k
+  event cap on every doctor invocation. PASS when clean; WARN on
+  soft issues; FAIL bubbles to doctor's overall exit code. Above the
+  cap, WARN points at the explicit CLI for a full pass.
+- **`docs/hard-rules.md`** — adds the *Verifiable, not just declared*
+  paragraph under rule #2. Codifies the principle: the spine's status
+  as source of truth is operator-provable from a single CLI command.
+- **Strictly read-only.** No `maddu spine repair`. If verify flags
+  something, the operator decides remediation (manual edit + slice-stop,
+  `maddu checkpoint rollback`, etc.). The spine is sacred.
+
+Bridge load: zero new endpoints, zero new polls. The verifier is a
+CLI-only walker; doctor runs it once per invocation. ~50ms for typical
+spines, linear in event count.
+
+### Spine-authoritative approvals (hard-rule-#2 alignment)
 
 **The spine is now genuinely the source of truth for approval
 decisions.** Before this slice, per-repo auto-decides were *synthesized

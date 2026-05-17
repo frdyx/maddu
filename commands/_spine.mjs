@@ -44,7 +44,12 @@ export async function loadSpineLib() {
   // the request paths fall back to legacy behavior if it's missing.
   let approvals = null;
   try { approvals = await import(pathToFileURL(join(dir, 'approvals.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals };
+  // verify.mjs landed in v0.16 (spine integrity verifier). Optional-load
+  // so a newer global CLI can still run subcommands against an older
+  // install — `maddu spine verify` reports a clear error in that case.
+  let verify = null;
+  try { verify = await import(pathToFileURL(join(dir, 'verify.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify };
 }
 
 export async function resolveRepoRoot(paths) {
