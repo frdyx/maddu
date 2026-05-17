@@ -20,7 +20,7 @@ import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
 import {
   exists, frameworkOwnedFiles, sha256OfFile, readMadduJson, writeMadduJson,
-  frameworkVersion, TEMPLATE_ROOT
+  frameworkVersion, ensureShimExecutable, TEMPLATE_ROOT
 } from './_manifest.mjs';
 
 export default async function upgrade(argv) {
@@ -132,6 +132,13 @@ export default async function upgrade(argv) {
     managed: newManaged
   };
   await writeMadduJson(repoRoot, next);
+
+  // The project-local CLI shims (maddu/run, maddu/run.cmd) ride along
+  // with the managed manifest — they were either added in `actions.add`
+  // (pre-v0.14 install upgrading into v0.14+) or refreshed in `actions.update`
+  // (already had them). All we need to do here is re-set the POSIX execute
+  // bit, which `copyFile` doesn't preserve.
+  await ensureShimExecutable(repoRoot);
 
   // Append FRAMEWORK_UPGRADED to spine.
   const eventsSegment = join(repoRoot, '.maddu', 'events', '000000000001.ndjson');

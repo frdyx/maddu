@@ -18,15 +18,21 @@ on a fresh `maddu init`: needing a global install to invoke the CLI,
 and having to track the `ses_…` id by hand across every subsequent
 `heartbeat` / `close`.
 
-- **Project-local `./maddu` shims.** `init` now copies `bin/maddu.mjs`
-  + `commands/*.mjs` + `version.json` into the installed `maddu/` tree
-  and drops byte-stable `./maddu` (POSIX, chmod 755) and `./maddu.cmd`
-  (Windows) wrappers at the target repo root. `./maddu <cmd>` works
-  from inside the repo with zero global state. No `npm link`
+- **Project-local CLI shim.** `init` now copies `bin/maddu.mjs` +
+  `commands/*.mjs` + `version.json` into the installed `maddu/` tree
+  and ships two byte-stable wrappers there too: **`maddu/run` (POSIX,
+  chmod 755)** and **`maddu/run.cmd` (Windows)**. `./maddu/run <cmd>`
+  works from the repo root with zero global state. No `npm link`
   collisions between workspaces — each repo carries its own bundled
-  CLI. `maddu upgrade` keeps the bundled CLI in sync via the existing
-  managed manifest. The Next-steps block at the end of `init` now
-  reflects the new shim flow plus an optional `npm install -g` hint.
+  CLI. `maddu upgrade` keeps both the CLI and the shims in sync via
+  the existing managed manifest; `init` and `upgrade` call
+  `ensureShimExecutable()` to (re-)apply the POSIX execute bit, which
+  `copyFile` doesn't preserve.
+
+  (Earlier iterations of this slice dropped the shims at the repo
+  root as `./maddu` + `./maddu.cmd`, but `./maddu` on disk is the same
+  path as the `maddu/` runtime directory — every fresh init failed
+  with `EISDIR`. Replaced before any tagged release went out.)
 - **Active-session cache.** `session register` and the new
   `session start "<label>"` shorthand write the new id to
   `.maddu/state/session.active.json` (atomic via temp + rename).

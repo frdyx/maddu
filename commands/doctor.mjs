@@ -52,20 +52,31 @@ async function checkPort(host, port) {
   });
 }
 
-// Load the workspaces library from the framework template (always available
-// because doctor ships with the CLI).
-async function loadWorkspacesLib() {
+// Resolve a runtime lib file. Honors both layouts:
+//   1. Installed (commands/ alongside runtime/): <CLI-root>/runtime/lib/<name>
+//   2. Framework source (CLI at framework root): <framework>/template/maddu/runtime/lib/<name>
+// Mirrors _spine.mjs::libDir(). Returns null if neither path exists.
+async function resolveRuntimeLib(name) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const lib = join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'workspaces.mjs');
-  return await import(pathToFileURL(lib).href);
+  const cliRoot = join(__dirname, '..');
+  const installed = join(cliRoot, 'runtime', 'lib', name);
+  if (await exists(installed)) return installed;
+  const dev = join(cliRoot, 'template', 'maddu', 'runtime', 'lib', name);
+  if (await exists(dev)) return dev;
+  return null;
 }
 
-// Load the session-active library from the framework template. Returns null
-// on legacy installs where the file doesn't yet exist (pre-v0.14).
+async function loadWorkspacesLib() {
+  const p = await resolveRuntimeLib('workspaces.mjs');
+  if (!p) throw new Error('workspaces.mjs not found in runtime tree');
+  return await import(pathToFileURL(p).href);
+}
+
+// Returns null on legacy installs (pre-v0.14) where the file doesn't yet exist.
 async function loadSessionActiveLib() {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const lib = join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'session-active.mjs');
-  try { return await import(pathToFileURL(lib).href); } catch { return null; }
+  const p = await resolveRuntimeLib('session-active.mjs');
+  if (!p) return null;
+  try { return await import(pathToFileURL(p).href); } catch { return null; }
 }
 
 // Per-repo hard-rule + integrity checks. Returns an array of check objects.
@@ -168,33 +179,33 @@ async function runRepoChecks(repoRoot, label) {
     checks.push({ level: 'WARN', label: `${tagLabel}state containment`, detail: `leaked at repo root: ${leaks.join(', ')} — move into .maddu/` });
   }
 
-  // ── Project-local CLI shim (./maddu / ./maddu.cmd) ──
-  // Both shims are byte-stable files dropped by `maddu init` so the
-  // operator can run `./maddu <cmd>` from the repo root. Note: a
-  // *directory* named `maddu` always exists (the installed runtime
-  // tree), so we explicitly stat the path and check for `isFile()`.
-  // WARN if missing — never FAIL, since a global `maddu` install
-  // satisfies the same need.
+  // ── Project-local CLI shim (maddu/run + maddu/run.cmd) ──
+  // The shims ride with the managed manifest, so a clean install or
+  // upgrade always lands them. The one thing that can drift is the
+  // POSIX execute bit on maddu/run — `maddu init` and `maddu upgrade`
+  // chmod it 755, but a fresh git clone wouldn't preserve the bit.
+  // WARN if missing or non-executable — never FAIL, since a global
+  // `maddu` install satisfies the same need.
   async function shimFileStat(p) {
     try { const st = await stat(p); return st.isFile() ? st : null; } catch { return null; }
   }
-  const shimPosixStat = await shimFileStat(join(repoRoot, 'maddu'));
-  const shimWinStat = await shimFileStat(join(repoRoot, 'maddu.cmd'));
+  const shimPosixStat = await shimFileStat(join(repoRoot, 'maddu', 'run'));
+  const shimWinStat = await shimFileStat(join(repoRoot, 'maddu', 'run.cmd'));
   if (!shimPosixStat && !shimWinStat) {
     checks.push({
       level: 'WARN',
       label: `${tagLabel}cli shim`,
-      detail: 'no ./maddu or ./maddu.cmd at repo root — run `maddu init --force` to install'
+      detail: 'maddu/run and maddu/run.cmd both missing — run `maddu upgrade` or `maddu init --force`'
     });
   } else if (process.platform !== 'win32' && shimPosixStat) {
     const mode = shimPosixStat.mode & 0o777;
     if ((mode & 0o111) === 0) {
-      checks.push({ level: 'WARN', label: `${tagLabel}cli shim`, detail: './maddu not executable — `chmod +x ./maddu`' });
+      checks.push({ level: 'WARN', label: `${tagLabel}cli shim`, detail: 'maddu/run not executable — `chmod +x maddu/run` (or re-run `maddu upgrade`)' });
     } else {
-      checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: 'project-local ./maddu present + executable' });
+      checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: 'maddu/run present + executable' });
     }
   } else {
-    const which = [shimPosixStat && './maddu', shimWinStat && './maddu.cmd'].filter(Boolean).join(' + ');
+    const which = [shimPosixStat && 'maddu/run', shimWinStat && 'maddu/run.cmd'].filter(Boolean).join(' + ');
     checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: `${which} present` });
   }
 

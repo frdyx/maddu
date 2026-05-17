@@ -9,10 +9,11 @@
 //   .maddu/archive/  .maddu/lanes/claims.json  .maddu/lanes/project/
 //   .maddu/briefs/project/  .maddu/wiki/project/  .maddu/harness/project/
 
-import { readdir, readFile, stat, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile, mkdir, copyFile, chmod } from 'node:fs/promises';
 import { join, dirname, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { platform } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const FRAMEWORK_ROOT = join(__dirname, '..');
@@ -116,6 +117,17 @@ export async function writeMadduJson(repoRoot, obj) {
 export async function frameworkVersion() {
   const v = await readJson(join(FRAMEWORK_ROOT, 'version.json'));
   return v.version;
+}
+
+// Make the project-local CLI shim (maddu/run) executable on POSIX. The
+// shim file itself is part of the managed template tree (it ships in
+// every install + upgrade via the manifest), so this only handles the
+// one thing the manifest copy can't carry: the POSIX execute bit.
+// No-op on Windows.
+export async function ensureShimExecutable(repoRoot) {
+  if (platform() === 'win32') return;
+  const shimPath = join(repoRoot, 'maddu', 'run');
+  try { await chmod(shimPath, 0o755); } catch {}
 }
 
 // Copy a single file into the target repo, creating intermediate directories.

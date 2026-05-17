@@ -12,13 +12,13 @@
 //   6. Appends FRAMEWORK_INSTALLED to the spine.
 //   7. Adds Máddu's standard .gitignore entries (token paths, no-token-export).
 
-import { mkdir, readFile, writeFile, appendFile, chmod, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { platform } from 'node:os';
 import { parseFlags } from './_args.mjs';
 import {
   exists, frameworkOwnedFiles, copyFromTemplate, sha256OfFile,
-  readMadduJson, writeMadduJson, frameworkVersion, FRAMEWORK_ROOT, TEMPLATE_ROOT
+  readMadduJson, writeMadduJson, frameworkVersion, ensureShimExecutable,
+  FRAMEWORK_ROOT, TEMPLATE_ROOT
 } from './_manifest.mjs';
 
 const GITIGNORE_BLOCK = `
@@ -137,29 +137,17 @@ export default async function init(argv) {
     console.log(`  updated .gitignore (token paths only)`);
   }
 
-  // 7. Project-local CLI shims so the user can run `./maddu <cmd>` from the
-  //    repo root without a global install. Tiny, byte-stable wrappers that
-  //    point at maddu/bin/maddu.mjs — they're not in the managed manifest,
-  //    so `maddu upgrade` won't touch them.
-  const shimPosix = `#!/usr/bin/env bash\nexec node "$(dirname "$0")/maddu/bin/maddu.mjs" "$@"\n`;
-  const shimWin = `@echo off\r\nnode "%~dp0maddu\\bin\\maddu.mjs" %*\r\n`;
-  const shimPosixPath = join(cwd, 'maddu');
-  const shimWinPath = join(cwd, 'maddu.cmd');
-  const shimExists = (await exists(shimPosixPath)) || (await exists(shimWinPath));
-  if (!shimExists || force) {
-    await writeFile(shimPosixPath, shimPosix);
-    if (platform() !== 'win32') {
-      try { await chmod(shimPosixPath, 0o755); } catch {}
-    }
-    await writeFile(shimWinPath, shimWin);
-    console.log(`  installed ./maddu + ./maddu.cmd shims (project-local CLI)`);
-  }
+  // 7. Project-local CLI shim — the wrapper scripts ride with the template
+  //    (maddu/run + maddu/run.cmd) so they're already on disk from step 1.
+  //    Only the POSIX execute bit needs setting, since git/npm don't
+  //    preserve it through copy.
+  await ensureShimExecutable(cwd);
 
   console.log(`\nMáddu v${fwVersion} installed.`);
   console.log(`\nNext steps (from this repo):`);
-  console.log(`  ./maddu doctor                          # verify install`);
-  console.log(`  ./maddu start                           # boot bridge on 127.0.0.1:4177`);
-  console.log(`  ./maddu session start "first session"   # register + cache active session`);
+  console.log(`  ./maddu/run doctor                          # verify install`);
+  console.log(`  ./maddu/run start                           # boot bridge on 127.0.0.1:4177`);
+  console.log(`  ./maddu/run session start "first session"   # register + cache active session`);
   console.log(`\nOr to use 'maddu' as a bare command anywhere:`);
   console.log(`  npm install -g github:frdyx/maddu#v${fwVersion}`);
 }
