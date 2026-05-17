@@ -3396,3 +3396,44 @@ select option:hover,
     transition-duration: 0s !important;
   }
 }
+
+/* ─── Slice 3 — scope toggle + workspace badge ─────────────────────── */
+.scope-pill {
+  display: inline-flex;
+  gap: 0;
+  margin: 8px 0 14px;
+  border: 1px solid var(--m-line);
+  background: var(--m-bg-2);
+  border-radius: 999px;
+  padding: 2px;
+}
+.scope-pill .scope-btn {
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--m-fg-2);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.scope-pill .scope-btn:hover { color: var(--m-fg-1); }
+.scope-pill .scope-btn.active {
+  background: var(--m-accent);
+  color: #0a0e1a;
+  font-weight: 600;
+}
+.workspace-badge {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border: 1px solid var(--m-line);
+  border-radius: 999px;
+  background: var(--m-bg-2);
+  color: var(--m-fg-2);
+  vertical-align: baseline;
+}
