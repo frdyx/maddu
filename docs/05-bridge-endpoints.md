@@ -222,6 +222,51 @@ The long-poll endpoint is the substrate every live cockpit panel reuses.
 
 The Docs popup (opened with `?` from any route) reads these endpoints.
 
+## Workspaces (v0.13)
+
+These routes are **machine-scope** — they bypass the `X-Maddu-Workspace` header because they own the registry that defines workspaces.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET  | `/bridge/_workspaces`          | — | `{workspaces:[{id,label,path}], active, legacy}` |
+| POST | `/bridge/_workspaces/activate` | `{id}` | `{ok, active}` |
+
+### Per-request workspace selection
+
+Every other `/bridge/*` request honors an optional `X-Maddu-Workspace: <id>` header naming which mounted workspace the call is for. With no header, the bridge falls back to the registry's `active` field. The header value `_all` is reserved for fan-out reads under `/bridge/_all/*`.
+
+## All-workspaces fan-out (v0.13)
+
+Aggregate views across every mounted workspace. Each row is tagged with `workspace_id` + `workspace_label`. Set `X-Maddu-Workspace: _all`.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/bridge/_all/projection`      | merged projection (sessions, claims, tasks, workers, approvals, slice-stops…) |
+| GET | `/bridge/_all/conductor`       | merged KPIs + score matrix + Now/Next/Waiting/Done board |
+| GET | `/bridge/_all/approvals`       | merged `{open, ledger, policies}` |
+| GET | `/bridge/_all/queue`           | merged Scheduler / Queue / Dispatch / Preflights columns |
+| GET | `/bridge/_all/events/recent?limit=N` | merged tail across every spine, sorted by `ts` |
+
+Writes do not have an `_all` form. The cockpit pins approval decisions issued from "All" mode to the row's origin workspace via `X-Maddu-Workspace: <row.workspace_id>` on `POST /bridge/approvals/respond`.
+
+## Global crons + policies (v0.13)
+
+Machine-scope CRUD over `~/.config/maddu/global/{schedules.ndjson, policies.json}` (or `%APPDATA%\maddu\global\…`). Also bypasses workspace resolution.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET    | `/bridge/_global/schedules`              | — | `{schedules[]}` |
+| POST   | `/bridge/_global/schedules`              | `{title, natural?, cron?, action, targets?, enabled?, by?}` | `{ok, schedule}` |
+| POST   | `/bridge/_global/schedules/parse`        | `{text}` | `{cron}` |
+| POST   | `/bridge/_global/schedules/<id>/enable`  | — | `{ok, schedule}` |
+| POST   | `/bridge/_global/schedules/<id>/disable` | — | `{ok, schedule}` |
+| DELETE | `/bridge/_global/schedules/<id>`         | — | `{ok, id}` |
+| GET    | `/bridge/_global/policies`               | — | `{policies[]}` |
+| POST   | `/bridge/_global/policies`               | `{tool, lane?, decision}` (`decision ∈ allow-always|deny`) | `{ok, policy}` |
+| DELETE | `/bridge/_global/policies/<tool>@<lane|*>` | — | `{ok, id}` |
+
+When a global schedule fires, the bridge appends one action event per target workspace's spine with a top-level `triggered_by: { kind: 'global_schedule', id, fired_at }`. When a global policy auto-decides an approval, the resulting `APPROVAL_DECIDED` event carries `actor: 'global-policy'`, `reason: 'global-policy:<tool>@<lane|*>'`, and a matching `triggered_by` field.
+
 ## Auth and CORS
 
 - **Auth tokens.** None required in v0.3 — the bridge binds to `127.0.0.1` only and trusts the local OS. Adding token-based auth is on the roadmap for v0.4.

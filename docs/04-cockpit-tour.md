@@ -8,6 +8,8 @@ Every route long-polls `/bridge/events/wait` for live updates and re-fetches `/b
 
 The shell shows in every route:
 
+- **Workspace switcher** *(v0.13)* — dropdown above the rail nav, visible when ≥ 2 workspaces are registered. Selecting one re-renders every route against that workspace's data and persists the choice in `localStorage`. `Ctrl+K` also lists "Switch to workspace: …" entries. With one or zero workspaces (legacy single-repo mode), the switcher hides entirely.
+- **"All workspaces" scope pill** *(v0.13)* — on Conductor, Dashboard, Approvals, Agents, and Queue Board. Flips the route from the active workspace to an aggregate view across every mounted workspace; rows render with a small workspace badge. Approval decisions issued from "All" mode pin the write to the row's origin workspace via `X-Maddu-Workspace`, so the `APPROVAL_DECIDED` event lands on the correct spine. Hidden in single-workspace mode.
 - **Bridge signal** — green dot when online, gray when offline.
 - **Version, uptime, host, port** — from `/bridge/status`.
 - **Approvals badge** — open approvals count.

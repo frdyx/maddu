@@ -11,7 +11,11 @@ narrative summary.
 
 ---
 
-## [Unreleased] · multi-workspace cockpit (slices 1, 2, 3, 4, 5)
+## [Unreleased]
+
+_No changes yet._
+
+## [v0.13.0] · 2026-05-17 · multi-workspace cockpit
 
 **One bridge, every repo.** Lifts the bridge from one-bridge-per-repo to a
 machine-wide service that mounts N repos via a device-bound registry. Each

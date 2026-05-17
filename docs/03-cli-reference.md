@@ -75,6 +75,29 @@ $ maddu workspace show
 
 The cockpit's left rail header shows a workspace switcher when more than one workspace is registered; selecting one re-renders every route against that workspace's data. `Ctrl+K` also surfaces a "Switch to workspace: …" entry per registered workspace.
 
+## `maddu global`
+
+Manage **machine-scope** crons and standing approval policies. Stored at `~/.config/maddu/global/{schedules.ndjson, policies.json}` (or `%APPDATA%\maddu\global\…` on Windows). The bridge picks up changes on its next 30 s scheduler tick (schedules) or the next `APPROVAL_REQUESTED` (policies) — no restart required.
+
+```bash
+$ maddu global cron add --natural "every minute" --title "tick" \
+    [--cron "*/5 * * * *"] [--action inbox] [--value "…"] \
+    [--targets r1,r2]         # comma-separated; omit = all mounted workspaces
+    [--disabled]
+$ maddu global cron list
+$ maddu global cron show <id>
+$ maddu global cron enable | disable <id>
+$ maddu global cron remove <id>
+
+$ maddu global policy add --tool <name|*> --decision <allow-always|deny> [--lane <id|*>]
+$ maddu global policy list
+$ maddu global policy remove <tool>@<lane|*>
+```
+
+Global schedules fan out across every target workspace. Each fired action appends an event into that workspace's spine with a top-level `triggered_by: { kind: 'global_schedule', id, fired_at }`. Global policies are consulted only if no per-repo policy matches; on match they write a real `APPROVAL_DECIDED` event with `reason: 'global-policy:<tool>@<lane|*>'` and a matching `triggered_by` field. Per-repo `.maddu/` remains the sole source of truth — the global files are device-local pointers.
+
+See [19-multi-workspace.md](19-multi-workspace.md) for the full operator flow.
+
 ## `maddu status`
 
 Print a state snapshot — repo root, spine event count, active sessions, lane claims, recent slice-stops.
