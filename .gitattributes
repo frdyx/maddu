@@ -1,0 +1,4 @@
+# Project-local POSIX CLI shim: must keep LF endings, otherwise the
+# `#!/usr/bin/env bash` shebang line gets `\r` appended on Linux/macOS
+# checkouts coming from a Windows clone and the kernel rejects it.
+template/maddu/run text eol=lf

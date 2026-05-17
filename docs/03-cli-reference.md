@@ -124,10 +124,10 @@ $ maddu session list
 **Active-session cache** *(v0.14+)*. `register` and `start` write the new id to `.maddu/state/session.active.json`. `heartbeat` and `close` consult that file when `--session` is omitted, so the typical flow is:
 
 ```bash
-$ ./maddu session start "morning slice"
+$ ./maddu/run session start "morning slice"
 ses_...
-$ ./maddu session heartbeat --focus "halfway"      # no --session flag
-$ ./maddu session close --handoff "wrap"           # clears the cache
+$ ./maddu/run session heartbeat --focus "halfway"      # no --session flag
+$ ./maddu/run session close --handoff "wrap"           # clears the cache
 ```
 
 The cache is a *UX hint*, not source of truth — the spine is authoritative. If the cache points at a session that's already closed in the spine, the CLI clears the file and exits 3 with a helpful message. `maddu doctor` proactively WARNs on stale caches. If you run parallel shells against the same repo, pass `--session <id>` explicitly in each.
