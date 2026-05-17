@@ -23,10 +23,16 @@ $ npx github:frdyx/maddu init
 
 This drops two things into your repo:
 
-- `maddu/` — framework-owned runtime and cockpit. Overwritten by `maddu upgrade`.
+- `maddu/` — framework-owned runtime, cockpit, and CLI. Overwritten by `maddu upgrade`.
 - `.maddu/` — all your state. Never overwritten.
 
-Plus `maddu.json` at the repo root, which records the framework version and a content-hash manifest of every managed file.
+Plus `maddu.json` (framework version + content-hash manifest) and two byte-stable CLI shims at the repo root: `./maddu` (POSIX, executable) and `./maddu.cmd` (Windows). They wrap `node maddu/bin/maddu.mjs "$@"` so you can run `./maddu <cmd>` without a global install. If you prefer `maddu` as a bare command anywhere, also run:
+
+```bash
+$ npm install -g github:frdyx/maddu#v<version>
+```
+
+Both modes work side-by-side. The rest of this guide uses `./maddu …` to match the install output's `Next steps:` block.
 
 ## 2. Verify
 
@@ -51,16 +57,25 @@ Open <http://127.0.0.1:4177> in any browser. You should see the cockpit — a da
 In another terminal:
 
 ```bash
-$ maddu session register --role implementer --label "First session" --focus "exploring"
+$ ./maddu session start "First session"
 ses_2026...01
+  (active session cached — 'maddu session heartbeat' / 'close' default to this)
 ```
 
-Save the printed session id. You'll reference it in subsequent commands.
-
-You can also see active sessions in the cockpit under the Workbench's left rail, or run:
+`session start "<label>"` is a one-line shorthand around `session register` (it defaults `--role` to `implementer` and `--focus` to the label). It also writes the new id to `.maddu/state/session.active.json`, so subsequent `heartbeat` / `close` calls don't need `--session`:
 
 ```bash
-$ maddu session list
+$ ./maddu session heartbeat --focus "halfway"
+$ ./maddu session active            # prints the cached id
+$ ./maddu session close --handoff "wrap"   # clears the cache
+```
+
+If you want to set role / focus / lane / runtime explicitly, use the longer `./maddu session register --role implementer --label "…" --focus "…" --runtime <name>` form — it also populates the active cache. The cache is per-repo and per-machine; it never leaves `.maddu/state/`.
+
+You can see active sessions in the cockpit under the Workbench's left rail, or run:
+
+```bash
+$ ./maddu session list
 ```
 
 ## 5. Claim a lane
@@ -116,8 +131,8 @@ $ maddu memory list --limit 10
 ## 8. Close the session
 
 ```bash
-$ maddu lane release --lane harness --session ses_2026...01
-$ maddu session close --session ses_2026...01 --handoff "Done with hello-world"
+$ ./maddu lane release --lane harness --session ses_2026...01
+$ ./maddu session close --handoff "Done with hello-world"     # uses cached session id
 ```
 
 ## Where to go next

@@ -43,14 +43,40 @@ async function* walk(dir) {
 }
 
 // Returns the list of framework-owned file paths relative to the target repo.
-// Mirrors template/ → target structure. Always uses forward slashes for the
-// manifest keys (cross-platform stability).
+// Each entry is { relPath, absSource } — relPath is where the file will live in
+// the target repo (with forward slashes for cross-platform manifest stability),
+// absSource is the absolute path to read from on this framework checkout.
+//
+// Three roots get mirrored into the target's maddu/ directory:
+//   template/maddu/**  →  maddu/**          (runtime + cockpit)
+//   bin/**             →  maddu/bin/**      (CLI entry; lets ./maddu shim work)
+//   commands/**        →  maddu/commands/** (CLI subcommand handlers)
+// Plus version.json so the installed CLI can self-report.
 export async function frameworkOwnedFiles() {
   const out = [];
-  if (!(await exists(TEMPLATE_MADDU))) return out;
-  for await (const abs of walk(TEMPLATE_MADDU)) {
-    const rel = relative(TEMPLATE_ROOT, abs).split(sep).join('/');
-    out.push({ relPath: rel, absSource: abs });
+  if (await exists(TEMPLATE_MADDU)) {
+    for await (const abs of walk(TEMPLATE_MADDU)) {
+      const rel = relative(TEMPLATE_ROOT, abs).split(sep).join('/');
+      out.push({ relPath: rel, absSource: abs });
+    }
+  }
+  const BIN_DIR = join(FRAMEWORK_ROOT, 'bin');
+  if (await exists(BIN_DIR)) {
+    for await (const abs of walk(BIN_DIR)) {
+      const rel = 'maddu/bin/' + relative(BIN_DIR, abs).split(sep).join('/');
+      out.push({ relPath: rel, absSource: abs });
+    }
+  }
+  const COMMANDS_DIR = join(FRAMEWORK_ROOT, 'commands');
+  if (await exists(COMMANDS_DIR)) {
+    for await (const abs of walk(COMMANDS_DIR)) {
+      const rel = 'maddu/commands/' + relative(COMMANDS_DIR, abs).split(sep).join('/');
+      out.push({ relPath: rel, absSource: abs });
+    }
+  }
+  const versionJson = join(FRAMEWORK_ROOT, 'version.json');
+  if (await exists(versionJson)) {
+    out.push({ relPath: 'maddu/version.json', absSource: versionJson });
   }
   return out;
 }
@@ -92,10 +118,20 @@ export async function frameworkVersion() {
   return v.version;
 }
 
-// Copy a single file from template/ into the target repo, creating intermediate
-// directories. Returns the destination absolute path.
-export async function copyFromTemplate(repoRoot, relPath) {
-  const src = join(TEMPLATE_ROOT, relPath);
+// Copy a single file into the target repo, creating intermediate directories.
+// Accepts either a string (legacy: path relative to template/) or a manifest
+// entry { relPath, absSource } so callers can copy from bin/, commands/, or
+// any other framework root without re-deriving the source path.
+// Returns the destination absolute path.
+export async function copyFromTemplate(repoRoot, entry) {
+  let relPath, src;
+  if (typeof entry === 'string') {
+    relPath = entry;
+    src = join(TEMPLATE_ROOT, entry);
+  } else {
+    relPath = entry.relPath;
+    src = entry.absSource || join(TEMPLATE_ROOT, relPath);
+  }
   const dst = join(repoRoot, relPath);
   await mkdir(dirname(dst), { recursive: true });
   await copyFile(src, dst);

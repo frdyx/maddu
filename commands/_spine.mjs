@@ -34,7 +34,12 @@ export async function loadSpineLib() {
   const checkpoints = await import(pathToFileURL(join(dir, 'checkpoints.mjs')).href);
   const auth = await import(pathToFileURL(join(dir, 'auth.mjs')).href);
   const imports = await import(pathToFileURL(join(dir, 'imports.mjs')).href);
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports };
+  // session-active.mjs landed in v0.14. Older installs don't have it —
+  // make it optional so the new global CLI can still run subcommands
+  // that don't need it (heartbeat/close still work via --session).
+  let sessionActive = null;
+  try { sessionActive = await import(pathToFileURL(join(dir, 'session-active.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive };
 }
 
 export async function resolveRepoRoot(paths) {
