@@ -11,7 +11,7 @@ narrative summary.
 
 ---
 
-## [Unreleased] · multi-workspace cockpit (slices 1, 2, 3, 5)
+## [Unreleased] · multi-workspace cockpit (slices 1, 2, 3, 4, 5)
 
 **One bridge, every repo.** Lifts the bridge from one-bridge-per-repo to a
 machine-wide service that mounts N repos via a device-bound registry. Each
@@ -61,8 +61,44 @@ repo's spine remains the sole source of truth for that repo.
   the `APPROVAL_DECIDED` event lands on the correct spine even when the
   active workspace differs.
 
-Slice 4 (global crons + policies under `~/.config/maddu/global/` with
-`triggered_by` ancestry on the spine) is queued as a follow-up PR.
+- **Global crons + policies** (slice 4) — machine-scope orchestration
+  state under `~/.config/maddu/global/` (or `%APPDATA%\maddu\global\`).
+  `schedules.ndjson` follows the same put/remove projection as per-repo
+  schedules with an added `targets: [workspaceId, ...]` field (omitted
+  or empty = every mounted workspace). `policies.json` is a flat array
+  of `{ tool, lane?, decision, setAt, setBy }` rows. A new
+  `lib/global.mjs` module owns CRUD; `schedule.mjs` gains `tickGlobal()`
+  which the bridge's 30 s scheduler loop invokes alongside the per-repo
+  tick.
+- **`triggered_by` ancestry on the spine** — `spine.append()` now passes
+  an optional top-level `triggered_by` field straight through to the
+  NDJSON line. Each event written *because of* a global trigger carries
+  `triggered_by: { kind: 'global_schedule' | 'global_policy', id, fired_at }`,
+  so per-repo spines remain authoritative but record the cross-workspace
+  cause.
+- **Approval auto-decide cascade** — `/bridge/approvals/request` now
+  first lets the per-repo projector auto-decide (existing behavior); if
+  no per-repo policy matches, it consults global policies and, on
+  match, appends a real `APPROVAL_DECIDED` event with
+  `actor: 'global-policy'`, `reason: 'global-policy:<tool>@<lane|*>'`,
+  and the `triggered_by` field.
+- **New `/bridge/_global/*` endpoints** — CRUD for global schedules
+  (`GET`/`POST` `/bridge/_global/schedules`, `POST /…/parse`,
+  `POST /…/<id>/enable|disable`, `DELETE /…/<id>`) and policies
+  (`GET`/`POST` `/bridge/_global/policies`, `DELETE /…/<id>`). Routes
+  bypass the workspace resolver — same machine-scope pattern as
+  `/bridge/_workspaces`.
+- **`maddu global` CLI** — new verb: `cron add|list|show|enable|disable|remove`
+  and `policy add|list|remove`. Direct file I/O via `lib/global.mjs`;
+  no bridge round-trip required. Bridge picks up changes on its next
+  30 s tick (schedules) or the next `APPROVAL_REQUESTED` (policies).
+- **Cockpit Schedule route** — scope pill flips list and create form
+  between this-workspace and global. Global rows show a `targets` row
+  with workspace chips (or `(all workspaces)` for empty).
+- **Cockpit Approvals route** — new "Standing policies (global)" panel
+  reads `/bridge/_global/policies`. Decision-ledger entries with
+  `reason` starting `global-policy:` render a tinted "global" chip
+  inline.
 
 ## [v0.12.0] · 2026-05-17 · depth-upgrade complete
 

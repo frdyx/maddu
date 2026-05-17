@@ -182,13 +182,14 @@ export async function ensureSpine(repoRoot) {
   return paths;
 }
 
-export async function append(repoRoot, { type, actor = null, lane = null, data = {} }) {
+export async function append(repoRoot, { type, actor = null, lane = null, data = {}, triggered_by = null }) {
   if (!EVENT_TYPES[type]) {
     throw new Error(`unknown event type: ${type}`);
   }
   const paths = await ensureSpine(repoRoot);
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
+  if (triggered_by) ev.triggered_by = triggered_by;
   const seg = await currentSegment(paths);
   await appendFile(join(paths.events, seg), JSON.stringify(ev) + '\n');
   return ev;
