@@ -232,6 +232,82 @@ async function runRepoChecks(repoRoot, label) {
     // No cache file is the normal idle state — no check row in that case.
   }
 
+  // ── Approval ledger completeness ──
+  // Legacy spines (pre-v0.15) auto-decided approvals in the projector
+  // without ever appending an APPROVAL_DECIDED event. After the v0.15
+  // upgrade those decisions are missing from the ledger. Scan the spine:
+  // for every APPROVAL_REQUESTED without a paired APPROVAL_DECIDED and
+  // *some* policy that would have matched it, surface a WARN telling the
+  // operator to run the migration tool. Never FAIL — the system still
+  // functions; this just means audit completeness needs one CLI call.
+  {
+    const eventsPath = join(repoRoot, '.maddu', 'events');
+    let evs = [];
+    try {
+      const segs = await readdir(eventsPath);
+      for (const seg of segs.sort()) {
+        const text = await readFile(join(eventsPath, seg), 'utf8');
+        for (const line of text.split('\n')) {
+          if (!line.trim()) continue;
+          try { evs.push(JSON.parse(line)); } catch {}
+        }
+      }
+    } catch {}
+    if (evs.length) {
+      const matchK = (m, t, l) => `${t || '*'}@${l || '*'}`;
+      const find = (pols, t, l) => pols.get(matchK(t, l)) || pols.get(matchK(t, '*')) || pols.get(matchK('*', l)) || pols.get(matchK('*', '*')) || null;
+      const policies = new Map();
+      const decided = new Set();
+      let needsMigration = 0;
+      for (const ev of evs) {
+        if (ev.type === 'APPROVAL_POLICY_SET') {
+          const { tool, lane, decision } = ev.data || {};
+          const k = matchK(tool, lane);
+          if (decision === 'clear') policies.delete(k);
+          else policies.set(k, { decision });
+        } else if (ev.type === 'APPROVAL_DECIDED' && ev.data?.approvalId) {
+          decided.add(ev.data.approvalId);
+        } else if (ev.type === 'APPROVAL_REQUESTED') {
+          const m = find(policies, ev.data?.tool, ev.lane);
+          if (m && (m.decision === 'allow-always' || m.decision === 'deny')) {
+            // Tentatively unpaired — confirmed only after full scan.
+            if (!decided.has(ev.id)) needsMigration++;
+          }
+        }
+      }
+      // Recompute properly: decided may include later events. Walk again
+      // checking final decided set.
+      let unpaired = 0;
+      const policies2 = new Map();
+      for (const ev of evs) {
+        if (ev.type === 'APPROVAL_POLICY_SET') {
+          const { tool, lane, decision } = ev.data || {};
+          const k = matchK(tool, lane);
+          if (decision === 'clear') policies2.delete(k);
+          else policies2.set(k, { decision });
+        } else if (ev.type === 'APPROVAL_REQUESTED') {
+          const m = find(policies2, ev.data?.tool, ev.lane);
+          if (m && (m.decision === 'allow-always' || m.decision === 'deny') && !decided.has(ev.id)) {
+            unpaired++;
+          }
+        }
+      }
+      if (unpaired > 0) {
+        checks.push({
+          level: 'WARN',
+          label: `${tagLabel}approval ledger completeness`,
+          detail: `${unpaired} legacy auto-decision(s) without spine events — run \`maddu approval migrate-legacy-decisions\``
+        });
+      } else {
+        checks.push({
+          level: 'PASS',
+          label: `${tagLabel}approval ledger completeness`,
+          detail: 'every auto-decision has a spine event'
+        });
+      }
+    }
+  }
+
   // ── Rule #8: no duplicate active lane claims ──
   const claimsPath = join(repoRoot, '.maddu', 'lanes', 'claims.json');
   if (await exists(claimsPath)) {

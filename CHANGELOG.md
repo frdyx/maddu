@@ -11,9 +11,50 @@ narrative summary.
 
 ---
 
-## [Unreleased]
+## [Unreleased] · spine-authoritative approvals (hard-rule-#2 alignment)
 
-_No changes yet._
+**The spine is now genuinely the source of truth for approval
+decisions.** Before this slice, per-repo auto-decides were *synthesized
+by the projector at read time* — no `APPROVAL_DECIDED` event ever
+landed in the spine for them. That violated hard rule #2 in spirit:
+forensic queries had no anchor event, projector logic changes could
+silently rewrite history, and replay on a different machine could
+produce a different ledger. The global-policy work in v0.13 quietly got
+this right; the per-repo path was older and had not yet been brought up
+to standard.
+
+- **New `lib/approvals.mjs::maybeAutoDecide()`** — shared helper called
+  by both the bridge handler (`/bridge/approvals/request`) and the CLI
+  (`maddu approval request`) the moment an `APPROVAL_REQUESTED` event
+  lands. On a per-repo or global policy match, it appends a real
+  `APPROVAL_DECIDED` event with `actor: 'policy' | 'global-policy'`
+  and a top-level `triggered_by: { kind, id, fired_at }` field.
+- **Projector synthesis removed** — the auto-decide block in
+  `projections.mjs` is gone. The projector is now a pure spine reader;
+  every entry in `proj.approvals.ledger` traces back to a real
+  `APPROVAL_DECIDED` event.
+- **`maddu approval migrate-legacy-decisions [--dry-run]`** — one-shot,
+  append-only, idempotent CLI tool. Streams the spine once, replays
+  the historical policy map up to each `APPROVAL_REQUESTED`, and
+  appends a real decision event for every legacy implicit decision
+  with `actor: 'policy-migrated'` and
+  `triggered_by: { kind: 'policy_migration', id, fired_at,
+  original_request, original_ts }`. Refuses to run while the bridge is
+  on port 4177 (avoids concurrent NDJSON writers).
+- **Doctor `approval ledger completeness` check** — surfaces unpaired
+  legacy auto-decisions as `WARN` with a one-line remediation hint
+  (`run maddu approval migrate-legacy-decisions`). PASS when every
+  auto-decision in the spine has its `APPROVAL_DECIDED` event.
+- **Hard-rule documentation** — `docs/hard-rules.md` rule #2 gains a
+  *Derived ≠ projected* clarification: projections summarize, they
+  don't infer; decisions must be appended as real events.
+- **API addition** — `/bridge/approvals/request` response now includes
+  `autoDecideSource: 'policy' | 'global-policy' | null` so callers can
+  distinguish per-repo from global matches. Backwards compatible.
+
+Bridge load: zero new endpoints, zero new polls. The `maybeAutoDecide`
+helper re-projects once per request (already the case before this
+slice). The migration tool is a CLI-only one-shot.
 
 ## [v0.14.0] · 2026-05-18 · onboarding ergonomics
 
