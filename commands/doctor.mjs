@@ -79,6 +79,13 @@ async function loadSessionActiveLib() {
   try { return await import(pathToFileURL(p).href); } catch { return null; }
 }
 
+// Returns null on installs without the verifier (pre-v0.16).
+async function loadVerifyLib() {
+  const p = await resolveRuntimeLib('verify.mjs');
+  if (!p) return null;
+  try { return await import(pathToFileURL(p).href); } catch { return null; }
+}
+
 // Per-repo hard-rule + integrity checks. Returns an array of check objects.
 // Pulled out of the main function so the same logic can run once for the
 // cwd repo or N times for every registered workspace.
@@ -306,6 +313,55 @@ async function runRepoChecks(repoRoot, label) {
         });
       }
     }
+  }
+
+  // ── Spine integrity ──
+  // Walk every segment (up to a 50k-event cap, so doctor stays fast on
+  // very long-running repos) and check parseability, id uniqueness,
+  // segment continuity, and referential integrity. Above the cap,
+  // emit a WARN pointing at the explicit `maddu spine verify` CLI.
+  // Full check from CLI: `maddu spine verify` (no cap).
+  try {
+    const verifyLib = await loadVerifyLib();
+    if (verifyLib) {
+      const SPINE_CAP = 50000;
+      const r = await verifyLib.verifySpine(repoRoot, { maxEvents: SPINE_CAP });
+      if (r.capped) {
+        checks.push({
+          level: 'WARN',
+          label: `${tagLabel}spine integrity`,
+          detail: `>${SPINE_CAP.toLocaleString()} events — run \`maddu spine verify\` manually for full check`
+        });
+      } else if (r.counts.FAIL > 0) {
+        const fails = r.counts.FAIL;
+        const warns = r.counts.WARN;
+        const wpart = warns > 0 ? ` · ${warns} warn${warns === 1 ? '' : 's'}` : '';
+        checks.push({
+          level: 'FAIL',
+          label: `${tagLabel}spine integrity`,
+          detail: `${fails} fail${fails === 1 ? '' : 's'}${wpart} — run \`maddu spine verify\` for detail`
+        });
+      } else if (r.counts.WARN > 0) {
+        const warns = r.counts.WARN;
+        checks.push({
+          level: 'WARN',
+          label: `${tagLabel}spine integrity`,
+          detail: `${warns} warn${warns === 1 ? '' : 's'} — run \`maddu spine verify\` for detail`
+        });
+      } else {
+        checks.push({
+          level: 'PASS',
+          label: `${tagLabel}spine integrity`,
+          detail: `${r.events.toLocaleString()} events · ${r.segments.length} segment${r.segments.length === 1 ? '' : 's'} · 0 fails · 0 warns`
+        });
+      }
+    }
+  } catch (err) {
+    checks.push({
+      level: 'WARN',
+      label: `${tagLabel}spine integrity`,
+      detail: `verifier error: ${err.message}`
+    });
   }
 
   // ── Rule #8: no duplicate active lane claims ──

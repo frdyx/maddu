@@ -302,6 +302,25 @@ $ maddu schedule tick [--at <ISO>]                  # run one poller pass now
 $ maddu schedule remove <id>
 ```
 
+## `maddu spine`
+
+Verify integrity of the append-only event spine, or look up a single event by id. Read-only — never mutates `.maddu/events/`.
+
+```bash
+$ maddu spine verify [--json]
+$ maddu spine show <eventId>
+```
+
+`verify` walks every segment under `.maddu/events/` and runs the checks described in the *Verifiable, not just declared* paragraph of [hard-rules.md](hard-rules.md) — parseability, envelope shape, event-id uniqueness, id-format (with exemptions for well-known fixed-suffix events like `evt_…_init00`), timestamp monotonicity within each segment, schema-version consistency, segment continuity, and referential integrity (orphan `APPROVAL_DECIDED`, dangling `LANE_RELEASED`, unknown-session `SESSION_CLOSED`, etc.).
+
+Exit code: `0` on a clean run or WARN-only run; `1` if any FAIL. `--json` emits the raw verifier result for tooling — useful in CI pipelines.
+
+`show <eventId>` pretty-prints the matching event from the spine. Exit `0` on find, `1` on miss. Useful when `verify` flags an event id and you want to inspect it without piping NDJSON through `grep`.
+
+`maddu doctor` calls into the verifier on every run, up to a 50k-event cap (configurable in the verifier's `maxEvents` option). Above the cap, doctor emits a `WARN` pointing at `maddu spine verify` for the full pass — keeps doctor fast on long-running repos without dropping the check entirely.
+
+The verifier is strictly read-only. If it flags an issue, the operator decides remediation (manual edit + slice-stop, `maddu checkpoint rollback`, etc.). There is no `maddu spine repair` — and won't be, by design.
+
 ## `maddu search`
 
 Cross-corpus search over the spine, slice-stops, memory, skills, mailbox, and inbox.

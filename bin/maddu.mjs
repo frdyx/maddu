@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -49,6 +49,7 @@ Commands:
   import         Subcommands: submit | scan | list | rejections. (Phase D2)
   workspace      Subcommands: add | list | remove | activate | show. (Multi-workspace cockpit)
   global         Subcommands: cron <add|list|show|enable|disable|remove> | policy <add|list|remove>. (Multi-workspace, machine-scope)
+  spine          Subcommands: verify [--json] | show <eventId>. Integrity check + event lookup against the append-only spine.
 
 Flags:
   --version      Print framework version.
