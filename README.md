@@ -7,7 +7,7 @@
 **The Source of local truth.** A local-first, files-only framework for orchestrating AI agents inside any git repo.
 
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-D0FF00?style=flat-square&labelColor=050B17)](LICENSE)
-[![Version 0.12.0](https://img.shields.io/badge/version-0.12.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.13.0](https://img.shields.io/badge/version-0.13.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-F04E23?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Files-only](https://img.shields.io/badge/state-files--only-F5F1E8?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
 [![No cloud](https://img.shields.io/badge/cloud-no-FF5E7A?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
@@ -78,6 +78,35 @@ your-repo/
 ```
 
 Nothing else in your repo is touched. `.gitignore` gets one stanza added for OS auth paths only.
+
+---
+
+## Multi-workspace (v0.13.0)
+
+One bridge, every repo. Register multiple `maddu`-installed repos and the same `127.0.0.1:4177` mounts all of them. Each repo's `.maddu/` remains the sole source of truth — the registry is just a device-local pointer file.
+
+```bash
+$ maddu workspace add ~/code/repo-a
+$ maddu workspace add ~/code/repo-b
+$ maddu workspace list
+WORKSPACES  (2)  registry: ~/.config/maddu/workspaces.json
+  ● repo-a                 repo-a              ~/code/repo-a
+    repo-b                 repo-b              ~/code/repo-b
+$ maddu start
+  workspaces: 2 mounted (registry: …)
+    ● repo-a   ~/code/repo-a
+      repo-b   ~/code/repo-b
+```
+
+In the cockpit:
+
+- **Rail switcher** — dropdown above the nav (shown when ≥ 2 workspaces are registered). Selection persists in `localStorage`. `Ctrl+K` also lists "Switch to workspace: …" entries.
+- **"All workspaces" scope pill** — on Conductor, Dashboard, Approvals, Agents, and Queue Board. Aggregates rows across every mounted workspace and tags each one with a workspace badge. Approval decisions issued from "All" mode land on the **origin** workspace's spine, not the active one.
+- **Global crons + policies** (`maddu global cron|policy …`) — machine-scope state under `~/.config/maddu/global/` that fans out across N workspaces. Every event written *because of* a global trigger carries a top-level `triggered_by: { kind, id, fired_at }` field so the per-repo spine records the cross-workspace cause.
+
+Full operator guide: [`docs/19-multi-workspace.md`](docs/19-multi-workspace.md).
+
+With no registry, the bridge falls back to walking up from `cwd` for a single `.maddu/` — existing single-repo installs work unchanged.
 
 ---
 
@@ -153,7 +182,7 @@ Every route renders summary widgets via a **pure-SVG widget kit** (no chart libr
 $ npx github:frdyx/maddu init
 ✓ .maddu/ skeleton created
 ✓ maddu/ runtime + cockpit installed
-✓ maddu.json written  (framework 0.12.0)
+✓ maddu.json written  (framework 0.13.0)
 
 # 2.  Verify install integrity + hard-rule compliance
 $ maddu doctor
@@ -165,7 +194,7 @@ $ maddu doctor
 
 # 3.  Boot the bridge
 $ maddu start
-Máddu  v0.12.0  ·  http://127.0.0.1:4177  ·  pid 84711
+Máddu  v0.13.0  ·  http://127.0.0.1:4177  ·  pid 84711
 
 # 4.  Open the cockpit in your browser
 $ open http://127.0.0.1:4177
@@ -207,6 +236,8 @@ maddu checkpoint     create / rollback / list.
 maddu import         submit / scan / list.
 maddu events         append / poll / wait.
 maddu search         <query>.
+maddu workspace      add / list / remove / activate / show.   (v0.13)
+maddu global         cron <add|list|show|enable|disable|remove>  ·  policy <add|list|remove>.   (v0.13)
 ```
 
 Full reference with flags + examples: [`docs/03-cli-reference.md`](docs/03-cli-reference.md).
@@ -283,6 +314,18 @@ Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
 
 - ✓ **Slice ζ** — Telegram bridge (long-poll, no public webhook) (`v0.9.0`)
 - ✓ **Slice η** — Discord + Email outbound-only bridges (`v0.10.0`)
+
+**v0.13 — multi-workspace cockpit** *(complete)*
+
+- ✓ Device-local `maddu workspace` registry; one bridge mounts N repos
+- ✓ Rail workspace switcher + `Ctrl+K` "Switch to workspace: …" actions
+- ✓ "All workspaces" aggregate views on Conductor, Dashboard, Approvals,
+  Agents, Queue Board (`/bridge/_all/*` fan-out)
+- ✓ Cross-workspace approval decisions land on the origin spine
+- ✓ Global crons + policies under `~/.config/maddu/global/` (`maddu global`)
+- ✓ `triggered_by` ancestry on the spine — every event written because
+  of a global trigger records its cause without breaking the
+  one-source-of-truth invariant
 
 **v0.11–v0.12 — cockpit polish + sub-target system** *(complete)*
 
