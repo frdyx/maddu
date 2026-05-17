@@ -602,6 +602,45 @@ async function fetchWorkspaces() {
   } catch { return null; }
 }
 
+// ─── Slice 3 — per-route scope toggle (one workspace vs all) ───────────
+// Each toggle-aware renderer asks scopeShouldShow() to decide whether to
+// surface the pill (hidden in legacy or single-workspace mode). The
+// "all" mode redirects fetches to /bridge/_all/* — the fetch shim already
+// injects X-Maddu-Workspace: _all on those URLs so no per-call plumbing
+// is needed except for cross-workspace writes (e.g. approval decisions),
+// where the caller passes an explicit workspaceId header.
+function scopeKey(route) { return `maddu.scope.${route}`; }
+function scopeShouldShow() {
+  if (!_workspacesCache) return false;
+  if (_workspacesCache.legacy) return false;
+  return (_workspacesCache.workspaces || []).length >= 2;
+}
+function getScope(route) {
+  if (!scopeShouldShow()) return 'one';
+  try { return localStorage.getItem(scopeKey(route)) || 'one'; } catch { return 'one'; }
+}
+function setScope(route, s) { try { localStorage.setItem(scopeKey(route), s); } catch {} }
+function scopedUrl(route, base) {
+  return getScope(route) === 'all' ? base.replace('/bridge/', '/bridge/_all/') : base;
+}
+function scopePill(route, onChange) {
+  if (!scopeShouldShow()) return null;
+  const cur = getScope(route);
+  const pill = el('div', { class: 'scope-pill', role: 'group', 'aria-label': 'Scope' });
+  const mkBtn = (val, label) => {
+    const b = el('button', { class: 'scope-btn' + (cur === val ? ' active' : ''), type: 'button' }, label);
+    b.addEventListener('click', () => { if (getScope(route) !== val) { setScope(route, val); onChange(val); } });
+    return b;
+  };
+  pill.appendChild(mkBtn('one', 'This workspace'));
+  pill.appendChild(mkBtn('all', 'All workspaces'));
+  return pill;
+}
+function workspaceBadge(row) {
+  if (!row || !row.workspace_id) return null;
+  return el('span', { class: 'workspace-badge mono', title: row.workspace_id }, row.workspace_label || row.workspace_id);
+}
+
 async function renderWorkspaceSwitcher() {
   const host = document.getElementById('rail-workspace');
   if (!host) return;
@@ -1785,6 +1824,9 @@ function renderConductor() {
   root.appendChild(el('h2', {}, 'Conductor'));
   root.appendChild(el('p', {}, ROUTES.conductor.description));
 
+  const pill = scopePill('conductor', () => load());
+  if (pill) root.appendChild(pill);
+
   // ── Next Command strip (front and center) ──
   const nextHost = el('div', { class: 'conductor-next' });
   nextHost.appendChild(loading('Computing safe next action…'));
@@ -1824,7 +1866,7 @@ function renderConductor() {
   const load = async () => {
     let view;
     try {
-      const r = await fetch('/bridge/conductor', { cache: 'no-store' });
+      const r = await fetch(scopedUrl('conductor', '/bridge/conductor'), { cache: 'no-store' });
       view = await r.json();
     } catch {
       nextHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
@@ -1854,7 +1896,7 @@ function renderConductor() {
 
     // Queue Board summary (counts per column)
     try {
-      const qr = await fetch('/bridge/queue', { cache: 'no-store' });
+      const qr = await fetch(scopedUrl('conductor', '/bridge/queue'), { cache: 'no-store' });
       if (qr.ok) {
         const qv = await qr.json();
         const segs = (qv.columns || []).map((col) => {
@@ -1977,7 +2019,11 @@ function renderConductorBoard(board) {
         if (t.lane) metaParts.push(t.lane);
         if (t.owner) metaParts.push(`@${t.owner}`);
         if ((t.activeBlockers || []).length > 0) metaParts.push(`blocked×${t.activeBlockers.length}`);
-        card.appendChild(el('div', { class: 'board-card-meta' }, metaParts.join(' · ') || '—'));
+        const meta = el('div', { class: 'board-card-meta' });
+        const badge = workspaceBadge(t);
+        if (badge) { meta.appendChild(badge); meta.appendChild(document.createTextNode(' ')); }
+        meta.appendChild(document.createTextNode(metaParts.join(' · ') || '—'));
+        card.appendChild(meta);
         card.addEventListener('click', () => openInspector({ kind: 'task', id: t.id, data: t }));
         c.appendChild(card);
       }
@@ -1993,11 +2039,15 @@ function renderScoreMatrix(rows) {
   for (const r of rows) {
     const tone = REASON_CODE_TONE[r.reasonCode] || 'neutral';
     const row = el('div', { class: 'score-row' });
-    const head = el('div', { class: 'score-head' }, [
+    const headChildren = [];
+    const badge = workspaceBadge(r);
+    if (badge) headChildren.push(badge);
+    headChildren.push(
       el('span', { class: 'score-lane' }, r.lane),
       el('span', { class: `score-pill tone-${tone}` }, REASON_CODE_LABEL[r.reasonCode] || r.reasonCode),
       el('span', { class: 'score-counts' }, `${r.done}/${r.total}${r.claimsHeld ? ` · claims ×${r.claimsHeld}` : ''}`)
-    ]);
+    );
+    const head = el('div', { class: 'score-head' }, headChildren);
     row.appendChild(head);
     row.appendChild(bar(r.progress * 100, r.scope || '', { tone, right: `${Math.round(r.progress * 100)}%` }));
     row.addEventListener('click', () => openInspector({ kind: 'lane', id: r.lane, data: r }));
@@ -2059,6 +2109,9 @@ function renderQueueBoard() {
   root.appendChild(el('h2', {}, 'Queue Board'));
   root.appendChild(el('p', {}, ROUTES.queue.description));
 
+  const pill = scopePill('queue', () => load());
+  if (pill) root.appendChild(pill);
+
   const host = el('div', {});
   host.appendChild(loading('Loading queue view…'));
   root.appendChild(host);
@@ -2075,7 +2128,7 @@ function renderQueueBoard() {
   const load = async () => {
     let view;
     try {
-      const r = await fetch('/bridge/queue', { cache: 'no-store' });
+      const r = await fetch(scopedUrl('queue', '/bridge/queue'), { cache: 'no-store' });
       view = await r.json();
     } catch {
       host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
@@ -2123,6 +2176,7 @@ function renderQueueCard(item, columnId) {
   if (item.detail) card.appendChild(el('div', { class: 'queue-card-detail' }, item.detail));
   if (item.summary) card.appendChild(el('div', { class: 'queue-card-summary' }, item.summary));
   const meta = el('div', { class: 'queue-card-meta' }, [
+    workspaceBadge(item),
     el('span', { class: `next-command-pill tone-${tone}` }, QUEUE_REASON_LABEL[item.reasonCode] || item.reasonCode || 'unknown'),
     item.nextFireTs ? el('span', { class: 'queue-card-next' }, `next: ${formatTs(item.nextFireTs)}`) : null,
     (item.blockers && item.blockers.length) ? el('span', { class: 'queue-card-blockers' }, `blocked by ${item.blockers.length}`) : null
@@ -2720,6 +2774,14 @@ function renderDashboard() {
   root.appendChild(el('h2', {}, 'Dashboard'));
   root.appendChild(el('p', {}, ROUTES.dashboard.description));
 
+  const pill = scopePill('dashboard', () => {
+    // Re-render the whole route — dashboard's data layers are too tangled
+    // to surgically swap fetches, and the projection/events endpoints both
+    // need the scoped URL.
+    renderRoute();
+  });
+  if (pill) root.appendChild(pill);
+
   const status = bridgeStatus || {};
   const counts = status.counts || {};
 
@@ -2786,7 +2848,9 @@ function renderDashboard() {
   // ── Async: fetch projection + recent events to populate widgets ─────
   (async () => {
     try {
-      const proj = await fetchProjection();
+      const projUrl = scopedUrl('dashboard', '/bridge/projection');
+      const projResp = await fetch(projUrl, { cache: 'no-store' });
+      const proj = projResp.ok ? await projResp.json() : null;
       if (proj) {
         // Tasks donut
         const t = proj.tasks || [];
@@ -2821,7 +2885,7 @@ function renderDashboard() {
     }
 
     try {
-      const r = await fetch('/bridge/events/recent?limit=500', { cache: 'no-store' });
+      const r = await fetch(scopedUrl('dashboard', '/bridge/events/recent') + '?limit=500', { cache: 'no-store' });
       const d = r.ok ? await r.json() : null;
       sparkBody.innerHTML = '';
       if (!d || !d.events || d.events.length === 0) {
@@ -3776,18 +3840,24 @@ function renderMarkdown(src) {
   return out.join('\n');
 }
 
-async function fetchApprovals() {
+async function fetchApprovals(scopeRoute) {
   try {
-    const r = await fetch('/bridge/approvals', { cache: 'no-store' });
+    const url = scopeRoute ? scopedUrl(scopeRoute, '/bridge/approvals') : '/bridge/approvals';
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
 }
 
-async function postApprovalDecision(approvalId, decision, reason) {
+async function postApprovalDecision(approvalId, decision, reason, workspaceId) {
+  const headers = { 'content-type': 'application/json' };
+  // In "all workspaces" mode the row carries its origin workspace id; pin
+  // the write to that spine so the decision lands in the right repo and
+  // not in the currently-active one.
+  if (workspaceId) headers['X-Maddu-Workspace'] = workspaceId;
   const r = await fetch('/bridge/approvals/respond', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({ approvalId, decision, reason })
   });
   return r.json();
@@ -3797,6 +3867,9 @@ function renderApprovals() {
   const root = el('div', { class: 'view' });
   root.appendChild(el('h2', {}, 'Approvals'));
   root.appendChild(el('p', {}, ROUTES.approvals.description));
+
+  const pill = scopePill('approvals', () => refresh());
+  if (pill) root.appendChild(pill);
 
   const summaryMount = el('div', {});
   summaryMount.appendChild(loading('Reading ledger…'));
@@ -3817,7 +3890,7 @@ function renderApprovals() {
     { id: 'policies', keywords: 'standing policies allow-always allow-once deny rules' }));
 
   function refresh() {
-    fetchApprovals().then((a) => {
+    fetchApprovals('approvals').then((a) => {
       summaryMount.innerHTML = '';
       openMount.innerHTML = '';
       ledgerMount.innerHTML = '';
@@ -3851,7 +3924,10 @@ function renderApprovals() {
         for (const ap of a.open) {
           const card = el('div', { class: 'approval' }, [
             el('div', { class: 'approval-body' }, [
-              el('div', { class: 'approval-tool' }, ap.tool),
+              el('div', { class: 'approval-tool' }, [
+                workspaceBadge(ap),
+                document.createTextNode(ap.tool)
+              ]),
               el('div', { class: 'approval-meta' }, [
                 `lane: ${ap.lane || '—'}  ·  asked by: ${ap.actor || 'anon'}  ·  ${ap.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}`
               ]),
@@ -3859,10 +3935,10 @@ function renderApprovals() {
               ap.summary ? el('div', { class: 'approval-summary' }, ap.summary) : null
             ]),
             el('div', { class: 'approval-actions' }, [
-              makeDecisionButton('allow-once', 'Allow once', 'btn-allow', ap.approvalId, refresh),
-              makeDecisionButton('allow-always', 'Allow always', 'btn-allow', ap.approvalId, refresh),
-              makeDecisionButton('deny', 'Deny', 'btn-deny', ap.approvalId, refresh),
-              makeDecisionButton('deny-always', 'Deny always', 'btn-deny-hard', ap.approvalId, refresh)
+              makeDecisionButton('allow-once', 'Allow once', 'btn-allow', ap.approvalId, refresh, ap.workspace_id),
+              makeDecisionButton('allow-always', 'Allow always', 'btn-allow', ap.approvalId, refresh, ap.workspace_id),
+              makeDecisionButton('deny', 'Deny', 'btn-deny', ap.approvalId, refresh, ap.workspace_id),
+              makeDecisionButton('deny-always', 'Deny always', 'btn-deny-hard', ap.approvalId, refresh, ap.workspace_id)
             ])
           ]);
           openMount.appendChild(card);
@@ -3875,6 +3951,7 @@ function renderApprovals() {
         for (const d of a.ledger.slice().reverse()) {
           const cls = d.decision.startsWith('allow') ? 'ledger-decision-allow' : 'ledger-decision-deny';
           ledgerMount.appendChild(el('div', { class: 'ledger-row' }, [
+            workspaceBadge(d),
             el('span', {}, d.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
             el('span', { class: cls }, d.decision),
             el('span', {}, `${d.tool || '—'}@${d.lane || '—'}`),
@@ -3889,6 +3966,7 @@ function renderApprovals() {
         for (const p of a.policies) {
           const cls = p.decision === 'allow-always' ? 'ledger-decision-allow' : 'ledger-decision-deny';
           policyMount.appendChild(el('div', { class: 'ledger-row' }, [
+            workspaceBadge(p),
             el('span', {}, p.setAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
             el('span', { class: cls }, p.decision),
             el('span', {}, `${p.tool || '*'}@${p.lane || '*'}`),
@@ -4084,13 +4162,13 @@ function prepend(parent, child) {
   else parent.appendChild(child);
 }
 
-function makeDecisionButton(decision, label, klass, approvalId, onDone) {
+function makeDecisionButton(decision, label, klass, approvalId, onDone, workspaceId) {
   const btn = el('button', { class: klass }, label);
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     btn.textContent = '…';
     try {
-      await postApprovalDecision(approvalId, decision, null);
+      await postApprovalDecision(approvalId, decision, null, workspaceId);
       onDone();
     } catch (err) {
       btn.textContent = 'error';
@@ -6714,12 +6792,16 @@ function renderAgents() {
   root.appendChild(el('h2', {}, 'Agents'));
   root.appendChild(el('p', {}, ROUTES.agents.description));
 
+  const pill = scopePill('agents', () => renderRoute());
+  if (pill) root.appendChild(pill);
+
   const gridBody = el('div', {});
   gridBody.appendChild(loadingFor('grid', 'Fetching active sessions…'));
   root.appendChild(panel('Coworker grid', 'GET /bridge/projection · activeSessions × claims × slice-stops', gridBody));
 
   (async () => {
-    const proj = await fetchProjection();
+    const projResp = await fetch(scopedUrl('agents', '/bridge/projection'), { cache: 'no-store' });
+    const proj = projResp.ok ? await projResp.json() : null;
     if (!proj) {
       gridBody.innerHTML = '';
       gridBody.appendChild(placeholder('Error', 'Could not fetch projection.'));
@@ -6759,6 +6841,7 @@ function renderAgents() {
         el('div', { class: 'agent-card-id mono' }, s.id),
         el('div', { class: 'agent-card-focus' }, s.focus || '(no current focus)'),
         el('div', { class: 'agent-card-stats' }, [
+          workspaceBadge(s),
           el('span', { class: 'pill tone-accent' }, `score ${score.get(s.id) || 0}`),
           el('span', { class: 'pill tone-blue' }, `${held.length} claim${held.length === 1 ? '' : 's'}`),
           el('span', { class: 'panel-aside mono' }, `hb ${formatAge ? formatAge(s.lastHeartbeatAt) : (s.lastHeartbeatAt || 'n/a')}`)

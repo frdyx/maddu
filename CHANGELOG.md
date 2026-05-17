@@ -11,7 +11,7 @@ narrative summary.
 
 ---
 
-## [Unreleased] · multi-workspace cockpit (slices 1, 2, 5)
+## [Unreleased] · multi-workspace cockpit (slices 1, 2, 3, 5)
 
 **One bridge, every repo.** Lifts the bridge from one-bridge-per-repo to a
 machine-wide service that mounts N repos via a device-bound registry. Each
@@ -47,8 +47,22 @@ repo's spine remains the sole source of truth for that repo.
   Bridge identical to v0.12.0 behavior in that mode. Hard rules preserved
   per-repo (each spine remains independent, files-only, append-only).
 
-Slices 3 ("All workspaces" aggregate views) and 4 (global crons + policies)
-are queued as follow-up PRs.
+- **"All workspaces" aggregate views** (slice 3) — five new read endpoints
+  under `/bridge/_all/`: `projection`, `conductor`, `approvals`, `queue`,
+  `events/recent`. Each fans out the existing single-workspace builder
+  over every mounted workspace in parallel and tags every row with
+  `workspace_id` + `workspace_label`. No subsystem module touched.
+- **Scope pill toggle** on Conductor, Dashboard, Approvals, Agents, and
+  Queue Board — flips the route from single-workspace to aggregate.
+  Selection persists per-route in `localStorage`. Hidden in legacy /
+  single-workspace mode. Rows render with a small workspace badge.
+- **Cross-workspace approval decisions** — in "All" mode the decision
+  POST sets `X-Maddu-Workspace` to the approval's origin workspace, so
+  the `APPROVAL_DECIDED` event lands on the correct spine even when the
+  active workspace differs.
+
+Slice 4 (global crons + policies under `~/.config/maddu/global/` with
+`triggered_by` ancestry on the spine) is queued as a follow-up PR.
 
 ## [v0.12.0] · 2026-05-17 · depth-upgrade complete
 
