@@ -20,7 +20,8 @@ import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSli
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
-import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, parseNatural } from './lib/schedule.mjs';
+import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
+import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy, matchGlobalPolicy } from './lib/global.mjs';
 import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
 import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
 import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
@@ -168,6 +169,69 @@ async function handleBridge(req, res, url, ctx) {
     ctx.active = body.id;
     try { await activateWorkspace(body.id); } catch {}
     return sendJson(res, 200, { ok: true, active: ctx.active });
+  }
+
+  // ── global crons + policies (slice 4, machine-scope) ──────────────────
+  // These live under ~/.config/maddu/global/ and are not bound to any one
+  // workspace, so they bypass resolveRequestWorkspace just like the
+  // /bridge/_workspaces routes above.
+  if (path === '/bridge/_global/schedules' && req.method === 'GET') {
+    const schedules = await listGlobalSchedules();
+    return sendJson(res, 200, { schedules });
+  }
+  if (path === '/bridge/_global/schedules' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const saved = await saveGlobalSchedule(body, body.by || 'operator');
+      return sendJson(res, 200, { ok: true, schedule: saved });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  if (path === '/bridge/_global/schedules/parse' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.text) return sendJson(res, 400, { error: 'text required' });
+    const cron = parseNatural(body.text);
+    return sendJson(res, 200, { cron });
+  }
+  {
+    const m = path.match(/^\/bridge\/_global\/schedules\/([^/]+)(?:\/(enable|disable))?$/);
+    if (m) {
+      const id = decodeURIComponent(m[1]);
+      const verb = m[2];
+      if (verb && req.method === 'POST') {
+        try {
+          const s = await setGlobalEnabled(id, verb === 'enable');
+          return sendJson(res, 200, { ok: true, schedule: s });
+        } catch (e) { return sendJson(res, 404, { error: e.message }); }
+      }
+      if (!verb && req.method === 'GET') {
+        const s = await readGlobalSchedule(id);
+        if (!s) return sendJson(res, 404, { error: 'not found' });
+        return sendJson(res, 200, s);
+      }
+      if (!verb && req.method === 'DELETE') {
+        await removeGlobalSchedule(id);
+        return sendJson(res, 200, { ok: true, id });
+      }
+    }
+  }
+  if (path === '/bridge/_global/policies' && req.method === 'GET') {
+    const policies = await listGlobalPolicies();
+    return sendJson(res, 200, { policies });
+  }
+  if (path === '/bridge/_global/policies' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    try {
+      const saved = await saveGlobalPolicy(body, body.by || 'operator');
+      return sendJson(res, 200, { ok: true, policy: saved });
+    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  }
+  {
+    const m = path.match(/^\/bridge\/_global\/policies\/(.+)$/);
+    if (m && req.method === 'DELETE') {
+      const id = decodeURIComponent(m[1]);
+      const ok = await removeGlobalPolicy(id);
+      return sendJson(res, ok ? 200 : 404, ok ? { ok: true, id } : { error: 'not found', id });
+    }
   }
 
   const ws = resolveRequestWorkspace(req, url, ctx);
@@ -507,15 +571,40 @@ async function handleBridge(req, res, url, ctx) {
         payload: body.payload || null
       }
     });
-    // Re-project so callers see if a policy auto-decided this approval.
-    const proj = await project(repoRoot);
+    // Re-project so callers see if a per-repo policy auto-decided this approval.
+    let proj = await project(repoRoot);
+    let dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
+
+    // Slice 4: if no per-repo policy matched, try global policies. A match
+    // writes a real APPROVAL_DECIDED event into this repo's spine with a
+    // triggered_by field pointing back at the global policy.
+    if (!dec) {
+      const gpolicies = await listGlobalPolicies();
+      const match = matchGlobalPolicy(gpolicies, body.tool, body.lane || null);
+      if (match && (match.decision === 'allow-always' || match.decision === 'deny')) {
+        await append(repoRoot, {
+          type: EVENT_TYPES.APPROVAL_DECIDED,
+          actor: 'global-policy',
+          lane: body.lane || null,
+          data: {
+            approvalId: ev.id,
+            decision: match.decision,
+            reason: `global-policy:${match.id}`,
+            tool: body.tool
+          },
+          triggered_by: { kind: 'global_policy', id: match.id, fired_at: new Date().toISOString() }
+        });
+        proj = await project(repoRoot);
+        dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
+      }
+    }
+
     const open = proj.approvals.open.find((a) => a.approvalId === ev.id);
-    const dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
     return sendJson(res, 200, {
       approvalId: ev.id,
       status: dec ? 'decided' : 'open',
       decision: dec ? dec.decision : null,
-      autoDecided: dec ? dec.reason && dec.reason.startsWith('policy:') : false,
+      autoDecided: dec ? !!(dec.reason && (dec.reason.startsWith('policy:') || dec.reason.startsWith('global-policy:'))) : false,
       open: open || null
     });
   }
@@ -2189,10 +2278,19 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
         if (fired.length) console.log(`[${workspaceId}] scheduler fired ${fired.length}: ${fired.map((s) => s.id).join(', ')}`);
       } catch (err) { console.error(`[${workspaceId}] scheduler tick failed:`, err.message); }
     }
+    // Slice 4: global scheduler fan-out — fires each matched global
+    // schedule against every target workspace (or all mounted workspaces
+    // when `targets` is omitted). Per-workspace failures are isolated
+    // inside tickGlobal.
+    try {
+      const firedGlobal = await scheduleTickGlobal(ctx.workspaces, new Date());
+      if (firedGlobal.length) console.log(`[global] scheduler fired ${firedGlobal.length}: ${firedGlobal.map((s) => s.id).join(', ')}`);
+    } catch (err) { console.error(`[global] scheduler tick failed:`, err.message); }
   }, 30000);
   // Also run once at startup so brand-new entries don't wait 30 s.
   setTimeout(() => {
     for (const repoRoot of ctx.workspaces.values()) scheduleTick(repoRoot).catch(() => {});
+    scheduleTickGlobal(ctx.workspaces).catch(() => {});
   }, 200);
 
   // Telegram/Discord/Email embedded poller — iterates workspaces. Each per-

@@ -3889,7 +3889,38 @@ function renderApprovals() {
   root.appendChild(panelFocus('Standing policies', 'APPROVAL_POLICY_SET', policyMount,
     { id: 'policies', keywords: 'standing policies allow-always allow-once deny rules' }));
 
+  // Slice 4: global policies — machine-scope rules at
+  // ~/.config/maddu/global/policies.json. Auto-decide hits every
+  // workspace's spine with a real APPROVAL_DECIDED event tagged
+  // triggered_by:{kind:'global_policy', id}.
+  const globalPolicyMount = el('div', {});
+  root.appendChild(panelFocus('Standing policies (global)', 'GET /bridge/_global/policies', globalPolicyMount,
+    { id: 'global-policies', keywords: 'global standing policies machine-scope allow-always deny' }));
+
   function refresh() {
+    // Global policies — independent fetch; failure renders empty, not an error
+    // (the route 404s in legacy bridges that haven't been upgraded yet).
+    fetch('/bridge/_global/policies', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((g) => {
+      globalPolicyMount.innerHTML = '';
+      const list = (g && g.policies) || [];
+      if (!list.length) {
+        globalPolicyMount.appendChild(placeholder('No global policies', '`maddu global policy add --tool <name> --decision deny`'));
+        return;
+      }
+      for (const p of list) {
+        const cls = p.decision === 'allow-always' ? 'ledger-decision-allow' : 'ledger-decision-deny';
+        globalPolicyMount.appendChild(el('div', { class: 'ledger-row' }, [
+          el('span', { class: 'workspace-badge mono' }, 'global'),
+          el('span', {}, (p.setAt || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z') || '—'),
+          el('span', { class: cls }, p.decision),
+          el('span', {}, `${p.tool || '*'}@${p.lane || '*'}`),
+          el('span', {}, p.setBy || '')
+        ]));
+      }
+    }).catch(() => {
+      globalPolicyMount.innerHTML = '';
+      globalPolicyMount.appendChild(placeholder('Offline', 'Global endpoint unavailable.'));
+    });
     fetchApprovals('approvals').then((a) => {
       summaryMount.innerHTML = '';
       openMount.innerHTML = '';
@@ -3950,12 +3981,16 @@ function renderApprovals() {
       } else {
         for (const d of a.ledger.slice().reverse()) {
           const cls = d.decision.startsWith('allow') ? 'ledger-decision-allow' : 'ledger-decision-deny';
+          const isGlobal = d.reason && d.reason.startsWith('global-policy:');
+          const reasonChildren = [];
+          if (isGlobal) reasonChildren.push(el('span', { class: 'workspace-badge mono', style: 'background:rgba(80,113,149,0.32);' }, 'global'));
+          reasonChildren.push(document.createTextNode(d.reason || ''));
           ledgerMount.appendChild(el('div', { class: 'ledger-row' }, [
             workspaceBadge(d),
             el('span', {}, d.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
             el('span', { class: cls }, d.decision),
             el('span', {}, `${d.tool || '—'}@${d.lane || '—'}`),
-            el('span', {}, d.reason || '')
+            el('span', {}, reasonChildren)
           ]));
         }
       }
@@ -4912,11 +4947,25 @@ function renderSchedule() {
   root.appendChild(el('h2', {}, 'Schedule'));
   root.appendChild(el('p', {}, ROUTES.schedule.description));
 
+  // Slice 4: scope pill (this workspace vs global). Hidden in legacy
+  // single-workspace mode. Global schedules live in
+  // ~/.config/maddu/global/schedules.ndjson and fan out to N workspaces.
+  const pill = scopePill('schedule', () => renderRoute());
+  if (pill) root.appendChild(pill);
+  const isGlobal = scopeShouldShow() && getScope('schedule') === 'all';
+  const baseUrl = isGlobal ? '/bridge/_global/schedules' : '/bridge/schedules';
+
   const inpTitle = el('input', { type: 'text', placeholder: 'title (e.g. Daily summary)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
   const inpNL = el('input', { type: 'text', placeholder: 'natural (e.g. every evening at 6pm)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const inpTargets = isGlobal
+    ? el('input', { type: 'text', placeholder: 'targets (comma; blank = all)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' })
+    : null;
   const preview = el('span', { style: 'font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);min-width:160px;' }, '');
-  const createBtn = el('button', {}, 'Create');
-  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;align-items:center;' }, [inpTitle, inpNL, preview, createBtn]);
+  const createBtn = el('button', {}, isGlobal ? 'Create (global)' : 'Create');
+  const formChildren = [inpTitle, inpNL];
+  if (inpTargets) formChildren.push(inpTargets);
+  formChildren.push(preview, createBtn);
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;align-items:center;' }, formChildren);
   root.appendChild(form);
 
   // Live preview of NL→cron
@@ -4927,13 +4976,13 @@ function renderSchedule() {
       const text = inpNL.value.trim();
       if (!text) { preview.textContent = ''; preview.style.color = 'var(--m-fg-3)'; return; }
       try {
-        const r = await fetch('/bridge/schedules/parse', {
+        const r = await fetch(isGlobal ? '/bridge/_global/schedules/parse' : '/bridge/schedules/parse', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ natural: text })
+          body: JSON.stringify({ natural: text, text })
         });
         const d = await r.json();
-        if (d.ok) { preview.textContent = `→ ${d.cron}`; preview.style.color = 'var(--m-signal)'; }
-        else      { preview.textContent = '↪ unparseable'; preview.style.color = 'var(--m-accent-warm)'; }
+        if (d.cron) { preview.textContent = `→ ${d.cron}`; preview.style.color = 'var(--m-signal)'; }
+        else        { preview.textContent = '↪ unparseable'; preview.style.color = 'var(--m-accent-warm)'; }
       } catch { preview.textContent = ''; }
     }, 200);
   });
@@ -4944,12 +4993,19 @@ function renderSchedule() {
     if (!title || !nat) return;
     createBtn.disabled = true;
     try {
-      const r = await fetch('/bridge/schedules', {
+      const body = { title, natural: nat, by: composer.currentSession || null };
+      if (isGlobal && inpTargets) {
+        body.targets = inpTargets.value.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      const r = await fetch(baseUrl, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title, natural: nat, by: composer.currentSession || null })
+        body: JSON.stringify(body)
       });
-      if (r.ok) { inpTitle.value = ''; inpNL.value = ''; preview.textContent = ''; refresh(); }
-      else { const d = await r.json().catch(() => ({})); showToast(`create failed: ${d.error || 'unknown'}`, 'err'); }
+      if (r.ok) {
+        inpTitle.value = ''; inpNL.value = '';
+        if (inpTargets) inpTargets.value = '';
+        preview.textContent = ''; refresh();
+      } else { const d = await r.json().catch(() => ({})); showToast(`create failed: ${d.error || 'unknown'}`, 'err'); }
     } finally { createBtn.disabled = false; }
   });
 
@@ -4964,7 +5020,7 @@ function renderSchedule() {
     mount.innerHTML = '';
     summaryMount.innerHTML = '';
     mount.appendChild(loading('Fetching schedules…'));
-    fetchSchedules().then((d) => {
+    fetch(baseUrl, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((d) => {
       mount.innerHTML = '';
       summaryMount.innerHTML = '';
       if (!d || d.schedules.length === 0) {
@@ -5002,6 +5058,17 @@ function renderSchedule() {
             s.natural ? el('dt', {}, 'natural') : null,
             s.natural ? el('dd', {}, s.natural) : null,
             el('dt', {}, 'action'),  el('dd', {}, `${s.action?.kind}: ${s.action?.value || '—'}`),
+            isGlobal ? el('dt', {}, 'targets') : null,
+            isGlobal ? el('dd', {}, (() => {
+              const wrap = el('span', {});
+              const ts = (s.targets && s.targets.length) ? s.targets : [];
+              if (!ts.length) {
+                wrap.appendChild(el('span', { class: 'workspace-badge mono' }, '(all workspaces)'));
+              } else {
+                for (const t of ts) wrap.appendChild(el('span', { class: 'workspace-badge mono', style: 'margin-right:4px;' }, t));
+              }
+              return wrap;
+            })()) : null,
             el('dt', {}, 'last'),    el('dd', {}, s.lastRun ? s.lastRun.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'),
             el('dt', {}, 'id'),      el('dd', {}, s.id)
           ]),
@@ -5010,13 +5077,13 @@ function renderSchedule() {
             const tog = el('button', {}, enabled ? 'Disable' : 'Enable');
             tog.addEventListener('click', async () => {
               tog.disabled = true;
-              await fetch(`/bridge/schedules/${encodeURIComponent(s.id)}/${enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              await fetch(`${baseUrl}/${encodeURIComponent(s.id)}/${enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
               refresh();
             });
             const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
             rem.addEventListener('click', async () => {
               if (!confirm(`Remove schedule "${s.title}"?`)) return;
-              await fetch(`/bridge/schedules/${encodeURIComponent(s.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              await fetch(`${baseUrl}/${encodeURIComponent(s.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
               refresh();
             });
             actions.appendChild(tog); actions.appendChild(rem);

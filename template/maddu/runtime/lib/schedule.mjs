@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES } from './spine.mjs';
+import { listGlobalSchedules, recordGlobalScheduleFire } from './global.mjs';
 
 function scheduleFile(repoRoot) {
   return join(pathsFor(repoRoot).state, 'schedule.ndjson'); // .maddu/schedule.ndjson
@@ -291,3 +292,51 @@ export async function tick(repoRoot, now = new Date(), { onFire = null } = {}) {
 }
 
 export function genId() { return genScheduleId(); }
+
+// ─── global scheduler tick (slice 4) ────────────────────────────────────
+// Iterates global schedules and fires each matched one across all targets
+// (or every mounted workspace if `targets` is omitted/empty). Each fired
+// action appends an event to the target workspace's spine carrying a
+// `triggered_by` field that points to the originating global schedule.
+// Per-workspace failures are logged but don't poison the fan-out.
+export async function tickGlobal(workspacesMap, now = new Date(), { onFire = null } = {}) {
+  const all = await listGlobalSchedules();
+  const fired = [];
+  for (const s of all) {
+    if (!shouldFire(s, now)) continue;
+    s.lastRun = now.toISOString();
+    s.lastRunMinute = currentMinuteIso(now);
+    s.fireCount = (s.fireCount || 0) + 1;
+    await recordGlobalScheduleFire(s);
+
+    const targets = (Array.isArray(s.targets) && s.targets.length)
+      ? s.targets.filter((id) => workspacesMap.has(id))
+      : [...workspacesMap.keys()];
+    const triggered_by = { kind: 'global_schedule', id: s.id, fired_at: s.lastRun };
+
+    for (const wsId of targets) {
+      const repoRoot = workspacesMap.get(wsId);
+      try {
+        if (s.action && s.action.kind === 'inbox') {
+          await append(repoRoot, {
+            type: EVENT_TYPES.INBOX_MESSAGE,
+            actor: 'global-scheduler',
+            lane: null,
+            data: {
+              message: `[global] ${s.action.value || s.title}`,
+              kind: 'scheduled',
+              scheduleId: s.id,
+              scope: 'global'
+            },
+            triggered_by
+          });
+        }
+        if (onFire) await onFire(s, wsId, repoRoot);
+      } catch (err) {
+        console.error(`[global-scheduler] ${wsId} ${s.id}: ${err.message}`);
+      }
+    }
+    fired.push(s);
+  }
+  return fired;
+}
