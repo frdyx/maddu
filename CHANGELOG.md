@@ -11,7 +11,11 @@ narrative summary.
 
 ---
 
-## [Unreleased] · onboarding ergonomics
+## [Unreleased]
+
+_No changes yet._
+
+## [v0.14.0] · 2026-05-18 · onboarding ergonomics
 
 **Zero-friction first-run.** Closes the two biggest day-one frictions
 on a fresh `maddu init`: needing a global install to invoke the CLI,

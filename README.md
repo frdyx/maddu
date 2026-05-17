@@ -7,7 +7,7 @@
 **The Source of local truth.** A local-first, files-only framework for orchestrating AI agents inside any git repo.
 
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-D0FF00?style=flat-square&labelColor=050B17)](LICENSE)
-[![Version 0.13.0](https://img.shields.io/badge/version-0.13.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.14.0](https://img.shields.io/badge/version-0.14.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-F04E23?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Files-only](https://img.shields.io/badge/state-files--only-F5F1E8?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
 [![No cloud](https://img.shields.io/badge/cloud-no-FF5E7A?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
@@ -81,7 +81,7 @@ Nothing else in your repo is touched. `.gitignore` gets one stanza added for OS 
 
 ---
 
-## Multi-workspace (v0.13.0)
+## Multi-workspace (v0.14.0)
 
 One bridge, every repo. Register multiple `maddu`-installed repos and the same `127.0.0.1:4177` mounts all of them. Each repo's `.maddu/` remains the sole source of truth — the registry is just a device-local pointer file.
 
@@ -182,7 +182,7 @@ Every route renders summary widgets via a **pure-SVG widget kit** (no chart libr
 $ npx github:frdyx/maddu init
 ✓ .maddu/ skeleton created
 ✓ maddu/ runtime + cockpit installed
-✓ maddu.json written  (framework 0.13.0)
+✓ maddu.json written  (framework 0.14.0)
 
 # 2.  Verify install integrity + hard-rule compliance
 $ maddu doctor
@@ -194,7 +194,7 @@ $ maddu doctor
 
 # 3.  Boot the bridge
 $ maddu start
-Máddu  v0.13.0  ·  http://127.0.0.1:4177  ·  pid 84711
+Máddu  v0.14.0  ·  http://127.0.0.1:4177  ·  pid 84711
 
 # 4.  Open the cockpit in your browser
 $ open http://127.0.0.1:4177
@@ -314,6 +314,17 @@ Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
 
 - ✓ **Slice ζ** — Telegram bridge (long-poll, no public webhook) (`v0.9.0`)
 - ✓ **Slice η** — Discord + Email outbound-only bridges (`v0.10.0`)
+
+**v0.14 — onboarding ergonomics** *(complete)*
+
+- ✓ Project-local CLI shim (`./maddu/run` + `./maddu/run.cmd`) so
+  `init` flow gives a working CLI without a global install
+- ✓ `bin/`, `commands/`, and `version.json` bundled into the installed
+  tree via the managed manifest — `maddu upgrade` keeps them in sync
+- ✓ Active-session cache at `.maddu/state/session.active.json`
+  (atomic temp+rename, self-healing on stale entries)
+- ✓ New `maddu session start "<label>"` shorthand + `maddu session active`
+- ✓ Two new WARN-only doctor checks (shim presence + cache integrity)
 
 **v0.13 — multi-workspace cockpit** *(complete)*
 
