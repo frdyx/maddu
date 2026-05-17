@@ -38,6 +38,20 @@ The contract: any projection can be deleted and rebuilt by replaying the spine. 
 
 Example: the cockpit Dashboard route renders by fetching `GET /bridge/projection`, which is computed from the spine on every request.
 
+## Workspaces
+
+A **workspace** is the scope above a repo: one entry in the device-local registry at `~/.config/maddu/workspaces.json` (Linux/macOS) or `%APPDATA%\maddu\workspaces.json` (Windows). Each entry pairs a kebab-case `id` (e.g. `client-acme`) with the absolute path to a repo containing `.maddu/`.
+
+```bash
+$ maddu workspace add ~/projects/maddu --id maddu --label "Máddu"
+$ maddu workspace add ~/projects/client-acme --id acme  --label "Acme"
+$ maddu workspace list
+```
+
+The bridge mounts every registered workspace at once and routes each HTTP request to one of them via the `X-Maddu-Workspace` header. The cockpit's left rail header surfaces a switcher; `Ctrl+K` exposes "Switch to workspace: …" actions. With no registry the bridge falls back to walking up from `cwd` for a single `.maddu/`, so existing single-repo installs keep working.
+
+The registry is device-bound — it follows the same path pattern as auth tokens and is **never** committed or synced across machines. Each repo's `.maddu/` remains the sole source of truth for that repo; the registry is just orchestration scaffolding.
+
 ## Lanes
 
 A **lane** is a scoped, mutually-exclusive area of work. Examples: `cockpit-shell`, `bridge-server`, `auth-providers`, `harness`, `wiki`. The full catalog is in [lanes.md](lanes.md).
