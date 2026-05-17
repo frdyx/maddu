@@ -8,6 +8,7 @@
 //
 // request is mostly for testing: simulate a worker asking for permission.
 
+import { createServer } from 'node:http';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
@@ -18,7 +19,7 @@ function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z
 export default async function approval(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths, spine, projections } = await loadSpineLib();
+  const { paths, spine, projections, approvals } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   if (!sub) {
@@ -115,15 +116,133 @@ export default async function approval(argv) {
       lane: flags.lane || null,
       data: { tool, action: flags.action || null, summary: flags.summary || null }
     });
-    // Re-project to detect auto-decision by standing policy.
+    // Auto-decide cascade. The shared helper writes a real
+    // APPROVAL_DECIDED event into the spine on policy match; the
+    // projector no longer synthesizes one at read time.
+    let source = null;
+    if (approvals) {
+      const auto = await approvals.maybeAutoDecide(repoRoot, ev);
+      source = auto.source;
+    }
     const proj = await projections.project(repoRoot);
     const dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
     if (dec) {
       const color = dec.decision.startsWith('allow') ? ANSI.pass : ANSI.fail;
-      console.log(`${ev.id}  auto-${color}${dec.decision}${ANSI.reset}  via policy`);
+      console.log(`${ev.id}  auto-${color}${dec.decision}${ANSI.reset}  via ${source || 'policy'}`);
     } else {
       console.log(`${ev.id}  ${ANSI.warn}pending${ANSI.reset}  awaiting operator decision`);
     }
+    return;
+  }
+
+  // ─── migrate-legacy-decisions ───────────────────────────────────────
+  // Backfills real APPROVAL_DECIDED events for APPROVAL_REQUESTED events
+  // that were auto-decided by the old projector synthesis path (before
+  // v0.15). Single-pass over the spine: maintains the policy map as we
+  // go, and for each request whose tool/lane matches the policy state
+  // *at that timestamp*, appends a real decision event with
+  // triggered_by.kind = 'policy_migration'.
+  //
+  // Append-only. Idempotent — skips requests that already have a paired
+  // APPROVAL_DECIDED in the spine. Refuses to run while the bridge is
+  // up to avoid concurrent writers on the same NDJSON segment file.
+  if (sub === 'migrate-legacy-decisions') {
+    const { flags } = parseFlags(rest);
+    const dryRun = !!flags['dry-run'];
+
+    // Refuse while bridge is up.
+    if (!dryRun) {
+      const portFree = await new Promise((resolve) => {
+        const srv = createServer();
+        srv.once('error', () => resolve(false));
+        srv.once('listening', () => srv.close(() => resolve(true)));
+        srv.listen(4177, '127.0.0.1');
+      });
+      if (!portFree) {
+        console.error(`${ANSI.fail}refused${ANSI.reset}: port 4177 is in use (bridge running).`);
+        console.error(`  Stop the bridge first ('Ctrl+C' in the maddu start terminal), then retry.`);
+        process.exit(5);
+      }
+    }
+
+    // Wildcard match — same precedence as lib/approvals.mjs::matchRepoPolicy.
+    const matchPolicy = (policiesMap, tool, lane) => {
+      const k = (t, l) => `${t || '*'}@${l || '*'}`;
+      const try1 = policiesMap.get(k(tool, lane));     if (try1) return try1;
+      const try2 = policiesMap.get(k(tool, '*'));      if (try2) return try2;
+      const try3 = policiesMap.get(k('*', lane));      if (try3) return try3;
+      const try4 = policiesMap.get(k('*', '*'));       if (try4) return try4;
+      return null;
+    };
+
+    const events = await spine.readAll(repoRoot);
+    const policies = new Map();      // key → { tool, lane, decision }
+    const decidedIds = new Set();    // approvalId for any existing APPROVAL_DECIDED
+    const unpaired = [];             // [{ requestEv, matchedAt }]
+
+    for (const ev of events) {
+      if (ev.type === 'APPROVAL_POLICY_SET') {
+        const { tool, lane, decision } = ev.data;
+        const key = `${tool || '*'}@${lane || '*'}`;
+        if (decision === 'clear') policies.delete(key);
+        else policies.set(key, { tool, lane, decision, key });
+      } else if (ev.type === 'APPROVAL_DECIDED' && ev.data?.approvalId) {
+        decidedIds.add(ev.data.approvalId);
+      } else if (ev.type === 'APPROVAL_REQUESTED') {
+        // Snapshot the policy match *as of this point in the replay*.
+        const match = matchPolicy(policies, ev.data?.tool, ev.lane);
+        if (match && (match.decision === 'allow-always' || match.decision === 'deny')) {
+          unpaired.push({ requestEv: ev, matched: match });
+        }
+      }
+    }
+
+    // Filter out anything that already has a real decision in the spine.
+    const candidates = unpaired.filter((u) => !decidedIds.has(u.requestEv.id));
+
+    console.log(`Scanning spine: ${events.length} events`);
+    console.log(`Found ${candidates.length} APPROVAL_REQUESTED events without paired decision (legacy auto-decisions)`);
+    if (candidates.length === 0) {
+      console.log('(nothing to migrate)');
+      return;
+    }
+
+    // Summary by policy key.
+    const byKey = new Map();
+    for (const c of candidates) byKey.set(c.matched.key, (byKey.get(c.matched.key) || 0) + 1);
+    const summary = [...byKey.entries()].map(([k, n]) => `${k}: ${n}`).join('  ·  ');
+    console.log(`  → ${candidates.length} would auto-decide (${summary})`);
+
+    if (dryRun) {
+      console.log(`\nRun without --dry-run to append the ${candidates.length} decisions.`);
+      return;
+    }
+
+    let written = 0;
+    for (const c of candidates) {
+      const r = c.requestEv;
+      const m = c.matched;
+      await spine.append(repoRoot, {
+        type: spine.EVENT_TYPES.APPROVAL_DECIDED,
+        actor: 'policy-migrated',
+        lane: r.lane,
+        data: {
+          approvalId: r.id,
+          decision: m.decision,
+          reason: `policy:${m.key}`,
+          tool: r.data?.tool || null
+        },
+        triggered_by: {
+          kind: 'policy_migration',
+          id: m.key,
+          fired_at: new Date().toISOString(),
+          original_request: r.id,
+          original_ts: r.ts
+        }
+      });
+      written++;
+    }
+    console.log(`\n${ANSI.pass}Wrote ${written} APPROVAL_DECIDED events${ANSI.reset} with triggered_by.kind=policy_migration`);
     return;
   }
 

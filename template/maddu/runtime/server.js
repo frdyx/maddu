@@ -21,7 +21,8 @@ import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
 import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
-import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy, matchGlobalPolicy } from './lib/global.mjs';
+import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy } from './lib/global.mjs';
+import { maybeAutoDecide } from './lib/approvals.mjs';
 import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
 import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
 import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
@@ -571,40 +572,20 @@ async function handleBridge(req, res, url, ctx) {
         payload: body.payload || null
       }
     });
-    // Re-project so callers see if a per-repo policy auto-decided this approval.
-    let proj = await project(repoRoot);
-    let dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
-
-    // Slice 4: if no per-repo policy matched, try global policies. A match
-    // writes a real APPROVAL_DECIDED event into this repo's spine with a
-    // triggered_by field pointing back at the global policy.
-    if (!dec) {
-      const gpolicies = await listGlobalPolicies();
-      const match = matchGlobalPolicy(gpolicies, body.tool, body.lane || null);
-      if (match && (match.decision === 'allow-always' || match.decision === 'deny')) {
-        await append(repoRoot, {
-          type: EVENT_TYPES.APPROVAL_DECIDED,
-          actor: 'global-policy',
-          lane: body.lane || null,
-          data: {
-            approvalId: ev.id,
-            decision: match.decision,
-            reason: `global-policy:${match.id}`,
-            tool: body.tool
-          },
-          triggered_by: { kind: 'global_policy', id: match.id, fired_at: new Date().toISOString() }
-        });
-        proj = await project(repoRoot);
-        dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
-      }
-    }
-
+    // Auto-decide cascade (per-repo policy → global policy). Writes a real
+    // APPROVAL_DECIDED event into this repo's spine on match, with a
+    // triggered_by field pointing at the rule. The projector no longer
+    // synthesizes auto-decisions — the spine is the only source of truth.
+    const auto = await maybeAutoDecide(repoRoot, ev);
+    const proj = await project(repoRoot);
+    const dec = proj.approvals.ledger.find((l) => l.approvalId === ev.id);
     const open = proj.approvals.open.find((a) => a.approvalId === ev.id);
     return sendJson(res, 200, {
       approvalId: ev.id,
       status: dec ? 'decided' : 'open',
       decision: dec ? dec.decision : null,
-      autoDecided: dec ? !!(dec.reason && (dec.reason.startsWith('policy:') || dec.reason.startsWith('global-policy:'))) : false,
+      autoDecided: auto.decided,
+      autoDecideSource: auto.source,
       open: open || null
     });
   }

@@ -39,7 +39,12 @@ export async function loadSpineLib() {
   // that don't need it (heartbeat/close still work via --session).
   let sessionActive = null;
   try { sessionActive = await import(pathToFileURL(join(dir, 'session-active.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive };
+  // approvals.mjs landed in v0.15 (spine-authoritative approval decisions).
+  // Optional-load so a newer global CLI can run against older installs;
+  // the request paths fall back to legacy behavior if it's missing.
+  let approvals = null;
+  try { approvals = await import(pathToFileURL(join(dir, 'approvals.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals };
 }
 
 export async function resolveRepoRoot(paths) {

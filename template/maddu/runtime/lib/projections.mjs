@@ -112,26 +112,11 @@ export async function project(repoRoot) {
           payload: ev.data.payload || null,
           autoDecided: false
         });
-        // Auto-decision via standing policy.
-        {
-          const policyKey = policyKeyFor(ev.data.tool, ev.lane);
-          const p = policies.get(policyKey);
-          if (p && (p.decision === 'allow-always' || p.decision === 'deny')) {
-            const auto = openApprovals.get(ev.id);
-            auto.autoDecided = true;
-            auto.autoDecision = p.decision;
-            approvalLedger.push({
-              approvalId: ev.id,
-              ts: ev.ts,
-              decision: p.decision,
-              reason: 'policy:' + policyKey,
-              tool: ev.data.tool,
-              lane: ev.lane,
-              actor: 'policy'
-            });
-            openApprovals.delete(ev.id);
-          }
-        }
+        // No projector-side auto-decide. Per-repo + global policy matches
+        // are appended as real APPROVAL_DECIDED events by the bridge / CLI
+        // before the projection ever runs (see lib/approvals.mjs and the
+        // hard-rule-#2 note in docs/06-hard-rules.md). The projector is a
+        // pure spine reader; nothing here manufactures ledger entries.
         break;
       case 'APPROVAL_DECIDED': {
         const aid = ev.data.approvalId;

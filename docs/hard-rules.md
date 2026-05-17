@@ -22,6 +22,8 @@ No SQLite. No embedded DB. No hosted DB. No binary blobs masquerading as state. 
 
 **Why:** One home for truth. Every state question reduces to "replay the spine."
 
+**Derived ≠ projected.** A projection *summarizes* events that exist in the spine — it never *infers* state that has no anchor event. If the system makes a decision (auto-approving a tool call, auto-firing a schedule, auto-releasing a lane), that decision must be appended to the spine as its own event, with a `triggered_by` field pointing at the rule that produced it. Synthesizing decisions at read time would break audit immutability (a projector change could rewrite historical decisions) and cross-machine determinism (a fresh replay on another machine could land different outcomes). The bridge handles auto-approvals via `lib/approvals.mjs::maybeAutoDecide`; the projector consumes the resulting `APPROVAL_DECIDED` events but never manufactures them.
+
 ## 3. No hosted backends
 
 Provider APIs (Anthropic, OpenAI, Google) are called directly from local subprocess workers. Máddu has no SaaS counterpart. No telemetry beacon, no relay, no "Máddu Cloud."
