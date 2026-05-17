@@ -1,6 +1,35 @@
 // Máddu cockpit — vanilla SPA. No framework, no build step.
 // Hash-routed; views render into #route-view.
 
+// ─── Multi-workspace scoping ────────────────────────────────────────────
+// The bridge can mount N repos. Every /bridge/* request carries an
+// X-Maddu-Workspace header naming which one this call is for. The fetch
+// shim below injects it on every request so the 100+ existing call sites
+// don't need to change. The active id is persisted to localStorage and
+// re-validated against /bridge/_workspaces on boot.
+let currentWorkspace = (() => {
+  try { return localStorage.getItem('maddu.workspace') || null; } catch { return null; }
+})();
+let allWorkspacesMode = false; // when true, /bridge/_all/* gets `_all`.
+
+(function installFetchShim() {
+  const origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    init = init || {};
+    const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+    if (urlStr.startsWith('/bridge/')) {
+      const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
+      if (urlStr.startsWith('/bridge/_all/')) {
+        if (!headers.has('X-Maddu-Workspace')) headers.set('X-Maddu-Workspace', '_all');
+      } else if (currentWorkspace && !headers.has('X-Maddu-Workspace')) {
+        headers.set('X-Maddu-Workspace', currentWorkspace);
+      }
+      init.headers = headers;
+    }
+    return origFetch(input, init);
+  };
+})();
+
 // Phase 1 of the polish pass — every route carries group + rank so the rail
 // can be built dynamically and the same registry powers desktop rail, tablet
 // glyphs, and the mobile dock. Anchor routes (the five depth-upgrade
@@ -557,6 +586,89 @@ function setRailCollapsed(groupId, collapsed) {
   const s = railCollapseState();
   if (collapsed) s[groupId] = true; else delete s[groupId];
   try { localStorage.setItem('maddu.railGroups', JSON.stringify(s)); } catch {}
+}
+
+// ─── Workspace switcher (rail header) ──────────────────────────────────
+// Mirrors the registered workspaces from /bridge/_workspaces. In legacy
+// single-repo mode (only the synthesized `default` workspace) the slot
+// stays hidden — the switcher would have nothing to switch.
+let _workspacesCache = null;
+
+async function fetchWorkspaces() {
+  try {
+    const r = await fetch('/bridge/_workspaces', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function renderWorkspaceSwitcher() {
+  const host = document.getElementById('rail-workspace');
+  if (!host) return;
+  const data = await fetchWorkspaces();
+  _workspacesCache = data;
+  if (!data || !data.workspaces || data.workspaces.length === 0 || data.legacy) {
+    // Legacy single-repo mode — hide the slot.
+    host.hidden = true;
+    host.innerHTML = '';
+    currentWorkspace = null;
+    return;
+  }
+  host.hidden = false;
+  // Validate persisted selection against the registry.
+  if (currentWorkspace && !data.workspaces.find((w) => w.id === currentWorkspace)) {
+    currentWorkspace = null;
+  }
+  if (!currentWorkspace) currentWorkspace = data.active;
+  try { localStorage.setItem('maddu.workspace', currentWorkspace); } catch {}
+
+  host.innerHTML = '';
+  const label = el('label', { class: 'rail-workspace-label', for: 'rail-workspace-select' }, 'Workspace');
+  const select = el('select', { class: 'rail-workspace-select', id: 'rail-workspace-select', 'aria-label': 'Active workspace' });
+  for (const w of data.workspaces) {
+    const opt = document.createElement('option');
+    opt.value = w.id;
+    opt.textContent = w.label || w.id;
+    if (w.id === currentWorkspace) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', async () => {
+    const id = select.value;
+    if (!id || id === currentWorkspace) return;
+    currentWorkspace = id;
+    try { localStorage.setItem('maddu.workspace', id); } catch {}
+    try {
+      await fetch('/bridge/_workspaces/activate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+    } catch {}
+    // Re-fetch chrome and re-render whatever route is showing.
+    await fetchBridgeStatus();
+    renderRoute();
+    document.dispatchEvent(new CustomEvent('workspace-changed', { detail: { id } }));
+  });
+  host.appendChild(label);
+  host.appendChild(select);
+}
+
+function setActiveWorkspace(id) {
+  if (!_workspacesCache || !_workspacesCache.workspaces.find((w) => w.id === id)) return;
+  const select = document.getElementById('rail-workspace-select');
+  if (select && select.value !== id) {
+    select.value = id;
+    select.dispatchEvent(new Event('change'));
+  } else {
+    currentWorkspace = id;
+    try { localStorage.setItem('maddu.workspace', id); } catch {}
+    fetch('/bridge/_workspaces/activate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id })
+    }).catch(() => {});
+    fetchBridgeStatus().then(() => renderRoute());
+  }
 }
 
 function buildRail() {
@@ -7212,6 +7324,33 @@ function paletteItems(query) {
     }
   }
 
+  // Workspaces — operator can switch the active workspace from anywhere.
+  if (_workspacesCache && _workspacesCache.workspaces && _workspacesCache.workspaces.length > 1) {
+    for (const w of _workspacesCache.workspaces) {
+      if (w.id === currentWorkspace) continue;
+      const lbl = (w.label || w.id).toLowerCase();
+      const idLc = w.id.toLowerCase();
+      const hay = `workspace switch ${lbl} ${idLc}`;
+      if (!q || hay.includes(q) || lbl.includes(q) || idLc.includes(q)) {
+        let score;
+        if (!q)                            score = 3;
+        else if (lbl.startsWith(q))        score = 0;
+        else if (lbl.includes(q))          score = 1;
+        else if (idLc.includes(q))         score = 2;
+        else                               score = 4;
+        out.push({
+          kind: 'workspace',
+          id: `workspace:${w.id}`,
+          title: `Switch to workspace: ${w.label || w.id}`,
+          group: 'connect',
+          desc: w.path || '',
+          workspaceId: w.id,
+          score
+        });
+      }
+    }
+  }
+
   // Actions — verbs the cockpit can run directly.
   for (const a of actionItems(q)) out.push(a);
 
@@ -7313,6 +7452,8 @@ function commitPalette(i) {
     catch (e) { console.error('[action]', it.id, e); }
   } else if (it.kind === 'sub') {
     location.hash = `#/${it.targetRoute}?focus=${encodeURIComponent(it.focus)}`;
+  } else if (it.kind === 'workspace') {
+    setActiveWorkspace(it.workspaceId);
   } else {
     location.hash = `#/${it.id}`;
   }
@@ -7420,6 +7561,7 @@ async function boot() {
   buildDock();
   initDock();
   initPalette();
+  await renderWorkspaceSwitcher();
   await fetchBridgeStatus();
   await seedCursor();
   renderRoute();

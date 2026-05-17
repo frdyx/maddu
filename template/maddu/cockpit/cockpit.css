@@ -331,6 +331,39 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   text-transform: uppercase;
 }
 
+.rail-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 12px;
+  border-bottom: 1px solid var(--m-line-soft);
+  font-family: var(--m-font-mono);
+}
+.rail-workspace[hidden] { display: none; }
+.rail-workspace-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m-fg-4);
+}
+.rail-workspace-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--m-bg-2);
+  color: var(--m-fg-0);
+  border: 1px solid var(--m-line);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-family: var(--m-font-cond);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.rail-workspace-select:focus {
+  outline: none;
+  border-color: var(--m-accent);
+}
+
 .rail-nav {
   display: flex;
   flex-direction: column;
@@ -1532,8 +1565,11 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   :root { --m-rail-w: 60px; }
   .rail-mark-name,
   .rail-link span:last-child,
-  .rail-foot { display: none; }
+  .rail-foot,
+  .rail-workspace-label { display: none; }
   .rail-link { grid-template-columns: 1fr; justify-items: center; }
+  .rail-workspace { padding: 8px 4px; }
+  .rail-workspace-select { font-size: 11px; padding: 4px 4px; }
 }
 
 /* ── Conductor (Slice α) ───────────────────────────────────────────── */

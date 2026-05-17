@@ -29,6 +29,7 @@ import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeD
 import * as telegram from './lib/telegram.mjs';
 import * as discord from './lib/discord.mjs';
 import * as emailBridge from './lib/email.mjs';
+import { readRegistry, writeRegistry, activateWorkspace, registryExists, registryPath } from './lib/workspaces.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -120,9 +121,61 @@ async function serveStatic(res, urlPath) {
   }
 }
 
+// Resolve the workspace for an incoming request.
+//   - X-Maddu-Workspace header takes precedence.
+//   - "_all" is reserved for /bridge/_all/* fan-out endpoints only.
+//   - missing/unknown id → fall back to ctx.active.
+// Returns { repoRoot, workspaceId } or null if the header is "_all" but the
+// path isn't an /bridge/_all/* endpoint (caller rejects with 400).
+function resolveRequestWorkspace(req, url, ctx) {
+  const header = (req.headers['x-maddu-workspace'] || '').toString().trim();
+  const isFanout = url.pathname.startsWith('/bridge/_all/');
+  if (header === '_all') {
+    if (!isFanout) return null;
+    return { repoRoot: null, workspaceId: '_all', fanout: true };
+  }
+  if (header && ctx.workspaces.has(header)) {
+    return { repoRoot: ctx.workspaces.get(header), workspaceId: header, fanout: false };
+  }
+  // Fall back to active workspace.
+  const active = ctx.active;
+  return { repoRoot: ctx.workspaces.get(active), workspaceId: active, fanout: false };
+}
+
 async function handleBridge(req, res, url, ctx) {
   const path = url.pathname;
-  const { repoRoot } = ctx;
+
+  // ── workspace registry (cross-workspace, no per-workspace context) ────
+  if (path === '/bridge/_workspaces' && req.method === 'GET') {
+    const list = [];
+    for (const [id, repoRoot] of ctx.workspaces) {
+      list.push({ id, label: id, path: repoRoot });
+    }
+    // If the registry exists, prefer its labels.
+    try {
+      const reg = await readRegistry();
+      for (const w of reg.workspaces) {
+        const row = list.find((r) => r.id === w.id);
+        if (row) row.label = w.label;
+      }
+    } catch {}
+    return sendJson(res, 200, { workspaces: list, active: ctx.active, legacy: ctx.legacy });
+  }
+  if (path === '/bridge/_workspaces/activate' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    if (!body.id) return sendJson(res, 400, { error: 'id required' });
+    if (!ctx.workspaces.has(body.id)) return sendJson(res, 404, { error: 'unknown workspace', id: body.id });
+    ctx.active = body.id;
+    try { await activateWorkspace(body.id); } catch {}
+    return sendJson(res, 200, { ok: true, active: ctx.active });
+  }
+
+  const ws = resolveRequestWorkspace(req, url, ctx);
+  if (!ws) {
+    return sendJson(res, 400, { error: '_all header only valid on /bridge/_all/* endpoints' });
+  }
+  const repoRoot = ws.repoRoot;
+  const workspaceId = ws.workspaceId;
 
   // ── status / version / health ─────────────────────────────────────────
   if (path === '/bridge/status' && req.method === 'GET') {
@@ -135,6 +188,7 @@ async function handleBridge(req, res, url, ctx) {
       host: req.socket.localAddress,
       port: req.socket.localPort,
       repoRoot,
+      workspaceId,
       stateDir: pathsFor(repoRoot).state,
       cockpitDir,
       uptimeMs: Math.floor(process.uptime() * 1000),
@@ -720,6 +774,9 @@ async function handleBridge(req, res, url, ctx) {
           session: body.sessionId || null,
           lane: body.lane || null,
           extraArgs: body.args || [],
+          // Workers always run with cwd = the workspace's repoRoot so they
+          // act on the correct .maddu/ regardless of where the bridge booted.
+          cwd: repoRoot,
           bridgeUrl: `http://${req.socket.localAddress}:${req.socket.localPort}`
         });
         return sendJson(res, 200, { ok: !out.error, ...out });
@@ -1810,20 +1867,38 @@ function pickPort() {
   return DEFAULT_PORT;
 }
 
+// Build the { id → repoRoot } map from the registry. If the registry is
+// missing or empty, synthesize a single workspace named `default` from the
+// legacy cwd walk-up — preserves single-repo behavior for existing installs.
+async function buildWorkspaceMap() {
+  if (await registryExists()) {
+    const reg = await readRegistry();
+    if (reg.workspaces.length > 0) {
+      const map = new Map();
+      for (const w of reg.workspaces) map.set(w.id, w.path);
+      const active = reg.active && map.has(reg.active) ? reg.active : reg.workspaces[0].id;
+      return { map, active, legacy: false };
+    }
+  }
+  const repoRoot = await resolveRepoRoot();
+  return { map: new Map([['default', repoRoot]]), active: 'default', legacy: true };
+}
+
 export async function start({ host = DEFAULT_HOST, port } = {}) {
   const finalPort = port || pickPort();
-  const repoRoot = await resolveRepoRoot();
-  await ensureSpine(repoRoot);
+  const ws = await buildWorkspaceMap();
+  const ctx = { workspaces: ws.map, active: ws.active, legacy: ws.legacy };
 
-  // Record startup in the spine.
-  await append(repoRoot, {
-    type: EVENT_TYPES.FRAMEWORK_BOOTED,
-    actor: null,
-    lane: null,
-    data: { host, port: finalPort, version: await readVersion(repoRoot), pid: process.pid }
-  });
-
-  const ctx = { repoRoot };
+  // Ensure every mounted workspace has its spine ready + record FRAMEWORK_BOOTED.
+  for (const [id, repoRoot] of ctx.workspaces) {
+    await ensureSpine(repoRoot);
+    await append(repoRoot, {
+      type: EVENT_TYPES.FRAMEWORK_BOOTED,
+      actor: null,
+      lane: null,
+      data: { host, port: finalPort, version: await readVersion(repoRoot), pid: process.pid, workspaceId: id }
+    });
+  }
 
   const server = createServer(async (req, res) => {
     try {
@@ -1843,51 +1918,57 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     server.listen(finalPort, host, res);
   });
 
-  const version = await readVersion(repoRoot);
+  const firstRoot = ctx.workspaces.get(ctx.active);
+  const version = await readVersion(firstRoot);
   console.log(`Máddu bridge v${version} listening on http://${host}:${finalPort}`);
-  console.log(`  repo:    ${repoRoot}`);
-  console.log(`  state:   ${pathsFor(repoRoot).state}`);
+  console.log(`  workspaces: ${ctx.workspaces.size} mounted (${ctx.legacy ? 'legacy single-repo mode' : `registry: ${registryPath()}`})`);
+  for (const [id, root] of ctx.workspaces) {
+    const tag = id === ctx.active ? '●' : ' ';
+    console.log(`    ${tag} ${id.padEnd(22)} ${root}`);
+  }
   console.log(`  cockpit: ${cockpitDir}`);
   console.log(`  Ctrl+C to stop.`);
 
-  // Schedule poller — every 30 s, check all enabled schedules. Default action
-  // is to write to the inbox so the operator sees scheduled fires.
+  // Schedule poller — every 30 s, check all enabled schedules per workspace.
+  // Default action is to write to the inbox so the operator sees scheduled fires.
   const scheduleTimer = setInterval(async () => {
-    try {
-      const fired = await scheduleTick(repoRoot, new Date(), {
-        onFire: async (s) => {
-          try {
-            const act = s.action || {};
-            if (act.kind === 'inbox') {
-              await append(repoRoot, {
-                type: EVENT_TYPES.INBOX_MESSAGE,
-                actor: 'scheduler', lane: null,
-                data: { message: `[scheduled] ${act.value || s.title}`, kind: 'scheduled', scheduleId: s.id }
-              });
-            }
-          } catch (err) { console.error('schedule.onFire failed:', err.message); }
-        }
-      });
-      if (fired.length) console.log(`[scheduler] fired ${fired.length}: ${fired.map((s) => s.id).join(', ')}`);
-    } catch (err) { console.error('[scheduler] tick failed:', err.message); }
+    for (const [workspaceId, repoRoot] of ctx.workspaces) {
+      try {
+        const fired = await scheduleTick(repoRoot, new Date(), {
+          onFire: async (s) => {
+            try {
+              const act = s.action || {};
+              if (act.kind === 'inbox') {
+                await append(repoRoot, {
+                  type: EVENT_TYPES.INBOX_MESSAGE,
+                  actor: 'scheduler', lane: null,
+                  data: { message: `[scheduled] ${act.value || s.title}`, kind: 'scheduled', scheduleId: s.id }
+                });
+              }
+            } catch (err) { console.error(`[${workspaceId}] schedule.onFire failed:`, err.message); }
+          }
+        });
+        if (fired.length) console.log(`[${workspaceId}] scheduler fired ${fired.length}: ${fired.map((s) => s.id).join(', ')}`);
+      } catch (err) { console.error(`[${workspaceId}] scheduler tick failed:`, err.message); }
+    }
   }, 30000);
   // Also run once at startup so brand-new entries don't wait 30 s.
-  setTimeout(() => scheduleTick(repoRoot).catch(() => {}), 200);
+  setTimeout(() => {
+    for (const repoRoot of ctx.workspaces.values()) scheduleTick(repoRoot).catch(() => {});
+  }, 200);
 
-  // Telegram embedded poller — only ticks when state.enabled.
-  // Loop pattern: chain self-scheduled timeouts (not setInterval) so a long
-  // long-poll never overlaps with the next tick.
+  // Telegram/Discord/Email embedded poller — iterates workspaces. Each per-
+  // workspace tick is cheap when state.enabled is false.
   let telegramStopping = false;
   async function telegramLoop() {
     if (telegramStopping) return;
-    try { await telegram.tickPoll(repoRoot); } catch (err) { console.error('[telegram poll]', err.message); }
-    try { await telegram.tickSend(repoRoot); } catch (err) { console.error('[telegram send]', err.message); }
-    try { await discord.tickSend(repoRoot); }  catch (err) { console.error('[discord send]', err.message); }
-    try { await emailBridge.tickSend(repoRoot); } catch (err) { console.error('[email send]', err.message); }
+    for (const [workspaceId, repoRoot] of ctx.workspaces) {
+      try { await telegram.tickPoll(repoRoot); } catch (err) { console.error(`[${workspaceId}] telegram poll`, err.message); }
+      try { await telegram.tickSend(repoRoot); } catch (err) { console.error(`[${workspaceId}] telegram send`, err.message); }
+      try { await discord.tickSend(repoRoot); }  catch (err) { console.error(`[${workspaceId}] discord send`, err.message); }
+      try { await emailBridge.tickSend(repoRoot); } catch (err) { console.error(`[${workspaceId}] email send`, err.message); }
+    }
     if (telegramStopping) return;
-    // When disabled the tick is cheap (early return), so we can poll the state
-    // every few seconds without hitting Telegram. When enabled the long-poll
-    // itself blocks for up to 25 s so the loop naturally throttles.
     setTimeout(telegramLoop, 1500);
   }
   setTimeout(telegramLoop, 1000);

@@ -11,6 +11,45 @@ narrative summary.
 
 ---
 
+## [Unreleased] · multi-workspace cockpit (slices 1, 2, 5)
+
+**One bridge, every repo.** Lifts the bridge from one-bridge-per-repo to a
+machine-wide service that mounts N repos via a device-bound registry. Each
+repo's spine remains the sole source of truth for that repo.
+
+- **`maddu workspace`** — new verb: `add | list | remove | activate | show`.
+  Registry stored at `~/.config/maddu/workspaces.json` (Linux/macOS) or
+  `%APPDATA%\maddu\workspaces.json` (Windows), same path pattern as auth.
+- **Multi-tenant bridge** — `maddu start` loads the registry and mounts
+  every workspace at once. Each `/bridge/*` request carries an
+  `X-Maddu-Workspace` header naming which repo this call is for; missing
+  header falls back to the registry's `active` field. With no registry,
+  the bridge walks up from `cwd` as before — existing single-repo installs
+  work unchanged.
+- **Cockpit workspace switcher** — left-rail dropdown above the nav,
+  visible whenever more than one workspace is registered. Selection
+  persists in `localStorage`. A global `fetch` shim injects the header on
+  every `/bridge/*` call, so all 100+ existing call sites stayed unmodified.
+- **`Ctrl+K` workspace switching** — every registered workspace surfaces
+  as a "Switch to workspace: <label>" action.
+- **Per-workspace pollers** — scheduler / Telegram / Discord / Email
+  tickers iterate every mounted workspace so per-repo `.maddu/state` stays
+  authoritative.
+- **`spawnWorker` cwd fix** — workers spawned via `/bridge/runtimes/<n>/spawn`
+  now always run with `cwd = repoRoot` so they act on the correct
+  `.maddu/` regardless of where the bridge was booted from.
+- **Doctor extended** — validates the registry shape (paths exist, contain
+  `.maddu/`, no duplicates, `active` is known). `maddu doctor --all` runs
+  every per-rule check for every registered workspace; check rows are
+  prefixed with `[<workspace-id>]`. Unreachable paths report `WARN`, not
+  `FAIL`.
+- **Backward compatibility** — no registry → legacy single-repo mode.
+  Bridge identical to v0.12.0 behavior in that mode. Hard rules preserved
+  per-repo (each spine remains independent, files-only, append-only).
+
+Slices 3 ("All workspaces" aggregate views) and 4 (global crons + policies)
+are queued as follow-up PRs.
+
 ## [v0.12.0] · 2026-05-17 · depth-upgrade complete
 
 **Programmatic palette destinations + UI alignment.**

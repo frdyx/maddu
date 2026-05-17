@@ -21,7 +21,7 @@ Máddu runs as two processes at the most:
                                   └────────────────────┘
 ```
 
-- **Bridge** — a single Node HTTP server listening on `127.0.0.1:4177`. Owns the append-only spine, all projections, and the OAuth token store. Serves the cockpit as static files. No state lives in memory beyond a 1-second projection cache. Every restart rebuilds from disk.
+- **Bridge** — a single Node HTTP server listening on `127.0.0.1:4177`. Owns the append-only spine, all projections, and the OAuth token store. Serves the cockpit as static files. No state lives in memory beyond a 1-second projection cache. Every restart rebuilds from disk. **One bridge, N repos:** if `~/.config/maddu/workspaces.json` lists multiple repos, the bridge mounts all of them simultaneously and routes each request to one via the `X-Maddu-Workspace` header. Each repo's spine remains its own source of truth.
 - **Cockpit** — a vanilla-JS SPA in `maddu/cockpit/`. No framework, no build step. Talks only to the bridge. Long-polls `/bridge/events/wait` for live updates.
 - **Workers** — short-lived subprocesses spawned by the bridge on demand. Each worker is one `claude exec`, `codex exec`, or custom Node process. Credentials are injected at spawn time and never serialized into the spine.
 

@@ -40,10 +40,12 @@ See [upgrade-policy.md](upgrade-policy.md).
 Verify install integrity, hard rules, and port availability.
 
 ```bash
-$ maddu doctor [--verbose]
+$ maddu doctor [--verbose] [--all]
 ```
 
 Reports PASS / WARN / FAIL per check. Appends a `DOCTOR_REPORT` event. Exits 1 on any FAIL.
+
+If a workspace registry exists at `~/.config/maddu/workspaces.json`, doctor validates its shape unconditionally. By default per-rule checks run for the cwd repo. Pass `--all` to run every check for every registered workspace; check rows are prefixed with `[<workspace-id>]`.
 
 ## `maddu start`
 
@@ -54,6 +56,24 @@ $ maddu start [--port 4177]
 ```
 
 Default port: 4177. The bridge listens on `127.0.0.1` only.
+
+If `~/.config/maddu/workspaces.json` exists, the bridge mounts every registered repo simultaneously and routes each HTTP request to the workspace named by the `X-Maddu-Workspace` header (falls back to the registry's `active` field). With no registry, the bridge falls back to walking up from `cwd` for a single `.maddu/` — existing single-repo installs work unchanged.
+
+## `maddu workspace`
+
+Manage the multi-workspace registry. Stored at `~/.config/maddu/workspaces.json` (Linux/macOS) or `%APPDATA%\maddu\workspaces.json` (Windows) — device-bound, never committed.
+
+```bash
+$ maddu workspace add <path> [--id <slug>] [--label "<label>"]
+$ maddu workspace list
+$ maddu workspace remove <id>
+$ maddu workspace activate <id>
+$ maddu workspace show
+```
+
+`<path>` must contain a `.maddu/` directory (i.e. `maddu init` was run there). Ids must match `[a-z][a-z0-9-]{0,40}` and are unique per machine. If `--id` is omitted, it is derived from the directory name.
+
+The cockpit's left rail header shows a workspace switcher when more than one workspace is registered; selecting one re-renders every route against that workspace's data. `Ctrl+K` also surfaces a "Switch to workspace: …" entry per registered workspace.
 
 ## `maddu status`
 
