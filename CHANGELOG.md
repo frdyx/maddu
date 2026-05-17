@@ -11,9 +11,47 @@ narrative summary.
 
 ---
 
-## [Unreleased]
+## [Unreleased] · onboarding ergonomics
 
-_No changes yet._
+**Zero-friction first-run.** Closes the two biggest day-one frictions
+on a fresh `maddu init`: needing a global install to invoke the CLI,
+and having to track the `ses_…` id by hand across every subsequent
+`heartbeat` / `close`.
+
+- **Project-local `./maddu` shims.** `init` now copies `bin/maddu.mjs`
+  + `commands/*.mjs` + `version.json` into the installed `maddu/` tree
+  and drops byte-stable `./maddu` (POSIX, chmod 755) and `./maddu.cmd`
+  (Windows) wrappers at the target repo root. `./maddu <cmd>` works
+  from inside the repo with zero global state. No `npm link`
+  collisions between workspaces — each repo carries its own bundled
+  CLI. `maddu upgrade` keeps the bundled CLI in sync via the existing
+  managed manifest. The Next-steps block at the end of `init` now
+  reflects the new shim flow plus an optional `npm install -g` hint.
+- **Active-session cache.** `session register` and the new
+  `session start "<label>"` shorthand write the new id to
+  `.maddu/state/session.active.json` (atomic via temp + rename).
+  `session heartbeat` and `session close` default `--session` to that
+  cached id; `close` clears the file on success. The cache
+  self-heals — if it points at a session that's already closed in the
+  spine, the CLI clears it and exits 3 with a helpful message. Spine
+  stays authoritative; cache is a UX hint, never source of truth.
+- **`session start "<label>"`.** One-line bootstrap for a fresh shell.
+  Defaults `--role` to `implementer` and `--focus` to the label;
+  positional label is the only required argument. Wraps `register`,
+  populates the active cache.
+- **`session active`.** Prints the cached session id or
+  `(no active session)` + exit 1. Self-heals stale entries.
+- **Doctor checks.** Two new WARN-only rows: (1) project-local CLI
+  shim present + executable; (2) active-session cache integrity.
+  Stale caches surface proactively without blocking a green report.
+- **`spine.append()` triggered_by passthrough** carried forward from
+  v0.13. New `session-active.mjs` helper is optional-load via
+  `_spine.mjs`'s `loadSpineLib` — pre-v0.14 installs can run a v0.14
+  global CLI without crashing (the active-cache features just stay
+  disabled until they upgrade).
+
+Bridge load: zero new endpoints, zero new polls. All work is per-CLI
+invocation, ~50 ms of local filesystem reads.
 
 ## [v0.13.0] · 2026-05-17 · multi-workspace cockpit
 

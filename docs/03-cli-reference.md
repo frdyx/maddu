@@ -108,16 +108,31 @@ $ maddu status
 
 ## `maddu session`
 
-Register / heartbeat / close / list agent sessions.
+Register / start / heartbeat / close / list / active.
 
 ```bash
 $ maddu session register --role <r> --label "<l>" --focus "<f>" [--runtime <name>]
-$ maddu session heartbeat --session <id> [--focus "<f>"] [--lane <id>]
-$ maddu session close --session <id> [--handoff "<h>"]
+$ maddu session start "<label>" [--role implementer] [--focus "<f>"] [--lane <id>] [--runtime <name>]
+$ maddu session heartbeat [--session <id>] [--focus "<f>"] [--lane <id>]
+$ maddu session close     [--session <id>] [--handoff "<h>"]
+$ maddu session active
 $ maddu session list
 ```
 
-`register` prints the new `ses_...` id. `list` shows active sessions plus the last 10 closed.
+`register` prints the new `ses_...` id. `start` is a one-line shorthand that defaults `--role` to `implementer` and `--focus` to the label. `list` shows active sessions plus the last 10 closed.
+
+**Active-session cache** *(v0.14+)*. `register` and `start` write the new id to `.maddu/state/session.active.json`. `heartbeat` and `close` consult that file when `--session` is omitted, so the typical flow is:
+
+```bash
+$ ./maddu session start "morning slice"
+ses_...
+$ ./maddu session heartbeat --focus "halfway"      # no --session flag
+$ ./maddu session close --handoff "wrap"           # clears the cache
+```
+
+The cache is a *UX hint*, not source of truth — the spine is authoritative. If the cache points at a session that's already closed in the spine, the CLI clears the file and exits 3 with a helpful message. `maddu doctor` proactively WARNs on stale caches. If you run parallel shells against the same repo, pass `--session <id>` explicitly in each.
+
+`active` prints the cached session id (or `(no active session)` + exit 1).
 
 ## `maddu lane`
 

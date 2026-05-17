@@ -60,6 +60,14 @@ async function loadWorkspacesLib() {
   return await import(pathToFileURL(lib).href);
 }
 
+// Load the session-active library from the framework template. Returns null
+// on legacy installs where the file doesn't yet exist (pre-v0.14).
+async function loadSessionActiveLib() {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const lib = join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'session-active.mjs');
+  try { return await import(pathToFileURL(lib).href); } catch { return null; }
+}
+
 // Per-repo hard-rule + integrity checks. Returns an array of check objects.
 // Pulled out of the main function so the same logic can run once for the
 // cwd repo or N times for every registered workspace.
@@ -158,6 +166,59 @@ async function runRepoChecks(repoRoot, label) {
     checks.push({ level: 'PASS', label: `${tagLabel}state containment`, detail: 'no Máddu state dirs leaked outside .maddu/' });
   } else {
     checks.push({ level: 'WARN', label: `${tagLabel}state containment`, detail: `leaked at repo root: ${leaks.join(', ')} — move into .maddu/` });
+  }
+
+  // ── Project-local CLI shim (./maddu / ./maddu.cmd) ──
+  // Both shims are byte-stable files dropped by `maddu init` so the
+  // operator can run `./maddu <cmd>` from the repo root. Note: a
+  // *directory* named `maddu` always exists (the installed runtime
+  // tree), so we explicitly stat the path and check for `isFile()`.
+  // WARN if missing — never FAIL, since a global `maddu` install
+  // satisfies the same need.
+  async function shimFileStat(p) {
+    try { const st = await stat(p); return st.isFile() ? st : null; } catch { return null; }
+  }
+  const shimPosixStat = await shimFileStat(join(repoRoot, 'maddu'));
+  const shimWinStat = await shimFileStat(join(repoRoot, 'maddu.cmd'));
+  if (!shimPosixStat && !shimWinStat) {
+    checks.push({
+      level: 'WARN',
+      label: `${tagLabel}cli shim`,
+      detail: 'no ./maddu or ./maddu.cmd at repo root — run `maddu init --force` to install'
+    });
+  } else if (process.platform !== 'win32' && shimPosixStat) {
+    const mode = shimPosixStat.mode & 0o777;
+    if ((mode & 0o111) === 0) {
+      checks.push({ level: 'WARN', label: `${tagLabel}cli shim`, detail: './maddu not executable — `chmod +x ./maddu`' });
+    } else {
+      checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: 'project-local ./maddu present + executable' });
+    }
+  } else {
+    const which = [shimPosixStat && './maddu', shimWinStat && './maddu.cmd'].filter(Boolean).join(' + ');
+    checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: `${which} present` });
+  }
+
+  // ── Active-session cache integrity ──
+  // If the cache file exists but points at a session that's already
+  // closed (or was never registered in this repo's spine), surface a
+  // WARN. The cache self-heals on next heartbeat/close — this check
+  // just lets the operator see the problem proactively.
+  const activeLib = await loadSessionActiveLib();
+  if (activeLib) {
+    const cached = await activeLib.readActiveSession(repoRoot);
+    if (cached) {
+      const verified = await activeLib.readActiveSessionVerified(repoRoot);
+      if (verified && verified.stale) {
+        checks.push({
+          level: 'WARN',
+          label: `${tagLabel}active session cache`,
+          detail: `stale (${verified.sessionId} already closed) — next heartbeat/close will clear`
+        });
+      } else if (verified) {
+        checks.push({ level: 'PASS', label: `${tagLabel}active session cache`, detail: `${cached.sessionId}` });
+      }
+    }
+    // No cache file is the normal idle state — no check row in that case.
   }
 
   // ── Rule #8: no duplicate active lane claims ──
