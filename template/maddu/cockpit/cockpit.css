@@ -346,22 +346,13 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   text-transform: uppercase;
   color: var(--m-fg-4);
 }
+/* Workspace switcher inherits the design-system .m-select brand pass
+   (see "Native select brand pass" below): navy fill, chevron SVG,
+   accent focus ring, accent-on-selected option row. Only the rail
+   layout tweak — width-fills the rail slot — lives here. */
 .rail-workspace-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background: var(--m-bg-2);
-  color: var(--m-fg-0);
-  border: 1px solid var(--m-line);
-  border-radius: 3px;
-  padding: 6px 10px;
-  font-family: var(--m-font-cond);
-  font-size: 13px;
+  width: 100%;
   letter-spacing: 0.04em;
-  cursor: pointer;
-}
-.rail-workspace-select:focus {
-  outline: none;
-  border-color: var(--m-accent);
 }
 
 .rail-nav {
@@ -1569,7 +1560,7 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   .rail-workspace-label { display: none; }
   .rail-link { grid-template-columns: 1fr; justify-items: center; }
   .rail-workspace { padding: 8px 4px; }
-  .rail-workspace-select { font-size: 11px; padding: 4px 4px; }
+  .rail-workspace-select { font-size: 11px; padding: 4px 22px 4px 8px; }
 }
 
 /* ── Conductor (Slice α) ───────────────────────────────────────────── */

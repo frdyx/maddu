@@ -663,7 +663,7 @@ async function renderWorkspaceSwitcher() {
 
   host.innerHTML = '';
   const label = el('label', { class: 'rail-workspace-label', for: 'rail-workspace-select' }, 'Workspace');
-  const select = el('select', { class: 'rail-workspace-select', id: 'rail-workspace-select', 'aria-label': 'Active workspace' });
+  const select = el('select', { class: 'm-select rail-workspace-select', id: 'rail-workspace-select', 'aria-label': 'Active workspace' });
   for (const w of data.workspaces) {
     const opt = document.createElement('option');
     opt.value = w.id;
