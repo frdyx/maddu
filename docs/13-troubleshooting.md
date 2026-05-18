@@ -171,6 +171,47 @@ $ maddu memory extract --rebuild
 
 If the spine itself is wrong, that is a bug — open an issue with the offending event id.
 
+## Doctor reports `spine integrity` FAIL *(v0.15+)*
+
+Run the full verifier for detail:
+
+```bash
+$ ./maddu/run spine verify
+```
+
+Common findings + remediation:
+
+- **`unparseable`** — a line in `.maddu/events/*.ndjson` isn't valid JSON. Usually a partial write (power loss) or a hand-edit gone wrong. Locate the offending line via the segment + line number in the output; remove or fix it manually, then verify again.
+- **`segment_gap`** — a numbered segment file is missing between the existing ones. Usually a botched filesystem operation. Restore from git history (`git log -- .maddu/events/<missing>.ndjson`) or accept the gap as a known void.
+- **`orphan_approval_decided`** — an `APPROVAL_DECIDED` references an `approvalId` that doesn't exist in the spine. Almost always a synthetic test event left behind; locate via `./maddu/run spine show <id>` and remove if appropriate.
+- **`duplicate_id`** — two events share the same id. Replay artifact; the first event is canonical.
+
+No `maddu spine repair` exists by design — the spine is sacred. Remediation is always manual or via `maddu checkpoint rollback`.
+
+## Doctor reports `approval ledger completeness` WARN *(v0.15+)*
+
+Your spine contains pre-v0.15 `APPROVAL_REQUESTED` events whose policies would have auto-decided them, but no `APPROVAL_DECIDED` event was ever written (the old projector synthesized the decisions at read time). Fix with the migration tool:
+
+```bash
+$ ./maddu/run approval migrate-legacy-decisions --dry-run    # preview
+$ ./maddu/run approval migrate-legacy-decisions              # append the missing events
+```
+
+Stop the bridge first if it's running. Append-only and idempotent — running twice does nothing.
+
+## Doctor reports `active session cache` WARN *(v0.14+)*
+
+The cached active session id in `.maddu/state/session.active.json` points at a session that's already closed in the spine. The cache self-heals on the next `maddu session heartbeat` or `maddu session close` call — the CLI clears the file and prompts for `session start`. Or clear it manually:
+
+```bash
+$ rm .maddu/state/session.active.json
+$ ./maddu/run session start "<label>"        # register a fresh one
+```
+
+## Doctor reports `cli shim` WARN *(v0.14+)*
+
+The project-local `./maddu/run` (POSIX) + `./maddu/run.cmd` (Windows) wrapper(s) are missing. `maddu init --force` or `maddu upgrade` reinstalls them. On POSIX, `chmod +x maddu/run` if the file exists but isn't executable.
+
 ## Where to ask for help
 
 - The `?` Docs popup in the cockpit has the full doc set.

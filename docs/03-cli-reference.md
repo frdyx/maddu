@@ -169,9 +169,12 @@ $ maddu approval list
 $ maddu approval respond --id <approvalId> --decision <allow-once|allow-always|deny|deny-always> [--reason "<r>"]
 $ maddu approval policy --tool <name|*> [--lane <id>] --decision <allow-always|deny|clear>
 $ maddu approval request --tool <name> [--lane <id>] --action "<a>" --summary "<s>" [--session <sid>]
+$ maddu approval migrate-legacy-decisions [--dry-run]
 ```
 
-`request` is mostly for testing — workers normally request approvals via the bridge. See [09-approvals-and-permissions.md](09-approvals-and-permissions.md).
+`request` is mostly for testing — workers normally request approvals via the bridge. Auto-decides now write real `APPROVAL_DECIDED` events to the spine; `request` prints `auto-deny via policy` when a policy matches.
+
+`migrate-legacy-decisions` *(v0.15+)* — append-only, idempotent. Scans for pre-v0.15 `APPROVAL_REQUESTED` events that were auto-decided by the projector (no paired spine event) and writes a real `APPROVAL_DECIDED` event for each, with `actor: 'policy-migrated'` and `triggered_by.kind: 'policy_migration'`. Refuses to run while the bridge is on port 4177. See [09-approvals-and-permissions.md](09-approvals-and-permissions.md).
 
 ## `maddu auth`
 

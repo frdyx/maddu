@@ -20,6 +20,8 @@ agent polls GET /bridge/approvals/<id> → sees decision → proceeds or aborts
 
 **Auto-decisions land on the spine.** Whether the operator decides manually, a per-repo policy matches, or a global policy matches, every decision is written as a real `APPROVAL_DECIDED` event. The `actor` field identifies the decider (`operator`, `policy`, `global-policy`, or `policy-migrated`) and `triggered_by.{kind,id,fired_at}` points at the rule. This is enforced by hard rule #2 — see the *Derived ≠ projected* clarification in [`hard-rules.md`](hard-rules.md). For legacy spines (pre-v0.15) where the projector used to synthesize auto-decisions, run `maddu approval migrate-legacy-decisions` once to backfill the missing events.
 
+**Cascade order.** When `/bridge/approvals/request` lands an `APPROVAL_REQUESTED`, `lib/approvals.mjs::maybeAutoDecide` checks (1) per-repo policy first, (2) global policy second, (3) no match → request stays in the open queue. The response's `autoDecideSource` field reports which branch fired: `'policy' | 'global-policy' | null`. Wildcard precedence within each tier: exact `tool@lane` > `tool@*` > `*@lane` > `*@*`.
+
 Four decisions:
 
 - `allow-once` — this specific request only.
