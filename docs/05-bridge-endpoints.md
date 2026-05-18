@@ -55,11 +55,13 @@ The bridge is a Node HTTP server in `maddu/runtime/server.js`. It binds to `127.
 |---|---|---|---|
 | GET | `/bridge/approvals` | — | `{open[], ledger[], policies[]}` |
 | GET | `/bridge/approvals/<id>` | — | `{status: 'open'|'decided', ...}` |
-| POST | `/bridge/approvals/request` | `{tool, sessionId?, lane?, action?, summary?, payload?}` | `{approvalId, status, decision?, autoDecided, open?}` |
+| POST | `/bridge/approvals/request` | `{tool, sessionId?, lane?, action?, summary?, payload?}` | `{approvalId, status, decision?, autoDecided, autoDecideSource?, open?}` |
 | POST | `/bridge/approvals/respond` | `{approvalId, decision, actor?, lane?, reason?, tool?}` | `{ok, event}` |
 | POST | `/bridge/approvals/policies` | `{tool, decision, actor?, lane?}` | `{ok, event}` |
 
 `decision` is one of `allow-once`, `allow-always`, `deny`, `deny-always` (request/respond) or `allow-always`, `deny`, `clear` (policies).
+
+**Auto-decide cascade** *(v0.15+)*. When `/bridge/approvals/request` lands an `APPROVAL_REQUESTED`, the bridge calls `lib/approvals.mjs::maybeAutoDecide`. On a per-repo policy match it appends a real `APPROVAL_DECIDED` event with `actor: 'policy'` and `triggered_by: { kind: 'policy', id, fired_at }`; on a global-policy match it appends one with `actor: 'global-policy'` and `triggered_by.kind: 'global_policy'`. The response's `autoDecideSource` field reports `'policy' | 'global-policy' | null` so callers can distinguish per-repo from global matches. The projector no longer synthesizes auto-decisions — every entry in `proj.approvals.ledger` traces back to a real spine event. See [09-approvals-and-permissions.md](09-approvals-and-permissions.md).
 
 ## Imports
 

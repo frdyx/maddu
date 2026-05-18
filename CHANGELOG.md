@@ -13,6 +13,16 @@ narrative summary.
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [v0.15.0] · 2026-05-18 · audit foundation
+
+**The spine is now genuinely the source of truth — and the operator can
+prove it.** Two foundation slices that complete the audit chain rule #2
+has always promised. With these in, every approval decision lives as a
+real spine event (no projector inference), and the spine itself is
+operator-verifiable from a single CLI call.
+
 ### Spine integrity verifier
 
 **Trust the spine — and prove it.** With the previous slice making the

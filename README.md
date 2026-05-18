@@ -7,7 +7,7 @@
 **The Source of local truth.** A local-first, files-only framework for orchestrating AI agents inside any git repo.
 
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-D0FF00?style=flat-square&labelColor=050B17)](LICENSE)
-[![Version 0.14.0](https://img.shields.io/badge/version-0.14.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.15.0](https://img.shields.io/badge/version-0.15.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-F04E23?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Files-only](https://img.shields.io/badge/state-files--only-F5F1E8?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
 [![No cloud](https://img.shields.io/badge/cloud-no-FF5E7A?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
@@ -81,7 +81,7 @@ Nothing else in your repo is touched. `.gitignore` gets one stanza added for OS 
 
 ---
 
-## Multi-workspace (v0.14.0)
+## Multi-workspace (v0.13.0)
 
 One bridge, every repo. Register multiple `maddu`-installed repos and the same `127.0.0.1:4177` mounts all of them. Each repo's `.maddu/` remains the sole source of truth — the registry is just a device-local pointer file.
 
@@ -107,6 +107,34 @@ In the cockpit:
 Full operator guide: [`docs/19-multi-workspace.md`](docs/19-multi-workspace.md).
 
 With no registry, the bridge falls back to walking up from `cwd` for a single `.maddu/` — existing single-repo installs work unchanged.
+
+---
+
+## Audit foundation (v0.15.0)
+
+The framework's central claim — *the spine wins over any projection* — is now operator-provable from the CLI. Two slices in this release complete the audit chain rule #2 has always promised.
+
+**Spine-authoritative decisions.** Every approval auto-decided by a per-repo or global policy lands as a real `APPROVAL_DECIDED` event in the spine, with a top-level `triggered_by: { kind, id, fired_at }` field pointing at the rule that produced it. The projector no longer synthesizes ledger entries — every row in `proj.approvals.ledger` traces back to a real event, so audit history survives projector changes and cross-machine replay.
+
+```bash
+$ ./maddu/run approval policy --tool bash --decision deny
+$ ./maddu/run approval request --tool bash --action "rm /tmp/x"
+evt_…  auto-deny  via policy
+$ grep APPROVAL_DECIDED .maddu/events/*.ndjson | tail -1
+# {"actor":"policy","reason":"policy:bash@*","triggered_by":{"kind":"policy",…}}
+```
+
+Migrating legacy spines (pre-v0.15 auto-decisions had no spine event): `./maddu/run approval migrate-legacy-decisions [--dry-run]`. Append-only, idempotent. Doctor surfaces unmigrated spines with `approval ledger completeness  WARN`.
+
+**Spine integrity verifier.** `./maddu/run spine verify` walks every NDJSON segment under `.maddu/events/` and confirms parseability, event-id uniqueness, segment continuity, timestamp monotonicity, and referential integrity (orphan `APPROVAL_DECIDED`, dangling `LANE_RELEASED`, unknown-session `SESSION_CLOSED`, missing `TASK_CREATED` for updates, schedule fire refs, worker heartbeat refs). Doctor runs the same check on every invocation up to a 50k event cap. Strictly read-only — no `maddu spine repair` and won't be, by design.
+
+```bash
+$ ./maddu/run spine verify
+✓ 000000000001.ndjson  342 events · 14.7 KB · 2026-05-18 09:00:00Z → 2026-05-18 17:42:11Z
+PASS spine integrity: 342 events · 1 segment · 0 fails · 0 warns
+```
+
+The hard-rule clarifications driving this work: [*Derived ≠ projected*](docs/hard-rules.md) and [*Verifiable, not just declared*](docs/hard-rules.md). After this release the framework's strongest claim — *the spine is the source of truth* — is true in practice, not just in promise.
 
 ---
 
@@ -182,7 +210,7 @@ Every route renders summary widgets via a **pure-SVG widget kit** (no chart libr
 $ npx github:frdyx/maddu init
 ✓ .maddu/ skeleton created
 ✓ maddu/ runtime + cockpit installed
-✓ maddu.json written  (framework 0.14.0)
+✓ maddu.json written  (framework 0.15.0)
 
 # 2.  Verify install integrity + hard-rule compliance
 $ maddu doctor
@@ -194,7 +222,7 @@ $ maddu doctor
 
 # 3.  Boot the bridge
 $ maddu start
-Máddu  v0.14.0  ·  http://127.0.0.1:4177  ·  pid 84711
+Máddu  v0.15.0  ·  http://127.0.0.1:4177  ·  pid 84711
 
 # 4.  Open the cockpit in your browser
 $ open http://127.0.0.1:4177
@@ -238,6 +266,7 @@ maddu events         append / poll / wait.
 maddu search         <query>.
 maddu workspace      add / list / remove / activate / show.   (v0.13)
 maddu global         cron <add|list|show|enable|disable|remove>  ·  policy <add|list|remove>.   (v0.13)
+maddu spine          verify [--json]  ·  show <eventId>.   (v0.15)
 ```
 
 Full reference with flags + examples: [`docs/03-cli-reference.md`](docs/03-cli-reference.md).
@@ -314,6 +343,20 @@ Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
 
 - ✓ **Slice ζ** — Telegram bridge (long-poll, no public webhook) (`v0.9.0`)
 - ✓ **Slice η** — Discord + Email outbound-only bridges (`v0.10.0`)
+
+**v0.15 — audit foundation** *(complete)*
+
+- ✓ Spine-authoritative approval decisions — every policy auto-decide
+  writes a real `APPROVAL_DECIDED` event with `triggered_by`
+- ✓ `maddu approval migrate-legacy-decisions` — backfill pre-v0.15
+  spines with real events for legacy implicit decisions
+- ✓ `maddu spine verify [--json]` — single-pass NDJSON walker checking
+  parseability, id uniqueness, segment continuity, referential
+  integrity (8 event-type relationships)
+- ✓ `maddu spine show <eventId>` — pretty-print one event
+- ✓ Doctor: `spine integrity` + `approval ledger completeness` checks
+- ✓ Hard-rule clarifications: *Derived ≠ projected* + *Verifiable, not
+  just declared*
 
 **v0.14 — onboarding ergonomics** *(complete)*
 

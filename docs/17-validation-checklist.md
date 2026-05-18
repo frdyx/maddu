@@ -93,9 +93,30 @@ If you don't intend to use Telegram, skip this section.
 - [ ] `package.json` lists zero runtime dependencies (devDependencies acceptable).
 - [ ] `maddu/runtime/` imports nothing from `anthropic`, `openai`, `discord.js`, `nodemailer`, or similar SDKs.
 
+## 8 · Multi-workspace + global state *(v0.13+)*
+
+- [ ] `maddu workspace add <path>` for ≥ 2 repos; `maddu workspace list` shows both. Active marked with `●`.
+- [ ] `maddu start` boot log reports `workspaces: N mounted (registry: ...)`.
+- [ ] Cockpit shows rail switcher above the nav. Selection persists across reload.
+- [ ] On `/conductor`, `/dashboard`, `/approvals`, `/agents`, `/queue`: "All workspaces" scope pill toggles. Aggregate rows carry a workspace badge.
+- [ ] Approval issued in "All" mode lands on the row's origin spine, not the active one.
+- [ ] `maddu global cron add --natural "every minute" --action inbox --value tick`; after ≤ 90s each target workspace's spine contains `INBOX_MESSAGE` with `triggered_by.kind="global_schedule"` and matching id.
+- [ ] `maddu global policy add --tool bash --decision deny`; subsequent `POST /bridge/approvals/request` from any workspace returns `status: decided, autoDecideSource: "global-policy"`; spine has real `APPROVAL_DECIDED` event with `actor:"global-policy"`.
+
+## 9 · Audit foundation *(v0.15+)*
+
+- [ ] `maddu approval policy --tool bash --decision deny` then `maddu approval request --tool bash --action test` prints `auto-deny via policy`.
+- [ ] `grep APPROVAL_DECIDED .maddu/events/*.ndjson` shows real event with `actor:"policy"`, `reason:"policy:bash@*"`, `triggered_by:{kind:"policy",...}`.
+- [ ] Delete `.maddu/state/` (rebuilds projection from spine); `maddu approval list` shows identical ledger.
+- [ ] `maddu spine verify` returns `PASS spine integrity: N events · M segment(s) · 0 fails · 0 warns`.
+- [ ] Append `garbage` to a segment; `maddu spine verify` returns FAIL `unparseable`, exit 1. Doctor flips to FAIL.
+- [ ] Remove the bad line; both pass again.
+- [ ] `maddu spine show <eventId>` round-trips a known event.
+- [ ] Legacy spine simulation: synthesize an `APPROVAL_REQUESTED` matching a policy with no paired decision → doctor WARN `approval ledger completeness`. Run `maddu approval migrate-legacy-decisions`; doctor flips to PASS. Re-run; reports "(nothing to migrate)" — idempotent.
+
 ---
 
-## 8 · Sign-off
+## 10 · Sign-off
 
 When every box above is checked, the framework is ready to tag `v1.0.0`:
 

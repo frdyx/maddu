@@ -4,7 +4,7 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v0.14.0** ([changelog](../CHANGELOG.md)). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v0.15.0** ([changelog](../CHANGELOG.md)). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
 
 ## 60-second overview
 
@@ -37,7 +37,7 @@ Current version: **v0.14.0** ([changelog](../CHANGELOG.md)). License: Apache-2.0
 | 16 | [16-widget-kit.md](16-widget-kit.md) | The pure-SVG widget kit used across the cockpit. |
 | 17 | [17-validation-checklist.md](17-validation-checklist.md) | Pre-v1.0.0 walkthrough — cockpit, motion, integrations, hard-rule spot checks. |
 | 18 | [18-first-slice.md](18-first-slice.md) | Five-minute new-operator tour. **Start here if you just installed.** |
-| 19 | [19-multi-workspace.md](19-multi-workspace.md) | One bridge across N repos: `maddu workspace`, the rail switcher, "All workspaces" mode, `maddu global` crons + policies, `triggered_by` ancestry. *(v0.14.0)* |
+| 19 | [19-multi-workspace.md](19-multi-workspace.md) | One bridge across N repos: `maddu workspace`, the rail switcher, "All workspaces" mode, `maddu global` crons + policies, `triggered_by` ancestry. *(v0.13.0)* |
 
 Reference docs that are not in the numbered series:
 

@@ -50,10 +50,20 @@ The crucial property: **every write goes through the spine first**. Projections 
 ```
 <repo-root>/
 ├── maddu.json                       # framework version + content-hash manifest
+├── maddu                            # ← v0.14+ POSIX wrapper (./maddu/run …)
+├── maddu.cmd                        # ← v0.14+ Windows wrapper
 ├── maddu/                           # framework-owned (overwritten on upgrade)
+│   ├── bin/maddu.mjs                # CLI entry (bundled v0.14+)
+│   ├── commands/                    # CLI subcommand handlers (bundled v0.14+)
+│   ├── run                          # POSIX shim (chmod 755)
+│   ├── run.cmd                      # Windows shim
+│   ├── version.json                 # bundled so the CLI can self-report
 │   ├── runtime/
 │   │   ├── server.js                # the bridge
 │   │   └── lib/                     # spine, projections, hindsight, etc.
+│   │                                # plus: workspaces (v0.13), global (v0.13),
+│   │                                # session-active (v0.14), approvals (v0.15),
+│   │                                # verify (v0.15)
 │   ├── cockpit/
 │   │   ├── index.html
 │   │   ├── cockpit.js
