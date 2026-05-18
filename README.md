@@ -1,471 +1,169 @@
 <div align="center">
 
+<picture><img alt="Máddu mark" src="template/maddu/cockpit/brand-mark.svg" width="80"></picture>
+
 # Máddu
 
-### *root · origin · ancestry* — North Sámi, pronounced **MOD-doo**
+*The local-first event spine for AI agents — one Node process, files on disk, zero cloud dependence.*
 
-**The Source of local truth.** A local-first, files-only framework for orchestrating AI agents inside any git repo.
-
-[![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-D0FF00?style=flat-square&labelColor=050B17)](LICENSE)
-[![Version 0.15.0](https://img.shields.io/badge/version-0.15.0-56B8FF?style=flat-square&labelColor=050B17)](version.json)
-[![Node 20+](https://img.shields.io/badge/node-20%2B-F04E23?style=flat-square&labelColor=050B17)](https://nodejs.org)
-[![Files-only](https://img.shields.io/badge/state-files--only-F5F1E8?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
-[![No cloud](https://img.shields.io/badge/cloud-no-FF5E7A?style=flat-square&labelColor=050B17)](docs/06-hard-rules.md)
+[![Version 0.15.0](https://img.shields.io/badge/version-0.15.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
 ```bash
 npx github:frdyx/maddu init
 ```
 
-[Get started](docs/01-getting-started.md)  ·  [Five-minute tour](docs/18-first-slice.md)  ·  [Cockpit tour](docs/04-cockpit-tour.md)  ·  [Hard rules](docs/06-hard-rules.md)  ·  [CLI reference](docs/03-cli-reference.md)
+> *Máddu spawns no models, stores no secrets, calls no clouds.*
+
+[Quickstart](docs/01-getting-started.md) · [Hard rules](docs/hard-rules.md)
 
 </div>
 
 ---
 
-## The 30-second pitch
+## 60-second tour
 
-|  | |
-|---|---|
-| **Local-first** | Máddu runs as a single Node process on your machine. It talks to vendor APIs directly via subprocess workers, with no cloud relay and no telemetry beacon. |
-| **Files-only state** | Every fact is an NDJSON event or a JSON projection on disk under `.maddu/`. No SQLite. No embedded DB. No schema migrations. `cat`, `grep`, `git` are the only tools you need to audit it. |
-| **Multi-agent native** | Lanes, mailboxes, approvals, hindsight memory, runtime adapters, and a slice-stop ritual are built in — not bolted on. Claude Code and Codex CLI are spawned as workers; Máddu itself imports zero provider SDKs. |
+```bash
+$ npx github:frdyx/maddu init
+✓ Máddu v0.15.0 installed.
 
----
+$ ./maddu/run start &
+Máddu  v0.15.0  ·  http://127.0.0.1:4177  ·  ready
 
-## How it thinks · how it looks
+$ ./maddu/run session start "first slice"
+ses_20260518081409_b7f312
+(active session cached — heartbeat / close default to this)
 
-The cockpit's mental model rendered as a pure-SVG diagram. Every node below is a clickable route in the running cockpit. Every edge is an event type on the append-only spine.
+$ ./maddu/run slice-stop --summary "wired the bridge to my repo"
+SLICE_STOP appended  evt_20260518084211_a1b2c6
 
-<br/>
+$ tail -n 1 .maddu/events/000000000001.ndjson
+{"v":1,"id":"evt_20260518084211_a1b2c6","type":"SLICE_STOP","actor":"ses_20260518081409_b7f312","data":{"summary":"wired the bridge to my repo"}}
+```
+
+Every state question reduces to `tail` on a file. That's the whole product.
+
+Full walkthrough → [docs/01-getting-started.md](docs/01-getting-started.md).
+
+## How it thinks
+
+The bridge is one Node process bound to `127.0.0.1:4177`. The spine is `.maddu/events/*.ndjson` — append-only, single source of truth, the only thing on disk that gets to be authoritative. Everything under `.maddu/state/` is a projection: rebuildable from the spine, discarded on conflict. The cockpit is a static HTML+JS page the bridge serves over loopback. Subprocess workers (Claude Code, Codex, future runtimes) are spawned with credentials handed in at spawn-time; the bridge imports zero provider SDKs. Files-only state. The spine wins over any projection.
+
+<!--
+  TODO(post-screenshot): when docs/images/cockpit-hero.png lands, uncomment
+  this <picture> tag and remove this comment block. It shows the running
+  cockpit at /conductor with a sample slice-stop visible.
+
+  <picture><img alt="Máddu cockpit at /conductor" src="docs/images/cockpit-hero.png"></picture>
+-->
 
 <picture><img alt="Workflows blueprint — operator → BOSS / Enforcer → queue / claims → fleet → gates / reports → learning / wiki" src="docs/images/workflows-blueprint.svg"></picture>
 
-<br/>
+*Every edge is an ndjson event · every node is a cockpit route.*
 
-For the rest of the visual language — every brand token, component anatomy, motion rule, responsive pose, and the keyboard contract — see **[`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md)**. It's the canonical reference that `template/maddu/cockpit/cockpit.css` writes against.
-
----
-
-## Why Máddu exists
-
-Most agent-orchestration tools we studied (AionUi, Hermes, OpenClaw and friends) end up reaching for a hidden SQLite database, a hosted gateway, an Electron desktop, or a sprawl of provider SDKs. The result is a stack that's powerful but opaque — you can't `cat` your way to understanding what happened, and you can't move the orchestration off the machine that created it.
-
-Máddu is a deliberate refusal of that pattern. The whole system is a Node process, a static HTML page, and a `.maddu/` directory of plain files. Eight invariants ([`docs/06-hard-rules.md`](docs/06-hard-rules.md)) enforce that refusal. Doctor verifies them on every install and every upgrade.
-
-The Sámi word *máddu* means **root, origin, ancestry** — the spirit-source from which every instance descends. In Máddu the framework, every action, claim, slice, and approval descends from a recorded ancestor on an append-only spine.
-
-> *Máddu spawns no models, stores no secrets, calls no clouds.*
-
----
-
-## What you get after `maddu init`
-
-```
-your-repo/
-├─ .maddu/                     ← state directory (committed)
-│  ├─ events/000000000001.ndjson     append-only spine
-│  ├─ state/projection.json          rebuildable JSON projections
-│  ├─ sessions/                      registered agent sessions
-│  ├─ lanes/catalog.json             scoped work areas + ownership
-│  ├─ inbox/current-session.md       append-only operator inbox
-│  ├─ skills/                        SKILL.md-pattern recipes
-│  ├─ memory/                        hindsight-extracted facts
-│  └─ harness/                       node-only harness scripts
-├─ maddu/                      ← runtime + cockpit (committed)
-│  ├─ runtime/server.js              the bridge (127.0.0.1:4177)
-│  └─ cockpit/index.html             the single-page app
-└─ maddu.json                  ← framework version + install metadata
+```jsonl
+{"v":1,"id":"evt_20260518081402_a1b2c3","ts":"2026-05-18T08:14:02.117Z","type":"FRAMEWORK_INSTALLED","actor":null,"lane":null,"data":{"version":"0.15.0"}}
+{"v":1,"id":"evt_20260518081409_a1b2c4","ts":"2026-05-18T08:14:09.482Z","type":"SESSION_REGISTERED","actor":"ses_20260518081409_b7f312","lane":null,"data":{"role":"implementer","label":"first slice","runtime":"claude-code"}}
+{"v":1,"id":"evt_20260518081733_a1b2c5","ts":"2026-05-18T08:17:33.904Z","type":"APPROVAL_DECIDED","actor":"policy","lane":null,"data":{"approvalId":"evt_20260518081728_d3e4f5","decision":"deny","reason":"policy:bash@*","tool":"bash"},"triggered_by":{"kind":"policy","id":"bash@*","fired_at":"2026-05-18T08:17:33.901Z"}}
+{"v":1,"id":"evt_20260518084211_a1b2c6","ts":"2026-05-18T08:42:11.006Z","type":"SLICE_STOP","actor":"ses_20260518081409_b7f312","lane":null,"data":{"summary":"wired the bridge to my repo"}}
 ```
 
-Nothing else in your repo is touched. `.gitignore` gets one stanza added for OS auth paths only.
+*Every event you'll ever debug is one line in this file.*
 
----
+## Why Máddu
 
-## Multi-workspace (v0.13.0)
+Six design choices, and what each one lets you do that you couldn't before.
 
-One bridge, every repo. Register multiple `maddu`-installed repos and the same `127.0.0.1:4177` mounts all of them. Each repo's `.maddu/` remains the sole source of truth — the registry is just a device-local pointer file.
+**Audit with `cat`.**
 
-```bash
-$ maddu workspace add ~/code/repo-a
-$ maddu workspace add ~/code/repo-b
-$ maddu workspace list
-WORKSPACES  (2)  registry: ~/.config/maddu/workspaces.json
-  ● repo-a                 repo-a              ~/code/repo-a
-    repo-b                 repo-b              ~/code/repo-b
-$ maddu start
-  workspaces: 2 mounted (registry: …)
-    ● repo-a   ~/code/repo-a
-      repo-b   ~/code/repo-b
-```
+Every approval, session boundary, and slice-stop lands as one line in one file.
 
-In the cockpit:
+`.maddu/events/*.ndjson` is the append-only spine; every state question reduces to `tail` on a file, or `grep`, or `git log`.
 
-- **Rail switcher** — dropdown above the nav (shown when ≥ 2 workspaces are registered). Selection persists in `localStorage`. `Ctrl+K` also lists "Switch to workspace: …" entries.
-- **"All workspaces" scope pill** — on Conductor, Dashboard, Approvals, Agents, and Queue Board. Aggregates rows across every mounted workspace and tags each one with a workspace badge. Approval decisions issued from "All" mode land on the **origin** workspace's spine, not the active one.
-- **Global crons + policies** (`maddu global cron|policy …`) — machine-scope state under `~/.config/maddu/global/` that fans out across N workspaces. Every event written *because of* a global trigger carries a top-level `triggered_by: { kind, id, fired_at }` field so the per-repo spine records the cross-workspace cause.
+You introspect the system with shell tools you already trust — no SQLite to crack open, no log aggregator to provision, no dashboard between you and the truth.
 
-Full operator guide: [`docs/19-multi-workspace.md`](docs/19-multi-workspace.md).
+**Survive a projector rebuild.**
 
-With no registry, the bridge falls back to walking up from `cwd` for a single `.maddu/` — existing single-repo installs work unchanged.
+Delete `.maddu/state/`, rebuild from the spine on any machine, and get the exact same ledger.
 
----
+Decisions live as real events, never as projector-derived state: per-repo and global approval policies emit a real `APPROVAL_DECIDED` event with a top-level `triggered_by` field (`kind: "policy" | "global_policy"`, `id`, `fired_at`).
 
-## Audit foundation (v0.15.0)
+The spine wins over any projection — audit immutability is operator-provable, not declared in a doc.
 
-The framework's central claim — *the spine wins over any projection* — is now operator-provable from the CLI. Two slices in this release complete the audit chain rule #2 has always promised.
+**Operator-verifiable bedrock.**
 
-**Spine-authoritative decisions.** Every approval auto-decided by a per-repo or global policy lands as a real `APPROVAL_DECIDED` event in the spine, with a top-level `triggered_by: { kind, id, fired_at }` field pointing at the rule that produced it. The projector no longer synthesizes ledger entries — every row in `proj.approvals.ledger` traces back to a real event, so audit history survives projector changes and cross-machine replay.
+Spine corruption surfaces immediately, by name, with file and line precision.
 
-```bash
-$ ./maddu/run approval policy --tool bash --decision deny
-$ ./maddu/run approval request --tool bash --action "rm /tmp/x"
-evt_…  auto-deny  via policy
-$ grep APPROVAL_DECIDED .maddu/events/*.ndjson | tail -1
-# {"actor":"policy","reason":"policy:bash@*","triggered_by":{"kind":"policy",…}}
-```
+`maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, and referential integrity across eight event-type relationships; `maddu doctor` runs the same check on every invocation up to a 50k event cap.
 
-Migrating legacy spines (pre-v0.15 auto-decisions had no spine event): `./maddu/run approval migrate-legacy-decisions [--dry-run]`. Append-only, idempotent. Doctor surfaces unmigrated spines with `approval ledger completeness  WARN`.
+No `maddu spine repair` exists by design — the operator reads the failure and decides remediation. Verifiable, not just declared.
 
-**Spine integrity verifier.** `./maddu/run spine verify` walks every NDJSON segment under `.maddu/events/` and confirms parseability, event-id uniqueness, segment continuity, timestamp monotonicity, and referential integrity (orphan `APPROVAL_DECIDED`, dangling `LANE_RELEASED`, unknown-session `SESSION_CLOSED`, missing `TASK_CREATED` for updates, schedule fire refs, worker heartbeat refs). Doctor runs the same check on every invocation up to a 50k event cap. Strictly read-only — no `maddu spine repair` and won't be, by design.
+**One bridge, every repo.**
 
-```bash
-$ ./maddu/run spine verify
-✓ 000000000001.ndjson  342 events · 14.7 KB · 2026-05-18 09:00:00Z → 2026-05-18 17:42:11Z
-PASS spine integrity: 342 events · 1 segment · 0 fails · 0 warns
-```
+Switch context across five repos without booting five bridges.
 
-The hard-rule clarifications driving this work: [*Derived ≠ projected*](docs/hard-rules.md) and [*Verifiable, not just declared*](docs/hard-rules.md). After this release the framework's strongest claim — *the spine is the source of truth* — is true in practice, not just in promise.
+`maddu workspace add` registers a repo in `~/.config/maddu/workspaces.json`; one bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per-request, and `/bridge/_all/*` fans out reads across all mounts with each row tagged by workspace.
 
----
+Each repo's spine stays its own source of truth while the cockpit gives you the aggregated view.
 
-## The cockpit
+**Slice-stops are the only path into memory.**
 
-A single-page web app on `http://127.0.0.1:4177`. **27 routes** grouped into five phase-of-work clusters in the left rail — `DECIDE → OPERATE → VERIFY → CONNECT → REFERENCE`. The rail shrinks to glyph-only on tablets and becomes a bottom dock on mobile. Press `?` from anywhere to open the in-cockpit docs. Press `Ctrl + K` to jump anywhere.
+Nothing enters long-term memory without a structured event saying so.
 
-<table width="100%">
-<tr><th align="left" colspan="2">◆ DECIDE  <sub><i>what is safe to do next</i></sub></th></tr>
-<tr><td width="22%"><code>/conductor</code> ◆</td><td>KPI strip, next-command, score matrix, Now/Next/Waiting/Done board.</td></tr>
-<tr><td><code>/boss</code> ◆</td><td>BOSS proposes · Enforcer cites · operator decides. Action-proposal cards with risk pill.</td></tr>
-<tr><td><code>/queue</code></td><td>Scheduler / Queue / Dispatch / Preflights kanban with reason codes.</td></tr>
-<tr><td><code>/claims</code></td><td>Active claims by lane with lease state, heartbeat age, handoff button.</td></tr>
-<tr><td><code>/approvals</code></td><td>Pending permission requests + decision ledger + standing policies.</td></tr>
-<tr><td><code>/tasks</code></td><td>Dependency-aware task board with auto-unblocking.</td></tr>
+Every working slice ends with a `SLICE_STOP` event; the hindsight extractor reads only `SLICE_STOP` events, and this is the only way new facts reach `.maddu/state/memory.ndjson` or skills land in `.maddu/skills/`.
 
-<tr><th align="left" colspan="2">◈ OPERATE  <sub><i>agents, lanes, conversations</i></sub></th></tr>
-<tr><td><code>/workflows</code> ◆</td><td>Pure-SVG blueprint of the framework as a system. Every node opens its route.</td></tr>
-<tr><td><code>/agents</code></td><td>Coworker profile grid — role, focus, claims held, score, heartbeat, last slice.</td></tr>
-<tr><td><code>/teams</code></td><td>Lane ownership map with held/free pills + policy strip.</td></tr>
-<tr><td><code>/workbench</code></td><td>OS-style three-pane shell. Lanes + sessions · live stream · status counts.</td></tr>
-<tr><td><code>/chats</code></td><td>Conversation surfaces with history + replay.</td></tr>
-<tr><td><code>/mailbox</code></td><td>Per-lane mailbox bus for async cross-lane handoffs.</td></tr>
-<tr><td><code>/swarm</code></td><td>Lane roster, worker status donut, claim resolution.</td></tr>
+Derived ≠ projected: memory is exactly what slice-stops produced, which means it stays auditable, replayable, and deletable.
 
-<tr><th align="left" colspan="2">⌬ VERIFY  <sub><i>evidence, memory, wiki</i></sub></th></tr>
-<tr><td><code>/learning</code> ◆</td><td>Hindsight memory — facts distilled from slice-stops. Filter by kind / lane / query.</td></tr>
-<tr><td><code>/wiki</code> ◆</td><td>Auto-maintained per-lane wiki. Drift drawer flags pages that fell behind the spine.</td></tr>
-<tr><td><code>/events</code></td><td>Long-poll cursor over the spine, filterable by type. Pause/resume.</td></tr>
-<tr><td><code>/operations</code></td><td>Slice-stop ledger, hindsight memory, checkpoint timeline.</td></tr>
-<tr><td><code>/search</code></td><td>Cross-corpus search — events, slice-stops, memory, skills, mailbox, inbox.</td></tr>
+**Zero provider SDKs, zero cloud relay.**
 
-<tr><th align="left" colspan="2">⌗ CONNECT  <sub><i>runtimes, auth, integrations</i></sub></th></tr>
-<tr><td><code>/runtimes</code></td><td>Pluggable subprocess adapters — Claude Code, Codex, future agents.</td></tr>
-<tr><td><code>/mcp</code></td><td>Bridge-owned MCP server registry. stdio / sse / http.</td></tr>
-<tr><td><code>/auth</code></td><td>Multi-key OAuth store with rotation. Tokens never leave the device.</td></tr>
-<tr><td><code>/imports</code></td><td>Foreign-artifact gateway with secret-shape rejection.</td></tr>
-<tr><td><code>/schedule</code></td><td>Natural-language → cron. Bridge polls every 30 s.</td></tr>
-<tr><td><code>/settings</code></td><td>Bridge, lanes, providers, Telegram / Discord / Email bridges, MCP, paths, hard rules.</td></tr>
+SDK churn from Anthropic, OpenAI, or Google never reaches your orchestrator.
 
-<tr><th align="left" colspan="2">☷ REFERENCE  <sub><i>dashboard, docs, roadmap</i></sub></th></tr>
-<tr><td><code>/dashboard</code></td><td>At-a-glance status. Donut pair, sparklines, capacity meters.</td></tr>
-<tr><td><code>/roadmap</code></td><td>Roadmap KPIs, 28-day closure cadence, lane mix, clickable slice index.</td></tr>
-<tr><td><code>/skills</code></td><td>Reusable agent recipes distilled from slice-stops (`SKILL.md` format).</td></tr>
-<tr><td><code>/docs</code></td><td>Full end-user manual, anchor-deep-linkable, with backlinks.</td></tr>
-</table>
+The bridge and cockpit import nothing from `anthropic`, `openai`, or `@google/generative-ai`; provider calls happen only inside spawned subprocess workers (Claude Code, Codex, future runtimes) with credentials injected at spawn, tokens stay device-bound at `~/.config/maddu/auth/`, and `maddu export` scrubs them on the way out.
 
-Every route renders summary widgets via a **pure-SVG widget kit** (no chart library, per [hard rule #4](docs/06-hard-rules.md)). Routes marked ◆ are *anchor* routes — the five depth-upgrade signatures that every other surface plugs into.
-
----
+Máddu spawns no models, stores no secrets, calls no clouds — supply-chain integrity holds, and your credentials never traverse a remote service.
 
 ## The eight hard rules
 
-| # | Rule | Why |
+*Eight invariants. `maddu doctor` verifies them on every install and every upgrade. A repo that violates any of them is not a Máddu repo.*
+
+| # | Rule | What it prevents |
 |---|---|---|
-| 1 | **Files-only state** | Auditability with `cat`. Backup with `cp`. Portability with `git`. Recovery without specialized tooling. |
-| 2 | **Append-only event spine** | Single home for truth. Every state question reduces to "replay the spine." |
-| 3 | **No hosted backends** | Local-first means local-first. No relay, no telemetry, no "Máddu Cloud." |
-| 4 | **No broad dependencies** | Supply-chain integrity. Reproducibility. No surprise transitive vulnerabilities. |
-| 5 | **No provider SDKs in app code** | The cockpit is a UI for orchestration, not a model client. Keeps SDKs out of the bridge surface. |
-| 6 | **No token export** | OAuth tokens are device credentials, not portable identity. |
-| 7 | **Three-layer brand boundary** | Framework shell brand / app brand / content brand never bleed into each other. |
-| 8 | **Lane ownership** | Multi-agent work without conflict requires an explicit coordination primitive. Lanes + mailboxes are it. |
+| 1 | Files-only state | SQLite corruption, opaque feature state, schema-migration hazards |
+| 2 | Append-only event spine | Mutable history, replay-divergence between machines |
+| 3 | No hosted backends | Telemetry, vendor lock-in, "Máddu Cloud" |
+| 4 | No broad dependencies | Supply-chain risk, transitive vulnerabilities |
+| 5 | No provider SDKs in app code | Hidden API keys, SDK churn in the orchestrator |
+| 6 | No token export | Portable credentials, cross-machine leak |
+| 7 | Three-layer brand boundary | Framework / app / content brand bleed |
+| 8 | Lane ownership | Two agents writing the same files |
 
-`maddu doctor` verifies all eight on every install. Full text: [`docs/06-hard-rules.md`](docs/06-hard-rules.md).
-
----
-
-## Quick start
-
-```bash
-# 1.  Install into the current repo
-$ npx github:frdyx/maddu init
-✓ .maddu/ skeleton created
-✓ maddu/ runtime + cockpit installed
-✓ maddu.json written  (framework 0.15.0)
-
-# 2.  Verify install integrity + hard-rule compliance
-$ maddu doctor
-✓ files-only state
-✓ append-only spine
-✓ no provider SDKs in app code
-✓ port 4177 available
-8/8 checks pass
-
-# 3.  Boot the bridge
-$ maddu start
-Máddu  v0.15.0  ·  http://127.0.0.1:4177  ·  pid 84711
-
-# 4.  Open the cockpit in your browser
-$ open http://127.0.0.1:4177
-
-# 5.  Register a session, claim a lane, ship a slice
-$ maddu session register --runtime claude-code --lane cockpit-shell \
-    --label "Claude — restyle settings page"  \
-    --focus "ship lane defaults editor"
-session_id  s-2026-05-15-a1b2
-
-# 6.  When done, run the slice-stop ritual
-$ maddu slice-stop "SLICE STOP: settings-editor  …"
-```
-
----
-
-## CLI
-
-```
-maddu init           Install into the current directory.
-maddu upgrade        Pull newer framework files in place; never touch project state.
-maddu doctor         Verify install integrity, port availability, hard-rule compliance.
-maddu start          Boot the bridge server on 127.0.0.1:4177.
-maddu status         Print a state snapshot.
-maddu slice-stop     Run the slice-stop ritual at the end of a working session.
-maddu session        register / heartbeat / close / list.
-maddu lane           claim / release / list.
-maddu approval       list / respond / policy.
-maddu auth           add / list / remove / rate-limit.
-maddu skill          create / from-slice / list / show / apply.
-maddu memory         search / extract.
-maddu mailbox        send / read / list.
-maddu task           create / update / done / list.
-maddu worker         spawn / heartbeat / exit / kill / list.
-maddu runtime        register / detect / spawn / list.
-maddu mcp            register / enable / disable / test / list.
-maddu schedule       create / enable / disable / list.
-maddu checkpoint     create / rollback / list.
-maddu import         submit / scan / list.
-maddu events         append / poll / wait.
-maddu search         <query>.
-maddu workspace      add / list / remove / activate / show.   (v0.13)
-maddu global         cron <add|list|show|enable|disable|remove>  ·  policy <add|list|remove>.   (v0.13)
-maddu spine          verify [--json]  ·  show <eventId>.   (v0.15)
-```
-
-Full reference with flags + examples: [`docs/03-cli-reference.md`](docs/03-cli-reference.md).
-
----
-
-## Architecture in one diagram
-
-```
-                ┌──────────────────────────────────────────┐
-                │   .maddu/events/*.ndjson                 │
-                │   append-only spine — single source      │
-                │   of truth, the actual máddu             │
-                └────────────────┬─────────────────────────┘
-                                 │ replay
-                                 ▼
-                ┌──────────────────────────────────────────┐
-                │   .maddu/state/*.json                    │
-                │   projections — rebuildable, never       │
-                │   authoritative; the spine wins          │
-                └────────────────┬─────────────────────────┘
-                                 │ read
-                                 ▼
-   ┌──────────────────┐  HTTP   ┌────────────────────┐   spawn   ┌──────────────────┐
-   │  Bridge (Node)   │◀───────▶│   Cockpit (SPA)    │           │ Workers          │
-   │  127.0.0.1:4177  │         │   /dashboard       │           │ claude exec      │
-   │                  │         │   /workbench       │           │ codex exec       │
-   │                  │         │   /approvals …     │           │ future runtimes  │
-   └────────┬─────────┘         └────────────────────┘           └────────┬─────────┘
-            │                                                             │
-            │              credentials injected at spawn                  │
-            └─────────────────────────────────────────────────────────────┘
-                              (workers own provider APIs;
-                               bridge imports zero SDKs)
-```
-
-Deep dive: [`docs/15-architecture.md`](docs/15-architecture.md).
-
----
+Read the full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 
 ## Documentation
 
-**Start here** — [`docs/00-index.md`](docs/00-index.md) — table of contents + 60-second overview.
-
-| Getting started | Concepts | Reference | Advanced |
+| Start here | Concepts | Reference | Operations |
 |---|---|---|---|
-| [Installation](docs/installation.md) | [Concepts](docs/02-concepts.md) | [CLI](docs/03-cli-reference.md) | [Architecture](docs/15-architecture.md) |
-| [Getting started](docs/01-getting-started.md) | [Lanes & sessions](docs/07-lanes-and-sessions.md) | [Bridge endpoints](docs/05-bridge-endpoints.md) | [Widget kit](docs/16-widget-kit.md) |
-| [Five-minute tour](docs/18-first-slice.md) | [Slice-stop ritual](docs/08-slice-stop-ritual.md) | [Hard rules](docs/06-hard-rules.md) | [Upgrade policy](docs/upgrade-policy.md) |
-| [Cockpit tour](docs/04-cockpit-tour.md) | [Approvals & permissions](docs/09-approvals-and-permissions.md) | [Lanes](docs/lanes.md) | [Auth & imports](docs/12-auth-and-imports.md) |
-| [Troubleshooting](docs/13-troubleshooting.md) | [Skills & hindsight](docs/10-skills-and-hindsight.md) | [Validation checklist](docs/17-validation-checklist.md) | [Runtimes & MCP](docs/11-runtimes-and-mcp.md) |
-|  |  | [Design system](docs/DESIGN-SYSTEM.md) | [Changelog](CHANGELOG.md) |
+| [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
+| [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
+| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Architecture](docs/15-architecture.md) — two-process model | [Design system](docs/DESIGN-SYSTEM.md) — tokens, type, motion | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
+
+Roadmap status, version history, and per-slice notes → [CHANGELOG.md](CHANGELOG.md).
+
+## Why the name
+
+*Máddu* (North Sámi) means **root, origin, ancestry** — the spirit-source from which an instance descends. Pronounced **MOD-doo**. The name is not decoration: every action, claim, slice, and approval in this framework descends from a recorded ancestor on an append-only event spine, and the word captures that property more precisely than any English equivalent we tried. Anglo-Saxon software naming defaults are not a law of nature; we used a Sámi word because it described the shape of the thing.
+
+## License
+
+Apache-2.0. See [`LICENSE`](LICENSE).
+
+*Contributing:* the framework is pre-1.0; expect tag-boundary changes. Non-trivial PRs end with a slice-stop — include the summary in the PR description. Issues and discussions welcome at [github.com/frdyx/maddu](https://github.com/frdyx/maddu/issues).
+
+<div align="center">
 
 ---
 
-## Roadmap status
+*Máddu spawns no models, stores no secrets, calls no clouds.*
 
-**v0.3.x — original synthesis roadmap** *(complete)*
-
-- ✓ **Phase A — Foundations.** `/approvals` ledger, `/events/live` cursor stream, hindsight extraction worker.
-- ✓ **Phase B — Operator productivity.** Slash-command composer, mailbox bus, dependency-aware tasks, skills gallery, heartbeat watcher, cross-corpus search.
-- ✓ **Phase C — Power user.** Runtime adapter contract, MCP visual registry, NL→cron scheduler, checkpoint timeline, multi-key rotation.
-- ◻ **Phase D — Vision.** `/workbench` shell ✓, `/imports` gateway ✓, office-artifact preview pane (deferred).
-
-**v0.4–v0.8 — depth-upgrade plan** *(complete)*
-
-- ✓ **Slice α** — Conductor + Inspector (`v0.4.0`)
-- ✓ **Slice β** — Queue Board + Claim Map (`v0.5.0`)
-- ✓ **Slice γ** — BOSS / Enforcer duality (`v0.6.0`)
-- ✓ **Slice δ** — Learning Memory + Wiki Updater (`v0.7.0`)
-- ✓ **Slice ε** — Workflows + Roadmap depth + Agents + Teams (`v0.8.0`)
-
-**v0.9–v0.10 — optional integrations** *(off by default, allowlisted)*
-
-- ✓ **Slice ζ** — Telegram bridge (long-poll, no public webhook) (`v0.9.0`)
-- ✓ **Slice η** — Discord + Email outbound-only bridges (`v0.10.0`)
-
-**v0.15 — audit foundation** *(complete)*
-
-- ✓ Spine-authoritative approval decisions — every policy auto-decide
-  writes a real `APPROVAL_DECIDED` event with `triggered_by`
-- ✓ `maddu approval migrate-legacy-decisions` — backfill pre-v0.15
-  spines with real events for legacy implicit decisions
-- ✓ `maddu spine verify [--json]` — single-pass NDJSON walker checking
-  parseability, id uniqueness, segment continuity, referential
-  integrity (8 event-type relationships)
-- ✓ `maddu spine show <eventId>` — pretty-print one event
-- ✓ Doctor: `spine integrity` + `approval ledger completeness` checks
-- ✓ Hard-rule clarifications: *Derived ≠ projected* + *Verifiable, not
-  just declared*
-
-**v0.14 — onboarding ergonomics** *(complete)*
-
-- ✓ Project-local CLI shim (`./maddu/run` + `./maddu/run.cmd`) so
-  `init` flow gives a working CLI without a global install
-- ✓ `bin/`, `commands/`, and `version.json` bundled into the installed
-  tree via the managed manifest — `maddu upgrade` keeps them in sync
-- ✓ Active-session cache at `.maddu/state/session.active.json`
-  (atomic temp+rename, self-healing on stale entries)
-- ✓ New `maddu session start "<label>"` shorthand + `maddu session active`
-- ✓ Two new WARN-only doctor checks (shim presence + cache integrity)
-
-**v0.13 — multi-workspace cockpit** *(complete)*
-
-- ✓ Device-local `maddu workspace` registry; one bridge mounts N repos
-- ✓ Rail workspace switcher + `Ctrl+K` "Switch to workspace: …" actions
-- ✓ "All workspaces" aggregate views on Conductor, Dashboard, Approvals,
-  Agents, Queue Board (`/bridge/_all/*` fan-out)
-- ✓ Cross-workspace approval decisions land on the origin spine
-- ✓ Global crons + policies under `~/.config/maddu/global/` (`maddu global`)
-- ✓ `triggered_by` ancestry on the spine — every event written because
-  of a global trigger records its cause without breaking the
-  one-source-of-truth invariant
-
-**v0.11–v0.12 — cockpit polish + sub-target system** *(complete)*
-
-- ✓ Grouped rail (5 phase-of-work clusters), tablet-collapse, mobile dock
-- ✓ `Ctrl+K` command palette with route / sub-target / action results
-- ✓ Inspector responsive: persistent → slide-over → bottom-sheet
-- ✓ Signature motion: 900 ms lime line on every `SLICE_STOP`
-- ✓ Design-system alignment for scrollbars, buttons, inputs, focus rings
-- ✓ Sub-target programmatic registry — every searchable entity in the
-  cockpit reachable by typing its own name (`Ctrl+K` → "anthropic",
-  "telegram", "<session-label>", any lane name, any open task title…)
-- ✓ Shape-aware skeleton bones (`loadingFor`) so panels don't reflow
-
-**Next**
-
-- ◻ `v1.0.0` — gated on the validation walkthrough at
-  [`docs/17-validation-checklist.md`](docs/17-validation-checklist.md).
-  Real-world Telegram/Discord/Email smoke + the lime-line motion check.
-
-Full per-version notes: [`CHANGELOG.md`](CHANGELOG.md). Original
-synthesis detail: [`docs/maddu-v0.3-roadmap.md`](docs/maddu-v0.3-roadmap.md).
-
----
-
-## FAQ
-
-<details>
-<summary><strong>Why not SQLite?</strong></summary>
-
-SQLite is excellent — and wrong for this project's thesis. The thesis is that orchestration state should remain auditable with `cat`, diffable with `git`, and recoverable without specialized tooling. SQLite breaks all three. Prior systems we studied lost slice context to corrupt rows that no operator noticed for a week; the append-only NDJSON spine makes that failure mode impossible.
-
-</details>
-
-<details>
-<summary><strong>Does it work offline?</strong></summary>
-
-The bridge + cockpit + spine + projections all run offline. Provider calls (Claude, Codex, future runtimes) require network because that's where the models live — but Máddu itself spawns no models. You can run the bridge, register sessions, run slice-stops, and inspect history with no internet at all.
-
-</details>
-
-<details>
-<summary><strong>Can I use it with my own LLM runtime?</strong></summary>
-
-Yes. Register it under `/runtimes` with a binary path, detection command, and capability descriptor. The bridge will spawn it like any other worker. The runtime adapter contract is one JSON schema; see [`docs/11-runtimes-and-mcp.md`](docs/11-runtimes-and-mcp.md).
-
-</details>
-
-<details>
-<summary><strong>Is the cockpit a desktop app?</strong></summary>
-
-No. It's a static HTML page served by the Node bridge. Open it in any browser. No Electron, no native window, no installer beyond `npx github:frdyx/maddu init`.
-
-</details>
-
-<details>
-<summary><strong>Where do OAuth tokens live?</strong></summary>
-
-- Linux/macOS: `~/.config/maddu/auth/`
-- Windows: `%APPDATA%\maddu\auth\`
-
-The bridge never returns raw token values over HTTP; the cockpit only ever sees label + last-4 chars. `maddu export` scrubs tokens from portable bundles. `maddu import` refuses to overwrite existing tokens.
-
-</details>
-
-<details>
-<summary><strong>How is it different from AionUi, Hermes, OpenClaw?</strong></summary>
-
-Those systems gave us most of the ideas (lanes, mailboxes, approvals, hindsight memory, runtime adapters). Máddu re-implements them under a stricter set of invariants — no SQLite, no Electron, no provider SDKs in app code, no hosted relay, no token export. The 11 patterns those systems use that Máddu explicitly refuses are catalogued in the [do-not-copy table](docs/06-hard-rules.md).
-
-</details>
-
-<details>
-<summary><strong>Why a Sámi name?</strong></summary>
-
-Because *máddu* captures what the framework actually does — it anchors every action to a recorded ancestor — in a way no English word does. And because Anglo-Saxon naming defaults in software are not a law of nature.
-
-</details>
-
----
-
-## Project ethos
-
-> *Máddu spawns no models, stores no secrets, calls no clouds.*
-
-The framework is a witness, not an actor. It records what happens; it does not perform. Its job is to be the floor you stand on while AI workers do the work above it — and to be the floor that survives them when they're gone.
-
-**License:** Apache-2.0. See [`LICENSE`](LICENSE).
-
-**Contributing:** issues and PRs welcome. The framework is pre-1.0; expect tag-boundary changes. Slice-stops are how we record decisions — if you contribute a non-trivial change, run `maddu slice-stop` and include the summary in the PR description.
+</div>
