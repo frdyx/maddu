@@ -4,7 +4,9 @@
 
 # Máddu
 
-*The local-first event spine for AI agents — one Node process, files on disk, zero cloud dependence.*
+**Máddu is a local-first orchestration spine for AI agents.** A small Node process puts every approval, session, and slice of work onto an append-only event log on disk — and a static-page cockpit lets you watch and replay it in any browser.
+
+Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
 [![Version 0.15.0](https://img.shields.io/badge/version-0.15.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
