@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -59,6 +59,10 @@ Commands:
   register       Zero-keystroke session bootstrap; idempotent on MADDU_SESSION_ID env. (v0.17)
   help           Interactive discovery guide for slash commands + topics. (v0.18)
   suggest        Recommend a slash command + lane for a vague task. (v0.18)
+  team           Subcommands: open | status | close. Disjoint-lane child sessions. (v0.18 Phase 4)
+  pipeline       Subcommands: run <name> | list. Declarative multi-stage runner. (v0.18 Phase 4)
+  advise         Non-claiming advisor: maddu advise <runtime> "<prompt>". (v0.18 Phase 4)
+  cost           Token / call rollup per session, day, runtime, model. (v0.18 Phase 4)
 
 Flags:
   --version      Print framework version.

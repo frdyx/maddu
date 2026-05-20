@@ -80,6 +80,19 @@ export async function project(repoRoot) {
   const reviewsRecent = [];                     // capped 200
   const openFollowups = [];                     // FOLLOWUP_OPENED chain
 
+  // v0.18 Phase 4: teams, pipelines, advisors, token ledger.
+  //   teams       : Map teamId -> { id, openedAt, parentSessionId, lanes[], members[], status, closedAt }
+  //   pipelines   : Map pipelineRunId -> { id, name, goal, startedAt, stages[], status, completedAt }
+  //   advisors    : Array of { id, ts, runtime, prompt, parentSessionId, artifactPath }
+  //   tokenLedger : Array of { ts, runtime, sessionId, model, inputTokens, outputTokens, cacheRead, cacheCreation }
+  //                 Entries without input/output token counts are kept as
+  //                 "minimum-schema" rows; `maddu cost --unreported-count`
+  //                 surfaces the gap honestly instead of zeroing it.
+  const teams = new Map();
+  const pipelines = new Map();
+  const advisors = [];
+  const tokenLedger = [];
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -534,6 +547,143 @@ export async function project(repoRoot) {
         });
         break;
       }
+      // v0.18 Phase 4 — teams.
+      case 'TEAM_OPENED': {
+        const id = ev.data.teamId || ev.id;
+        teams.set(id, {
+          id,
+          openedAt: ev.ts,
+          parentSessionId: ev.data.parentSessionId || ev.actor || null,
+          lanes: Array.isArray(ev.data.lanes) ? ev.data.lanes.slice() : [],
+          members: [],
+          status: 'open',
+          closedAt: null,
+        });
+        break;
+      }
+      case 'TEAM_LANE_ALLOCATED': {
+        const t = teams.get(ev.data.teamId);
+        if (t && ev.data.lane && !t.lanes.includes(ev.data.lane)) {
+          t.lanes.push(ev.data.lane);
+        }
+        break;
+      }
+      case 'TEAM_MEMBER_JOINED': {
+        const t = teams.get(ev.data.teamId);
+        if (t) {
+          t.members.push({
+            sessionId: ev.data.sessionId || ev.actor,
+            lane: ev.data.lane || null,
+            joinedAt: ev.ts,
+            leftAt: null,
+          });
+        }
+        break;
+      }
+      case 'TEAM_MEMBER_LEFT': {
+        const t = teams.get(ev.data.teamId);
+        if (t) {
+          const m = t.members.find((x) => x.sessionId === (ev.data.sessionId || ev.actor) && !x.leftAt);
+          if (m) m.leftAt = ev.ts;
+        }
+        break;
+      }
+      case 'TEAM_CLOSED': {
+        const t = teams.get(ev.data.teamId);
+        if (t) {
+          t.status = 'closed';
+          t.closedAt = ev.ts;
+        }
+        break;
+      }
+      // v0.18 Phase 4 — pipelines.
+      case 'PIPELINE_STARTED': {
+        const id = ev.data.pipelineRunId || ev.id;
+        pipelines.set(id, {
+          id,
+          name: ev.data.name || null,
+          goal: ev.data.goal || null,
+          startedAt: ev.ts,
+          stages: [],
+          status: 'running',
+          completedAt: null,
+        });
+        break;
+      }
+      case 'PIPELINE_STAGE_ENTERED': {
+        const p = pipelines.get(ev.data.pipelineRunId);
+        if (p) {
+          p.stages.push({
+            name: ev.data.stage || 'unnamed',
+            enteredAt: ev.ts,
+            exitedAt: null,
+            status: 'running',
+          });
+        }
+        break;
+      }
+      case 'PIPELINE_STAGE_EXITED': {
+        const p = pipelines.get(ev.data.pipelineRunId);
+        if (p) {
+          const s = p.stages.find((x) => x.name === ev.data.stage && !x.exitedAt);
+          if (s) {
+            s.exitedAt = ev.ts;
+            s.status = ev.data.status || 'ok';
+          }
+        }
+        break;
+      }
+      case 'PIPELINE_COMPLETED': {
+        const p = pipelines.get(ev.data.pipelineRunId);
+        if (p) {
+          p.status = 'completed';
+          p.completedAt = ev.ts;
+        }
+        break;
+      }
+      case 'PIPELINE_HALTED': {
+        const p = pipelines.get(ev.data.pipelineRunId);
+        if (p) {
+          p.status = 'halted';
+          p.completedAt = ev.ts;
+          p.haltReason = ev.data.reason || null;
+        }
+        break;
+      }
+      // v0.18 Phase 4 — advisors (non-claiming).
+      case 'ADVISOR_INVOKED': {
+        advisors.push({
+          id: ev.data.advisorId || ev.id,
+          ts: ev.ts,
+          runtime: ev.data.runtime || null,
+          prompt: ev.data.prompt || '',
+          parentSessionId: ev.data.parentSessionId || ev.actor || null,
+          artifactPath: null,
+        });
+        break;
+      }
+      case 'ADVISOR_ARTIFACT_WRITTEN': {
+        const a = advisors.find((x) => x.id === ev.data.advisorId);
+        if (a) a.artifactPath = ev.data.artifactPath || null;
+        break;
+      }
+      // v0.18 Phase 4 — token ledger.
+      case 'TOKEN_USAGE_REPORTED': {
+        // Minimum schema: { runtime, sessionId, model, ts }. Optional:
+        // inputTokens, outputTokens, cacheRead, cacheCreation. We keep
+        // rows verbatim; `maddu cost` does the rollup + unreported count.
+        tokenLedger.push({
+          ts: ev.ts,
+          runtime: ev.data.runtime || null,
+          sessionId: ev.data.sessionId || ev.actor || null,
+          model: ev.data.model || null,
+          inputTokens: typeof ev.data.inputTokens === 'number' ? ev.data.inputTokens : null,
+          outputTokens: typeof ev.data.outputTokens === 'number' ? ev.data.outputTokens : null,
+          cacheRead: typeof ev.data.cacheRead === 'number' ? ev.data.cacheRead : null,
+          cacheCreation: typeof ev.data.cacheCreation === 'number' ? ev.data.cacheCreation : null,
+        });
+        break;
+      }
     }
   }
 
@@ -614,6 +764,11 @@ export async function project(repoRoot) {
       staleSessions: Array.from(janitorStaleSet).sort(),
       autoClosedTotal: janitorAutoClosedThisHour,
     },
+    // v0.18 Phase 4 — backbone projections.
+    teams: Array.from(teams.values()),
+    pipelines: Array.from(pipelines.values()),
+    advisors: advisors.slice(),
+    tokenLedger: tokenLedger.slice(),
   };
 }
 

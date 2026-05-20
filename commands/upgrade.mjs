@@ -177,6 +177,31 @@ export default async function upgrade(argv) {
     console.error(`  (janitor trigger allowlist seed skipped: ${err.message})`);
   }
 
+  // v0.18 Phase 4 — seed the built-in pipeline if it's missing. Same
+  // idempotent pattern as the janitor / triggers configs: never disturb
+  // an existing operator-edited copy.
+  try {
+    const pipelinesDir = join(repoRoot, '.maddu', 'config', 'pipelines');
+    await mkdir(pipelinesDir, { recursive: true });
+    const builtInPath = join(pipelinesDir, 'plan-exec-verify-fix.json');
+    if (!(await exists(builtInPath))) {
+      const builtIn = {
+        name: 'plan-exec-verify-fix',
+        description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
+        stages: [
+          { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
+          { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
+          { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
+          { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
+        ],
+      };
+      await writeFile(builtInPath, JSON.stringify(builtIn, null, 2) + '\n');
+      console.log(`  built-in pipeline seeded: plan-exec-verify-fix`);
+    }
+  } catch (err) {
+    console.error(`  (pipeline seed skipped: ${err.message})`);
+  }
+
   // v0.17 agent-native bootstrap — re-run the agent-file sync. Same
   // helper as init, but the helper-discovered framework root is the
   // installed maddu/ directory in the consumer (init lives in the

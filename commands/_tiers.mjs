@@ -45,4 +45,9 @@ export default {
   // v0.18 — discovery surface (read-only).
   help:         { tier: 'read-only', autoTrigger: 'allowed'   },
   suggest:      { tier: 'read-only', autoTrigger: 'allowed'   },
+  // v0.18 Phase 4 — architectural backbone.
+  team:         { tier: 'mutating',  autoTrigger: 'forbidden' },
+  pipeline:     { tier: 'mutating',  autoTrigger: 'forbidden' },
+  advise:       { tier: 'mutating',  autoTrigger: 'forbidden' },
+  cost:         { tier: 'read-only', autoTrigger: 'allowed'   },
 };
