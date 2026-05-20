@@ -187,11 +187,14 @@ export default async function init(argv) {
   //     emits a single AGENT_FILE_SYNCED event with action: 'create' |
   //     'merge' | 'no-change'.
   try {
-    const { loadAgentFileTemplates, syncAllAgentFiles } = await import(
+    const { loadAgentFileTemplates, syncAllAgentFiles, syncSlashCommands } = await import(
       'file://' + join(FRAMEWORK_ROOT, 'commands', '_agent-files.mjs').replace(/\\/g, '/')
     );
     const templates = await loadAgentFileTemplates(FRAMEWORK_ROOT);
     const result = await syncAllAgentFiles(cwd, templates);
+    // v0.18 Phase 1 — install .claude/commands/ + .codex/commands/
+    // directories (and any framework-shipped slash commands).
+    const slashResult = await syncSlashCommands(cwd, FRAMEWORK_ROOT);
     // Append AGENT_FILE_SYNCED to the spine. Single event per init
     // (not per file) — the perFile breakdown rides in data for
     // operators reading the spine directly.
@@ -209,6 +212,29 @@ export default async function init(argv) {
     const perFileSummary = Object.entries(result.perFile)
       .map(([f, a]) => `${f}:${a}`).join(', ');
     console.log(`  agent files synced (${result.action}) — ${perFileSummary}`);
+
+    // Emit a separate SLASH_COMMANDS_SYNCED event so the install path is
+    // observable even when no commands ship yet (Phase 1).
+    const ts3 = new Date().toISOString();
+    const ev3 = {
+      v: 1,
+      id: 'evt_' + ts3.replace(/[-:T.Z]/g, '').slice(0, 14) + '_' + randomBytes(3).toString('hex'),
+      ts: ts3,
+      type: 'SLASH_COMMANDS_SYNCED',
+      actor: null,
+      lane: null,
+      data: {
+        action: slashResult.action,
+        files: slashResult.files,
+        perFile: slashResult.perFile,
+        reason: slashResult.reason || null,
+      }
+    };
+    await appendFile(eventsSegment, JSON.stringify(ev3) + '\n');
+    const slashSummary = slashResult.files.length
+      ? `${slashResult.files.length} command(s)`
+      : (slashResult.reason || 'no commands');
+    console.log(`  slash commands synced (${slashResult.action}) — ${slashSummary}`);
   } catch (err) {
     console.error(`  (agent-file sync skipped: ${err.message})`);
   }

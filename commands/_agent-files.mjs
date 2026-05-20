@@ -17,7 +17,7 @@
 // overwrites; without `--force` we keep operator edits and emit
 // action:'no-change').
 
-import { readFile, writeFile, stat, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, stat, mkdir, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -137,6 +137,119 @@ export async function loadAgentFileTemplates(frameworkRoot) {
     readFile(join(root, 'AGENTS.section.md'), 'utf8'),
   ]);
   return { madduCanonical: maddu, claudeSection: claude, agentsSection: agents };
+}
+
+// ---------------------------------------------------------------------------
+// Slash-command install mechanics (v0.18 Phase 1).
+//
+// Slash commands are framework-owned markdown files installed into
+// `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`. Claude
+// Code and Codex CLI natively pick these up — when the operator types
+// `/maddu-<name> <args>` the agent inlines the markdown into the
+// conversation and dispatches the underlying `maddu` CLI calls.
+//
+// Source of truth: `template/maddu/agent-files/commands/*.md` in the
+// framework checkout, or `<consumer>/maddu/agent-files/commands/*.md`
+// after install (mirrored automatically by frameworkOwnedFiles()).
+//
+// Discipline:
+//   - Each installed file body is wrapped in <!-- BEGIN MADDU v1 --> /
+//     <!-- END MADDU v1 --> markers — same pattern as CLAUDE.md/AGENTS.md
+//     so operators can append project-specific instructions outside the
+//     marker block without losing them on upgrade.
+//   - Files NOT prefixed `maddu-` are operator-owned and never touched.
+//   - When no slash-command templates exist (Phase 1), we still create
+//     the .claude/commands/ and .codex/commands/ directories so the
+//     install path is exercised and operators can drop their own
+//     commands beside Máddu's.
+// ---------------------------------------------------------------------------
+
+const SLASH_COMMAND_DIRS = ['.claude/commands', '.codex/commands'];
+
+async function exists_(p) { return exists(p); }
+
+// Locate the slash-command template directory. Probes:
+//   <root>/template/maddu/agent-files/commands  (source layout)
+//   <root>/maddu/agent-files/commands           (installed/consumer layout)
+// Returns absolute path or null.
+async function locateSlashCommandTemplateDir(frameworkRoot) {
+  const sourceBase = join(frameworkRoot, 'template', 'maddu', 'agent-files', 'commands');
+  const installedBase = join(frameworkRoot, 'maddu', 'agent-files', 'commands');
+  if (await exists(sourceBase)) return sourceBase;
+  if (await exists(installedBase)) return installedBase;
+  return null;
+}
+
+// List slash-command template files (`<name>.md`) from a template dir.
+// Filters to *.md only; ignores any non-markdown debris.
+async function listSlashCommandTemplates(templateDir) {
+  let entries;
+  try { entries = await readdir(templateDir, { withFileTypes: true }); }
+  catch { return []; }
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith('.md') && e.name.startsWith('maddu-'))
+    .map((e) => e.name)
+    .sort();
+}
+
+// Sync one slash command into both `.claude/commands/` and `.codex/commands/`.
+// Returns { file, action } pairs (one per dir).
+async function syncOneSlashCommand(repoRoot, fileName, bodyText) {
+  const wrapped = wrapWithMarkers(bodyText);
+  const results = [];
+  for (const dir of SLASH_COMMAND_DIRS) {
+    const target = join(repoRoot, dir, fileName);
+    if (!(await exists(target))) {
+      results.push(await syncOne(target, wrapped));
+      continue;
+    }
+    const existing = normalize(await readFile(target, 'utf8'));
+    if (existing.includes(MARKER_BEGIN) && existing.includes(MARKER_END)) {
+      const next = replaceBetweenMarkers(existing, wrapped);
+      results.push(await syncOne(target, next));
+    } else {
+      // Existing file without markers — preserve it. The gate will
+      // surface drift. We do not prepend here; slash-command files are
+      // single-purpose and a marker-less variant is most likely an
+      // operator-authored override (or an older Máddu install pre-v0.18).
+      results.push({ action: 'no-change', file: target, reason: 'no-markers-present' });
+    }
+  }
+  return results;
+}
+
+// Drive the slash-command sync. Creates both target directories
+// unconditionally; installs each template file under marker discipline.
+// Returns a summary suitable for a SLASH_COMMANDS_SYNCED event payload.
+export async function syncSlashCommands(repoRoot, frameworkRoot) {
+  // Ensure target directories exist even when nothing ships.
+  for (const dir of SLASH_COMMAND_DIRS) {
+    await mkdir(join(repoRoot, dir), { recursive: true });
+  }
+  const templateDir = await locateSlashCommandTemplateDir(frameworkRoot);
+  if (!templateDir) {
+    return { action: 'no-change', files: [], perFile: {}, reason: 'no-template-dir' };
+  }
+  const fileNames = await listSlashCommandTemplates(templateDir);
+  if (fileNames.length === 0) {
+    return { action: 'no-change', files: [], perFile: {}, reason: 'no-templates' };
+  }
+  const perFile = {};
+  let sawCreate = false, sawMerge = false;
+  for (const name of fileNames) {
+    const body = await readFile(join(templateDir, name), 'utf8');
+    const results = await syncOneSlashCommand(repoRoot, name, body);
+    for (const r of results) {
+      const key = r.file.split(/[\\/]/).slice(-3).join('/');
+      perFile[key] = r.action;
+      if (r.action === 'create') sawCreate = true;
+      else if (r.action === 'merge') sawMerge = true;
+    }
+  }
+  let action = 'no-change';
+  if (sawCreate) action = 'create';
+  else if (sawMerge) action = 'merge';
+  return { action, files: fileNames, perFile };
 }
 
 // Drive all three syncs and return a summary suitable for the

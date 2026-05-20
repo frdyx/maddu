@@ -182,8 +182,9 @@ export default async function upgrade(argv) {
   // installed maddu/ directory in the consumer (init lives in the
   // dev tree; here we're in the consumer). The helper probes both.
   let agentFileSync = null;
+  let slashSync = null;
   try {
-    const { loadAgentFileTemplates, syncAllAgentFiles } = await import(
+    const { loadAgentFileTemplates, syncAllAgentFiles, syncSlashCommands } = await import(
       'file://' + join(TEMPLATE_ROOT, '..', 'commands', '_agent-files.mjs').replace(/\\/g, '/')
     );
     // TEMPLATE_ROOT points at the framework's template/ dir; its
@@ -194,6 +195,16 @@ export default async function upgrade(argv) {
     const perFile = Object.entries(agentFileSync.perFile)
       .map(([f, a]) => `${f}:${a}`).join(', ');
     console.log(`  agent files synced (${agentFileSync.action}) — ${perFile}`);
+
+    // v0.18 Phase 1 — install/refresh slash-command directories. The
+    // consumer's installed `maddu/agent-files/commands/` was copied
+    // above via the managed-file manifest; sync from there into
+    // `.claude/commands/` + `.codex/commands/`.
+    slashSync = await syncSlashCommands(repoRoot, repoRoot);
+    const slashSummary = slashSync.files.length
+      ? `${slashSync.files.length} command(s)`
+      : (slashSync.reason || 'no commands');
+    console.log(`  slash commands synced (${slashSync.action}) — ${slashSummary}`);
   } catch (err) {
     console.error(`  (agent-file sync skipped: ${err.message})`);
   }
@@ -232,6 +243,25 @@ export default async function upgrade(argv) {
       data: { files: agentFileSync.files, action: agentFileSync.action, perFile: agentFileSync.perFile }
     };
     await appendFile(eventsSegment, JSON.stringify(ev2) + '\n');
+  }
+
+  if (slashSync) {
+    const ts3 = new Date().toISOString();
+    const ev3 = {
+      v: 1,
+      id: 'evt_' + ts3.replace(/[-:T.Z]/g, '').slice(0, 14) + '_' + randomBytes(3).toString('hex'),
+      ts: ts3,
+      type: 'SLASH_COMMANDS_SYNCED',
+      actor: null,
+      lane: null,
+      data: {
+        action: slashSync.action,
+        files: slashSync.files,
+        perFile: slashSync.perFile,
+        reason: slashSync.reason || null,
+      }
+    };
+    await appendFile(eventsSegment, JSON.stringify(ev3) + '\n');
   }
 
   console.log(`\nUpgraded to v${toVersion}. (event ${ev.id})`);
