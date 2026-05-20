@@ -252,6 +252,35 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           if (ev.actor) registeredSessions.add(ev.actor);
           break;
 
+        case 'SESSION_AUTO_REGISTERED':
+          // v0.17 — agent-native bootstrap. Lifecycle identical to
+          // SESSION_REGISTERED for the purposes of referential integrity:
+          // heartbeats and closes reference the same actor id.
+          if (ev.actor) registeredSessions.add(ev.actor);
+          break;
+
+        case 'SESSION_STALE_DETECTED':
+          // Janitor observation (Phase 5). No state transition — the
+          // session stays open; this is a heads-up event.
+          if (ev.data && ev.data.sessionId && !registeredSessions.has(ev.data.sessionId)) {
+            push(issue('WARN', 'unknown_session_stale',
+              `${ev.id}: SESSION_STALE_DETECTED for unregistered session ${ev.data.sessionId}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+
+        case 'SESSION_AUTO_CLOSED':
+          // Janitor auto-close (Phase 5). Treat the same as SESSION_CLOSED
+          // for closed-set bookkeeping but emit a distinct issue code.
+          if (ev.actor && !registeredSessions.has(ev.actor)) {
+            push(issue('FAIL', 'unknown_session_auto_close',
+              `${ev.id}: SESSION_AUTO_CLOSED for unregistered session ${ev.actor}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (ev.actor) {
+            closedSessions.add(ev.actor);
+          }
+          break;
+
         case 'SESSION_HEARTBEAT':
           if (ev.actor && !registeredSessions.has(ev.actor)) {
             push(issue('WARN', 'unknown_session_heartbeat',

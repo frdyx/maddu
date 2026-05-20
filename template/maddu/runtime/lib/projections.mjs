@@ -86,6 +86,24 @@ export async function project(repoRoot) {
           status: 'active'
         });
         break;
+      case 'SESSION_AUTO_REGISTERED':
+        // v0.17 — agent-native bootstrap. Same session lifecycle as
+        // SESSION_REGISTERED; the only extra is event.data.source which
+        // the cockpit can use to disambiguate 'cli' / 'spawn' /
+        // 'agent-bootstrap' registrations. Tree provenance (parent
+        // links) gets a dedicated sessionsTree slot in Phase 2.
+        sessions.set(ev.actor, {
+          id: ev.actor,
+          role: ev.data.role || null,
+          label: ev.data.label || null,
+          focus: ev.data.focus || ev.data.label || null,
+          registeredAt: ev.ts,
+          lastHeartbeatAt: ev.ts,
+          closedAt: null,
+          status: 'active',
+          source: ev.data.source || 'cli'
+        });
+        break;
       case 'SESSION_HEARTBEAT': {
         const s = sessions.get(ev.actor);
         if (s) {
