@@ -28,10 +28,18 @@ All empty is correct. There's nothing to show yet. The panels read empty states 
 Open a terminal. From your repo root:
 
 ```bash
+maddu register
+```
+
+That's it. *(v0.17+)* — `maddu register` is the zero-keystroke shortcut. Defaults: label from cwd-basename, role=`implementer`, focus=label. Prints a session id like `ses_20260101_aaaaaa` and a one-line `export MADDU_SESSION_ID=…` hint. Idempotent: re-running in the same shell returns the cached id instead of creating a duplicate.
+
+If you want explicit role/label/focus from the start (e.g. to bind a session to a specific runtime, or set up tree provenance for a fan-out), use the longer form:
+
+```bash
 maddu session register --role implementer --label "First session" --focus "tour"
 ```
 
-The CLI prints a session id like `ses_20260101_aaaaaa`. Copy it — you'll reference it in three more commands.
+Either form caches the new id to `.maddu/state/session.active.json`, so subsequent `heartbeat` / `close` calls don't need `--session`. Copy the printed id — you'll reference it in three more commands.
 
 Switch back to the cockpit. `Ctrl+K`, type `agents`, Enter. The **Agents** route now shows one card: your session.
 
@@ -127,6 +135,7 @@ You now have a working spine with one slice-stop, a populated Learning route, a 
 - **[08-slice-stop-ritual.md](08-slice-stop-ritual.md)** — the slice-stop payload reference.
 - **[04-cockpit-tour.md](04-cockpit-tour.md)** — every route, what it shows, when to use it.
 - **[20-governance.md](20-governance.md)** *(v0.16)* — orientation, gate authoring, tracked sources, slice scope-lock, trigger discipline, review lane.
+- **[21-agent-onboarding.md](21-agent-onboarding.md)** *(v0.17)* — `maddu register`, agent files at repo root, marker discipline, tree provenance, janitor, agent-context endpoint.
 
 If anything didn't behave as described above, [13-troubleshooting.md](13-troubleshooting.md) covers the common failures. Most issues surface via `maddu doctor --verbose`.
 

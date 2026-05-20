@@ -206,3 +206,41 @@ No mutating command may auto-fire from a schedule or hook without (a) a `tier: '
 A **reviewer** is a runtime with `kind: 'reviewer'` — a separate reasoning lane (different model, second-opinion process, even a script) that runs against a sealed slice. `maddu review run --slice <id>` spawns it, parses JSON or YAML-frontmatter output into `{verdict, findings}`, archives a per-review markdown at `.maddu/reviews/<slice-event-id>.md`, emits `SLICE_REVIEWED`, and auto-opens `FOLLOWUP_OPENED` for non-clean verdicts. Catches the semantic regressions structural gates can't see.
 
 See [20-governance.md](20-governance.md).
+
+## Agent-native bootstrap *(v0.17)*
+
+Six surfaces that put agents on the spine by default. Every governance primitive above is contingent on agents being participants — v0.16 built the surfaces, v0.17 puts the agents inside them. Full reference: [21-agent-onboarding.md](21-agent-onboarding.md).
+
+### Agent files at repo root
+
+`maddu init` drops three files at the consumer's repo root, governed by **marker discipline**:
+
+- **`MADDU.md`** — canonical agent brief (single source of truth, ~150 lines). Sections: hard rules, mandatory turn-start ritual, slash-command list, slice-stop ritual, governance primitives, troubleshooting.
+- **`CLAUDE.md`** — Claude Code reads this on every session start. Máddu owns content between `<!-- BEGIN MADDU v1 -->` and `<!-- END MADDU v1 -->`; everything outside survives untouched.
+- **`AGENTS.md`** — Codex CLI and similar agents. Same marker pattern.
+
+Project content outside the markers is **never** overwritten. `maddu upgrade` updates the marker section in place; if no markers exist, the section is prepended above existing content with a blank line separator.
+
+The `agent-file-current` gate (severity `safety`) fails `maddu doctor` when the marker sections drift from the canonical template — same enforcement pattern as v0.16.2's `docs-in-sync`.
+
+### Zero-keystroke session register
+
+`maddu register` is the operator-friendly bootstrap. Defaults: label from cwd-basename, role=`implementer`, focus=label. **Idempotent**: if `MADDU_SESSION_ID` is set in env and that session is still open, no-op with `(already registered)` instead of creating a duplicate. Emits `SESSION_AUTO_REGISTERED` with `source: 'cli' | 'spawn' | 'agent-bootstrap'`.
+
+### Session tree provenance
+
+`SESSION_REGISTERED.data` gains optional `parentSessionId`. The projection's `sessionsTree` slot builds a parent → children graph; `maddu session tree [--root <id>]` prints ASCII. verify-spine rejects orphan `parentSessionId` references.
+
+### `autoRegister: true` runtime descriptors
+
+A runtime descriptor with `autoRegister: true` tells `spawnWorker` to register a fresh child session **before** spawning, link it to the caller via `parentSessionId`, and inject the new id into the child's `MADDU_SESSION_ID` env. Fan-out orchestration (one parent → N sub-agents) now produces N distinct sessions in the tree instead of one shared session.
+
+### Stale-session janitor
+
+Runs inline on every `/bridge/projection` read (no daemon). For each open session whose `lastHeartbeatAt` is older than `staleAfterMs` (default 30 min), emits `SESSION_STALE_DETECTED`. Past `autoCloseAfterMs` (default 4 hr), emits `SESSION_AUTO_CLOSED` with `triggered_by: {kind:'janitor', …}`. Thresholds in `.maddu/config/janitor.json`. The auto-close trigger is **allowlisted** in `.maddu/config/triggers.json` (candidate rule #9 enforces explicit allowlisting).
+
+### Agent context endpoint
+
+`maddu brief --for-agent` (text) and `GET /bridge/agent-context` (JSON) return a self-contained bootstrap payload: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands the agent should run. `MADDU.md` tells the agent to call this at every turn start. One command, one read, ready to operate.
+
+See [21-agent-onboarding.md](21-agent-onboarding.md).

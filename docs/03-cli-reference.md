@@ -108,20 +108,40 @@ Print a state snapshot — repo root, spine event count, active sessions, lane c
 $ maddu status
 ```
 
-## `maddu session`
+## `maddu register` *(v0.17)*
 
-Register / start / heartbeat / close / list / active.
+Zero-keystroke session bootstrap. The agent's mandatory first command of every turn.
 
 ```bash
-$ maddu session register --role <r> --label "<l>" --focus "<f>" [--runtime <name>]
+$ maddu register [<label>] [--parent <sessionId>] [--role <role>] [--runtime <name>]
+```
+
+- Defaults: label from cwd-basename, role=`implementer`, focus=label.
+- **Idempotent**: if `MADDU_SESSION_ID` is set in env AND that session is still open in the projection, returns the cached id with `(already registered)` — no duplicate event.
+- Stale env (closed session) → registers a fresh session anyway.
+- Emits `SESSION_AUTO_REGISTERED` with `source: 'cli'`.
+- Writes the new id to `.maddu/state/session.active.json` (same cache as `session start`).
+- Prints an `export MADDU_SESSION_ID=<id>` hint on first registration; agents that source the hint get free idempotency on later calls.
+
+For deeper init flows (multi-role, explicit focus, runtime binding) use `maddu session register` below.
+
+## `maddu session`
+
+Register / start / heartbeat / close / list / active / tree.
+
+```bash
+$ maddu session register --role <r> --label "<l>" --focus "<f>" [--runtime <name>] [--parent <sessionId>]
 $ maddu session start "<label>" [--role implementer] [--focus "<f>"] [--lane <id>] [--runtime <name>]
 $ maddu session heartbeat [--session <id>] [--focus "<f>"] [--lane <id>]
 $ maddu session close     [--session <id>] [--handoff "<h>"]
 $ maddu session active
 $ maddu session list
+$ maddu session tree      [--root <sessionId>]            # v0.17: ASCII parent → children tree
 ```
 
-`register` prints the new `ses_...` id. `start` is a one-line shorthand that defaults `--role` to `implementer` and `--focus` to the label. `list` shows active sessions plus the last 10 closed.
+`register` prints the new `ses_...` id. `start` is a one-line shorthand that defaults `--role` to `implementer` and `--focus` to the label. `list` shows active sessions plus the last 10 closed. `tree` *(v0.17)* renders the `sessionsTree` projection — parent sessions with their auto-registered children inline, useful for fan-out orchestration.
+
+`--parent <sessionId>` *(v0.17)* — set the parent reference for tree provenance. Also passable via `MADDU_PARENT_SESSION_ID` env. verify-spine rejects orphan parent references.
 
 **Active-session cache** *(v0.14+)*. `register` and `start` write the new id to `.maddu/state/session.active.json`. `heartbeat` and `close` consult that file when `--session` is omitted, so the typical flow is:
 
@@ -284,11 +304,13 @@ $ maddu runtime list
 $ maddu runtime show <name>
 $ maddu runtime register --name <n> --binary <b> [--args a,b] [--detect "<cmd>"] \
                          [--display "<d>"] [--mcp] [--streaming] [--approval per-tool] \
-                         [--lanes a,b] [--notes "<n>"]
+                         [--lanes a,b] [--notes "<n>"] [--auto-register]
 $ maddu runtime detect [<name>]                     # no arg → detect-all
 $ maddu runtime spawn <name> [--session <sid>] [--lane <id>] [--args a,b]
 $ maddu runtime remove <name>
 ```
+
+**`--auto-register`** *(v0.17)* sets `kind: 'reviewer'`-style behavior: every `spawnWorker` call against this runtime first registers a fresh child session (linked to the caller via `parentSessionId`), then injects the new id into the child's `MADDU_SESSION_ID` env. Fan-out orchestration produces N distinct sessions in the tree instead of one shared session. Editable post-register by hand-editing `.maddu/runtimes/<name>.json` and setting `autoRegister: true`.
 
 ## `maddu schedule`
 
@@ -383,7 +405,7 @@ $ maddu phase set --name "<name>" [--notes "<notes>"]
 $ maddu phase show
 ```
 
-## `maddu brief` *(v0.16)*
+## `maddu brief` *(v0.16, agent-context flag v0.17)*
 
 Turn-start orientation digest. Writes deterministic projections to `.maddu/state/orientation.json` and `.maddu/state/handoff.md` (anchored to `lastEventId`, never `new Date()` — same spine → byte-identical files).
 
@@ -391,9 +413,14 @@ Turn-start orientation digest. Writes deterministic projections to `.maddu/state
 $ maddu brief                # pretty-print
 $ maddu brief --json         # emit orientation JSON for machine consumption
 $ maddu brief --drain        # also drain pending-actions queue (emits PENDING_ACTION_DRAINED)
+$ maddu brief --for-agent    # v0.17: single text block scoped for agent consumption
 ```
 
-Prints goal, phase, active session, last slice-stop, counters, and open follow-ups. Run at the start of every agent turn. See [20-governance.md](20-governance.md#turn-start-orientation).
+Prints goal, phase, active session, last slice-stop, counters, and open follow-ups. Run at the start of every agent turn.
+
+**`--for-agent`** *(v0.17)* returns a self-contained text block agents can read on every turn: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands. Mirrors the bridge endpoint `GET /bridge/agent-context` (JSON). `MADDU.md` tells agents to call this at turn start.
+
+See [20-governance.md](20-governance.md#turn-start-orientation) and [21-agent-onboarding.md](21-agent-onboarding.md).
 
 ## `maddu slice` *(v0.16)*
 

@@ -57,6 +57,16 @@ Open <http://127.0.0.1:4177> in any browser. You should see the cockpit — a da
 In another terminal:
 
 ```bash
+$ ./maddu/run register
+ses_2026...01
+  (active session cached — idempotent on MADDU_SESSION_ID)
+```
+
+`maddu register` *(v0.17+)* is the zero-keystroke bootstrap. Defaults: label from cwd-basename, role=`implementer`. Prints a session id and an `export MADDU_SESSION_ID=…` hint. Re-running in the same shell returns the cached id (no duplicates).
+
+For explicit role/label/focus from the start, use:
+
+```bash
 $ ./maddu/run session start "First session"
 ses_2026...01
   (active session cached — 'maddu session heartbeat' / 'close' default to this)
@@ -141,4 +151,5 @@ $ ./maddu/run session close --handoff "Done with hello-world"     # uses cached 
 - [04-cockpit-tour.md](04-cockpit-tour.md) — every cockpit route explained.
 - [08-slice-stop-ritual.md](08-slice-stop-ritual.md) — slice-stop payload reference.
 - [20-governance.md](20-governance.md) *(v0.16+)* — orientation digest (`maddu brief`), authoring gates, tracked sources, slice scope-lock, trigger discipline, post-stop review lane.
+- [21-agent-onboarding.md](21-agent-onboarding.md) *(v0.17+)* — `maddu register`, `MADDU.md`/`CLAUDE.md`/`AGENTS.md` at repo root, marker discipline, tree provenance for fan-out, stale-session janitor, agent-context endpoint.
 - [13-troubleshooting.md](13-troubleshooting.md) — if anything misbehaved.
