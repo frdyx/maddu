@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
 import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId, genWorkerId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
+import { buildOrientation, renderHandoff } from './lib/handoff.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
 import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './lib/skills.mjs';
@@ -1377,6 +1378,15 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/projection' && req.method === 'GET') {
     const proj = await project(repoRoot);
     return sendJson(res, 200, proj);
+  }
+
+  // ── orientation (Governance Phase 1) ──────────────────────────────────
+  // Turn-start digest. Derived from the spine on each call.
+  if (path === '/bridge/orientation' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const orientation = buildOrientation(proj);
+    const handoff = renderHandoff(proj);
+    return sendJson(res, 200, { orientation, handoff });
   }
 
   // ── conductor (Slice α: signal-of-record for "what is safe next?") ────

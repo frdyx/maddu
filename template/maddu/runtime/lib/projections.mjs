@@ -45,6 +45,10 @@ export async function project(repoRoot) {
   // BOSS transcript fragments (Slice γ) — keyed by sessionId, append-only.
   const bossTranscripts = new Map();
 
+  // Governance Phase 1: goal + phase declarations (latest wins).
+  let goal = null;
+  let phase = null;
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -266,6 +270,20 @@ export async function project(repoRoot) {
         p.reason = ev.data.reason || null;
         break;
       }
+      case 'GOAL_DECLARED':
+        goal = {
+          objective: ev.data.objective || '',
+          constraints: Array.isArray(ev.data.constraints) ? ev.data.constraints : [],
+          setAt: ev.ts
+        };
+        break;
+      case 'PHASE_DECLARED':
+        phase = {
+          name: ev.data.name || '',
+          notes: ev.data.notes || null,
+          setAt: ev.ts
+        };
+        break;
       case 'BOSS_MESSAGE': {
         const sid = ev.data.bossSessionId || 'default';
         if (!bossTranscripts.has(sid)) bossTranscripts.set(sid, []);
@@ -324,7 +342,10 @@ export async function project(repoRoot) {
     tasks: Array.from(tasks.values()),
     workers: Array.from(workers.values()).map((w) => annotateWorker(w)),
     proposals: Array.from(proposals.values()),
-    bossTranscripts: Object.fromEntries(bossTranscripts)
+    bossTranscripts: Object.fromEntries(bossTranscripts),
+    // Governance Phase 1: latest declared goal + phase (null if never set).
+    goal,
+    phase
   };
 }
 

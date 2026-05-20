@@ -22,18 +22,20 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = process.env.MADDU_TEST_REPO || process.cwd();
 
-async function loadProjections() {
-  // Prefer installed runtime (the consumer repo); fall back to source template.
-  const installed = path.join(repoRoot, 'maddu', 'runtime', 'lib', 'projections.mjs');
-  const sourceLib = path.resolve(__dirname, '..', '..', 'template', 'maddu', 'runtime', 'lib', 'projections.mjs');
+async function loadLib(file) {
+  const installed = path.join(repoRoot, 'maddu', 'runtime', 'lib', file);
+  const sourceLib = path.resolve(__dirname, '..', '..', 'template', 'maddu', 'runtime', 'lib', file);
   const candidates = [installed, sourceLib];
   for (const p of candidates) {
-    try {
-      await fs.stat(p);
-      return await import(pathToFileURL(p).href);
-    } catch {}
+    try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
   }
-  throw new Error(`projections.mjs not found (tried: ${candidates.join(', ')})`);
+  return null;
+}
+
+async function loadProjections() {
+  const m = await loadLib('projections.mjs');
+  if (!m) throw new Error('projections.mjs not found');
+  return m;
 }
 
 function canonical(obj) {
@@ -67,17 +69,38 @@ async function main() {
   const stateDir = path.join(repoRoot, '.maddu', 'state');
   const beforeFiles = await readStateFiles(stateDir);
 
-  const first = await lib.project(repoRoot);
+  // Optional handoff renderer (Phase 1+). When present, also exercise the
+  // brief-style write-through to .maddu/state/orientation.json + handoff.md
+  // so the byte-equality round-trip covers those projection files too.
+  const handoffMod = await loadLib('handoff.mjs');
 
-  // Delete tracked state files (preserves coordinator-log.ndjson + other
-  // non-projection artifacts). We only delete files that look like
-  // projection snapshots (.json) and have a recorded "before" content.
-  for (const rel of Object.keys(beforeFiles)) {
+  async function writeOrientationFiles(proj) {
+    if (!handoffMod) return;
+    await fs.mkdir(stateDir, { recursive: true });
+    const orientation = handoffMod.buildOrientation(proj);
+    const handoff = handoffMod.renderHandoff(proj);
+    await fs.writeFile(path.join(stateDir, 'orientation.json'),
+      JSON.stringify(orientation, null, 2) + '\n');
+    await fs.writeFile(path.join(stateDir, 'handoff.md'), handoff);
+  }
+
+  const first = await lib.project(repoRoot);
+  await writeOrientationFiles(first);
+
+  // Re-snapshot after first write so beforeFiles includes the orientation pair.
+  const snapshot = await readStateFiles(stateDir);
+
+  // Delete every snapshotted projection file.
+  for (const rel of Object.keys(snapshot)) {
     try { await fs.rm(path.join(stateDir, rel), { force: true }); } catch {}
   }
 
   const second = await lib.project(repoRoot);
+  await writeOrientationFiles(second);
   const afterFiles = await readStateFiles(stateDir);
+
+  // For byte-equality assertion, use the post-first-write snapshot.
+  for (const rel of Object.keys(snapshot)) beforeFiles[rel] = snapshot[rel];
 
   // Restore any state files we deleted but the second project() did not
   // rewrite (so the harness leaves no footprint).
