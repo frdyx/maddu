@@ -17,6 +17,13 @@ export async function project(repoRoot) {
   //   sessionId -> { parentSessionId, source, state, lastHeartbeatAt }
   // childSessionIds populated in a reverse-index pass after replay.
   const sessionsTree = new Map();
+  // v0.17 janitor: rolling window of stale-detected sessions and the
+  // auto-closed counter (last hour, for the cockpit). Rebuilt per
+  // project() call from SESSION_STALE_DETECTED + SESSION_AUTO_CLOSED.
+  const janitorStaleSet = new Set();
+  let janitorAutoClosedThisHour = 0;
+  let janitorLastRunAt = null;
+  const hourMs = 60 * 60 * 1000;
   const claims = new Map();                // lane -> { lane, sessionId, focus, claimedAt }
   const sliceStops = [];                   // list of slice-stop events, newest last
   const inbox = [];                        // list of inbox events
@@ -145,6 +152,40 @@ export async function project(repoRoot) {
         // Release any claims held by this session.
         for (const [lane, c] of claims) {
           if (c.sessionId === ev.actor) claims.delete(lane);
+        }
+        // Clear from the janitor's stale set — the session is closed
+        // by the operator and no longer a janitor concern.
+        janitorStaleSet.delete(ev.actor);
+        break;
+      }
+      case 'SESSION_STALE_DETECTED': {
+        janitorLastRunAt = ev.ts;
+        if (ev.data && ev.data.sessionId) janitorStaleSet.add(ev.data.sessionId);
+        const t = sessionsTree.get(ev.data && ev.data.sessionId);
+        if (t) t.state = 'stale';
+        break;
+      }
+      case 'SESSION_AUTO_CLOSED': {
+        janitorLastRunAt = ev.ts;
+        const sid = ev.actor || (ev.data && ev.data.sessionId);
+        const s = sessions.get(sid);
+        if (s) {
+          s.closedAt = ev.ts;
+          s.status = 'closed';
+          s.closedBy = 'janitor';
+        }
+        const t = sessionsTree.get(sid);
+        if (t) t.state = 'closed';
+        janitorStaleSet.delete(sid);
+        // Determinism: count events within `hourMs` of the *latest event*
+        // we've seen so far, not wall-clock now. Wall-clock would make
+        // project() non-idempotent and break the round-trip test.
+        // The cockpit can re-window against Date.now() at display time
+        // if it wants a sliding hour.
+        janitorAutoClosedThisHour += 1;
+        // Release any claims held by the auto-closed session.
+        for (const [lane, c] of claims) {
+          if (c.sessionId === sid) claims.delete(lane);
         }
         break;
       }
@@ -563,8 +604,16 @@ export async function project(repoRoot) {
     openFollowups: openFollowups.slice(),
     // v0.17 Phase 2: session-tree provenance (parent → child links).
     // Each entry is keyed by sessionId; childSessionIds is the reverse
-    // index built once after replay (Phase 5 will set state='stale').
+    // index built once after replay (state may flip to 'stale' via Phase 5).
     sessionsTree: buildSessionsTreeView(sessionsTree),
+    // v0.17 Phase 5: stale-session janitor view. Deterministic — the
+    // counter is total auto-closes seen on the spine (cockpit can
+    // re-window against wall-clock at display time).
+    janitor: {
+      lastRunAt: janitorLastRunAt,
+      staleSessions: Array.from(janitorStaleSet).sort(),
+      autoClosedTotal: janitorAutoClosedThisHour,
+    },
   };
 }
 

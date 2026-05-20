@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
 import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId, genWorkerId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
+import { runJanitor } from './lib/janitor.mjs';
 import { buildOrientation, renderHandoff } from './lib/handoff.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
@@ -1376,8 +1377,27 @@ async function handleBridge(req, res, url, ctx) {
 
   // ── projection ────────────────────────────────────────────────────────
   if (path === '/bridge/projection' && req.method === 'GET') {
-    const proj = await project(repoRoot);
-    return sendJson(res, 200, proj);
+    // v0.17 Phase 5: inline stale-session janitor. Runs before the read
+    // so freshly-emitted SESSION_STALE_DETECTED / SESSION_AUTO_CLOSED
+    // events make it into the projection we return. The janitor is
+    // bounded — it only looks at currently-active sessions and only
+    // emits events when thresholds cross, so re-reads don't churn the
+    // spine. Failures are swallowed; never block the projection read.
+    try {
+      const preProj = await project(repoRoot);
+      const summary = await runJanitor(repoRoot, preProj);
+      if (summary.staleEmitted > 0 || summary.closedEmitted > 0) {
+        // Force a re-projection so the response includes the events
+        // we just appended.
+        const proj = await project(repoRoot);
+        return sendJson(res, 200, proj);
+      }
+      return sendJson(res, 200, preProj);
+    } catch (err) {
+      console.error('janitor tick failed:', err.message);
+      const proj = await project(repoRoot);
+      return sendJson(res, 200, proj);
+    }
   }
 
   // ── orientation (Governance Phase 1) ──────────────────────────────────

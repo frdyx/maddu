@@ -141,6 +141,33 @@ export default async function upgrade(argv) {
   // bit, which `copyFile` doesn't preserve.
   await ensureShimExecutable(repoRoot);
 
+  // v0.17 Phase 5 — backfill the janitor's trigger allowlist entry
+  // for existing v0.16 repos so the trigger-discipline gate doesn't
+  // trip on the first auto-close fire. janitor.json itself is optional
+  // (readJanitorConfig falls back to baked-in defaults), so we only
+  // write it when missing and never disturb operator overrides.
+  try {
+    const configDir = join(repoRoot, '.maddu', 'config');
+    await mkdir(configDir, { recursive: true });
+    const triggersPath = join(configDir, 'triggers.json');
+    if (await exists(triggersPath)) {
+      const text = await readFile(triggersPath, 'utf8');
+      const cur = JSON.parse(text);
+      const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
+      if (!allowed.includes('janitor:sessions')) {
+        allowed.push('janitor:sessions');
+        await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
+      }
+    } else {
+      await writeFile(
+        triggersPath,
+        JSON.stringify({ allowed: ['janitor:sessions'] }, null, 2) + '\n'
+      );
+    }
+  } catch (err) {
+    console.error(`  (janitor trigger allowlist seed skipped: ${err.message})`);
+  }
+
   // v0.17 agent-native bootstrap — re-run the agent-file sync. Same
   // helper as init, but the helper-discovered framework root is the
   // installed maddu/ directory in the consumer (init lives in the

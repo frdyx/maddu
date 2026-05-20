@@ -138,6 +138,38 @@ export default async function init(argv) {
     console.log(`  updated .gitignore (token paths only)`);
   }
 
+  // 6a. v0.17 Phase 5 — janitor config + triggers allowlist. Ships
+  //     defaults; operator can edit (30min stale, 4hr auto-close) or
+  //     remove the trigger from the allowlist to disable.
+  const configDir = join(cwd, '.maddu', 'config');
+  await mkdir(configDir, { recursive: true });
+  const janitorPath = join(configDir, 'janitor.json');
+  if (!(await exists(janitorPath))) {
+    await writeFile(
+      janitorPath,
+      JSON.stringify({ staleAfterMs: 1800000, autoCloseAfterMs: 14400000 }, null, 2) + '\n'
+    );
+  }
+  const triggersPath = join(configDir, 'triggers.json');
+  if (!(await exists(triggersPath))) {
+    await writeFile(
+      triggersPath,
+      JSON.stringify({ allowed: ['janitor:sessions'] }, null, 2) + '\n'
+    );
+  } else {
+    // Existing file — merge our entry without disturbing operator additions.
+    try {
+      const text = await readFile(triggersPath, 'utf8');
+      const cur = JSON.parse(text);
+      const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
+      if (!allowed.includes('janitor:sessions')) {
+        allowed.push('janitor:sessions');
+        await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
+      }
+    } catch {}
+  }
+  console.log(`  janitor + trigger allowlist seeded (.maddu/config/)`);
+
   // 6b. v0.17 agent-native bootstrap — drop MADDU.md + marker-delimited
   //     sections into CLAUDE.md / AGENTS.md at the repo root. The
   //     helper preserves operator content outside the markers and
