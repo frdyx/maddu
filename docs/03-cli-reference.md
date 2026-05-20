@@ -478,3 +478,111 @@ $ maddu worker show <id>
 ```
 
 A worker silent for >15 s appears as `stuck` at read time — no event needed.
+
+## `maddu help` *(v0.18)*
+
+Interactive discovery guide for `/maddu-*` slash commands.
+
+```bash
+$ maddu help                            # full topic-grouped roster
+$ maddu help --topic autopilot          # filter by topic
+$ maddu help --format json              # machine-readable
+```
+
+Topics: `discovery`, `autopilot`, `planning`, `team`, `cost`,
+`skills`, `admin`.
+
+## `maddu suggest` *(v0.18)*
+
+Deterministic recommender — string-match keyword + lane scope,
+stopword-filtered, recency tie-break. No LLM call (rule #5).
+
+```bash
+$ maddu suggest --task "<vague task>"           # full output
+$ maddu suggest --task "<vague task>" --emit-lane     # lane id only
+$ maddu suggest --task "<vague task>" --emit-command  # /maddu-* only
+$ maddu suggest --task "<vague task>" --json
+```
+
+Used by `/maddu-autopilot` to pick the right lane. The
+`suggest-engine-deterministic` doctor gate runs the same input twice
+and fails on drift.
+
+## `maddu team` *(v0.18)*
+
+Pre-allocate disjoint lanes for fan-out work; rule #8 enforced both
+pre-fact (the command refuses overlap) and by the
+`rule-8-team-lane-disjoint` gate.
+
+```bash
+$ maddu team open --members N --lanes a,b,c [--label "..."]
+$ maddu team status [--team-id <id>] [--json]
+$ maddu team close --team-id <id>
+```
+
+## `maddu pipeline` *(v0.18)*
+
+Walks declarative stages from `.maddu/config/pipelines/<name>.json`.
+The runner is a bookkeeper — emits `PIPELINE_*` events with a stage
+trail; the actual work is the agent's responsibility (see
+`/maddu-autopilot`).
+
+```bash
+$ maddu pipeline list                              # configured pipelines
+$ maddu pipeline run plan-exec-verify-fix "<goal>" # walk stages
+```
+
+Built-in: `plan-exec-verify-fix` (plan → exec → verify → fix). Seeded
+by `init` and `upgrade`; never overwritten.
+
+## `maddu advise` *(v0.18)*
+
+Non-claiming advisor query. Writes a stub artifact at
+`.maddu/artifacts/advisors/<id>.md`; the LLM agent fills in the
+response. Rule #5 preserved — Máddu never imports an SDK.
+
+```bash
+$ maddu advise <runtime> "<prompt>"
+```
+
+The `advisor-non-claiming` gate refuses any `LANE_CLAIMED` event
+whose actor matches a recorded advisor session — rule #8 companion.
+
+## `maddu cost` *(v0.18)*
+
+Token / call rollup from `TOKEN_USAGE_REPORTED` events. Honest about
+gaps — rows missing input/output counts surface as `unreported`,
+never zero-filled.
+
+```bash
+$ maddu cost --by runtime               # default axis
+$ maddu cost --by session               # per session
+$ maddu cost --by day                   # per day
+$ maddu cost --by model                 # per model
+$ maddu cost --unreported-count         # just the gap count
+$ maddu cost --json                     # machine-readable
+```
+
+## Slash commands (v0.18)
+
+Inside Claude Code or Codex CLI, the operator can dispatch any of the
+underlying commands via a markdown shim:
+
+| Slash command | Underlying CLI |
+|---|---|
+| `/maddu-help` | `maddu help` |
+| `/maddu-doctor` | `maddu doctor` |
+| `/maddu-autopilot <task>` | `register` → `suggest` → `lane claim` → `pipeline run` → `slice-stop` |
+| `/maddu-plan <topic>` | `goal`, `phase`, `brief` |
+| `/maddu-review [slice-id]` | `review run`, `review status` |
+| `/maddu-team <N> <task>` | `team open` |
+| `/maddu-advise <runtime> <prompt>` | `advise` |
+| `/maddu-status` | `brief`, `status` |
+| `/maddu-skill <verb>` | `skill` |
+| `/maddu-cost` | `cost` |
+| `/maddu-cancel` | `session close`, `slice-stop` |
+| `/maddu-note <text>` | `mailbox send` |
+
+See [22-slash-commands.md](22-slash-commands.md) for the full
+reference, including marker discipline and how to add your own
+slash commands.

@@ -1,5 +1,19 @@
 # Your first slice — the five-minute tour
 
+**The 30-second version (v0.18):** open Claude Code or Codex CLI in
+your repo and type `/maddu-autopilot fix something small`. The agent
+will register, suggest the right lane, claim it, walk the
+plan-exec-verify-fix pipeline, and slice-stop — telling you each
+step. That's your first slice. Now `maddu doctor` should show 25
+PASS, and the cockpit's `#orientation` route has something to
+display. If that's all you wanted, you're done.
+
+The rest of this page is the *manual* version, showing what
+`/maddu-autopilot` is dispatching underneath. Read it if you want to
+understand the mechanics or if you're working from a plain shell.
+
+---
+
 You just installed Máddu. The cockpit is open at `http://127.0.0.1:4177/` and every route is showing an empty state. This is the page that takes you from that empty cockpit to a system that *remembers what you did*, in about five minutes.
 
 You don't need to read everything else first. The mental model takes two paragraphs.

@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 0.17.0](https://img.shields.io/badge/version-0.17.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.18.0](https://img.shields.io/badge/version-0.18.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -18,9 +18,38 @@ npx github:frdyx/maddu init
 
 > *Máddu spawns no models, stores no secrets, calls no clouds.*
 
-[Quickstart](docs/01-getting-started.md) · [Hard rules](docs/hard-rules.md)
+[Quickstart](docs/01-getting-started.md) · [Hard rules](docs/hard-rules.md) · [Slash commands](docs/22-slash-commands.md)
 
 </div>
+
+---
+
+## Zero learning curve (v0.18)
+
+Inside Claude Code or Codex CLI, type a slash command — or just
+natural language. Máddu picks the right action and tells you which
+one. The verbose CLI stays first-class for scripts and CI.
+
+| Slash command | What it does |
+|---|---|
+| `/maddu-autopilot <task>` | End-to-end: register → suggest lane → claim → plan-exec-verify-fix → slice-stop. |
+| `/maddu-plan <topic>` | Plan-only stage; writes a brief artifact. |
+| `/maddu-review [slice-id]` | Post-stop review of a slice. |
+| `/maddu-team <N> <task>` | Open N child sessions with disjoint lanes. |
+| `/maddu-advise <runtime> <prompt>` | Non-claiming advisor query; artifact-only. |
+| `/maddu-status` | Pretty-print state across surfaces. |
+| `/maddu-cost` | Token / call rollup per session, day, runtime, model. |
+| `/maddu-skill <verb>` | List / search / apply skills. |
+| `/maddu-help` | Discovery guide for every slash command. |
+| `/maddu-doctor` | Run hard-rule gates and surface findings. |
+| `/maddu-cancel` | Stop the current slice cleanly. |
+| `/maddu-note <text>` | One-liner into the operator inbox. |
+
+Or just type *"ship the login form"*, *"status"*, *"tokens"*. The
+agent classifies the intent from `MADDU.md` and dispatches the
+matching slash command. Full reference:
+[22-slash-commands.md](docs/22-slash-commands.md) +
+[23-natural-language-routing.md](docs/23-natural-language-routing.md).
 
 ---
 
@@ -28,7 +57,7 @@ npx github:frdyx/maddu init
 
 ```bash
 $ npx github:frdyx/maddu init
-✓ Máddu v0.17.0 installed.
+✓ Máddu v0.18.0 installed.
 
 $ ./maddu/run start &
 Máddu  v0.17.0  ·  http://127.0.0.1:4177  ·  ready

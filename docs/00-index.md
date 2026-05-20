@@ -4,7 +4,24 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v0.16.0** ([changelog](../CHANGELOG.md)) — the governance layer release (orientation, extensible gates, optional scope-lock, trigger discipline, post-stop review lane). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v0.18.0** ([changelog](../CHANGELOG.md)) — the no-learning-curve UX shell (OMC-inspired slash commands, natural-language intent routing, teams/pipelines/advisors/token-ledger backbone). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+
+## Zero learning curve (v0.18)
+
+Inside Claude Code or Codex CLI you can type slash commands directly:
+
+```
+/maddu-autopilot ship the login form    # end-to-end task
+/maddu-status                           # what's going on
+/maddu-help                             # full roster
+/maddu-cost                             # token / call rollup
+```
+
+Or just type natural language — the agent classifies the intent and
+dispatches the matching slash command (and tells you which one).
+Full reference: [22-slash-commands.md](22-slash-commands.md) +
+[23-natural-language-routing.md](23-natural-language-routing.md).
+The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 
 ## 60-second overview
 
@@ -40,6 +57,8 @@ Current version: **v0.16.0** ([changelog](../CHANGELOG.md)) — the governance l
 | 19 | [19-multi-workspace.md](19-multi-workspace.md) | One bridge across N repos: `maddu workspace`, the rail switcher, "All workspaces" mode, `maddu global` crons + policies, `triggered_by` ancestry. *(v0.13.0)* |
 | 20 | [20-governance.md](20-governance.md) | Governance layer (Phases 1–6): orientation, gate authoring, tracked sources, slice scope-lock, trigger discipline, post-stop review lane. *(v0.16.0)* |
 | 21 | [21-agent-onboarding.md](21-agent-onboarding.md) | Agent-native bootstrap (v0.17): root-level agent files, `maddu register` shortcut, session-tree provenance, autoRegister spawns, stale-session janitor, `brief --for-agent` + `/bridge/agent-context`. *(v0.17.0)* |
+| 22 | [22-slash-commands.md](22-slash-commands.md) | No-learning-curve UX shell (v0.18): the 12 `/maddu-*` slash commands, marker discipline, when to use slash vs verbose CLI, adding your own commands. *(v0.18.0)* |
+| 23 | [23-natural-language-routing.md](23-natural-language-routing.md) | The intent-routing pattern: how the agent classifies operator-typed phrases without a framework parser; `maddu suggest` companion; plugin-author extension points. *(v0.18.0)* |
 
 Reference docs that are not in the numbered series:
 
