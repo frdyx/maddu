@@ -274,6 +274,27 @@ export async function tick(repoRoot, now = new Date(), { onFire = null } = {}) {
   const fired = [];
   for (const s of all) {
     if (!shouldFire(s, now)) continue;
+
+    // Governance Phase 4: tier discipline.
+    // If the schedule's action invokes a top-level command, refuse to
+    // fire mutating commands not on the per-repo triggers.json allowlist,
+    // and enforce per-trigger cooldown windows.
+    if (s.action && s.action.kind === 'command' && s.action.target) {
+      const gate = await evaluateCommandTrigger(repoRoot, s.action.target, s.id, now.getTime());
+      if (!gate.fired) {
+        // Don't bump lastRun/fireCount on refusal — operator may fix
+        // allowlist and the next tick retries.
+        console.error(`schedule ${s.id} refused: ${gate.reason}`);
+        continue;
+      }
+      await append(repoRoot, {
+        type: EVENT_TYPES.TRIGGER_FIRED,
+        actor: null, lane: null,
+        data: { triggerId: s.id, target: s.action.target, cooldownMs: gate.cooldownMs },
+        triggered_by: { kind: 'schedule', id: s.id, fired_at: now.toISOString() },
+      });
+    }
+
     s.lastRun = now.toISOString();
     s.lastRunMinute = currentMinuteIso(now);
     s.fireCount = (s.fireCount || 0) + 1;
@@ -289,6 +310,89 @@ export async function tick(repoRoot, now = new Date(), { onFire = null } = {}) {
     fired.push(s);
   }
   return fired;
+}
+
+// Governance Phase 4: shared trigger gauntlet — used by tick + any future
+// auto-trigger surface. Returns `{ fired: true, cooldownMs }` on green;
+// `{ fired: false, reason }` on refusal.
+export async function evaluateCommandTrigger(repoRoot, target, triggerId, nowMs) {
+  // 1. Resolve tier from commands/_tiers.mjs (installed or dev).
+  const tier = await resolveTier(repoRoot, target);
+  if (!tier) return { fired: false, reason: `command "${target}" has no tier in _tiers.mjs` };
+
+  // 2. Read allowlist (.maddu/config/triggers.json).
+  const allowlist = await readTriggersAllowlist(repoRoot);
+  const entry = allowlist.find((a) => a.command === target);
+
+  // 3. Mutating commands must be explicitly allowlisted.
+  if (tier.tier === 'mutating' && !entry) {
+    return { fired: false, reason: `mutating-not-allowlisted (command=${target})` };
+  }
+
+  // 4. Cooldown: read prior TRIGGER_FIRED for this triggerId from spine.
+  const cooldownMs = entry?.cooldownMs ?? 0;
+  if (cooldownMs > 0) {
+    const last = await lastTriggerFiredAt(repoRoot, triggerId);
+    if (last && nowMs - last < cooldownMs) {
+      return { fired: false, reason: `cooldown (${cooldownMs}ms; ${nowMs - last}ms since last)` };
+    }
+  }
+
+  return { fired: true, cooldownMs };
+}
+
+async function resolveTier(repoRoot, command) {
+  const { readFile, stat } = await import('node:fs/promises');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const __dirname2 = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(repoRoot, 'maddu', 'commands', '_tiers.mjs'),
+    join(__dirname2, '..', '..', '..', '..', 'commands', '_tiers.mjs'),
+  ];
+  for (const p of candidates) {
+    try {
+      await stat(p);
+      const mod = await import(pathToFileURL(p).href);
+      return (mod.default || {})[command] || null;
+    } catch {}
+  }
+  return null;
+}
+
+async function readTriggersAllowlist(repoRoot) {
+  const { readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  try {
+    const text = await readFile(join(repoRoot, '.maddu', 'config', 'triggers.json'), 'utf8');
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed?.allowed) ? parsed.allowed : [];
+  } catch { return []; }
+}
+
+async function lastTriggerFiredAt(repoRoot, triggerId) {
+  // Lightweight: scan spine segments for the most recent TRIGGER_FIRED
+  // with matching triggerId. Acceptable cost: schedule.tick is per-minute.
+  const { readdir, readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  let segs = [];
+  try { segs = (await readdir(join(repoRoot, '.maddu', 'events'))).sort().reverse(); }
+  catch { return 0; }
+  for (const seg of segs) {
+    let text;
+    try { text = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); }
+    catch { continue; }
+    const lines = text.split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const ev = JSON.parse(lines[i]);
+        if (ev.type === 'TRIGGER_FIRED' && ev.data?.triggerId === triggerId) {
+          return new Date(ev.ts).getTime();
+        }
+      } catch {}
+    }
+  }
+  return 0;
 }
 
 export function genId() { return genScheduleId(); }
