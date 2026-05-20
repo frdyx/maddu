@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v0.16.1] · 2026-05-20 · ship docs to consumers
+
+**Patch: the in-cockpit docs popup was empty in every consumer install since v0.10.** Root cause: `template/maddu/docs/` didn't exist, so `maddu init` shipped no markdown files. The bridge's `resolveDocsDir()` walked two candidate paths (`<consumer>/maddu/docs/` and the dev-only fallback `<source>/docs/`); neither resolved in a consumer install, and `/bridge/docs` returned `[]`. The "Take the five-minute tour →" header link and the `?` keyboard shortcut both landed on an empty docs page reading "No markdown files found under docs/".
+
+This patch mirrors the 27 top-level `docs/*.md` files into `template/maddu/docs/` so they ship with every install. `frameworkOwnedFiles()` already walks the template tree — no code change in init or upgrade was needed; the files are picked up automatically.
+
+- **Affects:** every consumer install since the docs popup was added. `maddu upgrade` brings the docs in without re-installing.
+- **Doesn't ship:** `docs/research/`, `docs/releases/`, `docs/sessions/`, `docs/images/`, `docs/skills/` — those are repo-internal historical/draft material, not end-user docs.
+- **Maintenance note:** keep `docs/*.md` and `template/maddu/docs/*.md` in sync at release time. A future patch may add a `docs-in-sync` gate to enforce this automatically.
+
 ## [v0.16.0] · 2026-05-20 · governance layer
 
 **Máddu can be dropped into an arbitrary codebase and within a day provide
