@@ -181,6 +181,27 @@ export default async function init(argv) {
   }
   console.log(`  janitor + trigger allowlist seeded (.maddu/config/)`);
 
+  // 6a-v0.18 — seed the built-in `plan-exec-verify-fix` pipeline. Like
+  // janitor.json, operators can edit or delete; init re-seeds only when
+  // missing (idempotent across re-runs).
+  const pipelinesDir = join(configDir, 'pipelines');
+  await mkdir(pipelinesDir, { recursive: true });
+  const planExecVerifyFixPath = join(pipelinesDir, 'plan-exec-verify-fix.json');
+  if (!(await exists(planExecVerifyFixPath))) {
+    const builtIn = {
+      name: 'plan-exec-verify-fix',
+      description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
+      stages: [
+        { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
+        { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
+        { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
+        { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
+      ],
+    };
+    await writeFile(planExecVerifyFixPath, JSON.stringify(builtIn, null, 2) + '\n');
+    console.log(`  built-in pipeline seeded: plan-exec-verify-fix`);
+  }
+
   // 6b. v0.17 agent-native bootstrap — drop MADDU.md + marker-delimited
   //     sections into CLAUDE.md / AGENTS.md at the repo root. The
   //     helper preserves operator content outside the markers and
