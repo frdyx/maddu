@@ -16,6 +16,7 @@
 
 import { mkdir, readFile, writeFile, unlink, appendFile, copyFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
 import {
@@ -140,6 +141,27 @@ export default async function upgrade(argv) {
   // bit, which `copyFile` doesn't preserve.
   await ensureShimExecutable(repoRoot);
 
+  // v0.17 agent-native bootstrap — re-run the agent-file sync. Same
+  // helper as init, but the helper-discovered framework root is the
+  // installed maddu/ directory in the consumer (init lives in the
+  // dev tree; here we're in the consumer). The helper probes both.
+  let agentFileSync = null;
+  try {
+    const { loadAgentFileTemplates, syncAllAgentFiles } = await import(
+      'file://' + join(TEMPLATE_ROOT, '..', 'commands', '_agent-files.mjs').replace(/\\/g, '/')
+    );
+    // TEMPLATE_ROOT points at the framework's template/ dir; its
+    // parent is the framework repo root, which doubles as the
+    // template-root the helper expects in dev mode.
+    const templates = await loadAgentFileTemplates(repoRoot);
+    agentFileSync = await syncAllAgentFiles(repoRoot, templates);
+    const perFile = Object.entries(agentFileSync.perFile)
+      .map(([f, a]) => `${f}:${a}`).join(', ');
+    console.log(`  agent files synced (${agentFileSync.action}) — ${perFile}`);
+  } catch (err) {
+    console.error(`  (agent-file sync skipped: ${err.message})`);
+  }
+
   // Append FRAMEWORK_UPGRADED to spine.
   const eventsSegment = join(repoRoot, '.maddu', 'events', '000000000001.ndjson');
   const ts = new Date().toISOString();
@@ -161,6 +183,20 @@ export default async function upgrade(argv) {
     }
   };
   await appendFile(eventsSegment, JSON.stringify(ev) + '\n');
+
+  if (agentFileSync) {
+    const ts2 = new Date().toISOString();
+    const ev2 = {
+      v: 1,
+      id: 'evt_' + ts2.replace(/[-:T.Z]/g, '').slice(0, 14) + '_' + randomBytes(3).toString('hex'),
+      ts: ts2,
+      type: 'AGENT_FILE_SYNCED',
+      actor: null,
+      lane: null,
+      data: { files: agentFileSync.files, action: agentFileSync.action, perFile: agentFileSync.perFile }
+    };
+    await appendFile(eventsSegment, JSON.stringify(ev2) + '\n');
+  }
 
   console.log(`\nUpgraded to v${toVersion}. (event ${ev.id})`);
 }
