@@ -11,10 +11,6 @@ narrative summary.
 
 ---
 
-## [Unreleased]
-
-_No changes yet._
-
 ## [v0.16.0] · 2026-05-20 · governance layer
 
 **Máddu can be dropped into an arbitrary codebase and within a day provide
