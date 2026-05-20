@@ -117,6 +117,17 @@ End-user docs popup. Reads `docs/*.md` via `/bridge/docs` and `/bridge/docs/<slu
 
 Bridge config, lane catalog, provider auth shortcuts, MCP registry shortcuts. The "edit" surfaces here are convenience wrappers around the same endpoints used by the other routes.
 
+### `#pipelines` *(v0.18)*
+
+The v0.18 backbone view — one route, four cards:
+
+- **Teams** — open and closed `TEAM_OPENED` chains with their allocated lanes and members. Empty state explains how to fan out via `maddu team open` or `/maddu-team`.
+- **Pipelines** — last 10 `PIPELINE_*` runs with stage trail (✓ for completed stages, … for running). Status tag tones: ok / warn / neutral.
+- **Token cost ledger** — `TOKEN_USAGE_REPORTED` rolled up by runtime, with calls + input/output sums and an explicit "unreported" count (never zero-filled).
+- **Slash-command cheatsheet** — every `/maddu-*` command with one-line description. Points at MADDU.md §"Intent routing" so operators learn the natural-language form too.
+
+All four cards refresh on the bridge event stream with 400 ms debounce — same pattern as the Claims map.
+
 ## Common operator flows
 
 - **Triage a new approval.** Stuck banner or badge → click Approvals → decide → return to whatever route you were on.

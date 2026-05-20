@@ -248,3 +248,25 @@ Runs inline on every `/bridge/projection` read (no daemon). For each open sessio
 `maddu brief --for-agent` (text) and `GET /bridge/agent-context` (JSON) return a self-contained bootstrap payload: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands the agent should run. `MADDU.md` tells the agent to call this at every turn start. One command, one read, ready to operate.
 
 See [21-agent-onboarding.md](21-agent-onboarding.md).
+
+
+## No-learning-curve UX shell *(v0.18)*
+
+Two new surfaces that fold the operator-facing complexity flat:
+
+### Slash commands
+
+Inside Claude Code or Codex CLI, `/maddu-autopilot ship the login form` runs the full register → suggest lane → claim → plan-exec-verify-fix pipeline → slice-stop chain. Twelve slash commands ship under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`, each a marker-wrapped markdown shim that dispatches existing `maddu <cmd>` invocations. The verbose CLI stays first-class. See [22-slash-commands.md](22-slash-commands.md).
+
+### Natural-language intent routing
+
+The operator can also type `"ship the login form"` with no `/` prefix. The LLM agent reads the intent-routing table in `MADDU.md` / `CLAUDE.md` / `AGENTS.md` and classifies the phrase shape (`"autopilot …"` → `/maddu-autopilot`, `"plan …"` → `/maddu-plan`, etc.), telling the operator which slash command it picked. No framework parser — the classification happens at the LLM layer (rule #5 preserved by construction). See [23-natural-language-routing.md](23-natural-language-routing.md).
+
+### Backbone primitives
+
+Behind the friendly surface, four new primitives land as event-additive projections + gated CLI commands:
+
+- **Teams** — `maddu team open --members N --lanes a,b,c` pre-allocates disjoint lanes for fan-out work; the `rule-8-team-lane-disjoint` gate enforces.
+- **Pipelines** — declarative `.maddu/config/pipelines/*.json` walked by `maddu pipeline run`. Built-in: `plan-exec-verify-fix`.
+- **Advisors** — non-claiming `maddu advise <runtime> "<prompt>"` writes an artifact stub; the LLM produces the response inline. The `advisor-non-claiming` gate refuses any lane claim by an advisor session.
+- **Token ledger** — workers self-report `TOKEN_USAGE_REPORTED` events with minimum schema `{runtime, sessionId, model, ts}`; `maddu cost --by runtime` rolls up; unreported rows surface honestly (never zero-filled).
