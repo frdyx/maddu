@@ -74,6 +74,24 @@ Before editing a file area, an agent claims a lane in `.maddu/lanes/claims.json`
 
 ---
 
+## 9. Every auto-trigger crosses the gauntlet *(candidate · ratifies after one slice of real use)*
+
+No command that mutates spine, state, or workspace files may auto-fire (cron, schedule, daemon, retry loop) without:
+
+1. A `tier: 'mutating'` entry in `commands/_tiers.mjs`.
+2. An explicit allowlist entry in `<repo>/.maddu/config/triggers.json` naming the command.
+3. A respected cooldown window since the most recent `TRIGGER_FIRED` for the same trigger id.
+
+Read-only commands (tier `'read-only'`) may auto-fire freely. Any auto-trigger that succeeds emits a `TRIGGER_FIRED` event with `triggered_by` provenance. Auto-actions that should run only when an agent is present land in the pending-actions queue via `PENDING_ACTION_ENQUEUED` and are surfaced to the next agent through `maddu brief --drain`.
+
+**Why:** A spine that mutates on its own without an operator-visible audit trail is a spine an agent can't trust. The gauntlet ensures every auto-mutation has (a) a typed command identity, (b) an operator's signature in `triggers.json`, and (c) a recorded firing event. Pre-Phase-4 schedules could fire any command silently — that footgun is now closed.
+
+**Status:** candidate. Promoted to permanent after one slice of real use in a foreign repo demonstrates no false-positive refusals on legitimate workflows.
+
+The `command-tier-discipline` built-in gate enforces (1). The `schedule.tick` evaluateCommandTrigger helper enforces (2) and (3) at fire-time. `verify-spine` accepts `TRIGGER_FIRED`, `PENDING_ACTION_ENQUEUED`, and `PENDING_ACTION_DRAINED` events and checks the enqueued↔drained referential integrity.
+
+---
+
 ## Do-not-copy reference
 
 The patterns below were observed in studied systems and are explicitly forbidden in Máddu. `maddu doctor` watches for them.
