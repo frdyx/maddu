@@ -35,6 +35,7 @@ function defaultDescriptor(name) {
   return {
     schemaVersion: DESCRIPTOR_SCHEMA,
     name,
+    kind: null,                 // null | 'reviewer' | future kinds; framework ignores when null
     displayName: name,
     binary: null,
     args: [],
