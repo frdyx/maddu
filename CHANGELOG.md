@@ -15,6 +15,130 @@ narrative summary.
 
 _No changes yet._
 
+## [v0.16.0] · 2026-05-20 · governance layer
+
+**Máddu can be dropped into an arbitrary codebase and within a day provide
+turn-start orientation, an extensible gate stack, optional scope discipline,
+auto-trigger safety, and a post-stop review lane — with hard rules 1–8 still
+passing, no new npm dependencies, and no domain content leaked into framework
+code.** Six slices that layer governance onto the existing substrate without
+changing what the substrate is.
+
+Substrate is unchanged: append-only NDJSON spine, projections rebuilt on read,
+approvals with `triggered_by` provenance, runtime descriptors, schedules,
+multi-workspace, spine verify, doctor. Every layer below is **opt-in** — a
+repo that ignores any phase keeps working exactly as before.
+
+### Phase 0 — Foundation
+
+**Zero behavior change. Reserves the schema.** Twelve new event types reserved
+in `EVENT_TYPES`; optional `kind` field added to runtime descriptors. Event
+taxonomy published at `docs/research/governance-event-taxonomy.md`. New
+determinism test at `scripts/test/projection-roundtrip.mjs` proves every
+projection file is byte-equal after deletion + rebuild.
+
+### Phase 1 — Orientation digest
+
+**Agents get one turn-start file instead of N.** `maddu goal set|show`,
+`maddu phase set|show`, `maddu brief [--json|--drain]`. Goal and phase are
+spine events (`GOAL_DECLARED`, `PHASE_DECLARED`); orientation and handoff
+markdown are deterministic projections at `.maddu/state/orientation.json`
+and `.maddu/state/handoff.md`. New bridge `GET /bridge/orientation`.
+
+### Phase 2 — Gate runner + tracked-source drift
+
+**Doctor is now a fan-out runner.** Ten built-in gates at
+`template/maddu/runtime/gates/builtin/*.mjs`; operator gates discovered at
+`.maddu/gates/*.mjs`. New `tracked-source-drift` gate driven by
+`.maddu/config/tracked-sources.json` + `SOURCE_HASH_RECOMPUTED` events. New
+`maddu sources rebuild|status` CLI. Each gate emits `GATE_RAN` per run;
+bridge `GET /bridge/gates` surfaces recent history. Also fixes a pre-existing
+`DOCTOR_REPORT` id collision (manual append with static suffix → use
+`spine.append`).
+
+### Phase 3 — Slice scope-lock (opt-in)
+
+**Slices that declare scope enforce it.** `maddu slice scope-declare|expand|
+approve-functional|show`. `slice-scope` gate runs before `slice-stop` and
+refuses out-of-scope edits. Expansion bound `+5 files OR +30%` (configurable).
+Doc-like paths (docs/, README, CHANGELOG, .maddu/state/, .maddu/reviews/) are
+always permitted. After `SLICE_FUNCTIONAL_APPROVED`, only doc-like edits pass.
+`verify-spine` checks `SLICE_SCOPE_EXPANDED.sliceId` resolves to a prior
+`SLICE_SCOPE_DECLARED`. Slices that don't declare scope behave unchanged.
+
+### Phase 4 — Trigger discipline + pending-actions queue
+
+**No mutating command may auto-fire without a signature.** Tier manifest
+covers all 30 top-level commands at `commands/_tiers.mjs`. New
+`command-tier-discipline` gate enforces the manifest is complete.
+`schedule.tick` evaluates an `action.kind:'command'` schedule through a
+gauntlet: tier lookup → allowlist match in `.maddu/config/triggers.json` →
+cooldown check → emit `TRIGGER_FIRED`. The pending-actions queue lets
+read-only auto-actions surface to the next live agent via
+`maddu brief --drain` (emits `PENDING_ACTION_DRAINED`).
+
+### Phase 5 — Post-stop review lane
+
+**Catch the semantic regressions structural gates can't see.** Runtime kind
+`'reviewer'`; review-policy config at `.maddu/config/review-policy.json`;
+parser handles JSON and YAML-frontmatter markdown. New `maddu review run
+--slice <id> [--reviewer name]` synchronously spawns the configured reviewer,
+parses stdout, writes a per-review markdown archive at
+`.maddu/reviews/<slice-event-id>.md`, and emits `SLICE_REVIEWED`. Non-clean
+verdicts auto-emit `FOLLOWUP_OPENED` with a draft scope drawn from finding
+locations; follow-ups surface in `maddu brief` and on `/orientation`. Bridge
+`GET /bridge/reviews?verdict=P2` filters by verdict. `verify-spine` checks
+`SLICE_REVIEWED.sliceEventId → SLICE_STOP.id` and `FOLLOWUP_OPENED.
+fromReviewEventId → SLICE_REVIEWED.id`.
+
+### Phase 6 — Cockpit surfaces
+
+**Three new read-only routes.** `/orientation` (goal, phase, last slice,
+follow-ups, handoff markdown), `/gates` (recent `GATE_RAN` events + summary
+counts), `/reviews` (recent `SLICE_REVIEWED` events + verdict counts + open
+follow-ups). All live via the existing event stream; zero new long-poll
+subscribers. Bridge endpoints documented in `docs/05-bridge-endpoints.md`.
+
+### Documentation, candidate hard rule, skills
+
+- **`docs/20-governance.md`** — single-page reference: turn-start orientation,
+  gate authoring, tracked sources, slice scope-lock, trigger discipline,
+  review lane, verification matrix, and "what to copy vs skip" relative to
+  systems where the patterns were observed.
+- **Candidate hard rule #9** — "Every auto-trigger crosses the gauntlet."
+  Labeled as **candidate**; ratified after one slice of real use demonstrates
+  no false-positive refusals on legitimate workflows.
+- **Three SKILL.md drafts** under `docs/skills/`:
+  - `orientation-skill.md` — when to run `maddu brief`, what to act on.
+  - `gate-authoring-skill.md` — gate contract + recipe + severity guidance.
+  - `review-lane-skill.md` — reviewer setup + verdict semantics.
+  Copy any of these into a project's `.maddu/skills/` to make the recipe
+  discoverable to agents in that repo.
+
+### What was deliberately not built
+
+No typed-invariant registry, no domain vocabulary, no mandatory adoption, no
+new npm dependencies, no provider SDK imports in framework code, no web
+socket / scheduler thread / daemon. Each opt-in mechanism is a thin contract
+the operator supplies the content for; a repo that ships nothing under
+`.maddu/config/` or `.maddu/gates/` behaves identically to v0.15.0.
+
+Bridge load: 3 new endpoints, each a single `project()` read; zero new
+long-poll subscribers; zero new background timers.
+
+### Verify
+
+```bash
+maddu spine verify                                  # exits 0
+maddu doctor                                        # exits 0 (16 pass · 0 warn · 0 fail)
+node scripts/test/projection-roundtrip.mjs          # exits 0
+grep -RIE '(5 Laws|IntentExecutor)' template/ commands/ bin/  # empty
+grep -RIE 'import .*(anthropic|openai)' template/maddu commands  # empty
+git diff package.json                               # empty
+```
+
+---
+
 ## [v0.15.0] · 2026-05-18 · audit foundation
 
 **The spine is now genuinely the source of truth — and the operator can
