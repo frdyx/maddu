@@ -9,6 +9,10 @@
 // Comma-separated for plain lists; semicolon-separated for learnings/next
 // (because those entries often contain commas themselves).
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { stat } from 'node:fs/promises';
+
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
@@ -21,13 +25,57 @@ function ssv(s) {
   return String(s).split(';').map((x) => x.trim()).filter(Boolean);
 }
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+async function loadGatesLib() {
+  const candidates = [
+    join(process.cwd(), 'maddu', 'runtime', 'lib', 'gates.mjs'),
+    join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'gates.mjs'),
+  ];
+  for (const p of candidates) {
+    try { await stat(p); return await import(pathToFileURL(p).href); } catch {}
+  }
+  return null;
+}
+
 export default async function sliceStop(argv) {
   const { flags } = parseFlags(argv);
   const summary = requireFlag(flags, 'summary');
   const sessionId = requireFlag(flags, 'session');
 
-  const { paths, spine, hindsight } = await loadSpineLib();
+  const { paths, spine, projections, hindsight } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
+
+  // Governance Phase 3: invoke the slice-scope gate before appending.
+  // Skipped when no scope is declared for the current slice (opt-in).
+  const sliceId = (typeof flags['slice-id'] === 'string' ? flags['slice-id'] : null)
+    || process.env.MADDU_SLICE_ID || null;
+  const touchedPaths = [...csv(flags.targets), ...csv(flags.paths)];
+  if (sliceId) {
+    const gatesLib = await loadGatesLib();
+    if (gatesLib?.runGates) {
+      // Build ctx with extra slice-scope-specific fields.
+      const baseCtx = {
+        repoRoot,
+        paths,
+        spine,
+        projections,
+        project: () => projections.project(repoRoot),
+        sliceId,
+        touchedPaths,
+      };
+      const result = await gatesLib.runGates(repoRoot, {
+        onlyId: 'slice-scope',
+        emitEvents: true,
+        ctx: baseCtx,
+      });
+      if (result.summary.fail > 0) {
+        const failRun = result.runs.find((r) => !r.ok);
+        console.error(`slice-stop refused by slice-scope gate: ${failRun?.message || 'see GATE_RAN event'}`);
+        process.exit(1);
+      }
+    }
+  }
 
   const ev = await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.SLICE_STOP,
