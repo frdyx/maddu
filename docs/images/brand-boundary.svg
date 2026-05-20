@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 480" role="img" aria-label="Máddu three-layer brand boundary">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 480" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Máddu three-layer brand boundary">
   <title>Three layers, no cross-references — framework shell brand / app brand / content brand</title>
   <desc>Máddu enforces a three-layer brand boundary by construction. The framework shell brand (Máddu's cockpit and design tokens) is the outermost layer. The app brand (your project) is nested one level in. The content brand (per-campaign, per-asset) is the innermost. The three layers never reference each other; maddu doctor verifies the boundary on every run.</desc>
   <defs>
