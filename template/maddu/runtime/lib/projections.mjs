@@ -49,6 +49,13 @@ export async function project(repoRoot) {
   let goal = null;
   let phase = null;
 
+  // Governance Phase 2: gate runs + tracked-source hashes.
+  const gateRuns = [];                        // capped 200
+  const gateSummary = { ok: 0, fail: 0, warn: 0 };
+  let gatesLastRunAt = null;
+  const sourceHashPaths = {};                 // path -> { hash, recordedAt }
+  let sourceHashesLastRecomputedAt = null;
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -270,6 +277,36 @@ export async function project(repoRoot) {
         p.reason = ev.data.reason || null;
         break;
       }
+      case 'GATE_RAN': {
+        const ok = !!ev.data?.ok;
+        const severity = ev.data?.severity || 'warn';
+        // Map result → ok/fail/warn buckets. The gate runner's full status
+        // mapping (including explicit status='warn') isn't replayable from
+        // GATE_RAN alone; for projection counters we treat !ok as fail when
+        // severity != warn, else warn.
+        if (ok) gateSummary.ok++;
+        else if (severity === 'warn') gateSummary.warn++;
+        else gateSummary.fail++;
+        gateRuns.push({
+          gateId: ev.data?.gateId || null,
+          ok,
+          severity,
+          durationMs: ev.data?.durationMs ?? null,
+          evidence: ev.data?.evidence ?? null,
+          ts: ev.ts,
+        });
+        if (gateRuns.length > 200) gateRuns.splice(0, gateRuns.length - 200);
+        gatesLastRunAt = ev.ts;
+        break;
+      }
+      case 'SOURCE_HASH_RECOMPUTED': {
+        const paths = Array.isArray(ev.data?.paths) ? ev.data.paths : [];
+        for (const p of paths) {
+          if (p?.path && p?.hash) sourceHashPaths[p.path] = { hash: p.hash, recordedAt: ev.ts };
+        }
+        sourceHashesLastRecomputedAt = ev.ts;
+        break;
+      }
       case 'GOAL_DECLARED':
         goal = {
           objective: ev.data.objective || '',
@@ -345,7 +382,17 @@ export async function project(repoRoot) {
     bossTranscripts: Object.fromEntries(bossTranscripts),
     // Governance Phase 1: latest declared goal + phase (null if never set).
     goal,
-    phase
+    phase,
+    // Governance Phase 2: gate runs + tracked-source hashes.
+    gates: {
+      lastRunAt: gatesLastRunAt,
+      runs: gateRuns.slice(),
+      summary: { ...gateSummary },
+    },
+    sourceHashes: {
+      paths: { ...sourceHashPaths },
+      lastRecomputedAt: sourceHashesLastRecomputedAt,
+    }
   };
 }
 

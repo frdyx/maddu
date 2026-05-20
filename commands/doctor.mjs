@@ -6,14 +6,25 @@
 // Multi-workspace: if a registry exists at ~/.config/maddu/workspaces.json,
 // doctor validates registry shape first. Per-rule checks run for the cwd
 // repo by default; pass --all to run them for every registered workspace.
+//
+// Governance Phase 2: doctor is now a thin wrapper around the gate runner
+// (`template/maddu/runtime/lib/gates.mjs`). The 9 historical hard-rule /
+// integrity checks are individual gates at
+// `template/maddu/runtime/gates/builtin/*.mjs`. Operator-supplied gates at
+// `<repo>/.maddu/gates/*.mjs` are discovered automatically.
+//
+// Flags:
+//   --gate <id>          run only one gate by id
+//   --severity <level>   filter built-in + operator gates by severity
+//   --all                run gates per registered workspace
 
-import { readdir, readFile, stat, appendFile } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
-import { exists, readMadduJson, sha256OfFile, frameworkVersion } from './_manifest.mjs';
+import { exists, readMadduJson, frameworkVersion } from './_manifest.mjs';
 
 const ANSI = {
   pass: '\x1b[32m',
@@ -29,18 +40,6 @@ function tag(level) {
   if (level === 'WARN') return `${ANSI.warn}WARN${ANSI.reset}`;
   if (level === 'FAIL') return `${ANSI.fail}FAIL${ANSI.reset}`;
   return level;
-}
-
-async function walkFiles(dir, predicate = () => true) {
-  const out = [];
-  let entries;
-  try { entries = await readdir(dir, { withFileTypes: true }); } catch { return out; }
-  for (const ent of entries) {
-    const p = join(dir, ent.name);
-    if (ent.isDirectory()) out.push(...await walkFiles(p, predicate));
-    else if (ent.isFile() && predicate(p)) out.push(p);
-  }
-  return out;
 }
 
 async function checkPort(host, port) {
@@ -72,24 +71,27 @@ async function loadWorkspacesLib() {
   return await import(pathToFileURL(p).href);
 }
 
-// Returns null on legacy installs (pre-v0.14) where the file doesn't yet exist.
-async function loadSessionActiveLib() {
-  const p = await resolveRuntimeLib('session-active.mjs');
+// Resolve and import the gate runner. Returns null on legacy installs.
+async function loadGatesLib() {
+  const p = await resolveRuntimeLib('gates.mjs');
   if (!p) return null;
   try { return await import(pathToFileURL(p).href); } catch { return null; }
 }
 
-// Returns null on installs without the verifier (pre-v0.16).
-async function loadVerifyLib() {
-  const p = await resolveRuntimeLib('verify.mjs');
-  if (!p) return null;
-  try { return await import(pathToFileURL(p).href); } catch { return null; }
+// Map a gate run record into a doctor check row, preserving label text.
+function gateRunToCheck(run, tagLabel) {
+  const labelText = `${tagLabel}${run.label || run.gateId}`;
+  let level = 'PASS';
+  if (run.status === 'fail') level = 'FAIL';
+  else if (run.status === 'warn') level = 'WARN';
+  return { level, label: labelText, detail: run.message };
 }
 
-// Per-repo hard-rule + integrity checks. Returns an array of check objects.
-// Pulled out of the main function so the same logic can run once for the
-// cwd repo or N times for every registered workspace.
-async function runRepoChecks(repoRoot, label) {
+// Per-repo gate-runner wrapper. Preserves prior doctor behavior (the
+// install-integrity / hard-rules / spine / approval / session-cache checks
+// are now individual gates) and prepends the maddu.json / framework-version
+// preamble that isn't a gate-shaped concern.
+async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   const checks = [];
   const tagLabel = label ? `[${label}] ` : '';
 
@@ -103,78 +105,22 @@ async function runRepoChecks(repoRoot, label) {
     checks.push({ level: 'WARN', label: `${tagLabel}framework version`, detail: `CLI v${cliVersion} but install is v${madduJson.framework_version} — run \`maddu upgrade\`` });
   }
 
-  // ── Install integrity ──
-  const managed = madduJson.managed || {};
-  const missing = [], modified = [];
-  for (const [rel, meta] of Object.entries(managed)) {
-    const abs = join(repoRoot, rel);
-    if (!(await exists(abs))) { missing.push(rel); continue; }
-    const h = await sha256OfFile(abs);
-    if (h !== meta.sha256) modified.push(rel);
-  }
-  if (missing.length === 0 && modified.length === 0) {
-    checks.push({ level: 'PASS', label: `${tagLabel}install integrity`, detail: `${Object.keys(managed).length} managed files present, hashes match` });
+  // ── Gate runner — built-in gates + operator gates ──
+  const gatesLib = await loadGatesLib();
+  if (gatesLib?.runGates) {
+    const result = await gatesLib.runGates(repoRoot, {
+      onlyId: gateOpts.onlyId,
+      severity: gateOpts.severity,
+      emitEvents: true,
+    });
+    for (const run of result.runs) checks.push(gateRunToCheck(run, tagLabel));
+    // State containment isn't a gate (no security-relevant invariant; it's
+    // just a hygiene check for repo layout). Keep it inline below.
   } else {
-    if (missing.length) checks.push({ level: 'FAIL', label: `${tagLabel}install integrity`, detail: `missing: ${missing.join(', ')}` });
-    if (modified.length) checks.push({ level: 'WARN', label: `${tagLabel}install integrity`, detail: `locally modified: ${modified.join(', ')}` });
+    checks.push({ level: 'WARN', label: `${tagLabel}gate runner`, detail: 'gates.mjs not available — install older than v0.16' });
   }
 
-  // ── Rule #1: files-only state ──
-  const stateDir = join(repoRoot, '.maddu');
-  const dbFiles = await walkFiles(stateDir, (p) => /\.(db|sqlite|sqlite3)$/i.test(p));
-  if (dbFiles.length === 0) {
-    checks.push({ level: 'PASS', label: `${tagLabel}rule #1 files-only state`, detail: 'no DB files under .maddu/' });
-  } else {
-    checks.push({ level: 'FAIL', label: `${tagLabel}rule #1 files-only state`, detail: `found: ${dbFiles.map((p) => p.slice(repoRoot.length + 1)).join(', ')}` });
-  }
-
-  // ── Rule #2: no SQLite / DB packages ──
-  const pkgJsonPath = join(repoRoot, 'package.json');
-  if (await exists(pkgJsonPath)) {
-    let pkg = {};
-    try { pkg = JSON.parse(await readFile(pkgJsonPath, 'utf8')); } catch {}
-    const banned = ['better-sqlite3', 'sqlite3', 'sqlite', 'node-sqlite', '@databases/sqlite'];
-    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-    const found = banned.filter((b) => deps[b]);
-    if (found.length === 0) {
-      checks.push({ level: 'PASS', label: `${tagLabel}rule #2 no DB packages`, detail: 'no SQLite-family deps in package.json' });
-    } else {
-      checks.push({ level: 'FAIL', label: `${tagLabel}rule #2 no DB packages`, detail: `found: ${found.join(', ')}` });
-    }
-  } else {
-    checks.push({ level: 'PASS', label: `${tagLabel}rule #2 no DB packages`, detail: 'no package.json — nothing to check' });
-  }
-
-  // ── Rule #5: no provider SDK imports in framework code ──
-  const madduDir = join(repoRoot, 'maddu');
-  const codeFiles = await walkFiles(madduDir, (p) => /\.(m?js|ts|mjs|html|css)$/.test(p));
-  const banned = [/from\s+['"]anthropic['"]/, /from\s+['"]@anthropic-ai/, /from\s+['"]openai['"]/, /from\s+['"]@google\/generative-ai['"]/, /require\(['"](anthropic|openai|@anthropic-ai|@google\/generative-ai)['"]/];
-  const sdkHits = [];
-  for (const f of codeFiles) {
-    const text = await readFile(f, 'utf8');
-    for (const re of banned) if (re.test(text)) sdkHits.push(f.slice(repoRoot.length + 1));
-  }
-  if (sdkHits.length === 0) {
-    checks.push({ level: 'PASS', label: `${tagLabel}rule #5 no provider SDKs in app code`, detail: `scanned ${codeFiles.length} files` });
-  } else {
-    checks.push({ level: 'FAIL', label: `${tagLabel}rule #5 no provider SDKs in app code`, detail: sdkHits.join(', ') });
-  }
-
-  // ── Rule #6: no obvious token leaks under .maddu/ ──
-  const tokenRegex = /(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|xox[baprs]-[0-9a-zA-Z\-]+)/;
-  const stateFiles = await walkFiles(stateDir, (p) => /\.(json|ndjson|md|txt|ya?ml)$/i.test(p));
-  const tokenHits = [];
-  for (const f of stateFiles) {
-    const text = await readFile(f, 'utf8');
-    if (tokenRegex.test(text)) tokenHits.push(f.slice(repoRoot.length + 1));
-  }
-  if (tokenHits.length === 0) {
-    checks.push({ level: 'PASS', label: `${tagLabel}rule #6 no token leaks under .maddu/`, detail: `scanned ${stateFiles.length} files` });
-  } else {
-    checks.push({ level: 'FAIL', label: `${tagLabel}rule #6 no token leaks under .maddu/`, detail: tokenHits.join(', ') });
-  }
-
-  // ── State containment ──
+  // ── State containment (not a gate; layout hygiene only) ──
   const FORBIDDEN_AT_ROOT = ['skills', 'mcp', 'runtimes', 'checkpoints'];
   const leaks = [];
   for (const name of FORBIDDEN_AT_ROOT) {
@@ -187,12 +133,7 @@ async function runRepoChecks(repoRoot, label) {
   }
 
   // ── Project-local CLI shim (maddu/run + maddu/run.cmd) ──
-  // The shims ride with the managed manifest, so a clean install or
-  // upgrade always lands them. The one thing that can drift is the
-  // POSIX execute bit on maddu/run — `maddu init` and `maddu upgrade`
-  // chmod it 755, but a fresh git clone wouldn't preserve the bit.
-  // WARN if missing or non-executable — never FAIL, since a global
-  // `maddu` install satisfies the same need.
+  // Not a gate — it's about the operator's invocation path, not a hard rule.
   async function shimFileStat(p) {
     try { const st = await stat(p); return st.isFile() ? st : null; } catch { return null; }
   }
@@ -216,173 +157,22 @@ async function runRepoChecks(repoRoot, label) {
     checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: `${which} present` });
   }
 
-  // ── Active-session cache integrity ──
-  // If the cache file exists but points at a session that's already
-  // closed (or was never registered in this repo's spine), surface a
-  // WARN. The cache self-heals on next heartbeat/close — this check
-  // just lets the operator see the problem proactively.
-  const activeLib = await loadSessionActiveLib();
-  if (activeLib) {
-    const cached = await activeLib.readActiveSession(repoRoot);
-    if (cached) {
-      const verified = await activeLib.readActiveSessionVerified(repoRoot);
-      if (verified && verified.stale) {
-        checks.push({
-          level: 'WARN',
-          label: `${tagLabel}active session cache`,
-          detail: `stale (${verified.sessionId} already closed) — next heartbeat/close will clear`
-        });
-      } else if (verified) {
-        checks.push({ level: 'PASS', label: `${tagLabel}active session cache`, detail: `${cached.sessionId}` });
-      }
-    }
-    // No cache file is the normal idle state — no check row in that case.
-  }
-
-  // ── Approval ledger completeness ──
-  // Legacy spines (pre-v0.15) auto-decided approvals in the projector
-  // without ever appending an APPROVAL_DECIDED event. After the v0.15
-  // upgrade those decisions are missing from the ledger. Scan the spine:
-  // for every APPROVAL_REQUESTED without a paired APPROVAL_DECIDED and
-  // *some* policy that would have matched it, surface a WARN telling the
-  // operator to run the migration tool. Never FAIL — the system still
-  // functions; this just means audit completeness needs one CLI call.
-  {
-    const eventsPath = join(repoRoot, '.maddu', 'events');
-    let evs = [];
-    try {
-      const segs = await readdir(eventsPath);
-      for (const seg of segs.sort()) {
-        const text = await readFile(join(eventsPath, seg), 'utf8');
-        for (const line of text.split('\n')) {
-          if (!line.trim()) continue;
-          try { evs.push(JSON.parse(line)); } catch {}
-        }
-      }
-    } catch {}
-    if (evs.length) {
-      const matchK = (m, t, l) => `${t || '*'}@${l || '*'}`;
-      const find = (pols, t, l) => pols.get(matchK(t, l)) || pols.get(matchK(t, '*')) || pols.get(matchK('*', l)) || pols.get(matchK('*', '*')) || null;
-      const policies = new Map();
-      const decided = new Set();
-      let needsMigration = 0;
-      for (const ev of evs) {
-        if (ev.type === 'APPROVAL_POLICY_SET') {
-          const { tool, lane, decision } = ev.data || {};
-          const k = matchK(tool, lane);
-          if (decision === 'clear') policies.delete(k);
-          else policies.set(k, { decision });
-        } else if (ev.type === 'APPROVAL_DECIDED' && ev.data?.approvalId) {
-          decided.add(ev.data.approvalId);
-        } else if (ev.type === 'APPROVAL_REQUESTED') {
-          const m = find(policies, ev.data?.tool, ev.lane);
-          if (m && (m.decision === 'allow-always' || m.decision === 'deny')) {
-            // Tentatively unpaired — confirmed only after full scan.
-            if (!decided.has(ev.id)) needsMigration++;
-          }
-        }
-      }
-      // Recompute properly: decided may include later events. Walk again
-      // checking final decided set.
-      let unpaired = 0;
-      const policies2 = new Map();
-      for (const ev of evs) {
-        if (ev.type === 'APPROVAL_POLICY_SET') {
-          const { tool, lane, decision } = ev.data || {};
-          const k = matchK(tool, lane);
-          if (decision === 'clear') policies2.delete(k);
-          else policies2.set(k, { decision });
-        } else if (ev.type === 'APPROVAL_REQUESTED') {
-          const m = find(policies2, ev.data?.tool, ev.lane);
-          if (m && (m.decision === 'allow-always' || m.decision === 'deny') && !decided.has(ev.id)) {
-            unpaired++;
-          }
-        }
-      }
-      if (unpaired > 0) {
-        checks.push({
-          level: 'WARN',
-          label: `${tagLabel}approval ledger completeness`,
-          detail: `${unpaired} legacy auto-decision(s) without spine events — run \`maddu approval migrate-legacy-decisions\``
-        });
-      } else {
-        checks.push({
-          level: 'PASS',
-          label: `${tagLabel}approval ledger completeness`,
-          detail: 'every auto-decision has a spine event'
-        });
-      }
-    }
-  }
-
-  // ── Spine integrity ──
-  // Walk every segment (up to a 50k-event cap, so doctor stays fast on
-  // very long-running repos) and check parseability, id uniqueness,
-  // segment continuity, and referential integrity. Above the cap,
-  // emit a WARN pointing at the explicit `maddu spine verify` CLI.
-  // Full check from CLI: `maddu spine verify` (no cap).
-  try {
-    const verifyLib = await loadVerifyLib();
-    if (verifyLib) {
-      const SPINE_CAP = 50000;
-      const r = await verifyLib.verifySpine(repoRoot, { maxEvents: SPINE_CAP });
-      if (r.capped) {
-        checks.push({
-          level: 'WARN',
-          label: `${tagLabel}spine integrity`,
-          detail: `>${SPINE_CAP.toLocaleString()} events — run \`maddu spine verify\` manually for full check`
-        });
-      } else if (r.counts.FAIL > 0) {
-        const fails = r.counts.FAIL;
-        const warns = r.counts.WARN;
-        const wpart = warns > 0 ? ` · ${warns} warn${warns === 1 ? '' : 's'}` : '';
-        checks.push({
-          level: 'FAIL',
-          label: `${tagLabel}spine integrity`,
-          detail: `${fails} fail${fails === 1 ? '' : 's'}${wpart} — run \`maddu spine verify\` for detail`
-        });
-      } else if (r.counts.WARN > 0) {
-        const warns = r.counts.WARN;
-        checks.push({
-          level: 'WARN',
-          label: `${tagLabel}spine integrity`,
-          detail: `${warns} warn${warns === 1 ? '' : 's'} — run \`maddu spine verify\` for detail`
-        });
-      } else {
-        checks.push({
-          level: 'PASS',
-          label: `${tagLabel}spine integrity`,
-          detail: `${r.events.toLocaleString()} events · ${r.segments.length} segment${r.segments.length === 1 ? '' : 's'} · 0 fails · 0 warns`
-        });
-      }
-    }
-  } catch (err) {
-    checks.push({
-      level: 'WARN',
-      label: `${tagLabel}spine integrity`,
-      detail: `verifier error: ${err.message}`
-    });
-  }
-
-  // ── Rule #8: no duplicate active lane claims ──
-  const claimsPath = join(repoRoot, '.maddu', 'lanes', 'claims.json');
-  if (await exists(claimsPath)) {
-    try {
-      const cj = JSON.parse(await readFile(claimsPath, 'utf8'));
-      const lanes = (cj.claims || []).map((c) => c.lane);
-      const dups = lanes.filter((l, i) => lanes.indexOf(l) !== i);
-      if (dups.length === 0) {
-        checks.push({ level: 'PASS', label: `${tagLabel}rule #8 lane ownership`, detail: `${lanes.length} active claim(s), no duplicates` });
-      } else {
-        checks.push({ level: 'FAIL', label: `${tagLabel}rule #8 lane ownership`, detail: `duplicate lanes: ${[...new Set(dups)].join(', ')}` });
-      }
-    } catch {
-      checks.push({ level: 'WARN', label: `${tagLabel}rule #8 lane ownership`, detail: 'claims.json unreadable' });
-    }
-  }
-
   return checks;
 }
+
+// Legacy inline checks are now individual gates under
+// template/maddu/runtime/gates/builtin/. See:
+//   install-integrity.mjs
+//   rule-1-files-only.mjs
+//   rule-2-no-sqlite.mjs
+//   rule-5-no-provider-sdks.mjs
+//   rule-6-no-token-leaks.mjs
+//   rule-8-no-duplicate-claims.mjs
+//   active-session-cache.mjs
+//   approval-ledger-completeness.mjs
+//   spine-integrity.mjs
+//   tracked-source-drift.mjs (Phase 2 new)
+
 
 // Validate the workspaces registry (multi-workspace mode). Returns an array
 // of check objects plus the list of registered workspaces for the caller
@@ -476,8 +266,12 @@ export default async function doctor(argv) {
     console.log(`${ANSI.bold}Máddu doctor${ANSI.reset}  ${repoTargets.length} workspaces`);
   }
 
+  const gateOpts = {
+    onlyId: typeof flags.gate === 'string' ? flags.gate : undefined,
+    severity: typeof flags.severity === 'string' ? flags.severity : undefined,
+  };
   for (const { repoRoot, label } of repoTargets) {
-    checks.push(...await runRepoChecks(repoRoot, label));
+    checks.push(...await runRepoChecks(repoRoot, label, gateOpts));
   }
 
   // ── Port availability (machine-wide, not per-workspace) ──
@@ -499,27 +293,30 @@ export default async function doctor(argv) {
   console.log();
   console.log(`  ${ANSI.bold}Summary:${ANSI.reset}  ${counts.PASS} pass · ${counts.WARN} warn · ${counts.FAIL} fail`);
 
-  // Append a DOCTOR_REPORT event to each repo's spine that was checked.
-  for (const { repoRoot } of repoTargets) {
+  // Append a DOCTOR_REPORT event to each repo's spine via the proper
+  // spine.append API (generates a unique random id and respects segment
+  // rolling). The previous manual append used a static `_drep00` suffix,
+  // which collided when doctor ran more than once per second.
+  const spineLibPath = await resolveRuntimeLib('spine.mjs');
+  if (spineLibPath) {
     try {
-      const eventsSegment = join(repoRoot, '.maddu', 'events', '000000000001.ndjson');
-      const ts = new Date().toISOString();
-      const ev = {
-        v: 1,
-        id: 'evt_' + ts.replace(/[-:T.Z]/g, '').slice(0, 14) + '_drep00',
-        ts,
-        type: 'DOCTOR_REPORT',
-        actor: null,
-        lane: null,
-        data: {
-          counts,
-          checks: checks.map((c) => ({ level: c.level, label: c.label }))
+      const spineMod = await import(pathToFileURL(spineLibPath).href);
+      for (const { repoRoot } of repoTargets) {
+        try {
+          const ev = await spineMod.append(repoRoot, {
+            type: 'DOCTOR_REPORT',
+            data: {
+              counts,
+              checks: checks.map((c) => ({ level: c.level, label: c.label })),
+            },
+          });
+          if (verbose) console.log(`\n  (recorded ${ev.id} in ${repoRoot})`);
+        } catch (err) {
+          if (verbose) console.error(`  (could not append DOCTOR_REPORT to ${repoRoot}: ${err.message})`);
         }
-      };
-      await appendFile(eventsSegment, JSON.stringify(ev) + '\n');
-      if (verbose) console.log(`\n  (recorded ${ev.id} in ${repoRoot})`);
+      }
     } catch (err) {
-      if (verbose) console.error(`  (could not append DOCTOR_REPORT to ${repoRoot}: ${err.message})`);
+      if (verbose) console.error(`  (could not load spine.mjs: ${err.message})`);
     }
   }
 
