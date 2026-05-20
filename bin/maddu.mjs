@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -54,6 +54,7 @@ Commands:
   phase          Subcommands: set --name "…" [--notes "…"] | show. (Governance Phase 1)
   brief          Turn-start orientation digest. Writes .maddu/state/orientation.json + handoff.md. [--json] (Governance Phase 1)
   sources        Subcommands: rebuild | status. Tracked SSOT files for the tracked-source-drift gate. (Governance Phase 2)
+  slice          Subcommands: scope-declare | scope-expand | approve-functional | show. Optional slice scope-lock. (Governance Phase 3)
 
 Flags:
   --version      Print framework version.

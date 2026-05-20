@@ -56,6 +56,10 @@ export async function project(repoRoot) {
   const sourceHashPaths = {};                 // path -> { hash, recordedAt }
   let sourceHashesLastRecomputedAt = null;
 
+  // Governance Phase 3: slice scope-locks (opt-in).
+  // Map sliceId → { scope, lockedScopeHash, expansionBound, expansions[], functionalApproved, declaredAt }
+  const sliceLocks = {};
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -299,6 +303,47 @@ export async function project(repoRoot) {
         gatesLastRunAt = ev.ts;
         break;
       }
+      case 'SLICE_SCOPE_DECLARED': {
+        const sid = ev.data?.sliceId;
+        if (sid) {
+          sliceLocks[sid] = {
+            sliceId: sid,
+            scope: Array.isArray(ev.data.scope) ? [...ev.data.scope] : [],
+            lockedScopeHash: ev.data.lockedScopeHash || null,
+            expansionBound: ev.data.expansionBound || { maxFiles: 5, maxGrowthPct: 30 },
+            expansions: [],
+            functionalApproved: false,
+            declaredAt: ev.ts,
+            functionallyApprovedAt: null,
+          };
+        }
+        break;
+      }
+      case 'SLICE_SCOPE_EXPANDED': {
+        const sid = ev.data?.sliceId;
+        const lock = sid ? sliceLocks[sid] : null;
+        if (lock) {
+          const added = Array.isArray(ev.data.addedPaths) ? ev.data.addedPaths : [];
+          lock.expansions.push({
+            addedPaths: added,
+            newHash: ev.data.newHash || null,
+            reason: ev.data.reason || null,
+            ts: ev.ts,
+          });
+          lock.scope = [...lock.scope, ...added];
+          if (ev.data.newHash) lock.lockedScopeHash = ev.data.newHash;
+        }
+        break;
+      }
+      case 'SLICE_FUNCTIONAL_APPROVED': {
+        const sid = ev.data?.sliceId;
+        const lock = sid ? sliceLocks[sid] : null;
+        if (lock) {
+          lock.functionalApproved = true;
+          lock.functionallyApprovedAt = ev.ts;
+        }
+        break;
+      }
       case 'SOURCE_HASH_RECOMPUTED': {
         const paths = Array.isArray(ev.data?.paths) ? ev.data.paths : [];
         for (const p of paths) {
@@ -392,7 +437,9 @@ export async function project(repoRoot) {
     sourceHashes: {
       paths: { ...sourceHashPaths },
       lastRecomputedAt: sourceHashesLastRecomputedAt,
-    }
+    },
+    // Governance Phase 3: slice scope-locks (opt-in).
+    sliceLocks: { ...sliceLocks }
   };
 }
 

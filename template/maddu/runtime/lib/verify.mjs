@@ -90,6 +90,10 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   const createdTasks = new Set();
   const spawnedWorkers = new Set();
   const liveSchedules = new Set();       // SCHEDULE_CREATED minus SCHEDULE_REMOVED
+  const declaredSlices = new Set();      // SLICE_SCOPE_DECLARED.data.sliceId (Phase 3)
+  const reviewedSlices = new Map();      // SLICE_REVIEWED.id → sliceEventId (Phase 5)
+  const enqueuedActions = new Set();     // PENDING_ACTION_ENQUEUED.actionId (Phase 4)
+  const sliceStopIds = new Set();        // SLICE_STOP.id (Phase 5)
   // (lane, sessionId) → "claimed" / "released". Used to verify LANE_RELEASED has a prior LANE_CLAIMED.
   const laneClaims = new Map();
   let installedAt = null;                // FRAMEWORK_INSTALLED.ts — lower bound for ts sanity
@@ -332,6 +336,99 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           if (sid && !liveSchedules.has(sid)) {
             push(issue('WARN', 'orphan_schedule_fire',
               `${ev.id}: SCHEDULE_FIRED references unknown or removed schedule ${sid}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'SLICE_STOP':
+          sliceStopIds.add(ev.id);
+          break;
+
+        case 'SLICE_SCOPE_DECLARED': {
+          const sid = ev.data?.sliceId;
+          if (!sid) {
+            push(issue('FAIL', 'invalid_slice_scope_declared',
+              `${ev.id}: SLICE_SCOPE_DECLARED missing data.sliceId`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else {
+            declaredSlices.add(sid);
+          }
+          break;
+        }
+
+        case 'SLICE_SCOPE_EXPANDED': {
+          const sid = ev.data?.sliceId;
+          if (!sid) {
+            push(issue('FAIL', 'invalid_slice_scope_expanded',
+              `${ev.id}: SLICE_SCOPE_EXPANDED missing data.sliceId`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (!declaredSlices.has(sid)) {
+            push(issue('FAIL', 'orphan_slice_scope_expanded',
+              `${ev.id}: SLICE_SCOPE_EXPANDED references unknown sliceId ${sid}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'SLICE_FUNCTIONAL_APPROVED': {
+          const sid = ev.data?.sliceId;
+          if (!sid) {
+            push(issue('FAIL', 'invalid_slice_functional_approved',
+              `${ev.id}: SLICE_FUNCTIONAL_APPROVED missing data.sliceId`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (!declaredSlices.has(sid)) {
+            push(issue('FAIL', 'orphan_slice_functional_approved',
+              `${ev.id}: SLICE_FUNCTIONAL_APPROVED references unknown sliceId ${sid}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'PENDING_ACTION_ENQUEUED': {
+          const aid = ev.data?.actionId;
+          if (aid) enqueuedActions.add(aid);
+          break;
+        }
+
+        case 'PENDING_ACTION_DRAINED': {
+          const aid = ev.data?.actionId;
+          if (!aid) {
+            push(issue('FAIL', 'invalid_pending_action_drained',
+              `${ev.id}: PENDING_ACTION_DRAINED missing data.actionId`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (!enqueuedActions.has(aid)) {
+            push(issue('FAIL', 'orphan_pending_action_drained',
+              `${ev.id}: PENDING_ACTION_DRAINED references unknown actionId ${aid}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'SLICE_REVIEWED': {
+          const sliceEventId = ev.data?.sliceEventId;
+          if (!sliceEventId) {
+            push(issue('FAIL', 'invalid_slice_reviewed',
+              `${ev.id}: SLICE_REVIEWED missing data.sliceEventId`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (!sliceStopIds.has(sliceEventId)) {
+            push(issue('FAIL', 'orphan_slice_reviewed',
+              `${ev.id}: SLICE_REVIEWED references unknown SLICE_STOP ${sliceEventId}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          reviewedSlices.set(ev.id, sliceEventId);
+          break;
+        }
+
+        case 'FOLLOWUP_OPENED': {
+          const reviewId = ev.data?.fromReviewEventId;
+          if (!reviewId) {
+            push(issue('FAIL', 'invalid_followup_opened',
+              `${ev.id}: FOLLOWUP_OPENED missing data.fromReviewEventId`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (!reviewedSlices.has(reviewId)) {
+            push(issue('FAIL', 'orphan_followup_opened',
+              `${ev.id}: FOLLOWUP_OPENED references unknown SLICE_REVIEWED ${reviewId}`,
               { segment: segName, line: lineNo, eventId: ev.id }));
           }
           break;
