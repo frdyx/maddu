@@ -1389,6 +1389,19 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { orientation, handoff });
   }
 
+  // ── gates (Governance Phase 2) ────────────────────────────────────────
+  // Recent GATE_RAN history + summary, derived from the spine.
+  if (path === '/bridge/gates' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get('limit') || '50', 10) || 50, 200));
+    const runs = (proj.gates?.runs || []).slice(-limit).reverse();
+    return sendJson(res, 200, {
+      lastRunAt: proj.gates?.lastRunAt || null,
+      summary: proj.gates?.summary || { ok: 0, fail: 0, warn: 0 },
+      runs,
+    });
+  }
+
   // ── conductor (Slice α: signal-of-record for "what is safe next?") ────
   if (path === '/bridge/conductor' && req.method === 'GET') {
     const view = await buildConductor(repoRoot);
