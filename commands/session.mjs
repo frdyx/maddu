@@ -35,7 +35,7 @@ async function resolveSession(flags, repoRoot, sessionActive) {
   return result.sessionId;
 }
 
-async function doRegister(spine, sessionActive, repoRoot, { id, role, label, focus, runtime, lane }) {
+async function doRegister(spine, sessionActive, repoRoot, { id, role, label, focus, runtime, lane, parentSessionId }) {
   const sessionId = id || spine.genSessionId();
   const ev = await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.SESSION_REGISTERED,
@@ -45,7 +45,10 @@ async function doRegister(spine, sessionActive, repoRoot, { id, role, label, foc
       role: role || null,
       label: label || null,
       focus: focus || null,
-      runtime: runtime || null
+      runtime: runtime || null,
+      // v0.17 Phase 2: optional tree provenance. Old events without
+      // parentSessionId remain valid (verify-spine treats absence as null).
+      ...(parentSessionId ? { parentSessionId } : {})
     }
   });
   if (sessionActive) {
@@ -74,7 +77,9 @@ export default async function session(argv) {
   if (sub === 'register') {
     const { flags } = parseFlags(rest);
     const { sessionId, ev } = await doRegister(spine, sessionActive, repoRoot, {
-      id: flags.id, role: flags.role, label: flags.label, focus: flags.focus, runtime: flags.runtime, lane: flags.lane
+      id: flags.id, role: flags.role, label: flags.label, focus: flags.focus,
+      runtime: flags.runtime, lane: flags.lane,
+      parentSessionId: flags.parent || process.env.MADDU_PARENT_SESSION_ID || null
     });
     console.log(sessionId);
     if (process.stdout.isTTY) {
@@ -103,7 +108,8 @@ export default async function session(argv) {
       label,
       focus: flags.focus || label,
       runtime: flags.runtime,
-      lane: flags.lane
+      lane: flags.lane,
+      parentSessionId: flags.parent || process.env.MADDU_PARENT_SESSION_ID || null
     });
     console.log(sessionId);
     if (process.stdout.isTTY) {
@@ -180,6 +186,40 @@ export default async function session(argv) {
     for (const s of closed.slice(-10)) {
       console.log(`  ${s.id}  ${s.role || '—'}  ${s.label || ''}`);
     }
+    return;
+  }
+
+  // v0.17 Phase 2 — `maddu session tree [--root <id>]`
+  //
+  // Prints an ASCII tree of sessions using sessionsTree projection slot.
+  // --root filters to just that subtree (useful when a parent fans out
+  // dozens of children and the operator only cares about one branch).
+  if (sub === 'tree') {
+    const { flags } = parseFlags(rest);
+    const proj = await projections.project(repoRoot);
+    const tree = proj.sessionsTree || {};
+    const labelOf = (id) => {
+      const s = proj.sessions.find((x) => x.id === id);
+      const dim = (str) => process.stdout.isTTY ? `\x1b[2m${str}\x1b[0m` : str;
+      const stale = tree[id]?.state === 'closed' ? dim(' [closed]') : '';
+      return `${id}  ${s?.label || dim('—')}${stale}`;
+    };
+    const roots = flags.root
+      ? (tree[flags.root] ? [flags.root] : [])
+      : Object.keys(tree).filter((id) => !tree[id].parentSessionId).sort();
+    if (roots.length === 0) {
+      if (flags.root) console.error(`(no session ${flags.root} in tree)`);
+      else console.log('(no sessions registered)');
+      return;
+    }
+    const draw = (id, prefix, depth, isLast) => {
+      const branch = depth === 0 ? '' : (isLast ? '└─ ' : '├─ ');
+      console.log(`${prefix}${branch}${labelOf(id)}`);
+      const next = depth === 0 ? '' : prefix + (isLast ? '   ' : '│  ');
+      const kids = (tree[id]?.childSessionIds || []).slice();
+      kids.forEach((k, i) => draw(k, next, depth + 1, i === kids.length - 1));
+    };
+    for (const r of roots) draw(r, '', 0, true);
     return;
   }
 

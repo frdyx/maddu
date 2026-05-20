@@ -13,6 +13,10 @@ export async function project(repoRoot) {
   const events = await readAll(repoRoot);
 
   const sessions = new Map();              // sessionId -> { id, role, label, focus, registeredAt, lastHeartbeatAt, closedAt, status }
+  // v0.17 sessionsTree: parent/child provenance for session spawn graphs.
+  //   sessionId -> { parentSessionId, source, state, lastHeartbeatAt }
+  // childSessionIds populated in a reverse-index pass after replay.
+  const sessionsTree = new Map();
   const claims = new Map();                // lane -> { lane, sessionId, focus, claimedAt }
   const sliceStops = [];                   // list of slice-stop events, newest last
   const inbox = [];                        // list of inbox events
@@ -85,6 +89,15 @@ export async function project(repoRoot) {
           closedAt: null,
           status: 'active'
         });
+        // v0.17 sessionsTree — `manual` source unless overridden.
+        // SESSION_REGISTERED may carry parentSessionId after Phase 2;
+        // older events without it remain valid (null parent).
+        sessionsTree.set(ev.actor, {
+          parentSessionId: ev.data.parentSessionId || null,
+          source: ev.data.source || 'manual',
+          state: 'active',
+          lastHeartbeatAt: ev.ts
+        });
         break;
       case 'SESSION_AUTO_REGISTERED':
         // v0.17 — agent-native bootstrap. Same session lifecycle as
@@ -103,6 +116,12 @@ export async function project(repoRoot) {
           status: 'active',
           source: ev.data.source || 'cli'
         });
+        sessionsTree.set(ev.actor, {
+          parentSessionId: ev.data.parentSessionId || null,
+          source: ev.data.source || 'cli',
+          state: 'active',
+          lastHeartbeatAt: ev.ts
+        });
         break;
       case 'SESSION_HEARTBEAT': {
         const s = sessions.get(ev.actor);
@@ -110,6 +129,8 @@ export async function project(repoRoot) {
           s.lastHeartbeatAt = ev.ts;
           if (ev.data.focus) s.focus = ev.data.focus;
         }
+        const t = sessionsTree.get(ev.actor);
+        if (t) t.lastHeartbeatAt = ev.ts;
         break;
       }
       case 'SESSION_CLOSED': {
@@ -119,6 +140,8 @@ export async function project(repoRoot) {
           s.status = 'closed';
           if (ev.data.handoff) s.handoff = ev.data.handoff;
         }
+        const t = sessionsTree.get(ev.actor);
+        if (t) t.state = 'closed';
         // Release any claims held by this session.
         for (const [lane, c] of claims) {
           if (c.sessionId === ev.actor) claims.delete(lane);
@@ -538,7 +561,34 @@ export async function project(repoRoot) {
       recent: reviewsRecent.slice(),
     },
     openFollowups: openFollowups.slice(),
+    // v0.17 Phase 2: session-tree provenance (parent → child links).
+    // Each entry is keyed by sessionId; childSessionIds is the reverse
+    // index built once after replay (Phase 5 will set state='stale').
+    sessionsTree: buildSessionsTreeView(sessionsTree),
   };
+}
+
+function buildSessionsTreeView(sessionsTree) {
+  // Reverse-index children. The forward replay records parentSessionId
+  // on the child; the view exposes both directions so `maddu session
+  // tree` can walk either way without re-scanning.
+  const out = {};
+  for (const [id, node] of sessionsTree) {
+    out[id] = {
+      parentSessionId: node.parentSessionId,
+      childSessionIds: [],
+      source: node.source,
+      state: node.state,
+      lastHeartbeatAt: node.lastHeartbeatAt
+    };
+  }
+  for (const [id, node] of sessionsTree) {
+    if (node.parentSessionId && out[node.parentSessionId]) {
+      out[node.parentSessionId].childSessionIds.push(id);
+    }
+  }
+  for (const id of Object.keys(out)) out[id].childSessionIds.sort();
+  return out;
 }
 
 // Read-time status derivation: a worker that hasn't heartbeat'd in
