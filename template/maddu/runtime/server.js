@@ -15,6 +15,7 @@ import { findRepoRoot, pathsFor } from './lib/paths.mjs';
 import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId, genWorkerId } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
 import { runJanitor } from './lib/janitor.mjs';
+import { buildAgentContext, renderAgentContextText } from './lib/agent-context.mjs';
 import { buildOrientation, renderHandoff } from './lib/handoff.mjs';
 import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
@@ -1398,6 +1399,20 @@ async function handleBridge(req, res, url, ctx) {
       const proj = await project(repoRoot);
       return sendJson(res, 200, proj);
     }
+  }
+
+  // ── agent context (v0.17 Phase 6) ─────────────────────────────────────
+  // Self-contained snapshot intended for a code agent to read once at
+  // turn start. Same data the CLI `maddu brief --for-agent` exposes,
+  // returned here as JSON. The MADDU.md brief points agents here.
+  if (path === '/bridge/agent-context' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const ctx = buildAgentContext(proj);
+    if (url.searchParams.get('text') === '1') {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(renderAgentContextText(ctx));
+    }
+    return sendJson(res, 200, ctx);
   }
 
   // ── orientation (Governance Phase 1) ──────────────────────────────────
