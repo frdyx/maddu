@@ -4,7 +4,7 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v0.15.0** ([changelog](../CHANGELOG.md)). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v0.16.0** ([changelog](../CHANGELOG.md)) — the governance layer release (orientation, extensible gates, optional scope-lock, trigger discipline, post-stop review lane). License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
 
 ## 60-second overview
 

@@ -21,6 +21,18 @@ The shell shows in every route:
 
 ## Routes
 
+### `#orientation` *(v0.16)*
+
+Turn-start digest. Goal, phase, active session, last slice, counters, open follow-ups, plus the rendered handoff markdown from the most recent slice-stop. Top of the **Decide** group. Reads `GET /bridge/orientation` — pure projection from the spine, deterministic across restarts. Pair with the CLI: `maddu brief` prints the same data. Set goal/phase with `maddu goal set` / `maddu phase set`. See [20-governance.md](20-governance.md#turn-start-orientation).
+
+### `#gates` *(v0.16)*
+
+Recent `GATE_RAN` events with summary counts (ok / fail / warn / last run). One row per gate run. Operator gates dropped at `.maddu/gates/*.mjs` show alongside the ten framework built-ins (hard-rule extractions + `tracked-source-drift` + `slice-scope` + `command-tier-discipline`). Reads `GET /bridge/gates?limit=N`. See [20-governance.md](20-governance.md#authoring-gates).
+
+### `#reviews` *(v0.16)*
+
+Post-stop reviews. Verdict counts (`CLEAN`/`P1`/`P2`/`P3`/`INFO`), recent `SLICE_REVIEWED` events, open follow-ups. Per-review markdown archived at `.maddu/reviews/<slice-event-id>.md`. Configured via `.maddu/config/review-policy.json`; the reviewer is a runtime with `kind: 'reviewer'`. Non-clean verdicts auto-open `FOLLOWUP_OPENED` events that surface in `#orientation`. Reads `GET /bridge/reviews?limit=N&verdict=P2`. See [20-governance.md](20-governance.md#post-stop-review-lane).
+
 ### `#workbench`
 
 The default landing route. OS-like three-pane shell:
