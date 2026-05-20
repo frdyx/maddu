@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 460" role="img" aria-label="Máddu three-layer brand boundary">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 480" role="img" aria-label="Máddu three-layer brand boundary">
   <title>Three layers, no cross-references — framework shell brand / app brand / content brand</title>
   <desc>Máddu enforces a three-layer brand boundary by construction. The framework shell brand (Máddu's cockpit and design tokens) is the outermost layer. The app brand (your project) is nested one level in. The content brand (per-campaign, per-asset) is the innermost. The three layers never reference each other; maddu doctor verifies the boundary on every run.</desc>
   <defs>
@@ -7,68 +7,75 @@
       .ring-1    { fill: rgba(208,255,0,0.04); stroke: #D0FF00; stroke-width: 1.5; }
       .ring-2    { fill: rgba(86,184,255,0.04); stroke: #56B8FF; stroke-width: 1.5; }
       .ring-3    { fill: rgba(242,189,92,0.06); stroke: #F2BD5C; stroke-width: 1.5; }
-      .fg-0      { fill: #E8E6E3; }
-      .fg-2      { fill: #9aa1ab; }
-      .fg-3      { fill: #6a7079; }
-      .accent    { fill: #D0FF00; }
-      .accent2   { fill: #56B8FF; }
-      .warm      { fill: #F2BD5C; }
       .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
       .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
     </style>
+    <filter id="glow-lime" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.0" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-warm" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.0" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
-  <rect class="canvas" width="1400" height="460"/>
+  <rect class="canvas" width="1480" height="480"/>
 
   <!-- Title strip -->
   <g transform="translate(40,30)">
-    <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◈ BRAND BOUNDARY</text>
-    <text x="0" y="22" class="cond-b fg-0" font-size="20">Three layers, no cross-references</text>
-    <text x="0" y="42" class="mono fg-3" font-size="11">framework / app / content — operator-verifiable by maddu doctor</text>
+    <text x="0" y="0" class="cond-b" fill="#D0FF00" font-size="11" letter-spacing="0.14em" filter="url(#glow-lime)">◈ BRAND BOUNDARY</text>
+    <text x="0" y="22" class="cond-b" fill="#E8E6E3" font-size="20">Three layers, no cross-references</text>
+    <text x="0" y="42" class="mono" fill="#6a7079" font-size="11">framework / app / content — operator-verifiable by maddu doctor</text>
   </g>
 
-  <!-- Outer ring: framework shell brand -->
-  <g transform="translate(200,100)">
-    <rect class="ring-1" width="1000" height="320" rx="10"/>
-    <text x="20" y="28" class="cond-b accent" font-size="12" letter-spacing="0.10em">◈ FRAMEWORK SHELL BRAND (Máddu)</text>
-    <text x="20" y="46" class="mono fg-3" font-size="10">template/maddu/cockpit/tokens.css · brand-mark.svg · IBM Plex · cockpit aesthetic</text>
+  <!-- Outer ring: framework shell brand (Máddu) -->
+  <g transform="translate(220,100)">
+    <rect class="ring-1" width="1040" height="320" rx="10" filter="url(#glow-lime)"/>
+    <text x="20" y="28" class="cond-b" fill="#D0FF00" font-size="12" letter-spacing="0.10em">◈ FRAMEWORK SHELL BRAND (Máddu)</text>
+    <text x="20" y="46" class="mono" fill="#6a7079" font-size="10">template/maddu/cockpit/tokens.css · brand-mark.svg · IBM Plex · cockpit aesthetic</text>
 
     <!-- Middle ring: app brand -->
     <g transform="translate(80,80)">
-      <rect class="ring-2" width="840" height="220" rx="10"/>
-      <text x="20" y="28" class="cond-b accent2" font-size="12" letter-spacing="0.10em">◈ APP BRAND (your project)</text>
-      <text x="20" y="46" class="mono fg-3" font-size="10">wherever your project keeps brand data — owned by the project</text>
+      <rect class="ring-2" width="880" height="220" rx="10" filter="url(#glow-cyan)"/>
+      <text x="20" y="28" class="cond-b" fill="#56B8FF" font-size="12" letter-spacing="0.10em">◈ APP BRAND (your project)</text>
+      <text x="20" y="46" class="mono" fill="#6a7079" font-size="10">wherever your project keeps brand data — owned by the project</text>
 
       <!-- Inner ring: content brand -->
       <g transform="translate(80,80)">
-        <rect class="ring-3" width="680" height="120" rx="10"/>
-        <text x="20" y="28" class="cond-b warm" font-size="12" letter-spacing="0.10em">◈ CONTENT BRAND (per-campaign / per-asset)</text>
-        <text x="20" y="46" class="mono fg-3" font-size="10">owned by the project's content authors — per-asset overrides</text>
-        <text x="20" y="80" class="cond-b fg-2" font-size="11" letter-spacing="0.04em">no reference outward → app brand or framework shell</text>
+        <rect class="ring-3" width="720" height="120" rx="10" filter="url(#glow-warm)"/>
+        <text x="20" y="28" class="cond-b" fill="#F2BD5C" font-size="12" letter-spacing="0.10em">◈ CONTENT BRAND (per-campaign / per-asset)</text>
+        <text x="20" y="46" class="mono" fill="#6a7079" font-size="10">owned by the project's content authors — per-asset overrides</text>
+        <text x="20" y="80" class="cond-b" fill="#9aa1ab" font-size="11" letter-spacing="0.04em">no reference outward → app brand or framework shell</text>
       </g>
     </g>
   </g>
 
-  <!-- Side annotation -->
-  <g transform="translate(40,210)">
-    <text x="0" y="0" class="cond-b fg-2" font-size="11" letter-spacing="0.04em">Why nested,</text>
-    <text x="0" y="16" class="cond-b fg-2" font-size="11" letter-spacing="0.04em">not adjacent:</text>
-    <text x="0" y="40" class="mono fg-3" font-size="10">each inner layer</text>
-    <text x="0" y="54" class="mono fg-3" font-size="10">inherits its OUTER</text>
-    <text x="0" y="68" class="mono fg-3" font-size="10">layer's tokens by</text>
-    <text x="0" y="82" class="mono fg-3" font-size="10">default, but cannot</text>
-    <text x="0" y="96" class="mono fg-3" font-size="10">leak inward.</text>
+  <!-- Side annotation (left) -->
+  <g transform="translate(40,220)">
+    <text x="0" y="0" class="cond-b" fill="#9aa1ab" font-size="11" letter-spacing="0.04em">Why nested,</text>
+    <text x="0" y="16" class="cond-b" fill="#9aa1ab" font-size="11" letter-spacing="0.04em">not adjacent:</text>
+    <text x="0" y="40" class="mono" fill="#6a7079" font-size="10">each inner layer</text>
+    <text x="0" y="54" class="mono" fill="#6a7079" font-size="10">inherits its OUTER</text>
+    <text x="0" y="68" class="mono" fill="#6a7079" font-size="10">layer's tokens by</text>
+    <text x="0" y="82" class="mono" fill="#6a7079" font-size="10">default, but cannot</text>
+    <text x="0" y="96" class="mono" fill="#6a7079" font-size="10">leak inward.</text>
   </g>
 
-  <g transform="translate(1240,210)">
-    <text x="0" y="0" class="cond-b fg-2" font-size="11" letter-spacing="0.04em">Enforced by:</text>
-    <text x="0" y="24" class="mono fg-3" font-size="10">maddu doctor</text>
-    <text x="0" y="40" class="mono fg-3" font-size="10">checks the dirs do</text>
-    <text x="0" y="54" class="mono fg-3" font-size="10">not cross-import.</text>
+  <!-- Side annotation (right) -->
+  <g transform="translate(1300,220)">
+    <text x="0" y="0" class="cond-b" fill="#9aa1ab" font-size="11" letter-spacing="0.04em">Enforced by:</text>
+    <text x="0" y="24" class="mono" fill="#6a7079" font-size="10">maddu doctor</text>
+    <text x="0" y="40" class="mono" fill="#6a7079" font-size="10">checks the dirs do</text>
+    <text x="0" y="54" class="mono" fill="#6a7079" font-size="10">not cross-import.</text>
   </g>
 
   <!-- Tagline -->
-  <g transform="translate(700,440)">
-    <text x="0" y="0" class="mono fg-3" font-size="10" text-anchor="middle" letter-spacing="0.08em">THE THREE LAYERS NEVER REFERENCE EACH OTHER · BOUNDARY IS OPERATOR-VERIFIABLE</text>
+  <g transform="translate(740,460)">
+    <text x="0" y="0" class="mono" fill="#6a7079" font-size="10" text-anchor="middle" letter-spacing="0.08em">THE THREE LAYERS NEVER REFERENCE EACH OTHER · BOUNDARY IS OPERATOR-VERIFIABLE</text>
   </g>
 </svg>

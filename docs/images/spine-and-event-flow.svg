@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 540" role="img" aria-label="Máddu spine and event flow">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 560" role="img" aria-label="Máddu spine and event flow">
   <title>Máddu architecture — writers → spine → projections → readers</title>
   <desc>Writers (workers, CLI commands, bridge) feed an append-only NDJSON spine. Projections derive from the spine and are read by the cockpit, brief, status, and doctor. The spine is authoritative; projections are rebuildable.</desc>
   <defs>
@@ -10,30 +10,33 @@
       .node-rect.boss   { stroke: #56B8FF; }
       .edge      { fill: none; stroke: rgba(80,113,149,0.55); stroke-width: 1.5; opacity: 0.85; }
       .edge.live { stroke: #D0FF00; stroke-width: 2; opacity: 0.75; }
-      .fg-0      { fill: #E8E6E3; }
-      .fg-2      { fill: #9aa1ab; }
-      .fg-3      { fill: #6a7079; }
-      .accent    { fill: #D0FF00; }
-      .accent2   { fill: #56B8FF; }
       .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
       .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
     </style>
+    <filter id="glow-lime" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
-  <rect class="canvas" width="1400" height="540"/>
+  <rect class="canvas" width="1480" height="560"/>
 
   <!-- Title strip -->
   <g transform="translate(40,30)">
-    <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◈ ARCHITECTURE</text>
-    <text x="0" y="22" class="cond-b fg-0" font-size="20">Spine writes / projections read / events flow</text>
-    <text x="0" y="42" class="mono fg-3" font-size="11">events are authoritative · state is rebuildable · cockpit reads, never writes</text>
+    <text x="0" y="0" class="cond-b" fill="#D0FF00" font-size="11" letter-spacing="0.14em" filter="url(#glow-lime)">◈ ARCHITECTURE</text>
+    <text x="0" y="22" class="cond-b" fill="#E8E6E3" font-size="20">Spine writes / projections read / events flow</text>
+    <text x="0" y="42" class="mono" fill="#6a7079" font-size="11">events are authoritative · state is rebuildable · cockpit reads, never writes</text>
   </g>
 
   <!-- Zone labels -->
-  <g class="cond-b fg-3" font-size="10" letter-spacing="0.14em">
-    <text x="130" y="100">◈ WRITES</text>
-    <text x="630" y="100">◈ STORE</text>
-    <text x="1180" y="100">◈ READS</text>
+  <g class="cond-b" font-size="10" letter-spacing="0.14em">
+    <text x="130" y="100" fill="#6a7079">◈ WRITES</text>
+    <text x="630" y="100" fill="#6a7079">◈ STORE</text>
+    <text x="1240" y="100" fill="#6a7079">◈ READS</text>
   </g>
 
   <!-- Bezier edges -->
@@ -45,41 +48,42 @@
     <!-- bridge → spine -->
     <path d="M 220 310 C 350 310, 350 260, 480 260" class="edge"/>
     <!-- projections → cockpit -->
-    <path d="M 920 320 C 1050 320, 1050 140, 1140 140" class="edge"/>
+    <path d="M 920 320 C 1080 320, 1080 140, 1200 140" class="edge"/>
     <!-- projections → brief -->
-    <path d="M 920 320 C 1050 320, 1050 220, 1140 220" class="edge live"/>
+    <path d="M 920 320 C 1080 320, 1080 220, 1200 220" class="edge live"/>
     <!-- projections → status -->
-    <path d="M 920 320 C 1050 320, 1050 300, 1140 300" class="edge"/>
+    <path d="M 920 320 C 1080 320, 1080 300, 1200 300" class="edge"/>
     <!-- projections → doctor -->
-    <path d="M 920 320 C 1050 320, 1050 380, 1140 380" class="edge"/>
+    <path d="M 920 320 C 1080 320, 1080 380, 1200 380" class="edge"/>
   </g>
 
   <!-- Writers (left) -->
-  <g class="cond-b fg-0" font-size="13" text-anchor="middle">
+  <g class="cond-b" font-size="13" text-anchor="middle">
     <g transform="translate(100,128)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">WORKERS</text>
+      <text x="60" y="28" fill="#E8E6E3">WORKERS</text>
     </g>
     <g transform="translate(100,208)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">CLI</text>
+      <text x="60" y="28" fill="#E8E6E3">CLI</text>
     </g>
     <g transform="translate(100,288)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">BRIDGE</text>
+      <text x="60" y="28" fill="#E8E6E3">BRIDGE</text>
     </g>
   </g>
 
-  <!-- Store (center) — large panel with two stacked surfaces -->
-  <g transform="translate(480,128)">
+  <!-- Store (center) — large panel with two stacked surfaces, glow because authoritative -->
+  <g transform="translate(480,128)" filter="url(#glow-lime)">
     <rect class="panel-hi" width="440" height="260" rx="8"/>
-
+  </g>
+  <g transform="translate(480,128)">
     <!-- spine layer -->
     <g transform="translate(24,28)">
-      <text x="0" y="0" class="cond-b accent" font-size="10" letter-spacing="0.14em">◈ SPINE</text>
-      <text x="0" y="22" class="cond-b fg-0" font-size="15">.maddu/events/*.ndjson</text>
-      <text x="0" y="42" class="mono fg-2" font-size="11">append-only · fsynced · 10 MB segments</text>
-      <text x="0" y="60" class="mono fg-3" font-size="11">one event per line · `evt_&lt;14-digit&gt;_&lt;6-hex&gt;`</text>
+      <text x="0" y="0" class="cond-b" fill="#D0FF00" font-size="10" letter-spacing="0.14em">◈ SPINE</text>
+      <text x="0" y="22" class="cond-b" fill="#E8E6E3" font-size="15">.maddu/events/*.ndjson</text>
+      <text x="0" y="42" class="mono" fill="#9aa1ab" font-size="11">append-only · fsynced · 10 MB segments</text>
+      <text x="0" y="60" class="mono" fill="#6a7079" font-size="11">one event per line · `evt_&lt;14-digit&gt;_&lt;6-hex&gt;`</text>
     </g>
 
     <!-- divider -->
@@ -89,61 +93,61 @@
     <g transform="translate(220,140)">
       <path d="M 0 0 L 0 30" stroke="#D0FF00" stroke-width="1.5" fill="none"/>
       <path d="M -4 26 L 0 32 L 4 26 Z" fill="#D0FF00"/>
-      <text x="14" y="22" class="mono accent" font-size="11">project()</text>
+      <text x="14" y="22" class="mono" fill="#D0FF00" font-size="11">project()</text>
     </g>
 
     <!-- projection layer -->
     <g transform="translate(24,196)">
-      <text x="0" y="0" class="cond-b accent2" font-size="10" letter-spacing="0.14em">◈ PROJECTIONS</text>
-      <text x="0" y="22" class="cond-b fg-0" font-size="15">.maddu/state/*.json</text>
-      <text x="0" y="42" class="mono fg-2" font-size="11">rebuilt from spine on every read · cached 1s</text>
+      <text x="0" y="0" class="cond-b" fill="#56B8FF" font-size="10" letter-spacing="0.14em">◈ PROJECTIONS</text>
+      <text x="0" y="22" class="cond-b" fill="#E8E6E3" font-size="15">.maddu/state/*.json</text>
+      <text x="0" y="42" class="mono" fill="#9aa1ab" font-size="11">rebuilt from spine on every read · cached 1s</text>
     </g>
   </g>
 
   <!-- Readers (right) -->
-  <g class="cond-b fg-0" font-size="13" text-anchor="middle">
-    <g transform="translate(1140,118)">
-      <rect class="node-rect boss" width="160" height="44" rx="6"/>
-      <text x="80" y="28" class="accent2">COCKPIT</text>
+  <g class="cond-b" font-size="13" text-anchor="middle">
+    <g transform="translate(1200,118)">
+      <rect class="node-rect boss" width="160" height="44" rx="6" filter="url(#glow-cyan)"/>
+      <text x="80" y="28" fill="#56B8FF">COCKPIT</text>
     </g>
-    <g transform="translate(1140,198)">
+    <g transform="translate(1200,198)">
       <rect class="node-rect" width="160" height="44" rx="6"/>
-      <text x="80" y="28">maddu brief</text>
+      <text x="80" y="28" fill="#E8E6E3">maddu brief</text>
     </g>
-    <g transform="translate(1140,278)">
+    <g transform="translate(1200,278)">
       <rect class="node-rect" width="160" height="44" rx="6"/>
-      <text x="80" y="28">maddu status</text>
+      <text x="80" y="28" fill="#E8E6E3">maddu status</text>
     </g>
-    <g transform="translate(1140,358)">
+    <g transform="translate(1200,358)">
       <rect class="node-rect" width="160" height="44" rx="6"/>
-      <text x="80" y="28">maddu doctor</text>
+      <text x="80" y="28" fill="#E8E6E3">maddu doctor</text>
     </g>
   </g>
 
   <!-- Legend strip below -->
-  <g transform="translate(40,420)">
-    <text x="0" y="0" class="cond-b fg-3" font-size="10" letter-spacing="0.10em">LEGEND</text>
-    <line x1="0" y1="20" x2="1320" y2="20" stroke="rgba(80,113,149,0.18)" stroke-width="1"/>
+  <g transform="translate(40,440)">
+    <text x="0" y="0" class="cond-b" fill="#6a7079" font-size="10" letter-spacing="0.10em">LEGEND</text>
+    <line x1="0" y1="20" x2="1400" y2="20" stroke="rgba(80,113,149,0.18)" stroke-width="1"/>
     <g transform="translate(0,40)">
       <rect width="14" height="2" fill="#D0FF00"/>
-      <text x="22" y="6" class="mono fg-3" font-size="11">primary flow (live)</text>
+      <text x="22" y="6" class="mono" fill="#6a7079" font-size="11">primary flow (live)</text>
     </g>
     <g transform="translate(200,40)">
       <rect width="14" height="2" fill="rgba(80,113,149,0.55)"/>
-      <text x="22" y="6" class="mono fg-3" font-size="11">secondary edge</text>
+      <text x="22" y="6" class="mono" fill="#6a7079" font-size="11">secondary edge</text>
     </g>
     <g transform="translate(380,40)">
       <rect width="12" height="12" fill="#0C1428" stroke="#D0FF00"/>
-      <text x="22" y="11" class="mono fg-3" font-size="11">authoritative · spine on disk</text>
+      <text x="22" y="11" class="mono" fill="#6a7079" font-size="11">authoritative · spine on disk</text>
     </g>
     <g transform="translate(720,40)">
       <rect width="12" height="12" fill="#0A1224" stroke="#56B8FF"/>
-      <text x="22" y="11" class="mono fg-3" font-size="11">cockpit · derives from projections</text>
+      <text x="22" y="11" class="mono" fill="#6a7079" font-size="11">cockpit · derives from projections</text>
     </g>
   </g>
 
   <!-- Tagline -->
-  <g transform="translate(700,510)">
-    <text x="0" y="0" class="mono fg-3" font-size="10" text-anchor="middle" letter-spacing="0.08em">DELETE ANY PROJECTION · REPLAY THE SPINE · RECOVER EXACTLY</text>
+  <g transform="translate(740,530)">
+    <text x="0" y="0" class="mono" fill="#6a7079" font-size="10" text-anchor="middle" letter-spacing="0.08em">DELETE ANY PROJECTION · REPLAY THE SPINE · RECOVER EXACTLY</text>
   </g>
 </svg>
