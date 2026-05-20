@@ -21,13 +21,22 @@ import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
 import {
   exists, frameworkOwnedFiles, sha256OfFile, readMadduJson, writeMadduJson,
-  frameworkVersion, ensureShimExecutable, TEMPLATE_ROOT
+  frameworkVersion, ensureShimExecutable, requireSourceLayout, TEMPLATE_ROOT
 } from './_manifest.mjs';
 
 export default async function upgrade(argv) {
   const { flags } = parseFlags(argv);
   const force = !!flags.force;
   const dryRun = !!flags['dry-run'];
+
+  // v0.17.1: refuse early if invoked via a consumer install's bundled CLI.
+  // Previously a silent no-op — walked an empty template/maddu/ and copied
+  // bin+commands onto itself, then reported "Upgraded to vX.Y.Z" with 0 updates.
+  const layoutError = await requireSourceLayout('upgrade');
+  if (layoutError) {
+    console.error(layoutError);
+    process.exit(2);
+  }
 
   const repoRoot = await findRepoRoot(process.cwd());
   if (!repoRoot) {

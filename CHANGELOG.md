@@ -11,6 +11,20 @@ narrative summary.
 
 ---
 
+## [v0.17.1] · 2026-05-20 · bulletproof init/upgrade refusal
+
+**Patch: a real bug surfaced by user testing.** Running `./maddu/run init` (or `upgrade`) via a *consumer install's* bundled CLI used to either crash mid-way with `ERR_MODULE_NOT_FOUND` on `defaults.mjs` (after creating a half-installed `.maddu/` skeleton — non-recoverable without manual cleanup) or silently no-op while reporting success. Root cause: `commands/_manifest.mjs` resolves `TEMPLATE_MADDU` as `<FRAMEWORK_ROOT>/template/maddu/`, which exists in the source repo but **not** in a consumer install (the install flattens that prefix on the way in so the bridge can find `runtime/` at `maddu/runtime/`).
+
+The fix is refuse-with-actionable-error, not magic-passthrough. A consumer install copying onto itself is meaningless; trying to make it "work" would mask future bugs. v0.17.1 detects the layout up front and exits with exit code 2 + a clear message naming the right way to invoke the command (`npx github:frdyx/maddu init` or via a source clone).
+
+- **New `detectFrameworkLayout()` + `requireSourceLayout(commandName)`** helpers in `commands/_manifest.mjs`. Detect `source` (template/maddu/ present) vs. `installed` (runtime/ present directly under FRAMEWORK_ROOT) vs. `unknown`.
+- **`maddu init`** refuses early when invoked from an installed layout. Was: crashed mid-way after creating a half-installed `.maddu/`. Now: exit 2 with a 12-line error naming the three correct ways to invoke.
+- **`maddu upgrade`** refuses early when invoked from an installed layout. Was: silently no-op while reporting `Upgraded to vX.Y.Z` with 0 updates. Now: exit 2 with the same clear error.
+- **New built-in gate `framework-layout`** (severity `critical`) surfaces the detected layout in `maddu doctor` output (e.g. `PASS framework layout — framework layout: installed`). FAILs on `unknown` so a broken/partial extraction surfaces immediately. Doctor in consumer installs goes 17 → 18 pass.
+- **New end-to-end test** at `scripts/test/layout-refusal.mjs` locking the behavior down across 4 scenarios: source init succeeds, consumer-install init refuses, consumer-install upgrade refuses, source upgrade from inside consumer (via source bin) succeeds.
+
+Verified by rebuilding `maddu-test-consumer` from scratch with v0.17.1: doctor reports `PASS framework layout: installed`, `./maddu/run init` refuses with exit 2 + full error, `./maddu/run upgrade` refuses with exit 2 + full error, and `node /path/to/source/bin/maddu.mjs upgrade` from inside the consumer still works correctly.
+
 ## [v0.17.0] · 2026-05-20 · agent-native bootstrap
 
 **Turns dormant governance into live governance.** v0.16 layered governance on top of a spine that, in practice, no agent was writing to — operators had to remember to `maddu session register`, and most never did. v0.17 removes that friction. A code agent (Claude Code, Codex CLI, Gemini CLI, or any future LLM CLI that reads a root-level agent file) opening in a Máddu repo now learns the framework from a single canonical brief, auto-registers a session (with parent-session tree provenance for spawned children), uses Máddu primitives idiomatically, and is automatically cleaned up when stale — all preserving hard rules 1–8, candidate #9, and the project's existing agent-file content via merge-marker discipline.

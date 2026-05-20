@@ -20,6 +20,72 @@ export const FRAMEWORK_ROOT = join(__dirname, '..');
 export const TEMPLATE_ROOT = join(FRAMEWORK_ROOT, 'template');
 export const TEMPLATE_MADDU = join(TEMPLATE_ROOT, 'maddu');
 
+// Layout detection (v0.17.1).
+//
+// Two valid framework layouts ship with this codebase:
+//
+//   source — a clone of frdyx/maddu or the npm-extracted package. Has
+//            `template/maddu/{runtime,cockpit,docs,agent-files,...}/` as
+//            the install source. This is the only layout that can scaffold
+//            new consumer repos.
+//
+//   installed — a consumer's `<repo>/maddu/` directory, produced by
+//               `maddu init`. The `template/maddu/` prefix has been
+//               flattened on the way in (so `runtime/`, `cockpit/`, etc.
+//               live directly under `maddu/`). The bridge requires this
+//               flat layout to find files; it CANNOT be used to scaffold
+//               other repos.
+//
+// `frameworkOwnedFiles`, `buildSourceManifest`, init, and upgrade ALL require
+// the `source` layout. Calling any of them via a consumer's bundled
+// `./maddu/run` would semantically mean "copy the install onto itself" —
+// meaningless and historically silently broken (init would crash mid-way;
+// upgrade would no-op every file). v0.17.1 refuses these calls early with
+// a clear actionable error.
+export async function detectFrameworkLayout() {
+  if (await exists(TEMPLATE_MADDU)) return 'source';
+  if (await exists(join(FRAMEWORK_ROOT, 'runtime'))) return 'installed';
+  return 'unknown';
+}
+
+// Used by init.mjs and upgrade.mjs to refuse running from the wrong layout.
+// Returns null when ok; returns an error message (operator-friendly) when not.
+export async function requireSourceLayout(commandName) {
+  const layout = await detectFrameworkLayout();
+  if (layout === 'source') return null;
+  if (layout === 'installed') {
+    return [
+      `maddu ${commandName}: refused.`,
+      ``,
+      `You invoked \`maddu ${commandName}\` via a consumer install's bundled CLI`,
+      `(\`./maddu/run\` or equivalent). A consumer install only contains the`,
+      `flat \`maddu/{runtime,cockpit,docs,...}/\` layout the bridge needs — it`,
+      `is NOT a framework source and cannot scaffold or upgrade other repos.`,
+      ``,
+      `To run \`maddu ${commandName}\` correctly, use one of:`,
+      ``,
+      `  npx github:frdyx/maddu ${commandName}            # latest published`,
+      `  npx github:frdyx/maddu@v0.17.1 ${commandName}    # a specific version`,
+      `  node /path/to/maddu-source/bin/maddu.mjs ${commandName}   # from a clone`,
+      ``,
+      `The consumer install's own CLI is for operating on THIS install —`,
+      `\`doctor\`, \`brief\`, \`start\`, \`status\`, \`register\`, etc.`,
+    ].join('\n');
+  }
+  return [
+    `maddu ${commandName}: refused.`,
+    ``,
+    `Unable to detect framework layout. Neither \`${TEMPLATE_MADDU}\` (source layout)`,
+    `nor \`${join(FRAMEWORK_ROOT, 'runtime')}\` (installed layout) exists relative to`,
+    `the CLI's framework root. This usually means the framework checkout is`,
+    `broken or partially extracted.`,
+    ``,
+    `Expected one of:`,
+    `  - source layout: ${TEMPLATE_MADDU} present (clone of frdyx/maddu)`,
+    `  - installed layout: ${join(FRAMEWORK_ROOT, 'runtime')} present (consumer install)`,
+  ].join('\n');
+}
+
 export async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
 export async function readJson(p) {
