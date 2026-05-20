@@ -60,6 +60,10 @@ export async function project(repoRoot) {
   // Map sliceId → { scope, lockedScopeHash, expansionBound, expansions[], functionalApproved, declaredAt }
   const sliceLocks = {};
 
+  // Governance Phase 4: trigger discipline + pending-actions queue.
+  const triggers = {};                          // triggerId -> { lastFiredAt, cooldownMs }
+  const pendingActionsMap = new Map();          // actionId -> { ..., drained, outcome }
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -344,6 +348,42 @@ export async function project(repoRoot) {
         }
         break;
       }
+      case 'TRIGGER_FIRED': {
+        const tid = ev.data?.triggerId;
+        if (tid) {
+          triggers[tid] = {
+            lastFiredAt: ev.ts,
+            cooldownMs: ev.data?.cooldownMs ?? 0,
+            target: ev.data?.target || null,
+          };
+        }
+        break;
+      }
+      case 'PENDING_ACTION_ENQUEUED': {
+        const aid = ev.data?.actionId;
+        if (aid) {
+          pendingActionsMap.set(aid, {
+            actionId: aid,
+            kind: ev.data?.kind || null,
+            payload: ev.data?.payload ?? null,
+            enqueuedAt: ev.ts,
+            drained: false,
+            outcome: null,
+          });
+        }
+        break;
+      }
+      case 'PENDING_ACTION_DRAINED': {
+        const aid = ev.data?.actionId;
+        const a = aid ? pendingActionsMap.get(aid) : null;
+        if (a) {
+          a.drained = true;
+          a.outcome = ev.data?.outcome || 'ok';
+          a.detail = ev.data?.detail || null;
+          a.drainedAt = ev.ts;
+        }
+        break;
+      }
       case 'SOURCE_HASH_RECOMPUTED': {
         const paths = Array.isArray(ev.data?.paths) ? ev.data.paths : [];
         for (const p of paths) {
@@ -439,7 +479,10 @@ export async function project(repoRoot) {
       lastRecomputedAt: sourceHashesLastRecomputedAt,
     },
     // Governance Phase 3: slice scope-locks (opt-in).
-    sliceLocks: { ...sliceLocks }
+    sliceLocks: { ...sliceLocks },
+    // Governance Phase 4: trigger discipline + pending-actions queue.
+    triggers: { ...triggers },
+    pendingActions: Array.from(pendingActionsMap.values()),
   };
 }
 

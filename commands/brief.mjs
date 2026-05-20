@@ -16,11 +16,26 @@ import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
 export default async function command(argv) {
   const { flags } = parseFlags(argv);
-  const { paths, projections } = await loadSpineLib();
+  const { paths, spine, projections } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   // Load handoff renderer from the same runtime tree the projector came from.
   const handoffMod = await loadHandoff(repoRoot);
+
+  // Governance Phase 4: --drain returns open read-only pending actions and
+  // marks them drained on the spine.
+  if (flags.drain) {
+    const pending = await loadPendingActions(repoRoot);
+    let drained = [];
+    if (pending?.drain) drained = await pending.drain(spine, projections, repoRoot, { limit: 50 });
+    if (flags.json) {
+      process.stdout.write(JSON.stringify({ drained }, null, 2) + '\n');
+    } else {
+      console.log(`drained ${drained.length} pending action(s)`);
+      for (const a of drained) console.log(`  ${a.actionId}  ${a.kind}  ${JSON.stringify(a.payload)}`);
+    }
+    return;
+  }
 
   const proj = await projections.project(repoRoot);
   const orientation = handoffMod.buildOrientation(proj);
@@ -83,4 +98,16 @@ async function loadHandoff(repoRoot) {
     try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
   }
   throw new Error('handoff.mjs not found');
+}
+
+async function loadPendingActions(repoRoot) {
+  const candidates = [
+    path.join(repoRoot, 'maddu', 'runtime', 'lib', 'pending-actions.mjs'),
+    path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname),
+                 '..', 'template', 'maddu', 'runtime', 'lib', 'pending-actions.mjs'),
+  ];
+  for (const p of candidates) {
+    try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
+  }
+  return null;
 }
