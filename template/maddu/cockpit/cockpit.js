@@ -7711,6 +7711,56 @@ function renderOrientation() {
   root.appendChild(panelFocus('Brief', 'GET /bridge/orientation · goal / phase / last slice / open follow-ups', mount,
     { id: 'orientation-brief', keywords: 'goal phase orientation brief handoff' }));
 
+  // v0.17 Phase 7: Sessions panel — renders the parent → child session
+  // tree and the inline janitor's recent activity. Reads the projection
+  // directly so a stale handoff.md doesn't hide a live spawn fan-out.
+  const sessionsMount = el('div', {});
+  sessionsMount.appendChild(loading('Reading sessions tree…'));
+  root.appendChild(panelFocus('Sessions', 'GET /bridge/projection · sessions tree + janitor activity', sessionsMount,
+    { id: 'orientation-sessions', keywords: 'sessions tree janitor stale auto-close parent child' }));
+
+  async function loadSessions() {
+    try {
+      const r = await fetch('/bridge/projection', { cache: 'no-store' });
+      const proj = await r.json();
+      sessionsMount.innerHTML = '';
+      const tree = proj.sessionsTree || {};
+      const sessionsById = {};
+      for (const s of (proj.sessions || [])) sessionsById[s.id] = s;
+      const roots = Object.keys(tree).filter((id) => !tree[id].parentSessionId);
+      const summary = el('div', { class: 'widget-stat' }, [
+        el('div', { class: 'widget-stat-num' }, [
+          el('span', { class: 'widget-stat-value' }, String(Object.keys(tree).length)),
+          el('span', { class: 'widget-stat-trend' }, ` total · ${roots.length} root(s)`),
+        ]),
+        el('div', { class: 'widget-stat-label' },
+          `janitor: ${(proj.janitor?.staleSessions || []).length} stale · ${proj.janitor?.autoClosedTotal || 0} auto-closed`),
+      ]);
+      sessionsMount.appendChild(summary);
+      if (roots.length === 0) {
+        sessionsMount.appendChild(placeholder('No sessions yet', 'Run `./maddu/run register` to bootstrap one.'));
+        return;
+      }
+      const list = el('ul', { class: 'hard-rules' });
+      const walk = (id, depth) => {
+        const s = sessionsById[id] || { label: '—' };
+        const n = tree[id] || {};
+        const stale = n.state === 'stale' ? ' · stale' : '';
+        const closed = n.state === 'closed' ? ' · closed' : '';
+        const indent = '  '.repeat(depth);
+        list.appendChild(el('li', {}, `${indent}${depth > 0 ? '└─ ' : ''}${s.label || id}  ${n.source ? '(' + n.source + ')' : ''}${stale}${closed}`));
+        const kids = (n.childSessionIds || []).slice().sort();
+        for (const k of kids) walk(k, depth + 1);
+      };
+      for (const r of roots.sort()) walk(r, 0);
+      sessionsMount.appendChild(list);
+    } catch (err) {
+      sessionsMount.innerHTML = '';
+      sessionsMount.appendChild(placeholder('Unavailable', String(err.message || err)));
+    }
+  }
+  loadSessions();
+
   async function load() {
     try {
       const r = await fetch('/bridge/orientation', { cache: 'no-store' });
@@ -7747,11 +7797,15 @@ function renderOrientation() {
     }
   }
   load();
+  loadSessions();
   let pending = false;
   const onEvent = () => {
     if (pending) return;
     pending = true;
-    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+    setTimeout(async () => {
+      try { await load(); await loadSessions(); }
+      finally { pending = false; }
+    }, 400);
   };
   stream.bus.addEventListener('event', onEvent);
   els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
