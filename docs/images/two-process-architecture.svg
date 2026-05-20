@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 440" role="img" aria-label="Máddu two-process architecture">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 440" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Máddu two-process architecture">
   <title>Two processes at most — cockpit (browser) ↔ bridge (Node) → worker subprocess</title>
   <desc>Máddu runs as at most two processes. A vanilla-JS cockpit in the browser long-polls the bridge over loopback HTTP. A single Node bridge process owns the append-only spine and spawns short-lived worker subprocesses (Claude Code, Codex, custom Node) on demand. Credentials inject at spawn time and never serialize into the spine.</desc>
   <defs>

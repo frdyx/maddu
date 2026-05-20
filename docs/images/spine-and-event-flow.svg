@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 560" role="img" aria-label="Máddu spine and event flow">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 560" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Máddu spine and event flow">
   <title>Máddu architecture — writers → spine → projections → readers</title>
   <desc>Writers (workers, CLI commands, bridge) feed an append-only NDJSON spine. Projections derive from the spine and are read by the cockpit, brief, status, and doctor. The spine is authoritative; projections are rebuildable.</desc>
   <defs>

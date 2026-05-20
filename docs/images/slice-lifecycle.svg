@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 600" role="img" aria-label="Máddu slice lifecycle">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 600" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Máddu slice lifecycle">
   <title>The slice loop — register → claim → work → slice-stop → hindsight → memory / skills · review / follow-up · janitor / re-register</title>
   <desc>The Máddu work loop: a session registers (idempotent on MADDU_SESSION_ID), claims a lane, does the work, heartbeats, runs slice-stop. The slice-stop event feeds hindsight extraction into memory and skills, optionally fires a post-stop review, and either closes the session or — via the janitor — auto-closes a stale session and surfaces a follow-up.</desc>
   <defs>

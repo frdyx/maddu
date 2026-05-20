@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 620" role="img" aria-label="Máddu workflows blueprint">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 620" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Máddu workflows blueprint">
   <title>Máddu workflows — operator → orientation → BOSS/Enforcer → claims / sessions tree → fleet → gates / reviews → reports → learning / wiki</title>
   <desc>How Máddu thinks: an operator opens the cockpit, reads the orientation digest, then directs BOSS (LLM voice, proposes) and Enforcer (deterministic, refuses). They write to the queue and claims; claims include the v0.17 session tree for autoRegister fan-out. The fleet executes; gates and reviews verify (gates are structural, reviews are semantic — v0.16). Reports surface in the cockpit; learning and wiki accumulate.</desc>
   <defs>
