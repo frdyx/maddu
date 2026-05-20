@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 0.16.0](https://img.shields.io/badge/version-0.16.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.17.0](https://img.shields.io/badge/version-0.17.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -28,14 +28,14 @@ npx github:frdyx/maddu init
 
 ```bash
 $ npx github:frdyx/maddu init
-✓ Máddu v0.16.0 installed.
+✓ Máddu v0.17.0 installed.
 
 $ ./maddu/run start &
-Máddu  v0.16.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v0.17.0  ·  http://127.0.0.1:4177  ·  ready
 
-$ ./maddu/run session start "first slice"
+$ ./maddu/run register
 ses_20260518081409_b7f312
-(active session cached — heartbeat / close default to this)
+(active session cached — idempotent on MADDU_SESSION_ID)
 
 $ ./maddu/run slice-stop --summary "wired the bridge to my repo"
 SLICE_STOP appended  evt_20260518084211_a1b2c6
@@ -125,6 +125,24 @@ The bridge and cockpit import nothing from `anthropic`, `openai`, or `@google/ge
 
 Máddu spawns no models, stores no secrets, calls no clouds — supply-chain integrity holds, and your credentials never traverse a remote service.
 
+## Agent-native bootstrap · v0.17
+
+*Closes the loop opened by v0.16: every governance surface is contingent on agents being participants in the spine. v0.16 built the surfaces; v0.17 puts the agents on the spine **by default**.*
+
+**One canonical brief at repo root.** `maddu init` drops `MADDU.md` (the full agent contract), plus marker-delimited stanzas in `CLAUDE.md` and `AGENTS.md` that point at it. Marker discipline (`<!-- BEGIN MADDU v1 -->` / `<!-- END MADDU v1 -->`) means project content outside the markers is never touched. Any LLM CLI reading a root-level agent file learns Máddu on first turn.
+
+**Zero-keystroke session register.** `maddu register` (vs. the longer `session register --role … --label … --focus …`). Idempotent: re-running in the same shell with `MADDU_SESSION_ID` set returns the cached id instead of duplicating. The agent's mandatory first command of every turn.
+
+**Tree provenance for fan-out.** A parent terminal that spawns N sub-agents now produces N distinct sessions, each linking back via `parentSessionId`. `maddu session tree` shows the tree; the cockpit's Orientation route renders it live. Runtime descriptors gain `autoRegister: true` — the bridge registers a fresh child session per `spawnWorker` call.
+
+**Self-cleaning sessions.** A stale-session janitor runs inline on every `/bridge/projection` read (no daemon, no new timer thread). Default 30 min stale → `SESSION_STALE_DETECTED`; 4 hr → `SESSION_AUTO_CLOSED` (allowlisted-mutating per candidate rule #9). Thresholds configurable via `.maddu/config/janitor.json`.
+
+**Agents read their context with one command.** `maddu brief --for-agent` (text) and `GET /bridge/agent-context` (JSON) return everything an agent needs to bootstrap: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands. `MADDU.md` tells agents to call this at every turn start.
+
+**Sessions panel in the cockpit.** `#orientation` now shows the live session tree alongside goal/phase/follow-ups. Stale-session count surfaces in the same view. Janitor activity is visible.
+
+Full reference → [docs/21-agent-onboarding.md](docs/21-agent-onboarding.md). What changes when you upgrade → [CHANGELOG v0.17.0](CHANGELOG.md).
+
 ## The governance layer · v0.16
 
 *Six opt-in surfaces an agent picks up over the substrate above. A repo that ignores `.maddu/config/` and `.maddu/gates/` behaves exactly as v0.15 — adoption is per-feature, none of it mandatory.*
@@ -167,6 +185,7 @@ Read the full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices, governance | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8 invariants + candidate #9 | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) *(v0.16)* — orientation, gates, scope-lock, triggers, reviews | [Architecture](docs/15-architecture.md) — two-process model | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
+| [Agent onboarding](docs/21-agent-onboarding.md) *(v0.17)* — auto-bootstrap, marker discipline, tree provenance | | | |
 
 Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Roadmap status, version history, per-slice notes → [CHANGELOG.md](CHANGELOG.md).
 

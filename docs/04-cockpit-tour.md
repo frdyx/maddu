@@ -21,9 +21,9 @@ The shell shows in every route:
 
 ## Routes
 
-### `#orientation` *(v0.16)*
+### `#orientation` *(v0.16, Sessions panel v0.17)*
 
-Turn-start digest. Goal, phase, active session, last slice, counters, open follow-ups, plus the rendered handoff markdown from the most recent slice-stop. Top of the **Decide** group. Reads `GET /bridge/orientation` — pure projection from the spine, deterministic across restarts. Pair with the CLI: `maddu brief` prints the same data. Set goal/phase with `maddu goal set` / `maddu phase set`. See [20-governance.md](20-governance.md#turn-start-orientation).
+Turn-start digest. Goal, phase, active session, last slice, counters, open follow-ups, plus the rendered handoff markdown from the most recent slice-stop. **v0.17** adds a **Sessions panel** showing the live `sessionsTree` projection — parent sessions and their auto-registered children inline, with stale/closed indicators driven by the inline janitor. Top of the **Decide** group. Reads `GET /bridge/orientation` + (for v0.17) `GET /bridge/agent-context`; both are pure projections from the spine, deterministic across restarts. Pair with the CLI: `maddu brief` prints the orientation digest, `maddu session tree` prints the same tree the panel renders. Set goal/phase with `maddu goal set` / `maddu phase set`. See [20-governance.md](20-governance.md#turn-start-orientation) and [21-agent-onboarding.md](21-agent-onboarding.md).
 
 ### `#gates` *(v0.16)*
 
