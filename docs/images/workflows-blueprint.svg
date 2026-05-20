@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 600" role="img" aria-label="Máddu workflows blueprint">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 620" role="img" aria-label="Máddu workflows blueprint">
   <title>Máddu workflows — operator → orientation → BOSS/Enforcer → claims / sessions tree → fleet → gates / reviews → reports → learning / wiki</title>
   <desc>How Máddu thinks: an operator opens the cockpit, reads the orientation digest, then directs BOSS (LLM voice, proposes) and Enforcer (deterministic, refuses). They write to the queue and claims; claims include the v0.17 session tree for autoRegister fan-out. The fleet executes; gates and reviews verify (gates are structural, reviews are semantic — v0.16). Reports surface in the cockpit; learning and wiki accumulate.</desc>
   <defs>
@@ -10,23 +10,26 @@
       .node-rect.warm   { stroke: #F2BD5C; }
       .edge      { fill: none; stroke: rgba(80,113,149,0.55); stroke-width: 1.5; opacity: 0.85; }
       .edge.live { stroke: #D0FF00; stroke-width: 2; opacity: 0.75; }
-      .fg-0      { fill: #E8E6E3; }
-      .fg-3      { fill: #6a7079; }
-      .accent    { fill: #D0FF00; }
-      .accent2   { fill: #56B8FF; }
-      .warm      { fill: #F2BD5C; }
       .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
       .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
     </style>
+    <filter id="glow-lime" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
-  <rect class="canvas" width="1400" height="600"/>
+  <rect class="canvas" width="1480" height="620"/>
 
   <!-- Title strip -->
   <g transform="translate(40,30)">
-    <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◈ WORKFLOWS</text>
-    <text x="0" y="22" class="cond-b fg-0" font-size="20">Blueprint of how Máddu thinks</text>
-    <text x="0" y="42" class="mono fg-3" font-size="11">operator → orientation → BOSS / Enforcer → claims / sessions → fleet → gates / reviews → reports → learning / wiki</text>
+    <text x="0" y="0" class="cond-b" fill="#D0FF00" font-size="11" letter-spacing="0.14em" filter="url(#glow-lime)">◈ WORKFLOWS</text>
+    <text x="0" y="22" class="cond-b" fill="#E8E6E3" font-size="20">Blueprint of how Máddu thinks</text>
+    <text x="0" y="42" class="mono" fill="#6a7079" font-size="11">operator → orientation → BOSS / Enforcer → claims / sessions → fleet → gates / reviews → reports → learning / wiki</text>
   </g>
 
   <!-- Bezier edges -->
@@ -75,115 +78,115 @@
   </g>
 
   <!-- Nodes -->
-  <g class="cond-b fg-0" font-size="13" text-anchor="middle">
+  <g class="cond-b" font-size="13" text-anchor="middle">
     <!-- Operator -->
     <g transform="translate(100,198)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">OPERATOR</text>
+      <text x="60" y="28" fill="#E8E6E3">OPERATOR</text>
     </g>
 
-    <!-- Orientation (v0.17) -->
+    <!-- Orientation (v0.17) — glow because turn-start primitive -->
     <g transform="translate(260,198)">
-      <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">ORIENTATION</text>
+      <rect class="node-rect" width="120" height="44" rx="6" filter="url(#glow-lime)"/>
+      <text x="60" y="28" fill="#D0FF00">ORIENTATION</text>
     </g>
 
     <!-- BOSS -->
     <g transform="translate(460,138)">
-      <rect class="node-rect boss" width="120" height="44" rx="6"/>
-      <text x="60" y="28" class="accent2">BOSS</text>
+      <rect class="node-rect boss" width="120" height="44" rx="6" filter="url(#glow-cyan)"/>
+      <text x="60" y="28" fill="#56B8FF">BOSS</text>
     </g>
     <!-- Enforcer -->
     <g transform="translate(460,258)">
       <rect class="node-rect warm" width="120" height="44" rx="6"/>
-      <text x="60" y="28" class="warm">ENFORCER</text>
+      <text x="60" y="28" fill="#F2BD5C">ENFORCER</text>
     </g>
 
     <!-- Queue -->
     <g transform="translate(660,98)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">QUEUE</text>
+      <text x="60" y="28" fill="#E8E6E3">QUEUE</text>
     </g>
     <!-- Claims -->
     <g transform="translate(660,198)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">CLAIMS</text>
+      <text x="60" y="28" fill="#E8E6E3">CLAIMS</text>
     </g>
     <!-- Sessions tree (v0.17) -->
     <g transform="translate(660,318)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">SESSIONS</text>
+      <text x="60" y="28" fill="#E8E6E3">SESSIONS</text>
     </g>
 
     <!-- Fleet -->
     <g transform="translate(900,198)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">FLEET</text>
+      <text x="60" y="28" fill="#E8E6E3">FLEET</text>
     </g>
 
     <!-- Gates -->
     <g transform="translate(1100,98)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">GATES</text>
+      <text x="60" y="28" fill="#E8E6E3">GATES</text>
     </g>
-    <!-- Reviews (v0.16) -->
+    <!-- Reviews (v0.16) — glow because semantic check -->
     <g transform="translate(1100,198)">
-      <rect class="node-rect boss" width="120" height="44" rx="6"/>
-      <text x="60" y="28" class="accent2">REVIEWS</text>
+      <rect class="node-rect boss" width="120" height="44" rx="6" filter="url(#glow-cyan)"/>
+      <text x="60" y="28" fill="#56B8FF">REVIEWS</text>
     </g>
     <!-- Reports -->
     <g transform="translate(1100,298)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28">REPORTS</text>
+      <text x="60" y="28" fill="#E8E6E3">REPORTS</text>
     </g>
 
-    <!-- Learning -->
+    <!-- Learning — glow because terminal-value surface -->
     <g transform="translate(1300,118)">
-      <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28" class="accent">LEARNING</text>
+      <rect class="node-rect" width="120" height="44" rx="6" filter="url(#glow-lime)"/>
+      <text x="60" y="28" fill="#D0FF00">LEARNING</text>
     </g>
-    <!-- Wiki -->
+    <!-- Wiki — glow because terminal-value surface -->
     <g transform="translate(1300,258)">
-      <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28" class="accent">WIKI</text>
+      <rect class="node-rect" width="120" height="44" rx="6" filter="url(#glow-lime)"/>
+      <text x="60" y="28" fill="#D0FF00">WIKI</text>
     </g>
   </g>
 
   <!-- v0.17 / v0.16 annotation marks -->
-  <g class="mono fg-3" font-size="9" letter-spacing="0.06em">
-    <text x="320" y="180" text-anchor="middle">v0.17</text>
-    <text x="720" y="300" text-anchor="middle">v0.17</text>
-    <text x="1160" y="180" text-anchor="middle">v0.16</text>
+  <g class="mono" font-size="9" letter-spacing="0.06em">
+    <text x="320" y="180" text-anchor="middle" fill="#6a7079">v0.17</text>
+    <text x="720" y="300" text-anchor="middle" fill="#6a7079">v0.17</text>
+    <text x="1160" y="180" text-anchor="middle" fill="#6a7079">v0.16</text>
   </g>
 
   <!-- Legend strip -->
-  <g transform="translate(40,440)">
-    <text x="0" y="0" class="cond-b fg-3" font-size="10" letter-spacing="0.10em">LEGEND</text>
-    <line x1="0" y1="20" x2="1320" y2="20" stroke="rgba(80,113,149,0.18)" stroke-width="1"/>
+  <g transform="translate(40,460)">
+    <text x="0" y="0" class="cond-b" fill="#6a7079" font-size="10" letter-spacing="0.10em">LEGEND</text>
+    <line x1="0" y1="20" x2="1400" y2="20" stroke="rgba(80,113,149,0.18)" stroke-width="1"/>
     <g transform="translate(0,40)">
       <rect width="14" height="2" fill="#D0FF00"/>
-      <text x="22" y="6" class="mono fg-3" font-size="11">primary flow (live)</text>
+      <text x="22" y="6" class="mono" fill="#6a7079" font-size="11">primary flow (live)</text>
     </g>
     <g transform="translate(200,40)">
       <rect width="14" height="2" fill="rgba(80,113,149,0.55)"/>
-      <text x="22" y="6" class="mono fg-3" font-size="11">secondary edge</text>
+      <text x="22" y="6" class="mono" fill="#6a7079" font-size="11">secondary edge</text>
     </g>
     <g transform="translate(380,40)">
       <rect width="12" height="12" fill="#0A1224" stroke="#D0FF00"/>
-      <text x="22" y="11" class="mono fg-3" font-size="11">canonical surface — clickable in cockpit</text>
+      <text x="22" y="11" class="mono" fill="#6a7079" font-size="11">canonical surface — clickable in cockpit</text>
     </g>
     <g transform="translate(740,40)">
       <rect width="12" height="12" fill="#0A1224" stroke="#56B8FF"/>
-      <text x="22" y="11" class="mono fg-3" font-size="11">BOSS · LLM voice (proposes)</text>
+      <text x="22" y="11" class="mono" fill="#6a7079" font-size="11">BOSS · LLM voice (proposes)</text>
     </g>
     <g transform="translate(1020,40)">
       <rect width="12" height="12" fill="#0A1224" stroke="#F2BD5C"/>
-      <text x="22" y="11" class="mono fg-3" font-size="11">ENFORCER · deterministic (refuses)</text>
+      <text x="22" y="11" class="mono" fill="#6a7079" font-size="11">ENFORCER · deterministic (refuses)</text>
     </g>
   </g>
 
   <!-- Tagline -->
-  <g transform="translate(700,560)">
-    <text x="0" y="0" class="mono fg-3" font-size="10" text-anchor="middle" letter-spacing="0.08em">EVERY EDGE IS AN NDJSON EVENT · EVERY NODE IS A COCKPIT ROUTE</text>
+  <g transform="translate(740,580)">
+    <text x="0" y="0" class="mono" fill="#6a7079" font-size="10" text-anchor="middle" letter-spacing="0.08em">EVERY EDGE IS AN NDJSON EVENT · EVERY NODE IS A COCKPIT ROUTE</text>
   </g>
 </svg>
