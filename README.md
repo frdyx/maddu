@@ -52,6 +52,8 @@ Full walkthrough → [docs/01-getting-started.md](docs/01-getting-started.md).
 
 The bridge is one Node process bound to `127.0.0.1:4177`. The spine is `.maddu/events/*.ndjson` — append-only, single source of truth, the only thing on disk that gets to be authoritative. Everything under `.maddu/state/` is a projection: rebuildable from the spine, discarded on conflict. The cockpit is a static HTML+JS page the bridge serves over loopback. Subprocess workers (Claude Code, Codex, future runtimes) are spawned with credentials handed in at spawn-time; the bridge imports zero provider SDKs. Files-only state. The spine wins over any projection.
 
+<picture><img alt="Máddu architecture — writers feed the append-only spine, projections derive from the spine, cockpit and CLI read projections" src="docs/images/spine-and-event-flow.svg"></picture>
+
 <!--
   TODO(post-screenshot): when docs/images/cockpit-hero.png lands, uncomment
   this <picture> tag and remove this comment block. It shows the running

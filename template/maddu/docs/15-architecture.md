@@ -6,20 +6,7 @@ A deep dive for operators who want to understand how Máddu fits together. The u
 
 Máddu runs as two processes at the most:
 
-```
-   ┌────────────────────┐         ┌────────────────────┐
-   │   Cockpit (SPA)    │  HTTP   │   Bridge (Node)    │
-   │ static HTML/JS/CSS │◀────────▶│   server.js:4177  │
-   │ in your browser    │         │   owns the spine   │
-   └────────────────────┘         └─────────┬──────────┘
-                                            │ spawn
-                                            ▼
-                                  ┌────────────────────┐
-                                  │  Worker subprocess │
-                                  │ claude / codex /…  │
-                                  │ injected env       │
-                                  └────────────────────┘
-```
+<picture><img alt="Two-process architecture — cockpit in browser, bridge in Node, worker subprocess on demand" src="images/two-process-architecture.svg"></picture>
 
 - **Bridge** — a single Node HTTP server listening on `127.0.0.1:4177`. Owns the append-only spine, all projections, and the OAuth token store. Serves the cockpit as static files. No state lives in memory beyond a 1-second projection cache. Every restart rebuilds from disk. **One bridge, N repos:** if `~/.config/maddu/workspaces.json` lists multiple repos, the bridge mounts all of them simultaneously and routes each request to one via the `X-Maddu-Workspace` header. Each repo's spine remains its own source of truth.
 - **Cockpit** — a vanilla-JS SPA in `maddu/cockpit/`. No framework, no build step. Talks only to the bridge. Long-polls `/bridge/events/wait` for live updates.
@@ -27,21 +14,7 @@ Máddu runs as two processes at the most:
 
 ## Event flow
 
-```
-agent action
-    │
-    ▼
-POST /bridge/<endpoint>            ─── bridge appends to .maddu/events/*.ndjson
-    │                                  (one line, fsynced)
-    ▼
-projection rebuilt on next read     ── project(repoRoot) re-derives state
-    │                                  from the spine, cached briefly
-    ▼
-cockpit /bridge/events/wait         ── long-poll returns events after the cursor
-    │
-    ▼
-UI re-renders                       ── DOM update per event
-```
+<picture><img alt="Writers feed the append-only spine; projections rebuild from spine; cockpit and CLI read projections" src="images/spine-and-event-flow.svg"></picture>
 
 The crucial property: **every write goes through the spine first**. Projections are downstream. If a projection looks wrong, blow it away — `project()` rebuilds it.
 
@@ -111,25 +84,7 @@ If the worker stays silent past 15 s, `project()` reports it as `stuck` at read 
 
 ## Three-layer brand boundary
 
-```
-┌──────────────────────────────────────────────────────────┐
-│   Framework shell brand   (Máddu)                        │
-│   maddu/cockpit/tokens.css                               │
-│   IBM Plex Sans / Plex Sans Condensed / Plex Mono       │
-│   Scandinavian tech, sci-fi dark noir                    │
-│                                                          │
-│   ┌──────────────────────────────────────────────────┐  │
-│   │   App brand   (your project)                     │  │
-│   │   Wherever your project keeps brand data         │  │
-│   │   Owned by the project                           │  │
-│   │                                                  │  │
-│   │   ┌──────────────────────────────────────────┐  │  │
-│   │   │   Content brand   (per-campaign/asset)   │  │  │
-│   │   │   Owned by the project's content authors │  │  │
-│   │   └──────────────────────────────────────────┘  │  │
-│   └──────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
-```
+<picture><img alt="Three concentric brand layers — framework shell (Máddu) wraps app brand (your project) wraps content brand (per-asset)" src="images/brand-boundary.svg"></picture>
 
 The three layers never reference each other. `maddu doctor` checks the directories do not cross-import.
 

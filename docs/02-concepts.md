@@ -2,6 +2,8 @@
 
 The mental model for working with Máddu. Read this once and the rest of the docs will read as reference.
 
+<picture><img alt="Máddu architecture — writers feed the append-only spine, projections derive from the spine, cockpit and CLI read projections" src="images/spine-and-event-flow.svg"></picture>
+
 ## Files-only state
 
 Every piece of state Máddu writes is a plain file under `.maddu/`. No SQLite. No embedded DB. No hosted service. If you can `cat` it, Máddu wrote it; if you cannot, Máddu did not.
@@ -77,6 +79,8 @@ Sessions emit `SESSION_REGISTERED`, `SESSION_HEARTBEAT`, and `SESSION_CLOSED` ev
 A session may hold zero or more lane claims. A claim without a session is impossible by construction.
 
 ## Slices
+
+<picture><img alt="The slice loop — register, claim, work, slice-stop, hindsight feeds memory and skills, review opens follow-ups, janitor auto-closes stale sessions" src="images/slice-lifecycle.svg"></picture>
 
 A **slice** is the smallest unit of work that has a beginning, an outcome, and a written record. There is no formal "slice start" event — a slice begins implicitly when a session claims a lane and starts editing. A slice ends explicitly with a `maddu slice-stop`.
 

@@ -12,6 +12,8 @@ Every other surface you'll see — projections, claims, memory, the wiki, scorin
 
 The slice-stop is the ritual that closes one unit of work and writes a `SLICE_STOP` event. That's the only path into Hindsight memory and the only thing that makes the auto-wiki update. Once you've done one slice-stop, the system has something to remember. That's the whole goal of this five-minute tour.
 
+The full loop you're about to do is sketched in [02-concepts.md → Slices](02-concepts.md#slices) (with diagram). Below is the five-minute version.
+
 ## 1 · Find the Conductor
 
 When the cockpit first boots, it lands on **Conductor** — the leftmost item in the **Decide** group. You'll see four panels:
