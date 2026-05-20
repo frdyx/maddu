@@ -6,7 +6,7 @@ A deep dive for operators who want to understand how Máddu fits together. The u
 
 Máddu runs as two processes at the most:
 
-<a href="images/two-process-architecture.svg?raw=true"><picture><img alt="Two-process architecture — cockpit in browser, bridge in Node, worker subprocess on demand (click to open full size)" src="images/two-process-architecture.svg"></picture></a>
+<a href="https://raw.githubusercontent.com/frdyx/maddu/main/docs/images/two-process-architecture.svg"><picture><img alt="Two-process architecture — cockpit in browser, bridge in Node, worker subprocess on demand (click to open full size)" src="images/two-process-architecture.svg"></picture></a>
 
 - **Bridge** — a single Node HTTP server listening on `127.0.0.1:4177`. Owns the append-only spine, all projections, and the OAuth token store. Serves the cockpit as static files. No state lives in memory beyond a 1-second projection cache. Every restart rebuilds from disk. **One bridge, N repos:** if `~/.config/maddu/workspaces.json` lists multiple repos, the bridge mounts all of them simultaneously and routes each request to one via the `X-Maddu-Workspace` header. Each repo's spine remains its own source of truth.
 - **Cockpit** — a vanilla-JS SPA in `maddu/cockpit/`. No framework, no build step. Talks only to the bridge. Long-polls `/bridge/events/wait` for live updates.
@@ -14,7 +14,7 @@ Máddu runs as two processes at the most:
 
 ## Event flow
 
-<a href="images/spine-and-event-flow.svg?raw=true"><picture><img alt="Writers feed the append-only spine; projections rebuild from spine; cockpit and CLI read projections (click to open full size)" src="images/spine-and-event-flow.svg"></picture></a>
+<a href="https://raw.githubusercontent.com/frdyx/maddu/main/docs/images/spine-and-event-flow.svg"><picture><img alt="Writers feed the append-only spine; projections rebuild from spine; cockpit and CLI read projections (click to open full size)" src="images/spine-and-event-flow.svg"></picture></a>
 
 The crucial property: **every write goes through the spine first**. Projections are downstream. If a projection looks wrong, blow it away — `project()` rebuilds it.
 
@@ -84,7 +84,7 @@ If the worker stays silent past 15 s, `project()` reports it as `stuck` at read 
 
 ## Three-layer brand boundary
 
-<a href="images/brand-boundary.svg?raw=true"><picture><img alt="Three concentric brand layers — framework shell (Máddu) wraps app brand (your project) wraps content brand (per-asset) (click to open full size)" src="images/brand-boundary.svg"></picture></a>
+<a href="https://raw.githubusercontent.com/frdyx/maddu/main/docs/images/brand-boundary.svg"><picture><img alt="Three concentric brand layers — framework shell (Máddu) wraps app brand (your project) wraps content brand (per-asset) (click to open full size)" src="images/brand-boundary.svg"></picture></a>
 
 The three layers never reference each other. `maddu doctor` checks the directories do not cross-import.
 
