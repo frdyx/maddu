@@ -72,6 +72,11 @@ const ROUTES = {
                 keywords: 'gates doctor verdict severity hard-rules' },
   reviews:    { title: 'Reviews',    group: 'verify',    rank: 7,                 render: renderReviews,    description: 'Post-stop reviews. Verdict counts + per-review markdown.',
                 keywords: 'reviews verdict findings followups P1 P2 P3' },
+  // v0.18 — UX shell backbone surface: teams, pipelines, cost ledger, and
+  // the slash-command cheatsheet. One route, four cards. Reads projection
+  // slots added in Phase 4; never mutates state.
+  pipelines:  { title: 'Pipelines',  group: 'operate',   rank: 8,                 render: renderPipelinesV018, description: 'v0.18 backbone — teams, pipelines, token cost ledger, and the /maddu-* slash-command cheatsheet.',
+                keywords: 'pipelines teams cost tokens advisors slash commands cheatsheet v0.18' },
   dashboard:  { title: 'Dashboard',  group: 'reference', rank: 1,                 render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   roadmap:    { title: 'Roadmap',    group: 'reference', rank: 2,                 render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
   skills:     { title: 'Skills',     group: 'reference', rank: 3,                 render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
@@ -7959,6 +7964,168 @@ async function boot() {
   initComposer();
   // Fallback chrome refresh in case stream stalls.
   setInterval(fetchBridgeStatus, 15000);
+}
+
+// ─── v0.18 backbone view (Phase 6) ────────────────────────────────────
+// Single route that surfaces the four v0.18 additions in one place:
+//   1. Teams panel       (projection.teams)
+//   2. Pipelines panel   (projection.pipelines)
+//   3. Cost panel        (projection.tokenLedger)
+//   4. Slash-command cheatsheet card — derived from a baked-in roster.
+//
+// Reuses existing cockpit tokens (.view, .panel, .empty-state). No new
+// CSS introduced. No state mutation — pure projection-derived views.
+function renderPipelinesV018() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'v0.18 Backbone'));
+  root.appendChild(el('p', {}, ROUTES.pipelines.description));
+
+  const grid = el('div', { class: 'panel-grid' });
+  const teamsHost = el('div', {});
+  const pipelinesHost = el('div', {});
+  const costHost = el('div', {});
+  const cheatHost = el('div', {});
+  teamsHost.appendChild(loading('Loading teams…'));
+  pipelinesHost.appendChild(loading('Loading pipelines…'));
+  costHost.appendChild(loading('Loading token ledger…'));
+  cheatHost.appendChild(renderSlashCheatsheet());
+  grid.appendChild(panel('Teams', null, teamsHost));
+  grid.appendChild(panel('Pipelines', null, pipelinesHost));
+  grid.appendChild(panel('Token cost ledger', null, costHost));
+  grid.appendChild(panel('Slash-command cheatsheet (v0.18)', '/maddu-*', cheatHost));
+  root.appendChild(grid);
+
+  let pending = false;
+  const load = async () => {
+    let proj;
+    try {
+      const r = await fetch('/bridge/projection', { cache: 'no-store' });
+      proj = await r.json();
+    } catch {
+      teamsHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      pipelinesHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      costHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    teamsHost.replaceChildren(renderTeamsCard(proj.teams || []));
+    pipelinesHost.replaceChildren(renderPipelinesCard(proj.pipelines || []));
+    costHost.replaceChildren(renderCostCard(proj.tokenLedger || []));
+  };
+  load();
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+
+  return root;
+}
+
+function renderTeamsCard(teams) {
+  if (teams.length === 0) {
+    return placeholder('No teams open', 'Run `maddu team open --members 2 --lanes a,b` (or `/maddu-team 2 \"<task>\"`) to fan out.');
+  }
+  const wrap = el('div', {});
+  for (const t of teams) {
+    const row = el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, t.id),
+        el('span', { class: `tag tone-${t.status === 'open' ? 'ok' : 'neutral'}` }, t.status),
+      ]),
+      el('div', { class: 'panel-row-meta' }, [
+        el('span', {}, `${(t.lanes || []).length} lane(s)`),
+        el('span', {}, `${(t.members || []).length} member(s)`),
+        el('span', { class: 'dim' }, t.openedAt || ''),
+      ]),
+      el('div', { class: 'panel-row-detail' }, `lanes: ${(t.lanes || []).join(', ')}`),
+    ]);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+function renderPipelinesCard(pipelines) {
+  if (pipelines.length === 0) {
+    return placeholder('No pipelines run yet', 'Run `maddu pipeline run plan-exec-verify-fix "<goal>"` (or `/maddu-autopilot`) to start one.');
+  }
+  const wrap = el('div', {});
+  for (const p of pipelines.slice(-10).reverse()) {
+    const stageNames = (p.stages || []).map((s) => `${s.name}${s.status === 'ok' ? '✓' : (s.exitedAt ? '' : '…')}`).join(' → ');
+    const row = el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, p.id),
+        el('span', { class: `tag tone-${p.status === 'completed' ? 'ok' : (p.status === 'halted' ? 'warn' : 'neutral')}` }, p.status),
+      ]),
+      el('div', { class: 'panel-row-meta' }, [
+        el('span', { class: 'mono' }, p.name || ''),
+        el('span', { class: 'dim' }, p.goal || ''),
+        el('span', { class: 'dim' }, p.startedAt || ''),
+      ]),
+      el('div', { class: 'panel-row-detail' }, stageNames || '(no stages)'),
+    ]);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+function renderCostCard(ledger) {
+  if (ledger.length === 0) {
+    return placeholder('No token usage reported', 'Workers emit TOKEN_USAGE_REPORTED events with at least { runtime, sessionId, model, ts }. `maddu cost --unreported-count` surfaces gaps honestly.');
+  }
+  const byRuntime = new Map();
+  let unreported = 0;
+  for (const row of ledger) {
+    const k = row.runtime || '(unknown)';
+    if (!byRuntime.has(k)) byRuntime.set(k, { calls: 0, input: 0, output: 0, unreported: 0 });
+    const g = byRuntime.get(k);
+    g.calls++;
+    if (row.inputTokens != null) g.input += row.inputTokens; else { g.unreported++; unreported++; }
+    if (row.outputTokens != null) g.output += row.outputTokens;
+  }
+  const wrap = el('div', {});
+  wrap.appendChild(el('div', { class: 'panel-row-meta' }, [
+    el('span', {}, `${ledger.length} call(s)`),
+    el('span', { class: unreported > 0 ? 'tag tone-warn' : 'dim' }, `${unreported} unreported`),
+  ]));
+  for (const [runtime, g] of byRuntime) {
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [el('span', { class: 'mono' }, runtime), el('span', { class: 'dim' }, `${g.calls} calls`)]),
+      el('div', { class: 'panel-row-detail' }, `in: ${g.input.toLocaleString()} · out: ${g.output.toLocaleString()} · unreported: ${g.unreported}`),
+    ]));
+  }
+  return wrap;
+}
+
+// Baked-in roster — kept in sync with template/maddu/agent-files/commands/.
+const SLASH_CHEATSHEET = [
+  { name: '/maddu-help',      line: 'Discovery guide — list commands by topic.' },
+  { name: '/maddu-doctor',    line: 'Run hard-rule gates and surface findings.' },
+  { name: '/maddu-autopilot', line: 'Register → claim → pipeline → slice-stop.' },
+  { name: '/maddu-plan',      line: 'Plan-only stage; write a brief artifact.' },
+  { name: '/maddu-review',    line: 'Post-stop review of a slice.' },
+  { name: '/maddu-team',      line: 'Open N child sessions with disjoint lanes.' },
+  { name: '/maddu-advise',    line: 'Non-claiming advisor query; artifact-only.' },
+  { name: '/maddu-status',    line: 'Pretty-print state across surfaces.' },
+  { name: '/maddu-cost',      line: 'Token / call rollup.' },
+  { name: '/maddu-skill',     line: 'List / search / apply skills.' },
+  { name: '/maddu-cancel',    line: 'Stop the current slice cleanly.' },
+  { name: '/maddu-note',      line: 'One-liner into the operator inbox.' },
+];
+
+function renderSlashCheatsheet() {
+  const wrap = el('div', {});
+  for (const c of SLASH_CHEATSHEET) {
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, c.name),
+      ]),
+      el('div', { class: 'panel-row-detail' }, c.line),
+    ]));
+  }
+  wrap.appendChild(el('p', { class: 'dim' }, 'Natural language works too — type "ship the login form" or "status" and the agent will pick the slash command for you. See MADDU.md §"Intent routing".'));
+  return wrap;
 }
 
 boot();

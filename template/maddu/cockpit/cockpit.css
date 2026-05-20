@@ -735,6 +735,56 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   color: var(--m-fg-4);
 }
 
+/* v0.18 — backbone view layout. Reuses existing tokens; no new color
+   palette introduced. Two-column grid on wide screens, single column
+   on narrow. */
+.view .panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: var(--m-space-5);
+  margin-top: var(--m-space-4);
+}
+.view .panel-row {
+  border-top: 1px solid var(--m-line);
+  padding: 10px 0;
+  font-family: var(--m-font-mono);
+  font-size: 12px;
+}
+.view .panel-row:first-child { border-top: 0; padding-top: 0; }
+.view .panel-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--m-fg-1);
+}
+.view .panel-row-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--m-fg-3);
+  margin: 4px 0 4px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.view .panel-row-detail {
+  color: var(--m-fg-2);
+  font-size: 11px;
+}
+.view .panel-row .mono { font-family: var(--m-font-mono); color: var(--m-fg-0); }
+.view .panel-row .dim  { color: var(--m-fg-4); }
+.view .panel-row .tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--m-line);
+  border-radius: 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.view .panel-row .tag.tone-ok      { border-color: var(--m-accent-2); color: var(--m-accent-2); }
+.view .panel-row .tag.tone-warn    { border-color: var(--m-accent);   color: var(--m-accent); }
+.view .panel-row .tag.tone-neutral { color: var(--m-fg-3); }
+
 .kv {
   display: grid;
   grid-template-columns: 140px 1fr;
