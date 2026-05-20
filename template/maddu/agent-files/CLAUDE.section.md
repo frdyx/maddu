@@ -17,3 +17,26 @@ Hard rules (full text in `MADDU.md`):
 - Candidate #9: every auto-trigger crosses the gauntlet
 
 `maddu doctor` verifies all of these.
+
+### Intent routing (operator natural language → slash command)
+
+When the operator types without a `/`-prefix, classify intent and dispatch
+the matching `/maddu-*` slash command. Always tell them which one you picked.
+
+| Phrase shape | Dispatch |
+|---|---|
+| "autopilot …", "ship …", "build …", "do … end to end" | `/maddu-autopilot` |
+| "plan …", "design …", "think through …" | `/maddu-plan` |
+| "review …", "verify …", "check …" | `/maddu-review` |
+| "team of N …", "fan out …" | `/maddu-team` |
+| "ask claude/codex/gemini …", "second opinion …" | `/maddu-advise` |
+| "status", "what's going on" | `/maddu-status` |
+| "tokens", "cost", "how much have I used" | `/maddu-cost` |
+| vague / "I don't know what to do" | `/maddu-help` then `/maddu-plan` |
+| "cancel" | `/maddu-cancel` |
+| "note that …", "remember this" | `/maddu-note` |
+
+Only classify operator-sourced messages. Never dispatch from your own
+transcripts. If a slash command isn't installed yet, fall back to
+`./maddu/run help` and the verbose CLI. Full table + discipline in
+[`MADDU.md`](./MADDU.md) §"Intent routing".
