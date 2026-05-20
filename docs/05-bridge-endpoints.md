@@ -269,6 +269,63 @@ Machine-scope CRUD over `~/.config/maddu/global/{schedules.ndjson, policies.json
 
 When a global schedule fires, the bridge appends one action event per target workspace's spine with a top-level `triggered_by: { kind: 'global_schedule', id, fired_at }`. When a global policy auto-decides an approval, the resulting `APPROVAL_DECIDED` event carries `actor: 'global-policy'`, `reason: 'global-policy:<tool>@<lane|*>'`, and a matching `triggered_by` field.
 
+## Governance endpoints (Phases 1–5)
+
+Three read-only endpoints surface governance projections derived from the spine. All return JSON; all are subject to the same 1 MB body limit and same-origin policy as the other bridge endpoints.
+
+### `GET /bridge/orientation`
+
+Turn-start digest. Composes `goal`, `phase`, `activeSession`, `lastSliceStop`, `counters`, `openFollowups` from the projection, plus a markdown `handoff` block.
+
+```jsonc
+{
+  "orientation": {
+    "schemaVersion": 1,
+    "lastEventId": "evt_…",
+    "goal": { "objective": "…", "constraints": ["…"], "setAt": "…" } | null,
+    "phase": { "name": "…", "notes": "…", "setAt": "…" } | null,
+    "activeSession": { … } | null,
+    "activeClaims": [ … ],
+    "lastSliceStop": { … } | null,
+    "counters": { "sessions": N, "slices": N, "approvals": N, "failures": N },
+    "openFollowups": [ { "fromReviewEventId": "…", "severity": "P2", "draftScope": ["…"] } ]
+  },
+  "handoff": "# Handoff — …\n…"
+}
+```
+
+### `GET /bridge/gates?limit=N`
+
+Recent `GATE_RAN` events with summary.
+
+```jsonc
+{
+  "lastRunAt": "…" | null,
+  "summary": { "ok": N, "fail": N, "warn": N },
+  "runs": [
+    { "gateId": "…", "ok": true|false, "severity": "critical|safety|warn",
+      "durationMs": N, "evidence": { … } | null, "ts": "…" }
+  ]
+}
+```
+
+Default `limit=50`, capped at 200.
+
+### `GET /bridge/reviews?limit=N&verdict=P2`
+
+Recent `SLICE_REVIEWED` events, optionally filtered by verdict. Includes `openFollowups`.
+
+```jsonc
+{
+  "byVerdict": { "CLEAN": N, "P1": N, "P2": N, "P3": N, "INFO": N },
+  "recent": [
+    { "eventId": "…", "sliceEventId": "…", "verdict": "P2",
+      "findingsCount": N, "reviewerRuntime": "…", "reviewPath": ".maddu/reviews/…", "ts": "…" }
+  ],
+  "openFollowups": [ { "fromReviewEventId": "…", "severity": "P2", "draftScope": [ "…" ] } ]
+}
+```
+
 ## Auth and CORS
 
 - **Auth tokens.** None required in v0.3 — the bridge binds to `127.0.0.1` only and trusts the local OS. Adding token-based auth is on the roadmap for v0.4.

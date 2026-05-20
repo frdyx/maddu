@@ -66,6 +66,12 @@ const ROUTES = {
   settings:   { title: 'Settings',   group: 'connect',   rank: 6,                 render: renderSettings,   description: 'Bridge, lanes, providers, tokens, integrations, MCP registry.',
                 keywords: 'telegram discord email smtp integrations bot chat notifications dropbox imap outbound webhook' },
 
+  orientation:{ title: 'Orientation',group: 'decide',    rank: 0,                 render: renderOrientation,description: 'Turn-start digest. Goal, phase, last slice, open follow-ups.',
+                keywords: 'goal phase brief orientation handoff next' },
+  gates:      { title: 'Gates',      group: 'verify',    rank: 6,                 render: renderGates,      description: 'Recent gate runs. Filter by verdict / severity / gate id.',
+                keywords: 'gates doctor verdict severity hard-rules' },
+  reviews:    { title: 'Reviews',    group: 'verify',    rank: 7,                 render: renderReviews,    description: 'Post-stop reviews. Verdict counts + per-review markdown.',
+                keywords: 'reviews verdict findings followups P1 P2 P3' },
   dashboard:  { title: 'Dashboard',  group: 'reference', rank: 1,                 render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   roadmap:    { title: 'Roadmap',    group: 'reference', rank: 2,                 render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
   skills:     { title: 'Skills',     group: 'reference', rank: 3,                 render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
@@ -7691,6 +7697,186 @@ function flashSliceLine() {
   // Force reflow so the animation re-fires.
   void line.offsetWidth;
   line.classList.add('flash');
+}
+
+// ─── Governance Phase 6 render functions ──────────────────────────────────
+
+function renderOrientation() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Orientation'));
+  root.appendChild(el('p', {}, ROUTES.orientation.description));
+
+  const mount = el('div', {});
+  mount.appendChild(loading('Reading orientation digest…'));
+  root.appendChild(panelFocus('Brief', 'GET /bridge/orientation · goal / phase / last slice / open follow-ups', mount,
+    { id: 'orientation-brief', keywords: 'goal phase orientation brief handoff' }));
+
+  async function load() {
+    try {
+      const r = await fetch('/bridge/orientation', { cache: 'no-store' });
+      const data = await r.json();
+      const o = data.orientation || {};
+      mount.innerHTML = '';
+      const lines = [];
+      lines.push(['Goal', o.goal?.objective || '—']);
+      if (o.goal?.constraints?.length) lines.push(['Constraints', o.goal.constraints.join(' · ')]);
+      lines.push(['Phase', o.phase?.name || '—']);
+      lines.push(['Active session', o.activeSession?.id || '—']);
+      lines.push(['Last slice', o.lastSliceStop?.summary || '—']);
+      lines.push(['Counters', JSON.stringify(o.counters || {})]);
+      lines.push(['Open follow-ups', String((o.openFollowups || []).length)]);
+      const tbl = el('table', { class: 'ledger' });
+      for (const [k, v] of lines) {
+        tbl.appendChild(el('tr', {}, [el('td', { class: 'event-actor' }, k), el('td', {}, String(v))]));
+      }
+      mount.appendChild(tbl);
+      if ((o.openFollowups || []).length) {
+        const list = el('ul', { class: 'hard-rules' });
+        for (const f of o.openFollowups) {
+          list.appendChild(el('li', {}, `[${f.severity}] ${f.fromReviewEventId}  scope=${(f.draftScope || []).join(', ')}`));
+        }
+        mount.appendChild(list);
+      }
+      if (data.handoff) {
+        const pre = el('pre', { class: 'docs-body' }, data.handoff);
+        mount.appendChild(pre);
+      }
+    } catch (err) {
+      mount.innerHTML = '';
+      mount.appendChild(placeholder('Unavailable', String(err.message || err)));
+    }
+  }
+  load();
+  let pending = false;
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+  return root;
+}
+
+function renderGates() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Gates'));
+  root.appendChild(el('p', {}, ROUTES.gates.description));
+
+  const mount = el('div', {});
+  mount.appendChild(loading('Reading recent gate runs…'));
+  root.appendChild(panelFocus('Recent gate runs', 'GET /bridge/gates · GATE_RAN events', mount,
+    { id: 'gate-runs', keywords: 'gates gate-ran doctor verdict severity' }));
+
+  async function load() {
+    try {
+      const r = await fetch('/bridge/gates?limit=50', { cache: 'no-store' });
+      const data = await r.json();
+      mount.innerHTML = '';
+      const sum = data.summary || { ok: 0, fail: 0, warn: 0 };
+      mount.appendChild(el('div', { class: 'widget-stat' }, [
+        el('div', { class: 'widget-stat-num' }, [
+          el('span', { class: 'widget-stat-value' }, String(sum.ok)),
+          el('span', { class: 'widget-stat-trend' + (sum.fail > 0 ? '' : ' up') }, ` ok · ${sum.fail} fail · ${sum.warn} warn`),
+        ]),
+        el('div', { class: 'widget-stat-label' }, `last run: ${data.lastRunAt || '—'}`),
+      ]));
+      if (!data.runs || data.runs.length === 0) {
+        mount.appendChild(placeholder('No runs yet', 'Run `maddu doctor` to populate.'));
+        return;
+      }
+      const tbl = el('table', { class: 'ledger' });
+      tbl.appendChild(el('tr', {}, [
+        el('th', {}, 'ts'), el('th', {}, 'gate'), el('th', {}, 'severity'),
+        el('th', {}, 'verdict'), el('th', {}, 'duration')
+      ]));
+      for (const run of data.runs) {
+        tbl.appendChild(el('tr', {}, [
+          el('td', {}, (run.ts || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+          el('td', {}, run.gateId || ''),
+          el('td', {}, run.severity || ''),
+          el('td', { class: 'event-type t-' + (run.ok ? 'session' : 'approval') }, run.ok ? 'PASS' : 'FAIL'),
+          el('td', {}, `${run.durationMs ?? '—'}ms`),
+        ]));
+      }
+      mount.appendChild(tbl);
+    } catch (err) {
+      mount.innerHTML = '';
+      mount.appendChild(placeholder('Unavailable', String(err.message || err)));
+    }
+  }
+  load();
+  let pending = false;
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+  return root;
+}
+
+function renderReviews() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Reviews'));
+  root.appendChild(el('p', {}, ROUTES.reviews.description));
+
+  const mount = el('div', {});
+  mount.appendChild(loading('Reading post-stop reviews…'));
+  root.appendChild(panelFocus('Recent reviews', 'GET /bridge/reviews · SLICE_REVIEWED events', mount,
+    { id: 'recent-reviews', keywords: 'reviews verdict findings P1 P2 P3 followup' }));
+
+  async function load() {
+    try {
+      const r = await fetch('/bridge/reviews?limit=50', { cache: 'no-store' });
+      const data = await r.json();
+      mount.innerHTML = '';
+      const v = data.byVerdict || {};
+      mount.appendChild(el('div', { class: 'widget-stat-label' },
+        `Clean ${v.CLEAN || 0} · P1 ${v.P1 || 0} · P2 ${v.P2 || 0} · P3 ${v.P3 || 0} · Info ${v.INFO || 0}`));
+      if (!data.recent || data.recent.length === 0) {
+        mount.appendChild(placeholder('No reviews yet', 'Run `maddu review run --slice <id>` after a slice-stop.'));
+        return;
+      }
+      const tbl = el('table', { class: 'ledger' });
+      tbl.appendChild(el('tr', {}, [
+        el('th', {}, 'ts'), el('th', {}, 'verdict'), el('th', {}, 'findings'),
+        el('th', {}, 'slice'), el('th', {}, 'archive')
+      ]));
+      for (const r of data.recent) {
+        tbl.appendChild(el('tr', {}, [
+          el('td', {}, (r.ts || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+          el('td', { class: 'event-type t-' + (r.verdict === 'CLEAN' ? 'session' : 'approval') }, r.verdict || ''),
+          el('td', {}, String(r.findingsCount || 0)),
+          el('td', {}, r.sliceEventId || ''),
+          el('td', {}, r.reviewPath || ''),
+        ]));
+      }
+      mount.appendChild(tbl);
+      if (data.openFollowups && data.openFollowups.length) {
+        const list = el('ul', { class: 'hard-rules' });
+        list.appendChild(el('li', {}, `Open follow-ups: ${data.openFollowups.length}`));
+        for (const f of data.openFollowups) {
+          list.appendChild(el('li', {}, `[${f.severity}] from ${f.fromReviewEventId} · scope=${(f.draftScope || []).join(', ')}`));
+        }
+        mount.appendChild(list);
+      }
+    } catch (err) {
+      mount.innerHTML = '';
+      mount.appendChild(placeholder('Unavailable', String(err.message || err)));
+    }
+  }
+  load();
+  let pending = false;
+  const onEvent = () => {
+    if (pending) return;
+    pending = true;
+    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
+  };
+  stream.bus.addEventListener('event', onEvent);
+  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+  return root;
 }
 
 async function boot() {
