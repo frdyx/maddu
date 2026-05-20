@@ -140,4 +140,5 @@ $ ./maddu/run session close --handoff "Done with hello-world"     # uses cached 
 - [02-concepts.md](02-concepts.md) — the mental model in depth.
 - [04-cockpit-tour.md](04-cockpit-tour.md) — every cockpit route explained.
 - [08-slice-stop-ritual.md](08-slice-stop-ritual.md) — slice-stop payload reference.
+- [20-governance.md](20-governance.md) *(v0.16+)* — orientation digest (`maddu brief`), authoring gates, tracked sources, slice scope-lock, trigger discipline, post-stop review lane.
 - [13-troubleshooting.md](13-troubleshooting.md) — if anything misbehaved.

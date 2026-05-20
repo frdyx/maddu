@@ -40,12 +40,14 @@ See [upgrade-policy.md](upgrade-policy.md).
 Verify install integrity, hard rules, and port availability.
 
 ```bash
-$ maddu doctor [--verbose] [--all]
+$ maddu doctor [--verbose] [--all] [--gate <id>] [--severity <critical|safety|warn>]
 ```
 
 Reports PASS / WARN / FAIL per check. Appends a `DOCTOR_REPORT` event. Exits 1 on any FAIL.
 
 If a workspace registry exists at `~/.config/maddu/workspaces.json`, doctor validates its shape unconditionally. By default per-rule checks run for the cwd repo. Pass `--all` to run every check for every registered workspace; check rows are prefixed with `[<workspace-id>]`.
+
+**Gate runner *(v0.16+)*.** Doctor is a fan-out runner over `template/maddu/runtime/gates/builtin/*.mjs` (framework) plus `<repo>/.maddu/gates/*.mjs` (operator). Each gate emits a `GATE_RAN` event. `--gate <id>` runs only one gate (e.g. `--gate spine-integrity`). `--severity <level>` filters by severity. Operator gates with the same id as a built-in override the built-in. See [20-governance.md](20-governance.md#authoring-gates).
 
 ## `maddu start`
 
@@ -362,6 +364,78 @@ $ maddu task complete <id> [--by <sid>]
 ```
 
 Statuses: `todo`, `in-progress`, `blocked`, `done`, `cancelled`. Completing a task auto-surfaces unblocked dependents.
+
+## `maddu goal` *(v0.16)*
+
+Declare the agent's current objective. Latest `GOAL_DECLARED` wins in the projection and surfaces in `maddu brief` / `#orientation`.
+
+```bash
+$ maddu goal set --objective "<obj>" [--constraint "<c>" --constraint "<c>" …]
+$ maddu goal show
+```
+
+## `maddu phase` *(v0.16)*
+
+Declare the agent's current phase (a coarser-grained context than goal). Latest `PHASE_DECLARED` wins.
+
+```bash
+$ maddu phase set --name "<name>" [--notes "<notes>"]
+$ maddu phase show
+```
+
+## `maddu brief` *(v0.16)*
+
+Turn-start orientation digest. Writes deterministic projections to `.maddu/state/orientation.json` and `.maddu/state/handoff.md` (anchored to `lastEventId`, never `new Date()` — same spine → byte-identical files).
+
+```bash
+$ maddu brief                # pretty-print
+$ maddu brief --json         # emit orientation JSON for machine consumption
+$ maddu brief --drain        # also drain pending-actions queue (emits PENDING_ACTION_DRAINED)
+```
+
+Prints goal, phase, active session, last slice-stop, counters, and open follow-ups. Run at the start of every agent turn. See [20-governance.md](20-governance.md#turn-start-orientation).
+
+## `maddu slice` *(v0.16)*
+
+Optional slice scope-lock. Slices that don't declare scope behave unchanged; slices that do are enforced by the built-in `slice-scope` gate before `slice-stop` succeeds.
+
+```bash
+$ maddu slice scope-declare --paths a.js,b.js [--slice-id <id>] \
+                            [--max-files N] [--max-growth-pct N]
+$ maddu slice scope-expand  --paths c.js --reason "<why>" [--slice-id <id>]
+$ maddu slice approve-functional [--slice-id <id>]
+$ maddu slice show [--slice-id <id>]
+```
+
+Expansion bound defaults to `+5 files OR +30%`. After `approve-functional`, only doc-like paths (`docs/`, `README`, `CHANGELOG`, `.maddu/state/`, `.maddu/reviews/`) are accepted. See [20-governance.md](20-governance.md#slice-scope-lock-opt-in).
+
+## `maddu sources` *(v0.16)*
+
+Tracked SSOT files driven by `.maddu/config/tracked-sources.json`. `rebuild` snapshots current hashes onto the spine; the `tracked-source-drift` gate fails when any tracked file diverges from the recorded hash.
+
+```bash
+$ maddu sources rebuild      # emits SOURCE_HASH_RECOMPUTED { count, paths[] }
+$ maddu sources status       # exits 1 on drift / unrecorded / missing
+```
+
+Config format:
+```json
+{ "schemaVersion": 1, "paths": ["docs/hard-rules.md", "CLAUDE.md"] }
+```
+
+See [20-governance.md](20-governance.md#tracked-sources).
+
+## `maddu review` *(v0.16)*
+
+Post-stop review lane. Runs a configured reviewer runtime (`kind: 'reviewer'`) against a sealed slice, parses output, archives a per-review markdown, emits `SLICE_REVIEWED`, and auto-opens `FOLLOWUP_OPENED` for non-clean verdicts.
+
+```bash
+$ maddu review run --slice <eventId> [--reviewer <name>]
+$ maddu review status [--limit N]
+$ maddu review list  [--limit N]      # alias for status
+```
+
+Reviewer arg substitution supports `${SLICE_EVENT_ID}` and `${REPO_ROOT}`; env injection: `MADDU_SLICE_EVENT_ID`, `MADDU_REPO_ROOT`. 10-minute wallclock timeout. Policy at `.maddu/config/review-policy.json` (`defaultReviewer`, `lanesRequiringReview`, `severityToFollowupMap`). Archive at `.maddu/reviews/<slice-event-id>.md` with YAML frontmatter. See [20-governance.md](20-governance.md#post-stop-review-lane).
 
 ## `maddu worker`
 

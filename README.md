@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 0.15.0](https://img.shields.io/badge/version-0.15.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.16.0](https://img.shields.io/badge/version-0.16.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -28,10 +28,10 @@ npx github:frdyx/maddu init
 
 ```bash
 $ npx github:frdyx/maddu init
-✓ Máddu v0.15.0 installed.
+✓ Máddu v0.16.0 installed.
 
 $ ./maddu/run start &
-Máddu  v0.15.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v0.16.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run session start "first slice"
 ses_20260518081409_b7f312
@@ -65,7 +65,7 @@ The bridge is one Node process bound to `127.0.0.1:4177`. The spine is `.maddu/e
 *Every edge is an ndjson event · every node is a cockpit route.*
 
 ```jsonl
-{"v":1,"id":"evt_20260518081402_a1b2c3","ts":"2026-05-18T08:14:02.117Z","type":"FRAMEWORK_INSTALLED","actor":null,"lane":null,"data":{"version":"0.15.0"}}
+{"v":1,"id":"evt_20260518081402_a1b2c3","ts":"2026-05-18T08:14:02.117Z","type":"FRAMEWORK_INSTALLED","actor":null,"lane":null,"data":{"version":"0.16.0"}}
 {"v":1,"id":"evt_20260518081409_a1b2c4","ts":"2026-05-18T08:14:09.482Z","type":"SESSION_REGISTERED","actor":"ses_20260518081409_b7f312","lane":null,"data":{"role":"implementer","label":"first slice","runtime":"claude-code"}}
 {"v":1,"id":"evt_20260518081733_a1b2c5","ts":"2026-05-18T08:17:33.904Z","type":"APPROVAL_DECIDED","actor":"policy","lane":null,"data":{"approvalId":"evt_20260518081728_d3e4f5","decision":"deny","reason":"policy:bash@*","tool":"bash"},"triggered_by":{"kind":"policy","id":"bash@*","fired_at":"2026-05-18T08:17:33.901Z"}}
 {"v":1,"id":"evt_20260518084211_a1b2c6","ts":"2026-05-18T08:42:11.006Z","type":"SLICE_STOP","actor":"ses_20260518081409_b7f312","lane":null,"data":{"summary":"wired the bridge to my repo"}}
@@ -125,6 +125,24 @@ The bridge and cockpit import nothing from `anthropic`, `openai`, or `@google/ge
 
 Máddu spawns no models, stores no secrets, calls no clouds — supply-chain integrity holds, and your credentials never traverse a remote service.
 
+## The governance layer · v0.16
+
+*Six opt-in surfaces an agent picks up over the substrate above. A repo that ignores `.maddu/config/` and `.maddu/gates/` behaves exactly as v0.15 — adoption is per-feature, none of it mandatory.*
+
+**Turn-start orientation.** `maddu brief` prints goal, phase, active session, last slice-stop, counters, open follow-ups, plus the rendered handoff from the most recent slice — and writes deterministic projections to `.maddu/state/orientation.json` + `.maddu/state/handoff.md`. Same spine in, same bytes out. Set goal/phase with `maddu goal set` / `maddu phase set`.
+
+**Extensible gate runner.** `maddu doctor` is now a fan-out runner over framework-shipped built-in gates plus operator gates dropped at `.maddu/gates/*.mjs`. Each gate exports `{id, severity, run(ctx)}` and emits a `GATE_RAN` event per invocation. Includes a `tracked-source-drift` gate driven by `.maddu/config/tracked-sources.json` — pin your SSOT files, `maddu sources rebuild` snapshots their hashes, doctor fails on drift.
+
+**Optional slice scope-lock.** `maddu slice scope-declare --paths a,b,c` locks a slice's surface. The built-in `slice-scope` gate refuses out-of-scope edits before `slice-stop` succeeds. Expansion bound (`+5 files OR +30%`) caps scope creep; `scope-expand` widens within the bound. After `approve-functional`, only doc-like edits pass.
+
+**Trigger discipline + pending-actions queue.** No mutating command auto-fires without (a) a tier in `commands/_tiers.mjs`, (b) an allowlist entry in `.maddu/config/triggers.json`, (c) a respected cooldown. Every successful auto-fire emits `TRIGGER_FIRED` with `triggered_by` provenance. Read-only auto-actions land in a queue surfaced to the next live agent via `maddu brief --drain`. This is candidate hard rule #9.
+
+**Post-stop review lane.** A reviewer is a runtime with `kind: 'reviewer'` — a separate reasoning lane that runs against a sealed slice. `maddu review run --slice <id>` spawns it, parses `{verdict, findings}` from JSON or YAML-frontmatter output, archives a markdown at `.maddu/reviews/<id>.md`, emits `SLICE_REVIEWED`, and auto-opens `FOLLOWUP_OPENED` for non-clean verdicts. Catches the semantic regressions structural gates can't see.
+
+**Three new cockpit routes.** `/orientation`, `/gates`, `/reviews` — read-only views over the projections above. Zero new long-poll subscribers; same event-stream wiring as every existing route.
+
+Full reference → [docs/20-governance.md](docs/20-governance.md). Authoritative design spec → [docs/research/governance-ultraplan.md](docs/research/governance-ultraplan.md).
+
 ## The eight hard rules
 
 *Eight invariants. `maddu doctor` verifies them on every install and every upgrade. A repo that violates any of them is not a Máddu repo.*
@@ -146,11 +164,11 @@ Read the full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
-| [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
-| [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
-| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Architecture](docs/15-architecture.md) — two-process model | [Design system](docs/DESIGN-SYSTEM.md) — tokens, type, motion | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
+| [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices, governance | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
+| [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8 invariants + candidate #9 | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
+| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) *(v0.16)* — orientation, gates, scope-lock, triggers, reviews | [Architecture](docs/15-architecture.md) — two-process model | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
 
-Roadmap status, version history, and per-slice notes → [CHANGELOG.md](CHANGELOG.md).
+Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Roadmap status, version history, per-slice notes → [CHANGELOG.md](CHANGELOG.md).
 
 ## Why the name
 

@@ -174,3 +174,35 @@ OAuth tokens live in OS-bound paths: `~/.config/maddu/auth/` on Linux/macOS, `%A
 The **import gateway** lets you pull foreign artifacts (skills, lane definitions, etc.) into the repo while guaranteeing provider secrets cannot enter. Payloads containing key-shaped values are rejected whole; the rejection ledger records JSON paths and pattern names only.
 
 See [12-auth-and-imports.md](12-auth-and-imports.md).
+
+## Governance primitives *(v0.16)*
+
+Six surfaces layered onto the substrate above. Every one is **opt-in** — a repo that ignores `.maddu/config/` and `.maddu/gates/` behaves exactly as v0.15. Full reference: [20-governance.md](20-governance.md).
+
+### Goal, phase, orientation
+
+A **goal** is a one-sentence objective with zero-or-more constraints, declared via `maddu goal set`. A **phase** is a coarser context (e.g. `audit-foundation`, `governance-layer`), declared via `maddu phase set`. Both are spine events; latest wins.
+
+**`maddu brief`** prints a turn-start digest — goal, phase, active session, last slice-stop, counters, open follow-ups — and writes deterministic projections to `.maddu/state/orientation.json` + `.maddu/state/handoff.md`. The agent's first action every turn.
+
+### Gates
+
+A **gate** is a single check with one of three severities (`critical`, `safety`, `warn`). Each gate exports `{ id, severity, description, run(ctx) → {ok, message, evidence?} }`. `maddu doctor` is a fan-out runner that discovers framework gates at `template/maddu/runtime/gates/builtin/` and operator gates at `.maddu/gates/`. Every run emits a `GATE_RAN` event. Operator gates with the same id as a built-in override it.
+
+### Tracked sources
+
+A list of single-source-of-truth files (docs, schemas, manifests) pinned in `.maddu/config/tracked-sources.json`. `maddu sources rebuild` snapshots their SHA-256 hashes onto the spine via `SOURCE_HASH_RECOMPUTED`. The `tracked-source-drift` gate fails when any pinned file diverges from the recorded hash — kills silent doc rot.
+
+### Slice scope-lock *(opt-in)*
+
+A slice that runs `maddu slice scope-declare --paths a,b,c` is enforced by the `slice-scope` gate before `slice-stop` succeeds — out-of-scope edits fail. Expansion bound (`+5 files OR +30%`) caps scope creep; `scope-expand` widens within the bound. After `approve-functional`, only doc-like paths pass — locks the slice's surface for final review. Slices that don't declare scope behave unchanged.
+
+### Trigger discipline + pending-actions queue
+
+No mutating command may auto-fire from a schedule or hook without (a) a `tier: 'mutating'` entry in `commands/_tiers.mjs`, (b) an explicit allowlist entry in `.maddu/config/triggers.json`, (c) a respected cooldown. Read-only commands fire freely. Every successful auto-fire emits `TRIGGER_FIRED` with `triggered_by` provenance. Read-only auto-actions that should run only when an agent is present land in the **pending-actions queue** (`PENDING_ACTION_ENQUEUED`) and surface via `maddu brief --drain`. This is candidate hard rule #9.
+
+### Post-stop review lane
+
+A **reviewer** is a runtime with `kind: 'reviewer'` — a separate reasoning lane (different model, second-opinion process, even a script) that runs against a sealed slice. `maddu review run --slice <id>` spawns it, parses JSON or YAML-frontmatter output into `{verdict, findings}`, archives a per-review markdown at `.maddu/reviews/<slice-event-id>.md`, emits `SLICE_REVIEWED`, and auto-opens `FOLLOWUP_OPENED` for non-clean verdicts. Catches the semantic regressions structural gates can't see.
+
+See [20-governance.md](20-governance.md).

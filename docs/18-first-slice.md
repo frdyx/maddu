@@ -49,6 +49,26 @@ Back in the cockpit, `Ctrl+K` → `claims`. The **Claim Map** route shows your l
 
 Every state visible right now was derived from two events (`SESSION_REGISTERED`, `LANE_CLAIMED`) in `.maddu/events/`. Open the **Events** route to see them.
 
+## 3.5 · Read the brief *(v0.16+)*
+
+Before doing the work, get oriented. From the terminal:
+
+```bash
+maddu brief
+```
+
+You'll see a turn-start digest — goal, phase, active session, last slice-stop, counters, open follow-ups, plus the handoff markdown from the most recent slice-stop (empty on a fresh install). This is the agent's "where am I?" ritual. The same digest is the **Orientation** route in the cockpit (`Ctrl+K` → `orientation`).
+
+Optionally, declare a goal so future briefs anchor to it:
+
+```bash
+maddu goal set --objective "Tour Máddu end-to-end" --constraint "no SQLite, no SDKs"
+```
+
+Re-run `maddu brief` — the goal now appears. Whatever the agent reads at turn-start lives in `.maddu/state/orientation.json` + `.maddu/state/handoff.md`, both rebuildable from the spine.
+
+See [20-governance.md](20-governance.md) for the rest of the governance surface (gates, scope-lock, review lane).
+
 ## 4 · Make a slice-stop
 
 This is the moment the framework starts remembering. From the terminal:
@@ -106,6 +126,7 @@ You now have a working spine with one slice-stop, a populated Learning route, a 
 - **[02-concepts.md](02-concepts.md)** — the mental model in depth: lanes, claims, sessions, hindsight, the BOSS/Enforcer duality.
 - **[08-slice-stop-ritual.md](08-slice-stop-ritual.md)** — the slice-stop payload reference.
 - **[04-cockpit-tour.md](04-cockpit-tour.md)** — every route, what it shows, when to use it.
+- **[20-governance.md](20-governance.md)** *(v0.16)* — orientation, gate authoring, tracked sources, slice scope-lock, trigger discipline, review lane.
 
 If anything didn't behave as described above, [13-troubleshooting.md](13-troubleshooting.md) covers the common failures. Most issues surface via `maddu doctor --verbose`.
 
