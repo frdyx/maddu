@@ -2,7 +2,7 @@
 
 The mental model for working with Máddu. Read this once and the rest of the docs will read as reference.
 
-<a href="https://raw.githubusercontent.com/frdyx/maddu/main/docs/images/spine-and-event-flow.svg"><picture><img alt="Máddu architecture — writers feed the append-only spine, projections derive from the spine, cockpit and CLI read projections (click to open full size)" src="images/spine-and-event-flow.svg"></picture></a>
+<a href="images/spine-and-event-flow.svg"><picture><img alt="Máddu architecture — writers feed the append-only spine, projections derive from the spine, cockpit and CLI read projections (click to open full size)" src="images/spine-and-event-flow.svg"></picture></a>
 
 ## Files-only state
 
@@ -80,7 +80,7 @@ A session may hold zero or more lane claims. A claim without a session is imposs
 
 ## Slices
 
-<a href="https://raw.githubusercontent.com/frdyx/maddu/main/docs/images/slice-lifecycle.svg"><picture><img alt="The slice loop — register, claim, work, slice-stop, hindsight feeds memory and skills, review opens follow-ups, janitor auto-closes stale sessions (click to open full size)" src="images/slice-lifecycle.svg"></picture></a>
+<a href="images/slice-lifecycle.svg"><picture><img alt="The slice loop — register, claim, work, slice-stop, hindsight feeds memory and skills, review opens follow-ups, janitor auto-closes stale sessions (click to open full size)" src="images/slice-lifecycle.svg"></picture></a>
 
 A **slice** is the smallest unit of work that has a beginning, an outcome, and a written record. There is no formal "slice start" event — a slice begins implicitly when a session claims a lane and starts editing. A slice ends explicitly with a `maddu slice-stop`.
 
