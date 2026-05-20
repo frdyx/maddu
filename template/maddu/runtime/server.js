@@ -1389,6 +1389,23 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { orientation, handoff });
   }
 
+  // ── reviews (Governance Phase 5) ──────────────────────────────────────
+  // Per-verdict counts + recent SLICE_REVIEWED list. Optional verdict
+  // filter via ?verdict=P2.
+  if (path === '/bridge/reviews' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const reviews = proj.reviews || { byVerdict: {}, recent: [] };
+    const verdict = url.searchParams.get('verdict');
+    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get('limit') || '50', 10) || 50, 200));
+    let recent = reviews.recent.slice().reverse();
+    if (verdict) recent = recent.filter((r) => r.verdict === verdict);
+    return sendJson(res, 200, {
+      byVerdict: reviews.byVerdict,
+      recent: recent.slice(0, limit),
+      openFollowups: proj.openFollowups || [],
+    });
+  }
+
   // ── gates (Governance Phase 2) ────────────────────────────────────────
   // Recent GATE_RAN history + summary, derived from the spine.
   if (path === '/bridge/gates' && req.method === 'GET') {

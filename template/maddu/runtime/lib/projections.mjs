@@ -64,6 +64,11 @@ export async function project(repoRoot) {
   const triggers = {};                          // triggerId -> { lastFiredAt, cooldownMs }
   const pendingActionsMap = new Map();          // actionId -> { ..., drained, outcome }
 
+  // Governance Phase 5: reviews + open follow-ups.
+  const reviewsByVerdict = { CLEAN: 0, P1: 0, P2: 0, P3: 0, INFO: 0 };
+  const reviewsRecent = [];                     // capped 200
+  const openFollowups = [];                     // FOLLOWUP_OPENED chain
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -348,6 +353,32 @@ export async function project(repoRoot) {
         }
         break;
       }
+      case 'SLICE_REVIEWED': {
+        const verdict = ev.data?.verdict || 'INFO';
+        if (verdict in reviewsByVerdict) reviewsByVerdict[verdict]++;
+        else reviewsByVerdict[verdict] = (reviewsByVerdict[verdict] || 0) + 1;
+        reviewsRecent.push({
+          eventId: ev.id,
+          sliceEventId: ev.data?.sliceEventId || null,
+          verdict,
+          findingsCount: ev.data?.findingsCount ?? 0,
+          reviewerRuntime: ev.data?.reviewerRuntime || null,
+          reviewPath: ev.data?.reviewPath || null,
+          ts: ev.ts,
+        });
+        if (reviewsRecent.length > 200) reviewsRecent.splice(0, reviewsRecent.length - 200);
+        break;
+      }
+      case 'FOLLOWUP_OPENED': {
+        openFollowups.push({
+          eventId: ev.id,
+          fromReviewEventId: ev.data?.fromReviewEventId || null,
+          severity: ev.data?.severity || 'P3',
+          draftScope: Array.isArray(ev.data?.draftScope) ? ev.data.draftScope : [],
+          ts: ev.ts,
+        });
+        break;
+      }
       case 'TRIGGER_FIRED': {
         const tid = ev.data?.triggerId;
         if (tid) {
@@ -483,6 +514,12 @@ export async function project(repoRoot) {
     // Governance Phase 4: trigger discipline + pending-actions queue.
     triggers: { ...triggers },
     pendingActions: Array.from(pendingActionsMap.values()),
+    // Governance Phase 5: post-stop reviews + open follow-ups.
+    reviews: {
+      byVerdict: { ...reviewsByVerdict },
+      recent: reviewsRecent.slice(),
+    },
+    openFollowups: openFollowups.slice(),
   };
 }
 

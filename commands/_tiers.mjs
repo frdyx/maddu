@@ -25,6 +25,7 @@ export default {
   mcp:          { tier: 'mutating',  autoTrigger: 'forbidden' },
   memory:       { tier: 'read-only', autoTrigger: 'allowed'   },
   phase:        { tier: 'mutating',  autoTrigger: 'forbidden' },
+  review:       { tier: 'mutating',  autoTrigger: 'forbidden' },
   runtime:      { tier: 'mutating',  autoTrigger: 'forbidden' },
   schedule:     { tier: 'mutating',  autoTrigger: 'forbidden' },
   search:       { tier: 'read-only', autoTrigger: 'allowed'   },

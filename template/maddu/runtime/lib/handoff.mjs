@@ -66,6 +66,6 @@ export function buildOrientation(projection) {
       approvals: approvalLedger.length,
       failures: 0,           // Phase 2 wires GATE_RAN fails here
     },
-    openFollowups: [],        // Phase 5 wires FOLLOWUP_OPENED here
+    openFollowups: Array.isArray(projection?.openFollowups) ? projection.openFollowups : [],
   };
 }
