@@ -42,4 +42,7 @@ export default {
   upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden' },
   worker:       { tier: 'mutating',  autoTrigger: 'forbidden' },
   workspace:    { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v0.18 — discovery surface (read-only).
+  help:         { tier: 'read-only', autoTrigger: 'allowed'   },
+  suggest:      { tier: 'read-only', autoTrigger: 'allowed'   },
 };
