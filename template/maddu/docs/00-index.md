@@ -39,6 +39,7 @@ Current version: **v0.16.0** ([changelog](../CHANGELOG.md)) — the governance l
 | 18 | [18-first-slice.md](18-first-slice.md) | Five-minute new-operator tour. **Start here if you just installed.** |
 | 19 | [19-multi-workspace.md](19-multi-workspace.md) | One bridge across N repos: `maddu workspace`, the rail switcher, "All workspaces" mode, `maddu global` crons + policies, `triggered_by` ancestry. *(v0.13.0)* |
 | 20 | [20-governance.md](20-governance.md) | Governance layer (Phases 1–6): orientation, gate authoring, tracked sources, slice scope-lock, trigger discipline, post-stop review lane. *(v0.16.0)* |
+| 21 | [21-agent-onboarding.md](21-agent-onboarding.md) | Agent-native bootstrap (v0.17): root-level agent files, `maddu register` shortcut, session-tree provenance, autoRegister spawns, stale-session janitor, `brief --for-agent` + `/bridge/agent-context`. *(v0.17.0)* |
 
 Reference docs that are not in the numbered series:
 

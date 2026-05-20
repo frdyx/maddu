@@ -41,6 +41,17 @@ export default async function command(argv) {
   const orientation = handoffMod.buildOrientation(proj);
   const handoff = handoffMod.renderHandoff(proj);
 
+  // v0.17 Phase 6: --for-agent renders a single self-contained text
+  // block agents can consume at turn start without reading multiple
+  // files. JSON sibling lives at GET /bridge/agent-context for HTTP
+  // callers; the same builder is reused there.
+  if (flags['for-agent']) {
+    const agentCtxMod = await loadAgentContext(repoRoot);
+    const block = agentCtxMod.renderAgentContextText(agentCtxMod.buildAgentContext(proj));
+    process.stdout.write(block);
+    return;
+  }
+
   // Write through to .maddu/state/. Side-effects, but deterministic on input.
   const stateDir = path.join(repoRoot, '.maddu', 'state');
   await fs.mkdir(stateDir, { recursive: true });
@@ -98,6 +109,18 @@ async function loadHandoff(repoRoot) {
     try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
   }
   throw new Error('handoff.mjs not found');
+}
+
+async function loadAgentContext(repoRoot) {
+  const candidates = [
+    path.join(repoRoot, 'maddu', 'runtime', 'lib', 'agent-context.mjs'),
+    path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname),
+                 '..', 'template', 'maddu', 'runtime', 'lib', 'agent-context.mjs'),
+  ];
+  for (const p of candidates) {
+    try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
+  }
+  throw new Error('agent-context.mjs not found');
 }
 
 async function loadPendingActions(repoRoot) {

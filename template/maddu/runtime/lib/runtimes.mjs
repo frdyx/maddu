@@ -14,6 +14,7 @@ import { mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathsFor } from './paths.mjs';
+import { randomBytes } from 'node:crypto';
 import { append, EVENT_TYPES, genWorkerId } from './spine.mjs';
 
 const DESCRIPTOR_SCHEMA = 1;
@@ -50,8 +51,42 @@ function defaultDescriptor(name) {
     spawn: { env: [], cwd: '.' },
     detect: { command: null, expectExit: 0 },
     lanes: ['*'],
+    // v0.17 Phase 3 — when true, spawnWorker auto-registers a child
+    // session per spawn and threads its id through MADDU_SESSION_ID. The
+    // child appears in sessionsTree under the caller's session, so a
+    // parent that fans out N workers shows N distinct branches instead
+    // of N events all stamped with the parent's actor id.
+    autoRegister: false,
     notes: ''
   };
+}
+
+function genChildSessionId() {
+  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const r = randomBytes(3).toString('hex');
+  return `ses_${t}_${r}`;
+}
+
+// Internal helper for Phase 3 autoRegister spawns. Emits
+// SESSION_AUTO_REGISTERED with source:'spawn' and parentSessionId set
+// to the caller's session id. Returns the new child session id, ready
+// to be threaded into the spawned worker's env.
+async function registerChildSession(repoRoot, parentSessionId, runtimeName, label) {
+  const sessionId = genChildSessionId();
+  await append(repoRoot, {
+    type: EVENT_TYPES.SESSION_AUTO_REGISTERED,
+    actor: sessionId,
+    lane: null,
+    data: {
+      sessionId,
+      parentSessionId: parentSessionId || null,
+      source: 'spawn',
+      label: label || `${runtimeName} worker`,
+      role: 'implementer',
+      runtime: runtimeName
+    }
+  });
+  return sessionId;
 }
 
 function mergeDescriptor(base, patch) {
@@ -198,7 +233,22 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   const args = [...(r.args || []), ...(opts.extraArgs || [])];
   const cwd = opts.cwd || r.spawn?.cwd || process.cwd();
   const env = { ...process.env, MADDU_WORKER_ID: workerId, MADDU_BRIDGE_URL: opts.bridgeUrl || 'http://127.0.0.1:4177', MADDU_RUNTIME: name };
-  if (opts.session) env.MADDU_SESSION_ID = opts.session;
+
+  // v0.17 Phase 3 — runtime descriptors carrying autoRegister:true mint
+  // a fresh child session per spawn (linked to opts.session as parent
+  // when present). The child session id supersedes opts.session in the
+  // env we hand to the spawned process; bookkeeping (WORKER_SPAWNED
+  // actor, projection lookup) follows the new id so the harness sees
+  // each spawn as its own identity. Descriptors without autoRegister
+  // (i.e. all existing v0.16 runtimes) retain v0.16 semantics exactly.
+  let effectiveSession = opts.session || null;
+  if (r.autoRegister) {
+    effectiveSession = await registerChildSession(
+      repoRoot, opts.session || null, name,
+      opts.label || `${name} worker ${workerId}`
+    );
+  }
+  if (effectiveSession) env.MADDU_SESSION_ID = effectiveSession;
   if (opts.lane) env.MADDU_LANE = opts.lane;
 
   let child, pid = null, error = null;
@@ -214,12 +264,15 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     try { await logFh.close(); } catch {}
   }
 
-  // Either way, record the spawn intent in the spine.
+  // Either way, record the spawn intent in the spine. For autoRegister
+  // descriptors the actor and sessionId are the freshly-minted child
+  // session id (not the caller's) — that's how the cockpit reads the
+  // fan-out as a tree instead of a flat list keyed by parent.
   await append(repoRoot, {
     type: EVENT_TYPES.WORKER_SPAWNED,
-    actor: opts.session || null,
+    actor: effectiveSession,
     lane: opts.lane || null,
-    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: opts.session || null, error }
+    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, error }
   });
   if (error) {
     // Mark as exited so projection reflects a failed spawn.

@@ -13,6 +13,17 @@ export async function project(repoRoot) {
   const events = await readAll(repoRoot);
 
   const sessions = new Map();              // sessionId -> { id, role, label, focus, registeredAt, lastHeartbeatAt, closedAt, status }
+  // v0.17 sessionsTree: parent/child provenance for session spawn graphs.
+  //   sessionId -> { parentSessionId, source, state, lastHeartbeatAt }
+  // childSessionIds populated in a reverse-index pass after replay.
+  const sessionsTree = new Map();
+  // v0.17 janitor: rolling window of stale-detected sessions and the
+  // auto-closed counter (last hour, for the cockpit). Rebuilt per
+  // project() call from SESSION_STALE_DETECTED + SESSION_AUTO_CLOSED.
+  const janitorStaleSet = new Set();
+  let janitorAutoClosedThisHour = 0;
+  let janitorLastRunAt = null;
+  const hourMs = 60 * 60 * 1000;
   const claims = new Map();                // lane -> { lane, sessionId, focus, claimedAt }
   const sliceStops = [];                   // list of slice-stop events, newest last
   const inbox = [];                        // list of inbox events
@@ -85,6 +96,39 @@ export async function project(repoRoot) {
           closedAt: null,
           status: 'active'
         });
+        // v0.17 sessionsTree — `manual` source unless overridden.
+        // SESSION_REGISTERED may carry parentSessionId after Phase 2;
+        // older events without it remain valid (null parent).
+        sessionsTree.set(ev.actor, {
+          parentSessionId: ev.data.parentSessionId || null,
+          source: ev.data.source || 'manual',
+          state: 'active',
+          lastHeartbeatAt: ev.ts
+        });
+        break;
+      case 'SESSION_AUTO_REGISTERED':
+        // v0.17 — agent-native bootstrap. Same session lifecycle as
+        // SESSION_REGISTERED; the only extra is event.data.source which
+        // the cockpit can use to disambiguate 'cli' / 'spawn' /
+        // 'agent-bootstrap' registrations. Tree provenance (parent
+        // links) gets a dedicated sessionsTree slot in Phase 2.
+        sessions.set(ev.actor, {
+          id: ev.actor,
+          role: ev.data.role || null,
+          label: ev.data.label || null,
+          focus: ev.data.focus || ev.data.label || null,
+          registeredAt: ev.ts,
+          lastHeartbeatAt: ev.ts,
+          closedAt: null,
+          status: 'active',
+          source: ev.data.source || 'cli'
+        });
+        sessionsTree.set(ev.actor, {
+          parentSessionId: ev.data.parentSessionId || null,
+          source: ev.data.source || 'cli',
+          state: 'active',
+          lastHeartbeatAt: ev.ts
+        });
         break;
       case 'SESSION_HEARTBEAT': {
         const s = sessions.get(ev.actor);
@@ -92,6 +136,8 @@ export async function project(repoRoot) {
           s.lastHeartbeatAt = ev.ts;
           if (ev.data.focus) s.focus = ev.data.focus;
         }
+        const t = sessionsTree.get(ev.actor);
+        if (t) t.lastHeartbeatAt = ev.ts;
         break;
       }
       case 'SESSION_CLOSED': {
@@ -101,9 +147,45 @@ export async function project(repoRoot) {
           s.status = 'closed';
           if (ev.data.handoff) s.handoff = ev.data.handoff;
         }
+        const t = sessionsTree.get(ev.actor);
+        if (t) t.state = 'closed';
         // Release any claims held by this session.
         for (const [lane, c] of claims) {
           if (c.sessionId === ev.actor) claims.delete(lane);
+        }
+        // Clear from the janitor's stale set — the session is closed
+        // by the operator and no longer a janitor concern.
+        janitorStaleSet.delete(ev.actor);
+        break;
+      }
+      case 'SESSION_STALE_DETECTED': {
+        janitorLastRunAt = ev.ts;
+        if (ev.data && ev.data.sessionId) janitorStaleSet.add(ev.data.sessionId);
+        const t = sessionsTree.get(ev.data && ev.data.sessionId);
+        if (t) t.state = 'stale';
+        break;
+      }
+      case 'SESSION_AUTO_CLOSED': {
+        janitorLastRunAt = ev.ts;
+        const sid = ev.actor || (ev.data && ev.data.sessionId);
+        const s = sessions.get(sid);
+        if (s) {
+          s.closedAt = ev.ts;
+          s.status = 'closed';
+          s.closedBy = 'janitor';
+        }
+        const t = sessionsTree.get(sid);
+        if (t) t.state = 'closed';
+        janitorStaleSet.delete(sid);
+        // Determinism: count events within `hourMs` of the *latest event*
+        // we've seen so far, not wall-clock now. Wall-clock would make
+        // project() non-idempotent and break the round-trip test.
+        // The cockpit can re-window against Date.now() at display time
+        // if it wants a sliding hour.
+        janitorAutoClosedThisHour += 1;
+        // Release any claims held by the auto-closed session.
+        for (const [lane, c] of claims) {
+          if (c.sessionId === sid) claims.delete(lane);
         }
         break;
       }
@@ -520,7 +602,42 @@ export async function project(repoRoot) {
       recent: reviewsRecent.slice(),
     },
     openFollowups: openFollowups.slice(),
+    // v0.17 Phase 2: session-tree provenance (parent → child links).
+    // Each entry is keyed by sessionId; childSessionIds is the reverse
+    // index built once after replay (state may flip to 'stale' via Phase 5).
+    sessionsTree: buildSessionsTreeView(sessionsTree),
+    // v0.17 Phase 5: stale-session janitor view. Deterministic — the
+    // counter is total auto-closes seen on the spine (cockpit can
+    // re-window against wall-clock at display time).
+    janitor: {
+      lastRunAt: janitorLastRunAt,
+      staleSessions: Array.from(janitorStaleSet).sort(),
+      autoClosedTotal: janitorAutoClosedThisHour,
+    },
   };
+}
+
+function buildSessionsTreeView(sessionsTree) {
+  // Reverse-index children. The forward replay records parentSessionId
+  // on the child; the view exposes both directions so `maddu session
+  // tree` can walk either way without re-scanning.
+  const out = {};
+  for (const [id, node] of sessionsTree) {
+    out[id] = {
+      parentSessionId: node.parentSessionId,
+      childSessionIds: [],
+      source: node.source,
+      state: node.state,
+      lastHeartbeatAt: node.lastHeartbeatAt
+    };
+  }
+  for (const [id, node] of sessionsTree) {
+    if (node.parentSessionId && out[node.parentSessionId]) {
+      out[node.parentSessionId].childSessionIds.push(id);
+    }
+  }
+  for (const id of Object.keys(out)) out[id].childSessionIds.sort();
+  return out;
 }
 
 // Read-time status derivation: a worker that hasn't heartbeat'd in

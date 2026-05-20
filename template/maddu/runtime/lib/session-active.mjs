@@ -83,7 +83,11 @@ export async function readActiveSessionVerified(repoRoot) {
     const ev = events[i];
     if (ev.actor !== cached.sessionId) continue;
     if (ev.type === 'SESSION_CLOSED') return { stale: true, sessionId: cached.sessionId };
+    if (ev.type === 'SESSION_AUTO_CLOSED') return { stale: true, sessionId: cached.sessionId };
     if (ev.type === 'SESSION_REGISTERED') return cached;
+    // v0.17: zero-keystroke `maddu register` writes SESSION_AUTO_REGISTERED.
+    // The lifecycle is identical to SESSION_REGISTERED — counts as alive.
+    if (ev.type === 'SESSION_AUTO_REGISTERED') return cached;
   }
   // Walked the full spine, no REGISTERED event matches — the cache
   // points to a session that never existed in this repo. Treat as stale.

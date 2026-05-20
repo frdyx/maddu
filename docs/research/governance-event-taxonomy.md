@@ -199,6 +199,87 @@ data: {
 }
 ```
 
+## v0.17 agent-native bootstrap
+
+Four event types are reserved in Phase 0 and emitted across Phases 1–5
+of the agent-native bootstrap rollout. They participate in the same
+forward-compat discipline as the governance-layer types above — Phase 0
+reserves the names in `EVENT_TYPES` so older spines remain readable
+when projections that consume them are introduced later.
+
+`SESSION_REGISTERED.data` is also extended (optionally — old events
+without it remain valid) with a `parentSessionId` field used by
+Phase 2's `sessionsTree` projection slot. Verify-spine treats absence
+as `null`; if present, it must reference a prior `SESSION_REGISTERED`
+event id in the same spine.
+
+### 13. `SESSION_AUTO_REGISTERED`
+
+```jsonc
+data: {
+  "sessionId":        "ses_… — id of the newly-registered session",
+  "parentSessionId":  "ses_… — optional; must reference prior SESSION_REGISTERED or SESSION_AUTO_REGISTERED",
+  "source":           "cli" | "spawn" | "agent-bootstrap",
+  "label":            "<one-line, auto-derived from cwd-basename when source=cli>",
+  "role":             "implementer" | "<...>"
+}
+```
+
+Emitters:
+
+- `maddu register` → `source: 'cli'`.
+- `spawnWorker` when the runtime descriptor has `autoRegister: true` →
+  `source: 'spawn'`, `parentSessionId` set to the caller's session id.
+- Agent-first-read bootstrap (future) → `source: 'agent-bootstrap'`.
+
+Idempotency: when `MADDU_SESSION_ID` is set in env AND that session is
+still open in the projection, `maddu register` emits nothing (no-op).
+
+### 14. `SESSION_STALE_DETECTED`
+
+```jsonc
+data: {
+  "sessionId":        "ses_… — must match a prior SESSION_REGISTERED or SESSION_AUTO_REGISTERED",
+  "lastHeartbeatAt":  "ISO-8601 — last SESSION_HEARTBEAT.ts for this session, or registration ts if none",
+  "ageMs":            123456
+}
+```
+
+Emitted by the inline janitor (Phase 5) when an open session's last
+heartbeat exceeds the stale threshold (default 30 min, configurable
+via `.maddu/config/janitor.json`). One event per detection; the
+projection's `janitor.staleSessions` slot deduplicates.
+
+### 15. `SESSION_AUTO_CLOSED`
+
+```jsonc
+data: {
+  "sessionId":        "ses_… — must match a prior SESSION_REGISTERED or SESSION_AUTO_REGISTERED",
+  "reason":           "janitor-stale",
+  "lastHeartbeatAt":  "ISO-8601"
+}
+```
+
+Emitted by the janitor when an open session ages past the auto-close
+threshold (default 4 hours). MUST carry a `triggered_by` envelope per
+the trigger-discipline gate; the janitor entry is shipped in the
+default `.maddu/config/triggers.json` allowlist.
+
+### 16. `AGENT_FILE_SYNCED`
+
+```jsonc
+data: {
+  "files":  ["MADDU.md", "CLAUDE.md", "AGENTS.md"],
+  "action": "create" | "merge" | "no-change"
+}
+```
+
+Emitted by `maddu init` and `maddu upgrade` after the marker-delimited
+merge into the three repo-root agent files completes. One event per
+init/upgrade run (not per file). `action: 'no-change'` is emitted when
+all three files were already in sync — preserved so re-runs leave a
+trace without churning the spine with new content.
+
 ## Projection slot pointers (see Appendix B of the plan for full schemas)
 
 - `goal`, `phase` (Phase 1)
@@ -206,6 +287,7 @@ data: {
 - `sliceLocks` (Phase 3)
 - `triggers`, `pendingActions` (Phase 4)
 - `reviews` (Phase 5)
+- `sessionsTree`, `janitor` (v0.17 Phases 2 + 5)
 
 ## Verify-spine extensions (per phase)
 

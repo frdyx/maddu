@@ -14,6 +14,7 @@
 
 import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { parseFlags } from './_args.mjs';
 import {
   exists, frameworkOwnedFiles, copyFromTemplate, sha256OfFile,
@@ -135,6 +136,70 @@ export default async function init(argv) {
   if (!gi.includes('Máddu token paths')) {
     await appendFile(gitignorePath, gi.endsWith('\n') || gi.length === 0 ? GITIGNORE_BLOCK : '\n' + GITIGNORE_BLOCK);
     console.log(`  updated .gitignore (token paths only)`);
+  }
+
+  // 6a. v0.17 Phase 5 — janitor config + triggers allowlist. Ships
+  //     defaults; operator can edit (30min stale, 4hr auto-close) or
+  //     remove the trigger from the allowlist to disable.
+  const configDir = join(cwd, '.maddu', 'config');
+  await mkdir(configDir, { recursive: true });
+  const janitorPath = join(configDir, 'janitor.json');
+  if (!(await exists(janitorPath))) {
+    await writeFile(
+      janitorPath,
+      JSON.stringify({ staleAfterMs: 1800000, autoCloseAfterMs: 14400000 }, null, 2) + '\n'
+    );
+  }
+  const triggersPath = join(configDir, 'triggers.json');
+  if (!(await exists(triggersPath))) {
+    await writeFile(
+      triggersPath,
+      JSON.stringify({ allowed: ['janitor:sessions'] }, null, 2) + '\n'
+    );
+  } else {
+    // Existing file — merge our entry without disturbing operator additions.
+    try {
+      const text = await readFile(triggersPath, 'utf8');
+      const cur = JSON.parse(text);
+      const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
+      if (!allowed.includes('janitor:sessions')) {
+        allowed.push('janitor:sessions');
+        await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
+      }
+    } catch {}
+  }
+  console.log(`  janitor + trigger allowlist seeded (.maddu/config/)`);
+
+  // 6b. v0.17 agent-native bootstrap — drop MADDU.md + marker-delimited
+  //     sections into CLAUDE.md / AGENTS.md at the repo root. The
+  //     helper preserves operator content outside the markers and
+  //     emits a single AGENT_FILE_SYNCED event with action: 'create' |
+  //     'merge' | 'no-change'.
+  try {
+    const { loadAgentFileTemplates, syncAllAgentFiles } = await import(
+      'file://' + join(FRAMEWORK_ROOT, 'commands', '_agent-files.mjs').replace(/\\/g, '/')
+    );
+    const templates = await loadAgentFileTemplates(FRAMEWORK_ROOT);
+    const result = await syncAllAgentFiles(cwd, templates);
+    // Append AGENT_FILE_SYNCED to the spine. Single event per init
+    // (not per file) — the perFile breakdown rides in data for
+    // operators reading the spine directly.
+    const ts2 = new Date().toISOString();
+    const ev2 = {
+      v: 1,
+      id: 'evt_' + ts2.replace(/[-:T.Z]/g, '').slice(0, 14) + '_' + randomBytes(3).toString('hex'),
+      ts: ts2,
+      type: 'AGENT_FILE_SYNCED',
+      actor: null,
+      lane: null,
+      data: { files: result.files, action: result.action, perFile: result.perFile }
+    };
+    await appendFile(eventsSegment, JSON.stringify(ev2) + '\n');
+    const perFileSummary = Object.entries(result.perFile)
+      .map(([f, a]) => `${f}:${a}`).join(', ');
+    console.log(`  agent files synced (${result.action}) — ${perFileSummary}`);
+  } catch (err) {
+    console.error(`  (agent-file sync skipped: ${err.message})`);
   }
 
   // 7. Project-local CLI shim — the wrapper scripts ride with the template

@@ -105,7 +105,14 @@ export const EVENT_TYPES = {
   SLICE_SCOPE_DECLARED:      'SLICE_SCOPE_DECLARED',
   SLICE_SCOPE_EXPANDED:      'SLICE_SCOPE_EXPANDED',
   SOURCE_HASH_RECOMPUTED:    'SOURCE_HASH_RECOMPUTED',
-  TRIGGER_FIRED:             'TRIGGER_FIRED'
+  TRIGGER_FIRED:             'TRIGGER_FIRED',
+  // Agent-native bootstrap (v0.17; emitted in Phases 1–5)
+  // SESSION_REGISTERED.data also gains an OPTIONAL `parentSessionId` field
+  // for tree provenance — events without it remain valid (forward-compat).
+  AGENT_FILE_SYNCED:         'AGENT_FILE_SYNCED',
+  SESSION_AUTO_CLOSED:       'SESSION_AUTO_CLOSED',
+  SESSION_AUTO_REGISTERED:   'SESSION_AUTO_REGISTERED',
+  SESSION_STALE_DETECTED:    'SESSION_STALE_DETECTED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
