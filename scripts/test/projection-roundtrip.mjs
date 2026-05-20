@@ -10,6 +10,13 @@
 // extend this script to also delete those files and assert byte-equality
 // after rebuild.
 //
+// v0.17 agent-native bootstrap extends this contract with two additional
+// projection slots — `sessionsTree` (Phase 2) and `janitor` (Phase 5) —
+// both of which must round-trip the same as governance slots. The
+// state-file walk below is slot-agnostic (it picks up any *.json or
+// *.md in .maddu/state/) so the new slots are covered automatically
+// once their respective phases land; this comment records the intent.
+//
 // Exit codes:
 //   0 = round-trip OK
 //   1 = mismatch (with diff hint on stderr)
