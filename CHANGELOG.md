@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v0.16.2] · 2026-05-20 · docs-in-sync gate
+
+**Closes the maintenance loop opened by v0.16.1.** That patch bundled `docs/*.md` into `template/maddu/docs/` so consumer installs render the docs popup. The discipline of keeping the two trees byte-equal was left manual. This patch adds a built-in gate that fails `maddu doctor` on drift.
+
+- **New gate** `docs-in-sync` at `template/maddu/runtime/gates/builtin/docs-in-sync.mjs`. Severity `safety`. For every `.md` in `docs/`, hashes both the source and the bundled copy (after CRLF→LF normalization) and fails on any pair that differs, plus any orphan in either tree.
+- **No-ops in consumer installs.** Detects `template/maddu/docs/` absence at the consumer's repo root and returns `ok:true` with `skipped` in the message — `maddu doctor` stays green for end users.
+- **Failure message names the fix:** `docs out of sync: 1 drifted — run \`cp docs/*.md template/maddu/docs/\` and commit`. Evidence includes the explicit `drifted` / `onlyInSource` / `onlyInTemplate` lists.
+- **20-governance.md** built-in gates table updated to list the gate.
+
+Verified end-to-end: source repo in-sync → PASS; introduce drift → FAIL with explicit file list; revert → PASS; consumer install → PASS (no-op skip).
+
 ## [v0.16.1] · 2026-05-20 · ship docs to consumers
 
 **Patch: the in-cockpit docs popup was empty in every consumer install since v0.10.** Root cause: `template/maddu/docs/` didn't exist, so `maddu init` shipped no markdown files. The bridge's `resolveDocsDir()` walked two candidate paths (`<consumer>/maddu/docs/` and the dev-only fallback `<source>/docs/`); neither resolved in a consumer install, and `/bridge/docs` returned `[]`. The "Take the five-minute tour →" header link and the `?` keyboard shortcut both landed on an empty docs page reading "No markdown files found under docs/".

@@ -71,21 +71,23 @@ maddu doctor --gate spine-integrity        # run one
 maddu doctor --severity critical           # filter by severity
 ```
 
-### Built-in gates (v0.16.0)
+### Built-in gates
 
-| id | severity | what it checks |
-|---|---|---|
-| install-integrity | critical | every managed file present + hash-matched |
-| rule-1-files-only | critical | no DB files under `.maddu/` |
-| rule-2-no-sqlite | critical | no SQLite-family deps in `package.json` |
-| rule-5-no-provider-sdks | critical | no provider SDKs imported in framework code |
-| rule-6-no-token-leaks | critical | no obvious tokens / keys in state files |
-| rule-8-no-duplicate-claims | critical | no two sessions hold the same lane |
-| spine-integrity | critical | append-only spine: parseable, id-unique, referential |
-| active-session-cache | warn | active-session cache points at an open session |
-| approval-ledger-completeness | warn | every auto-decision has a paired spine event |
-| tracked-source-drift | critical | tracked SSOT files unchanged since last rebuild |
-| command-tier-discipline | safety | every CLI command has a tier in `_tiers.mjs` |
+| id | severity | what it checks | shipped |
+|---|---|---|---|
+| install-integrity | critical | every managed file present + hash-matched | v0.16.0 |
+| rule-1-files-only | critical | no DB files under `.maddu/` | v0.16.0 |
+| rule-2-no-sqlite | critical | no SQLite-family deps in `package.json` | v0.16.0 |
+| rule-5-no-provider-sdks | critical | no provider SDKs imported in framework code | v0.16.0 |
+| rule-6-no-token-leaks | critical | no obvious tokens / keys in state files | v0.16.0 |
+| rule-8-no-duplicate-claims | critical | no two sessions hold the same lane | v0.16.0 |
+| spine-integrity | critical | append-only spine: parseable, id-unique, referential | v0.16.0 |
+| active-session-cache | warn | active-session cache points at an open session | v0.16.0 |
+| approval-ledger-completeness | warn | every auto-decision has a paired spine event | v0.16.0 |
+| tracked-source-drift | critical | tracked SSOT files unchanged since last rebuild | v0.16.0 |
+| command-tier-discipline | safety | every CLI command has a tier in `_tiers.mjs` | v0.16.0 |
+| slice-scope | critical | slices that declare scope stay within it | v0.16.0 |
+| docs-in-sync | safety | `docs/*.md` and `template/maddu/docs/*.md` byte-equal (framework source repo only; no-ops in consumer installs) | v0.16.2 |
 
 ## Tracked sources
 
