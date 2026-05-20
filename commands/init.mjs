@@ -19,6 +19,7 @@ import { parseFlags } from './_args.mjs';
 import {
   exists, frameworkOwnedFiles, copyFromTemplate, sha256OfFile,
   readMadduJson, writeMadduJson, frameworkVersion, ensureShimExecutable,
+  requireSourceLayout,
   FRAMEWORK_ROOT, TEMPLATE_ROOT
 } from './_manifest.mjs';
 
@@ -32,6 +33,16 @@ export default async function init(argv) {
   const { flags } = parseFlags(argv);
   const force = !!flags.force;
   const cwd = process.cwd();
+
+  // v0.17.1: refuse early if invoked via a consumer install's bundled CLI.
+  // Previously crashed mid-way with ERR_MODULE_NOT_FOUND on defaults.mjs
+  // after creating a half-installed .maddu/ skeleton. Now exits with an
+  // actionable error before touching the target.
+  const layoutError = await requireSourceLayout('init');
+  if (layoutError) {
+    console.error(layoutError);
+    process.exit(2);
+  }
 
   if (await exists(join(cwd, '.maddu')) && !force) {
     console.error(`.maddu/ already exists in ${cwd}.`);

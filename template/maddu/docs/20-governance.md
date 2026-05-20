@@ -88,6 +88,8 @@ maddu doctor --severity critical           # filter by severity
 | command-tier-discipline | safety | every CLI command has a tier in `_tiers.mjs` | v0.16.0 |
 | slice-scope | critical | slices that declare scope stay within it | v0.16.0 |
 | docs-in-sync | safety | `docs/*.md` and `template/maddu/docs/*.md` byte-equal (framework source repo only; no-ops in consumer installs) | v0.16.2 |
+| agent-file-current | safety | `MADDU.md` / `CLAUDE.md` / `AGENTS.md` marker stanzas match canonical template | v0.17.0 |
+| framework-layout | critical | detects framework layout (source / installed) and refuses to operate from an unknown layout | v0.17.1 |
 
 ## Tracked sources
 
