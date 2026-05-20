@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 540" role="img" aria-label="Máddu workflows blueprint">
-  <title>Máddu workflows — operator → BOSS/Enforcer → claims → fleet → gates → reports → learning/wiki</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 600" role="img" aria-label="Máddu workflows blueprint">
+  <title>Máddu workflows — operator → orientation → BOSS/Enforcer → claims / sessions tree → fleet → gates / reviews → reports → learning / wiki</title>
+  <desc>How Máddu thinks: an operator opens the cockpit, reads the orientation digest, then directs BOSS (LLM voice, proposes) and Enforcer (deterministic, refuses). They write to the queue and claims; claims include the v0.17 session tree for autoRegister fan-out. The fleet executes; gates and reviews verify (gates are structural, reviews are semantic — v0.16). Reports surface in the cockpit; learning and wiki accumulate.</desc>
   <defs>
     <style>
       .canvas    { fill: #050B17; }
@@ -13,111 +14,150 @@
       .fg-3      { fill: #6a7079; }
       .accent    { fill: #D0FF00; }
       .accent2   { fill: #56B8FF; }
+      .warm      { fill: #F2BD5C; }
       .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
       .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
     </style>
   </defs>
 
-  <rect class="canvas" width="1400" height="540"/>
+  <rect class="canvas" width="1400" height="600"/>
 
   <!-- Title strip -->
   <g transform="translate(40,30)">
     <text x="0" y="0" class="cond-b accent" font-size="11" letter-spacing="0.14em">◈ WORKFLOWS</text>
     <text x="0" y="22" class="cond-b fg-0" font-size="20">Blueprint of how Máddu thinks</text>
-    <text x="0" y="42" class="mono fg-3" font-size="11">operator → BOSS / Enforcer → claims → fleet → gates → reports → learning / wiki</text>
+    <text x="0" y="42" class="mono fg-3" font-size="11">operator → orientation → BOSS / Enforcer → claims / sessions → fleet → gates / reviews → reports → learning / wiki</text>
   </g>
 
   <!-- Bezier edges -->
   <g>
-    <!-- operator → BOSS -->
-    <path d="M 220 200 C 280 200, 280 140, 340 140" class="edge live"/>
-    <!-- operator → Enforcer -->
-    <path d="M 220 200 C 280 200, 280 260, 340 260" class="edge"/>
+    <!-- operator → orientation (v0.17 turn-start, lime) -->
+    <path d="M 220 220 C 240 220, 240 220, 260 220" class="edge live"/>
+    <!-- orientation → BOSS -->
+    <path d="M 380 220 C 420 220, 420 160, 460 160" class="edge live"/>
+    <!-- orientation → Enforcer -->
+    <path d="M 380 220 C 420 220, 420 280, 460 280" class="edge"/>
+
     <!-- BOSS → Queue -->
-    <path d="M 460 140 C 520 140, 520 140, 580 140" class="edge live"/>
+    <path d="M 580 160 C 620 160, 620 120, 660 120" class="edge live"/>
     <!-- BOSS → Claims -->
-    <path d="M 460 140 C 520 140, 520 260, 580 260" class="edge"/>
+    <path d="M 580 160 C 620 160, 620 220, 660 220" class="edge"/>
     <!-- Enforcer → Queue -->
-    <path d="M 460 260 C 520 260, 520 140, 580 140" class="edge"/>
+    <path d="M 580 280 C 620 280, 620 120, 660 120" class="edge"/>
     <!-- Enforcer → Claims -->
-    <path d="M 460 260 C 520 260, 520 260, 580 260" class="edge"/>
+    <path d="M 580 280 C 620 280, 620 220, 660 220" class="edge"/>
+    <!-- Claims → Sessions tree (v0.17) -->
+    <path d="M 720 240 C 720 280, 720 300, 720 320" class="edge"/>
+
     <!-- Queue → Fleet -->
-    <path d="M 700 140 C 760 140, 760 200, 820 200" class="edge live"/>
+    <path d="M 780 120 C 840 120, 840 220, 900 220" class="edge live"/>
     <!-- Claims → Fleet -->
-    <path d="M 700 260 C 760 260, 760 200, 820 200" class="edge"/>
+    <path d="M 780 220 C 840 220, 840 220, 900 220" class="edge"/>
+    <!-- Sessions → Fleet -->
+    <path d="M 780 340 C 840 340, 840 220, 900 220" class="edge"/>
+
     <!-- Fleet → Gates -->
-    <path d="M 940 200 C 1000 200, 1000 140, 1060 140" class="edge"/>
+    <path d="M 1020 220 C 1060 220, 1060 120, 1100 120" class="edge"/>
+    <!-- Fleet → Reviews (v0.16, live) -->
+    <path d="M 1020 220 C 1060 220, 1060 220, 1100 220" class="edge live"/>
     <!-- Fleet → Reports -->
-    <path d="M 940 200 C 1000 200, 1000 260, 1060 260" class="edge live"/>
+    <path d="M 1020 220 C 1060 220, 1060 320, 1100 320" class="edge live"/>
+
     <!-- Gates → Reports -->
-    <path d="M 1180 140 C 1180 200, 1180 200, 1060 260" class="edge" opacity="0.4"/>
+    <path d="M 1220 140 C 1220 220, 1220 220, 1100 320" class="edge" opacity="0.4"/>
+    <!-- Reviews → Reports -->
+    <path d="M 1220 240 C 1220 280, 1220 280, 1100 320" class="edge"/>
+
     <!-- Reports → Learning -->
-    <path d="M 1180 260 C 1220 260, 1220 140, 1260 140" class="edge live"/>
+    <path d="M 1220 320 C 1260 320, 1260 140, 1300 140" class="edge live"/>
     <!-- Reports → Wiki -->
-    <path d="M 1180 260 C 1220 260, 1220 260, 1260 260" class="edge live"/>
+    <path d="M 1220 320 C 1260 320, 1260 280, 1300 280" class="edge live"/>
   </g>
 
   <!-- Nodes -->
-  <g class="cond-b fg-0" font-size="14" text-anchor="middle">
-    <!-- Operator (left, centered) -->
-    <g transform="translate(100,178)">
+  <g class="cond-b fg-0" font-size="13" text-anchor="middle">
+    <!-- Operator -->
+    <g transform="translate(100,198)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
       <text x="60" y="28">OPERATOR</text>
     </g>
 
+    <!-- Orientation (v0.17) -->
+    <g transform="translate(260,198)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">ORIENTATION</text>
+    </g>
+
     <!-- BOSS -->
-    <g transform="translate(340,118)">
+    <g transform="translate(460,138)">
       <rect class="node-rect boss" width="120" height="44" rx="6"/>
-      <text x="60" y="28" fill="#56B8FF">BOSS</text>
+      <text x="60" y="28" class="accent2">BOSS</text>
     </g>
     <!-- Enforcer -->
-    <g transform="translate(340,238)">
+    <g transform="translate(460,258)">
       <rect class="node-rect warm" width="120" height="44" rx="6"/>
-      <text x="60" y="28" fill="#F2BD5C">ENFORCER</text>
+      <text x="60" y="28" class="warm">ENFORCER</text>
     </g>
 
     <!-- Queue -->
-    <g transform="translate(580,118)">
+    <g transform="translate(660,98)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
       <text x="60" y="28">QUEUE</text>
     </g>
     <!-- Claims -->
-    <g transform="translate(580,238)">
+    <g transform="translate(660,198)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
       <text x="60" y="28">CLAIMS</text>
     </g>
+    <!-- Sessions tree (v0.17) -->
+    <g transform="translate(660,318)">
+      <rect class="node-rect" width="120" height="44" rx="6"/>
+      <text x="60" y="28">SESSIONS</text>
+    </g>
 
     <!-- Fleet -->
-    <g transform="translate(820,178)">
+    <g transform="translate(900,198)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
       <text x="60" y="28">FLEET</text>
     </g>
 
     <!-- Gates -->
-    <g transform="translate(1060,118)">
+    <g transform="translate(1100,98)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
       <text x="60" y="28">GATES</text>
     </g>
+    <!-- Reviews (v0.16) -->
+    <g transform="translate(1100,198)">
+      <rect class="node-rect boss" width="120" height="44" rx="6"/>
+      <text x="60" y="28" class="accent2">REVIEWS</text>
+    </g>
     <!-- Reports -->
-    <g transform="translate(1060,238)">
+    <g transform="translate(1100,298)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
       <text x="60" y="28">REPORTS</text>
     </g>
 
     <!-- Learning -->
-    <g transform="translate(1260,118)">
+    <g transform="translate(1300,118)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28" fill="#D0FF00">LEARNING</text>
+      <text x="60" y="28" class="accent">LEARNING</text>
     </g>
     <!-- Wiki -->
-    <g transform="translate(1260,238)">
+    <g transform="translate(1300,258)">
       <rect class="node-rect" width="120" height="44" rx="6"/>
-      <text x="60" y="28" fill="#D0FF00">WIKI</text>
+      <text x="60" y="28" class="accent">WIKI</text>
     </g>
   </g>
 
-  <!-- Legend strip below -->
-  <g transform="translate(40,400)">
+  <!-- v0.17 / v0.16 annotation marks -->
+  <g class="mono fg-3" font-size="9" letter-spacing="0.06em">
+    <text x="320" y="180" text-anchor="middle">v0.17</text>
+    <text x="720" y="300" text-anchor="middle">v0.17</text>
+    <text x="1160" y="180" text-anchor="middle">v0.16</text>
+  </g>
+
+  <!-- Legend strip -->
+  <g transform="translate(40,440)">
     <text x="0" y="0" class="cond-b fg-3" font-size="10" letter-spacing="0.10em">LEGEND</text>
     <line x1="0" y1="20" x2="1320" y2="20" stroke="rgba(80,113,149,0.18)" stroke-width="1"/>
     <g transform="translate(0,40)">
@@ -143,7 +183,7 @@
   </g>
 
   <!-- Tagline -->
-  <g transform="translate(700,500)">
+  <g transform="translate(700,560)">
     <text x="0" y="0" class="mono fg-3" font-size="10" text-anchor="middle" letter-spacing="0.08em">EVERY EDGE IS AN NDJSON EVENT · EVERY NODE IS A COCKPIT ROUTE</text>
   </g>
 </svg>
