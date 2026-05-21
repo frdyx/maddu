@@ -1631,6 +1631,45 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, doc);
   }
 
+  // ── v0.19.1 PR-C4: observability read-only projections ───────────────
+  //
+  // Each endpoint is a pure projection-slice serializer. No state
+  // changes, no auth dependency, no provider calls. Cockpit nav can
+  // fetch these directly instead of fishing fields out of /status.
+  if (path === '/bridge/teams' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { teams: proj.teams || [] });
+  }
+  if (path === '/bridge/cost' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { tokenLedger: proj.tokenLedger || [] });
+  }
+  if (path === '/bridge/advisors' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { advisors: proj.advisors || [] });
+  }
+  if (path === '/bridge/pipelines' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { pipelines: proj.pipelines || [] });
+  }
+  if (path === '/bridge/skill-injections' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    return sendJson(res, 200, { skillInjections: proj.skillInjections || [] });
+  }
+  if (path === '/bridge/test-status' && req.method === 'GET') {
+    // Latest stress/upgrade-matrix run summaries, both optional. Read
+    // straight from the canonical state files written by the test
+    // harnesses (scripts/test/stress-harness.mjs et al.).
+    const fsp = await import('node:fs/promises');
+    const pathLib = await import('node:path');
+    const readJsonOrNull = async (p) => {
+      try { return JSON.parse(await fsp.readFile(p, 'utf8')); } catch { return null; }
+    };
+    const stress = await readJsonOrNull(pathLib.join(repoRoot, '.maddu', 'state', 'stress-last-run.json'));
+    const upgradeMatrix = await readJsonOrNull(pathLib.join(repoRoot, '.maddu', 'state', 'upgrade-matrix-last-run.json'));
+    return sendJson(res, 200, { stress, upgradeMatrix });
+  }
+
   return sendJson(res, 404, { error: 'not_found', path });
 }
 

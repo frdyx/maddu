@@ -71,8 +71,22 @@ export default async function cost(argv) {
   }
 
   if (r.total === 0) {
+    // v0.19.1 PR-C1: be honest about WHY the ledger is empty.
     console.log('(no token usage reported yet)');
-    console.log('  Workers emit TOKEN_USAGE_REPORTED events with at least { runtime, sessionId, model, ts }.');
+    console.log('');
+    console.log('Why this is empty:');
+    console.log('  The ledger only sees workers spawned by Máddu\'s bridge — direct');
+    console.log('  Claude Code / Codex CLI sessions (the operator\'s own shell) are not');
+    console.log('  captured here because the bridge isn\'t their parent process. This is');
+    console.log('  an architectural boundary, not a bug.');
+    console.log('');
+    console.log('To populate the ledger:');
+    console.log('  • Spawn workers through Máddu (`maddu pipeline run`, `maddu advise`,');
+    console.log('    `maddu team open`) — those workers emit TOKEN_USAGE_REPORTED.');
+    console.log('  • Or retroactively import your Claude Code transcripts:');
+    console.log('      maddu usage import --from claude-code [--session <id>] [--dry-run]');
+    console.log('    Each transcript line becomes a TOKEN_USAGE_REPORTED event with');
+    console.log('    source: "claude-code-transcript".');
     return;
   }
 
