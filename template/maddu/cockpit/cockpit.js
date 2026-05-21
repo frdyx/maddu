@@ -85,7 +85,12 @@ const ROUTES = {
   modelrouting: { title: 'Model Routing', group: 'connect', rank: 7,              render: renderModelRoutingRoute, description: 'Per-runtime + per-lane + per-pipeline modelPreference. Active hints by spawn.',
                 keywords: 'model routing modelPreference runtime lane pipeline stage hint' },
   teststatus: { title: 'Test Status', group: 'verify',   rank: 8,                 render: renderTestStatusRoute, description: 'Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.',
-                keywords: 'test status stress harness upgrade matrix roundtrip ci recent' },
+                keywords: 'test status stress harness upgrade matrix roundtrip ci recent',
+                // v1.0.3 — framework-source-only. The scripts under
+                // scripts/test/ that populate this route don't ship to
+                // consumer installs, so the panel is permanently empty
+                // for end users. Hidden on installed layouts.
+                frameworkOnly: true },
   dashboard:  { title: 'Dashboard',  group: 'reference', rank: 1,                 render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   roadmap:    { title: 'Roadmap',    group: 'reference', rank: 2,                 render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
   skills:     { title: 'Skills',     group: 'reference', rank: 3,                 render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
@@ -104,9 +109,19 @@ const NAV_GROUPS = [
   { id: 'reference', label: 'Reference', glyph: '☷', summary: 'dashboard, docs, roadmap' }
 ];
 
+// v1.0.3 — framework-only routes are hidden on consumer installs because
+// their data sources (e.g. scripts/test/*.mjs) don't ship. Default to
+// 'source' so framework contributors see everything before the first
+// /bridge/status response lands.
+let frameworkLayout = 'source';
+
+function isRouteHidden(route) {
+  return route && route.frameworkOnly && frameworkLayout !== 'source';
+}
+
 function routesInGroup(groupId) {
   return Object.entries(ROUTES)
-    .filter(([, r]) => r.group === groupId)
+    .filter(([, r]) => r.group === groupId && !isRouteHidden(r))
     .sort((a, b) => (a[1].rank || 99) - (b[1].rank || 99))
     .map(([id, r]) => ({ id, ...r }));
 }
@@ -189,6 +204,18 @@ async function fetchBridgeStatus() {
     if (!r.ok) throw new Error('bridge ' + r.status);
     bridgeStatus = await r.json();
     bridgeOk = true;
+    // v1.0.3 — propagate layout so framework-only routes hide on installs.
+    // Rebuild rail if the value changed (initial fetch transitions from
+    // the default 'source' to whatever the bridge reports).
+    const newLayout = bridgeStatus?.frameworkLayout || 'source';
+    if (newLayout !== frameworkLayout) {
+      frameworkLayout = newLayout;
+      try { buildRail(); } catch {}
+      // If the active route is now hidden, bounce to Conductor.
+      if (isRouteHidden(ROUTES[currentRoute()])) {
+        location.hash = '#/conductor';
+      }
+    }
   } catch {
     bridgeStatus = null;
     bridgeOk = false;
@@ -594,7 +621,11 @@ function currentRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'conductor';
   // Split on / or ? so #/search?q=foo resolves to "search".
   const id = raw.split(/[/?]/)[0];
-  return ROUTES[id] ? id : 'conductor';
+  if (!ROUTES[id]) return 'conductor';
+  // v1.0.3 — deep-link guard. Framework-only routes redirect to Conductor
+  // on consumer installs where their data can't exist.
+  if (isRouteHidden(ROUTES[id])) return 'conductor';
+  return id;
 }
 
 // ─── Phase 1+2 — build the rail dynamically from ROUTES + NAV_GROUPS ──
@@ -7551,6 +7582,7 @@ function paletteItems(query) {
 
   // Routes — top-level destinations.
   for (const [id, r] of Object.entries(ROUTES)) {
+    if (isRouteHidden(r)) continue;  // v1.0.3 — framework-only on consumer installs
     const titleLc = r.title.toLowerCase();
     const idLc = id.toLowerCase();
     const descLc = (r.description || '').toLowerCase();

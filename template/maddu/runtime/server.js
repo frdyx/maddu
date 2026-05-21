@@ -8,6 +8,7 @@
 
 import { createServer } from 'node:http';
 import { readFile, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, dirname, extname, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -61,6 +62,18 @@ async function resolveRepoRoot() {
   if (found) return found;
   const devFallback = resolve(runtimeRoot, '..', '..');
   return devFallback;
+}
+
+// v1.0.3 — detect framework-source vs consumer-install layout from the repo
+// root. Source: contributor clone of frdyx/maddu — has template/maddu/runtime/.
+// Installed: consumer scaffold — flat maddu/runtime/. Cockpit uses this to
+// hide framework-only routes (Test Status etc.) where their data sources
+// don't ship.
+function detectFrameworkLayout(repoRoot) {
+  if (!repoRoot) return 'unknown';
+  if (existsSync(join(repoRoot, 'template', 'maddu', 'runtime'))) return 'source';
+  if (existsSync(join(repoRoot, 'maddu', 'runtime'))) return 'installed';
+  return 'unknown';
 }
 
 async function readVersion(repoRoot) {
@@ -284,6 +297,11 @@ async function handleBridge(req, res, url, ctx) {
       ok: true,
       bridge: 'maddu',
       version,
+      // v1.0.3 — surfaces 'source' for the framework-source repo and
+      // 'installed' for consumer installs. Cockpit hides framework-only
+      // routes (e.g. Test Status) on 'installed' layouts where the
+      // populating scripts under scripts/test/ don't ship.
+      frameworkLayout: detectFrameworkLayout(repoRoot),
       host: req.socket.localAddress,
       port: req.socket.localPort,
       repoRoot,

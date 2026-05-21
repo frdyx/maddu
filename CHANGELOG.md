@@ -11,6 +11,32 @@ narrative summary.
 
 ---
 
+## [v1.0.3] · 2026-05-21 · framework-only route hiding
+
+Burn-in feedback from the snyggare consumer install: the `Test Status`
+cockpit route is permanently empty in any consumer install because the
+scripts that populate it (`scripts/test/stress-harness.mjs`,
+`upgrade-matrix.mjs`, `projection-roundtrip.mjs`) only ship with the
+framework source repo, not consumer scaffolds. Showing an unfillable
+panel to end users is the opposite of the no-learning-curve standard.
+
+### Fix
+
+1. `/bridge/status` returns a new `frameworkLayout: 'source' | 'installed' | 'unknown'` field, computed from the presence of `template/maddu/runtime/` (source) vs flat `maddu/runtime/` (consumer install).
+2. Cockpit `ROUTES` entries gain an optional `frameworkOnly: true` flag. The `teststatus` route is the first to use it.
+3. `routesInGroup`, the palette indexer, and the hash router all filter framework-only routes when the layout isn't `source`. Deep links to hidden routes (e.g. `#/teststatus`) redirect to Conductor.
+4. After the first `/bridge/status` response, if the layout differs from the boot default (`source`), the rail is rebuilt and the route bounces if it would otherwise be hidden.
+
+### Outcome
+
+- **Consumer installs:** Test Status no longer appears in the sidenav, the palette, or via direct hash navigation. Cleaner sidenav, no confusing empty panel.
+- **Framework source repo:** Test Status still visible for contributors; populates from `scripts/test/*.mjs` runs as before.
+- **Affordance available for future routes:** any cockpit surface whose data sources don't ship to consumers can mark `frameworkOnly: true` and inherit the same hiding behavior.
+
+Small JS + one bridge field. No behavior change in the framework source repo. No state mechanics changed.
+
+---
+
 ## [v1.0.2] · 2026-05-21 · stage-scroll hotfix
 
 v1.0.1 introduced `#app { overflow: hidden }` to prevent the rail from
