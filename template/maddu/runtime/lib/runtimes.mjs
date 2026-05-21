@@ -42,6 +42,66 @@ function wrapperPathFor(descriptor) {
   return null;
 }
 
+// v0.19 Phase 4 — model routing hint resolver.
+//
+// modelPreference shape (descriptor / lane / pipeline-stage):
+//   string                                      — flat default
+//   { default, plan?, exec?, verify?, review? } — per-stage override
+//
+// Valid stage keys (others rejected by the model-hint-shape gate):
+export const VALID_MODEL_STAGES = ['default', 'plan', 'exec', 'verify', 'review'];
+
+function pickFromPreference(pref, stage) {
+  if (!pref) return null;
+  if (typeof pref === 'string') return pref;
+  if (typeof pref === 'object') {
+    if (stage && typeof pref[stage] === 'string') return pref[stage];
+    if (typeof pref.default === 'string') return pref.default;
+  }
+  return null;
+}
+
+// Resolve a model hint string given the precedence chain. Higher in the
+// list wins. Returns null if no source provides a value.
+//
+//   resolveModelHint({
+//     override: 'claude-haiku-4-5-20251001',    // 1. per-spawn CLI flag
+//     pipelineStagePref: 'gpt-5',               // 2. pipeline stage
+//     lanePref: 'claude-sonnet-4-5',            // 3. lane catalog entry
+//     runtimePref: { default: 'claude-sonnet' },// 4. runtime descriptor
+//     stage: 'exec',                            // which stage we're spawning for
+//   })
+export function resolveModelHint({ override, pipelineStagePref, lanePref, runtimePref, stage } = {}) {
+  if (typeof override === 'string' && override.length > 0) return override;
+  return pickFromPreference(pipelineStagePref, stage)
+      || pickFromPreference(lanePref, stage)
+      || pickFromPreference(runtimePref, stage)
+      || null;
+}
+
+// Validate a modelPreference value. Returns array of error strings; empty
+// = valid. Used by the model-hint-shape gate.
+export function validateModelPreference(pref, where) {
+  const errs = [];
+  if (pref == null) return errs;
+  if (typeof pref === 'string') {
+    if (pref.length === 0) errs.push(`${where}: modelPreference is empty string`);
+    return errs;
+  }
+  if (typeof pref !== 'object' || Array.isArray(pref)) {
+    errs.push(`${where}: modelPreference must be string or object (got ${Array.isArray(pref) ? 'array' : typeof pref})`);
+    return errs;
+  }
+  for (const [k, v] of Object.entries(pref)) {
+    if (!VALID_MODEL_STAGES.includes(k)) {
+      errs.push(`${where}: modelPreference has unknown stage key '${k}' (valid: ${VALID_MODEL_STAGES.join('|')})`);
+    } else if (typeof v !== 'string' || v.length === 0) {
+      errs.push(`${where}: modelPreference['${k}'] must be non-empty string (got ${typeof v})`);
+    }
+  }
+  return errs;
+}
+
 const DESCRIPTOR_SCHEMA = 1;
 const DEFAULT_DETECT_TIMEOUT_MS = 5000;
 
@@ -280,9 +340,20 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     // cwd may have been overridden by opts.cwd.
     MADDU_REPO_ROOT: repoRoot,
   };
-  // v0.19 Phase 4 — model routing hint propagation (resolved in caller).
-  // Worker decides whether to honor it; framework just forwards.
-  if (opts.modelHint) env.MADDU_MODEL_HINT = opts.modelHint;
+  // v0.19 Phase 4 — model routing hint. Caller may resolve in advance
+  // and pass opts.modelHint as a literal, OR pass the precedence inputs
+  // (lanePref, pipelineStagePref, stage) and let spawnWorker resolve via
+  // resolveModelHint(). Worker decides whether to honor the env value.
+  const resolvedHint = typeof opts.modelHint === 'string' && opts.modelHint.length > 0
+    ? opts.modelHint
+    : resolveModelHint({
+        override: opts.modelHintOverride || null,
+        pipelineStagePref: opts.pipelineStagePref || null,
+        lanePref: opts.lanePref || null,
+        runtimePref: r.modelPreference || null,
+        stage: opts.stage || null,
+      });
+  if (resolvedHint) env.MADDU_MODEL_HINT = resolvedHint;
 
   // v0.17 Phase 3 — runtime descriptors carrying autoRegister:true mint
   // a fresh child session per spawn (linked to opts.session as parent
@@ -329,7 +400,7 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     type: EVENT_TYPES.WORKER_SPAWNED,
     actor: effectiveSession,
     lane: opts.lane || null,
-    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, wrapper: wrapperPath ? (r.wrapper || 'custom') : null, modelHint: opts.modelHint || null, error }
+    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, wrapper: wrapperPath ? (r.wrapper || 'custom') : null, modelHint: resolvedHint || null, stage: opts.stage || null, error }
   });
   if (error) {
     // Mark as exited so projection reflects a failed spawn.
