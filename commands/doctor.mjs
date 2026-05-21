@@ -20,7 +20,7 @@
 
 import { stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
@@ -48,6 +48,37 @@ async function checkPort(host, port) {
     srv.once('error', () => resolve({ free: false }));
     srv.once('listening', () => srv.close(() => resolve({ free: true })));
     srv.listen(port, host);
+  });
+}
+
+// v0.19.1 PR-C3: when port is in use, probe http://host:port/bridge/status
+// to decide if WE own it. If the bridge responds with the expected shape
+// we PASS instead of WARN-ing — the bridge sitting on its own port is
+// the healthy state.
+async function probeBridge(host, port, timeoutMs = 750) {
+  return new Promise((resolve) => {
+    const req = httpRequest({
+      method: 'GET',
+      host,
+      port,
+      path: '/bridge/status',
+      timeout: timeoutMs,
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          resolve({ reachable: true, parsed, status: res.statusCode });
+        } catch {
+          resolve({ reachable: true, parsed: null, status: res.statusCode });
+        }
+      });
+    });
+    req.on('error', () => resolve({ reachable: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ reachable: false }); });
+    req.end();
   });
 }
 
@@ -275,12 +306,34 @@ export default async function doctor(argv) {
   }
 
   // ── Port availability (machine-wide, not per-workspace) ──
+  //
+  // v0.19.1 PR-C3: when the port is in use, probe /bridge/status to see
+  // if WE own it. The previous WARN-on-in-use was a false positive when
+  // the operator's own bridge held the port — the healthy state.
   const portRes = await checkPort('127.0.0.1', 4177);
-  checks.push({
-    level: portRes.free ? 'PASS' : 'WARN',
-    label: 'port 4177 available',
-    detail: portRes.free ? 'free for bridge' : 'in use (bridge may already be running)'
-  });
+  if (portRes.free) {
+    checks.push({ level: 'PASS', label: 'port 4177 available', detail: 'free for bridge' });
+  } else {
+    const probe = await probeBridge('127.0.0.1', 4177);
+    const isOurBridge = probe.reachable && probe.parsed && (
+      probe.parsed.bridge === 'maddu' || probe.parsed.ok === true || probe.parsed.framework === 'maddu'
+    );
+    if (isOurBridge) {
+      checks.push({
+        level: 'PASS',
+        label: 'port 4177 available',
+        detail: 'our bridge is running on 127.0.0.1:4177 (/bridge/status responded)'
+      });
+    } else {
+      checks.push({
+        level: 'WARN',
+        label: 'port 4177 available',
+        detail: probe.reachable
+          ? 'in use by another process (/bridge/status returned unexpected shape)'
+          : 'in use by another process (no /bridge/status response)'
+      });
+    }
+  }
 
   // ── Report ──
   console.log();

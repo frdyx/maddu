@@ -50,4 +50,6 @@ export default {
   pipeline:     { tier: 'mutating',  autoTrigger: 'forbidden' },
   advise:       { tier: 'mutating',  autoTrigger: 'forbidden' },
   cost:         { tier: 'read-only', autoTrigger: 'allowed'   },
+  // v0.19.1 — retroactive transcript import populates the ledger.
+  usage:        { tier: 'mutating',  autoTrigger: 'forbidden' },
 };
