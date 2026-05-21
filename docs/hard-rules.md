@@ -74,7 +74,7 @@ Before editing a file area, an agent claims a lane in `.maddu/lanes/claims.json`
 
 ---
 
-## 9. Every auto-trigger crosses the gauntlet *(candidate · ratifies after one slice of real use)*
+## 9. Every auto-trigger crosses the gauntlet *(permanent as of v0.19.0)*
 
 No command that mutates spine, state, or workspace files may auto-fire (cron, schedule, daemon, retry loop) without:
 
@@ -86,7 +86,7 @@ Read-only commands (tier `'read-only'`) may auto-fire freely. Any auto-trigger t
 
 **Why:** A spine that mutates on its own without an operator-visible audit trail is a spine an agent can't trust. The gauntlet ensures every auto-mutation has (a) a typed command identity, (b) an operator's signature in `triggers.json`, and (c) a recorded firing event. Pre-Phase-4 schedules could fire any command silently — that footgun is now closed.
 
-**Status:** candidate. Promoted to permanent after one slice of real use in a foreign repo demonstrates no false-positive refusals on legitimate workflows.
+**Status:** permanent (promoted v0.19.0). Two v0.18 slices, the v0.19 Phase 5 stress harness scenario `advisor-cannot-claim`, and the upgrade-matrix coverage all produced zero false-positive refusals on legitimate workflows. The gauntlet stays.
 
 The `command-tier-discipline` built-in gate enforces (1). The `schedule.tick` evaluateCommandTrigger helper enforces (2) and (3) at fire-time. `verify-spine` accepts `TRIGGER_FIRED`, `PENDING_ACTION_ENQUEUED`, and `PENDING_ACTION_DRAINED` events and checks the enqueued↔drained referential integrity.
 

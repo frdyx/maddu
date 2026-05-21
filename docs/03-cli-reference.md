@@ -414,11 +414,17 @@ $ maddu brief                # pretty-print
 $ maddu brief --json         # emit orientation JSON for machine consumption
 $ maddu brief --drain        # also drain pending-actions queue (emits PENDING_ACTION_DRAINED)
 $ maddu brief --for-agent    # v0.17: single text block scoped for agent consumption
+$ maddu brief --for-agent --triggers a,b --tags x,y   # v0.19: auto-inject matching skills
+$ maddu brief --for-agent --triggers demo --dry-run   # render skills without emitting SKILL_INJECTED
 ```
 
 Prints goal, phase, active session, last slice-stop, counters, and open follow-ups. Run at the start of every agent turn.
 
 **`--for-agent`** *(v0.17)* returns a self-contained text block agents can read on every turn: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands. Mirrors the bridge endpoint `GET /bridge/agent-context` (JSON). `MADDU.md` tells agents to call this at turn start.
+
+**`--triggers a,b --tags x,y`** *(v0.19)* — auto-inject matching skills into the digest. Frontmatter `triggers:` / `tags:` on `.maddu/skills/*.md` files; matcher caps at 3 skills × 8 KB each. Active lane claims auto-fold into triggers (`lane:<id>`) and tags (`<id>`). Active session focus auto-folds into tags. Emits one `SKILL_INJECTED` event per call that injects ≥1 skill. See [24-skills-auto-inject.md](24-skills-auto-inject.md).
+
+**`--dry-run`** *(v0.19, with `--for-agent`)* — render the digest with skills attached but do NOT emit `SKILL_INJECTED`. Useful for previewing.
 
 See [20-governance.md](20-governance.md#turn-start-orientation) and [21-agent-onboarding.md](21-agent-onboarding.md).
 
@@ -535,18 +541,29 @@ $ maddu pipeline run plan-exec-verify-fix "<goal>" # walk stages
 Built-in: `plan-exec-verify-fix` (plan → exec → verify → fix). Seeded
 by `init` and `upgrade`; never overwritten.
 
-## `maddu advise` *(v0.18)*
+## `maddu advise` *(v0.18 stub; v0.19 spawns subprocess)*
 
-Non-claiming advisor query. Writes a stub artifact at
-`.maddu/artifacts/advisors/<id>.md`; the LLM agent fills in the
-response. Rule #5 preserved — Máddu never imports an SDK.
+Non-claiming cross-runtime advisor query. Resolves the runtime
+descriptor (or built-in defaults for `claude` / `codex` / `gemini`),
+auth-checks via `maddu auth list`, spawns the provider binary with
+the prompt, and captures the response into
+`.maddu/artifacts/advisors/<id>.md`. Rule #5 preserved — Máddu
+imports zero SDKs; the provider CLI is a subprocess.
 
 ```bash
 $ maddu advise <runtime> "<prompt>"
+$ maddu advise codex "review this design" --timeout-sec 600
+$ maddu advise gemini "..." --no-auth-check          # bypass auth check (e.g. you logged in via gemini's own CLI)
+$ maddu advise claude "..." --stub-only              # v0.18 behavior: write stub only, no subprocess
 ```
 
-The `advisor-non-claiming` gate refuses any `LANE_CLAIMED` event
-whose actor matches a recorded advisor session — rule #8 companion.
+Refuses cleanly (exit 2 + actionable error) when the provider isn't
+signed in. The `advisor-non-claiming` gate refuses any `LANE_CLAIMED`
+event whose actor matches a recorded advisor session — rule #8
+companion. Both `ADVISOR_INVOKED` and `ADVISOR_ARTIFACT_WRITTEN`
+events land on every call; the artifact event carries `status`
+(`ok` / `timeout` / `nonzero-exit` / `spawn-error` / `stub`) and
+`exitCode`.
 
 ## `maddu cost` *(v0.18)*
 

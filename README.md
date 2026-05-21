@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 0.18.0](https://img.shields.io/badge/version-0.18.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 0.19.0](https://img.shields.io/badge/version-0.19.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -23,6 +23,19 @@ npx github:frdyx/maddu init
 </div>
 
 ---
+
+## What's new in v0.19.0
+
+**Completeness and hardening.** v0.18 shipped the polished UX surface; v0.19 closes every wiring gap behind it.
+
+- **Token ledger fully wired.** Workers self-report `TOKEN_USAGE_REPORTED` from inside their subprocess via runtime wrappers (`claude` / `codex` / `gemini`). `maddu cost` shows real numbers after a slice.
+- **Cross-runtime advisors.** `maddu advise codex "review this design"` actually spawns Codex now (auth-checks first, refuses cleanly when not signed in, captures the response into the artifact).
+- **Skill auto-injection.** Frontmatter `triggers:` + `tags:` on `.maddu/skills/*.md` files; matching bodies auto-appended to orientation digests (capped at 3 skills, 24 KB total). New `SKILL_INJECTED` event.
+- **Model routing hints.** `modelPreference` on runtimes / lanes / pipeline stages with precedence resolution; framework forwards `MADDU_MODEL_HINT` env to the worker. Zero new SDK imports.
+- **Stress + upgrade harnesses.** 8 synthetic scenarios catch concurrency / malformed-event / large-spine regressions in ~7.5s. 4 upgrade-matrix paths verify any prior version converges cleanly.
+- **Six new doctor gates.** Doctor moves 25 → 30 PASS in the test consumer.
+
+See [the v0.19 changelog entry](CHANGELOG.md) for the full release notes. Read [`docs/24-skills-auto-inject.md`](docs/24-skills-auto-inject.md), [`docs/25-model-routing.md`](docs/25-model-routing.md), and [`docs/26-stress-testing.md`](docs/26-stress-testing.md) for the deep dives.
 
 ## Zero learning curve (v0.18)
 

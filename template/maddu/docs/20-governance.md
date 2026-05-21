@@ -93,10 +93,15 @@ maddu doctor --severity critical           # filter by severity
 | slash-commands-installed | safety | both `.claude/commands/` and `.codex/commands/` exist; every `maddu-*.md` template is installed in both surfaces with marker-block body byte-equal to the framework copy | v0.18.0 |
 | rule-8-team-lane-disjoint | critical | open teams have disjoint lanes; no overlap with non-team claims | v0.18.0 |
 | pipeline-schema-valid | safety | every `.maddu/config/pipelines/*.json` parses and matches the minimum `{name, stages:[{name,...}]}` schema | v0.18.0 |
-| token-ledger-schema | warn | every `TOKEN_USAGE_REPORTED` row carries the minimum schema `{runtime, sessionId, model, ts}` | v0.18.0 |
+| token-ledger-schema | critical | every `TOKEN_USAGE_REPORTED` row carries the minimum schema `{runtime, sessionId, model, ts}` | v0.18.0 (severity bumped warn → critical in v0.19.0) |
 | advisor-non-claiming | critical | no `LANE_CLAIMED` actor matches any recorded advisor session — rule #8 companion | v0.18.0 |
 | intent-routing-current | safety | `MADDU.md` / `CLAUDE.md` / `AGENTS.md` contain the v0.18 intent-routing table with `/maddu-*` targets | v0.18.0 |
 | suggest-engine-deterministic | warn | `maddu suggest --emit-lane` returns identical output across two consecutive runs on a fixed task set | v0.18.0 |
+| token-ledger-populated | warn | after a worker exits cleanly the token ledger is non-empty — flags a misconfigured wrapper | v0.19.0 |
+| skill-injection-bounded | critical | `SKILL_INJECTED` events stay within the cap (≤3 skills, ≤24 KB total) and all skill ids resolve on disk | v0.19.0 |
+| model-hint-shape | safety | `modelPreference` on runtimes / lanes / pipeline stages has valid shape (string or `{default,plan,exec,verify,review}`) | v0.19.0 |
+| stress-harness-recent | warn | synthetic stress harness ran in the last 30 days (records last-run at `.maddu/state/stress-last-run.json`) | v0.19.0 |
+| upgrade-matrix-recent | warn | upgrade-path matrix ran since the last `maddu.json` install (records last-run at `.maddu/state/upgrade-matrix-last-run.json`) | v0.19.0 |
 
 ## Tracked sources
 
