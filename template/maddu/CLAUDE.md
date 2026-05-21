@@ -54,10 +54,16 @@ explicitly tells you to.
    Claim it before editing:
 
    ```bash
-   maddu lane claim --lane <lane-id> --session <session-id> --focus "<work>"
+   export MADDU_SESSION_ID=<session-id>
+   maddu lane claim --lane <lane-id> --focus "<work>"
    ```
 
    `maddu status` shows current claims so you don't double-edit a lane.
+
+   **Tip (v0.19.1):** if `MADDU_SESSION_ID` is exported, you can omit
+   `--session` from `lane claim`, `lane release`, `session heartbeat`,
+   `session close`, `slice-stop`, `advise`, `team open`, and
+   `pipeline run` — they all fall back to the env var.
 
 ## Heartbeat and close
 
