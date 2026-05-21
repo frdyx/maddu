@@ -436,6 +436,13 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   grid-template-rows: var(--m-head-h) auto 1fr;
   position: relative;
   min-width: 0;
+  /* v1.0.2 — allow the 1fr grid track to shrink below its intrinsic content
+   * size so .stage-body's overflow:auto can actually scroll. Without this
+   * (the v1.0.1 regression) the body grows to content height, pushing
+   * .stage past viewport and the absolute-positioned .stage-foot composer
+   * below the visible area — chat invisible + page can't scroll. */
+  min-height: 0;
+  height: 100%;
 }
 
 .stage-head {
@@ -539,6 +546,9 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
    * the composer is expanded, content above 80 px from the bottom gets
    * temporarily covered until the user submits/clears. */
   padding: 24px 24px 96px;
+  /* v1.0.2 — pair with .stage { min-height: 0 } above so overflow:auto
+   * actually scrolls inside the grid 1fr track. */
+  min-height: 0;
   overflow: auto;
   background: var(--m-bg-0);
 }
