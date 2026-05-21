@@ -47,7 +47,54 @@ export default async function command(argv) {
   // callers; the same builder is reused there.
   if (flags['for-agent']) {
     const agentCtxMod = await loadAgentContext(repoRoot);
-    const block = agentCtxMod.renderAgentContextText(agentCtxMod.buildAgentContext(proj));
+    const baseCtx = agentCtxMod.buildAgentContext(proj);
+    // v0.19 Phase 3 — skill auto-injection.
+    //
+    // Operator passes `--triggers a,b` and/or `--tags x,y` (comma-separated)
+    // to describe what triggered this orientation read. The active lane's
+    // id is folded in automatically as both a trigger ("lane:<id>") and a
+    // tag ("<id>"). Matched skill bodies are appended inline; one
+    // SKILL_INJECTED event is emitted per --for-agent call that actually
+    // injects ≥1 skill.
+    const triggers = parseCsv(flags.triggers);
+    const tags = parseCsv(flags.tags);
+    if (baseCtx.activeSession) {
+      // The active session's focus often hints at the slice trigger.
+      // Pure heuristic — split on whitespace; LLMs don't care about precision.
+      if (baseCtx.activeSession.focus) {
+        for (const w of String(baseCtx.activeSession.focus).split(/\W+/).filter((x) => x.length > 2)) {
+          tags.push(w.toLowerCase());
+        }
+      }
+    }
+    for (const c of baseCtx.laneClaims || []) {
+      if (c.lane) {
+        triggers.push(`lane:${c.lane}`);
+        tags.push(c.lane);
+      }
+    }
+    let injected = [];
+    if (triggers.length || tags.length) {
+      const skillsList = await loadSkillsForInjection(repoRoot);
+      const matched = agentCtxMod.matchSkillsForContext(skillsList, { triggers, tags });
+      injected = matched;
+      if (injected.length > 0 && !flags['dry-run']) {
+        const totalBytes = injected.reduce((n, s) => n + (s.body || '').length, 0);
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.SKILL_INJECTED,
+          actor: baseCtx.activeSession?.id || null,
+          data: {
+            sessionId: baseCtx.activeSession?.id || null,
+            triggers,
+            tags,
+            skillIds: injected.map((s) => s.id),
+            totalBytes,
+          },
+        });
+      }
+    }
+    const ctxWithSkills = { ...baseCtx, injectedSkills: injected };
+    const block = agentCtxMod.renderAgentContextText(ctxWithSkills);
     process.stdout.write(block);
     return;
   }
@@ -121,6 +168,64 @@ async function loadAgentContext(repoRoot) {
     try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
   }
   throw new Error('agent-context.mjs not found');
+}
+
+function parseCsv(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.flatMap((x) => parseCsv(x));
+  return String(v).split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+// Load the full skill set from .maddu/skills/, parsing frontmatter
+// triggers/tags. Returns [{ id, title, triggers, tags, body, updated }].
+async function loadSkillsForInjection(repoRoot) {
+  const skillsDir = path.join(repoRoot, '.maddu', 'skills');
+  let entries;
+  try { entries = await fs.readdir(skillsDir, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const ent of entries) {
+    if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+    try {
+      const text = await fs.readFile(path.join(skillsDir, ent.name), 'utf8');
+      const parsed = parseSkillFrontmatter(text);
+      out.push({
+        id: parsed.fm.id || ent.name.replace(/\.md$/, ''),
+        title: parsed.fm.title || null,
+        triggers: Array.isArray(parsed.fm.triggers) ? parsed.fm.triggers : [],
+        tags: Array.isArray(parsed.fm.tags) ? parsed.fm.tags : [],
+        body: parsed.body,
+        updated: parsed.fm.updated || null,
+      });
+    } catch {}
+  }
+  return out;
+}
+
+// Minimal frontmatter parser. Mirrors lib/skills.mjs#parseSkill but kept
+// local so brief.mjs doesn't have to import skills.mjs (which has writer
+// side-effects).
+function parseSkillFrontmatter(text) {
+  const out = { fm: {}, body: '' };
+  if (!text.startsWith('---')) { out.body = text; return out; }
+  const end = text.indexOf('\n---', 4);
+  if (end < 0) { out.body = text; return out; }
+  const head = text.slice(4, end).replace(/^\n/, '');
+  out.body = text.slice(end + 4).replace(/^\r?\n/, '');
+  for (const raw of head.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    const i = line.indexOf(':');
+    if (i < 0) continue;
+    const key = line.slice(0, i).trim();
+    const rest = line.slice(i + 1).trim();
+    let value;
+    if (rest === '') value = '';
+    else if (/^(\[|\{|".*"|-?\d+(\.\d+)?|true|false|null)/.test(rest)) {
+      try { value = JSON.parse(rest); } catch { value = rest; }
+    } else { value = rest; }
+    out.fm[key] = value;
+  }
+  return out;
 }
 
 async function loadPendingActions(repoRoot) {

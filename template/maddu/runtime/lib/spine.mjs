@@ -128,7 +128,15 @@ export const EVENT_TYPES = {
   PIPELINE_HALTED:           'PIPELINE_HALTED',
   ADVISOR_INVOKED:           'ADVISOR_INVOKED',
   ADVISOR_ARTIFACT_WRITTEN:  'ADVISOR_ARTIFACT_WRITTEN',
-  TOKEN_USAGE_REPORTED:      'TOKEN_USAGE_REPORTED'
+  TOKEN_USAGE_REPORTED:      'TOKEN_USAGE_REPORTED',
+  // v0.19 Phase 3 — skill auto-injection. Emitted when `maddu brief
+  // --for-agent` (or the agent-context bridge endpoint) appends one or
+  // more skill bodies to the orientation digest based on trigger/tag
+  // matches. data: { sessionId, triggers, tags, skillIds, totalBytes }.
+  SKILL_INJECTED:            'SKILL_INJECTED',
+  // v0.19 Phase 5 — synthetic stress harness signals a rejected NDJSON
+  // line during malformed-event recovery. data: { segment, lineIndex, reason }.
+  SPINE_LINE_REJECTED:       'SPINE_LINE_REJECTED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

@@ -93,6 +93,10 @@ export async function project(repoRoot) {
   const advisors = [];
   const tokenLedger = [];
 
+  // v0.19 Phase 3 — skill auto-injection ledger.
+  //   skillInjections: [{ ts, sessionId, skillIds[], triggers[], tags[], totalBytes }]
+  const skillInjections = [];
+
   let lastEventId = null;
 
   for (const ev of events) {
@@ -668,6 +672,18 @@ export async function project(repoRoot) {
         break;
       }
       // v0.18 Phase 4 — token ledger.
+      // v0.19 Phase 3 — skill auto-injection event.
+      case 'SKILL_INJECTED': {
+        skillInjections.push({
+          ts: ev.ts,
+          sessionId: ev.data?.sessionId || ev.actor || null,
+          skillIds: Array.isArray(ev.data?.skillIds) ? ev.data.skillIds.slice() : [],
+          triggers: Array.isArray(ev.data?.triggers) ? ev.data.triggers.slice() : [],
+          tags: Array.isArray(ev.data?.tags) ? ev.data.tags.slice() : [],
+          totalBytes: typeof ev.data?.totalBytes === 'number' ? ev.data.totalBytes : 0,
+        });
+        break;
+      }
       case 'TOKEN_USAGE_REPORTED': {
         // Minimum schema: { runtime, sessionId, model, ts }. Optional:
         // inputTokens, outputTokens, cacheRead, cacheCreation. We keep
@@ -769,6 +785,8 @@ export async function project(repoRoot) {
     pipelines: Array.from(pipelines.values()),
     advisors: advisors.slice(),
     tokenLedger: tokenLedger.slice(),
+    // v0.19 Phase 3 — skill auto-injection ledger (cap 200 most recent).
+    skillInjections: skillInjections.slice(-200),
   };
 }
 
