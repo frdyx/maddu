@@ -117,16 +117,37 @@ End-user docs popup. Reads `docs/*.md` via `/bridge/docs` and `/bridge/docs/<slu
 
 Bridge config, lane catalog, provider auth shortcuts, MCP registry shortcuts. The "edit" surfaces here are convenience wrappers around the same endpoints used by the other routes.
 
-### `#pipelines` *(v0.18)*
+### `#pipelines` *(v0.18, narrowed in v0.19.2)*
 
-The v0.18 backbone view — one route, four cards:
+Pipeline runs only. Last 10 `PIPELINE_*` runs with stage trail (✓ for completed stages, … for running). Status tag tones: ok / warn / neutral. Reads `GET /bridge/pipelines`. In v0.18 this route bundled teams + pipelines + cost + a cheatsheet into one 4-card grid; v0.19.2 split each into its own route (see below). The slash-command cheatsheet moved to `#conductor` as a small "Slash-command quick reference" card.
 
-- **Teams** — open and closed `TEAM_OPENED` chains with their allocated lanes and members. Empty state explains how to fan out via `maddu team open` or `/maddu-team`.
-- **Pipelines** — last 10 `PIPELINE_*` runs with stage trail (✓ for completed stages, … for running). Status tag tones: ok / warn / neutral.
-- **Token cost ledger** — `TOKEN_USAGE_REPORTED` rolled up by runtime, with calls + input/output sums and an explicit "unreported" count (never zero-filled).
-- **Slash-command cheatsheet** — every `/maddu-*` command with one-line description. Points at MADDU.md §"Intent routing" so operators learn the natural-language form too.
+### `#cost` *(v0.19.2)*
 
-All four cards refresh on the bridge event stream with 400 ms debounce — same pattern as the Claims map.
+Token + call rollup per runtime. `TOKEN_USAGE_REPORTED` rolled up with calls + input/output sums and an explicit "unreported" count (never zero-filled). Reads `GET /bridge/cost`. Empty-state hints at the worker minimum schema (`{ runtime, sessionId, model, ts }`) and `maddu cost --unreported-count`.
+
+### `#advisors` *(v0.19.2)*
+
+Non-claiming advisor query artifacts. Each row shows the artifact id, runtime, parent session, timestamp, refusal flag, and a first-200-char preview of the prompt or body. Newest first. Reads `GET /bridge/advisors`. Empty-state points at `/maddu-advise <runtime> "<prompt>"`.
+
+### `#skillinjections` *(v0.19.2)*
+
+Log of `SKILL_INJECTED` events — which skill, which slice, which session, when. Distinct from the manual `#skills` route (which lists the skills themselves). Reads `GET /bridge/skill-injections`. Bounded by the `skill-injection-bounded` gate.
+
+### `#modelrouting` *(v0.19.2)*
+
+Per-runtime + per-lane + per-pipeline `modelPreference`. Three panels:
+
+- **Per-runtime modelPreference** — every registered runtime descriptor's preference.
+- **Per-lane defaults** — lanes with a `defaults.modelPreference` override in `.maddu/lanes/catalog.json`.
+- **Per-pipeline stage hints** — pipeline stages with stage-level `modelPreference`.
+
+Reads `GET /bridge/runtimes`, `GET /bridge/lanes`, and `GET /bridge/pipelines`. See [25-model-routing.md](25-model-routing.md) for the resolution order.
+
+### `#teststatus` *(v0.19.2)*
+
+Last-run timestamps for the stress harness and upgrade matrix. Each row carries a tone tag — `ok` if recent, `warn (Nd)` if older than the threshold (7 days for stress, 14 for upgrade matrix; matches the doctor gates). Reads `GET /bridge/test-status`, which reads the canonical state files written by `scripts/test/stress-harness.mjs` et al.
+
+All v0.19.2 routes refresh on the bridge event stream with 400 ms debounce — same pattern as the Claims map.
 
 ## Common operator flows
 
