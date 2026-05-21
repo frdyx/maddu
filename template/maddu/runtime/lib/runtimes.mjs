@@ -13,9 +13,34 @@
 import { mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
 import { randomBytes } from 'node:crypto';
 import { append, EVENT_TYPES, genWorkerId } from './spine.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Built-in wrapper map. Descriptors carrying `wrapper: 'claude' | 'codex' |
+// 'gemini'` route their spawn through the matching wrapper script which
+// parses token usage out of the provider's stream-json (where available)
+// and emits TOKEN_USAGE_REPORTED events. Wrappers live as standalone .mjs
+// scripts so they execute inside the worker subprocess — hard rule #5
+// stays preserved (framework code never imports a provider SDK).
+const BUILTIN_WRAPPERS = {
+  'claude':   join(__dirname, 'runtimes', 'claude-wrapper.mjs'),
+  'codex':    join(__dirname, 'runtimes', 'codex-wrapper.mjs'),
+  'gemini':   join(__dirname, 'runtimes', 'gemini-wrapper.mjs'),
+};
+
+function wrapperPathFor(descriptor) {
+  if (!descriptor) return null;
+  // Explicit absolute path wins.
+  if (descriptor.wrapperPath) return descriptor.wrapperPath;
+  // Named built-in lookup.
+  const name = descriptor.wrapper || null;
+  if (name && BUILTIN_WRAPPERS[name]) return BUILTIN_WRAPPERS[name];
+  return null;
+}
 
 const DESCRIPTOR_SCHEMA = 1;
 const DEFAULT_DETECT_TIMEOUT_MS = 5000;
@@ -57,6 +82,19 @@ function defaultDescriptor(name) {
     // parent that fans out N workers shows N distinct branches instead
     // of N events all stamped with the parent's actor id.
     autoRegister: false,
+    // v0.19 Phase 1 — opt-in token-usage wrapper. When set, spawnWorker
+    // routes the worker through a wrapper script that tees stdout and
+    // parses token usage out of the stream. Null = no wrapper (legacy
+    // behavior, descriptor untouched).
+    //   wrapper:     name of built-in wrapper ('claude' | 'codex' | 'gemini')
+    //   wrapperPath: absolute path to a custom wrapper .mjs (overrides built-in)
+    wrapper: null,
+    wrapperPath: null,
+    // v0.19 Phase 4 — model routing preference. Worker decides whether
+    // to honor it; framework only forwards as MADDU_MODEL_HINT env. May
+    // also be a richer { default, plan, exec, verify, review } object;
+    // the caller resolves a single string before spawning.
+    modelPreference: null,
     notes: ''
   };
 }
@@ -232,7 +270,19 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   const logFh = await open(logPath, 'a');
   const args = [...(r.args || []), ...(opts.extraArgs || [])];
   const cwd = opts.cwd || r.spawn?.cwd || process.cwd();
-  const env = { ...process.env, MADDU_WORKER_ID: workerId, MADDU_BRIDGE_URL: opts.bridgeUrl || 'http://127.0.0.1:4177', MADDU_RUNTIME: name };
+  const env = {
+    ...process.env,
+    MADDU_WORKER_ID: workerId,
+    MADDU_BRIDGE_URL: opts.bridgeUrl || 'http://127.0.0.1:4177',
+    MADDU_RUNTIME: name,
+    // v0.19 Phase 1 — wrappers append TOKEN_USAGE_REPORTED directly into
+    // the spine; they need the repo root explicitly because the worker
+    // cwd may have been overridden by opts.cwd.
+    MADDU_REPO_ROOT: repoRoot,
+  };
+  // v0.19 Phase 4 — model routing hint propagation (resolved in caller).
+  // Worker decides whether to honor it; framework just forwards.
+  if (opts.modelHint) env.MADDU_MODEL_HINT = opts.modelHint;
 
   // v0.17 Phase 3 — runtime descriptors carrying autoRegister:true mint
   // a fresh child session per spawn (linked to opts.session as parent
@@ -252,8 +302,15 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   if (opts.lane) env.MADDU_LANE = opts.lane;
 
   let child, pid = null, error = null;
+  // v0.19 Phase 1 — if the descriptor opts in to a wrapper, spawn:
+  //   node <wrapper-script> <real-binary> [args...]
+  // The wrapper tees stdout transparently to the same log fd while
+  // parsing token-usage frames out of the provider stream.
+  const wrapperPath = wrapperPathFor(r);
+  const spawnBinary = wrapperPath ? process.execPath : r.binary;
+  const spawnArgs = wrapperPath ? [wrapperPath, r.binary, ...args] : args;
   try {
-    child = spawn(r.binary, args, {
+    child = spawn(spawnBinary, spawnArgs, {
       cwd, env, stdio: ['ignore', logFh.fd, logFh.fd], detached: true
     });
     pid = child.pid;
@@ -272,7 +329,7 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     type: EVENT_TYPES.WORKER_SPAWNED,
     actor: effectiveSession,
     lane: opts.lane || null,
-    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, error }
+    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, wrapper: wrapperPath ? (r.wrapper || 'custom') : null, modelHint: opts.modelHint || null, error }
   });
   if (error) {
     // Mark as exited so projection reflects a failed spawn.
