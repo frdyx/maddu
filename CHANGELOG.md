@@ -11,6 +11,35 @@ narrative summary.
 
 ---
 
+## [v1.0.2] · 2026-05-21 · stage-scroll hotfix
+
+v1.0.1 introduced `#app { overflow: hidden }` to prevent the rail from
+pushing the composer below viewport, but missed `min-height: 0` on the
+`.stage` grid container and `.stage-body`. Without those, the `1fr`
+grid track grew to the body's intrinsic content size, pushed `.stage`
+past viewport, and the absolute-positioned `.stage-foot` composer
+ended up below the visible area while the page itself couldn't scroll
+(clipped by `#app`'s overflow).
+
+### Fix
+
+- `.stage` gains `min-height: 0` + `height: 100%` so the grid track is
+  bounded by the parent column.
+- `.stage-body` gains `min-height: 0` so its existing `overflow: auto`
+  actually activates inside the 1fr track.
+
+Two lines of behavior change. Composer anchored. Stage-body scrolls.
+
+### Verification
+
+- Test consumer doctor: green at v1.0.1 baseline; CSS-only change does
+  not affect any doctor gate.
+- Manual smoke at 1280×720 + 1280×600: composer visible at viewport
+  bottom; route content scrolls inside the stage-body; rail still
+  scrolls inside its own column.
+
+---
+
 ## [v1.0.1] · 2026-05-21 · cockpit UX patch
 
 Post-v1.0.0 burn-in revealed three real cockpit-UX issues. Single-PR fix,

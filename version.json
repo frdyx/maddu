@@ -1,5 +1,5 @@
 {
-  "version": "1.0.1",
-  "phase": "cockpit-ux-patch",
+  "version": "1.0.2",
+  "phase": "stage-scroll-hotfix",
   "released": "2026-05-21"
 }
