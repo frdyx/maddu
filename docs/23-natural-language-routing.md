@@ -56,7 +56,9 @@ Shipped in `MADDU.md` (full), with compact copies in `CLAUDE.md` and
 | "ask claude/codex/gemini …", "second opinion …" | `/maddu-advise` |
 | "what's going on", "status", "where are we" | `/maddu-status` |
 | "how much have I used", "tokens", "cost" | `/maddu-cost` |
-| "I don't know what to do" / vague request | `/maddu-help` then `/maddu-plan` |
+| "I don't know what to do" / vague request | `/maddu-suggest` then dispatch its recommendation |
+| "what should I run for …" / "recommend a command" | `/maddu-suggest` |
+| "what slash commands exist", "show me the surface" | `/maddu-help` |
 | "cancel", "stop the slice" | `/maddu-cancel` |
 | "remember this", "note that …" | `/maddu-note` |
 | "what skill should I use for …" | `/maddu-skill` |

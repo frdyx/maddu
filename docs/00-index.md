@@ -57,11 +57,12 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 | 19 | [19-multi-workspace.md](19-multi-workspace.md) | One bridge across N repos: `maddu workspace`, the rail switcher, "All workspaces" mode, `maddu global` crons + policies, `triggered_by` ancestry. *(v0.13.0)* |
 | 20 | [20-governance.md](20-governance.md) | Governance layer (Phases 1–6): orientation, gate authoring, tracked sources, slice scope-lock, trigger discipline, post-stop review lane. *(v0.16.0)* |
 | 21 | [21-agent-onboarding.md](21-agent-onboarding.md) | Agent-native bootstrap (v0.17): root-level agent files, `maddu register` shortcut, session-tree provenance, autoRegister spawns, stale-session janitor, `brief --for-agent` + `/bridge/agent-context`. *(v0.17.0)* |
-| 22 | [22-slash-commands.md](22-slash-commands.md) | No-learning-curve UX shell (v0.18): the 12 `/maddu-*` slash commands, marker discipline, when to use slash vs verbose CLI, adding your own commands. *(v0.18.0)* |
+| 22 | [22-slash-commands.md](22-slash-commands.md) | No-learning-curve UX shell (v0.18, expanded v0.19.1): the 13 `/maddu-*` slash commands, raw-frontmatter install, when to use slash vs verbose CLI, adding your own commands. *(v0.18.0 / v0.19.1)* |
 | 23 | [23-natural-language-routing.md](23-natural-language-routing.md) | The intent-routing pattern: how the agent classifies operator-typed phrases without a framework parser; `maddu suggest` companion; plugin-author extension points. *(v0.18.0)* |
 | 24 | [24-skills-auto-inject.md](24-skills-auto-inject.md) | Skill auto-injection (v0.19): trigger/tag frontmatter, the matcher, the ≤3-skills cap, the `SKILL_INJECTED` event, and the `skill-injection-bounded` gate. *(v0.19.0)* |
 | 25 | [25-model-routing.md](25-model-routing.md) | Model routing hints (v0.19): `modelPreference` on runtimes/lanes/pipelines, the resolution precedence chain, `MADDU_MODEL_HINT` env, the `model-hint-shape` gate. *(v0.19.0)* |
 | 26 | [26-stress-testing.md](26-stress-testing.md) | Stress + upgrade harnesses (v0.19): the 8 synthetic scenarios, the 4 upgrade-matrix paths, `stress-harness-recent` + `upgrade-matrix-recent` gates. *(v0.19.0)* |
+| 27 | [27-transcript-import.md](27-transcript-import.md) | `maddu usage import --from claude-code` — retroactively backfill the token ledger from `~/.claude/projects/<slug>/*.jsonl`. Idempotent via `importHash`. *(v0.19.1)* |
 
 Reference docs that are not in the numbered series:
 

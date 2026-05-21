@@ -267,10 +267,17 @@ export default async function init(argv) {
   await ensureShimExecutable(cwd);
 
   console.log(`\nMáddu v${fwVersion} installed.`);
-  console.log(`\nNext steps (from this repo):`);
+  console.log(`\nNext step: open this repo in Claude Code or Codex CLI and type:`);
+  console.log(`\n  /maddu-help                # discover the slash-command surface`);
+  console.log(`  /maddu-suggest <task>      # "what should I run for X?"`);
+  console.log(`  /maddu-autopilot <task>    # end-to-end task pipeline`);
+  console.log(`\nThe slash-command surface is the no-learning-curve entry point —`);
+  console.log(`no flags to memorize, no command names to recall. Just describe what`);
+  console.log(`you want to do.`);
+  console.log(`\nPower users / scripts can still use the verbose CLI:`);
   console.log(`  ./maddu/run doctor                          # verify install`);
   console.log(`  ./maddu/run start                           # boot bridge on 127.0.0.1:4177`);
   console.log(`  ./maddu/run session start "first session"   # register + cache active session`);
-  console.log(`\nOr to use 'maddu' as a bare command anywhere:`);
+  console.log(`\nOr install 'maddu' globally:`);
   console.log(`  npm install -g github:frdyx/maddu#v${fwVersion}`);
 }

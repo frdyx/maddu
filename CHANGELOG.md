@@ -11,6 +11,84 @@ narrative summary.
 
 ---
 
+## [v0.19.1] · 2026-05-21 · burn-in patch series
+
+A tight follow-up to v0.19.0, fixing 11 real friction findings surfaced
+during the first burn-in inside an unrelated foreign repo (the user's
+`snyggare` project). Four bundled PRs, no v1.0 commitment yet.
+
+### PR-A — UX shell hygiene
+
+- **Slash-command files installed raw, not marker-wrapped.** Claude
+  Code's frontmatter parser requires `---` on line 1; the previous
+  `<!-- BEGIN MADDU v1 -->` marker was clobbering the parsed
+  `description:`. Framework owns these files in their entirety; operator-
+  authored slash commands belong in sibling files NOT prefixed
+  `maddu-`. `slash-commands-installed` gate updated to verify raw byte-
+  equality and surface legacy marker installs as drift.
+- **Display-not-summarize discipline** added to the slash bodies that
+  surface CLI output verbatim: `/maddu-help`, `/maddu-status`,
+  `/maddu-cost`, `/maddu-doctor`, `/maddu-skill`.
+- **`[phase N]` tags removed** from `maddu help` — every advertised
+  verb now ships.
+- **New `/maddu-suggest`** slash command dispatches `./maddu/run
+  suggest` for vague-task triage. Help roster, intent-routing tables
+  (MADDU.md + CLAUDE.section.md + AGENTS.section.md), and docs/22 all
+  updated.
+- **`maddu skill add`** works as an alias for `create` (help text
+  already advertised it). A new doctor gate
+  `help-roster-matches-cli` walks every `under:` verb in the help
+  ROSTER and verifies it resolves to a real subcommand.
+
+### PR-B — CLI consistency
+
+- **`MADDU_SESSION_ID` env-var fallback** added to `lane claim`,
+  `lane release`, `session heartbeat`, `session close`, and
+  `slice-stop` (matching `advise` / `team open` / `pipeline run` which
+  already honored the env in v0.19.0). Documented in
+  `template/maddu/CLAUDE.md`.
+- **`slice-stop` accepts a positional first argument as the summary**
+  when `--summary` is omitted. Forgives the natural
+  `slice-stop --session X "SLICE STOP: ..."` agent invocation.
+
+### PR-C — Honesty + observability
+
+- **`maddu cost` empty-state honesty.** The output now explains WHY
+  the ledger is empty (the bridge only sees workers it spawns; direct
+  Claude Code / Codex CLI sessions aren't captured because the bridge
+  isn't their parent process). Points operators at the new import
+  path.
+- **`maddu usage import --from claude-code`** walks
+  `~/.claude/projects/<slug>/*.jsonl` and emits one
+  `TOKEN_USAGE_REPORTED` event per assistant turn with
+  `source: "claude-code-transcript"`. Idempotent via `importHash`
+  (sessionUuid + lineNumber + usage payload). Flags: `--dry-run`,
+  `--since <iso>`, `--session <substring>`. Pure stdlib parsing — no
+  provider SDKs. Full doc at
+  [`docs/27-transcript-import.md`](docs/27-transcript-import.md).
+- **Port-4177 doctor gate** now probes `/bridge/status` when the port
+  is in use. If our bridge owns it, the gate PASSes with "our bridge
+  is running on 127.0.0.1:4177"; otherwise it WARNs as before. False-
+  positive eliminated.
+- **Six new read-only bridge endpoints** for cockpit nav:
+  `/bridge/teams`, `/bridge/cost`, `/bridge/advisors`,
+  `/bridge/pipelines`, `/bridge/skill-injections`, `/bridge/test-status`.
+  Pure projection-slice serializers, no state changes.
+
+### PR-D — Onboarding pivot + docs sweep + release
+
+- **`maddu init` post-install message** leads with the slash-command
+  surface (`/maddu-help`, `/maddu-suggest`, `/maddu-autopilot`); the
+  verbose CLI moves to a "Power users / scripts" subsection.
+- **README + 8 numbered docs** touched up for the v0.19.1 surface
+  (slash-command count 12 → 13; raw-frontmatter rationale; new
+  `usage import` command; new bridge endpoints).
+- **New doc**: `docs/27-transcript-import.md` covers `maddu usage
+  import --from claude-code` in full.
+- **`v0.19.1` tag** pushed to origin.
+
+---
+
 ## [v0.19.0] · 2026-05-21 · completeness and hardening
 
 **Stable, complete.** v0.18 shipped the polished UX surface backed by partially-wired primitives — token ledger was infrastructure-only, advisors were 50% wired, skill auto-injection and model routing were deferred, stress + upgrade test coverage was thin. v0.19 closes every gap. Workers self-report token usage, advisors actually spawn the provider subprocess, skill bodies are auto-injected into orientation digests, lanes and pipeline stages can prefer specific models, and synthetic stress + upgrade-matrix harnesses keep concurrency and upgrade invariants honest.

@@ -52,8 +52,9 @@ one. The verbose CLI stays first-class for scripts and CI.
 | `/maddu-advise <runtime> <prompt>` | Non-claiming advisor query; artifact-only. |
 | `/maddu-status` | Pretty-print state across surfaces. |
 | `/maddu-cost` | Token / call rollup per session, day, runtime, model. |
-| `/maddu-skill <verb>` | List / search / apply skills. |
+| `/maddu-skill <verb>` | List / search / create / apply skills. |
 | `/maddu-help` | Discovery guide for every slash command. |
+| `/maddu-suggest <task>` | Recommend a slash command + lane for a vague task. |
 | `/maddu-doctor` | Run hard-rule gates and surface findings. |
 | `/maddu-cancel` | Stop the current slice cleanly. |
 | `/maddu-note <text>` | One-liner into the operator inbox. |
@@ -70,16 +71,34 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-✓ Máddu v0.18.0 installed.
+Máddu v0.19.1 installed.
 
+Next step: open this repo in Claude Code or Codex CLI and type:
+
+  /maddu-help                # discover the slash-command surface
+  /maddu-suggest <task>      # "what should I run for X?"
+  /maddu-autopilot <task>    # end-to-end task pipeline
+```
+
+That's the operator surface: slash commands. No flags to memorize, no
+CLI verb to recall — type a slash command (or just natural language —
+"ship the login form") and the agent dispatches the right thing and
+tells you which.
+
+### Power users / scripts
+
+The verbose CLI is always available — it's what the slash commands
+themselves dispatch under the hood:
+
+```bash
 $ ./maddu/run start &
-Máddu  v0.17.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v0.19.1  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
 (active session cached — idempotent on MADDU_SESSION_ID)
 
-$ ./maddu/run slice-stop --summary "wired the bridge to my repo"
+$ ./maddu/run slice-stop "wired the bridge to my repo"
 SLICE_STOP appended  evt_20260518084211_a1b2c6
 
 $ tail -n 1 .maddu/events/000000000001.ndjson
