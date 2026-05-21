@@ -11,6 +11,76 @@ narrative summary.
 
 ---
 
+## [v0.19.2] · 2026-05-21 · final-polish patch series
+
+A two-PR follow-up to v0.19.1, closing the last items surfaced by the
+re-burn-in v2 in `snyggare`. No v1.0 commitment yet — user-driven
+ceremony after the final re-burn.
+
+### PR-A — Slash output rendering discipline
+
+The five display-oriented slash commands (`/maddu-help`,
+`/maddu-doctor`, `/maddu-status`, `/maddu-cost`, `/maddu-skill`) said
+"print verbatim" but Claude Code's bash-output view collapses long
+output behind `… +N lines (ctrl+o to expand)` — the agent treated the
+collapsed display as compliant and the operator never saw the content.
+The unconditional "what are you trying to do?" follow-up also fired
+even when the operator's previous message already had context.
+
+- **Re-print pattern** — every display-oriented body now instructs the
+  agent to re-print the CLI output inside a fenced markdown code block
+  in its reply. That's the only way the roster, doctor verdicts,
+  brief, ledger, or skill list end up visible to the operator.
+- **Conditional follow-up** — the "what are you trying to do?"
+  question only fires when the operator typed the slash command with
+  no surrounding intent. If the previous message gave context, the
+  agent points at the matching row in one line.
+- **`slash-command-display-pattern` doctor gate** asserts the
+  canonical phrase "re-print" is present in each of the five
+  display-oriented templates so a regression fails CI.
+
+### PR-B — Cockpit nav completeness
+
+The v0.18 `Pipelines` cockpit route bundled teams + pipelines + cost +
+the slash cheatsheet into one 4-card grid. v0.19 added skill injection
++ model routing + test status data without dedicated nav, so operators
+had to know to click "Pipelines" to find their token cost. v0.19.2
+splits each into its own sidebar entry:
+
+- **`#pipelines`** — narrowed to actual pipeline runs only. Reads
+  `GET /bridge/pipelines`.
+- **`#cost`** — Token + call rollup per runtime. Reads `GET /bridge/cost`.
+- **`#advisors`** — Advisor artifact list (newest first), with refusal
+  flag and first-200-char preview. Reads `GET /bridge/advisors`.
+- **`#skillinjections`** — Log of `SKILL_INJECTED` events. Reads
+  `GET /bridge/skill-injections`.
+- **`#modelrouting`** — Per-runtime + per-lane + per-pipeline
+  `modelPreference`. Three panels. Reads `GET /bridge/runtimes`,
+  `GET /bridge/lanes`, `GET /bridge/pipelines`.
+- **`#teststatus`** — Last-run timestamps for the stress harness and
+  upgrade matrix; `warn (Nd)` tag if older than threshold. Reads
+  `GET /bridge/test-status`.
+
+The slash-command cheatsheet moved from the bundled Pipelines route to
+a small "Slash-command quick reference" card on `#conductor`.
+
+### Docs sweep
+
+- `docs/04-cockpit-tour.md` — documents the six new routes.
+- `docs/22-slash-commands.md` — documents the re-print pattern and
+  the new doctor gate.
+- `docs/25-model-routing.md` — points at the new Model Routing
+  cockpit panel.
+- All updated docs mirrored to `template/maddu/docs/`.
+
+### Doctor
+
+Test-consumer doctor: 32 PASS · 1 WARN · 0 FAIL (the workspace-registry
+WARN is acceptable). The new `slash-command-display-pattern` gate
+brings the total to 32 from the v0.19.1 baseline of 31.
+
+---
+
 ## [v0.19.1] · 2026-05-21 · burn-in patch series
 
 A tight follow-up to v0.19.0, fixing 11 real friction findings surfaced

@@ -2,6 +2,8 @@
 
 v0.19 adds a way to express **model preferences** without breaking hard rule #5. A lane can prefer Claude Sonnet for plan stages and Haiku for exec. A specific pipeline stage can override to use a faster model. The framework never imports a provider SDK to make that happen — it only forwards the preference as `MADDU_MODEL_HINT=<value>` to the worker subprocess. The worker decides whether to honor it.
 
+The cockpit's `#modelrouting` route (v0.19.2) gives you a read-only view of the per-runtime, per-lane, and per-pipeline preferences at a glance. See [04-cockpit-tour.md](04-cockpit-tour.md#modelrouting-v0192) for the layout.
+
 ## The `modelPreference` field
 
 Three places accept `modelPreference`, with override precedence (highest wins):

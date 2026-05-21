@@ -72,11 +72,20 @@ const ROUTES = {
                 keywords: 'gates doctor verdict severity hard-rules' },
   reviews:    { title: 'Reviews',    group: 'verify',    rank: 7,                 render: renderReviews,    description: 'Post-stop reviews. Verdict counts + per-review markdown.',
                 keywords: 'reviews verdict findings followups P1 P2 P3' },
-  // v0.18 — UX shell backbone surface: teams, pipelines, cost ledger, and
-  // the slash-command cheatsheet. One route, four cards. Reads projection
-  // slots added in Phase 4; never mutates state.
-  pipelines:  { title: 'Pipelines',  group: 'operate',   rank: 8,                 render: renderPipelinesV018, description: 'v0.18 backbone — teams, pipelines, token cost ledger, and the /maddu-* slash-command cheatsheet.',
-                keywords: 'pipelines teams cost tokens advisors slash commands cheatsheet v0.18' },
+  // v0.18 — backbone routes split into dedicated entries in v0.19.2. Each
+  // route reads the matching /bridge/<slice> endpoint (v0.19.1 PR-C4).
+  pipelines:  { title: 'Pipelines',  group: 'operate',   rank: 8,                 render: renderPipelinesRoute, description: 'Pipeline runs with stage timeline. plan-exec-verify-fix and related multi-stage workflows.',
+                keywords: 'pipelines runs stages plan-exec-verify-fix autopilot' },
+  cost:       { title: 'Cost',       group: 'operate',   rank: 9,                 render: renderCostRoute,      description: 'Token / call rollup per session, day, model, runtime. Surfaces unreported-token gaps honestly.',
+                keywords: 'cost tokens ledger usage billing rollup unreported' },
+  advisors:   { title: 'Advisors',   group: 'operate',   rank: 10,                render: renderAdvisorsRoute,  description: 'Non-claiming advisor query artifacts. Runtime + session + ts + first-line preview.',
+                keywords: 'advisors advise artifact non-claiming consult opinion' },
+  skillinjections: { title: 'Skill Injections', group: 'operate', rank: 11,       render: renderSkillInjectionsRoute, description: 'Log of SKILL_INJECTED events — which skill, which slice, when. Bounded by the skill-injection-bounded gate.',
+                keywords: 'skill injection injections inlined recipe slice budget' },
+  modelrouting: { title: 'Model Routing', group: 'connect', rank: 7,              render: renderModelRoutingRoute, description: 'Per-runtime + per-lane + per-pipeline modelPreference. Active hints by spawn.',
+                keywords: 'model routing modelPreference runtime lane pipeline stage hint' },
+  teststatus: { title: 'Test Status', group: 'verify',   rank: 8,                 render: renderTestStatusRoute, description: 'Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.',
+                keywords: 'test status stress harness upgrade matrix roundtrip ci recent' },
   dashboard:  { title: 'Dashboard',  group: 'reference', rank: 1,                 render: renderDashboard,  description: 'Snapshot of every lane, every spawned worker, every open approval.' },
   roadmap:    { title: 'Roadmap',    group: 'reference', rank: 2,                 render: renderRoadmap,    description: 'Planned slices, tagged versions, dependency graph.' },
   skills:     { title: 'Skills',     group: 'reference', rank: 3,                 render: renderSkills,     description: 'Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.' },
@@ -1872,6 +1881,10 @@ function renderConductor() {
   const sliceHost = el('div', {});
   root.appendChild(panelFocus('Last slice-stop', 'most recent ritual close', sliceHost,
     { id: 'last-slice', keywords: 'last slice-stop recent ritual learning' }));
+
+  // ── Slash-command quick reference (moved here in v0.19.2) ──
+  root.appendChild(panelFocus('Slash-command quick reference', '/maddu-*', renderSlashCheatsheet(),
+    { id: 'slash-cheatsheet', keywords: 'slash commands cheatsheet quick reference maddu-help maddu-autopilot' }));
 
   let dataLoaded = false;
   const load = async () => {
@@ -7975,42 +7988,12 @@ async function boot() {
 //
 // Reuses existing cockpit tokens (.view, .panel, .empty-state). No new
 // CSS introduced. No state mutation — pure projection-derived views.
-function renderPipelinesV018() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'v0.18 Backbone'));
-  root.appendChild(el('p', {}, ROUTES.pipelines.description));
+// v0.19.2: routes split into dedicated entries. Each route reads the
+// matching /bridge/<slice> endpoint (v0.19.1 PR-C4) and renders a
+// single-purpose panel. Empty data falls through to placeholder().
 
-  const grid = el('div', { class: 'panel-grid' });
-  const teamsHost = el('div', {});
-  const pipelinesHost = el('div', {});
-  const costHost = el('div', {});
-  const cheatHost = el('div', {});
-  teamsHost.appendChild(loading('Loading teams…'));
-  pipelinesHost.appendChild(loading('Loading pipelines…'));
-  costHost.appendChild(loading('Loading token ledger…'));
-  cheatHost.appendChild(renderSlashCheatsheet());
-  grid.appendChild(panel('Teams', null, teamsHost));
-  grid.appendChild(panel('Pipelines', null, pipelinesHost));
-  grid.appendChild(panel('Token cost ledger', null, costHost));
-  grid.appendChild(panel('Slash-command cheatsheet (v0.18)', '/maddu-*', cheatHost));
-  root.appendChild(grid);
-
+function bindRouteRefresh(load) {
   let pending = false;
-  const load = async () => {
-    let proj;
-    try {
-      const r = await fetch('/bridge/projection', { cache: 'no-store' });
-      proj = await r.json();
-    } catch {
-      teamsHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      pipelinesHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      costHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    teamsHost.replaceChildren(renderTeamsCard(proj.teams || []));
-    pipelinesHost.replaceChildren(renderPipelinesCard(proj.pipelines || []));
-    costHost.replaceChildren(renderCostCard(proj.tokenLedger || []));
-  };
   load();
   const onEvent = () => {
     if (pending) return;
@@ -8019,8 +8002,325 @@ function renderPipelinesV018() {
   };
   stream.bus.addEventListener('event', onEvent);
   els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
+}
 
+function renderPipelinesRoute() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Pipelines'));
+  root.appendChild(el('p', {}, ROUTES.pipelines.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading pipelines…'));
+  root.appendChild(panel('Pipeline runs', 'GET /bridge/pipelines', host));
+
+  bindRouteRefresh(async () => {
+    let data;
+    try {
+      const r = await fetch('/bridge/pipelines', { cache: 'no-store' });
+      data = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    host.replaceChildren(renderPipelinesCard(data.pipelines || []));
+  });
   return root;
+}
+
+function renderCostRoute() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Cost'));
+  root.appendChild(el('p', {}, ROUTES.cost.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading token ledger…'));
+  root.appendChild(panel('Token + call rollup', 'GET /bridge/cost', host));
+
+  bindRouteRefresh(async () => {
+    let data;
+    try {
+      const r = await fetch('/bridge/cost', { cache: 'no-store' });
+      data = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    host.replaceChildren(renderCostCard(data.tokenLedger || []));
+  });
+  return root;
+}
+
+function renderAdvisorsRoute() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Advisors'));
+  root.appendChild(el('p', {}, ROUTES.advisors.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading advisor artifacts…'));
+  root.appendChild(panel('Advisor artifacts', 'GET /bridge/advisors', host));
+
+  bindRouteRefresh(async () => {
+    let data;
+    try {
+      const r = await fetch('/bridge/advisors', { cache: 'no-store' });
+      data = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    host.replaceChildren(renderAdvisorsCard(data.advisors || []));
+  });
+  return root;
+}
+
+function renderAdvisorsCard(advisors) {
+  if (!advisors.length) {
+    return placeholder('No advisor calls yet', 'Run `/maddu-advise <runtime> "<prompt>"` to produce an advisor artifact. Advisors never claim lanes.');
+  }
+  const wrap = el('div', {});
+  // Newest first.
+  const sorted = advisors.slice().sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
+  for (const a of sorted.slice(0, 50)) {
+    const preview = String(a.preview || a.body || a.prompt || '').slice(0, 200);
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, a.id || a.artifactId || '(no id)'),
+        el('span', { class: 'tag tone-neutral' }, a.runtime || '(no runtime)'),
+        a.refused ? el('span', { class: 'tag tone-warn' }, 'refused') : null,
+      ]),
+      el('div', { class: 'panel-row-meta' }, [
+        el('span', { class: 'mono' }, a.sessionId || ''),
+        el('span', { class: 'dim' }, a.ts || ''),
+      ]),
+      el('div', { class: 'panel-row-detail' }, preview || '(no preview)'),
+    ]));
+  }
+  return wrap;
+}
+
+function renderSkillInjectionsRoute() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Skill Injections'));
+  root.appendChild(el('p', {}, ROUTES.skillinjections.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading injection log…'));
+  root.appendChild(panel('SKILL_INJECTED events', 'GET /bridge/skill-injections', host));
+
+  bindRouteRefresh(async () => {
+    let data;
+    try {
+      const r = await fetch('/bridge/skill-injections', { cache: 'no-store' });
+      data = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    host.replaceChildren(renderSkillInjectionsCard(data.skillInjections || []));
+  });
+  return root;
+}
+
+function renderSkillInjectionsCard(injections) {
+  if (!injections.length) {
+    return placeholder('No skill injections yet', 'Skills get inlined into slices via `/maddu-skill apply <id>`. Each injection writes a SKILL_INJECTED event; the skill-injection-bounded gate caps the per-slice budget.');
+  }
+  const wrap = el('div', {});
+  const sorted = injections.slice().sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
+  for (const inj of sorted.slice(0, 100)) {
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, inj.skillId || inj.skill || '(no skill)'),
+        el('span', { class: 'tag tone-neutral' }, inj.sliceId || '(no slice)'),
+      ]),
+      el('div', { class: 'panel-row-meta' }, [
+        el('span', { class: 'mono' }, inj.sessionId || ''),
+        el('span', { class: 'dim' }, inj.ts || ''),
+      ]),
+      inj.reason ? el('div', { class: 'panel-row-detail' }, inj.reason) : null,
+    ]));
+  }
+  return wrap;
+}
+
+function renderModelRoutingRoute() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Model Routing'));
+  root.appendChild(el('p', {}, ROUTES.modelrouting.description));
+
+  const runtimesHost = el('div', {});
+  runtimesHost.appendChild(loading('Loading runtime descriptors…'));
+  root.appendChild(panel('Per-runtime modelPreference', 'GET /bridge/runtimes', runtimesHost));
+
+  const lanesHost = el('div', {});
+  lanesHost.appendChild(loading('Loading lane defaults…'));
+  root.appendChild(panel('Per-lane defaults', 'GET /bridge/lanes', lanesHost));
+
+  const pipelinesHost = el('div', {});
+  pipelinesHost.appendChild(loading('Loading pipeline stage hints…'));
+  root.appendChild(panel('Per-pipeline stage hints', 'GET /bridge/pipelines', pipelinesHost));
+
+  bindRouteRefresh(async () => {
+    let runtimesData, lanesData, pipelinesData;
+    try {
+      [runtimesData, lanesData, pipelinesData] = await Promise.all([
+        fetch('/bridge/runtimes', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        fetch('/bridge/lanes', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        fetch('/bridge/pipelines', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+      ]);
+    } catch {
+      runtimesHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    runtimesHost.replaceChildren(renderModelRoutingRuntimes((runtimesData && runtimesData.runtimes) || []));
+    lanesHost.replaceChildren(renderModelRoutingLanes(((lanesData && lanesData.catalog && lanesData.catalog.lanes) || lanesData && lanesData.lanes) || []));
+    pipelinesHost.replaceChildren(renderModelRoutingPipelines((pipelinesData && pipelinesData.pipelines) || []));
+  });
+  return root;
+}
+
+function formatModelPref(pref) {
+  if (pref == null) return '(none)';
+  if (typeof pref === 'string') return pref;
+  if (typeof pref === 'object') {
+    const parts = Object.entries(pref).map(([k, v]) => `${k}: ${v}`);
+    return parts.length ? parts.join(' · ') : '(empty)';
+  }
+  return String(pref);
+}
+
+function renderModelRoutingRuntimes(runtimes) {
+  if (!runtimes.length) {
+    return placeholder('No runtime descriptors', 'Register a runtime under `.maddu/runtimes/` or via `maddu runtime add`.');
+  }
+  const wrap = el('div', {});
+  for (const r of runtimes) {
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, r.id || r.name || '(no id)'),
+        el('span', { class: 'tag tone-neutral' }, r.kind || ''),
+      ]),
+      el('div', { class: 'panel-row-detail' }, `modelPreference: ${formatModelPref(r.modelPreference)}`),
+    ]));
+  }
+  return wrap;
+}
+
+function renderModelRoutingLanes(lanes) {
+  if (!lanes.length) {
+    return placeholder('No lanes with model defaults', 'Add `defaults.modelPreference` to a lane in `.maddu/lanes/catalog.json`.');
+  }
+  const rows = lanes.filter((l) => l.defaults && l.defaults.modelPreference != null);
+  if (!rows.length) {
+    return placeholder('No lane modelPreference set', 'Lanes inherit the global default. Set `defaults.modelPreference` in `.maddu/lanes/catalog.json` to override per lane.');
+  }
+  const wrap = el('div', {});
+  for (const lane of rows) {
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'pill tone-accent' }, lane.id),
+      ]),
+      el('div', { class: 'panel-row-detail' }, `modelPreference: ${formatModelPref(lane.defaults.modelPreference)}`),
+    ]));
+  }
+  return wrap;
+}
+
+function renderModelRoutingPipelines(pipelines) {
+  if (!pipelines.length) {
+    return placeholder('No pipelines with stage hints', 'Pipeline stages can declare `modelPreference` to route different stages to different models.');
+  }
+  const wrap = el('div', {});
+  for (const p of pipelines.slice(-10).reverse()) {
+    const stageRows = (p.stages || [])
+      .filter((s) => s.modelPreference != null)
+      .map((s) => `${s.name}: ${formatModelPref(s.modelPreference)}`);
+    if (!stageRows.length) continue;
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, p.id || p.name || ''),
+      ]),
+      el('div', { class: 'panel-row-detail' }, stageRows.join(' · ')),
+    ]));
+  }
+  if (!wrap.childNodes.length) {
+    return placeholder('No stage-level modelPreference set', 'Add `modelPreference` to a pipeline stage to route just that stage to a specific model.');
+  }
+  return wrap;
+}
+
+function renderTestStatusRoute() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Test Status'));
+  root.appendChild(el('p', {}, ROUTES.teststatus.description));
+
+  const host = el('div', {});
+  host.appendChild(loading('Loading test status…'));
+  root.appendChild(panel('Latest test runs', 'GET /bridge/test-status', host));
+
+  bindRouteRefresh(async () => {
+    let data;
+    try {
+      const r = await fetch('/bridge/test-status', { cache: 'no-store' });
+      data = await r.json();
+    } catch {
+      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
+      return;
+    }
+    host.replaceChildren(renderTestStatusCard(data || {}));
+  });
+  return root;
+}
+
+function ageMs(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Date.now() - t;
+}
+
+function ageDays(ms) {
+  if (ms == null) return null;
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
+
+function renderTestStatusCard(data) {
+  const rows = [
+    { key: 'stress', label: 'Stress harness', warnDays: 7, data: data.stress },
+    { key: 'upgradeMatrix', label: 'Upgrade matrix', warnDays: 14, data: data.upgradeMatrix },
+  ];
+  if (rows.every((r) => !r.data)) {
+    return placeholder('No test runs recorded', 'Run `node scripts/test/stress-harness.mjs` or the upgrade-matrix verifier to populate `.maddu/state/*-last-run.json`.');
+  }
+  const wrap = el('div', {});
+  for (const row of rows) {
+    if (!row.data) {
+      wrap.appendChild(el('div', { class: 'panel-row' }, [
+        el('div', { class: 'panel-row-head' }, [
+          el('span', { class: 'mono' }, row.label),
+          el('span', { class: 'tag tone-neutral' }, 'never'),
+        ]),
+        el('div', { class: 'panel-row-detail dim' }, 'No run recorded yet.'),
+      ]));
+      continue;
+    }
+    const ts = row.data.completedAt || row.data.ts || row.data.startedAt || null;
+    const age = ageMs(ts);
+    const days = ageDays(age);
+    const stale = days != null && days > row.warnDays;
+    wrap.appendChild(el('div', { class: 'panel-row' }, [
+      el('div', { class: 'panel-row-head' }, [
+        el('span', { class: 'mono' }, row.label),
+        el('span', { class: `tag tone-${stale ? 'warn' : 'ok'}` }, stale ? `stale (${days}d)` : 'recent'),
+      ]),
+      el('div', { class: 'panel-row-meta' }, [
+        el('span', { class: 'dim' }, ts || '(no timestamp)'),
+        el('span', { class: 'dim' }, `threshold: ${row.warnDays}d`),
+      ]),
+      row.data.summary ? el('div', { class: 'panel-row-detail' }, String(row.data.summary)) : null,
+    ]));
+  }
+  return wrap;
 }
 
 function renderTeamsCard(teams) {
