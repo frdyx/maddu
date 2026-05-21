@@ -6,14 +6,15 @@
 // required — gaps are surfaced honestly by `maddu cost
 // --unreported-count` rather than enforced here.
 //
-// Severity: warn — non-conforming rows are recorded as warnings so
-// the operator can fix the worker that emitted them, but they don't
-// fail doctor (the projection already keeps them out of the rollup).
+// Severity: critical (v0.19 upgrade) — schema violations indicate a
+// wrapper or worker is emitting malformed rows. Token rollups can no
+// longer trust the projection if minimum-schema rows are present, so
+// doctor fails until the worker is fixed.
 
 export default {
   id: 'token-ledger-schema',
   label: 'token ledger schema',
-  severity: 'warn',
+  severity: 'critical',
   description: 'Every TOKEN_USAGE_REPORTED row carries the minimum schema (runtime, sessionId, model, ts).',
   run: async (ctx) => {
     const proj = await ctx.project();
