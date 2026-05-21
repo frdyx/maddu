@@ -1,13 +1,19 @@
 // `maddu slice-stop` — append a structured slice-stop event to the spine.
 //
 // Usage:
-//   maddu slice-stop --session <id> --summary "..." [--lane <id>]
-//                    [--action "..."] [--targets "a,b,c"] [--paths "a/,b/"]
-//                    [--gates "g1,g2"] [--learnings "A;B;C"] [--next "X;Y"]
-//                    [--reason "..."]
+//   maddu slice-stop [--session <id>] (--summary "..." | "<summary positional>")
+//                    [--lane <id>] [--action "..."] [--targets "a,b,c"]
+//                    [--paths "a/,b/"] [--gates "g1,g2"] [--learnings "A;B;C"]
+//                    [--next "X;Y"] [--reason "..."]
 //
 // Comma-separated for plain lists; semicolon-separated for learnings/next
 // (because those entries often contain commas themselves).
+//
+// v0.19.1 PR-B:
+//   - `--session` falls back to MADDU_SESSION_ID env var.
+//   - If `--summary` is omitted, the first positional argument is used
+//     as the summary (forgiving for natural agent invocations like
+//     `slice-stop --session X "SLICE STOP: ..."`).
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -39,7 +45,16 @@ async function loadGatesLib() {
 }
 
 export default async function sliceStop(argv) {
-  const { flags } = parseFlags(argv);
+  const { flags, positional } = parseFlags(argv);
+  // v0.19.1 PR-B2: accept first positional arg as --summary if the flag
+  // was omitted. The agent-side invocation pattern is
+  //   `./maddu/run slice-stop --session X "SLICE STOP: ..."`
+  // which previously failed with "--summary required".
+  if ((!flags.summary || flags.summary === true) && positional.length > 0) {
+    flags.summary = positional[0];
+  }
+  // v0.19.1 PR-B1: fall back to MADDU_SESSION_ID env when --session omitted.
+  if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
   const summary = requireFlag(flags, 'summary');
   const sessionId = requireFlag(flags, 'session');
 

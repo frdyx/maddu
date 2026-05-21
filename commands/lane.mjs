@@ -38,6 +38,8 @@ export default async function lane(argv) {
   if (sub === 'claim') {
     const { flags } = parseFlags(rest);
     const lid = requireFlag(flags, 'lane');
+    // v0.19.1 PR-B1: fall back to MADDU_SESSION_ID env when --session omitted.
+    if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
     const sid = requireFlag(flags, 'session');
     const proj = await projections.project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === lid);
@@ -58,6 +60,7 @@ export default async function lane(argv) {
   if (sub === 'release') {
     const { flags } = parseFlags(rest);
     const lid = requireFlag(flags, 'lane');
+    if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
     const sid = requireFlag(flags, 'session');
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LANE_RELEASED,

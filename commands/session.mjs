@@ -19,10 +19,13 @@ import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
 function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
 
-// Resolve --session, falling back to the cached active id. Self-heals
-// stale cache entries (session already closed in the spine).
+// Resolve --session, falling back to MADDU_SESSION_ID env var, then to
+// the cached active id. Self-heals stale cache entries (session already
+// closed in the spine).
 async function resolveSession(flags, repoRoot, sessionActive) {
-  if (flags.session) return flags.session;
+  if (flags.session && flags.session !== true) return flags.session;
+  // v0.19.1 PR-B1: env-var fallback (matches advise / team / pipeline).
+  if (process.env.MADDU_SESSION_ID) return process.env.MADDU_SESSION_ID;
   if (!sessionActive) return null;
   const result = await sessionActive.readActiveSessionVerified(repoRoot);
   if (!result) return null;
