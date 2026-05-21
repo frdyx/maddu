@@ -6,6 +6,8 @@ maddu-version-min: 0.18.0
 
 The operator wants the token-and-call ledger.
 
+**Print the output of `./maddu/run cost --by <axis>` verbatim to the operator. Do not summarize, paraphrase, or omit. The output IS the answer.**
+
 Procedure:
 
 1. Pick an axis. Default is `runtime`. If `$ARGUMENTS` is "session",

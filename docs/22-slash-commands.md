@@ -25,13 +25,15 @@ agent inlines the markdown into the conversation with `<args>`
 substituted for `$ARGUMENTS` and runs the underlying `maddu <cmd>`
 invocations via Bash.
 
-Máddu owns 12 of these files (the `maddu-*` family). They're shipped
+Máddu owns 13 of these files (the `maddu-*` family). They're shipped
 from `template/maddu/agent-files/commands/<name>.md` and installed
 into both `.claude/commands/` and `.codex/commands/` by `maddu init`
-and refreshed by `maddu upgrade`. Each installed file is wrapped in
-`<!-- BEGIN MADDU v1 -->` / `<!-- END MADDU v1 -->` markers so future
-upgrades refresh the framework-owned body without touching
-operator-authored markdown that may sit beside it.
+and refreshed by `maddu upgrade`. Each installed file is written
+**raw** (no marker wrapping) because Claude Code's slash-command
+frontmatter parser requires `---` on line 1; the marker comment
+would otherwise win line 1 and clobber the parsed `description:`.
+The framework owns the entire file — operator-authored slash commands
+go in sibling files NOT prefixed `maddu-`.
 
 Files NOT prefixed `maddu-` are operator-owned and never touched.
 
@@ -41,19 +43,20 @@ Files NOT prefixed `maddu-` are operator-owned and never touched.
 |---|---|---|
 | `/maddu-help [topic]` | Print the topic-grouped slash-command roster. | `maddu help` |
 | `/maddu-doctor [gate]` | Run hard-rule + integrity gates; surface findings. | `maddu doctor` |
+| `/maddu-suggest <task>` | Recommend a slash command + lane for a vague task. | `maddu suggest` |
 | `/maddu-autopilot <task>` | End-to-end: register → suggest lane → claim → `plan-exec-verify-fix` pipeline → slice-stop. | `register`, `suggest`, `lane claim`, `pipeline run`, `slice-stop` |
 | `/maddu-plan <topic>` | Plan-only stage; write a brief artifact under `.maddu/briefs/project/`. | `goal`, `phase`, `brief` |
 | `/maddu-review [slice-id]` | Post-stop review of the current or named slice. | `review run`, `review status` |
 | `/maddu-team <N> <task>` | Spawn N child sessions with disjoint declared lanes. | `team open` |
 | `/maddu-advise <runtime> <prompt>` | Non-claiming advisor query; artifact-only output. | `advise` |
 | `/maddu-status [topic]` | Pretty-print sessions, lanes, gates, reviews, teams, pipelines. | `brief`, `status` |
-| `/maddu-skill <verb> <args>` | List, search, show, apply, extract, delete skills. | `skill` |
+| `/maddu-skill <verb> <args>` | List, search, show, create/add, apply, extract, delete skills. | `skill` |
 | `/maddu-cost [axis]` | Token / call rollup per session, day, runtime, model. | `cost` |
 | `/maddu-cancel [reason]` | Stop the current slice cleanly — heartbeat-close + slice-stop. | `session close`, `slice-stop` |
 | `/maddu-note <text>` | Append a one-liner to the operator inbox. | `mailbox send` |
 
-12 files, each ≤ 2 KB, all marker-wrapped, all installed under
-`.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.
+13 files, each ≤ 2 KB, all installed raw (no marker wrap — see above)
+under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.
 
 ## Discipline
 

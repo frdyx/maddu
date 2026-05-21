@@ -32,7 +32,8 @@ the matching `/maddu-*` slash command. Always tell them which one you picked.
 | "ask claude/codex/gemini …", "second opinion …" | `/maddu-advise` |
 | "status", "what's going on" | `/maddu-status` |
 | "tokens", "cost", "how much have I used" | `/maddu-cost` |
-| vague / "I don't know what to do" | `/maddu-help` then `/maddu-plan` |
+| vague / "I don't know what to do" / "what should I run" | `/maddu-suggest` then dispatch its recommendation |
+| "what slash commands exist", "show me the surface" | `/maddu-help` |
 | "cancel" | `/maddu-cancel` |
 | "note that …", "remember this" | `/maddu-note` |
 

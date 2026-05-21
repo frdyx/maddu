@@ -1,9 +1,10 @@
-// `maddu skill <subcommand>` — list / show / create / from-slice / apply / delete.
+// `maddu skill <subcommand>` — list / show / create / add / from-slice / apply / delete.
 //
 // Usage:
 //   maddu skill list   [--tag <name>]
 //   maddu skill show   <id>
 //   maddu skill create --title "…" [--when "…"] [--tags a,b] [--body "…"]
+//   maddu skill add    --title "…" [--when "…"] [--tags a,b] [--body "…"]   (alias of create)
 //   maddu skill from-slice <eventId> [--title "…"] [--when "…"]
 //   maddu skill apply  <id> [--session <sid>]
 //   maddu skill delete <id>
@@ -23,7 +24,7 @@ export default async function skill(argv) {
   const repoRoot = await resolveRepoRoot(paths);
 
   if (!sub) {
-    console.error('Usage: maddu skill <list|show|create|from-slice|apply|delete> [flags]');
+    console.error('Usage: maddu skill <list|show|create|add|from-slice|apply|delete> [flags]');
     process.exit(2);
   }
 
@@ -60,7 +61,9 @@ export default async function skill(argv) {
     return;
   }
 
-  if (sub === 'create') {
+  // v0.19.1 (A5): `add` is a documented alias of `create`. Help text +
+  // intent table both advertise "add" — make the verb work for parity.
+  if (sub === 'create' || sub === 'add') {
     const { flags } = parseFlags(rest);
     const title = requireFlag(flags, 'title');
     const saved = await skills.saveSkill(repoRoot, {
