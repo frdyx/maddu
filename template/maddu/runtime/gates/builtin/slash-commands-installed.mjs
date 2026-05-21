@@ -1,14 +1,19 @@
-// Slash-commands-installed gate — v0.18 Phase 1.
+// Slash-commands-installed gate — v0.18 Phase 1 (revised v0.19.1).
 //
 // Verifies that:
 //   1. `.claude/commands/` and `.codex/commands/` directories exist (the
 //      install path was exercised by `maddu init` / `maddu upgrade`).
 //   2. For every `maddu-*.md` template under `maddu/agent-files/commands/`
 //      (consumer layout) or `template/maddu/agent-files/commands/`
-//      (source layout), a marker-wrapped copy exists under both
-//      `.claude/commands/` and `.codex/commands/`, with the body between
-//      <!-- BEGIN MADDU v1 --> / <!-- END MADDU v1 --> markers byte-equal
-//      (after LF normalization) to the template body.
+//      (source layout), a copy exists under both `.claude/commands/`
+//      and `.codex/commands/`, byte-equal (after LF normalization, with
+//      a single trailing newline) to the template body.
+//
+// v0.19.1 (A1): slash-command files are framework-owned in their
+// entirety and written RAW — no <!-- BEGIN MADDU v1 --> marker wrapping
+// (Claude Code's slash-command frontmatter parser requires `---` on
+// line 1). The gate compares the installed file directly to the
+// template body.
 //
 // Phase 1 ships zero slash-command templates, so this gate trivially
 // passes with "no commands shipped yet" — but it still verifies the two
@@ -42,14 +47,6 @@ function normalize(text) {
 
 function hashText(text) {
   return createHash('sha256').update(normalize(text)).digest('hex');
-}
-
-function extractMarkerBlock(text) {
-  const t = normalize(text);
-  const i = t.indexOf(MARKER_BEGIN);
-  const j = t.indexOf(MARKER_END, i + MARKER_BEGIN.length);
-  if (i < 0 || j < 0) return null;
-  return t.slice(i + MARKER_BEGIN.length, j).trim();
 }
 
 async function listTemplates(dir) {
@@ -116,21 +113,23 @@ export default {
     const drifted = [];
 
     for (const name of names) {
-      const tplBody = normalize(await readFile(join(base, name), 'utf8')).trim();
-      const tplHash = hashText(tplBody);
+      const tplRaw = normalize(await readFile(join(base, name), 'utf8'));
+      const tplFinal = tplRaw.endsWith('\n') ? tplRaw : tplRaw + '\n';
+      const tplHash = hashText(tplFinal);
       for (const dir of TARGET_DIRS) {
         const target = join(root, dir, name);
         if (!(await exists(target))) {
           missing.push(`${dir}/${name}`);
           continue;
         }
-        const existing = await readFile(target, 'utf8');
-        const block = extractMarkerBlock(existing);
-        if (block === null) {
-          drifted.push(`${dir}/${name} (no markers)`);
+        const existing = normalize(await readFile(target, 'utf8'));
+        // Surface legacy marker-wrapped installs as drift so `maddu upgrade`
+        // rewrites them with the raw body (v0.19.1 A1).
+        if (existing.includes(MARKER_BEGIN) || existing.includes(MARKER_END)) {
+          drifted.push(`${dir}/${name} (legacy markers — re-run maddu upgrade)`);
           continue;
         }
-        if (hashText(block) !== tplHash) {
+        if (hashText(existing) !== tplHash) {
           drifted.push(`${dir}/${name}`);
         }
       }

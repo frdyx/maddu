@@ -8,6 +8,7 @@ node_modules/
 # Dev-mode scratch: when running the bridge from the framework repo,
 # the spine is created here. The framework repo never commits dev state.
 template/.maddu/
+.maddu/
 .omc/
 
 # Brand and marketing assets are NOT part of the public repo.

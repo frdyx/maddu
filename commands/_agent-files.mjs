@@ -194,25 +194,34 @@ async function listSlashCommandTemplates(templateDir) {
 
 // Sync one slash command into both `.claude/commands/` and `.codex/commands/`.
 // Returns { file, action } pairs (one per dir).
+//
+// v0.19.1 (A1): slash-command files are framework-owned in entirety. They
+// are written RAW — no <!-- BEGIN MADDU v1 --> marker wrapping — because
+// Claude Code's slash-command frontmatter parser requires `---` on line 1
+// (the marker comment causes the parser to bail and the description falls
+// back to the marker text). Marker discipline still applies to shared
+// files like CLAUDE.md / AGENTS.md where the operator may append their
+// own content; slash-command bodies are single-purpose and entirely owned
+// by Máddu, so we just write the template body verbatim.
 async function syncOneSlashCommand(repoRoot, fileName, bodyText) {
-  const wrapped = wrapWithMarkers(bodyText);
+  const body = normalize(bodyText);
+  // Ensure exactly one trailing newline.
+  const final = body.endsWith('\n') ? body : body + '\n';
   const results = [];
   for (const dir of SLASH_COMMAND_DIRS) {
     const target = join(repoRoot, dir, fileName);
     if (!(await exists(target))) {
-      results.push(await syncOne(target, wrapped));
+      results.push(await syncOne(target, final));
       continue;
     }
     const existing = normalize(await readFile(target, 'utf8'));
-    if (existing.includes(MARKER_BEGIN) && existing.includes(MARKER_END)) {
-      const next = replaceBetweenMarkers(existing, wrapped);
-      results.push(await syncOne(target, next));
+    // If an old marker-wrapped variant is present (pre-0.19.1 install),
+    // overwrite with the raw body. Same outcome for any other content
+    // drift — framework owns these files.
+    if (existing === final) {
+      results.push({ action: 'no-change', file: target });
     } else {
-      // Existing file without markers — preserve it. The gate will
-      // surface drift. We do not prepend here; slash-command files are
-      // single-purpose and a marker-less variant is most likely an
-      // operator-authored override (or an older Máddu install pre-v0.18).
-      results.push({ action: 'no-change', file: target, reason: 'no-markers-present' });
+      results.push(await syncOne(target, final));
     }
   }
   return results;

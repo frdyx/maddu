@@ -6,6 +6,8 @@ maddu-version-min: 0.18.0
 
 The operator wants to discover Máddu's slash commands and surfaces.
 
+**Print the output of `./maddu/run help` verbatim to the operator. Do not summarize, paraphrase, or omit. The output IS the answer.**
+
 Run `./maddu/run help` (or `maddu help` if Máddu is installed globally)
 and surface the output. If the operator passed an argument
 (`$ARGUMENTS`), treat it as a topic filter: pass it through as
@@ -24,8 +26,8 @@ After printing the guide:
 Discipline:
 
 - Do not invent slash commands that aren't in `maddu help`'s output.
-- Slash commands marked `[phase 4]` or `[phase 5]` may not be installed
-  yet in this repo — if the operator asks for one and it's missing,
-  fall back to the underlying verbose CLI shown in the `└─` line.
+- If the operator asks for a command that's missing in this repo's
+  install, fall back to the underlying verbose CLI shown in the `└─`
+  line and suggest `maddu upgrade`.
 - The verbose `maddu <cmd>` CLI is always available — it's the same
   Máddu, just typed out. Slash commands are for interactive use.

@@ -6,6 +6,8 @@ maddu-version-min: 0.18.0
 
 The operator wants a Máddu health check.
 
+**Print the output of `./maddu/run doctor` verbatim to the operator. Do not summarize, paraphrase, or omit. The output IS the answer.**
+
 Run `./maddu/run doctor` and surface the output. If the operator passed
 an argument (`$ARGUMENTS`), treat it as the gate id to focus on:
 forward it as `./maddu/run doctor --gate "$ARGUMENTS"`.

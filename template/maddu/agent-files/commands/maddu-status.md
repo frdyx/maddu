@@ -6,6 +6,8 @@ maddu-version-min: 0.18.0
 
 The operator wants the lay of the land.
 
+**Print the output of `./maddu/run brief` and `./maddu/run status` verbatim to the operator. Do not summarize, paraphrase, or omit. The output IS the answer.** You may add a 5-bullet synthesis AFTER the verbatim output, but never instead of it.
+
 Procedure:
 
 1. Run `./maddu/run brief` first — it's the operator's turn-start

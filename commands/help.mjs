@@ -15,61 +15,61 @@
 import { parseFlags } from './_args.mjs';
 
 // Slash-command roster. Kept in sync with template/maddu/agent-files/commands/.
-// Items marked phase: 3 are live now; phase: 5 ship in Phase 5; phase: 4 are
-// dispatched by /maddu-* but the underlying CLI lands in Phase 4.
+// v0.19.1 (A3): phase tags removed — every entry below is shipping and live.
 const ROSTER = [
   {
     topic: 'discovery',
     title: 'Discovery & doctor',
     items: [
-      { name: '/maddu-help',    phase: 3, line: 'Print this guide.',                              under: 'help' },
-      { name: '/maddu-doctor',  phase: 3, line: 'Run hard-rule gates and surface findings.',      under: 'doctor' },
+      { name: '/maddu-help',    line: 'Print this guide.',                              under: 'help' },
+      { name: '/maddu-doctor',  line: 'Run hard-rule gates and surface findings.',      under: 'doctor' },
+      { name: '/maddu-suggest <task>', line: 'Recommend a slash command + lane for a vague task.', under: 'suggest' },
     ],
   },
   {
     topic: 'autopilot',
     title: 'Autopilot (end-to-end)',
     items: [
-      { name: '/maddu-autopilot <task>', phase: 5, line: 'Register → claim → plan-exec-verify-fix → slice-stop.', under: 'register, suggest, lane claim, pipeline run, slice-stop' },
+      { name: '/maddu-autopilot <task>', line: 'Register → claim → plan-exec-verify-fix → slice-stop.', under: 'register, suggest, lane claim, pipeline run, slice-stop' },
     ],
   },
   {
     topic: 'planning',
     title: 'Planning & review',
     items: [
-      { name: '/maddu-plan <topic>',         phase: 5, line: 'Run the plan stage only; write a plan artifact.', under: 'goal, phase, brief' },
-      { name: '/maddu-review [<slice-id>]',  phase: 5, line: 'Post-stop review of the current or named slice.',  under: 'review' },
+      { name: '/maddu-plan <topic>',         line: 'Run the plan stage only; write a plan artifact.', under: 'goal, phase, brief' },
+      { name: '/maddu-review [<slice-id>]',  line: 'Post-stop review of the current or named slice.',  under: 'review' },
     ],
   },
   {
     topic: 'team',
     title: 'Team & advisors',
     items: [
-      { name: '/maddu-team <N> <task>',          phase: 5, line: 'Spawn N child sessions with disjoint lanes.',      under: 'team open' },
-      { name: '/maddu-advise <runtime> <prompt>', phase: 5, line: 'Non-claiming advisor query; artifact-only.',     under: 'advise' },
+      { name: '/maddu-team <N> <task>',          line: 'Spawn N child sessions with disjoint lanes.',      under: 'team open' },
+      { name: '/maddu-advise <runtime> <prompt>', line: 'Non-claiming advisor query; artifact-only.',     under: 'advise' },
     ],
   },
   {
     topic: 'cost',
     title: 'Status & cost',
     items: [
-      { name: '/maddu-status',  phase: 5, line: 'Pretty-print sessions, lanes, gates, reviews, teams.', under: 'status, brief' },
-      { name: '/maddu-cost',    phase: 5, line: 'Token/call rollup per session, day, runtime.',         under: 'cost' },
+      { name: '/maddu-status',  line: 'Pretty-print sessions, lanes, gates, reviews, teams.', under: 'status, brief' },
+      { name: '/maddu-cost',    line: 'Token/call rollup per session, day, runtime.',         under: 'cost' },
     ],
   },
   {
     topic: 'skills',
     title: 'Skills & notes',
     items: [
-      { name: '/maddu-skill <verb> <args>', phase: 5, line: 'List, search, add, remove skills.',            under: 'skill' },
-      { name: '/maddu-note <text>',         phase: 5, line: 'One-liner into the operator inbox.',          under: 'mailbox send' },
+      { name: '/maddu-skill <verb> <args>', line: 'List, search, create, apply, delete skills.',  under: 'skill' },
+      { name: '/maddu-note <text>',         line: 'One-liner into the operator inbox.',          under: 'mailbox send' },
     ],
   },
   {
     topic: 'admin',
     title: 'Cancel',
     items: [
-      { name: '/maddu-cancel', phase: 5, line: 'Stop the current slice cleanly (heartbeat-close + slice-stop).', under: 'session close, slice-stop' },
+      { name: '/maddu-cancel', line: 'Stop the current slice cleanly (heartbeat-close + slice-stop).', under: 'session close, slice-stop' },
     ],
   },
 ];
@@ -97,8 +97,7 @@ function printText(roster) {
   for (const group of roster) {
     console.log('  ' + C.bold(group.title));
     for (const item of group.items) {
-      const phaseTag = item.phase >= 4 ? C.yellow(` [phase ${item.phase}]`) : '';
-      console.log('    ' + C.cyan(item.name.padEnd(34)) + ' ' + item.line + phaseTag);
+      console.log('    ' + C.cyan(item.name.padEnd(34)) + ' ' + item.line);
       console.log('      ' + C.dim('└─ ' + item.under));
     }
     console.log('');
@@ -108,8 +107,6 @@ function printText(roster) {
   console.log('  ' + C.cyan('maddu suggest --task "<vague task>"') + '   recommends a slash command + lane');
   console.log('  ' + C.cyan('maddu help --format json') + '              machine-readable roster');
   console.log('  ' + C.cyan('maddu doctor') + '                          hard-rule + gate diagnostics');
-  console.log('');
-  console.log(C.dim('Phase tags reflect the v0.18 rollout — items tagged "phase N" land in that release phase.'));
 }
 
 function filterByTopic(roster, topic) {
