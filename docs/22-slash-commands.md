@@ -58,6 +58,30 @@ Files NOT prefixed `maddu-` are operator-owned and never touched.
 13 files, each ≤ 2 KB, all installed raw (no marker wrap — see above)
 under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.
 
+## Display discipline (re-print pattern)
+
+The display-oriented slash commands (`/maddu-help`, `/maddu-doctor`,
+`/maddu-status`, `/maddu-cost`, `/maddu-skill`) all instruct the agent
+to **re-print** the underlying `maddu <cmd>` output inside a fenced
+markdown code block in its reply. This is non-obvious but load-bearing:
+Claude Code's bash-output view collapses long output behind a
+`… +N lines (ctrl+o to expand)` affordance. If the slash body merely
+says "print verbatim", the agent treats the collapsed display as
+compliant and the operator never sees the actual content. Re-printing
+inside a code fence is the only way the roster, doctor verdicts, status
+brief, cost ledger, or skill list end up visible.
+
+The `slash-command-display-pattern` doctor gate (added v0.19.2)
+asserts the canonical phrase "re-print" is present in each of the five
+display-oriented templates so a future regression fails CI instead of
+silently shipping broken UX.
+
+The display-oriented bodies also drop the unconditional "what are you
+trying to do?" follow-up that earlier templates carried. They ask only
+when the operator typed the slash command with no surrounding intent;
+if the operator's previous message already gave context (e.g. "how do I
+ship something"), the agent points at the matching row in one line.
+
 ## Discipline
 
 Every Máddu slash command body ends with a "Discipline" section that
