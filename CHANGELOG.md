@@ -11,6 +11,36 @@ narrative summary.
 
 ---
 
+## [v1.0.1] · 2026-05-21 · cockpit UX patch
+
+Post-v1.0.0 burn-in revealed three real cockpit-UX issues. Single-PR fix,
+cockpit only — no state mechanics, no new dependencies, no breaking
+surfaces.
+
+- **Composer footer anchors to viewport for real.** The 37-route rail
+  could overflow `.rail` on short viewports and push the page past
+  `100vh`, dragging the absolute-positioned `.stage-foot` composer
+  below the fold. Now `#app` is `overflow: hidden`, `.rail` has
+  `min-height: 0`, and `.rail-nav` declares `min-height: 0` + scrolls
+  internally. Page never scrolls — only panes do.
+- **Sidenav groups collapse by default.** Opening the cockpit shows
+  ~7–10 visible rows instead of 37 — only the group containing the
+  current route is expanded; the rest are collapsed headers with a
+  route-count badge (`OPERATE · 11`). Operator toggles persist in
+  `localStorage.maddu.railGroups`. Group headers are real `<button>`s
+  with `aria-expanded`. Navigation into a collapsed group auto-expands
+  it.
+- **Recent-routes group above the standard nav.** Top of the rail now
+  has a synthetic "Recent" group showing the operator's last 5 visited
+  routes (excluding the current one). Backed by
+  `localStorage.maddu.routes.recent`. Skipped when the operator has
+  visited fewer than 2 distinct routes.
+
+Route ids, palette indexing, deep links, and the mobile dock are
+untouched. All 8+1 hard rules + the gates remain green.
+
+---
+
 ## [v1.0.0] · 2026-05-21 · stable, declared
 
 **Same commit as v0.19.2. No code change.** This tag is the public

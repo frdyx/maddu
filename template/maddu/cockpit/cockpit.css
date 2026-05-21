@@ -291,6 +291,10 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   display: grid;
   grid-template-columns: var(--m-rail-w) 1fr;
   height: 100vh;
+  /* v1.0.1 — anchor composer: page never scrolls; only internal panes do.
+   * Without this, an over-long rail could push the app grid past 100vh and
+   * drag the absolute-positioned .stage-foot composer below the viewport. */
+  overflow: hidden;
 }
 
 /* ───────────────────── rail ───────────────────── */
@@ -300,6 +304,9 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   border-right: 1px solid var(--m-line);
   display: flex;
   flex-direction: column;
+  /* v1.0.1 — allow .rail-nav's overflow:auto child to actually shrink and
+   * scroll instead of overflowing the rail column. */
+  min-height: 0;
 }
 
 .rail-mark {
@@ -2715,6 +2722,10 @@ select option:hover,
   gap: 4px;
   padding: 10px 6px;
   overflow-y: auto;
+  /* v1.0.1 — required for flex children to shrink below content height so
+   * overflow:auto kicks in instead of pushing the rail past viewport. */
+  min-height: 0;
+  flex: 1 1 0;
 }
 
 .rail-group { display: flex; flex-direction: column; margin: 2px 0; }
@@ -2724,7 +2735,7 @@ select option:hover,
   background: transparent;
   border: 0;
   display: grid;
-  grid-template-columns: 2px 14px 1fr 12px;
+  grid-template-columns: 2px 14px 1fr auto 12px;
   align-items: center;
   gap: 6px;
   padding: 10px 12px 6px;
@@ -2738,7 +2749,19 @@ select option:hover,
   width: 100%;
   transition: color 120ms;
 }
-.rail-group-head:hover { color: var(--m-fg-1); }
+.rail-group-head:hover { color: var(--m-fg-1); background: var(--m-bg-3); }
+.rail-group-count {
+  font-family: var(--m-font-mono);
+  font-size: 10px;
+  color: var(--m-fg-4);
+  letter-spacing: 0;
+  padding: 0 4px;
+}
+.rail-group.has-active .rail-group-count { color: var(--m-fg-2); }
+/* Recent group — visual lead-in above standard groups */
+.rail-group.rail-group-recent { margin-bottom: 6px; }
+.rail-group.rail-group-recent + .rail-group { border-top: 1px solid var(--m-line-soft); padding-top: 4px; }
+.rail-group-recent .rail-group-glyph { color: var(--m-accent-2); }
 .rail-group-tick {
   height: 10px; width: 2px;
   background: transparent;
@@ -2793,7 +2816,7 @@ select option:hover,
     padding: 8px 0 4px 6px;
     gap: 4px;
   }
-  .rail-group-glyph, .rail-group-label, .rail-group-chev { display: none; }
+  .rail-group-glyph, .rail-group-label, .rail-group-chev, .rail-group-count { display: none; }
   .rail-group-head::after {
     content: "";
     display: block;

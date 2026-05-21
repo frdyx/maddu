@@ -598,14 +598,46 @@ function currentRoute() {
 }
 
 // ─── Phase 1+2 — build the rail dynamically from ROUTES + NAV_GROUPS ──
+// v1.0.1 — collapse state. If no persisted entry exists at all (fresh
+// operator), we default-collapse every group except the one containing the
+// current route so the cockpit fits the viewport. Persisted preferences
+// (the user explicitly toggled at least one group) win after that.
+function railCollapseRaw() {
+  try { return JSON.parse(localStorage.getItem('maddu.railGroups') || 'null'); }
+  catch { return null; }
+}
 function railCollapseState() {
-  try { return JSON.parse(localStorage.getItem('maddu.railGroups') || '{}'); }
-  catch { return {}; }
+  const raw = railCollapseRaw();
+  if (raw && typeof raw === 'object') return raw;
+  // No persisted preference — synthesize a default that expands only the
+  // group containing the current route (falling back to "decide").
+  const activeGroup = groupOf(currentRoute()) || 'decide';
+  const s = {};
+  for (const g of NAV_GROUPS) if (g.id !== activeGroup) s[g.id] = true;
+  return s;
 }
 function setRailCollapsed(groupId, collapsed) {
+  // Materialize the in-memory default before persisting the first edit so
+  // we don't lose the auto-collapsed siblings.
   const s = railCollapseState();
   if (collapsed) s[groupId] = true; else delete s[groupId];
   try { localStorage.setItem('maddu.railGroups', JSON.stringify(s)); } catch {}
+}
+
+// v1.0.1 — recent-route history (operator-local). Kept short, deduped,
+// newest-first. Used to populate the synthetic "Recent" rail group.
+function recentRoutes() {
+  try {
+    const arr = JSON.parse(localStorage.getItem('maddu.routes.recent') || '[]');
+    return Array.isArray(arr) ? arr.filter((id) => ROUTES[id]) : [];
+  } catch { return []; }
+}
+function pushRecentRoute(id) {
+  if (!id || !ROUTES[id]) return;
+  const cur = recentRoutes().filter((r) => r !== id);
+  cur.unshift(id);
+  while (cur.length > 8) cur.pop();
+  try { localStorage.setItem('maddu.routes.recent', JSON.stringify(cur)); } catch {}
 }
 
 // ─── Workspace switcher (rail header) ──────────────────────────────────
@@ -735,6 +767,54 @@ function buildRail() {
   if (!nav) return;
   nav.innerHTML = '';
   const collapsed = railCollapseState();
+
+  // v1.0.1 — synthetic "Recent" group, rendered above standard groups.
+  // Shows up to 5 most-recent routes, excluding the current one. Skipped
+  // when the operator has visited fewer than 2 distinct routes.
+  const here = currentRoute();
+  const recent = recentRoutes().filter((id) => id !== here).slice(0, 5);
+  if (recent.length >= 2) {
+    const rid = '_recent';
+    const isCollapsed = !!collapsed[rid];
+    const groupEl = el('div', { class: 'rail-group rail-group-recent' + (isCollapsed ? ' collapsed' : ''), 'data-group': rid });
+    const head = el('button', {
+      class: 'rail-group-head',
+      type: 'button',
+      'aria-expanded': isCollapsed ? 'false' : 'true',
+      'aria-controls': `rail-group-${rid}`
+    }, [
+      el('span', { class: 'rail-group-tick', 'aria-hidden': 'true' }),
+      el('span', { class: 'rail-group-glyph', 'aria-hidden': 'true' }, '↺'),
+      el('span', { class: 'rail-group-label' }, 'RECENT'),
+      el('span', { class: 'rail-group-count', 'aria-hidden': 'true' }, String(recent.length)),
+      el('span', { class: 'rail-group-chev', 'aria-hidden': 'true' }, '›')
+    ]);
+    head.addEventListener('click', () => {
+      const willCollapse = !groupEl.classList.contains('collapsed');
+      groupEl.classList.toggle('collapsed', willCollapse);
+      head.setAttribute('aria-expanded', willCollapse ? 'false' : 'true');
+      setRailCollapsed(rid, willCollapse);
+    });
+    groupEl.appendChild(head);
+    const list = el('div', { class: 'rail-group-list', id: `rail-group-${rid}` });
+    for (const id of recent) {
+      const r = ROUTES[id];
+      if (!r) continue;
+      const link = el('a', {
+        href: `#/${id}`,
+        class: 'rail-link' + (r.anchor ? ' anchor' : ''),
+        'data-route': id,
+        title: r.description
+      }, [
+        el('span', { class: 'rail-link-glyph', 'aria-hidden': 'true' }, r.anchor ? '◆' : '◇'),
+        el('span', { class: 'rail-link-label' }, r.title)
+      ]);
+      list.appendChild(link);
+    }
+    groupEl.appendChild(list);
+    nav.appendChild(groupEl);
+  }
+
   for (const g of NAV_GROUPS) {
     const routes = routesInGroup(g.id);
     if (!routes.length) continue;
@@ -749,6 +829,7 @@ function buildRail() {
       el('span', { class: 'rail-group-tick', 'aria-hidden': 'true' }),
       el('span', { class: 'rail-group-glyph', 'aria-hidden': 'true' }, g.glyph),
       el('span', { class: 'rail-group-label' }, g.label.toUpperCase()),
+      el('span', { class: 'rail-group-count', 'aria-hidden': 'true' }, String(routes.length)),
       el('span', { class: 'rail-group-chev', 'aria-hidden': 'true' }, '›')
     ]);
     head.addEventListener('click', () => {
@@ -777,6 +858,19 @@ function buildRail() {
     groupEl.appendChild(list);
     nav.appendChild(groupEl);
   }
+}
+
+// v1.0.1 — auto-expand the active group when nav lands in a collapsed
+// section (e.g. operator dispatched via palette / deep link).
+function ensureActiveGroupExpanded(routeId) {
+  const gid = groupOf(routeId);
+  if (!gid) return;
+  const groupEl = document.querySelector(`.rail-group[data-group="${gid}"]`);
+  if (!groupEl || !groupEl.classList.contains('collapsed')) return;
+  groupEl.classList.remove('collapsed');
+  const head = groupEl.querySelector('.rail-group-head');
+  if (head) head.setAttribute('aria-expanded', 'true');
+  setRailCollapsed(gid, false);
 }
 
 // ─── Phase 2 — mobile dock + group sheet ────────────────────────────────
@@ -855,6 +949,16 @@ function highlightActiveGroup(routeId) {
 function renderRoute() {
   const id = currentRoute();
   const route = ROUTES[id];
+
+  // v1.0.1 — operator-local history feeds the rail's "Recent" group.
+  // Only rebuild the rail when the visit actually changes the visible
+  // recent list (avoids per-navigation flicker for repeats).
+  const prevRecent = recentRoutes()[0];
+  pushRecentRoute(id);
+  // v1.0.1 — if the operator dispatched into a collapsed group (palette
+  // / deep link), auto-expand it so the active row is visible.
+  ensureActiveGroupExpanded(id);
+  if (prevRecent !== id) buildRail();
 
   document.querySelectorAll('.rail-link').forEach((el) => {
     el.classList.toggle('active', el.dataset.route === id);

@@ -19,6 +19,19 @@ The shell shows in every route:
 - **Slash-command composer** — bottom of every route. Type `/` to see commands: `/resume`, `/steer`, `/goal`, `/rollback`, `/stop`, `/usage`, `/skills`, `/runtime`, `/approve`, `/kill`. (Phase B1 — some commands are still rolling out; see [maddu-v0.3-roadmap.md](maddu-v0.3-roadmap.md).)
 - **`?` keyboard shortcut** — opens the Docs popup, which renders every page under `docs/` via `/bridge/docs`.
 
+## Rail organization — collapse, recent, search *(v1.0.1)*
+
+The rail (left sidenav) lists every route grouped into five clusters — **Decide**, **Operate**, **Verify**, **Connect**, **Reference**. With 37+ routes the flat list overran the viewport on short displays and pushed the composer below the fold. As of v1.0.1:
+
+- **Groups are collapsible.** Each cluster has a header button — glyph + label + route count + chevron. Click to collapse / expand. Headers are real `<button>` elements with `aria-expanded`, keyboard-navigable.
+- **Smart default.** On a fresh load the cockpit auto-expands only the group containing the current route; the rest start collapsed. Result: ~7–10 visible rows instead of 37, and the composer sits at the bottom of the viewport where it belongs.
+- **Persistence.** Operator toggles are saved to `localStorage.maddu.railGroups`. Cleared by browser data wipes; never written to `.maddu/`.
+- **Auto-expand on navigation.** Jumping into a route inside a collapsed group (via `Ctrl/Cmd+K` palette, deep link, or the composer's `/route` shortcut) automatically expands that group.
+- **Recent group.** When the operator has visited ≥ 2 distinct routes the rail shows a synthetic **Recent** group at the top, listing the last 5 visited routes (excluding the current one). Backed by `localStorage.maddu.routes.recent` — operator-local browser state, no spine write.
+- **Search remains the fast path.** `Ctrl/Cmd+K` opens the palette and indexes every route, every command, every workspace, every recent slice-stop. The rail's job is glanceable orientation; the palette's job is precision navigation.
+
+The page itself never scrolls — only the rail and the route body do. The composer footer is glass-blurred and anchored to the viewport bottom; expanding the textarea grows it upward over the route body, not downward off-screen.
+
 ## Routes
 
 ### `#orientation` *(v0.16, Sessions panel v0.17)*
