@@ -580,14 +580,35 @@ $ maddu cost --unreported-count         # just the gap count
 $ maddu cost --json                     # machine-readable
 ```
 
-## Slash commands (v0.18)
+## `maddu usage import` *(v0.19.1)*
+
+Retroactively populate the token ledger from Claude Code session
+transcripts. Walks `~/.claude/projects/<slug>/*.jsonl`, emits one
+`TOKEN_USAGE_REPORTED` event per assistant turn with `source:
+"claude-code-transcript"`. Idempotent via `importHash`.
+
+```bash
+$ maddu usage import --from claude-code --dry-run    # parse + report; write nothing
+$ maddu usage import --from claude-code              # commit the import
+$ maddu usage import --from claude-code --session 21f43c48   # filter by session UUID
+$ maddu usage import --from claude-code --since 2026-04-01   # skip older lines
+```
+
+Full reference: [27-transcript-import.md](27-transcript-import.md).
+
+## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the
-underlying commands via a markdown shim:
+underlying commands via a markdown shim. The 13 framework-owned files
+ship under `template/maddu/agent-files/commands/maddu-*.md` and are
+installed RAW (no marker wrap) into `.claude/commands/` and
+`.codex/commands/` — Claude Code's frontmatter parser requires `---`
+on line 1.
 
 | Slash command | Underlying CLI |
 |---|---|
 | `/maddu-help` | `maddu help` |
+| `/maddu-suggest <task>` | `maddu suggest` |
 | `/maddu-doctor` | `maddu doctor` |
 | `/maddu-autopilot <task>` | `register` → `suggest` → `lane claim` → `pipeline run` → `slice-stop` |
 | `/maddu-plan <topic>` | `goal`, `phase`, `brief` |
@@ -601,5 +622,5 @@ underlying commands via a markdown shim:
 | `/maddu-note <text>` | `mailbox send` |
 
 See [22-slash-commands.md](22-slash-commands.md) for the full
-reference, including marker discipline and how to add your own
-slash commands.
+reference, including the raw-frontmatter rationale and how to add
+your own slash commands.

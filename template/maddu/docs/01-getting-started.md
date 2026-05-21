@@ -2,13 +2,17 @@
 
 Ten minutes from zero to your first slice-stop.
 
-**Working inside Claude Code or Codex CLI?** After step 1 (install),
-you can skip straight to `/maddu-autopilot <your task>` and the agent
-will register, claim, run the plan-exec-verify-fix pipeline, and
-slice-stop without any further flags from you. See
-[22-slash-commands.md](22-slash-commands.md). The rest of this guide
-shows the verbose CLI shape so you understand what the slash command
-dispatches to.
+**Slash-command-first.** After step 1 (install), open the repo in
+Claude Code or Codex CLI and type:
+
+- `/maddu-help` — show the slash-command surface.
+- `/maddu-suggest <task>` — "what should I run for X?"
+- `/maddu-autopilot <task>` — end-to-end task pipeline.
+
+That's the no-learning-curve entry point. The rest of this guide
+shows the verbose CLI shape so you understand what the slash commands
+dispatch to — useful for scripts, CI, and when you want to read the
+audit trail.
 
 ## Prerequisites
 

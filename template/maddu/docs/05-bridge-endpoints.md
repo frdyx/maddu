@@ -19,6 +19,21 @@ The bridge is a Node HTTP server in `maddu/runtime/server.js`. It binds to `127.
 
 `counts` includes `events`, `activeSessions`, `claims`, `sliceStops`, `openApprovals`, `unreadMail`, etc.
 
+## Observability projections *(v0.19.1)*
+
+Read-only projection-slice endpoints — pure JSON serializers, no state
+changes, no auth dependency. Cockpit nav can fetch these directly
+instead of fishing fields out of `/bridge/status`.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/bridge/teams` | — | `{teams[]}` |
+| GET | `/bridge/cost` | — | `{tokenLedger[]}` |
+| GET | `/bridge/advisors` | — | `{advisors[]}` |
+| GET | `/bridge/pipelines` | — | `{pipelines[]}` |
+| GET | `/bridge/skill-injections` | — | `{skillInjections[]}` (last 200) |
+| GET | `/bridge/test-status` | — | `{stress, upgradeMatrix}` — reads `.maddu/state/{stress,upgrade-matrix}-last-run.json` |
+
 ## Sessions
 
 | Method | Path | Body | Returns |
