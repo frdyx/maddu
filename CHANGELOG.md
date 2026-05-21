@@ -11,6 +11,59 @@ narrative summary.
 
 ---
 
+## [v1.0.0] · 2026-05-21 · stable, declared
+
+**Same commit as v0.19.2. No code change.** This tag is the public
+declaration that Máddu is now stable, earned by a real-world burn-in
+in a foreign project (`snyggare`) where the full pipeline shipped real
+code end-to-end using only slash commands.
+
+### What v1.0.0 commits to
+
+The following surfaces are stable across the v1.x line. Changes that
+break any of them require a major version bump.
+
+- **The 8+1 hard rules** (now all permanent — see `docs/hard-rules.md`):
+  files-only state · append-only spine · no hosted backend · no broad
+  new deps · no provider SDKs in framework code · device-bound tokens
+  · three-layer brand boundary · lane ownership · every auto-trigger
+  crosses the gauntlet.
+- **Spine NDJSON event format** — event ids (`evt_<14-digit>_<6-hex>`),
+  the `EVENT_TYPES` registry, segment rotation, projection determinism.
+- **Slash command names** — the 13 framework-owned `/maddu-*` commands
+  (autopilot · plan · review · team · advise · status · cost · skill ·
+  note · cancel · help · doctor · suggest).
+- **Cockpit routes** — all routes listed in `docs/04-cockpit-tour.md`.
+  New routes may be added; existing route ids are stable.
+- **CLI surface** — every `maddu <cmd>` verb documented in
+  `docs/03-cli-reference.md`. Flag additions are non-breaking; flag
+  removals/renames require a major bump.
+- **`MADDU.md` / `CLAUDE.md` / `AGENTS.md` marker discipline** —
+  `<!-- BEGIN MADDU v1 --> / <!-- END MADDU v1 -->` is the v1 marker;
+  v2 would migrate to `MADDU v2` markers and provide an automatic
+  upgrade path.
+
+### Verification (recorded in spine + this release)
+
+- Foreign-repo burn-in (`snyggare`) shipped a real `/health` endpoint
+  end-to-end via `/maddu-autopilot`. Pipeline + slice-stop + lane
+  release all clean.
+- Doctor in foreign repo: **32 PASS · 1 WARN · 0 FAIL.**
+- Token ledger populated from real Claude Code transcripts:
+  **53 668 calls · 56 031 565 output tokens · 0 unreported.**
+- All v0.19.1 regressions verified clean in re-burn.
+- All 8 hard rules + (now permanent) rule #9 enforced by gates.
+- Stress harness (8 scenarios) + upgrade matrix (4 source versions)
+  both pass.
+
+### Roadmap
+
+v1.x evolves additively. New features land as minor bumps. Breaking
+changes require a v2.0 with documented migration. The framework's
+shape is now fixed; the work ahead is depth and polish.
+
+---
+
 ## [v0.19.2] · 2026-05-21 · final-polish patch series
 
 A two-PR follow-up to v0.19.1, closing the last items surfaced by the
