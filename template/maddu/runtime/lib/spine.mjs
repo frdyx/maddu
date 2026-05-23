@@ -149,7 +149,22 @@ export const EVENT_TYPES = {
   TOOL_REFUSED:              'TOOL_REFUSED',
   // v1.1.0 Phase 3 — workspace governance tier transitions.
   // data: { from, to, by: sessionId|null, reason }
-  GOVERNANCE_MODE_CHANGED:   'GOVERNANCE_MODE_CHANGED'
+  GOVERNANCE_MODE_CHANGED:   'GOVERNANCE_MODE_CHANGED',
+  // v1.1.0 Phase 5 — plan persistence + revision.
+  // PLAN_CREATED:        { planId, title, phases: [{name, intent}], goal }
+  // PLAN_PHASE_ADDED:    { planId, name, intent, at }
+  // PLAN_PHASE_COMPLETED:{ planId, name, summary }
+  // PLAN_PHASE_BLOCKED:  { planId, name, reason }
+  // PLAN_REVISED:        { planId, by, diff: { added, removed, modified } }
+  // PLAN_COMPLETED:      { planId }
+  // PLAN_CANCELLED:      { planId, reason }
+  PLAN_CREATED:              'PLAN_CREATED',
+  PLAN_PHASE_ADDED:          'PLAN_PHASE_ADDED',
+  PLAN_PHASE_COMPLETED:      'PLAN_PHASE_COMPLETED',
+  PLAN_PHASE_BLOCKED:        'PLAN_PHASE_BLOCKED',
+  PLAN_REVISED:              'PLAN_REVISED',
+  PLAN_COMPLETED:            'PLAN_COMPLETED',
+  PLAN_CANCELLED:            'PLAN_CANCELLED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

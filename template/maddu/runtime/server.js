@@ -818,6 +818,16 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
+  // ── plans (v1.1.0 Phase 5) ────────────────────────────────────────────
+  if (path === '/bridge/plans' && req.method === 'GET') {
+    try {
+      const lib = await import('./lib/plans.mjs');
+      const all = await lib.listPlans(repoRoot);
+      const kb = await lib.kanban(repoRoot);
+      return sendJson(res, 200, { plans: all, kanban: kb });
+    } catch (err) { return sendJson(res, 500, { error: err.message }); }
+  }
+
   // ── receipt log feed (v1.1.0 Phase 4) ─────────────────────────────────
   if (path === '/bridge/operations' && req.method === 'GET') {
     try {

@@ -90,7 +90,11 @@ export default async function init(argv) {
     '.maddu/wiki',
     '.maddu/wiki/project',
     '.maddu/harness',
-    '.maddu/harness/project'
+    '.maddu/harness/project',
+    // v1.1.0 Phase 5 — plan persistence root.
+    '.maddu/state/plans',
+    // v1.1.0 Phase 4 — receipt log root.
+    '.maddu/state/log'
   ];
   for (const d of skeleton) {
     await mkdir(join(cwd, d), { recursive: true });
