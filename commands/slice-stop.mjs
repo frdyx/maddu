@@ -92,10 +92,24 @@ export default async function sliceStop(argv) {
     }
   }
 
+  // v1.1.0 Phase 5 — optional --triggered-by plan:<id> records lineage on
+  // the slice-stop and triggers plan auto-revision.
+  let triggered_by = null;
+  if (typeof flags['triggered-by'] === 'string' && flags['triggered-by']) {
+    const tb = flags['triggered-by'];
+    const m = /^plan:(.+)$/.exec(tb);
+    if (m) {
+      triggered_by = { planId: m[1] };
+    } else if (typeof tb === 'string') {
+      triggered_by = { ref: tb };
+    }
+  }
+
   const ev = await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.SLICE_STOP,
     actor: sessionId,
     lane: flags.lane || null,
+    triggered_by,
     data: {
       summary,
       action: flags.action || null,
@@ -107,6 +121,21 @@ export default async function sliceStop(argv) {
       reason: flags.reason || null
     }
   });
+
+  // Auto-revise the named plan if triggered_by carries a planId.
+  if (triggered_by && triggered_by.planId) {
+    try {
+      const candidates = [
+        join(process.cwd(), 'maddu', 'runtime', 'lib', 'plans.mjs'),
+        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'plans.mjs'),
+      ];
+      for (const c of candidates) {
+        try { await stat(c); const plans = await import(pathToFileURL(c).href); await plans.maybeAutoReviseFromSliceStop(repoRoot, ev); break; } catch {}
+      }
+    } catch (err) {
+      console.error(`  plan auto-revise failed (non-fatal): ${err.message}`);
+    }
+  }
 
   console.log(`slice-stop  ${ev.id}  [${ev.lane || '—'}]`);
   console.log(`  ${summary}`);

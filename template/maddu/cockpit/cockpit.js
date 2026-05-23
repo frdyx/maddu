@@ -41,6 +41,8 @@ const ROUTES = {
   claims:     { title: 'Claims',     group: 'decide',    rank: 4,                 render: renderClaimMap,   description: 'Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.' },
   approvals:  { title: 'Approvals',  group: 'decide',    rank: 5,                 render: renderApprovals,  description: 'Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.' },
   tasks:      { title: 'Tasks',      group: 'decide',    rank: 6,                 render: renderTasks,      description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
+  plans:      { title: 'Plans',      group: 'decide',    rank: 7,                 render: renderPlans,      description: 'Multi-phase plan persistence + Kanban (Now / Next / Blocked / Done). State derived from spine PLAN_* events. (v1.1.0)',
+                keywords: 'plans plan phases kanban revision multi-phase' },
 
   workflows:  { title: 'Workflows',  group: 'operate',   anchor: true,  rank: 1,  render: renderWorkflows,  description: 'Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.' },
   agents:     { title: 'Agents',     group: 'operate',   rank: 2,                 render: renderAgents,     description: 'Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.' },
@@ -5401,6 +5403,71 @@ function renderTools() {
     }
   }
   refresh();
+  return root;
+}
+
+// v1.1.0 Phase 5 — Plans + Kanban cockpit route.
+function renderPlans() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Plans'));
+  root.appendChild(el('p', {}, ROUTES.plans.description));
+
+  const kanbanMount = el('div', {});
+  kanbanMount.appendChild(loading('Loading plans + kanban…'));
+  root.appendChild(panel('Kanban', 'Now · Next · Blocked · Done (derived from PLAN_* events)', kanbanMount));
+
+  const listMount = el('div', {});
+  listMount.appendChild(loading('Loading plan list…'));
+  root.appendChild(panel('All plans', 'Open + completed + cancelled (newest first)', listMount));
+
+  fetch('/bridge/plans').then((r) => r.json()).then((d) => {
+    kanbanMount.innerHTML = '';
+    const k = d.kanban || { now: [], next: [], blocked: [], done: [] };
+    const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;' });
+    for (const [label, items, color] of [['Now', k.now, '#6cf'], ['Next', k.next, '#cb6'], ['Blocked', k.blocked, '#e77'], ['Done', k.done, '#7c7']]) {
+      const col = el('div', { style: 'border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;' });
+      col.appendChild(el('div', { style: `font-family:var(--m-font-mono);font-size:12px;color:${color};margin-bottom:6px;` }, `${label}  (${items.length})`));
+      for (const it of items) {
+        const card = el('div', { style: 'background:var(--m-bg-1);padding:5px 7px;margin-bottom:4px;font-size:11px;' });
+        card.appendChild(el('div', { style: 'font-weight:bold;' }, it.title || '(untitled)'));
+        if (it.phase) card.appendChild(el('div', { style: 'color:var(--m-fg-2);' }, '→ ' + it.phase));
+        if (it.status) card.appendChild(el('div', { style: 'color:var(--m-fg-2);' }, it.status));
+        col.appendChild(card);
+      }
+      grid.appendChild(col);
+    }
+    kanbanMount.appendChild(grid);
+
+    listMount.innerHTML = '';
+    const plans = d.plans || [];
+    if (plans.length === 0) {
+      listMount.appendChild(placeholder('No plans yet', 'Create one with `maddu plan new "<title>" --phases "a,b,c"`.'));
+    } else {
+      const table = el('table', { style: 'width:100%;border-collapse:collapse;font-family:var(--m-font-mono);font-size:12px;' });
+      const head = el('tr', {});
+      for (const h of ['planId', 'status', 'title', 'phases', 'revs']) {
+        head.appendChild(el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);font-weight:normal;' }, h));
+      }
+      table.appendChild(head);
+      for (const p of plans) {
+        const row = el('tr', {});
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, p.planId));
+        const done = (p.phases || []).filter((x) => x.status === 'completed').length;
+        const total = (p.phases || []).length;
+        const sColor = p.status === 'completed' ? '#7c7' : (p.status === 'cancelled' ? '#cc8' : '#6cf');
+        row.appendChild(el('td', { style: `padding:4px 6px;border-bottom:1px solid var(--m-line);color:${sColor};` }, p.status || 'open'));
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, p.title || '(untitled)'));
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, `${done}/${total}`));
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, String(p.revisionCount || 0)));
+        table.appendChild(row);
+      }
+      listMount.appendChild(table);
+    }
+  }).catch((err) => {
+    kanbanMount.innerHTML = '';
+    kanbanMount.appendChild(placeholder('Bridge unreachable', err.message));
+  });
+
   return root;
 }
 
