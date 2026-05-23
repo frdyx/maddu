@@ -71,8 +71,13 @@ export async function cancelPlan(repoRoot, { planId, reason = null, by = null })
 
 export function projectPlanState(events, planId) {
   const plan = { planId, title: null, goal: null, status: 'open', phases: [], revisionCount: 0, lastEventId: null };
+  // Only consume PLAN_* events. Other event types (COORDINATOR_*, LOOP_*)
+  // may share planId in their data but are not state-bearing for this
+  // projection. Including them would cause state.json drift vs. fresh
+  // replay because lastEventId would advance without state mutation.
   for (const ev of events) {
     if (!ev.data || ev.data.planId !== planId) continue;
+    if (!ev.type || !ev.type.startsWith('PLAN_')) continue;
     if (ev.type === EVENT_TYPES.PLAN_CREATED) {
       plan.title = ev.data.title;
       plan.goal = ev.data.goal || null;
