@@ -4,29 +4,19 @@ A **lane** is the unit of mutually-exclusive work in Máddu. Before an agent edi
 
 ## Default lanes
 
-Installed on `maddu init`. Listed in `.maddu/lanes/catalog.json`. Each lane has an id, a one-line scope description, and a default set of file globs it owns.
+Installed on `maddu init`. Listed in `.maddu/lanes/catalog.json`. Each lane has an id and a one-line scope description. The default catalog is intentionally generic — edit it to match your project's actual surfaces.
 
 | Lane id | Scope |
 |---|---|
-| `architecture` | High-level design, planning, architecture briefs. Reads everything, writes briefs and roadmaps. |
-| `cockpit-shell` | The Máddu cockpit HTML, tokens, routes. Visual surface only — no business logic. |
-| `bridge-server` | `maddu/runtime/server.js` and harness wiring around it. |
-| `auth-providers` | OAuth flows, token paths, provider authentication. |
-| `harness` | The Node-only scripts under `.maddu/harness/`. |
-| `wiki` | The framework-default wiki pages under `.maddu/wiki/`. |
-| `briefs` | Framework-default briefs under `.maddu/briefs/`. |
-| `verification` | Verification reports, focused gates, doctor checks. |
-| `guardrails` | The approval ledger and policies (lands in Phase A). |
-| `observability` | The live event panel and search index (lands in Phase A/B). |
-| `learning-patterns` | Hindsight extraction, the skill gallery, the pattern library (lands in Phase A/B). |
-| `coordination` | The mailbox bus, the dependency-aware task board (lands in Phase B). |
-| `search-retrieval` | The file-backed spine search index (lands in Phase B). |
-| `runtime-integration` | The pluggable runtime-adapter contract (lands in Phase C). |
-| `tools` | The MCP visual registry (lands in Phase C). |
-| `ops-automation` | The NL→cron scheduler (lands in Phase C). |
-| `git-integration` | The checkpoint timeline via git worktrees (lands in Phase C). |
-| `shell` | The `/workbench` multi-pane shell (lands in Phase D). |
-| `portability` | The export/import surface (lands in Phase D). |
+| `architecture` | Design, planning, architectural briefs. Reads everything; writes plans and roadmaps. |
+| `frontend` | User-facing UI — components, styles, client-side logic. |
+| `backend` | Server-side code, APIs, data layer. |
+| `infra` | Build, deploy, CI, ops, configuration. |
+| `tests` | Test code, fixtures, harnesses. |
+| `docs` | Project documentation, READMEs, contributor guides. |
+| `general` | Catch-all for changes that don't fit another lane. Use sparingly — split into a real lane when patterns emerge. |
+
+Edit `.maddu/lanes/catalog.json` directly to add, remove, or rename lanes. `maddu upgrade` never touches operator-edited catalogs (only the seed at first `maddu init`).
 
 ## Claiming a lane
 
