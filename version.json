@@ -1,5 +1,5 @@
 {
-  "version": "1.0.4",
-  "phase": "generic-default-lane-catalog",
+  "version": "1.0.5",
+  "phase": "sweep-phase-leakage-from-shipped-docs",
   "released": "2026-05-23"
 }

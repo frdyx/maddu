@@ -101,7 +101,7 @@ $ maddu slice-stop \
     --gates "doctor,events-replay" \
     --learnings "Approvals must auto-decide via policy before surfacing" \
     --next "Wire deny-always policy in CLI" \
-    --reason "Phase A1 ship"
+    --reason "ship the approvals route"
 ```
 
 What slice-stop produces:
