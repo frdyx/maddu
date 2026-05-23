@@ -3216,6 +3216,35 @@ function renderOperations() {
   root.appendChild(el('h2', {}, 'Operations'));
   root.appendChild(el('p', {}, ROUTES.operations.description));
 
+  // v1.1.0 Phase 4 — receipt log feed (newest 50, all event types).
+  const receiptsMount = el('div', {});
+  receiptsMount.appendChild(loading('Reading receipt log…'));
+  root.appendChild(panel('Receipt log', 'GET /bridge/operations · derived from spine · last 50', receiptsMount));
+  fetch('/bridge/operations').then((r) => r.json()).then((d) => {
+    receiptsMount.innerHTML = '';
+    const receipts = (d && d.receipts) || [];
+    if (receipts.length === 0) {
+      receiptsMount.appendChild(placeholder('No receipts yet', 'Run any operational command (e.g. `maddu git status`) to populate.'));
+      return;
+    }
+    const table = el('table', { style: 'width:100%;border-collapse:collapse;font-family:var(--m-font-mono);font-size:12px;' });
+    const head = el('tr', {});
+    for (const h of ['ts', 'type', 'lane', 'summary']) {
+      head.appendChild(el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);font-weight:normal;' }, h));
+    }
+    table.appendChild(head);
+    for (const r of receipts.slice(0, 50)) {
+      const row = el('tr', {});
+      const ts = (r.ts || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z');
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, ts));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:#6cf;' }, r.type));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, r.lane || '—'));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, (r.summary || '').slice(0, 110)));
+      table.appendChild(row);
+    }
+    receiptsMount.appendChild(table);
+  }).catch((err) => { receiptsMount.innerHTML = ''; receiptsMount.appendChild(placeholder('Bridge unreachable', err.message)); });
+
   const summaryMount = el('div', {});
   summaryMount.appendChild(loading('Reading slice timeline…'));
   root.appendChild(panelFocus('Activity', 'slice-stops + memory facts · last 7 days', summaryMount,

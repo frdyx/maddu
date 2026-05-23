@@ -61,4 +61,6 @@ export default {
   install:      { tier: 'mutating',  autoTrigger: 'forbidden' },
   // v1.1.0 Phase 3 — governance tier control surface.
   governance:   { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.1.0 Phase 4 — receipt log viewer.
+  log:          { tier: 'read-only', autoTrigger: 'allowed'   },
 };
