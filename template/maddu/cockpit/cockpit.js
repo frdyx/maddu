@@ -80,6 +80,8 @@ const ROUTES = {
   // route reads the matching /bridge/<slice> endpoint (v0.19.1 PR-C4).
   pipelines:  { title: 'Pipelines',  group: 'operate',   rank: 8,                 render: renderPipelinesRoute, description: 'Pipeline runs with stage timeline. plan-exec-verify-fix and related multi-stage workflows.',
                 keywords: 'pipelines runs stages plan-exec-verify-fix autopilot' },
+  loops:      { title: 'Loops',      group: 'operate',   rank: 12,                render: renderLoops,      description: 'Ralph + plan-loops with iteration count, status, stuck-detection. (v1.1.0)',
+                keywords: 'loop loops ralph plan-loop persist iterate stuck' },
   cost:       { title: 'Cost',       group: 'operate',   rank: 9,                 render: renderCostRoute,      description: 'Token / call rollup per session, day, model, runtime. Surfaces unreported-token gaps honestly.',
                 keywords: 'cost tokens ledger usage billing rollup unreported' },
   advisors:   { title: 'Advisors',   group: 'operate',   rank: 10,                render: renderAdvisorsRoute,  description: 'Non-claiming advisor query artifacts. Runtime + session + ts + first-line preview.',
@@ -5403,6 +5405,43 @@ function renderTools() {
     }
   }
   refresh();
+  return root;
+}
+
+// v1.1.0 Phase 6 — Loops cockpit route.
+function renderLoops() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Loops'));
+  root.appendChild(el('p', {}, ROUTES.loops.description));
+  const mount = el('div', {});
+  mount.appendChild(loading('Loading loops…'));
+  root.appendChild(panel('All loops', 'GET /bridge/loops · LOOP_* events', mount));
+  fetch('/bridge/loops').then((r) => r.json()).then((d) => {
+    mount.innerHTML = '';
+    const loops = d.loops || [];
+    if (loops.length === 0) {
+      mount.appendChild(placeholder('No loops yet', 'Run `maddu loop ralph --goal "<task>" --verify "<cmd>"` to start one.'));
+      return;
+    }
+    const table = el('table', { style: 'width:100%;border-collapse:collapse;font-family:var(--m-font-mono);font-size:12px;' });
+    const head = el('tr', {});
+    for (const h of ['loopId', 'kind', 'status', 'iters/max', 'cooldown', 'goal']) {
+      head.appendChild(el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);font-weight:normal;' }, h));
+    }
+    table.appendChild(head);
+    for (const l of loops) {
+      const row = el('tr', {});
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, l.loopId));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, l.kind || '—'));
+      const sColor = l.status === 'completed' ? '#7c7' : (l.status === 'halted' ? '#e77' : '#6cf');
+      row.appendChild(el('td', { style: `padding:4px 6px;border-bottom:1px solid var(--m-line);color:${sColor};` }, l.status + (l.reason ? ` (${l.reason})` : '')));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, `${l.iters}/${l.maxIter || '?'}`));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, l.cooldownMs ? `${l.cooldownMs}ms` : '—'));
+      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, (l.goal || '').slice(0, 60)));
+      table.appendChild(row);
+    }
+    mount.appendChild(table);
+  }).catch((err) => { mount.innerHTML = ''; mount.appendChild(placeholder('Bridge unreachable', err.message)); });
   return root;
 }
 
