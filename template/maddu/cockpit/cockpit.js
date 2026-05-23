@@ -139,6 +139,7 @@ const els = {
   meta: document.getElementById('route-meta'),
   bridge: document.getElementById('status-bridge'),
   version: document.getElementById('status-version'),
+  governance: document.getElementById('status-governance'),
   uptime: document.getElementById('status-uptime'),
   host: document.getElementById('status-host'),
   port: document.getElementById('status-port'),
@@ -230,6 +231,15 @@ function updateChrome() {
     els.bridge.innerHTML = '<span class="signal live"></span>online';
     els.version.textContent = bridgeStatus.version || 'unknown';
     els.uptime.textContent = formatUptime(bridgeStatus.uptimeMs);
+    // v1.1.0 Phase 3 — governance mode badge (poll once when chrome updates).
+    if (els.governance && !els.governance.dataset.fetched) {
+      els.governance.dataset.fetched = '1';
+      fetch('/bridge/governance').then((r) => r.json()).then((d) => {
+        if (!d || !d.mode) { els.governance.textContent = '—'; return; }
+        const color = d.mode === 'strict' ? '#e77' : (d.mode === 'relaxed' ? '#ec8' : '#6cf');
+        els.governance.innerHTML = `<span style="color:${color};">${d.mode}</span>`;
+      }).catch(() => { els.governance.textContent = '—'; });
+    }
     if (bridgeStatus.port) els.port.textContent = bridgeStatus.port;
     const open = bridgeStatus.counts && bridgeStatus.counts.openApprovals;
     if (els.approvalsBadge) {
@@ -269,6 +279,7 @@ function updateChrome() {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
     els.version.textContent = '—';
     els.uptime.textContent = '—';
+    if (els.governance) { els.governance.textContent = '—'; delete els.governance.dataset.fetched; }
     if (els.approvalsBadge) els.approvalsBadge.hidden = true;
     if (els.mailboxBadge)   els.mailboxBadge.hidden = true;
     if (els.tasksBadge)     els.tasksBadge.hidden = true;

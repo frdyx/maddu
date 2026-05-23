@@ -161,6 +161,15 @@ export default async function init(argv) {
       JSON.stringify({ staleAfterMs: 1800000, autoCloseAfterMs: 14400000 }, null, 2) + '\n'
     );
   }
+  // v1.1.0 Phase 3 — seed governance.json with mode: standard. Idempotent.
+  const governancePath = join(configDir, 'governance.json');
+  if (!(await exists(governancePath))) {
+    await writeFile(
+      governancePath,
+      JSON.stringify({ mode: 'standard', overrides: {} }, null, 2) + '\n'
+    );
+    console.log(`  governance tier seeded (mode: standard)`);
+  }
   const triggersPath = join(configDir, 'triggers.json');
   if (!(await exists(triggersPath))) {
     await writeFile(

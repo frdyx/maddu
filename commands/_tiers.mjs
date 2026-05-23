@@ -59,4 +59,6 @@ export default {
   format:       { tier: 'mutating',  autoTrigger: 'forbidden' },
   lint:         { tier: 'read-only', autoTrigger: 'allowed'   },
   install:      { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.1.0 Phase 3 — governance tier control surface.
+  governance:   { tier: 'mutating',  autoTrigger: 'forbidden' },
 };

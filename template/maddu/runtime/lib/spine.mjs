@@ -146,7 +146,10 @@ export const EVENT_TYPES = {
   //   TOOL_REFUSED:   { tool, argv, lane, sessionId, reason, detail }
   TOOL_INVOKED:              'TOOL_INVOKED',
   TOOL_COMPLETED:            'TOOL_COMPLETED',
-  TOOL_REFUSED:              'TOOL_REFUSED'
+  TOOL_REFUSED:              'TOOL_REFUSED',
+  // v1.1.0 Phase 3 — workspace governance tier transitions.
+  // data: { from, to, by: sessionId|null, reason }
+  GOVERNANCE_MODE_CHANGED:   'GOVERNANCE_MODE_CHANGED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
