@@ -164,7 +164,14 @@ export const EVENT_TYPES = {
   PLAN_PHASE_BLOCKED:        'PLAN_PHASE_BLOCKED',
   PLAN_REVISED:              'PLAN_REVISED',
   PLAN_COMPLETED:            'PLAN_COMPLETED',
-  PLAN_CANCELLED:            'PLAN_CANCELLED'
+  PLAN_CANCELLED:            'PLAN_CANCELLED',
+  // v1.1.0 Phase 6 — loops (ralph + plan-loop).
+  // data: { loopId, kind: 'ralph'|'plan-loop', goal, iter?, maxIter?, cooldownMs?, reason? }
+  LOOP_STARTED:              'LOOP_STARTED',
+  LOOP_ITERATION_STARTED:    'LOOP_ITERATION_STARTED',
+  LOOP_ITERATION_COMPLETED:  'LOOP_ITERATION_COMPLETED',
+  LOOP_HALTED:               'LOOP_HALTED',
+  LOOP_COMPLETED:            'LOOP_COMPLETED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

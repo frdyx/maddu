@@ -818,6 +818,23 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
+  // ── loops (v1.1.0 Phase 6) ────────────────────────────────────────────
+  if (path === '/bridge/loops' && req.method === 'GET') {
+    const events = await readAll(repoRoot);
+    const loopEvents = events.filter((e) => e.type && e.type.startsWith('LOOP_'));
+    const byId = {};
+    for (const ev of loopEvents) {
+      const id = ev.data?.loopId;
+      if (!id) continue;
+      if (!byId[id]) byId[id] = { loopId: id, kind: ev.data.kind || null, started: null, iters: 0, status: 'open', goal: ev.data.goal || null };
+      if (ev.type === 'LOOP_STARTED') { byId[id].started = ev.ts; byId[id].cooldownMs = ev.data.cooldownMs; byId[id].maxIter = ev.data.maxIter; }
+      else if (ev.type === 'LOOP_ITERATION_COMPLETED') byId[id].iters = Math.max(byId[id].iters, ev.data.iter || 0);
+      else if (ev.type === 'LOOP_HALTED') { byId[id].status = 'halted'; byId[id].reason = ev.data.reason; }
+      else if (ev.type === 'LOOP_COMPLETED') { byId[id].status = 'completed'; }
+    }
+    return sendJson(res, 200, { loops: Object.values(byId).sort((a, b) => (b.started || '').localeCompare(a.started || '')) });
+  }
+
   // ── plans (v1.1.0 Phase 5) ────────────────────────────────────────────
   if (path === '/bridge/plans' && req.method === 'GET') {
     try {

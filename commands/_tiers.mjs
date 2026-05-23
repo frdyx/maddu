@@ -65,4 +65,6 @@ export default {
   log:          { tier: 'read-only', autoTrigger: 'allowed'   },
   // v1.1.0 Phase 5 — plan persistence.
   plan:         { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.1.0 Phase 6 — loops.
+  loop:         { tier: 'mutating',  autoTrigger: 'forbidden' },
 };
