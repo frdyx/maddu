@@ -121,7 +121,7 @@ maddu doctor
 
 Look for these gate rows:
 
-- `slash commands installed` — should report `12 slash command(s) × 2 surfaces in sync`.
+- `slash commands installed` — should report `26+ slash command(s) × 2 surfaces in sync` (v1.1.0 — was 12 in v0.19).
 - `intent-routing-current` — verifies the natural-language table is in MADDU.md / CLAUDE.md / AGENTS.md.
 - `suggest-engine-deterministic` — runs `maddu suggest` twice on 4 fixed tasks; fails on drift.
 
@@ -141,9 +141,31 @@ If you build a useful pattern and think other Máddu users would want
 it, open a PR adding it to `template/maddu/agent-files/commands/` and
 the framework will start shipping it under marker discipline.
 
+## v1.1.0 additions
+
+The Autonomy + Planning + Tool Gateway release ships 14 new slash commands:
+
+| Command | What it does |
+|---|---|
+| `/maddu-git <argv>` | Audited git wrapper; refuses empty `-m` and `push -f`. |
+| `/maddu-test [argv]` | Auto-detect test runner. |
+| `/maddu-format [argv]` | Auto-detect formatter. |
+| `/maddu-lint [argv]` | Auto-detect linter. |
+| `/maddu-install <pkgs>` | Audited dep install (npm/pnpm/yarn). |
+| `/maddu-mcp [verb]` | MCP template gallery (list/install/show/uninstall). |
+| `/maddu-governance [verb]` | Workspace governance tier (show/set/reset). |
+| `/maddu-log [flags]` | Receipt log viewer. |
+| `/maddu-plan [verb]` | Plan persistence (new/list/show/etc). |
+| `/maddu-ralph <goal>` | Persist-until-done loop. |
+| `/maddu-plan-loop <plan-id>` | Plan-driven iterative loop. |
+| `/maddu-coordinate <plan-id>` | Runtime-agnostic multi-phase driver. |
+| `/maddu-blast <task>` | Chained autonomous run (no-asks). |
+| `/maddu-skills-review` | Autonomous skill candidate triage. |
+
 ## Related
 
 - [`23-natural-language-routing.md`](23-natural-language-routing.md) — the no-prefix surface.
 - [`01-getting-started.md`](01-getting-started.md) — first slice, now leading with `/maddu-autopilot`.
 - [`03-cli-reference.md`](03-cli-reference.md) — verbose CLI reference (every `maddu <cmd>` shape).
 - [`20-governance.md`](20-governance.md) — the gate that verifies slash-command install.
+- [`30-governance-tiers.md`](30-governance-tiers.md) — workspace governance (v1.1.0).

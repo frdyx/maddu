@@ -4,7 +4,7 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v0.19.0** ([changelog](../CHANGELOG.md)) — completeness and hardening on the path to v1.0.0. Token ledger fully wired, advisors actually spawn subprocesses, skill auto-injection lives, model routing hints land via env vars, synthetic stress + upgrade-matrix harnesses keep concurrency and upgrade invariants honest. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v1.1.0** ([changelog](../CHANGELOG.md)) — Autonomy + Planning + Tool Gateway. Five audited default tools (`maddu git/test/format/lint/install`), 5 curated MCP server templates, three workspace governance tiers, a derived operations log, plan persistence with auto-revision, ralph + plan-loop primitives, and a runtime-agnostic coordinator that walks multi-phase plans without depending on any single agent CLI's affordances. Doctor moves to 45 PASS in a fresh consumer install. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
 
 ## Zero learning curve (v0.18)
 
@@ -63,6 +63,12 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 | 25 | [25-model-routing.md](25-model-routing.md) | Model routing hints (v0.19): `modelPreference` on runtimes/lanes/pipelines, the resolution precedence chain, `MADDU_MODEL_HINT` env, the `model-hint-shape` gate. *(v0.19.0)* |
 | 26 | [26-stress-testing.md](26-stress-testing.md) | Stress + upgrade harnesses (v0.19): the 8 synthetic scenarios, the 4 upgrade-matrix paths, `stress-harness-recent` + `upgrade-matrix-recent` gates. *(v0.19.0)* |
 | 27 | [27-transcript-import.md](27-transcript-import.md) | `maddu usage import --from claude-code` — retroactively backfill the token ledger from `~/.claude/projects/<slug>/*.jsonl`. Idempotent via `importHash`. *(v0.19.1)* |
+| 28 | [28-default-tools.md](28-default-tools.md) | Five audited subprocess wrappers (`maddu git/test/format/lint/install`); per-lane allowlist; `TOOL_INVOKED/_COMPLETED/_REFUSED` events. *(v1.1.0)* |
+| 29 | [29-mcp-templates.md](29-mcp-templates.md) | The 5 curated MCP server templates; `maddu mcp templates list/install/uninstall`; required-binary checks. *(v1.1.0)* |
+| 30 | [30-governance-tiers.md](30-governance-tiers.md) | `strict / standard / relaxed` workspace tiers; what tunes vs what stays immutable; per-gate overrides. *(v1.1.0)* |
+| 31 | [31-operations-log.md](31-operations-log.md) | Derived receipt log at `.maddu/log/operations.ndjson`; `maddu log`; cockpit Operations route. *(v1.1.0)* |
+| 32 | [32-kanban-and-plans.md](32-kanban-and-plans.md) | Plan persistence at `.maddu/plans/<id>/`; `PLAN_*` events; auto-revision via slice-stop `--triggered-by`; Kanban projection. *(v1.1.0)* |
+| 33 | [33-loops-and-coordinator.md](33-loops-and-coordinator.md) | Ralph + plan-loops (`maddu loop`); the runtime-agnostic coordinator primitive (`maddu coordinator`). *(v1.1.0)* |
 
 Reference docs that are not in the numbered series:
 

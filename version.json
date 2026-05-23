@@ -1,5 +1,5 @@
 {
-  "version": "1.0.5",
-  "phase": "sweep-phase-leakage-from-shipped-docs",
-  "released": "2026-05-23"
+  "version": "1.1.0",
+  "phase": "autonomy-planning-tool-gateway",
+  "released": "2026-05-24"
 }

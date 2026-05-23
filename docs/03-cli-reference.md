@@ -596,6 +596,64 @@ $ maddu usage import --from claude-code --since 2026-04-01   # skip older lines
 
 Full reference: [27-transcript-import.md](27-transcript-import.md).
 
+## v1.1.0 commands
+
+The Autonomy + Planning + Tool Gateway release adds nine new top-level
+verbs:
+
+```bash
+# Default tools (Phase 1)
+$ maddu git <argv...>          # audited git wrapper; refuses empty -m, push -f
+$ maddu test [argv...]         # auto-detect runner (npm/vitest/jest/mocha)
+$ maddu format [argv...]       # auto-detect prettier / `npm run format`
+$ maddu lint [argv...]         # auto-detect eslint / `npm run lint`
+$ maddu install <packages...>  # audited npm/pnpm/yarn install; refuses empty list
+
+# Governance tiers (Phase 3)
+$ maddu governance show
+$ maddu governance set <strict|standard|relaxed> [--reason "..."]
+$ maddu governance set-override <key> <value>
+$ maddu governance reset
+
+# Receipt log (Phase 4)
+$ maddu log [--since iso] [--lane id] [--op T] [--rebuild] [--json]
+
+# Plans + kanban (Phase 5)
+$ maddu plan new "<title>" [--phases "a,b,c"] [--goal "..."]
+$ maddu plan list / show / add-phase / complete-phase / block-phase
+$ maddu plan revise / complete / cancel / kanban
+
+# Loops (Phase 6)
+$ maddu loop ralph --goal "..." --verify "<cmd>" [--iterate "<cmd>"]
+$ maddu loop plan  --plan <id> [--max-iter N]
+$ maddu loop status / cancel
+
+# Coordinator (Phase 7)
+$ maddu coordinator <plan-id> [--dry-run | --synthetic-cmd "..." | --runtime <n>]
+
+# MCP templates (Phase 2)
+$ maddu mcp templates list / show <name>
+$ maddu mcp install <template> / uninstall <name>
+
+# Skill candidates (Phase 8c)
+$ maddu skill candidates list
+$ maddu skill from-candidate <hash> [--title "..."]
+$ maddu skill candidate-reject <hash> [--reason "..."]
+
+# Force-claim (Phase 8a)
+$ maddu lane claim --lane <id> --session <sid> --force [--reason "..."]
+
+# Slice-stop lineage (Phase 5)
+$ maddu slice-stop --triggered-by plan:<plan-id> --summary "..."
+```
+
+Full coverage: [28-default-tools.md](28-default-tools.md),
+[29-mcp-templates.md](29-mcp-templates.md),
+[30-governance-tiers.md](30-governance-tiers.md),
+[31-operations-log.md](31-operations-log.md),
+[32-kanban-and-plans.md](32-kanban-and-plans.md),
+[33-loops-and-coordinator.md](33-loops-and-coordinator.md).
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the
@@ -620,6 +678,20 @@ on line 1.
 | `/maddu-cost` | `cost` |
 | `/maddu-cancel` | `session close`, `slice-stop` |
 | `/maddu-note <text>` | `mailbox send` |
+| `/maddu-git <argv>` | `git` *(v1.1.0)* |
+| `/maddu-test [argv]` | `test` *(v1.1.0)* |
+| `/maddu-format [argv]` | `format` *(v1.1.0)* |
+| `/maddu-lint [argv]` | `lint` *(v1.1.0)* |
+| `/maddu-install <pkg>` | `install` *(v1.1.0)* |
+| `/maddu-mcp [verb]` | `mcp` *(v1.1.0)* |
+| `/maddu-governance [verb]` | `governance` *(v1.1.0)* |
+| `/maddu-log [flags]` | `log` *(v1.1.0)* |
+| `/maddu-plan [verb]` | `plan` *(v1.1.0)* |
+| `/maddu-ralph <goal>` | `loop ralph` *(v1.1.0)* |
+| `/maddu-plan-loop <plan-id>` | `loop plan` *(v1.1.0)* |
+| `/maddu-coordinate <plan-id>` | `coordinator` *(v1.1.0)* |
+| `/maddu-blast <task>` | chained: register → claim → loop → slice-stop *(v1.1.0)* |
+| `/maddu-skills-review` | `skill candidates list` *(v1.1.0)* |
 
 See [22-slash-commands.md](22-slash-commands.md) for the full
 reference, including the raw-frontmatter rationale and how to add
