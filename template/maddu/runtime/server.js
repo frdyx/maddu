@@ -818,6 +818,21 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
+  // ── receipt log feed (v1.1.0 Phase 4) ─────────────────────────────────
+  if (path === '/bridge/operations' && req.method === 'GET') {
+    try {
+      const lib = await import('./lib/receipts.mjs');
+      const u = new URL(req.url, 'http://x');
+      const opts = {};
+      if (u.searchParams.get('since')) opts.since = u.searchParams.get('since');
+      if (u.searchParams.get('lane')) opts.lane = u.searchParams.get('lane');
+      if (u.searchParams.get('op')) opts.op = u.searchParams.get('op');
+      await lib.writeReceiptLog(repoRoot); // refresh artifacts on read
+      const all = await lib.readReceiptLog(repoRoot, opts);
+      return sendJson(res, 200, { count: all.length, receipts: all.slice(-100).reverse() });
+    } catch (err) { return sendJson(res, 500, { error: err.message }); }
+  }
+
   // ── tools (v1.1.0 Phase 2) ────────────────────────────────────────────
   // Unified Tools view: 5 default tools (P1), active MCP servers + their
   // health (P2), recent TOOL_INVOKED/COMPLETED/REFUSED events (P1).

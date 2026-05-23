@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -70,6 +70,7 @@ Commands:
   lint           Auto-detects linter (eslint / npm run lint). (v1.1.0)
   install        Audited dep installer (npm/pnpm/yarn). Refuses empty package list. (v1.1.0)
   governance     Subcommands: show | set <strict|standard|relaxed> | set-override | reset. (v1.1.0)
+  log            Receipt log viewer (--since --lane --op --rebuild --json). (v1.1.0)
 
 Flags:
   --version      Print framework version.
