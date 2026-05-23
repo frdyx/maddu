@@ -30,7 +30,7 @@ $ maddu slice-stop \
     --gates "doctor,events-replay" \
     --learnings "Approvals must auto-decide via policy before surfacing in UI;Badge counter belongs in chrome, not the route" \
     --next "Wire deny-always in CLI;Add per-tool policy presets" \
-    --reason "Phase A1 ship"
+    --reason "ship the approvals route"
 ```
 
 Field meanings:
@@ -63,7 +63,7 @@ $ curl -X POST http://127.0.0.1:4177/bridge/slice-stop \
           "gates": ["doctor"],
           "learnings": ["Approvals must auto-decide via policy"],
           "next": ["Wire deny-always in CLI"],
-          "reason": "Phase A1 ship"
+          "reason": "ship the approvals route"
         }'
 ```
 

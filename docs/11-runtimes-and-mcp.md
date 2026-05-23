@@ -144,4 +144,3 @@ Both runtimes and MCP servers receive credentials via env injection **at spawn t
 - [12-auth-and-imports.md](12-auth-and-imports.md) — where credentials live.
 - [03-cli-reference.md](03-cli-reference.md) — full flag reference.
 - [05-bridge-endpoints.md](05-bridge-endpoints.md) — `/bridge/runtimes` and `/bridge/mcp` endpoints.
-- [maddu-v0.3-roadmap.md](maddu-v0.3-roadmap.md) — Phase C1 / C2 design notes.

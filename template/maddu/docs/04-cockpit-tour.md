@@ -16,7 +16,7 @@ The shell shows in every route:
 - **Mailbox badge** — total unread across all lanes.
 - **Tasks badge** — open tasks.
 - **Stuck banner** — appears when any worker is silent >15 s. Dismiss via `/kill <workerId>` in the composer or `maddu worker kill <id>`.
-- **Slash-command composer** — bottom of every route. Type `/` to see commands: `/resume`, `/steer`, `/goal`, `/rollback`, `/stop`, `/usage`, `/skills`, `/runtime`, `/approve`, `/kill`. (Phase B1 — some commands are still rolling out; see [maddu-v0.3-roadmap.md](maddu-v0.3-roadmap.md).)
+- **Slash-command composer** — bottom of every route. Type `/` to see commands: `/resume`, `/steer`, `/goal`, `/rollback`, `/stop`, `/usage`, `/skills`, `/runtime`, `/approve`, `/kill`.
 - **`?` keyboard shortcut** — opens the Docs popup, which renders every page under `docs/` via `/bridge/docs`.
 
 ## Rail organization — collapse, recent, search *(v1.0.1)*
@@ -80,7 +80,7 @@ Dependency-aware task board. Tasks group by status: `in-progress`, `todo`, `bloc
 
 ### `#skills`
 
-Skill gallery. Reads `.maddu/skills/*.md` (SKILL.md format). Filter by tag. Click a skill to view its body, provenance (which slice-stops contributed), and metadata. Drag-and-drop into a chat (Phase B4) to apply a skill to an active session.
+Skill gallery. Reads `.maddu/skills/*.md` (SKILL.md format). Filter by tag. Click a skill to view its body, provenance (which slice-stops contributed), and metadata. Drag-and-drop into a chat to apply a skill to an active session.
 
 ### `#search`
 

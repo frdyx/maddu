@@ -11,6 +11,41 @@ narrative summary.
 
 ---
 
+## [v1.0.5] · 2026-05-23 · sweep Phase-X leakage from shipped docs
+
+Burn-in feedback: v1.0.4 fixed the default lane catalog, but operator
+still saw "Phase A1 / Phase B1 / Phase B4" annotations in the Docs
+route and other places. Those were Máddu's internal depth-upgrade slice
+plan markers leaking through shipped documentation.
+
+### Cleaned
+
+- **Deleted `docs/maddu-v0.3-roadmap.md`** — Máddu's full internal v0.3
+  development roadmap, four-research-report distillation, was being
+  shipped to every consumer install's Docs route. This is a framework
+  artifact, not user documentation. Removed from both `docs/` and
+  `template/maddu/docs/`.
+- `docs/02-concepts.md` — sample `--reason "Phase A1 ship"` → `"ship the approvals route"`.
+- `docs/04-cockpit-tour.md` — dropped `(Phase B1 — see roadmap)` and `(Phase B4)` annotations and the cross-link to the deleted roadmap.
+- `docs/08-slice-stop-ritual.md` — same `"Phase A1 ship"` → generic example reason, in both CLI and HTTP examples.
+- `docs/11-runtimes-and-mcp.md` — dropped the "See also" line linking to the deleted roadmap.
+
+Operator never sees Máddu's internal phase-plan structure again.
+
+### Note on the catalog file in existing installs
+
+If an existing consumer install still has the old `DEFAULT_LANE_CATALOG`
+content in `.maddu/lanes/catalog.json` after `maddu upgrade` (because
+the bridge was running during upgrade and re-wrote the file from its
+in-memory old defaults), delete the file with the bridge stopped and
+restart — `ensureCatalog` will re-seed from the v1.0.5 defaults.
+
+### Not touched (intentional)
+
+- `template/maddu/runtime/server.js` and `template/maddu/cockpit/cockpit.js` source comments mentioning Phase markers are organizational labels for the framework's own contributors. They ship as code comments but are not user-visible. Left as-is.
+
+---
+
 ## [v1.0.4] · 2026-05-23 · generic default lane catalog
 
 Burn-in feedback from snyggare: the Conductor route listed lanes like
