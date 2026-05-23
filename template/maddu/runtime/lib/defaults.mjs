@@ -1,27 +1,29 @@
-// Framework-default lane catalog. Mirrors docs/lanes.md.
+// Generic default lane catalog shipped to every `maddu init` install.
+//
+// Lanes are the unit of mutually-exclusive work — pick or add ones that fit
+// YOUR project, not Máddu's internal development. Operators are expected to
+// edit `.maddu/lanes/catalog.json` to match the actual surfaces they edit
+// (frontend / backend / infra / etc.). This seed is intentionally minimal
+// and generic — opinions about what your project's lanes should be don't
+// belong in the framework default.
+//
+// v1.0.4 — replaced the prior Máddu-internal catalog (lanes like
+// `cockpit-shell`, `bridge-server`, `runtime-integration`, plus "Phase X"
+// markers from the depth-upgrade slice plan) which was leaking framework
+// development structure into every consumer install. Máddu's own
+// contributors maintain their internal catalog locally in `.maddu/lanes/`
+// (gitignored) — same as any other operator.
 
 export const DEFAULT_LANE_CATALOG = {
   schemaVersion: 1,
   framework: 'maddu',
   lanes: [
-    { id: 'architecture',         scope: 'High-level design, planning, architecture briefs.' },
-    { id: 'cockpit-shell',        scope: 'Cockpit HTML, tokens, routes. Visual surface only.' },
-    { id: 'bridge-server',        scope: 'runtime/server.js and harness wiring around it.' },
-    { id: 'auth-providers',       scope: 'OAuth flows, token paths, provider authentication.' },
-    { id: 'harness',              scope: 'Node-only scripts under .maddu/harness/.' },
-    { id: 'wiki',                 scope: 'Framework-default wiki pages.' },
-    { id: 'briefs',               scope: 'Framework-default briefs.' },
-    { id: 'verification',         scope: 'Verification reports, focused gates, doctor checks.' },
-    { id: 'guardrails',           scope: 'Approval ledger and policies. (Phase A1)' },
-    { id: 'observability',        scope: 'Live event panel and search index. (Phase A2 + B6)' },
-    { id: 'learning-patterns',    scope: 'Hindsight extraction, skill gallery, pattern library. (Phase A3 + B4)' },
-    { id: 'coordination',         scope: 'Mailbox bus, dependency-aware task board. (Phase B2 + B3)' },
-    { id: 'search-retrieval',     scope: 'File-backed spine search index. (Phase B6)' },
-    { id: 'runtime-integration',  scope: 'Pluggable runtime-adapter contract. (Phase C1)' },
-    { id: 'tools',                scope: 'MCP visual registry. (Phase C2)' },
-    { id: 'ops-automation',       scope: 'NL→cron scheduler. (Phase C3)' },
-    { id: 'git-integration',      scope: 'Checkpoint timeline via git worktrees. (Phase C4)' },
-    { id: 'shell',                scope: '/workbench multi-pane shell. (Phase D1)' },
-    { id: 'portability',          scope: 'Export/import surface. (Phase D2)' }
+    { id: 'architecture', scope: 'Design, planning, architectural briefs. Reads everything; writes plans and roadmaps.' },
+    { id: 'frontend',     scope: 'User-facing UI — components, styles, client-side logic.' },
+    { id: 'backend',      scope: 'Server-side code, APIs, data layer.' },
+    { id: 'infra',        scope: 'Build, deploy, CI, ops, configuration.' },
+    { id: 'tests',        scope: 'Test code, fixtures, harnesses.' },
+    { id: 'docs',         scope: 'Project documentation, READMEs, contributor guides.' },
+    { id: 'general',      scope: 'Catch-all for changes that do not fit another lane. Use sparingly — split into a real lane when patterns emerge.' }
   ]
 };

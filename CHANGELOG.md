@@ -11,6 +11,44 @@ narrative summary.
 
 ---
 
+## [v1.0.4] · 2026-05-23 · generic default lane catalog
+
+Burn-in feedback from snyggare: the Conductor route listed lanes like
+`cockpit-shell`, `bridge-server`, `runtime-integration`, `wiki`,
+`briefs`, `verification`, `shell`, with descriptions tagged `Phase A1`,
+`Phase B6`, `Phase C1`, `Phase D1`. Those are **Máddu's own internal
+development lanes** — the depth-upgrade slice plan structure — leaking
+verbatim into every consumer install via `DEFAULT_LANE_CATALOG`. End
+users were greeted by 19 empty lanes describing the framework's own
+roadmap instead of their project's surfaces.
+
+### Fix
+
+`template/maddu/runtime/lib/defaults.mjs` `DEFAULT_LANE_CATALOG` is now
+a generic minimal seed:
+
+- `architecture` — design, planning, briefs
+- `frontend` — UI, styles, client-side
+- `backend` — server, APIs, data
+- `infra` — build, deploy, CI, ops
+- `tests` — test code and fixtures
+- `docs` — documentation
+- `general` — catch-all
+
+Operators edit `.maddu/lanes/catalog.json` directly to match their own
+project surfaces. `maddu upgrade` never touches an operator-edited
+catalog; only the initial `maddu init` seed comes from this default.
+
+Máddu's own contributors maintain their internal lane catalog locally
+in the source repo's `.maddu/lanes/catalog.json` (gitignored) — same
+as any other operator. The framework's development structure no longer
+ships as a consumer's project structure.
+
+`docs/lanes.md` (and `template/maddu/docs/lanes.md` mirror) updated to
+match. `docs-in-sync` gate green.
+
+---
+
 ## [v1.0.3] · 2026-05-21 · framework-only route hiding
 
 Burn-in feedback from the snyggare consumer install: the `Test Status`

@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
-  "phase": "framework-only-route-hiding",
-  "released": "2026-05-21"
+  "version": "1.0.4",
+  "phase": "generic-default-lane-catalog",
+  "released": "2026-05-23"
 }
