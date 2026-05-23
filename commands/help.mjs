@@ -72,6 +72,17 @@ const ROSTER = [
       { name: '/maddu-cancel', line: 'Stop the current slice cleanly (heartbeat-close + slice-stop).', under: 'session close, slice-stop' },
     ],
   },
+  {
+    topic: 'tools',
+    title: 'Default tools (v1.1.0)',
+    items: [
+      { name: '/maddu-git <argv…>',     line: 'Audited git wrapper; refuses empty -m and `push -f`.',        under: 'git' },
+      { name: '/maddu-test [argv…]',    line: 'Auto-detect test runner (npm test / vitest / jest / mocha).', under: 'test' },
+      { name: '/maddu-format [argv…]',  line: 'Auto-detect formatter (prettier / npm run format).',          under: 'format' },
+      { name: '/maddu-lint [argv…]',    line: 'Auto-detect linter (eslint / npm run lint).',                 under: 'lint' },
+      { name: '/maddu-install <pkgs…>', line: 'Audited dep install (npm/pnpm/yarn). Refuses empty list.',    under: 'install' },
+    ],
+  },
 ];
 
 const C = {

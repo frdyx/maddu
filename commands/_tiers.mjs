@@ -52,4 +52,11 @@ export default {
   cost:         { tier: 'read-only', autoTrigger: 'allowed'   },
   // v0.19.1 — retroactive transcript import populates the ledger.
   usage:        { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.1.0 Phase 1 — default tools. All mutating; auto-trigger forbidden
+  // (the slash command path is the explicit-invocation surface).
+  git:          { tier: 'mutating',  autoTrigger: 'forbidden' },
+  test:         { tier: 'read-only', autoTrigger: 'allowed'   },
+  format:       { tier: 'mutating',  autoTrigger: 'forbidden' },
+  lint:         { tier: 'read-only', autoTrigger: 'allowed'   },
+  install:      { tier: 'mutating',  autoTrigger: 'forbidden' },
 };

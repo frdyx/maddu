@@ -383,6 +383,53 @@ async function upgradeMarkerCollision() {
   return { name, ok: allOk, duration };
 }
 
+// v1.1.0 Phase 1 — default-tool refusal events land on the spine and
+// the tool-allowlist gate stays coherent under volume.
+async function toolRefusalsCoherent() {
+  const name = 'tool-refusals-coherent';
+  const start = Date.now();
+  const tmp = await newTmp(name);
+  const { spine } = await loadSpine();
+  let allOk = true;
+  try {
+    // Synthesize 25 refusals across the 4 known reason classes.
+    const reasons = ['allowlist-deny', 'allowlist-not-allowed', 'dangerous-form', 'no-detector'];
+    for (let i = 0; i < 25; i++) {
+      const r = reasons[i % reasons.length];
+      await spine.append(tmp, {
+        type: 'TOOL_REFUSED',
+        actor: 'ses_stress',
+        lane: null,
+        data: { tool: ['git','test','format','lint','install'][i % 5], argv: [], lane: null, sessionId: 'ses_stress', reason: r, detail: `synthetic ${r}` },
+      });
+    }
+    const events = await spine.readAll(tmp);
+    const refused = events.filter((e) => e.type === 'TOOL_REFUSED');
+    allOk = ok(name, '25 TOOL_REFUSED events present', refused.length === 25) && allOk;
+    // Run the tool-allowlist gate.
+    const gate = await import(pathToFileURL(join(FRAMEWORK_ROOT, 'template', 'maddu', 'runtime', 'gates', 'builtin', 'tool-allowlist.mjs')).href);
+    const result = await gate.default.run({ repoRoot: tmp });
+    allOk = ok(name, 'tool-allowlist gate green under all valid reasons', result.ok === true, `msg=${result.message}`) && allOk;
+
+    // Inject one malformed event (no reason field) — gate should flag it.
+    await spine.append(tmp, {
+      type: 'TOOL_REFUSED',
+      actor: 'ses_stress',
+      lane: null,
+      data: { tool: 'git', argv: [], lane: null, sessionId: 'ses_stress' },
+    });
+    const result2 = await gate.default.run({ repoRoot: tmp });
+    allOk = ok(name, 'tool-allowlist gate flags malformed refusal', result2.ok === false, `msg=${result2.message}`) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception', false, err.message);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 // --- runner ------------------------------------------------------------
 
 const SCENARIOS = {
@@ -394,6 +441,7 @@ const SCENARIOS = {
   'malformed-event-recovery': malformedEventRecovery,
   'suggest-ambiguous':        suggestAmbiguous,
   'upgrade-marker-collision': upgradeMarkerCollision,
+  'tool-refusals-coherent':   toolRefusalsCoherent,
 };
 
 const overallStart = Date.now();

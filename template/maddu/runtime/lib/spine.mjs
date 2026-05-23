@@ -136,7 +136,17 @@ export const EVENT_TYPES = {
   SKILL_INJECTED:            'SKILL_INJECTED',
   // v0.19 Phase 5 — synthetic stress harness signals a rejected NDJSON
   // line during malformed-event recovery. data: { segment, lineIndex, reason }.
-  SPINE_LINE_REJECTED:       'SPINE_LINE_REJECTED'
+  SPINE_LINE_REJECTED:       'SPINE_LINE_REJECTED',
+  // v1.1.0 Phase 1 — default framework tools (git/test/format/lint/install)
+  // emit one event per invocation. TOOL_INVOKED at start, TOOL_COMPLETED on
+  // exit, TOOL_REFUSED when allowlist or dangerous-form check blocks before
+  // spawn. data shape:
+  //   TOOL_INVOKED:   { tool, argv, lane, sessionId, mode }
+  //   TOOL_COMPLETED: { tool, argv, lane, sessionId, exitCode, durationMs }
+  //   TOOL_REFUSED:   { tool, argv, lane, sessionId, reason, detail }
+  TOOL_INVOKED:              'TOOL_INVOKED',
+  TOOL_COMPLETED:            'TOOL_COMPLETED',
+  TOOL_REFUSED:              'TOOL_REFUSED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
