@@ -1,0 +1,34 @@
+{
+  "template": "local-search",
+  "displayName": "Local Web Search (RSS / curl)",
+  "summary": "RSS- and curl-based local search. No API key, no provider SDK; queries operator-curated feeds.",
+  "transport": "stdio",
+  "stdio": {
+    "command": "node",
+    "args": ["./.maddu/mcp/local-search/server.mjs"],
+    "env": []
+  },
+  "requires": [
+    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." },
+    { "binary": "curl", "install": "Install curl from your OS package manager (apt/brew/winget)." }
+  ],
+  "lanes": ["*"],
+  "scaffold": {
+    "files": [
+      {
+        "path": ".maddu/mcp/local-search/server.mjs",
+        "content": "#!/usr/bin/env node\n// Minimal local-search MCP stdio handshake stub. Operator extends with\n// their own RSS feeds via .maddu/mcp/local-search/feeds.json.\n//\n// On `initialize`, returns protocolVersion. On any other method, echoes\n// the curated feed URLs from feeds.json. No external API calls.\nimport { readFile } from 'node:fs/promises';\nimport { join, dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\n\nconst here = dirname(fileURLToPath(import.meta.url));\nconst feedsPath = join(here, 'feeds.json');\nlet feeds = [];\ntry { feeds = JSON.parse(await readFile(feedsPath, 'utf8')); } catch {}\n\nprocess.stdin.setEncoding('utf8');\nlet buf = '';\nprocess.stdin.on('data', (chunk) => {\n  buf += chunk;\n  let idx;\n  while ((idx = buf.indexOf('\\n')) >= 0) {\n    const line = buf.slice(0, idx);\n    buf = buf.slice(idx + 1);\n    if (!line.trim()) continue;\n    let msg;\n    try { msg = JSON.parse(line); } catch { continue; }\n    if (msg.method === 'initialize') {\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '0.1.0', capabilities: {}, serverInfo: { name: 'local-search', version: '0.1.0' } } }) + '\\n');\n      continue;\n    }\n    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { feeds } }) + '\\n');\n  }\n});\n"
+      },
+      {
+        "path": ".maddu/mcp/local-search/feeds.json",
+        "content": "[\n  \"https://hnrss.org/frontpage\"\n]\n"
+      }
+    ]
+  },
+  "notes": "Operator-curated feed list lives at .maddu/mcp/local-search/feeds.json. Replace the sample HN feed with whatever you want indexed. No external API keys required.",
+  "hardRuleNotes": [
+    "Rule #5 OK: no provider SDK; just curl + JSON over RSS.",
+    "Rule #3 OK: local subprocess; no hosted backend dependency.",
+    "Rule #4 OK: no new package.json dep (stdlib + curl)."
+  ]
+}

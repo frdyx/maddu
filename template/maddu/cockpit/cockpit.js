@@ -59,6 +59,8 @@ const ROUTES = {
   runtimes:   { title: 'Runtimes',   group: 'connect',   rank: 1,                 render: renderRuntimes,   description: 'Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.',
                 keywords: 'claude codex hermes worker subprocess spawn provider' },
   mcp:        { title: 'MCP',        group: 'connect',   rank: 2,                 render: renderMcp,        description: 'Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.' },
+  tools:      { title: 'Tools',      group: 'connect',   rank: 7,                 render: renderTools,      description: 'Unified tool gateway — 5 default tools (git/test/format/lint/install), active MCP servers, last 20 invocations. (v1.1.0)',
+                keywords: 'tools default mcp gateway git test format lint install audited' },
   auth:       { title: 'Auth',       group: 'connect',   rank: 3,                 render: renderAuth,       description: 'Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.',
                 keywords: 'api key keys token oauth credentials secret rotation anthropic openai' },
   imports:    { title: 'Imports',    group: 'connect',   rank: 4,                 render: renderImports,    description: 'Safe import gateway. Foreign artifacts in — provider secrets always out. Rejected payloads are logged with paths + pattern names only.' },
@@ -5264,6 +5266,102 @@ function renderSchedule() {
 
 async function fetchMcp() {
   try { const r = await fetch('/bridge/mcp', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+// v1.1.0 Phase 2 — unified Tools cockpit route.
+function renderTools() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Tools'));
+  root.appendChild(el('p', {}, ROUTES.tools.description));
+
+  const defaultsMount = el('div', {});
+  defaultsMount.appendChild(loading('Loading default tools…'));
+  root.appendChild(panel('Default tools (5)', 'git · test · format · lint · install — audited subprocess wrappers (v1.1.0 P1)', defaultsMount));
+
+  const mcpMount = el('div', {});
+  mcpMount.appendChild(loading('Loading MCP servers…'));
+  root.appendChild(panel('MCP servers', 'Active registrations (v1.1.0 P2 templates installable via maddu mcp install)', mcpMount));
+
+  const recentMount = el('div', {});
+  recentMount.appendChild(loading('Loading recent invocations…'));
+  root.appendChild(panel('Recent tool events (last 20)', 'TOOL_INVOKED / TOOL_COMPLETED / TOOL_REFUSED', recentMount));
+
+  function fmtArgv(argv) { return Array.isArray(argv) ? argv.join(' ') : ''; }
+  function badge(s, color) { return el('span', { style: `display:inline-block;padding:1px 6px;border-radius:3px;background:${color};color:#000;font-family:var(--m-font-mono);font-size:11px;` }, s); }
+
+  async function refresh() {
+    let data;
+    try { data = await (await fetch('/bridge/tools')).json(); }
+    catch (err) {
+      defaultsMount.innerHTML = '';
+      defaultsMount.appendChild(placeholder('Bridge unreachable', err.message));
+      return;
+    }
+    defaultsMount.innerHTML = '';
+    const dlist = el('div', { style: 'display:grid;grid-template-columns:repeat(5,1fr);gap:8px;' });
+    for (const t of (data.defaults || [])) {
+      const card = el('div', { style: 'border:1px solid var(--m-line);padding:8px 10px;background:var(--m-bg-2);' });
+      card.appendChild(el('div', { style: 'font-family:var(--m-font-mono);font-size:13px;font-weight:bold;' }, t.tool));
+      card.appendChild(el('div', { style: 'font-size:11px;color:var(--m-fg-2);margin-top:2px;' }, 'audited'));
+      dlist.appendChild(card);
+    }
+    defaultsMount.appendChild(dlist);
+
+    mcpMount.innerHTML = '';
+    const mcp = data.mcp || [];
+    if (mcp.length === 0) {
+      mcpMount.appendChild(placeholder('No MCP servers registered', 'Run `maddu mcp templates list` to see the 5 curated templates.'));
+    } else {
+      const list = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px;' });
+      for (const s of mcp) {
+        const card = el('div', { style: 'border:1px solid var(--m-line);padding:8px 10px;background:var(--m-bg-2);' });
+        const header = el('div', { style: 'display:flex;justify-content:space-between;align-items:center;font-family:var(--m-font-mono);font-size:13px;' });
+        header.appendChild(el('span', {}, s.name));
+        header.appendChild(el('span', { style: 'font-size:11px;color:var(--m-fg-2);' }, s.transport + (s.enabled ? ' · on' : ' · off')));
+        card.appendChild(header);
+        const h = (data.health || {})[s.name];
+        const note = h?.ok ? 'health: ok' : (h ? `health: ${h.error || 'down'}` : 'no health check yet');
+        card.appendChild(el('div', { style: 'font-size:11px;color:var(--m-fg-2);margin-top:4px;' }, note));
+        list.appendChild(card);
+      }
+      mcpMount.appendChild(list);
+    }
+
+    recentMount.innerHTML = '';
+    const recent = data.recent || [];
+    if (recent.length === 0) {
+      recentMount.appendChild(placeholder('No tool events yet', 'Run a default tool (e.g. `maddu git status`) to populate.'));
+    } else {
+      const table = el('table', { style: 'width:100%;border-collapse:collapse;font-family:var(--m-font-mono);font-size:12px;' });
+      const head = el('tr', {});
+      for (const h of ['ts', 'type', 'tool', 'argv', 'detail']) {
+        head.appendChild(el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);font-weight:normal;' }, h));
+      }
+      table.appendChild(head);
+      for (const ev of recent) {
+        const row = el('tr', {});
+        const ts = (ev.ts || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z');
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, ts));
+        let typeColor = '#888';
+        if (ev.type === 'TOOL_INVOKED') typeColor = '#6cf';
+        else if (ev.type === 'TOOL_COMPLETED') typeColor = ((ev.data?.exitCode === 0) ? '#7c7' : '#e77');
+        else if (ev.type === 'TOOL_REFUSED') typeColor = '#e77';
+        const typeCell = el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' });
+        typeCell.appendChild(badge(ev.type.replace('TOOL_', ''), typeColor));
+        row.appendChild(typeCell);
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, ev.data?.tool || '—'));
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, fmtArgv(ev.data?.argv).slice(0, 60)));
+        const detail = ev.type === 'TOOL_REFUSED' ? (ev.data?.detail || ev.data?.reason || '') :
+                       ev.type === 'TOOL_COMPLETED' ? `exit=${ev.data?.exitCode} ${ev.data?.durationMs}ms` :
+                       (ev.data?.mode || '');
+        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, String(detail).slice(0, 80)));
+        table.appendChild(row);
+      }
+      recentMount.appendChild(table);
+    }
+  }
+  refresh();
+  return root;
 }
 
 function renderMcp() {

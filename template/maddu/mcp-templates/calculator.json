@@ -1,0 +1,29 @@
+{
+  "template": "calculator",
+  "displayName": "Calculator",
+  "summary": "Local arithmetic + unit-conversion server. Pure stdlib; no network.",
+  "transport": "stdio",
+  "stdio": {
+    "command": "node",
+    "args": ["./.maddu/mcp/calculator/server.mjs"],
+    "env": []
+  },
+  "requires": [
+    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." }
+  ],
+  "lanes": ["*"],
+  "scaffold": {
+    "files": [
+      {
+        "path": ".maddu/mcp/calculator/server.mjs",
+        "content": "#!/usr/bin/env node\n// Local calculator MCP stub. Accepts a `calc/eval` method with { expr }\n// and returns the numeric result. Uses Function() in a tightly scoped\n// way; no I/O, no shell.\nprocess.stdin.setEncoding('utf8');\nlet buf = '';\nprocess.stdin.on('data', (chunk) => {\n  buf += chunk;\n  let idx;\n  while ((idx = buf.indexOf('\\n')) >= 0) {\n    const line = buf.slice(0, idx);\n    buf = buf.slice(idx + 1);\n    if (!line.trim()) continue;\n    let msg;\n    try { msg = JSON.parse(line); } catch { continue; }\n    if (msg.method === 'initialize') {\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '0.1.0', capabilities: {}, serverInfo: { name: 'calculator', version: '0.1.0' } } }) + '\\n');\n      continue;\n    }\n    const expr = msg?.params?.expr || '';\n    if (!/^[-+*/().\\d\\s%]+$/.test(expr)) {\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: 'unsafe expression' } }) + '\\n');\n      continue;\n    }\n    let result;\n    try { result = Function('\"use strict\"; return (' + expr + ');')(); }\n    catch (e) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: e.message } }) + '\\n'); continue; }\n    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\\n');\n  }\n});\n"
+      }
+    ]
+  },
+  "notes": "Accepts simple arithmetic expressions; refuses anything that doesn't match the digits/operators allowlist regex.",
+  "hardRuleNotes": [
+    "Rule #5 OK: stdlib only.",
+    "Rule #3 OK: local subprocess.",
+    "Rule #4 OK: zero deps."
+  ]
+}
