@@ -11,6 +11,136 @@ narrative summary.
 
 ---
 
+## [v1.1.0] · 2026-05-24 · Autonomy + Planning + Tool Gateway
+
+Largest minor release since v1.0.0. Nine phases, all coordinator-driven
+from a single session, each landed as its own PR (#61–#69).
+
+### Headline changes
+
+- **Default framework tools** (Phase 1) — five audited subprocess
+  wrappers ship: `maddu git/test/format/lint/install`. Every invocation
+  emits `TOOL_INVOKED` / `TOOL_COMPLETED` (or `TOOL_REFUSED`) on the
+  spine. Dangerous-form catalog refuses `git commit -m ""`, `git push
+  -f`, empty install lists, no-detector test/format/lint resolution.
+  Per-lane allowlist via `.maddu/config/triggers.json`. New gates:
+  `default-tools-shipped`, `tool-allowlist`.
+
+- **MCP server template gallery** (Phase 2) — 5 curated templates ship
+  as JSON descriptors (no new package.json deps): `local-fs`,
+  `local-search`, `calculator`, `git-advanced`, `time-and-date`. New
+  verbs `maddu mcp templates list/show`, `install <template>`,
+  `uninstall <name>`. `install` checks required binaries and refuses
+  cleanly when missing. New cockpit `tools` route unifies default tools
+  + active MCP servers + last 20 tool events.
+
+- **Workspace governance tiers** (Phase 3) —
+  `.maddu/config/governance.json` declares `strict | standard | relaxed`
+  + per-gate overrides. Three modes tune *operational* gates only; the
+  8+1 structural hard rules remain immutable. `maddu governance set
+  relaxed` requires `--reason` (explicit operator intent). Doctor
+  banner + cockpit rail-foot show mode prominently. New event
+  `GOVERNANCE_MODE_CHANGED`. New gate `governance-mode-coherent`.
+
+- **Receipt log + cockpit Operations feed** (Phase 4) — every
+  operational event projects to `.maddu/log/operations.ndjson` with a
+  human-readable summary; `.maddu/log/README.md` auto-refreshes with
+  last 50. `maddu log [--since][--lane][--op][--rebuild][--json]`.
+  Cockpit Operations route renders the feed. The projection is
+  REGENERABLE — `receipts-coherent` gate replays twice and asserts
+  byte-equality.
+
+- **Kanban projection + plan persistence + auto-revision** (Phase 5) —
+  plans live as files at `.maddu/plans/<plan-id>/{plan.md,state.json,
+  revisions/}`. All mutations land via `PLAN_*` events. `state.json`
+  is regenerable — `plan-state-derivable` gate enforces. Slice-stop
+  with `--triggered-by plan:<id>` auto-emits `PLAN_REVISED`. New
+  cockpit `plans` route with Kanban grid (Now/Next/Blocked/Done).
+  New gates: `plan-state-derivable`, `kanban-coherent`.
+
+- **Loops — ralph + plan-loop** (Phase 6) — persist-until-done
+  iteration. Every iter is a real slice with `LOOP_ITERATION_*`
+  events. Stuck-detection halts at two consecutive identical fail
+  signatures. Max iter + cooldown read from governance tier (strict
+  3/10s, standard 5/5s, relaxed 10/1s). New cockpit `loops` route.
+  New gates: `loop-iteration-audit`, `loop-cooldown-respected`.
+
+- **Coordinator as a Máddu primitive** (Phase 7) — the missing
+  portability piece. `maddu coordinator <plan-id>` walks a plan's
+  phases via `child_process.spawn` subprocesses passing
+  `MADDU_COORDINATOR_PLAN_ID / _PHASE / _ID / _ITER` env vars. 5-iter
+  cap per phase + stuck-detection. **Does NOT depend on Claude Code's
+  `Agent` tool** — verified by walking a synthetic 3-phase plan via
+  `--dry-run` and `--synthetic-cmd`. New events
+  `COORDINATOR_STARTED/_PHASE_STARTED/_PHASE_COMPLETED/_HALTED/_COMPLETED`.
+  New gate: `coordinator-phase-coherent`. (Also fixes a
+  `projectPlanState` bug where COORDINATOR_* events sharing planId
+  drifted state.json from spine.)
+
+- **Blast + starter skills + autonomous skill curation** (Phase 8) —
+  three bundled sub-phases:
+  - 8a: new `/maddu-blast` slash command (chained no-asks autonomous
+    run); `lane claim --force` flag emits `LANE_CLAIM_FORCED` for
+    audit preservation.
+  - 8b: 8 starter skills shipped under
+    `template/maddu/skills/starter/` and seeded into `.maddu/skills/`
+    on init.
+  - 8c: autonomous skill candidate detector (suggest-only — never
+    auto-writes a skill file). `maddu skill candidates list`,
+    `from-candidate <hash>`, `candidate-reject <hash>`. New events
+    `SKILL_CANDIDATE_DETECTED/_APPROVED/_REJECTED`.
+  - New gates: `lane-force-discipline`, `skills-starter-pack-installed`,
+    `skill-candidates-bounded`.
+
+- **Doctor + docs sweep + tag** (Phase 9, this entry) — gate count
+  rose from 32 (v1.0.5) to 45 PASS in a fresh consumer. README +
+  9 canonical docs updated. Six new docs added: `28-default-tools.md`,
+  `29-mcp-templates.md`, `30-governance-tiers.md`, `31-operations-log.md`,
+  `32-kanban-and-plans.md`, `33-loops-and-coordinator.md`. Tagged
+  `v1.1.0`.
+
+### Hard-rule compliance audit
+
+All 8+1 hard rules preserved by construction:
+- Rule #1 (files-only): receipts ndjson, plans .md/.json, governance
+  json — no DB.
+- Rule #2 (append-only): all projections rebuild from events.
+- Rule #3 (no hosted backend): MCP templates run local subprocesses;
+  coordinator subprocess is local.
+- Rule #4 (no broad new deps): zero new package.json entries.
+- Rule #5 (no provider SDKs): tool wrappers + loops + plans +
+  coordinator all stdlib + `child_process.spawn`.
+- Rule #6 (device-bound tokens): untouched.
+- Rule #7 (three-layer brand boundary): all v1.1.0 surfaces
+  framework-level.
+- Rule #8 (lane ownership): `--force` claim audit-logged.
+- Rule #9 (auto-trigger gauntlet): loop + coordinator iterations
+  emit `triggered_by` lineage; cooldown enforced; stuck-detection
+  caps runaway.
+
+Governance tiers tune operational gates only — never the 8+1 rules.
+
+### Verification
+
+- Fresh-consumer doctor: 45 PASS / 1 WARN / 0 FAIL at `standard`
+  (with no operator-side warnings beyond the pre-existing empty
+  workspace registry WARN).
+- `scripts/test/layout-refusal.mjs`: 4/4 green at every phase boundary.
+- `scripts/test/stress-harness.mjs --all`: 9/9 scenarios green
+  (added `tool-refusals-coherent` in Phase 1).
+- `scripts/test/upgrade-matrix.mjs`: 19/19 PASS (fresh + v0.16.0 +
+  v0.17.1 + v0.18.0 baselines).
+- Synthetic 3-phase coordinator walk: end-to-end via subprocess only —
+  no Claude Code `Agent` tool invoked.
+
+### PRs
+
+#61 (P1 tools) · #62 (P2 MCP templates) · #63 (P3 governance) ·
+#64 (P4 receipts) · #65 (P5 plans/kanban) · #66 (P6 loops) ·
+#67 (P7 coordinator) · #68 (P8 blast/skills) · #69 (P9 docs/tag).
+
+---
+
 ## [v1.0.5] · 2026-05-23 · sweep Phase-X leakage from shipped docs
 
 Burn-in feedback: v1.0.4 fixed the default lane catalog, but operator

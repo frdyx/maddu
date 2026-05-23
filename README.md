@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 0.19.0](https://img.shields.io/badge/version-0.19.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,18 +24,19 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v0.19.0
+## What's new in v1.1.0
 
-**Completeness and hardening.** v0.18 shipped the polished UX surface; v0.19 closes every wiring gap behind it.
+**Autonomy + Planning + Tool Gateway.** Nine phases, all coordinator-driven from a single session. Doctor moves 32 → 45 PASS in the test consumer.
 
-- **Token ledger fully wired.** Workers self-report `TOKEN_USAGE_REPORTED` from inside their subprocess via runtime wrappers (`claude` / `codex` / `gemini`). `maddu cost` shows real numbers after a slice.
-- **Cross-runtime advisors.** `maddu advise codex "review this design"` actually spawns Codex now (auth-checks first, refuses cleanly when not signed in, captures the response into the artifact).
-- **Skill auto-injection.** Frontmatter `triggers:` + `tags:` on `.maddu/skills/*.md` files; matching bodies auto-appended to orientation digests (capped at 3 skills, 24 KB total). New `SKILL_INJECTED` event.
-- **Model routing hints.** `modelPreference` on runtimes / lanes / pipeline stages with precedence resolution; framework forwards `MADDU_MODEL_HINT` env to the worker. Zero new SDK imports.
-- **Stress + upgrade harnesses.** 8 synthetic scenarios catch concurrency / malformed-event / large-spine regressions in ~7.5s. 4 upgrade-matrix paths verify any prior version converges cleanly.
-- **Six new doctor gates.** Doctor moves 25 → 30 PASS in the test consumer.
+- **Default framework tools** ([`docs/28-default-tools.md`](docs/28-default-tools.md)) — five audited subprocess wrappers ship: `maddu git/test/format/lint/install`. Every invocation emits `TOOL_INVOKED/_COMPLETED/_REFUSED` on the spine. Refuses empty commit messages, `git push -f`, empty install lists, no-detector test/format/lint resolution. Per-lane allowlist via `.maddu/config/triggers.json`.
+- **MCP server template gallery** ([`docs/29-mcp-templates.md`](docs/29-mcp-templates.md)) — 5 curated templates ship as JSON descriptors (no new package.json deps): `local-fs`, `local-search`, `calculator`, `git-advanced`, `time-and-date`. `maddu mcp install <template>` checks required binaries, scaffolds companion files, registers.
+- **Workspace governance tiers** ([`docs/30-governance-tiers.md`](docs/30-governance-tiers.md)) — `strict | standard | relaxed` with per-gate overrides. Tunes operational gates only; the 8+1 hard rules stay immutable. Doctor banner + cockpit rail-foot show mode.
+- **Receipt log + Operations feed** ([`docs/31-operations-log.md`](docs/31-operations-log.md)) — every operational event projects to `.maddu/log/operations.ndjson`; readable via `maddu log` and the cockpit `operations` route. Projection regenerable.
+- **Kanban + plan persistence** ([`docs/32-kanban-and-plans.md`](docs/32-kanban-and-plans.md)) — plans live at `.maddu/plans/<id>/{plan.md,state.json,revisions/}`. All mutations via PLAN_* events. Slice-stop with `--triggered-by plan:<id>` auto-revises. New cockpit `plans` route.
+- **Loops + coordinator primitive** ([`docs/33-loops-and-coordinator.md`](docs/33-loops-and-coordinator.md)) — `maddu loop ralph` (persist-until-done) + `maddu coordinator <plan-id>` (multi-phase autonomous driver). Coordinator is runtime-agnostic — does NOT depend on Claude Code's `Agent` tool.
+- **Blast + starter skills + autonomous curation** — `/maddu-blast` chained autonomous run; 8 starter skills seeded on init; suggest-only skill candidate detection from recurring slice-stop patterns.
 
-See [the v0.19 changelog entry](CHANGELOG.md) for the full release notes. Read [`docs/24-skills-auto-inject.md`](docs/24-skills-auto-inject.md), [`docs/25-model-routing.md`](docs/25-model-routing.md), and [`docs/26-stress-testing.md`](docs/26-stress-testing.md) for the deep dives.
+See [the v1.1.0 changelog entry](CHANGELOG.md) for the full release notes.
 
 ## Zero learning curve (v0.18)
 
