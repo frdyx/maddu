@@ -42,6 +42,29 @@ function tag(level) {
   return level;
 }
 
+// v1.1.0 Phase 3 — print the current governance mode as a banner so
+// operators always know the operational posture before reading gates.
+async function printGovernanceBanner(repoRoot) {
+  const candidates = [
+    join(repoRoot, 'maddu', 'runtime', 'lib', 'governance.mjs'),
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'template', 'maddu', 'runtime', 'lib', 'governance.mjs'),
+  ];
+  let libPath = null;
+  for (const c of candidates) {
+    try { await stat(c); libPath = c; break; } catch {}
+  }
+  if (!libPath) return;
+  try {
+    const lib = await import(pathToFileURL(libPath).href);
+    const cfg = await lib.readGovernance(repoRoot);
+    const color = cfg.mode === 'strict' ? ANSI.fail : (cfg.mode === 'relaxed' ? ANSI.warn : '\x1b[34m');
+    console.log(`             governance: ${color}${cfg.mode}${ANSI.reset}${ANSI.dim}  (${cfg.__source})${ANSI.reset}`);
+    if (cfg.mode === 'relaxed') {
+      console.log(`             ${ANSI.warn}operational gates lifted — hard rules still enforced${ANSI.reset}`);
+    }
+  } catch {}
+}
+
 async function checkPort(host, port) {
   return new Promise((resolve) => {
     const srv = createServer();
@@ -293,6 +316,8 @@ export default async function doctor(argv) {
     const madduJson = await readMadduJson(repoRoot);
     console.log(`${ANSI.bold}Máddu doctor${ANSI.reset}  repo: ${repoRoot}`);
     if (madduJson) console.log(`             installed framework v${madduJson.framework_version}`);
+    // v1.1.0 Phase 3 — governance mode banner.
+    await printGovernanceBanner(repoRoot);
   } else if (repoTargets.length > 0) {
     console.log(`${ANSI.bold}Máddu doctor${ANSI.reset}  ${repoTargets.length} workspaces`);
   }

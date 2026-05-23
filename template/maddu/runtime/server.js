@@ -807,6 +807,17 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
+  // ── governance (v1.1.0 Phase 3) ───────────────────────────────────────
+  if (path === '/bridge/governance' && req.method === 'GET') {
+    try {
+      const lib = await import('./lib/governance.mjs');
+      const cfg = await lib.readGovernance(repoRoot);
+      return sendJson(res, 200, { mode: cfg.mode, overrides: cfg.overrides || {}, source: cfg.__source });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
   // ── tools (v1.1.0 Phase 2) ────────────────────────────────────────────
   // Unified Tools view: 5 default tools (P1), active MCP servers + their
   // health (P2), recent TOOL_INVOKED/COMPLETED/REFUSED events (P1).
