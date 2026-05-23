@@ -67,4 +67,6 @@ export default {
   plan:         { tier: 'mutating',  autoTrigger: 'forbidden' },
   // v1.1.0 Phase 6 — loops.
   loop:         { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.1.0 Phase 7 — coordinator primitive.
+  coordinator:  { tier: 'mutating',  autoTrigger: 'forbidden' },
 };

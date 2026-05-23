@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -73,6 +73,7 @@ Commands:
   log            Receipt log viewer (--since --lane --op --rebuild --json). (v1.1.0)
   plan           Subcommands: new | list | show | add-phase | complete-phase | block-phase | revise | complete | cancel | kanban. (v1.1.0)
   loop           Subcommands: ralph | plan | status | cancel. Persist-until-done iteration with stuck-detection. (v1.1.0)
+  coordinator    maddu coordinator <plan-id> [--runtime <n>] [--dry-run] [--synthetic-cmd "<bash>"]. Runtime-agnostic multi-phase driver. (v1.1.0)
 
 Flags:
   --version      Print framework version.
