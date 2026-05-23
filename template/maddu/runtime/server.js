@@ -807,6 +807,21 @@ async function handleBridge(req, res, url, ctx) {
     }
   }
 
+  // ── tools (v1.1.0 Phase 2) ────────────────────────────────────────────
+  // Unified Tools view: 5 default tools (P1), active MCP servers + their
+  // health (P2), recent TOOL_INVOKED/COMPLETED/REFUSED events (P1).
+  if (path === '/bridge/tools' && req.method === 'GET') {
+    const allEvents = await readAll(repoRoot);
+    const toolEvents = allEvents
+      .filter((e) => e.type === 'TOOL_INVOKED' || e.type === 'TOOL_COMPLETED' || e.type === 'TOOL_REFUSED')
+      .slice(-20)
+      .reverse();
+    const mcp = await listMcp(repoRoot);
+    const health = await mcpHealth(repoRoot);
+    const defaults = ['git', 'test', 'format', 'lint', 'install'].map((t) => ({ tool: t, kind: 'default' }));
+    return sendJson(res, 200, { defaults, mcp, health, recent: toolEvents });
+  }
+
   // ── mcp registry (Phase C2) ───────────────────────────────────────────
   if (path === '/bridge/mcp' && req.method === 'GET') {
     const all = await listMcp(repoRoot);

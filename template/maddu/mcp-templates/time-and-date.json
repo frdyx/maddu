@@ -1,0 +1,28 @@
+{
+  "template": "time-and-date",
+  "displayName": "Time & Date",
+  "summary": "Local time, date arithmetic, timezone lookups. Pure stdlib; no network.",
+  "transport": "stdio",
+  "stdio": {
+    "command": "node",
+    "args": ["./.maddu/mcp/time-and-date/server.mjs"],
+    "env": []
+  },
+  "requires": [
+    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." }
+  ],
+  "lanes": ["*"],
+  "scaffold": {
+    "files": [
+      {
+        "path": ".maddu/mcp/time-and-date/server.mjs",
+        "content": "#!/usr/bin/env node\n// time-and-date MCP stub. Methods:\n//   now({tz}) → ISO + tz-shifted human string\n//   addDays({iso, days}) → ISO\n//   diff({a, b, unit}) → number\nprocess.stdin.setEncoding('utf8');\nlet buf = '';\nprocess.stdin.on('data', (chunk) => {\n  buf += chunk;\n  let idx;\n  while ((idx = buf.indexOf('\\n')) >= 0) {\n    const line = buf.slice(0, idx);\n    buf = buf.slice(idx + 1);\n    if (!line.trim()) continue;\n    let msg;\n    try { msg = JSON.parse(line); } catch { continue; }\n    const id = msg.id;\n    const method = msg.method;\n    const params = msg.params || {};\n    if (method === 'initialize') {\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '0.1.0', capabilities: {}, serverInfo: { name: 'time-and-date', version: '0.1.0' } } }) + '\\n');\n      continue;\n    }\n    if (method === 'now') {\n      const tz = params.tz || 'UTC';\n      const d = new Date();\n      let human;\n      try { human = d.toLocaleString('en-US', { timeZone: tz }); }\n      catch { human = d.toISOString(); }\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result: { iso: d.toISOString(), tz, human } }) + '\\n');\n      continue;\n    }\n    if (method === 'addDays') {\n      const d = new Date(params.iso || Date.now());\n      d.setDate(d.getDate() + Number(params.days || 0));\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result: { iso: d.toISOString() } }) + '\\n');\n      continue;\n    }\n    if (method === 'diff') {\n      const a = new Date(params.a).getTime();\n      const b = new Date(params.b).getTime();\n      const ms = b - a;\n      const unit = params.unit || 'ms';\n      const factors = { ms: 1, s: 1000, m: 60000, h: 3600000, d: 86400000 };\n      const factor = factors[unit] || 1;\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result: { value: ms / factor, unit } }) + '\\n');\n      continue;\n    }\n    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32601, message: 'unknown method' } }) + '\\n');\n  }\n});\n"
+      }
+    ]
+  },
+  "notes": "Pure stdlib. No external services. Timezone lookups use the platform's ICU database (built into Node 20+).",
+  "hardRuleNotes": [
+    "Rule #5 OK: stdlib only.",
+    "Rule #3 OK: local subprocess; no network."
+  ]
+}

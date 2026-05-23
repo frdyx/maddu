@@ -1,0 +1,29 @@
+{
+  "template": "git-advanced",
+  "displayName": "Git (advanced)",
+  "summary": "Wraps `git log --graph`, blame, and rev-list for richer history queries than the default `maddu git` wrapper.",
+  "transport": "stdio",
+  "stdio": {
+    "command": "node",
+    "args": ["./.maddu/mcp/git-advanced/server.mjs"],
+    "env": []
+  },
+  "requires": [
+    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." },
+    { "binary": "git",  "install": "Install git (https://git-scm.com)." }
+  ],
+  "lanes": ["*"],
+  "scaffold": {
+    "files": [
+      {
+        "path": ".maddu/mcp/git-advanced/server.mjs",
+        "content": "#!/usr/bin/env node\n// git-advanced MCP stub. Maps methods to git subprocesses; refuses any\n// argv that contains the substring 'commit' or '--force' (this server\n// is read-only by design — write paths stay on `maddu git`).\nimport { spawn } from 'node:child_process';\n\nfunction run(args) {\n  return new Promise((resolve) => {\n    const ch = spawn('git', args, { stdio: ['ignore', 'pipe', 'pipe'] });\n    let out = '', err = '';\n    ch.stdout.on('data', (b) => out += b.toString('utf8'));\n    ch.stderr.on('data', (b) => err += b.toString('utf8'));\n    ch.on('close', (code) => resolve({ code, out, err }));\n  });\n}\n\nfunction safe(args) {\n  for (const a of args) {\n    if (a === 'commit' || a === 'push' || a === '--force' || a === '-f' || a === 'reset') return false;\n  }\n  return true;\n}\n\nprocess.stdin.setEncoding('utf8');\nlet buf = '';\nprocess.stdin.on('data', async (chunk) => {\n  buf += chunk;\n  let idx;\n  while ((idx = buf.indexOf('\\n')) >= 0) {\n    const line = buf.slice(0, idx);\n    buf = buf.slice(idx + 1);\n    if (!line.trim()) continue;\n    let msg;\n    try { msg = JSON.parse(line); } catch { continue; }\n    if (msg.method === 'initialize') {\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '0.1.0', capabilities: {}, serverInfo: { name: 'git-advanced', version: '0.1.0' } } }) + '\\n');\n      continue;\n    }\n    const args = Array.isArray(msg?.params?.argv) ? msg.params.argv : [];\n    if (!safe(args)) {\n      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: 'write operations refused — use maddu git' } }) + '\\n');\n      continue;\n    }\n    const res = await run(args);\n    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { exitCode: res.code, stdout: res.out, stderr: res.err } }) + '\\n');\n  }\n});\n"
+      }
+    ]
+  },
+  "notes": "Read-only by design. Refuses commit/push/reset/--force argv. Use `maddu git` (Phase 1) for write paths.",
+  "hardRuleNotes": [
+    "Rule #5 OK: stdlib + git subprocess.",
+    "Rule #8 OK: read-only; cannot touch lane state."
+  ]
+}
