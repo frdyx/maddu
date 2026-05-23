@@ -117,6 +117,81 @@ export default async function skill(argv) {
     return;
   }
 
+  // v1.1.0 Phase 8c — autonomous skill curation verbs.
+  if (sub === 'candidates') {
+    const tsub = rest[0] || 'list';
+    const { fileURLToPath, pathToFileURL } = await import('node:url');
+    const { dirname, join, resolve: pathResolve } = await import('node:path');
+    const { stat } = await import('node:fs/promises');
+    const __dirname2 = dirname(fileURLToPath(import.meta.url));
+    const FRAMEWORK_ROOT2 = pathResolve(__dirname2, '..');
+    async function existsP(p) { try { await stat(p); return true; } catch { return false; } }
+    let lib;
+    for (const c of [join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'), join(FRAMEWORK_ROOT2, 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs')]) {
+      if (await existsP(c)) { lib = await import(pathToFileURL(c).href); break; }
+    }
+    if (!lib) { console.error('skill-candidates.mjs not present — run `maddu upgrade`'); process.exit(2); }
+    if (tsub === 'list') {
+      // First detect + emit any fresh candidates.
+      await lib.emitFreshCandidates(repoRoot);
+      const candidates = await lib.listCandidates(repoRoot);
+      if (candidates.length === 0) { console.log('(no skill candidates)'); return; }
+      console.log(`${ANSI.bold}SKILL CANDIDATES  (${candidates.length})${ANSI.reset}`);
+      for (const c of candidates) {
+        const color = c.status === 'approved' ? ANSI.pass : (c.status === 'rejected' ? ANSI.dim : ANSI.warn);
+        console.log(`  ${ANSI.accent}${c.hash}${ANSI.reset}  ${color}${c.status.padEnd(10)}${ANSI.reset}  ${ANSI.dim}tags:${ANSI.reset} ${c.tags.join(', ')}  ${ANSI.dim}(${c.examples.length} ex)${ANSI.reset}`);
+      }
+      return;
+    }
+    console.error('usage: maddu skill candidates list');
+    process.exit(2);
+  }
+
+  if (sub === 'from-candidate') {
+    const hash = rest[0];
+    if (!hash) { console.error('usage: maddu skill from-candidate <hash> [--title "..."]'); process.exit(2); }
+    const { flags } = parseFlags(rest.slice(1));
+    const { fileURLToPath, pathToFileURL } = await import('node:url');
+    const { dirname, join, resolve: pathResolve } = await import('node:path');
+    const { stat } = await import('node:fs/promises');
+    const __dirname2 = dirname(fileURLToPath(import.meta.url));
+    const FRAMEWORK_ROOT2 = pathResolve(__dirname2, '..');
+    async function existsP(p) { try { await stat(p); return true; } catch { return false; } }
+    let lib;
+    for (const c of [join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'), join(FRAMEWORK_ROOT2, 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs')]) {
+      if (await existsP(c)) { lib = await import(pathToFileURL(c).href); break; }
+    }
+    const all = await lib.listCandidates(repoRoot);
+    const candidate = all.find((c) => c.hash === hash);
+    if (!candidate) { console.error(`candidate ${hash} not found`); process.exit(3); }
+    const title = (typeof flags.title === 'string' && flags.title) || `Skill from candidate ${hash}`;
+    const body = `# ${title}\n\nDetected tag set: \`${candidate.tags.join('` , `')}\`\n\nExamples that triggered this candidate:\n\n` +
+      candidate.examples.map((e) => `- \`${e.sliceStopId}\` — ${e.summary || '(no summary)'}`).join('\n') + '\n';
+    const saved = await skills.saveSkill(repoRoot, { title, when: '', tags: candidate.tags, body });
+    await lib.approveCandidate(repoRoot, hash, null);
+    console.log(`${ANSI.pass}materialized${ANSI.reset}  ${saved.id}  ${saved.title}  ${ANSI.dim}(from candidate ${hash})${ANSI.reset}`);
+    return;
+  }
+
+  if (sub === 'candidate-reject') {
+    const hash = rest[0];
+    if (!hash) { console.error('usage: maddu skill candidate-reject <hash> [--reason "..."]'); process.exit(2); }
+    const { flags } = parseFlags(rest.slice(1));
+    const { fileURLToPath, pathToFileURL } = await import('node:url');
+    const { dirname, join, resolve: pathResolve } = await import('node:path');
+    const { stat } = await import('node:fs/promises');
+    const __dirname2 = dirname(fileURLToPath(import.meta.url));
+    const FRAMEWORK_ROOT2 = pathResolve(__dirname2, '..');
+    async function existsP(p) { try { await stat(p); return true; } catch { return false; } }
+    let lib;
+    for (const c of [join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'), join(FRAMEWORK_ROOT2, 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs')]) {
+      if (await existsP(c)) { lib = await import(pathToFileURL(c).href); break; }
+    }
+    await lib.rejectCandidate(repoRoot, hash, typeof flags.reason === 'string' ? flags.reason : null, null);
+    console.log(`${ANSI.warn}rejected${ANSI.reset}  ${hash}`);
+    return;
+  }
+
   console.error(`maddu skill: unknown subcommand "${sub}"`);
   process.exit(2);
 }

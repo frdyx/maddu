@@ -44,7 +44,30 @@ export default async function lane(argv) {
     const proj = await projections.project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === lid);
     if (existing && existing.sessionId !== sid) {
+      // v1.1.0 Phase 8 — --force pre-empts the prior claim. Emits
+      // LANE_RELEASED (for the prior holder) + LANE_CLAIM_FORCED +
+      // LANE_CLAIMED so the audit trail preserves who got booted.
+      if (flags.force) {
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.LANE_RELEASED,
+          actor: existing.sessionId, lane: lid,
+          data: { reason: 'force-claim-preempt', by: sid },
+        });
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.LANE_CLAIM_FORCED,
+          actor: sid, lane: lid,
+          data: { lane: lid, priorSessionId: existing.sessionId, by: sid, focus: flags.focus || null, reason: typeof flags.reason === 'string' ? flags.reason : null },
+        });
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.LANE_CLAIMED,
+          actor: sid, lane: lid,
+          data: { focus: flags.focus || null, forcedFrom: existing.sessionId }
+        });
+        console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${existing.sessionId})`);
+        return;
+      }
       console.error(`lane "${lid}" already claimed by ${existing.sessionId}`);
+      console.error(`  retry with --force to pre-empt (audit-logged via LANE_CLAIM_FORCED)`);
       process.exit(3);
     }
     await spine.append(repoRoot, {
