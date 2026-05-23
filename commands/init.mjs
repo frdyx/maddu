@@ -273,6 +273,28 @@ export default async function init(argv) {
     console.error(`  (agent-file sync skipped: ${err.message})`);
   }
 
+  // v1.1.0 Phase 8b — seed starter skills into .maddu/skills/. Idempotent.
+  try {
+    const { readdir, copyFile } = await import('node:fs/promises');
+    const starterSrc = join(FRAMEWORK_ROOT, 'template', 'maddu', 'skills', 'starter');
+    const targetDir = join(cwd, '.maddu', 'skills');
+    await mkdir(targetDir, { recursive: true });
+    let entries = [];
+    try { entries = await readdir(starterSrc, { withFileTypes: true }); } catch {}
+    let seeded = 0;
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith('.md')) continue;
+      const dest = join(targetDir, e.name);
+      if (!(await exists(dest))) {
+        await copyFile(join(starterSrc, e.name), dest);
+        seeded += 1;
+      }
+    }
+    if (seeded > 0) console.log(`  starter skills seeded (${seeded} skill${seeded === 1 ? '' : 's'})`);
+  } catch (err) {
+    console.error(`  (starter skills skipped: ${err.message})`);
+  }
+
   // 7. Project-local CLI shim — the wrapper scripts ride with the template
   //    (maddu/run + maddu/run.cmd) so they're already on disk from step 1.
   //    Only the POSIX execute bit needs setting, since git/npm don't

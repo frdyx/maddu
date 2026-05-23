@@ -16,8 +16,10 @@ Execute this sequence, halting and reporting on any failure:
    catalog)`, ask the operator one clarifying question to pick a lane
    from `./maddu/run lane list` and then proceed.
 3. `./maddu/run lane claim --lane <lane> --focus "$ARGUMENTS"` — claim
-   the lane. If it returns a rule #8 collision, surface the holding
-   session and ask before forcing.
+   the lane. If it returns a rule #8 collision: under `standard` mode
+   you may immediately retry with `--force` (v1.1.0 P8 — the audit
+   trail records LANE_CLAIM_FORCED so the prior holder is preserved).
+   Under `strict` mode, surface the holder and ask first.
 4. `./maddu/run pipeline run plan-exec-verify-fix "$ARGUMENTS"` — walk
    the pipeline's stages. For each stage:
    - **plan**: outline the change you intend in 3–5 bullets.
