@@ -84,6 +84,15 @@ const ROSTER = [
     ],
   },
   {
+    topic: 'bridges',
+    title: 'Bridge lifecycle (v1.2.1)',
+    items: [
+      { name: 'maddu bridges list',     line: 'List every running Máddu bridge with pid/port/repoRoot.',     under: 'bridges list' },
+      { name: 'maddu bridges kill-all', line: 'SIGTERM every detected bridge (SIGKILL after 3s).',            under: 'bridges kill-all' },
+      { name: 'maddu start --port N',   line: 'Bind the bridge to a non-default port.',                       under: 'start' },
+    ],
+  },
+  {
     topic: 'trust',
     title: 'Supply-chain trust (v1.2.0)',
     items: [

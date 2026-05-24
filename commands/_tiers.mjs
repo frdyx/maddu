@@ -74,4 +74,8 @@ export default {
   // are read-only-shaped but the verb dispatches into write paths too (pin/unpin),
   // so the verb itself is mutating; auto-trigger forbidden (operator explicit).
   trust:        { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.2.1 F2 — bridges list/kill-all is operator-explicit only.
+  // `list` is read-only-shaped but the verb dispatches into kill-all too,
+  // so the verb itself is mutating; auto-trigger forbidden.
+  bridges:      { tier: 'mutating',  autoTrigger: 'forbidden' },
 };
