@@ -11,6 +11,69 @@ narrative summary.
 
 ---
 
+## [v1.2.1] · 2026-05-24 · Multi-bridge / multi-workspace polish
+
+Patch release closing the five operator-UX findings from the v1.2.0 burn-in
+in snyggare. All five concern multi-bridge / multi-workspace state — the
+parts of Máddu that get exercised once the operator runs more than one
+repo against the same machine. Nothing here changes the spine or the
+hard rules; this is purely operator-surface polish.
+
+### PR-A — Bridges lifecycle
+
+- **F1 — Silent port-collision on `maddu start`.** Wraps the bridge's
+  `server.listen()` with EADDRINUSE detection. On collision, probes
+  `/bridge/status` to distinguish a foreign Máddu bridge from a non-Máddu
+  process and emits actionable refusal copy with workspace + restart
+  hints (Máddu case) or PID + `--port` hint (foreign case). No more
+  bare `Error: listen EADDRINUSE`.
+- **F2 — `maddu bridges list` + `maddu bridges kill-all`.** New
+  `commands/bridges.mjs` subcommand. Device-local registry at
+  `~/.config/maddu/bridges-registry.json` (or
+  `%APPDATA%\maddu\bridges-registry.json` on Windows) records pid +
+  port + repoRoot at `maddu start` time; the SIGTERM/SIGINT shutdown
+  handler clears the entry. `bridges list` reads the registry +
+  cross-platform process scan (Get-CimInstance / ps -ef) for orphans
+  and refreshes the live state via `/bridge/status`. `kill-all`
+  SIGTERMs every detected bridge with a 3 s SIGKILL fallback.
+- **F3 — CWD not in registry → silent fallback to active workspace.**
+  At start time, compares the resolved CWD against the workspace
+  registry. If the registry has entries but CWD isn't one of them, the
+  bridge would silently mount the registry's *active* workspace (not
+  CWD); we refuse with an add/force-active/cancel triage instead.
+  `--force-active` bypasses with a visible breadcrumb in stderr.
+- **`maddu start` gains `--port <n>`** for non-default binds; `maddu
+  stop` reads the port back from `.maddu/state/bridge.pid` so a custom
+  port survives the round-trip.
+- **Stress harness** picks up a 12th scenario (`port-collision-refusal`)
+  that boots a real bridge on a pinned port and asserts the second
+  `start` exits non-zero with the canonical refusal copy.
+
+### PR-B — Cockpit + CLI polish
+
+- **F4 — Rail-foot Workspace + Path rows.** The cockpit rail-foot now
+  surfaces `workspaceId` and `repoRoot` above Bridge/Version/Uptime.
+  Path truncates from the LEFT so the basename always stays visible
+  (operator cue: ellipsis on the left means "more path above this").
+  Hover reveals the full path via the `title` attribute. Resolves the
+  "which cockpit tab is which?" confusion when running multiple repos.
+- **F5 — `maddu workspace add` accepts both shapes.** `add <path>`
+  (positional, legacy) and `add --path <path>` (flag form, aligns with
+  the rest of the v1.1+ CLI like `plan complete --plan <id>`). Passing
+  both refuses rather than silently preferring one. Full argv
+  standardization across all subcommands is deferred to v1.3.
+
+### Verification
+
+- Doctor in test consumer: **54 PASS · 0 WARN · 0 FAIL.**
+- Stress harness: **12 / 12 scenarios pass · 37 assertions pass.**
+- Layout-refusal harness: **4 / 4 scenarios pass.**
+- All 8+1 hard rules still green at every PR boundary.
+- v1.0.3 framework-only route discipline, v1.1.1 stop/SIGINT handler,
+  v1.2.0 trust + secret-scan + env-allowlist gates: all preserved.
+
+---
+
 ## [v1.2.0] · 2026-05-24 · Supply-chain hardening + Hermes adapter
 
 2026 has been the year of supply-chain attacks on developer tooling
