@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -29,6 +29,7 @@ Commands:
   upgrade        Pull newer framework files in place; never touch project state.
   doctor         Verify install integrity, port, and hard-rule compliance.
   start          Boot the bridge server on 127.0.0.1:4177.
+  stop           Stop the running bridge server (reads .maddu/state/bridge.pid). (v1.1.1)
   status         Print a state snapshot of the spine.
   slice-stop     Append a structured slice-stop event to the spine.
   session        Subcommands: register | heartbeat | close | list.
@@ -100,6 +101,30 @@ async function main() {
   if (!COMMANDS.includes(raw)) {
     console.error(`maddu: unknown command "${raw}". Run "maddu --help".`);
     process.exit(2);
+  }
+
+  // v1.1.1 B3: --help discipline. If the operator types `maddu <verb> --help`
+  // (or -h), short-circuit BEFORE the verb's own flag validation runs.
+  //
+  // Verbs that ship their own per-verb usage string (start, stop, workspace,
+  // plan, lane, install) detect --help at the top of their handler — route
+  // through them so the operator sees the more specific text. Everything
+  // else falls back to the global discovery surface (`maddu help`).
+  if (rest.includes('--help') || rest.includes('-h')) {
+    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install']);
+    if (VERBS_WITH_OWN_HELP.has(raw)) {
+      const mod = await import(pathToFileURL(join(repoRoot, 'commands', `${raw}.mjs`)).href);
+      await mod.default(rest);
+      return;
+    }
+    try {
+      const helpMod = await import(pathToFileURL(join(repoRoot, 'commands', 'help.mjs')).href);
+      await helpMod.default([]);
+      return;
+    } catch {
+      printHelp();
+      return;
+    }
   }
 
   const commandPath = join(repoRoot, 'commands', `${raw}.mjs`);

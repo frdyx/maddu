@@ -1,15 +1,34 @@
 // `maddu lane <subcommand>` — claim / release / list.
 //
 // Usage:
-//   maddu lane claim --lane <id> --session <id> [--focus "..."]
+//   maddu lane claim <lane-id> [--session <id>] [--focus "..."] [--force]
+//   maddu lane claim --lane <id> --session <id> [--focus "..."]  (legacy)
 //   maddu lane release --lane <id> --session <id>
 //   maddu lane list
+//
+// v1.1.1: `lane claim` accepts a positional lane id; `--session` falls back
+// to MADDU_SESSION_ID. `--lane <id>` flag form is retained.
 
 import { readFile } from 'node:fs/promises';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
+function printLaneHelp() {
+  console.log([
+    'Usage: maddu lane <claim|release|list> [flags]',
+    '',
+    '  list                                          # show catalog + active claims',
+    '  claim <lane-id> [--session <id>] [--focus]    # claim a lane (positional shorthand)',
+    '  claim --lane <id> --session <id> [--focus]    # claim (legacy flag form)',
+    '  claim ... --force                             # pre-empt prior holder',
+    '  release --lane <id> --session <id>            # release a claim',
+    '',
+    '  --session falls back to $MADDU_SESSION_ID when omitted.',
+  ].join('\n'));
+}
+
 export default async function lane(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) { printLaneHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
   const { paths, spine, projections } = await loadSpineLib();
@@ -17,10 +36,7 @@ export default async function lane(argv) {
   const p = paths.pathsFor(repoRoot);
   await spine.ensureSpine(repoRoot);
 
-  if (!sub) {
-    console.error('Usage: maddu lane <claim|release|list> [flags]');
-    process.exit(2);
-  }
+  if (!sub) { printLaneHelp(); process.exit(2); }
 
   if (sub === 'list') {
     const cat = JSON.parse(await readFile(p.laneCatalog, 'utf8'));

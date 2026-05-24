@@ -37,6 +37,7 @@ export default {
   sources:      { tier: 'mutating',  autoTrigger: 'forbidden' },
   spine:        { tier: 'read-only', autoTrigger: 'allowed'   },
   start:        { tier: 'read-only', autoTrigger: 'allowed'   },
+  stop:         { tier: 'mutating',  autoTrigger: 'forbidden' },
   status:       { tier: 'read-only', autoTrigger: 'allowed'   },
   task:         { tier: 'mutating',  autoTrigger: 'forbidden' },
   upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden' },

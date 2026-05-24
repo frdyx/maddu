@@ -6,7 +6,17 @@
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 import { loadTools } from './_tools.mjs';
 
+function printInstallHelp() {
+  console.log([
+    'Usage: maddu install <package> [<package> ...]',
+    '',
+    '  Audited dep installer (resolves npm/pnpm/yarn from lockfiles).',
+    '  Refuses empty package lists and empty-string args (rule #4 guard).',
+  ].join('\n'));
+}
+
 export default async function installCmd(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) { printInstallHelp(); return; }
   const { paths } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const tools = await loadTools();
