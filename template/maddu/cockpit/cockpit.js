@@ -243,6 +243,48 @@ function truncatePathFromLeft(p, max = 40) {
   return '…' + p.slice(-(max - 1));
 }
 
+// v1.2.2 — compact "drive-root … basename" form for the rail-foot Path row.
+// Keeps the drive prefix (so operator sees C:/ vs D:/), an ellipsis for the
+// middle, and the last path segment (basename, the part that names the repo).
+// Width-bounded; the native browser tooltip (title attr) reveals the full path
+// on hover, and a click copies the full path to the clipboard.
+function compactPath(p) {
+  if (!p || typeof p !== 'string') return '—';
+  // Normalize separators for display + drop trailing slashes.
+  const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = norm.split('/').filter(Boolean);
+  if (parts.length <= 2) return norm;
+  // Windows drive root pattern (e.g. `C:`): keep as-is; else use the first segment.
+  const root = /^[A-Za-z]:$/.test(parts[0]) ? parts[0] : parts[0];
+  const tail = parts[parts.length - 1];
+  return `${root}/…/${tail}`;
+}
+
+// v1.2.2 — copy any string to the clipboard with a single-shot toast.
+// Falls back to a hidden textarea for environments without the Clipboard API
+// (older browsers, file://-hosted contexts). Returns a Promise.
+async function copyToClipboardWithToast(text, kind = 'path') {
+  if (!text) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    if (typeof showToast === 'function') showToast(`${kind} copied`, 'ok');
+  } catch (err) {
+    if (typeof showToast === 'function') showToast(`copy failed: ${err.message}`, 'err');
+  }
+}
+
 function updateChrome() {
   if (bridgeOk && bridgeStatus) {
     els.bridge.innerHTML = '<span class="signal live"></span>online';
@@ -256,8 +298,29 @@ function updateChrome() {
     }
     if (els.repoRoot) {
       const full = bridgeStatus.repoRoot || '';
-      els.repoRoot.textContent = truncatePathFromLeft(full, 40);
-      els.repoRoot.title = full; // hover reveals the full path.
+      // v1.2.2 — compact display (drive/…/basename), full path on hover (title),
+      // click-to-copy. Width is also CSS-bounded so long paths don't overflow.
+      els.repoRoot.textContent = compactPath(full);
+      els.repoRoot.title = full ? `${full}  ·  click to copy` : '';
+      els.repoRoot.dataset.fullPath = full;
+      if (!els.repoRoot.dataset.copyBound) {
+        els.repoRoot.dataset.copyBound = '1';
+        els.repoRoot.addEventListener('click', () => {
+          const path = els.repoRoot.dataset.fullPath || '';
+          if (path) copyToClipboardWithToast(path, 'Path');
+        });
+        // Keyboard accessibility — Enter / Space activate copy.
+        els.repoRoot.tabIndex = 0;
+        els.repoRoot.setAttribute('role', 'button');
+        els.repoRoot.setAttribute('aria-label', 'Copy workspace path to clipboard');
+        els.repoRoot.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            const path = els.repoRoot.dataset.fullPath || '';
+            if (path) copyToClipboardWithToast(path, 'Path');
+          }
+        });
+      }
     }
     // v1.1.0 Phase 3 — governance mode badge (poll once when chrome updates).
     if (els.governance && !els.governance.dataset.fetched) {
@@ -754,8 +817,27 @@ function scopePill(route, onChange) {
   const cur = getScope(route);
   const pill = el('div', { class: 'scope-pill', role: 'group', 'aria-label': 'Scope' });
   const mkBtn = (val, label) => {
-    const b = el('button', { class: 'scope-btn' + (cur === val ? ' active' : ''), type: 'button' }, label);
-    b.addEventListener('click', () => { if (getScope(route) !== val) { setScope(route, val); onChange(val); } });
+    const active = cur === val;
+    const b = el('button', {
+      class: 'scope-btn' + (active ? ' active' : ''),
+      type: 'button',
+      'aria-pressed': active ? 'true' : 'false', // v1.2.2 — a11y + screen-reader state
+    }, label);
+    b.dataset.scopeValue = val;
+    b.addEventListener('click', () => {
+      if (getScope(route) === val) return;
+      setScope(route, val);
+      // v1.2.2 — update the pill's visual + ARIA state in place so the operator
+      // sees which option is active. Previously the click changed scope state +
+      // refreshed content but never re-applied the `active` class — the pill
+      // visually froze on the first-render state.
+      for (const sib of pill.querySelectorAll('.scope-btn')) {
+        const isNowActive = sib.dataset.scopeValue === val;
+        sib.classList.toggle('active', isNowActive);
+        sib.setAttribute('aria-pressed', isNowActive ? 'true' : 'false');
+      }
+      onChange(val);
+    });
     return b;
   };
   pill.appendChild(mkBtn('one', 'This workspace'));

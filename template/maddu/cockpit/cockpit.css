@@ -424,7 +424,25 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   padding: 2px 0;
 }
 .rail-foot-label { color: var(--m-fg-4); text-transform: uppercase; letter-spacing: 0.06em; }
-.rail-foot-value { color: var(--m-fg-1); }
+.rail-foot-value {
+  color: var(--m-fg-1);
+  /* v1.2.2 — bound the value's width so long paths / workspace ids never
+   * overflow the rail. Native title attr reveals full string on hover; the
+   * click-to-copy handler (cockpit.js) handles the action. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* v1.2.2 — Path row is interactive (click to copy). Distinct cursor + accent
+ * hover so the operator knows it's actionable. Other rail-foot rows stay static. */
+#status-repo-root {
+  cursor: pointer;
+  transition: color 120ms ease-out;
+}
+#status-repo-root:hover,
+#status-repo-root:focus { color: var(--m-accent); outline: none; }
+#status-repo-root:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ───────────────────── stage ───────────────────── */
 
