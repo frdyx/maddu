@@ -52,11 +52,19 @@ export default async function lane(argv) {
   }
 
   if (sub === 'claim') {
-    const { flags } = parseFlags(rest);
-    const lid = requireFlag(flags, 'lane');
-    // v0.19.1 PR-B1: fall back to MADDU_SESSION_ID env when --session omitted.
+    const { flags, positional } = parseFlags(rest);
+    // v1.1.1 C3: first positional argument is lane id; `--lane <id>` still
+    // accepted as alias. `--session` falls back to MADDU_SESSION_ID per v0.19.1.
+    const lid = (typeof flags.lane === 'string' && flags.lane.length > 0)
+      ? flags.lane
+      : (positional && positional[0]);
+    if (!lid) { console.error('usage: maddu lane claim <lane-id> [--session <id>] [--focus "..."] [--force]'); process.exit(2); }
     if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
-    const sid = requireFlag(flags, 'session');
+    if (!flags.session || flags.session === true) {
+      console.error('--session required (or set MADDU_SESSION_ID)');
+      process.exit(2);
+    }
+    const sid = flags.session;
     const proj = await projections.project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === lid);
     if (existing && existing.sessionId !== sid) {
@@ -97,10 +105,18 @@ export default async function lane(argv) {
   }
 
   if (sub === 'release') {
-    const { flags } = parseFlags(rest);
-    const lid = requireFlag(flags, 'lane');
+    const { flags, positional } = parseFlags(rest);
+    // v1.1.1 C3: positional shorthand symmetric with `lane claim`.
+    const lid = (typeof flags.lane === 'string' && flags.lane.length > 0)
+      ? flags.lane
+      : (positional && positional[0]);
+    if (!lid) { console.error('usage: maddu lane release <lane-id> [--session <id>]'); process.exit(2); }
     if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
-    const sid = requireFlag(flags, 'session');
+    if (!flags.session || flags.session === true) {
+      console.error('--session required (or set MADDU_SESSION_ID)');
+      process.exit(2);
+    }
+    const sid = flags.session;
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LANE_RELEASED,
       actor: sid,
