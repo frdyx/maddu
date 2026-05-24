@@ -1,14 +1,19 @@
 // `maddu plan <subcommand>` — plan persistence + revision (v1.1.0 Phase 5).
 //
+// Canonical form (v1.1.1): first positional argument is the plan id.
+// `--plan <id>` is accepted as an alias on every verb. Phase identifier is
+// `--phase <id>` (preferred); `--name <id>` is accepted as a deprecated
+// alias and emits a one-time stderr warning.
+//
 // Usage:
 //   maddu plan new "<title>" [--phases "audit,redesign,migrate,verify"] [--goal "..."]
 //   maddu plan list
 //   maddu plan show <plan-id>
-//   maddu plan add-phase --plan <id> --name <n> --intent "..."
-//   maddu plan complete-phase --plan <id> --name <n> [--summary "..."]
-//   maddu plan block-phase --plan <id> --name <n> --reason "..."
-//   maddu plan revise --plan <id> --note "..."
-//   maddu plan complete <plan-id>
+//   maddu plan add-phase <plan-id> --phase <n> --intent "..."
+//   maddu plan complete-phase <plan-id> --phase <n> [--summary "..."]
+//   maddu plan block-phase <plan-id> --phase <n> --reason "..."
+//   maddu plan revise <plan-id> --note "..."
+//   maddu plan complete <plan-id> [--summary "..."]
 //   maddu plan cancel <plan-id> [--reason "..."]
 //   maddu plan kanban
 
@@ -33,7 +38,53 @@ async function loadPlans() {
   throw new Error('plans.mjs not found. Run `maddu upgrade`.');
 }
 
+// Canonical plan-id resolver. Order: explicit `--plan <id>` flag, then
+// first positional argument that isn't itself a flag value. Returns null
+// if neither present. The flag-form is stripped from `positional` so a
+// downstream `rest.find(...)` won't pick it up by accident.
+function resolvePlanId(flags, positional) {
+  if (typeof flags.plan === 'string' && flags.plan.length > 0) return flags.plan;
+  if (positional && positional.length > 0) return positional[0];
+  return null;
+}
+
+let _phaseNameWarned = false;
+function resolvePhaseName(flags) {
+  if (typeof flags.phase === 'string' && flags.phase.length > 0) return flags.phase;
+  if (typeof flags.name === 'string' && flags.name.length > 0) {
+    if (!_phaseNameWarned) {
+      _phaseNameWarned = true;
+      process.stderr.write('\x1b[33mwarning:\x1b[0m --name is deprecated for phase identifier; use --phase instead\n');
+    }
+    return flags.name;
+  }
+  return null;
+}
+
+function printPlanHelp() {
+  console.log([
+    'usage: maddu plan <subcommand> [args]',
+    '',
+    'subcommands:',
+    '  new "<title>" [--phases a,b,c] [--goal "..."]',
+    '  list',
+    '  show <plan-id>',
+    '  add-phase <plan-id> --phase <n> [--intent "..."]',
+    '  complete-phase <plan-id> --phase <n> [--summary "..."]',
+    '  block-phase <plan-id> --phase <n> --reason "..."',
+    '  revise <plan-id> --note "..."',
+    '  complete <plan-id> [--summary "..."]',
+    '  cancel <plan-id> [--reason "..."]',
+    '  kanban',
+    '',
+    'Plan id is the first positional argument; `--plan <id>` is accepted as an alias.',
+    'Phase identifier is `--phase <id>` (preferred); `--name <id>` is a deprecated alias.',
+  ].join('\n'));
+}
+
 export default async function planCmd(argv) {
+  // --help discipline: detect before flag validation.
+  if (argv.includes('--help') || argv.includes('-h')) { printPlanHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
   const { paths } = await loadSpineLib();
@@ -41,7 +92,7 @@ export default async function planCmd(argv) {
   const plans = await loadPlans();
   const sessionId = process.env.MADDU_SESSION_ID || null;
 
-  if (!sub) { console.error('usage: maddu plan <new|list|show|add-phase|complete-phase|block-phase|revise|complete|cancel|kanban> [args]'); process.exit(2); }
+  if (!sub) { printPlanHelp(); process.exit(2); }
 
   if (sub === 'new') {
     const title = rest.find((x) => !x.startsWith('-'));
@@ -70,7 +121,8 @@ export default async function planCmd(argv) {
   }
 
   if (sub === 'show') {
-    const planId = rest[0];
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
     if (!planId) { console.error('usage: maddu plan show <plan-id>'); process.exit(2); }
     const p = await plans.readPlan(repoRoot, planId);
     if (!p.title) { console.error(`plan ${planId} not found`); process.exit(3); }
@@ -89,29 +141,42 @@ export default async function planCmd(argv) {
   }
 
   if (sub === 'add-phase') {
-    const { flags } = parseFlags(rest);
-    await plans.addPhase(repoRoot, { planId: requireFlag(flags, 'plan'), name: requireFlag(flags, 'name'), intent: typeof flags.intent === 'string' ? flags.intent : '', by: sessionId });
-    console.log(`${ANSI.pass}added${ANSI.reset}  phase  ${flags.name}`);
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
+    const phase = resolvePhaseName(flags);
+    if (!planId) { console.error('usage: maddu plan add-phase <plan-id> --phase <n> [--intent "..."]'); process.exit(2); }
+    if (!phase) { console.error('--phase required'); process.exit(2); }
+    await plans.addPhase(repoRoot, { planId, name: phase, intent: typeof flags.intent === 'string' ? flags.intent : '', by: sessionId });
+    console.log(`${ANSI.pass}added${ANSI.reset}  phase  ${phase}`);
     return;
   }
 
   if (sub === 'complete-phase') {
-    const { flags } = parseFlags(rest);
-    await plans.completePhase(repoRoot, { planId: requireFlag(flags, 'plan'), name: requireFlag(flags, 'name'), summary: typeof flags.summary === 'string' ? flags.summary : null, by: sessionId });
-    console.log(`${ANSI.pass}completed${ANSI.reset}  phase  ${flags.name}`);
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
+    const phase = resolvePhaseName(flags);
+    if (!planId) { console.error('usage: maddu plan complete-phase <plan-id> --phase <n> [--summary "..."]'); process.exit(2); }
+    if (!phase) { console.error('--phase required'); process.exit(2); }
+    await plans.completePhase(repoRoot, { planId, name: phase, summary: typeof flags.summary === 'string' ? flags.summary : null, by: sessionId });
+    console.log(`${ANSI.pass}completed${ANSI.reset}  phase  ${phase}`);
     return;
   }
 
   if (sub === 'block-phase') {
-    const { flags } = parseFlags(rest);
-    await plans.blockPhase(repoRoot, { planId: requireFlag(flags, 'plan'), name: requireFlag(flags, 'name'), reason: requireFlag(flags, 'reason'), by: sessionId });
-    console.log(`${ANSI.warn}blocked${ANSI.reset}  phase  ${flags.name}`);
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
+    const phase = resolvePhaseName(flags);
+    if (!planId) { console.error('usage: maddu plan block-phase <plan-id> --phase <n> --reason "..."'); process.exit(2); }
+    if (!phase) { console.error('--phase required'); process.exit(2); }
+    await plans.blockPhase(repoRoot, { planId, name: phase, reason: requireFlag(flags, 'reason'), by: sessionId });
+    console.log(`${ANSI.warn}blocked${ANSI.reset}  phase  ${phase}`);
     return;
   }
 
   if (sub === 'revise') {
-    const { flags } = parseFlags(rest);
-    const planId = requireFlag(flags, 'plan');
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
+    if (!planId) { console.error('usage: maddu plan revise <plan-id> --note "..."'); process.exit(2); }
     const note = typeof flags.note === 'string' ? flags.note : '';
     await plans.revisePlan(repoRoot, { planId, diff: { note, by: sessionId }, by: sessionId });
     console.log(`${ANSI.pass}revised${ANSI.reset}  ${planId}`);
@@ -119,16 +184,17 @@ export default async function planCmd(argv) {
   }
 
   if (sub === 'complete') {
-    const planId = rest[0];
-    if (!planId) { console.error('usage: maddu plan complete <plan-id>'); process.exit(2); }
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
+    if (!planId) { console.error('usage: maddu plan complete <plan-id> [--summary "..."]'); process.exit(2); }
     await plans.completePlan(repoRoot, { planId, by: sessionId });
     console.log(`${ANSI.pass}completed${ANSI.reset}  ${planId}`);
     return;
   }
 
   if (sub === 'cancel') {
-    const { flags } = parseFlags(rest);
-    const planId = rest.find((x) => !x.startsWith('-'));
+    const { flags, positional } = parseFlags(rest);
+    const planId = resolvePlanId(flags, positional);
     if (!planId) { console.error('usage: maddu plan cancel <plan-id> [--reason "..."]'); process.exit(2); }
     await plans.cancelPlan(repoRoot, { planId, reason: typeof flags.reason === 'string' ? flags.reason : null, by: sessionId });
     console.log(`${ANSI.warn}cancelled${ANSI.reset}  ${planId}`);
