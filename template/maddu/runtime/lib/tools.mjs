@@ -177,27 +177,50 @@ export async function detectFramework(repoRoot, tool) {
   const scripts = (pkg && pkg.scripts) || {};
   const deps = { ...(pkg?.dependencies || {}), ...(pkg?.devDependencies || {}) };
 
+  // v1.1.2 — Python branch. Detected when pyproject.toml or requirements.txt
+  // is present. `node` projects (package.json) take precedence when both exist
+  // because npm-family runners are far more common in mixed-stack repos.
+  const hasPkgJson = pkg != null;
+  const hasPyProject = await exists(join(repoRoot, 'pyproject.toml'));
+  const hasRequirements = await exists(join(repoRoot, 'requirements.txt'));
+  const pythonStack = !hasPkgJson && (hasPyProject || hasRequirements);
+
   if (tool === 'test') {
     if (scripts.test) return { runner: 'npm', args: ['test', '--silent'] };
     if (deps.vitest) return { runner: 'npx', args: ['vitest', 'run'] };
     if (deps.jest) return { runner: 'npx', args: ['jest'] };
     if (deps.mocha) return { runner: 'npx', args: ['mocha'] };
+    if (pythonStack) return { runner: 'pytest', args: [] };
     return null;
   }
   if (tool === 'format') {
     if (scripts.format) return { runner: 'npm', args: ['run', 'format'] };
     if (deps.prettier) return { runner: 'npx', args: ['prettier', '--write', '.'] };
+    if (pythonStack) {
+      // Prefer ruff (faster, single binary) when available; black is the
+      // long-standing alternative. We pick ruff format first because pyproject
+      // tooling has trended that way since 2024.
+      return { runner: 'ruff', args: ['format', '.'], fallback: { runner: 'black', args: ['.'] } };
+    }
     return null;
   }
   if (tool === 'lint') {
     if (scripts.lint) return { runner: 'npm', args: ['run', 'lint'] };
     if (deps.eslint) return { runner: 'npx', args: ['eslint', '.'] };
+    if (pythonStack) return { runner: 'ruff', args: ['check', '.'] };
     return null;
   }
   if (tool === 'install') {
-    // Resolver only chooses npm/pnpm/yarn. Caller supplies the package list.
+    // Resolver only chooses npm/pnpm/yarn/pip. Caller supplies the package list.
     if (await exists(join(repoRoot, 'pnpm-lock.yaml'))) return { runner: 'pnpm', args: ['add'] };
     if (await exists(join(repoRoot, 'yarn.lock'))) return { runner: 'yarn', args: ['add'] };
+    if (hasPkgJson) return { runner: 'npm', args: ['install'] };
+    if (pythonStack) {
+      // Prefer uv (lock-file aware) when available; fall back to pip.
+      return { runner: 'uv', args: ['add'], fallback: { runner: 'pip', args: ['install'] } };
+    }
+    // Default: assume npm even without package.json (will likely fail with a
+    // clear "no package.json" message from npm itself).
     return { runner: 'npm', args: ['install'] };
   }
   return null;

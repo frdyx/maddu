@@ -55,21 +55,11 @@ export async function requireSourceLayout(commandName) {
   if (layout === 'source') return null;
   if (layout === 'installed') {
     return [
-      `maddu ${commandName}: refused.`,
+      `maddu ${commandName}: refused — this is a consumer install's CLI, not a framework source.`,
+      `Run from a framework source instead:`,
+      `  npx github:frdyx/maddu ${commandName}`,
       ``,
-      `You invoked \`maddu ${commandName}\` via a consumer install's bundled CLI`,
-      `(\`./maddu/run\` or equivalent). A consumer install only contains the`,
-      `flat \`maddu/{runtime,cockpit,docs,...}/\` layout the bridge needs — it`,
-      `is NOT a framework source and cannot scaffold or upgrade other repos.`,
-      ``,
-      `To run \`maddu ${commandName}\` correctly, use one of:`,
-      ``,
-      `  npx github:frdyx/maddu ${commandName}            # latest published`,
-      `  npx github:frdyx/maddu@v0.17.1 ${commandName}    # a specific version`,
-      `  node /path/to/maddu-source/bin/maddu.mjs ${commandName}   # from a clone`,
-      ``,
-      `The consumer install's own CLI is for operating on THIS install —`,
-      `\`doctor\`, \`brief\`, \`start\`, \`status\`, \`register\`, etc.`,
+      `The consumer's own CLI is for operating on THIS install (doctor, brief, start, status, register, …).`,
     ].join('\n');
   }
   return [

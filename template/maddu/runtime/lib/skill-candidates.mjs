@@ -1,10 +1,15 @@
 // v1.1.0 Phase 8c — autonomous skill candidate detection.
+// v1.1.2 — threshold tuning. Burn-in showed N=3 was too tight for short
+// runs (a 6-slice walk surfaced nothing). Now: N_HIGH=2 produces "high"
+// confidence candidates; N_SOFT=1 produces "soft" suggestions throttled
+// by a 24h per-hash cooldown so they don't flood the operator surface.
 //
 // Scans slice-stops + memory facts for recurring tag patterns. When a
-// tag appears across N=3 similar slice-stops with no existing skill
-// covering it, emits a SKILL_CANDIDATE_DETECTED with the candidate
-// hash. The operator can approve (materialize a real skill) or reject
-// via `maddu skill candidate-reject <hash>`.
+// tag set is observed across the threshold (with no existing skill
+// covering it), emits a SKILL_CANDIDATE_DETECTED with the candidate
+// hash and `confidence: 'high' | 'soft'`. The operator can approve
+// (materialize a real skill) or reject via
+// `maddu skill candidate-reject <hash>`.
 //
 // Suggest-only — never auto-writes a skill file. Operator's call.
 
@@ -13,7 +18,11 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readAll, append, EVENT_TYPES } from './spine.mjs';
 
-const N = 3;
+const N_HIGH = 2;
+const N_SOFT = 1;
+const SOFT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
+// Back-compat alias for any existing import; equals the high-confidence threshold.
+const N = N_HIGH;
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
@@ -81,27 +90,47 @@ export async function detectCandidates(repoRoot) {
   }
   const candidates = [];
   for (const [hash, b] of buckets) {
-    if (b.examples.length < N) continue;
+    if (b.examples.length < N_SOFT) continue;
     if (decided.get(hash) === 'rejected' || decided.get(hash) === 'approved') continue;
     // Skip if any tag is already an existing skill id.
     if (b.tags.some((t) => existing.has(t))) continue;
+    // v1.1.2 — confidence tier. High = ≥N_HIGH (2) repetitions; soft = N_SOFT (1)
+    // single observation, throttled later by the per-hash cooldown.
+    b.confidence = b.examples.length >= N_HIGH ? 'high' : 'soft';
     candidates.push(b);
   }
   return candidates;
 }
 
 // Emit SKILL_CANDIDATE_DETECTED for any candidate not yet emitted.
+// v1.1.2: soft candidates throttle via SOFT_COOLDOWN_MS to avoid flooding
+// the operator surface on every slice-stop with one-shot patterns. High
+// candidates emit on the first observation (no cooldown).
 export async function emitFreshCandidates(repoRoot, by = null) {
   const all = await readAll(repoRoot);
-  const already = new Set(all.filter((e) => e.type === EVENT_TYPES.SKILL_CANDIDATE_DETECTED).map((e) => e.data?.hash));
+  const detectedEvents = all.filter((e) => e.type === EVENT_TYPES.SKILL_CANDIDATE_DETECTED);
+  const lastEmitByHash = new Map();
+  for (const e of detectedEvents) {
+    const h = e.data?.hash;
+    if (!h) continue;
+    const ts = e.ts ? Date.parse(e.ts) : 0;
+    if (!lastEmitByHash.has(h) || ts > lastEmitByHash.get(h)) lastEmitByHash.set(h, ts);
+  }
   const candidates = await detectCandidates(repoRoot);
+  const now = Date.now();
   const emitted = [];
   for (const c of candidates) {
-    if (already.has(c.hash)) continue;
+    const lastEmit = lastEmitByHash.get(c.hash);
+    if (c.confidence === 'high') {
+      if (lastEmit) continue; // High candidates emit once; subsequent runs are no-ops.
+    } else {
+      // Soft candidate: skip if same hash emitted within the cooldown window.
+      if (lastEmit && (now - lastEmit) < SOFT_COOLDOWN_MS) continue;
+    }
     await append(repoRoot, {
       type: EVENT_TYPES.SKILL_CANDIDATE_DETECTED,
       actor: by, lane: null,
-      data: { hash: c.hash, tags: c.tags, examples: c.examples.slice(0, 5) },
+      data: { hash: c.hash, tags: c.tags, examples: c.examples.slice(0, 5), confidence: c.confidence },
     });
     emitted.push(c);
   }
@@ -125,6 +154,7 @@ export async function listCandidates(repoRoot) {
     hash: ev.data?.hash,
     tags: ev.data?.tags || [],
     examples: ev.data?.examples || [],
+    confidence: ev.data?.confidence || 'high', // v1.1.2 — older events default to 'high' (no soft tier existed)
     ts: ev.ts,
     status: approved.has(ev.data?.hash) ? 'approved' : (rejected.has(ev.data?.hash) ? 'rejected' : 'pending'),
   }));
