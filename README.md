@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.2.0](https://img.shields.io/badge/version-1.2.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.2.1](https://img.shields.io/badge/version-1.2.1-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -93,7 +93,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.2.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.2.1  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
