@@ -1,10 +1,23 @@
 // v1.2.0 Phase 3 — `secret-scan-active` gate.
 //
-// Verifies:
+// Defense against regression: verifies the secret-scan engine is wired
+// into the spawn path AND each default tool wrapper. If a wrapper drops
+// the import or the scan call, the gate FAILS — catching the regression
+// at the next `maddu doctor` run instead of in production after a real
+// secret leaked into a commit.
+//
+// Checks:
 //   1. `template/maddu/runtime/lib/secret-scan.mjs` exports `scanArgv`.
-//   2. `tools.mjs` imports secret-scan and calls scanArgv before spawn.
-//   3. No spine event ever logs a raw secret value — defensive check
-//      that no SECRET_DETECTED_IN_ARGV data field is longer than 200 chars.
+//   2. `tools.mjs` imports secret-scan AND calls `scanArgv(` before
+//      reaching `spawnSafe`.
+//   3. Each of the 5 default tool wrappers
+//      (`commands/{git,test,format,lint,install}.mjs`) imports
+//      `loadSecretScan` AND calls `scanArgv(` before invoking `runTool`.
+//   4. No SECRET_DETECTED_IN_ARGV spine event carries a string field
+//      long enough to contain a raw secret value (>200 chars) —
+//      defensive sanity check that raw values never leaked into events.
+//
+// Hard-rule compliance: rule #1 — files-only filesystem grep.
 
 import { readFile, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
@@ -12,14 +25,29 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LIB_DIR = join(__dirname, '..', '..', 'lib');
+// From <fw>/template/maddu/runtime/gates/builtin/ → up 5 → <fw>/commands/
+const FRAMEWORK_COMMANDS = join(__dirname, '..', '..', '..', '..', '..', 'commands');
+
+const WRAPPERS = ['git.mjs', 'test.mjs', 'format.mjs', 'lint.mjs', 'install.mjs'];
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+
+async function locateWrapper(repoRoot, name) {
+  const candidates = [
+    join(FRAMEWORK_COMMANDS, name),
+    join(repoRoot, 'commands', name),
+  ];
+  for (const p of candidates) {
+    if (await exists(p)) return p;
+  }
+  return null;
+}
 
 export default {
   id: 'secret-scan-active',
   label: 'secret scan active',
   severity: 'critical',
-  description: 'secret-scan engine present + wired into tools.mjs; no spine event logs raw secret values.',
+  description: 'secret-scan engine present + wired into tools.mjs + all 5 wrappers; no spine event leaks raw values.',
   run: async (ctx) => {
     const secretScanPath = join(LIB_DIR, 'secret-scan.mjs');
     if (!(await exists(secretScanPath))) {
@@ -31,6 +59,8 @@ export default {
     if (typeof mod.scanArgv !== 'function') {
       return { ok: false, message: 'secret-scan.mjs missing scanArgv export' };
     }
+
+    // tools.mjs central wiring.
     const toolsSrc = await readFile(join(LIB_DIR, 'tools.mjs'), 'utf8');
     if (!toolsSrc.includes("from './secret-scan.mjs'") && !toolsSrc.includes('from "./secret-scan.mjs"')) {
       return { ok: false, message: 'tools.mjs does not import secret-scan.mjs' };
@@ -38,6 +68,30 @@ export default {
     if (!toolsSrc.includes('scanArgv(')) {
       return { ok: false, message: 'tools.mjs imports secret-scan but never calls scanArgv()' };
     }
+
+    // Wrapper-level grep checks.
+    const wrapperProblems = [];
+    let wrappersChecked = 0;
+    let wrappersUnreachable = 0;
+    for (const w of WRAPPERS) {
+      const p = await locateWrapper(ctx.repoRoot, w);
+      if (!p) { wrappersUnreachable++; continue; }
+      wrappersChecked++;
+      const body = await readFile(p, 'utf8');
+      const importsHelper = /loadSecretScan/.test(body);
+      const callsScan = /scanArgv\s*\(/.test(body);
+      if (!importsHelper) wrapperProblems.push({ wrapper: w, kind: 'missing-import', detail: `${w} does not import loadSecretScan` });
+      if (!callsScan)    wrapperProblems.push({ wrapper: w, kind: 'missing-scan-call', detail: `${w} does not call scanArgv(...)` });
+    }
+    if (wrappersChecked > 0 && wrapperProblems.length > 0) {
+      return {
+        ok: false,
+        message: `${wrapperProblems.length} wrapper issue(s) across ${wrappersChecked} wrapper(s)`,
+        evidence: { wrapperProblems },
+      };
+    }
+
+    // Spine sanity check — no raw secret values should ever have landed.
     let leaks = [];
     try {
       const events = await ctx.spine.readAll(ctx.repoRoot);
@@ -57,9 +111,12 @@ export default {
         evidence: { leaks },
       };
     }
-    const patterns = mod.knownPatternTypes ? mod.knownPatternTypes()
-                    : Array.isArray(mod.PATTERN_TYPES) ? mod.PATTERN_TYPES
-                    : [];
-    return { ok: true, message: `secret-scan wired into tools.mjs (${patterns.length} pattern types)` };
+
+    const patterns = Array.isArray(mod.PATTERN_TYPES) ? mod.PATTERN_TYPES
+                   : (mod.knownPatternTypes ? mod.knownPatternTypes() : []);
+    return {
+      ok: true,
+      message: `secret-scan wired (tools.mjs + ${wrappersChecked}/${WRAPPERS.length} wrappers, ${patterns.length} pattern types)${wrappersUnreachable ? `; ${wrappersUnreachable} wrapper(s) unreachable` : ''}`,
+    };
   },
 };
