@@ -5363,6 +5363,18 @@ function renderTools() {
         header.appendChild(el('span', {}, s.name));
         header.appendChild(el('span', { style: 'font-size:11px;color:var(--m-fg-2);' }, s.transport + (s.enabled ? ' · on' : ' · off')));
         card.appendChild(header);
+        // v1.2.0 Phase 2 — provenance row.
+        const prov = s.provenance || null;
+        if (prov) {
+          let provColor = '#888';
+          let provLabel = prov.source || 'unknown';
+          if (prov.source === 'framework-shipped' && prov.approved) { provColor = '#7c7'; provLabel = 'framework-shipped ✓'; }
+          else if (prov.source === 'operator-trusted' && prov.approved) { provColor = '#6cf'; provLabel = 'operator-trusted ✓'; }
+          else if (prov.source === 'operator-trusted' && !prov.approved) { provColor = '#e77'; provLabel = 'operator-trusted (pending approval)'; }
+          card.appendChild(el('div', { style: `font-size:11px;color:${provColor};margin-top:4px;font-family:var(--m-font-mono);` }, `provenance: ${provLabel}`));
+        } else {
+          card.appendChild(el('div', { style: 'font-size:11px;color:#cb6;margin-top:4px;font-family:var(--m-font-mono);' }, 'provenance: (none — pre-v1.2.0 install)'));
+        }
         const h = (data.health || {})[s.name];
         const note = h?.ok ? 'health: ok' : (h ? `health: ${h.error || 'down'}` : 'no health check yet');
         card.appendChild(el('div', { style: 'font-size:11px;color:var(--m-fg-2);margin-top:4px;' }, note));

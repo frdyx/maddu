@@ -27,6 +27,11 @@ function validate(t) {
   if (typeof t.template !== 'string' || !t.template) errs.push('missing string field: template');
   if (typeof t.displayName !== 'string' || !t.displayName) errs.push('missing string field: displayName');
   if (typeof t.summary !== 'string' || !t.summary) errs.push('missing string field: summary');
+  // v1.2.0 Phase 2 — provenance is required on every shipped template.
+  if (!t.provenance || typeof t.provenance !== 'object') errs.push('missing provenance block (v1.2.0)');
+  else if (typeof t.provenance.sha256 !== 'string' || t.provenance.sha256.length !== 64) {
+    errs.push('provenance.sha256 must be a 64-char hex string');
+  }
   if (!VALID_TRANSPORTS.has(t.transport)) errs.push(`invalid transport: ${t.transport}`);
   if (t.transport === 'stdio') {
     if (!t.stdio || typeof t.stdio.command !== 'string' || !t.stdio.command) errs.push('stdio.command required');

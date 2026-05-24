@@ -5,13 +5,20 @@
   "transport": "stdio",
   "stdio": {
     "command": "node",
-    "args": ["./.maddu/mcp/calculator/server.mjs"],
+    "args": [
+      "./.maddu/mcp/calculator/server.mjs"
+    ],
     "env": []
   },
   "requires": [
-    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." }
+    {
+      "binary": "node",
+      "install": "Install Node.js 20+ (https://nodejs.org)."
+    }
   ],
-  "lanes": ["*"],
+  "lanes": [
+    "*"
+  ],
   "scaffold": {
     "files": [
       {
@@ -25,5 +32,11 @@
     "Rule #5 OK: stdlib only.",
     "Rule #3 OK: local subprocess.",
     "Rule #4 OK: zero deps."
-  ]
+  ],
+  "provenance": {
+    "source": "framework-shipped",
+    "sha256": "7507d54f6318710ebe23cd4975fca4045484a744511a066064d496d46ebf9871",
+    "version": "1.2.0",
+    "framework_shipped_at": "2026-05-24"
+  }
 }

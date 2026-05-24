@@ -227,22 +227,26 @@ async function cmdReport(repoRoot, flags, lib) {
   console.log(`wrote ${outPath}`);
 }
 
-async function cmdEnvAllow(repoRoot, args, flags) {
-  // Phase 2 surface — accepted by Phase 1 so slash routing works without
-  // a 404. Real implementation lands in Phase 2 (worker env allowlist).
+async function cmdEnvAllow(repoRoot, args, flags, spineLib) {
   const v = args[0];
   if (!v) { console.error('env-allow refused: VAR name required'); process.exit(2); }
-  console.log(`env-allow: deferred to Phase 2. Recorded request for ${v}${flags.lane ? ` on lane ${flags.lane}` : ''}.`);
-  // Append a violation-shaped event so the audit trail still captures
-  // the intent. Phase 2 will replace this with a real config write.
-  try {
-    const { loadSpineLib } = await import(pathToFileURL(join(frameworkRoot, 'commands', '_spine.mjs')).href);
-    const spineLib = await loadSpineLib();
-    await spineLib.spine.append(repoRoot, {
-      type: spineLib.spine.EVENT_TYPES.TRUST_PIN_ADDED, // reuse as a generic trust-mutation marker until Phase 2
-      data: { __envAllowRequest: true, var: v, lane: flags.lane || null },
-    });
-  } catch {}
+  // Load worker-env library. Layout-aware (installed vs source).
+  let weLib;
+  const installed = join(process.cwd(), 'maddu', 'runtime', 'lib', 'worker-env.mjs');
+  if (await exists(installed)) {
+    weLib = await import(pathToFileURL(installed).href);
+  } else {
+    const dev = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'worker-env.mjs');
+    weLib = await import(pathToFileURL(dev).href);
+  }
+  const cfg = await weLib.envAllow(repoRoot, v, flags.lane || null);
+  console.log(`env-allow: ${v}${flags.lane ? ` on lane ${flags.lane}` : ' (global)'} — written to .maddu/config/worker-env.json`);
+  // Record on the spine. Use TRUST_PIN_ADDED reuse — Phase 6 will add a
+  // dedicated WORKER_ENV_POLICY_CHANGED event family.
+  await spineLib.spine.append(repoRoot, {
+    type: spineLib.spine.EVENT_TYPES.TRUST_PIN_ADDED,
+    data: { __envAllow: true, var: v, lane: flags.lane || null, default_allow_count: cfg.default_allow.length },
+  });
 }
 
 export default async function trustCmd(argv) {
@@ -260,7 +264,7 @@ export default async function trustCmd(argv) {
     case 'verify':  return await cmdVerify(repoRoot, lib, spineLib);
     case 'list':    return await cmdList(repoRoot, lib);
     case 'report':  return await cmdReport(repoRoot, flags, lib);
-    case 'env-allow': return await cmdEnvAllow(repoRoot, args, flags);
+    case 'env-allow': return await cmdEnvAllow(repoRoot, args, flags, spineLib);
     default:
       console.error(`trust: unknown verb "${verb}". Try \`maddu trust --help\`.`);
       process.exit(2);
