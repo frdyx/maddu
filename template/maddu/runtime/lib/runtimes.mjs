@@ -15,8 +15,7 @@ import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
-import { randomBytes } from 'node:crypto';
-import { append, EVENT_TYPES, genWorkerId } from './spine.mjs';
+import { append, EVENT_TYPES, genWorkerId, makeId } from './spine.mjs';
 import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,9 +165,7 @@ function defaultDescriptor(name) {
 }
 
 function genChildSessionId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `ses_${t}_${r}`;
+  return makeId('ses');
 }
 
 // Internal helper for Phase 3 autoRegister spawns. Emits

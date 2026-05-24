@@ -18,16 +18,10 @@
 //     would silently mount the registry's active workspace (not CWD). We
 //     refuse with an actionable warning rather than confuse the operator.
 
-import { stat, writeFile, unlink, mkdir, readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const frameworkRoot = resolve(__dirname, '..');
-
-async function exists(path) {
-  try { await stat(path); return true; } catch { return false; }
-}
+import { writeFile, unlink, mkdir, readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { exists, FRAMEWORK_ROOT as frameworkRoot } from './_libroot.mjs';
 
 function parsePortFlag(args) {
   const i = args.indexOf('--port');

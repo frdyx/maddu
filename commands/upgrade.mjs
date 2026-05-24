@@ -183,20 +183,38 @@ export default async function upgrade(argv) {
   try {
     const pipelinesDir = join(repoRoot, '.maddu', 'config', 'pipelines');
     await mkdir(pipelinesDir, { recursive: true });
-    const builtInPath = join(pipelinesDir, 'plan-exec-verify-fix.json');
-    if (!(await exists(builtInPath))) {
-      const builtIn = {
-        name: 'plan-exec-verify-fix',
-        description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
-        stages: [
-          { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
-          { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
-          { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
-          { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
-        ],
-      };
-      await writeFile(builtInPath, JSON.stringify(builtIn, null, 2) + '\n');
-      console.log(`  built-in pipeline seeded: plan-exec-verify-fix`);
+    // v1.3.0 — re-seed the default pipeline catalog for repos predating it.
+    // Same idempotency contract as init: per-file, only when missing, never
+    // disturb operator-edited copies. Read each from the template source dir
+    // when present; `plan-exec-verify-fix` keeps an inline fallback for
+    // back-compat with checkouts that lack the source .json.
+    const PLAN_EXEC_VERIFY_FIX = {
+      name: 'plan-exec-verify-fix',
+      description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
+      stages: [
+        { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
+        { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
+        { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
+        { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
+      ],
+    };
+    const DEFAULT_PIPELINES = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
+    const pipelineSrcDir = join(TEMPLATE_ROOT, 'maddu', 'config', 'pipelines');
+    for (const name of DEFAULT_PIPELINES) {
+      const dst = join(pipelinesDir, `${name}.json`);
+      if (await exists(dst)) continue;
+      let body = null;
+      const src = join(pipelineSrcDir, `${name}.json`);
+      if (await exists(src)) {
+        body = await readFile(src, 'utf8');
+        if (!body.endsWith('\n')) body += '\n';
+      } else if (name === 'plan-exec-verify-fix') {
+        body = JSON.stringify(PLAN_EXEC_VERIFY_FIX, null, 2) + '\n';
+      } else {
+        continue;
+      }
+      await writeFile(dst, body);
+      console.log(`  pipeline seeded: ${name}`);
     }
   } catch (err) {
     console.error(`  (pipeline seed skipped: ${err.message})`);

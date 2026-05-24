@@ -250,17 +250,15 @@ Runs inline on every `/bridge/projection` read (no daemon). For each open sessio
 See [21-agent-onboarding.md](21-agent-onboarding.md).
 
 
-## No-learning-curve UX shell *(v0.18)*
+## The one canonical flow, at two altitudes *(v0.18)*
 
-Two new surfaces that fold the operator-facing complexity flat:
+Everything above is the **substrate**: register a session, claim a lane, do a slice, slice-stop, release, close. The no-learning-curve UX shell is not a second, competing flow — it is the *same* loop viewed from higher up, where the operator speaks in goals and the agent walks the substrate underneath. The canonical flow is stated once, for the whole framework, in [charter.md](charter.md).
 
-### Slash commands
+There is **one default execution path** the agent reaches for first: a pipeline. `maddu pipeline run ship-a-feature "<goal>"` walks orient → plan → coordinate → slice → test → review → land → account, and each stage is a literal `maddu` invocation against the substrate above. Two sibling pipelines cover the other common shapes — `fix-a-bug` and `plan-and-delegate` (fan-out across disjoint lanes). For genuinely one-off changes the agent falls back to an ad-hoc `/maddu-autopilot` run with no pipeline.
 
-Inside Claude Code or Codex CLI, `/maddu-autopilot ship the login form` runs the full register → suggest lane → claim → plan-exec-verify-fix pipeline → slice-stop chain. Twelve slash commands ship under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`, each a marker-wrapped markdown shim that dispatches existing `maddu <cmd>` invocations. The verbose CLI stays first-class. See [22-slash-commands.md](22-slash-commands.md).
+### Speaking to the flow: slash commands + natural language
 
-### Natural-language intent routing
-
-The operator can also type `"ship the login form"` with no `/` prefix. The LLM agent reads the intent-routing table in `MADDU.md` / `CLAUDE.md` / `AGENTS.md` and classifies the phrase shape (`"autopilot …"` → `/maddu-autopilot`, `"plan …"` → `/maddu-plan`, etc.), telling the operator which slash command it picked. No framework parser — the classification happens at the LLM layer (rule #5 preserved by construction). See [23-natural-language-routing.md](23-natural-language-routing.md).
+The operator never types verbose CLI flags. Inside Claude Code or Codex CLI you either type a slash command — `/maddu-autopilot ship the login form` — or just say `"ship the login form"` with no `/` prefix. The LLM agent reads the intent-routing table in `MADDU.md` / `CLAUDE.md` / `AGENTS.md`, maps the phrase shape to the right pipeline (or to an ad-hoc autopilot for a one-off), and tells the operator which it picked so the shortcut sticks. No framework parser — the classification happens at the LLM layer (rule #5 preserved by construction). Slash commands ship under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md` as marker-wrapped shims over the same `maddu <cmd>` substrate; the verbose CLI stays first-class for scripts and CI. See [22-slash-commands.md](22-slash-commands.md) and [23-natural-language-routing.md](23-natural-language-routing.md).
 
 ### Backbone primitives
 

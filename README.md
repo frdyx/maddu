@@ -24,9 +24,9 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.1.0
+## What's new in v1.2.3
 
-**Autonomy + Planning + Tool Gateway.** Nine phases, all coordinator-driven from a single session. Doctor moves 32 → 45 PASS in the test consumer.
+**Coherence + supply-chain hardening.** Coordinator-driven, single session. The 8+1 hard rules are now the permanent, stable charter — see [`docs/charter.md`](docs/charter.md).
 
 - **Default framework tools** ([`docs/28-default-tools.md`](docs/28-default-tools.md)) — five audited subprocess wrappers ship: `maddu git/test/format/lint/install`. Every invocation emits `TOOL_INVOKED/_COMPLETED/_REFUSED` on the spine. Refuses empty commit messages, `git push -f`, empty install lists, no-detector test/format/lint resolution. Per-lane allowlist via `.maddu/config/triggers.json`.
 - **MCP server template gallery** ([`docs/29-mcp-templates.md`](docs/29-mcp-templates.md)) — 5 curated templates ship as JSON descriptors (no new package.json deps): `local-fs`, `local-search`, `calculator`, `git-advanced`, `time-and-date`. `maddu mcp install <template>` checks required binaries, scaffolds companion files, registers.
@@ -36,7 +36,7 @@ npx github:frdyx/maddu init
 - **Loops + coordinator primitive** ([`docs/33-loops-and-coordinator.md`](docs/33-loops-and-coordinator.md)) — `maddu loop ralph` (persist-until-done) + `maddu coordinator <plan-id>` (multi-phase autonomous driver). Coordinator is runtime-agnostic — does NOT depend on Claude Code's `Agent` tool.
 - **Blast + starter skills + autonomous curation** — `/maddu-blast` chained autonomous run; 8 starter skills seeded on init; suggest-only skill candidate detection from recurring slice-stop patterns.
 
-See [the v1.1.0 changelog entry](CHANGELOG.md) for the full release notes.
+See [the v1.2.3 changelog entry](CHANGELOG.md) for the full release notes.
 
 ## Zero learning curve (v0.18)
 
@@ -72,7 +72,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v0.19.1 installed.
+Máddu v1.2.3 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -93,7 +93,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.2.1  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.2.3  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
@@ -199,7 +199,7 @@ Máddu spawns no models, stores no secrets, calls no clouds — supply-chain int
 
 **Tree provenance for fan-out.** A parent terminal that spawns N sub-agents now produces N distinct sessions, each linking back via `parentSessionId`. `maddu session tree` shows the tree; the cockpit's Orientation route renders it live. Runtime descriptors gain `autoRegister: true` — the bridge registers a fresh child session per `spawnWorker` call.
 
-**Self-cleaning sessions.** A stale-session janitor runs inline on every `/bridge/projection` read (no daemon, no new timer thread). Default 30 min stale → `SESSION_STALE_DETECTED`; 4 hr → `SESSION_AUTO_CLOSED` (allowlisted-mutating per candidate rule #9). Thresholds configurable via `.maddu/config/janitor.json`.
+**Self-cleaning sessions.** A stale-session janitor runs inline on every `/bridge/projection` read (no daemon, no new timer thread). Default 30 min stale → `SESSION_STALE_DETECTED`; 4 hr → `SESSION_AUTO_CLOSED` (allowlisted-mutating per hard rule #9). Thresholds configurable via `.maddu/config/janitor.json`.
 
 **Agents read their context with one command.** `maddu brief --for-agent` (text) and `GET /bridge/agent-context` (JSON) return everything an agent needs to bootstrap: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands. `MADDU.md` tells agents to call this at every turn start.
 
@@ -217,7 +217,7 @@ Full reference → [docs/21-agent-onboarding.md](docs/21-agent-onboarding.md). W
 
 **Optional slice scope-lock.** `maddu slice scope-declare --paths a,b,c` locks a slice's surface. The built-in `slice-scope` gate refuses out-of-scope edits before `slice-stop` succeeds. Expansion bound (`+5 files OR +30%`) caps scope creep; `scope-expand` widens within the bound. After `approve-functional`, only doc-like edits pass.
 
-**Trigger discipline + pending-actions queue.** No mutating command auto-fires without (a) a tier in `commands/_tiers.mjs`, (b) an allowlist entry in `.maddu/config/triggers.json`, (c) a respected cooldown. Every successful auto-fire emits `TRIGGER_FIRED` with `triggered_by` provenance. Read-only auto-actions land in a queue surfaced to the next live agent via `maddu brief --drain`. This is candidate hard rule #9.
+**Trigger discipline + pending-actions queue.** No mutating command auto-fires without (a) a tier in `commands/_tiers.mjs`, (b) an allowlist entry in `.maddu/config/triggers.json`, (c) a respected cooldown. Every successful auto-fire emits `TRIGGER_FIRED` with `triggered_by` provenance. Read-only auto-actions land in a queue surfaced to the next live agent via `maddu brief --drain`. This is permanent hard rule #9.
 
 **Post-stop review lane.** A reviewer is a runtime with `kind: 'reviewer'` — a separate reasoning lane that runs against a sealed slice. `maddu review run --slice <id>` spawns it, parses `{verdict, findings}` from JSON or YAML-frontmatter output, archives a markdown at `.maddu/reviews/<id>.md`, emits `SLICE_REVIEWED`, and auto-opens `FOLLOWUP_OPENED` for non-clean verdicts. Catches the semantic regressions structural gates can't see.
 
@@ -247,7 +247,7 @@ Read the full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices, governance | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
-| [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8 invariants + candidate #9 | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
+| [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) *(v0.16)* — orientation, gates, scope-lock, triggers, reviews | [Architecture](docs/15-architecture.md) — two-process model | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
 | [Agent onboarding](docs/21-agent-onboarding.md) *(v0.17)* — auto-bootstrap, marker discipline, tree provenance | | | |
 

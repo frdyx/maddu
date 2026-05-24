@@ -1,0 +1,14 @@
+{
+  "name": "ship-a-feature",
+  "description": "Default end-to-end feature shape: orient, plan, coordinate, slice, test, review, land, account. Each stage is a literal maddu invocation so walking it exercises the real cockpit surfaces (Plans, Reviews, Pipelines, Loops, Cost).",
+  "stages": [
+    { "name": "orient", "intent": "Read the situation and register. `maddu status` to read active state, `maddu brief` for the situation brief, then `maddu session register --runtime claude-code --role implementer --label \"<feature>\" --focus \"<one-line goal>\"`." },
+    { "name": "plan", "intent": "Set the goal and open a plan. `maddu goal set \"<feature goal>\"`, then `maddu plan new \"<feature>\"` and `maddu plan add-phase <plan-id> \"<phase>\"` for each phase. Surfaces in the cockpit Plans route." },
+    { "name": "coordinate", "intent": "Hand the plan to a coordinator for multi-lane work. `maddu coordinator <plan-id>` to drive phase execution; the coordinator claims lanes and dispatches workers." },
+    { "name": "slice", "intent": "Declare the working slice scope before editing. `maddu slice scope-declare --paths \"<dirs>\" --focus \"<what this slice changes>\"` so lane ownership and audit trail are explicit." },
+    { "name": "test", "intent": "Verify the change. Run the project test suite, then `maddu test` and `maddu doctor` to surface FAIL rows and hard-rule violations." },
+    { "name": "review", "intent": "Open a structured review. `maddu review run --plan <plan-id>` records the review against the plan; surfaces in the cockpit Reviews route." },
+    { "name": "land", "intent": "Complete the phase and stop the slice. `maddu plan complete-phase <plan-id> <phase-id>`, then `maddu slice-stop \"SLICE STOP: <summary>...\"` with targets, paths, gates, and learnings." },
+    { "name": "account", "intent": "Account for the work. `maddu cost` to record spend against the run, then `maddu skill from-slice` to extract a reusable recipe from the slice-stop summary." }
+  ]
+}

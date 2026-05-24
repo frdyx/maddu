@@ -27,6 +27,17 @@ explicitly tells you to.
 
 ## Mandatory first actions (every fresh session)
 
+Every turn starts the same way the agent brief prescribes: orient, then
+register, then read state.
+
+```bash
+maddu brief         # turn-start orientation digest
+maddu register      # idempotent session bootstrap (no-op on MADDU_SESSION_ID)
+maddu status        # cockpit-equivalent terminal snapshot
+```
+
+The detailed form of those three steps:
+
 1. **Register a session.** Unregistered agents cannot claim lanes.
 
    ```bash
@@ -99,9 +110,10 @@ Exceptions:
 - Pure conversational answer with no repo/Máddu change.
 - Operator explicitly says "do not write files".
 
-## The 8 hard rules (do not violate)
+## The 8+1 hard rules (do not violate)
 
-See [`docs/hard-rules.md`](../docs/hard-rules.md) for full rationale. Summary:
+See [`docs/hard-rules.md`](../docs/hard-rules.md) for full rationale and
+[`docs/charter.md`](../docs/charter.md) for the stable charter. Summary:
 
 1. **Files-only state.** No SQLite, no embedded DB, no hosted DB for feature state.
 2. **Append-only event spine.** The spine wins over any projection.
@@ -117,6 +129,25 @@ See [`docs/hard-rules.md`](../docs/hard-rules.md) for full rationale. Summary:
 8. **Lane ownership.** No two agents may hold the same lane concurrently. Use
    the mailbox bus (`.maddu/lanes/<lane>/mailbox.ndjson`) for cross-lane
    handoffs, not shared mutation.
+9. **Every auto-trigger crosses the gauntlet** (permanent since v0.19.0). No
+   spine/state/workspace-mutating command auto-fires without a `tier:'mutating'`
+   entry, an allowlist entry in `.maddu/config/triggers.json`, a respected
+   cooldown, and a `TRIGGER_FIRED` event carrying `triggered_by` provenance.
+
+## Prefer a pipeline (the default execution path)
+
+For any non-trivial "ship / build / fix / team" work, the default is a
+pipeline — `maddu pipeline run <name> "<goal>"` — not an ad-hoc one-off.
+Pipelines walk the one canonical flow (orient → plan → coordinate → slice
+→ test → review → land → account) and each stage is a literal `maddu`
+invocation against the substrate above. Three default pipelines ship:
+`ship-a-feature` (the default, for end-to-end feature work), `fix-a-bug`
+(something broken), and `plan-and-delegate` (fan-out across disjoint
+lanes). Reserve ad-hoc `/maddu-autopilot` (no pipeline) for genuinely
+one-off changes. The operator surface stays slash commands + natural
+language — there are no verbose CLI flags to memorize. See the full agent
+brief in [`agent-files/MADDU.md`](agent-files/MADDU.md) §"Intent routing"
+and the charter in [`docs/charter.md`](../docs/charter.md).
 
 ## Provider / runtime resolution
 

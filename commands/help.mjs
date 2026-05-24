@@ -24,6 +24,7 @@ const ROSTER = [
       { name: '/maddu-help',    line: 'Print this guide.',                              under: 'help' },
       { name: '/maddu-doctor',  line: 'Run hard-rule gates and surface findings.',      under: 'doctor' },
       { name: '/maddu-suggest <task>', line: 'Recommend a slash command + lane for a vague task.', under: 'suggest' },
+      { name: '/maddu-audit',   line: 'Framework-coherence self-audit (dead events, drift, orphans).', under: 'audit' },
     ],
   },
   {

@@ -6,16 +6,9 @@
 // `maddu brief --drain`. The agent decides whether to act; draining
 // emits PENDING_ACTION_DRAINED with an outcome.
 
-import { randomBytes } from 'node:crypto';
-
-function genActionId() {
-  const ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `act_${ts}_${r}`;
-}
-
 export async function enqueue(spine, repoRoot, { kind, payload = {}, triggered_by = null } = {}) {
-  const actionId = genActionId();
+  // Use the injected spine's canonical id factory (preserves act_<ts14>_<hex6>).
+  const actionId = spine.makeId('act');
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.PENDING_ACTION_ENQUEUED,
     data: { actionId, kind, payload },

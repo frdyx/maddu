@@ -11,6 +11,7 @@
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib, loadLibOptional } from './_libroot.mjs';
 
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', accent: '\x1b[35m' };
 
@@ -120,16 +121,7 @@ export default async function skill(argv) {
   // v1.1.0 Phase 8c — autonomous skill curation verbs.
   if (sub === 'candidates') {
     const tsub = rest[0] || 'list';
-    const { fileURLToPath, pathToFileURL } = await import('node:url');
-    const { dirname, join, resolve: pathResolve } = await import('node:path');
-    const { stat } = await import('node:fs/promises');
-    const __dirname2 = dirname(fileURLToPath(import.meta.url));
-    const FRAMEWORK_ROOT2 = pathResolve(__dirname2, '..');
-    async function existsP(p) { try { await stat(p); return true; } catch { return false; } }
-    let lib;
-    for (const c of [join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'), join(FRAMEWORK_ROOT2, 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs')]) {
-      if (await existsP(c)) { lib = await import(pathToFileURL(c).href); break; }
-    }
+    const lib = await loadLibOptional('skill-candidates.mjs');
     if (!lib) { console.error('skill-candidates.mjs not present — run `maddu upgrade`'); process.exit(2); }
     if (tsub === 'list') {
       // First detect + emit any fresh candidates.
@@ -151,16 +143,7 @@ export default async function skill(argv) {
     const hash = rest[0];
     if (!hash) { console.error('usage: maddu skill from-candidate <hash> [--title "..."]'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
-    const { fileURLToPath, pathToFileURL } = await import('node:url');
-    const { dirname, join, resolve: pathResolve } = await import('node:path');
-    const { stat } = await import('node:fs/promises');
-    const __dirname2 = dirname(fileURLToPath(import.meta.url));
-    const FRAMEWORK_ROOT2 = pathResolve(__dirname2, '..');
-    async function existsP(p) { try { await stat(p); return true; } catch { return false; } }
-    let lib;
-    for (const c of [join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'), join(FRAMEWORK_ROOT2, 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs')]) {
-      if (await existsP(c)) { lib = await import(pathToFileURL(c).href); break; }
-    }
+    const lib = await loadLib('skill-candidates.mjs');
     const all = await lib.listCandidates(repoRoot);
     const candidate = all.find((c) => c.hash === hash);
     if (!candidate) { console.error(`candidate ${hash} not found`); process.exit(3); }
@@ -177,16 +160,7 @@ export default async function skill(argv) {
     const hash = rest[0];
     if (!hash) { console.error('usage: maddu skill candidate-reject <hash> [--reason "..."]'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
-    const { fileURLToPath, pathToFileURL } = await import('node:url');
-    const { dirname, join, resolve: pathResolve } = await import('node:path');
-    const { stat } = await import('node:fs/promises');
-    const __dirname2 = dirname(fileURLToPath(import.meta.url));
-    const FRAMEWORK_ROOT2 = pathResolve(__dirname2, '..');
-    async function existsP(p) { try { await stat(p); return true; } catch { return false; } }
-    let lib;
-    for (const c of [join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'), join(FRAMEWORK_ROOT2, 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs')]) {
-      if (await existsP(c)) { lib = await import(pathToFileURL(c).href); break; }
-    }
+    const lib = await loadLib('skill-candidates.mjs');
     await lib.rejectCandidate(repoRoot, hash, typeof flags.reason === 'string' ? flags.reason : null, null);
     console.log(`${ANSI.warn}rejected${ANSI.reset}  ${hash}`);
     return;

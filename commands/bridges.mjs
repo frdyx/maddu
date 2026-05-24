@@ -16,24 +16,10 @@
 
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
-import { stat } from 'node:fs/promises';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const frameworkRoot = resolve(__dirname, '..');
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+import { loadLib } from './_libroot.mjs';
 
 async function loadRegistryLib() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'bridges-registry.mjs'),
-    join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'bridges-registry.mjs'),
-  ];
-  for (const c of candidates) {
-    if (await exists(c)) return await import(pathToFileURL(c).href);
-  }
-  throw new Error('bridges-registry.mjs not found. Run `maddu init` (or `maddu upgrade`) first.');
+  return loadLib('bridges-registry.mjs');
 }
 
 function printHelp() {

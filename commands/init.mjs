@@ -239,20 +239,40 @@ export default async function init(argv) {
   // missing (idempotent across re-runs).
   const pipelinesDir = join(configDir, 'pipelines');
   await mkdir(pipelinesDir, { recursive: true });
-  const planExecVerifyFixPath = join(pipelinesDir, 'plan-exec-verify-fix.json');
-  if (!(await exists(planExecVerifyFixPath))) {
-    const builtIn = {
-      name: 'plan-exec-verify-fix',
-      description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
-      stages: [
-        { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
-        { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
-        { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
-        { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
-      ],
-    };
-    await writeFile(planExecVerifyFixPath, JSON.stringify(builtIn, null, 2) + '\n');
-    console.log(`  built-in pipeline seeded: plan-exec-verify-fix`);
+  // v1.3.0 — seed the default pipeline catalog. `ship-a-feature` is the
+  // DEFAULT shape; `fix-a-bug` + `plan-and-delegate` cover the other two
+  // common run shapes. `plan-exec-verify-fix` is kept (back-compat) as an
+  // inline fallback below. Each .json source lives under
+  // template/maddu/config/pipelines/ so the source repo validates them; we
+  // read from there when present, otherwise fall back to inline. Seeding is
+  // idempotent per-file (only when missing) so operator edits survive re-runs.
+  const PLAN_EXEC_VERIFY_FIX = {
+    name: 'plan-exec-verify-fix',
+    description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
+    stages: [
+      { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
+      { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
+      { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
+      { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
+    ],
+  };
+  const DEFAULT_PIPELINES = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
+  const pipelineSrcDir = join(TEMPLATE_ROOT, 'maddu', 'config', 'pipelines');
+  for (const name of DEFAULT_PIPELINES) {
+    const dst = join(pipelinesDir, `${name}.json`);
+    if (await exists(dst)) continue;
+    let body = null;
+    const src = join(pipelineSrcDir, `${name}.json`);
+    if (await exists(src)) {
+      body = await readFile(src, 'utf8');
+      if (!body.endsWith('\n')) body += '\n';
+    } else if (name === 'plan-exec-verify-fix') {
+      body = JSON.stringify(PLAN_EXEC_VERIFY_FIX, null, 2) + '\n';
+    } else {
+      continue; // no source and no inline fallback — skip
+    }
+    await writeFile(dst, body);
+    console.log(`  pipeline seeded: ${name}`);
   }
 
   // 6b. v0.17 agent-native bootstrap — drop MADDU.md + marker-delimited

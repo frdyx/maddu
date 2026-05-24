@@ -2,9 +2,11 @@
 //
 // Resolves npm / pnpm / yarn from lockfiles. Refuses empty package lists
 // (rule #4 — no broad new deps without an explicit operator decision).
+// v1.3.0 — shares the wrapper body via _tools.mjs#runWrapper; the
+// strict-mode approval gate (v1.2.0 Phase 5) rides in as the `strict`
+// callback so the behavior is identical.
 
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
-import { loadTools, loadSecretScan } from './_tools.mjs';
+import { runWrapper } from './_tools.mjs';
 import { requireStrictApprovalIfNeeded } from './_strict-approval.mjs';
 
 function printInstallHelp() {
@@ -18,33 +20,11 @@ function printInstallHelp() {
 
 export default async function installCmd(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printInstallHelp(); return; }
-  const spineLib = await loadSpineLib();
-  const { paths, spine, projections, approvals } = spineLib;
-  const repoRoot = await resolveRepoRoot(paths);
-  const tools = await loadTools();
-  const lane = process.env.MADDU_LANE || null;
-  const sessionId = process.env.MADDU_SESSION_ID || null;
-  // v1.2.0 Phase 3 — wrapper-level secret scan (checked by `secret-scan-active` gate).
-  const secretScan = await loadSecretScan();
-  const wrapperScan = secretScan.scanArgv(argv);
-  if (wrapperScan && !secretScan.hasAllowSecret(argv)) { /* central runTool will refuse */ }
-
-  // v1.2.0 Phase 5 — strict-mode approval enforcement.
-  // Closes the v1.1.0 burn-in note: strict governance must actually gate
-  // `maddu install` behind explicit operator approval.
-  const strictResult = await requireStrictApprovalIfNeeded(spineLib, repoRoot, {
-    tool: 'install', argv, lane, sessionId,
+  await runWrapper('install', argv, {
+    // v1.2.0 Phase 5 — strict-mode approval enforcement. Closes the
+    // v1.1.0 burn-in note: strict governance must actually gate
+    // `maddu install` behind explicit operator approval.
+    strict: ({ spineLib, repoRoot, lane, sessionId, argv: a }) =>
+      requireStrictApprovalIfNeeded(spineLib, repoRoot, { tool: 'install', argv: a, lane, sessionId }),
   });
-  if (strictResult.refused) {
-    console.error(strictResult.detail);
-    process.exit(strictResult.exitCode || 2);
-  }
-
-  const res = await tools.runTool(repoRoot, { tool: 'install', argv, lane, sessionId, captureOutput: false });
-  if (res.refused) {
-    console.error(tools.summarize(res));
-    process.exit(2);
-  }
-  console.log(tools.summarize(res));
-  process.exit(res.exitCode === 0 ? 0 : (res.exitCode || 1));
 }

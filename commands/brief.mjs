@@ -180,9 +180,9 @@ function parseCsv(v) {
 // triggers/tags. Returns [{ id, title, triggers, tags, body, updated, provenance }].
 //
 // v1.2.0 Phase 4 — skills without a `provenance` field are REFUSED for
-// auto-injection (emits SKILL_INJECTION_REFUSED via the caller). Pre-v1.2
-// skills are grandfathered with provenance: 'pre-v1.2-grandfathered' on
-// first read so existing installs keep working.
+// auto-injection. Pre-v1.2 skills are grandfathered with
+// provenance: 'pre-v1.2-grandfathered' on first read so existing installs
+// keep working.
 async function loadSkillsForInjection(repoRoot) {
   const skillsDir = path.join(repoRoot, '.maddu', 'skills');
   let entries;

@@ -25,20 +25,13 @@
 //     ]
 //   }
 
-import { readFile, readdir, mkdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { exists } from './_libroot.mjs';
 
 const CONFIG_DIR = '.maddu/config/pipelines';
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
-
-function newId(prefix) {
-  const ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = Math.random().toString(36).slice(2, 8);
-  return `${prefix}_${ts}_${r}`;
-}
 
 async function loadPipeline(repoRoot, name) {
   const p = join(repoRoot, CONFIG_DIR, `${name}.json`);
@@ -96,7 +89,7 @@ async function runPipeline(name, goalText, flags) {
     throw new Error(`pipeline "${name}" has no stages`);
   }
 
-  const pipelineRunId = newId('pipe');
+  const pipelineRunId = spine.makeId('pipe');
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.PIPELINE_STARTED,
     actor: process.env.MADDU_SESSION_ID || null,

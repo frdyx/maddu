@@ -100,22 +100,9 @@ export async function requireStrictApprovalIfNeeded(spineLib, repoRoot, opts) {
 // Read governance.json via the runtime lib (layout-aware).
 async function readGovernance(spineLib, repoRoot) {
   try {
-    const { fileURLToPath, pathToFileURL } = await import('node:url');
-    const { dirname, join, resolve } = await import('node:path');
-    const { stat } = await import('node:fs/promises');
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    const frameworkRoot = resolve(__dirname, '..');
-    async function exists(p) { try { await stat(p); return true; } catch { return false; } }
-    const candidates = [
-      join(process.cwd(), 'maddu', 'runtime', 'lib', 'governance.mjs'),
-      join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'governance.mjs'),
-    ];
-    for (const c of candidates) {
-      if (await exists(c)) {
-        const mod = await import(pathToFileURL(c).href);
-        return await mod.readGovernance(repoRoot);
-      }
-    }
+    const { loadLib } = await import('./_libroot.mjs');
+    const mod = await loadLib('governance.mjs');
+    return await mod.readGovernance(repoRoot);
   } catch {}
   return { mode: 'standard', overrides: {} };
 }

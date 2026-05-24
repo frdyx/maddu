@@ -36,7 +36,7 @@ export const TEMPLATE_MADDU = join(TEMPLATE_ROOT, 'maddu');
 //               flat layout to find files; it CANNOT be used to scaffold
 //               other repos.
 //
-// `frameworkOwnedFiles`, `buildSourceManifest`, init, and upgrade ALL require
+// `frameworkOwnedFiles`, init, and upgrade ALL require
 // the `source` layout. Calling any of them via a consumer's bundled
 // `./maddu/run` would semantically mean "copy the install onto itself" —
 // meaningless and historically silently broken (init would crash mid-way;
@@ -141,21 +141,6 @@ export async function frameworkOwnedFiles() {
 export async function sha256OfFile(p) {
   const buf = await readFile(p);
   return createHash('sha256').update(buf).digest('hex');
-}
-
-export async function sha256OfBuffer(buf) {
-  return createHash('sha256').update(buf).digest('hex');
-}
-
-// Hash every framework-owned file in the framework repo. Returns
-// { 'maddu/runtime/server.js': 'sha256-…', … }.
-export async function buildSourceManifest() {
-  const files = await frameworkOwnedFiles();
-  const manifest = {};
-  for (const { relPath, absSource } of files) {
-    manifest[relPath] = await sha256OfFile(absSource);
-  }
-  return manifest;
 }
 
 // Read maddu.json from a target repo. Returns null if the file doesn't exist.

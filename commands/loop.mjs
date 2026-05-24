@@ -11,25 +11,26 @@
 // two consecutive identical failure signatures.
 
 import { spawn } from 'node:child_process';
-import { stat } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, resolve as pathResolve } from 'node:path';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', pass: '\x1b[32m', warn: '\x1b[33m', fail: '\x1b[31m' };
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FRAMEWORK_ROOT = pathResolve(__dirname, '..');
 
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+// NOTE (v1.3.0 coherence): `maddu loop` (ralph/plan) and `maddu coordinator`
+// both drive bounded multi-phase iteration with the same "same fail
+// signature twice in a row → halt" stuck-detection heuristic. The two
+// implementations live in runtime/lib/loops.mjs (runLoop) and
+// runtime/lib/coordinator.mjs (runCoordinator). They were NOT merged: the
+// loops core emits LOOP_* events and takes verify/iterate callbacks, while
+// the coordinator emits COORDINATOR_* events, injects MADDU_COORDINATOR_*
+// env, and spawns one subprocess per phase. The control flow is interwoven
+// with each one's distinct event emission, so extracting a shared core was
+// judged higher-risk than the duplication it removes. This cross-reference
+// is the deliberate alternative — see runtime/lib/coordinator.mjs.
 
 async function loadLoopsLib() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'loops.mjs'),
-    join(FRAMEWORK_ROOT, 'template', 'maddu', 'runtime', 'lib', 'loops.mjs'),
-  ];
-  for (const c of candidates) { if (await exists(c)) return await import(pathToFileURL(c).href); }
-  throw new Error('loops.mjs not found. Run `maddu upgrade`.');
+  return loadLib('loops.mjs');
 }
 
 function runShell(cmd, cwd) {

@@ -78,4 +78,8 @@ export default {
   // `list` is read-only-shaped but the verb dispatches into kill-all too,
   // so the verb itself is mutating; auto-trigger forbidden.
   bridges:      { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.3.0 — framework-coherence self-audit. Read-only (scans source, appends
+  // one best-effort AUDIT_REPORT timeline event); safe to auto-trigger so the
+  // drift check can run on a schedule every release.
+  audit:        { tier: 'read-only', autoTrigger: 'allowed'   },
 };

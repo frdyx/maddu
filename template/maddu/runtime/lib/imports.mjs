@@ -12,9 +12,8 @@
 
 import { mkdir, appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, makeId } from './spine.mjs';
 import { saveSkill } from './skills.mjs';
 
 // Patterns we recognize. Each is { name, re }. Names go into rejection logs;
@@ -42,8 +41,7 @@ function acceptedLog(repoRoot) { return join(importsDir(repoRoot), 'accepted.ndj
 function rejectedLog(repoRoot) { return join(importsDir(repoRoot), 'rejected-secrets.ndjson'); }
 
 function genImportId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  return `imp_${t}_${randomBytes(3).toString('hex')}`;
+  return makeId('imp');
 }
 
 async function ensureDirs(repoRoot) {
@@ -98,7 +96,7 @@ async function dispatchAccepted(repoRoot, kind, payload, by) {
     const p = pathsFor(repoRoot);
     await mkdir(p.statePrjDir, { recursive: true });
     const ts = new Date().toISOString();
-    const id = `mem_imp_${ts.replace(/[-:T.Z]/g, '').slice(0, 14)}_${randomBytes(2).toString('hex')}`;
+    const id = makeId('mem_imp', ts, 2);
     const fact = {
       v: 1, id, ts,
       kind: 'discovery',

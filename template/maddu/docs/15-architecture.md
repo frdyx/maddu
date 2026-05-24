@@ -156,4 +156,4 @@ The only state that can be "lost" across a restart is an in-flight HTTP response
 - [hard-rules.md](hard-rules.md) — the invariants this architecture enforces.
 - [05-bridge-endpoints.md](05-bridge-endpoints.md) — the API surface.
 - [02-concepts.md](02-concepts.md) — concepts at a higher level.
-- [maddu-v0.3-roadmap.md](maddu-v0.3-roadmap.md) — what is shipping in each phase.
+- [charter.md](charter.md) — the mission, invariants, and canonical flow this architecture serves.

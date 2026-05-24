@@ -26,12 +26,6 @@
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
-function newId(prefix) {
-  const ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = Math.random().toString(36).slice(2, 8);
-  return `${prefix}_${ts}_${r}`;
-}
-
 async function openTeam(flags) {
   const members = Number(flags.members || flags.n || 0);
   const lanesArg = flags.lanes || '';
@@ -64,7 +58,7 @@ async function openTeam(flags) {
     process.exit(1);
   }
 
-  const teamId = newId('team');
+  const teamId = spine.makeId('team');
   const label = flags.label || `team-${members}`;
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.TEAM_OPENED,
