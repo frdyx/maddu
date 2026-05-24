@@ -9,6 +9,8 @@ const VALID_REASONS = new Set([
   'allowlist-not-allowed',
   'dangerous-form',
   'no-detector',
+  // v1.2.0 Phase 3 — refusal when argv matches a known-secret pattern.
+  'secret-detected',
 ]);
 
 export default {
