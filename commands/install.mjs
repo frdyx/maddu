@@ -5,6 +5,7 @@
 
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 import { loadTools, loadSecretScan } from './_tools.mjs';
+import { requireStrictApprovalIfNeeded } from './_strict-approval.mjs';
 
 function printInstallHelp() {
   console.log([
@@ -17,7 +18,8 @@ function printInstallHelp() {
 
 export default async function installCmd(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printInstallHelp(); return; }
-  const { paths } = await loadSpineLib();
+  const spineLib = await loadSpineLib();
+  const { paths, spine, projections, approvals } = spineLib;
   const repoRoot = await resolveRepoRoot(paths);
   const tools = await loadTools();
   const lane = process.env.MADDU_LANE || null;
@@ -26,6 +28,18 @@ export default async function installCmd(argv) {
   const secretScan = await loadSecretScan();
   const wrapperScan = secretScan.scanArgv(argv);
   if (wrapperScan && !secretScan.hasAllowSecret(argv)) { /* central runTool will refuse */ }
+
+  // v1.2.0 Phase 5 — strict-mode approval enforcement.
+  // Closes the v1.1.0 burn-in note: strict governance must actually gate
+  // `maddu install` behind explicit operator approval.
+  const strictResult = await requireStrictApprovalIfNeeded(spineLib, repoRoot, {
+    tool: 'install', argv, lane, sessionId,
+  });
+  if (strictResult.refused) {
+    console.error(strictResult.detail);
+    process.exit(strictResult.exitCode || 2);
+  }
+
   const res = await tools.runTool(repoRoot, { tool: 'install', argv, lane, sessionId, captureOutput: false });
   if (res.refused) {
     console.error(tools.summarize(res));
