@@ -210,25 +210,51 @@ export async function maybeAutoReviseFromSliceStop(repoRoot, sliceStopEvent) {
   return planId;
 }
 
-// Kanban projection (Now / Next / Blocked / Done) over all open plans.
+// Kanban projection (Now / Next / Blocked / Done) over all plans.
+//
+// v1.1.1 fix (burn-in #23): aggregate phase status so that completed
+// phases land in DONE even before the plan itself is marked completed,
+// and so that a plan whose phases are all done but the plan is still
+// `open` shows in DONE rather than vanishing from every column.
+//
+// Each Kanban cell is a (planId, phase?) pair. Plan-level rows appear
+// when there are no phases (legacy plans) or to summarize plan status.
 export async function kanban(repoRoot) {
   const all = await listPlans(repoRoot);
   const cols = { now: [], next: [], blocked: [], done: [] };
   for (const p of all) {
+    const phases = p.phases || [];
+    // Plan-level terminal status always lands a row in DONE.
     if (p.status === 'completed' || p.status === 'cancelled') {
       cols.done.push({ planId: p.planId, title: p.title, status: p.status });
+      // Completed phases also surface individually so the board shows
+      // the per-phase history rather than a single plan-level row.
+      for (const ph of phases.filter((x) => x.status === 'completed')) {
+        cols.done.push({ planId: p.planId, title: p.title, phase: ph.name, status: 'completed' });
+      }
       continue;
     }
-    const phases = p.phases || [];
-    const firstOpen = phases.find((x) => x.status === 'pending');
+    // Phase-status aggregation (open plan).
     const blocked = phases.filter((x) => x.status === 'blocked');
-    if (blocked.length) {
-      cols.blocked.push({ planId: p.planId, title: p.title, blockedCount: blocked.length, phases: blocked.map((x) => x.name) });
+    const completed = phases.filter((x) => x.status === 'completed');
+    const pending = phases.filter((x) => x.status === 'pending');
+    for (const b of blocked) {
+      cols.blocked.push({ planId: p.planId, title: p.title, phase: b.name, reason: b.blockedReason || null });
     }
-    if (firstOpen) {
-      cols.now.push({ planId: p.planId, title: p.title, phase: firstOpen.name, intent: firstOpen.intent });
-      const upcoming = phases.filter((x) => x.status === 'pending' && x.name !== firstOpen.name).slice(0, 2);
-      for (const u of upcoming) cols.next.push({ planId: p.planId, title: p.title, phase: u.name });
+    for (const d of completed) {
+      cols.done.push({ planId: p.planId, title: p.title, phase: d.name, status: 'completed' });
+    }
+    if (pending.length > 0) {
+      const [first, ...rest] = pending;
+      cols.now.push({ planId: p.planId, title: p.title, phase: first.name, intent: first.intent });
+      for (const u of rest.slice(0, 2)) cols.next.push({ planId: p.planId, title: p.title, phase: u.name });
+    } else if (phases.length > 0 && blocked.length === 0) {
+      // All phases completed but plan still `open` — surface as DONE
+      // (plan-level) so the operator sees the work has converged.
+      cols.done.push({ planId: p.planId, title: p.title, status: 'phases-complete' });
+    } else if (phases.length === 0) {
+      // No phases declared yet — show plan in NOW with a placeholder.
+      cols.now.push({ planId: p.planId, title: p.title, phase: null, intent: p.goal || '' });
     }
   }
   return cols;

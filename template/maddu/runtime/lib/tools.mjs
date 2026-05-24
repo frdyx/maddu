@@ -184,13 +184,49 @@ export async function detectFramework(repoRoot, tool) {
 
 function isWindows() { return process.platform === 'win32'; }
 
+// npm-family runners on Windows resolve via `.cmd` shims (npm.cmd,
+// pnpm.cmd, yarn.cmd, npx.cmd). Since Node 22+, `spawn(name, args, {shell:false})`
+// will NOT pick up the `.cmd` extension from PATH, and even retrying with
+// an explicit `.cmd` suffix throws `spawn EINVAL` on Win32 unless
+// `shell: true` is also passed (see Node docs: "spawn on Windows").
+// `git` is a real `.exe` on PATH so it works without `shell:true`.
+const WINDOWS_SHELL_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'npx']);
+function needsWindowsShell(cmd) {
+  if (!isWindows()) return false;
+  if (typeof cmd !== 'string') return false;
+  const bare = cmd.replace(/\.(cmd|bat|ps1)$/i, '');
+  return WINDOWS_SHELL_RUNNERS.has(bare);
+}
+
+// On Windows + shell:true, argv values containing spaces or shell-metas
+// must be quoted; otherwise `cmd.exe` splits them. We escape conservatively:
+// wrap in double-quotes and escape embedded double-quotes. (Args without
+// metacharacters pass through unchanged so behavior matches POSIX where
+// shell:true is unnecessary.)
+function quoteWinArg(a) {
+  if (typeof a !== 'string') a = String(a);
+  if (a === '' || /[ \t"&|<>^()%!]/.test(a)) {
+    return '"' + a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
+  }
+  return a;
+}
+
 // Resolve a binary on Windows by trying both the bare name and the `.cmd`
-// shim. `child_process.spawn` on Win32 does NOT search PATH for `.cmd` /
-// `.bat` extensions unless `shell:true` is passed (which we refuse —
-// shell:true is a string-interpolation hazard). Instead we try the bare
-// name first; on ENOENT, retry with `.cmd`.
+// shim. The retry path requires `shell: true` (Node 22+ EINVAL guard).
 function spawnSafe(cmd, args, opts) {
   return new Promise((resolve) => {
+    // Fast path: on Windows for npm-family runners, jump straight to
+    // shell:true so we don't pay the ENOENT round-trip.
+    if (needsWindowsShell(cmd)) {
+      const quotedArgs = (args || []).map(quoteWinArg);
+      const child = spawn(quoteWinArg(cmd), quotedArgs, { ...opts, shell: true, windowsHide: true });
+      let stdout = '', stderr = '';
+      if (child.stdout) child.stdout.on('data', (b) => stdout += b.toString());
+      if (child.stderr) child.stderr.on('data', (b) => stderr += b.toString());
+      child.on('error', (err) => resolve({ code: -1, stdout, stderr: stderr + (err.message || String(err)) }));
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+      return;
+    }
     const child = spawn(cmd, args, { ...opts, shell: false });
     let stdout = '', stderr = '';
     let retried = false;
@@ -199,7 +235,9 @@ function spawnSafe(cmd, args, opts) {
     child.on('error', (err) => {
       if (!retried && isWindows() && err && err.code === 'ENOENT' && !cmd.endsWith('.cmd')) {
         retried = true;
-        const child2 = spawn(cmd + '.cmd', args, { ...opts, shell: false });
+        // Retry via cmd.exe shell so .cmd shims resolve cleanly under Node 22+.
+        const quotedArgs = (args || []).map(quoteWinArg);
+        const child2 = spawn(quoteWinArg(cmd + '.cmd'), quotedArgs, { ...opts, shell: true, windowsHide: true });
         if (child2.stdout) child2.stdout.on('data', (b) => stdout += b.toString());
         if (child2.stderr) child2.stderr.on('data', (b) => stderr += b.toString());
         child2.on('error', (err2) => resolve({ code: -1, stdout, stderr: stderr + (err2.message || String(err2)) }));

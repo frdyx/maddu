@@ -383,6 +383,100 @@ async function upgradeMarkerCollision() {
   return { name, ok: allOk, duration };
 }
 
+// v1.1.1 — ralph loop with an always-fail verify must NOT complete; it
+// must halt via stuck-detection (after 2 identical fail signatures) or
+// reach max-iter. Burn-in v1.1.0 finding #10 saw an inverted exit-code
+// interpretation; this scenario locks the contract against regression.
+async function ralphAlwaysFailHalts() {
+  const name = 'ralph-always-fail-halts';
+  const start = Date.now();
+  const tmp = await newTmp(name);
+  let allOk = true;
+  try {
+    // Seed governance defaults so runLoop can read tier values.
+    await writeFile(join(tmp, '.maddu', 'state', 'governance.json'),
+      JSON.stringify({ mode: 'standard', overrides: {} }, null, 2) + '\n');
+    const loopsMod = await import(pathToFileURL(join(LIB, 'loops.mjs')).href);
+    const { spine } = await loadSpine();
+    // Always-fail verify with a stable signature → must halt on stuck-detection.
+    const res1 = await loopsMod.runLoop(tmp, {
+      kind: 'ralph', goal: 'synthetic always-fail',
+      maxIter: 5, cooldownMs: 0,
+      verify: async () => ({ ok: false, signature: 'always-fail', summary: 'forced fail' }),
+      iterate: async () => ({ summary: 'noop' }),
+    });
+    allOk = ok(name, 'always-fail loop does NOT complete', res1.ok === false) && allOk;
+    allOk = ok(name, 'halts via stuck-detection', res1.reason === 'stuck-detection', `reason=${res1.reason}`) && allOk;
+    allOk = ok(name, 'iters >= 2 (need 2 fails to detect stuck)', res1.iters >= 2, `iters=${res1.iters}`) && allOk;
+    // Verify spine has LOOP_HALTED with the right reason.
+    const events = await spine.readAll(tmp);
+    const halted = events.filter((e) => e.type === 'LOOP_HALTED' && e.data?.reason === 'stuck-detection');
+    allOk = ok(name, 'LOOP_HALTED stuck-detection event landed', halted.length === 1, `count=${halted.length}`) && allOk;
+
+    // Distinct-signature failures (different each iter) → must reach max-iter.
+    let iter = 0;
+    const res2 = await loopsMod.runLoop(tmp, {
+      kind: 'ralph', goal: 'synthetic distinct-fails',
+      maxIter: 3, cooldownMs: 0,
+      verify: async () => ({ ok: false, signature: `unique-${++iter}`, summary: 'forced fail' }),
+    });
+    allOk = ok(name, 'distinct-signature loop reaches max-iter', res2.reason === 'max-iter-reached', `reason=${res2.reason}`) && allOk;
+    allOk = ok(name, 'iters = maxIter (3)', res2.iters === 3, `iters=${res2.iters}`) && allOk;
+
+    // Zero-exit verify → completes at iter=1 (positive control).
+    const res3 = await loopsMod.runLoop(tmp, {
+      kind: 'ralph', goal: 'synthetic pass', maxIter: 5, cooldownMs: 0,
+      verify: async () => ({ ok: true, signature: 'pass', summary: 'green' }),
+    });
+    allOk = ok(name, 'green verify completes at iter=1', res3.ok === true && res3.iters === 1, `ok=${res3.ok} iters=${res3.iters}`) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception during synthesis', false, err.message);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
+// v1.1.1 — Windows .cmd shim path for npm-family runners. Asserts that
+// spawnSafe routes npm/pnpm/yarn/npx through `shell:true` on Win32 so
+// `.cmd` shims execute under Node 22+ without `spawn EINVAL`.
+// Burn-in v1.1.0 finding #5.
+async function windowsSpawnNpmShim() {
+  const name = 'windows-spawn-npm-shim';
+  const start = Date.now();
+  const tmp = await newTmp(name);
+  let allOk = true;
+  try {
+    const toolsMod = await import(pathToFileURL(join(LIB, 'tools.mjs')).href);
+    // Synthesize a package.json so detectFramework('test') picks an npm path.
+    await writeFile(join(tmp, 'package.json'), JSON.stringify({
+      name: 'stress-fixture', private: true,
+      scripts: { test: 'node -e "process.exit(0)"' },
+    }, null, 2));
+    // Mark tool config as wildcard-allow so allowlist passes.
+    await mkdir(join(tmp, '.maddu', 'state', 'config'), { recursive: true });
+    await writeFile(join(tmp, '.maddu', 'state', 'config', 'triggers.json'),
+      JSON.stringify({ schemaVersion: 1, tools: { '*': { allow: ['test', 'git', 'lint', 'format', 'install'] } } }, null, 2));
+    const res = await toolsMod.runTool(tmp, { tool: 'test', argv: [], captureOutput: true });
+    allOk = ok(name, 'runTool does not throw EINVAL on Windows', !res.refused || res.reason !== 'spawn-error') && allOk;
+    // On non-Windows or when npm is present, exitCode should be a finite number (0 if npm is installed,
+    // -1 if not). The key invariant: no synchronous EINVAL crash.
+    allOk = ok(name, 'exitCode is a number (no EINVAL throw)', typeof res.exitCode === 'number', `exit=${res.exitCode}`) && allOk;
+    if (res.stderr && /EINVAL/.test(res.stderr)) {
+      allOk = ok(name, 'stderr free of EINVAL', false, res.stderr.slice(0, 120)) && allOk;
+    }
+  } catch (err) {
+    allOk = ok(name, 'no exception during spawn', false, err.message);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 // v1.1.0 Phase 1 — default-tool refusal events land on the spine and
 // the tool-allowlist gate stays coherent under volume.
 async function toolRefusalsCoherent() {
@@ -442,6 +536,8 @@ const SCENARIOS = {
   'suggest-ambiguous':        suggestAmbiguous,
   'upgrade-marker-collision': upgradeMarkerCollision,
   'tool-refusals-coherent':   toolRefusalsCoherent,
+  'ralph-always-fail-halts':  ralphAlwaysFailHalts,
+  'windows-spawn-npm-shim':   windowsSpawnNpmShim,
 };
 
 const overallStart = Date.now();

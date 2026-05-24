@@ -28,16 +28,33 @@ export default {
     if (!lib) return { ok: true, message: 'plans lib not present (skipped)' };
     const board = await lib.kanban(ctx.repoRoot);
     const problems = [];
-    const nowIds = new Set(board.now.map((x) => x.planId));
+    // v1.1.1: phase-level rows mean a plan legitimately appears in multiple
+    // columns (e.g. completed phase in Done, pending phase in Now). The
+    // coherence rule now checks the *plan-level* placement only: a plan
+    // whose status is `completed`/`cancelled` must not also have a NOW row.
+    const nowPlanLevelIds = new Set(board.now.filter((x) => !x.phase).map((x) => x.planId));
     for (const d of board.done) {
-      if (nowIds.has(d.planId)) problems.push({ planId: d.planId, reason: 'in both Now and Done' });
+      // Only enforce when the DONE row is plan-level (no phase set) AND
+      // the NOW row is also plan-level.
+      if (!d.phase && nowPlanLevelIds.has(d.planId)) {
+        problems.push({ planId: d.planId, reason: 'plan-level row in both Now and Done' });
+      }
     }
     const all = await lib.listPlans(ctx.repoRoot);
+    const allNowIds = new Set(board.now.map((x) => x.planId));
+    const allBlockedIds = new Set(board.blocked.map((x) => x.planId));
+    const allDoneIds = new Set(board.done.map((x) => x.planId));
     for (const p of all) {
       if (p.status === 'completed' || p.status === 'cancelled') continue;
       const hasOpenPhase = (p.phases || []).some((x) => x.status === 'pending');
-      if (!hasOpenPhase) continue;
-      const present = nowIds.has(p.planId) || board.blocked.some((b) => b.planId === p.planId);
+      if (!hasOpenPhase) {
+        // Open plan with all phases done should be in DONE per v1.1.1.
+        if ((p.phases || []).length > 0 && !allDoneIds.has(p.planId) && !allBlockedIds.has(p.planId)) {
+          problems.push({ planId: p.planId, reason: 'open plan with all phases complete not surfaced in Done' });
+        }
+        continue;
+      }
+      const present = allNowIds.has(p.planId) || allBlockedIds.has(p.planId);
       if (!present) problems.push({ planId: p.planId, reason: 'open plan with pending phase not in any column' });
     }
     if (problems.length === 0) {
