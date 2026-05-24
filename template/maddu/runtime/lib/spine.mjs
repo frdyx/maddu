@@ -210,7 +210,14 @@ export const EVENT_TYPES = {
   //   passed `--allow-secret` to bypass the refusal. The raw matched
   //   value is NEVER stored in the event payload — only pattern_type
   //   + argv_index.
-  SECRET_DETECTED_IN_ARGV:    'SECRET_DETECTED_IN_ARGV'
+  SECRET_DETECTED_IN_ARGV:    'SECRET_DETECTED_IN_ARGV',
+  // v1.2.0 Phase 4 — skill provenance enforcement.
+  //   SKILL_IMPORTED:           { source, sha256, trusted, dest }
+  //   SKILL_TRUSTED:            { id }
+  //   SKILL_INJECTION_REFUSED:  { id, reason, provenance? }
+  SKILL_IMPORTED:             'SKILL_IMPORTED',
+  SKILL_TRUSTED:              'SKILL_TRUSTED',
+  SKILL_INJECTION_REFUSED:    'SKILL_INJECTION_REFUSED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

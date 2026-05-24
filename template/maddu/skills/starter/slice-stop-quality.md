@@ -2,6 +2,7 @@
 id: slice-stop-quality
 tags: slice-stop, audit, learnings
 triggers: slice-stop, slice stop, end of slice
+provenance: framework-starter-pack-v1.2.0
 ---
 
 # Slice-stop quality

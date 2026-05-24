@@ -2,6 +2,7 @@
 id: marker-discipline
 tags: marker, agent-files, claude-md, agents-md
 triggers: CLAUDE.md, AGENTS.md, MADDU.md, marker
+provenance: framework-starter-pack-v1.2.0
 ---
 
 # Marker discipline (agent files)

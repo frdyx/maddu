@@ -2,6 +2,7 @@
 id: read-before-edit
 tags: read, edit, file, discipline
 triggers: edit, modify file, change file
+provenance: framework-starter-pack-v1.2.0
 ---
 
 # Read before edit
