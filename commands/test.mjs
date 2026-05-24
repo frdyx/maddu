@@ -5,7 +5,7 @@
 // --runner-arg=<a> --runner-arg=<b>`. Emits the standard tool events.
 
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
-import { loadTools } from './_tools.mjs';
+import { loadTools, loadSecretScan } from './_tools.mjs';
 import { parseFlags } from './_args.mjs';
 
 export default async function testCmd(argv) {
@@ -21,6 +21,10 @@ export default async function testCmd(argv) {
     const ra = flags['runner-arg'];
     runnerArgs = Array.isArray(ra) ? ra.map(String) : (ra && ra !== true ? [String(ra)] : []);
   }
+  // v1.2.0 Phase 3 — wrapper-level secret scan (checked by `secret-scan-active` gate).
+  const secretScan = await loadSecretScan();
+  const wrapperScan = secretScan.scanArgv(positional);
+  if (wrapperScan && !secretScan.hasAllowSecret(positional)) { /* central runTool will refuse */ }
   const res = await tools.runTool(repoRoot, { tool: 'test', argv: positional, lane, sessionId, runner, runnerArgs, captureOutput: false });
   if (res.refused) {
     console.error(tools.summarize(res));

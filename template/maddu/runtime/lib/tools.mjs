@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES } from './spine.mjs';
+import { scanArgv } from './secret-scan.mjs';
 
 // ─── allowlist ─────────────────────────────────────────────────────────
 
@@ -323,6 +324,50 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
     return { refused: true, reason: danger.reason, detail: danger.detail };
   }
 
+  // 2b. v1.2.0 Phase 3 — secret detection in argv. Refuses before spawn
+  // when an argv element matches a known-secret pattern. The MATCHED
+  // VALUE IS NEVER LOGGED — only the pattern_type and argv position.
+  // Operator escape hatch: `--allow-secret` records an override event
+  // and proceeds. The token is stripped from argv before spawning.
+  const allowSecret = cleanArgv.includes('--allow-secret');
+  const argvForSpawn = cleanArgv.filter((a) => a !== '--allow-secret');
+  // NOTE: scanArgv is called against argvForSpawn (post-strip) so the
+  // override token itself can never trigger a match. Raw matched values
+  // are never returned — only patternType + argvIndex.
+  const scan = scanArgv(argvForSpawn);
+  if (scan) {
+    await append(repoRoot, {
+      type: EVENT_TYPES.SECRET_DETECTED_IN_ARGV,
+      actor: sessionId,
+      lane,
+      data: {
+        tool,
+        pattern_type: scan.patternType,
+        argv_index: scan.argvIndex,
+        lane,
+        sessionId,
+        override: allowSecret ? 'operator-allowed-secret' : null,
+      },
+    });
+    if (!allowSecret) {
+      await append(repoRoot, {
+        type: EVENT_TYPES.TOOL_REFUSED,
+        actor: sessionId,
+        lane,
+        data: {
+          tool,
+          lane,
+          sessionId,
+          reason: 'secret-detected',
+          detail: `argv contains a value matching pattern "${scan.patternType}" at index ${scan.argvIndex}. Refused before spawn (rule #6). Pass --allow-secret to override.`,
+          pattern_type: scan.patternType,
+          argv_index: scan.argvIndex,
+        },
+      });
+      return { refused: true, reason: 'secret-detected', pattern_type: scan.patternType, argv_index: scan.argvIndex, detail: `pattern "${scan.patternType}" matched at argv index ${scan.argvIndex}` };
+    }
+  }
+
   // 3. Resolve runner. Caller may pre-resolve (e.g. install).
   let resolvedRunner = runner, resolvedRunnerArgs = runnerArgs || [];
   if (!resolvedRunner) {
@@ -336,7 +381,7 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
           type: EVENT_TYPES.TOOL_REFUSED,
           actor: sessionId,
           lane,
-          data: { tool, argv: cleanArgv, lane, sessionId, reason: 'no-detector', detail: `no ${tool} runner detected (no package.json scripts or known deps)` },
+          data: { tool, argv: argvForSpawn, lane, sessionId, reason: 'no-detector', detail: `no ${tool} runner detected (no package.json scripts or known deps)` },
         });
         return { refused: true, reason: 'no-detector', detail: `no ${tool} runner detected` };
       }
@@ -344,14 +389,16 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
       resolvedRunnerArgs = detected.args;
     }
   }
-  const fullArgv = [...resolvedRunnerArgs, ...cleanArgv];
+  // v1.2.0 Phase 3 — argvForSpawn has --allow-secret stripped so the
+  // underlying tool never sees the override token.
+  const fullArgv = [...resolvedRunnerArgs, ...argvForSpawn];
 
   // 4. Emit TOOL_INVOKED.
   await append(repoRoot, {
     type: EVENT_TYPES.TOOL_INVOKED,
     actor: sessionId,
     lane,
-    data: { tool, argv: cleanArgv, lane, sessionId, mode: `${resolvedRunner} ${resolvedRunnerArgs.join(' ')}`.trim() },
+    data: { tool, argv: argvForSpawn, lane, sessionId, mode: `${resolvedRunner} ${resolvedRunnerArgs.join(' ')}`.trim() },
   });
 
   // 5. Spawn.
@@ -365,7 +412,7 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
     type: EVENT_TYPES.TOOL_COMPLETED,
     actor: sessionId,
     lane,
-    data: { tool, argv: cleanArgv, lane, sessionId, exitCode: res.code, durationMs },
+    data: { tool, argv: argvForSpawn, lane, sessionId, exitCode: res.code, durationMs },
   });
 
   return {
