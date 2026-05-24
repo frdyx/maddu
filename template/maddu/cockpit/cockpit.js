@@ -285,6 +285,87 @@ async function copyToClipboardWithToast(text, kind = 'path') {
   }
 }
 
+// ─── v1.2.3 — Entity drawer (reusable right-side detail panel) ─────────
+//
+// Pattern: any clickable cockpit entity (plan, kanban card, etc.) can call
+// openEntityDrawer({ title, subtitle, body, onClose }) to slide a panel in
+// from the right showing full details. Closes on Esc / scrim click / × button.
+// Singleton — opening a new drawer replaces the current one (no stack).
+//
+// `body` is a DOM Element OR a function returning Element OR Promise<Element>
+// (so callers can pass `async () => fetch + render`). While the promise resolves
+// the drawer shows a loading state.
+
+let _entityDrawerEl = null;
+let _entityDrawerEscHandler = null;
+
+function closeEntityDrawer() {
+  if (!_entityDrawerEl) return;
+  const root = _entityDrawerEl;
+  root.classList.remove('open');
+  // Detach Esc handler immediately; let the close animation finish before removing the DOM.
+  if (_entityDrawerEscHandler) {
+    document.removeEventListener('keydown', _entityDrawerEscHandler);
+    _entityDrawerEscHandler = null;
+  }
+  setTimeout(() => {
+    if (root && root.parentNode) root.parentNode.removeChild(root);
+    if (_entityDrawerEl === root) _entityDrawerEl = null;
+  }, 220);
+}
+
+async function openEntityDrawer({ title, subtitle = null, body, onClose = null } = {}) {
+  closeEntityDrawer();
+  const scrim = el('div', { class: 'entity-drawer-scrim' });
+  const panel = el('aside', {
+    class: 'entity-drawer-panel',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': title || 'Entity detail',
+  });
+  const head = el('header', { class: 'entity-drawer-head' });
+  head.appendChild(el('div', { class: 'entity-drawer-title' }, title || '—'));
+  if (subtitle) head.appendChild(el('div', { class: 'entity-drawer-subtitle' }, subtitle));
+  const closeBtn = el('button', { class: 'entity-drawer-close', type: 'button', 'aria-label': 'Close' }, '×');
+  head.appendChild(closeBtn);
+  const bodyMount = el('div', { class: 'entity-drawer-body' });
+  panel.appendChild(head);
+  panel.appendChild(bodyMount);
+  const root = el('div', { class: 'entity-drawer' });
+  root.appendChild(scrim);
+  root.appendChild(panel);
+  document.body.appendChild(root);
+  _entityDrawerEl = root;
+  // Slide animation — add the 'open' class on the next frame so the transition fires.
+  requestAnimationFrame(() => root.classList.add('open'));
+  // Wire close affordances.
+  const close = () => {
+    closeEntityDrawer();
+    if (typeof onClose === 'function') try { onClose(); } catch {}
+  };
+  closeBtn.addEventListener('click', close);
+  scrim.addEventListener('click', close);
+  _entityDrawerEscHandler = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', _entityDrawerEscHandler);
+  // Focus the close button for keyboard users.
+  setTimeout(() => closeBtn.focus(), 50);
+  // Populate body. Loading placeholder shows while async resolves.
+  bodyMount.appendChild(loading('Loading…'));
+  try {
+    const result = (typeof body === 'function') ? body() : body;
+    const resolved = (result && typeof result.then === 'function') ? await result : result;
+    bodyMount.innerHTML = '';
+    if (resolved instanceof Element) {
+      bodyMount.appendChild(resolved);
+    } else if (typeof resolved === 'string') {
+      bodyMount.appendChild(el('div', {}, resolved));
+    }
+  } catch (err) {
+    bodyMount.innerHTML = '';
+    bodyMount.appendChild(placeholder('Failed to load', err.message || String(err)));
+  }
+}
+
 function updateChrome() {
   if (bridgeOk && bridgeStatus) {
     els.bridge.innerHTML = '<span class="signal live"></span>online';
@@ -5676,10 +5757,20 @@ function renderPlans() {
       const col = el('div', { style: 'border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;' });
       col.appendChild(el('div', { style: `font-family:var(--m-font-mono);font-size:12px;color:${color};margin-bottom:6px;` }, `${label}  (${items.length})`));
       for (const it of items) {
-        const card = el('div', { style: 'background:var(--m-bg-1);padding:5px 7px;margin-bottom:4px;font-size:11px;' });
+        // v1.2.3 — kanban cards become clickable entity-drawer triggers.
+        const card = el('div', {
+          class: 'entity-card',
+          style: 'background:var(--m-bg-1);padding:5px 7px;margin-bottom:4px;font-size:11px;cursor:pointer;',
+          tabindex: '0',
+          role: 'button',
+          'aria-label': `Open plan ${it.planId || ''}`,
+        });
         card.appendChild(el('div', { style: 'font-weight:bold;' }, it.title || '(untitled)'));
         if (it.phase) card.appendChild(el('div', { style: 'color:var(--m-fg-2);' }, '→ ' + it.phase));
         if (it.status) card.appendChild(el('div', { style: 'color:var(--m-fg-2);' }, it.status));
+        const openDrawer = () => openPlanDrawer(it.planId);
+        card.addEventListener('click', openDrawer);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawer(); } });
         col.appendChild(card);
       }
       grid.appendChild(col);
@@ -5698,7 +5789,14 @@ function renderPlans() {
       }
       table.appendChild(head);
       for (const p of plans) {
-        const row = el('tr', {});
+        // v1.2.3 — plans table rows also open the entity drawer on click/Enter.
+        const row = el('tr', {
+          class: 'entity-row',
+          style: 'cursor:pointer;',
+          tabindex: '0',
+          role: 'button',
+          'aria-label': `Open plan ${p.planId}`,
+        });
         row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, p.planId));
         const done = (p.phases || []).filter((x) => x.status === 'completed').length;
         const total = (p.phases || []).length;
@@ -5707,6 +5805,9 @@ function renderPlans() {
         row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, p.title || '(untitled)'));
         row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, `${done}/${total}`));
         row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, String(p.revisionCount || 0)));
+        const openDrawer = () => openPlanDrawer(p.planId);
+        row.addEventListener('click', openDrawer);
+        row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawer(); } });
         table.appendChild(row);
       }
       listMount.appendChild(table);
@@ -5717,6 +5818,79 @@ function renderPlans() {
   });
 
   return root;
+}
+
+// v1.2.3 — fetch single plan and open the entity drawer with structured details.
+function openPlanDrawer(planId) {
+  if (!planId) return;
+  openEntityDrawer({
+    title: planId,
+    subtitle: 'plan detail',
+    body: async () => {
+      const r = await fetch(`/bridge/plans/${encodeURIComponent(planId)}`, { cache: 'no-store' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: r.statusText }));
+        throw new Error(err.error || `bridge ${r.status}`);
+      }
+      const state = await r.json();
+      const wrap = el('div', { class: 'plan-detail' });
+
+      // Summary line: title + status pill + revision count.
+      const sumColor = state.status === 'completed' ? '#7c7' : (state.status === 'cancelled' ? '#cc8' : (state.status === 'blocked' ? '#e77' : '#6cf'));
+      const sumRow = el('div', { style: 'display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px;' });
+      sumRow.appendChild(el('div', { style: 'font-size:15px;font-weight:600;color:var(--m-fg-0);' }, state.title || '(untitled)'));
+      sumRow.appendChild(el('div', { style: `font-family:var(--m-font-mono);font-size:11px;padding:2px 8px;border:1px solid ${sumColor};color:${sumColor};border-radius:3px;` }, state.status || 'open'));
+      sumRow.appendChild(el('div', { style: 'font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);' }, `${state.revisionCount || 0} revision(s)`));
+      wrap.appendChild(sumRow);
+
+      if (state.goal) {
+        wrap.appendChild(el('h4', { style: 'margin:14px 0 4px;color:var(--m-fg-2);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;' }, 'Goal'));
+        wrap.appendChild(el('div', { style: 'color:var(--m-fg-1);font-size:13px;margin-bottom:10px;' }, state.goal));
+      }
+
+      // Phases — checkboxes-as-glyphs + colored status.
+      wrap.appendChild(el('h4', { style: 'margin:14px 0 4px;color:var(--m-fg-2);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;' }, `Phases (${state.phases?.length || 0})`));
+      const phases = state.phases || [];
+      if (phases.length === 0) {
+        wrap.appendChild(el('div', { style: 'color:var(--m-fg-3);font-size:12px;' }, '(no phases — add with `maddu plan add-phase`)'));
+      } else {
+        const list = el('div', { style: 'display:flex;flex-direction:column;gap:4px;' });
+        for (const p of phases) {
+          const glyph = p.status === 'completed' ? '✓' : (p.status === 'blocked' ? '◯' : '○');
+          const gColor = p.status === 'completed' ? '#7c7' : (p.status === 'blocked' ? '#e77' : 'var(--m-fg-3)');
+          const row = el('div', { style: 'display:flex;gap:8px;font-family:var(--m-font-mono);font-size:12px;align-items:baseline;padding:4px 6px;background:var(--m-bg-1);' });
+          row.appendChild(el('span', { style: `color:${gColor};` }, glyph));
+          row.appendChild(el('span', { style: 'color:var(--m-fg-0);min-width:120px;' }, p.name));
+          row.appendChild(el('span', { style: 'color:var(--m-fg-3);flex:1;' }, p.intent || ''));
+          if (p.summary) row.appendChild(el('span', { style: 'color:var(--m-fg-2);' }, p.summary));
+          if (p.reason && p.status === 'blocked') row.appendChild(el('span', { style: 'color:#e77;' }, `blocked: ${p.reason}`));
+          list.appendChild(row);
+        }
+        wrap.appendChild(list);
+      }
+
+      // Revisions — newest first.
+      const revs = state.revisions || [];
+      if (revs.length) {
+        wrap.appendChild(el('h4', { style: 'margin:14px 0 4px;color:var(--m-fg-2);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;' }, `Revisions (${revs.length})`));
+        const rlist = el('div', { style: 'display:flex;flex-direction:column;gap:4px;' });
+        for (const rev of revs.slice().reverse().slice(0, 20)) {
+          const item = el('div', { style: 'font-family:var(--m-font-mono);font-size:11px;padding:4px 6px;background:var(--m-bg-1);' });
+          item.appendChild(el('div', { style: 'color:var(--m-fg-3);' }, rev.ts || ''));
+          item.appendChild(el('div', { style: 'color:var(--m-fg-1);' }, rev.diff || rev.note || '(no description)'));
+          rlist.appendChild(item);
+        }
+        wrap.appendChild(rlist);
+      }
+
+      // Copy plan id button.
+      const cpy = el('button', { class: 'entity-drawer-action', type: 'button' }, 'Copy plan id');
+      cpy.addEventListener('click', () => copyToClipboardWithToast(state.planId, 'Plan id'));
+      const actions = el('div', { style: 'margin-top:14px;display:flex;gap:8px;' }, [cpy]);
+      wrap.appendChild(actions);
+      return wrap;
+    },
+  });
 }
 
 function renderMcp() {
