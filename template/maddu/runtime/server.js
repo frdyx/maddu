@@ -848,6 +848,19 @@ async function handleBridge(req, res, url, ctx) {
     } catch (err) { return sendJson(res, 500, { error: err.message }); }
   }
 
+  // v1.2.3 — single-plan detail. Returns full projected state for the entity
+  // drawer (cockpit click-through from kanban + plans table).
+  if (path.startsWith('/bridge/plans/') && req.method === 'GET') {
+    const planId = decodeURIComponent(path.slice('/bridge/plans/'.length));
+    if (!planId || planId.includes('/')) return sendJson(res, 400, { error: 'bad planId' });
+    try {
+      const lib = await import('./lib/plans.mjs');
+      const state = await lib.readPlan(repoRoot, planId);
+      if (!state || !state.planId) return sendJson(res, 404, { error: 'plan not found', planId });
+      return sendJson(res, 200, state);
+    } catch (err) { return sendJson(res, 500, { error: err.message }); }
+  }
+
   // ── receipt log feed (v1.1.0 Phase 4) ─────────────────────────────────
   if (path === '/bridge/operations' && req.method === 'GET') {
     try {

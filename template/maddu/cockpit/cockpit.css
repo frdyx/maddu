@@ -444,6 +444,51 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
 #status-repo-root:focus { color: var(--m-accent); outline: none; }
 #status-repo-root:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
 
+/* ─── v1.2.3 — Entity drawer (reusable right-side detail panel) ──────── */
+.entity-drawer { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+.entity-drawer-scrim {
+  position: absolute; inset: 0;
+  background: rgba(5, 11, 23, 0.55); backdrop-filter: blur(2px);
+  opacity: 0; transition: opacity 200ms ease-out; pointer-events: none;
+}
+.entity-drawer.open .entity-drawer-scrim { opacity: 1; pointer-events: auto; }
+.entity-drawer-panel {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(540px, 88vw);
+  background: var(--m-bg-1);
+  border-left: 1px solid var(--m-line);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.55);
+  transform: translateX(100%);
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  display: flex; flex-direction: column; pointer-events: none;
+}
+.entity-drawer.open .entity-drawer-panel { transform: translateX(0); pointer-events: auto; }
+.entity-drawer-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--m-line); background: var(--m-bg-2);
+}
+.entity-drawer-title { font-family: var(--m-font-mono); font-size: 13px; color: var(--m-fg-0); flex: 1; word-break: break-all; }
+.entity-drawer-subtitle { font-family: var(--m-font-mono); font-size: 10px; color: var(--m-fg-3); text-transform: uppercase; letter-spacing: 0.08em; }
+.entity-drawer-close {
+  font-size: 18px; line-height: 1; padding: 2px 8px;
+  background: transparent; color: var(--m-fg-3);
+  border: 1px solid var(--m-line); border-radius: 4px; cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.entity-drawer-close:hover, .entity-drawer-close:focus { color: var(--m-accent); border-color: var(--m-accent); outline: none; }
+.entity-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 24px; color: var(--m-fg-1); }
+.entity-drawer-action {
+  font: inherit; font-size: 11px; padding: 5px 12px;
+  background: var(--m-bg-2); color: var(--m-fg-1);
+  border: 1px solid var(--m-line); border-radius: 4px; cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.entity-drawer-action:hover, .entity-drawer-action:focus { color: var(--m-accent); border-color: var(--m-accent); outline: none; }
+.entity-card { transition: background 120ms, outline-color 120ms; outline: 1px solid transparent; }
+.entity-card:hover, .entity-card:focus { background: var(--m-bg-3); outline-color: var(--m-line); outline-offset: -1px; }
+.entity-row:hover, .entity-row:focus { background: var(--m-bg-2); outline: none; }
+
 /* ───────────────────── stage ───────────────────── */
 
 .stage {

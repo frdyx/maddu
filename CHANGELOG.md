@@ -11,6 +11,29 @@ narrative summary.
 
 ---
 
+## [v1.2.3] · 2026-05-24 · Entity drawer — clickable plans + Kanban cards
+
+Cockpit plans + Kanban cards become clickable. Click any card or row to open a right-side detail drawer showing the full plan state (goal, phases with completion glyphs, revisions, copy plan-id action). New reusable `openEntityDrawer({title, subtitle, body, onClose})` primitive that future cockpit routes can adopt for any entity (skills, MCP servers, advisors, slice-stops, runtimes, etc.).
+
+### Backend
+
+- New `GET /bridge/plans/<planId>` endpoint returns full projected plan state. Reuses existing `lib/plans.mjs:readPlan` — no new state mechanics.
+
+### Frontend
+
+- `openEntityDrawer(opts)` helper in `cockpit.js` — singleton drawer, slide-from-right with scrim, closes on `Esc` / scrim click / × button. `body` accepts a DOM Element, function, or async function returning a render Promise (loading state shows while async).
+- Plans table rows and Kanban cards become `role=button` + `tabIndex=0` with click + Enter/Space keyboard handlers.
+- `openPlanDrawer(planId)` fetches `/bridge/plans/<id>` and renders structured detail: title + status pill + revision count, goal section, phases list with `✓/◯/○` glyphs colored by state, revision history (last 20, newest first), and a Copy plan id action button.
+- CSS for `.entity-drawer*` + `.entity-card` + `.entity-row` — slide animation, accent hover/focus rings, accessible focus-visible styling.
+
+### Notes
+
+- Reusable primitive — other cockpit routes can adopt `openEntityDrawer(...)` incrementally. No coordination required to migrate them.
+- No new doctor gates. No spine event additions. No new dependencies. Cockpit + bridge only.
+- Stress harness + layout-refusal + upgrade-matrix unchanged + still green.
+
+---
+
 ## [v1.2.2] · 2026-05-24 · Cockpit polish — path popover + scope-pill active state
 
 Two small cockpit UX fixes from the v1.2.1 burn-in.
