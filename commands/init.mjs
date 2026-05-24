@@ -165,6 +165,19 @@ export default async function init(argv) {
       JSON.stringify({ staleAfterMs: 1800000, autoCloseAfterMs: 14400000 }, null, 2) + '\n'
     );
   }
+  // v1.2.0 Phase 1 — seed trust.json with default freshness thresholds. Idempotent.
+  const trustPath = join(configDir, 'trust.json');
+  if (!(await exists(trustPath))) {
+    await writeFile(
+      trustPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        pinnedPackages: [],
+        audit: { freshness_warn_days: 30, freshness_block_days: 7 },
+      }, null, 2) + '\n'
+    );
+    console.log(`  trust config seeded (freshness warn=30d, block=7d)`);
+  }
   // v1.1.0 Phase 3 — seed governance.json with mode: standard. Idempotent.
   const governancePath = join(configDir, 'governance.json');
   if (!(await exists(governancePath))) {

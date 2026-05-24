@@ -185,7 +185,16 @@ export const EVENT_TYPES = {
   LANE_CLAIM_FORCED:          'LANE_CLAIM_FORCED',
   SKILL_CANDIDATE_DETECTED:   'SKILL_CANDIDATE_DETECTED',
   SKILL_CANDIDATE_APPROVED:   'SKILL_CANDIDATE_APPROVED',
-  SKILL_CANDIDATE_REJECTED:   'SKILL_CANDIDATE_REJECTED'
+  SKILL_CANDIDATE_REJECTED:   'SKILL_CANDIDATE_REJECTED',
+  // v1.2.0 Phase 1 — supply-chain trust audit + pinning. Append-only.
+  //   TRUST_AUDIT_RAN:        { audited:N, freshDays, warns, fails, cacheHit }
+  //   TRUST_PIN_ADDED:        { name, version, sha256? }
+  //   TRUST_PIN_REMOVED:      { name }
+  //   TRUST_VIOLATION_DETECTED: { kind, pkg, expected?, actual?, detail }
+  TRUST_AUDIT_RAN:            'TRUST_AUDIT_RAN',
+  TRUST_PIN_ADDED:            'TRUST_PIN_ADDED',
+  TRUST_PIN_REMOVED:          'TRUST_PIN_REMOVED',
+  TRUST_VIOLATION_DETECTED:   'TRUST_VIOLATION_DETECTED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

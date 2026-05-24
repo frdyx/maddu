@@ -70,4 +70,8 @@ export default {
   loop:         { tier: 'mutating',  autoTrigger: 'forbidden' },
   // v1.1.0 Phase 7 — coordinator primitive.
   coordinator:  { tier: 'mutating',  autoTrigger: 'forbidden' },
+  // v1.2.0 Phase 1 — supply-chain trust audit + pinning. `audit/list/verify/report`
+  // are read-only-shaped but the verb dispatches into write paths too (pin/unpin),
+  // so the verb itself is mutating; auto-trigger forbidden (operator explicit).
+  trust:        { tier: 'mutating',  autoTrigger: 'forbidden' },
 };
