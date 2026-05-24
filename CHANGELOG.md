@@ -11,6 +11,172 @@ narrative summary.
 
 ---
 
+## [v1.2.0] · 2026-05-24 · Supply-chain hardening + Hermes adapter
+
+2026 has been the year of supply-chain attacks on developer tooling
+(TeamPCP — Trivy, Checkmarx, Bitwarden CLI, TanStack, GitHub itself).
+The operator chose Máddu specifically to minimize this attack surface;
+v1.2.0 turns "local-first, no broad deps, no provider SDKs in framework
+code, device-bound tokens" from architectural intent into **enforced
+gates** with explicit threat-model documentation. The framework becomes
+the operator's least-trust shell around their AI work.
+
+The release also lands the Hermes runtime adapter (Nous Research) —
+deferred from v1.1.0 — as the first new runtime added under the new
+trust discipline. Hermes proves the discipline transfers cleanly: it
+rides every gate (worker-env allowlist, secret-scan argv, tool
+allowlist, strict-mode approval) with zero special-case code.
+
+### Phase 1 — Dependency surface audit + pinning
+
+- New `maddu trust <verb>`: `audit`, `pin`, `unpin`, `verify`, `list`,
+  `report`, `env-allow`. Backed by `.maddu/config/trust.json`.
+- All registry queries via `npm` subprocess (rule #4 — no new deps).
+  6h cache on `npm view` time data in `.maddu/state/trust-cache.json`,
+  stale-cache fallback on registry outage.
+- Doctor gates: `dependency-freshness` (WARN within
+  `freshness_warn_days`; FAIL in strict mode within
+  `freshness_block_days`), `dep-pinning-respected` (FAIL when
+  `package.json` declared spec ≠ pinned version).
+- Spine events: `TRUST_AUDIT_RAN`, `TRUST_PIN_ADDED`,
+  `TRUST_PIN_REMOVED`, `TRUST_VIOLATION_DETECTED`.
+- `/maddu-trust` slash command shipped (raw, v0.19.1 frontmatter
+  discipline).
+
+### Phase 2 — MCP provenance + worker env allowlist
+
+**MCP provenance:**
+
+- Every shipped MCP template carries a `provenance` block with a SHA256
+  hash of the canonical content (provenance stripped, keys sorted).
+- `maddu mcp install <template>` verifies hash before scaffolding +
+  registering. Tampered template → `MCP_PROVENANCE_MISMATCH` refusal.
+- Operator-registered MCPs (`maddu mcp register`) tag as
+  `provenance: 'operator-trusted'` and are **disabled until
+  `maddu mcp approve <name>`**.
+- Doctor gate `mcp-provenance-verified` (FAIL when any enabled MCP
+  lacks approved provenance, or any shipped template hash drifts).
+- Cockpit Tools route shows a provenance badge per server.
+
+**Worker env allowlist:**
+
+- New `template/maddu/runtime/lib/worker-env.mjs` filters
+  `process.env` through an allowlist before every worker spawn.
+  Default-deny on `AWS_*`, `OPENAI_*`, `ANTHROPIC_API_KEY`,
+  `GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_*`, `AZURE_*`, `GCP_*`,
+  `STRIPE_*`. Default-allow on `PATH`, `HOME`, `MADDU_*`, `CLAUDE_*`,
+  `CODEX_*`, etc.
+- `maddu trust env-allow <VAR> [--lane <id>]` writes
+  `.maddu/config/worker-env.json`.
+- Every spawn emits `WORKER_ENV_FILTERED` with allowed-count and
+  **denied KEYS ONLY — never values**.
+- Doctor gate `worker-env-policy-coherent` validates the policy
+  ships required deny prefixes; WARN on lane overrides re-allowing a
+  secret prefix.
+
+### Phase 3 — Secret detection in tool argv
+
+- New `template/maddu/runtime/lib/secret-scan.mjs` — pure regex engine
+  for AWS / OpenAI / Anthropic / GitHub (4 prefix variants) / GitLab /
+  Slack / Stripe tokens + a `high-entropy-adjacent-to-secret-key`
+  fallback that requires the long string to appear next to a known
+  sensitive key name on the same arg (no false-positives on bare
+  commit SHAs).
+- Wired into `tools.runTool` central path AND every default tool
+  wrapper (`commands/{git,test,format,lint,install}.mjs`). Match →
+  refuse with `TOOL_REFUSED reason: 'secret-detected'`.
+- THE MATCHED VALUE IS NEVER LOGGED. Only `pattern_type` +
+  `argv_index` ride on the spine.
+- Operator escape hatch: `--allow-secret` records
+  `SECRET_DETECTED_IN_ARGV` with `override='operator-allowed-secret'`
+  and proceeds. The matched arg is `[REDACTED:<pattern_type>]` in
+  TOOL_INVOKED / TOOL_COMPLETED — even under override.
+- Doctor gate `secret-scan-active` (verifies wiring + defensive
+  200-char leak check on existing events).
+
+### Phase 4 — Skill provenance enforcement
+
+- Every skill in `.maddu/skills/` declares a `provenance` field:
+  `framework-starter-pack-vX | operator | imported`. Pre-v1.2 skills
+  auto-grandfathered at load time.
+- New `maddu skill import <path> --trust` (refuses without `--trust`,
+  injects provenance + SHA256, marks `trusted: false`).
+- New `maddu skill trust <id>` flips to trusted.
+- 8 starter skills stamped with
+  `provenance: framework-starter-pack-v1.2.0`.
+- Spine events: `SKILL_IMPORTED`, `SKILL_TRUSTED`,
+  `SKILL_INJECTION_REFUSED`.
+- Doctor gate `skill-provenance-required` (FAIL on missing
+  provenance; WARN on imported-pending-trust).
+
+### Phase 5 — Strict-mode approval enforcement (closes v1.1.0 burn-in)
+
+- New `commands/_strict-approval.mjs` helper. In strict mode, gated
+  tools (`install`, `mcp install`, `skill import`,
+  `lane claim --force`) emit `APPROVAL_REQUESTED` and **wait** up to
+  5 min for a paired `APPROVAL_DECIDED`. Auto-decide cascade:
+  per-repo policy → global policy → operator decision.
+- Wired into `commands/install.mjs` (the v1.1.0 burn-in target).
+- Doctor gate `strict-mode-approval-active` (in strict mode, every
+  gated `TOOL_INVOKED` must have preceding allow `APPROVAL_DECIDED`
+  in scope).
+
+### Phase 6 — Trust audit cockpit panel + threat model doc
+
+- Cockpit Trust route (verify group, rank 9): pin list, last audit,
+  violations, secret refusals (keys only), worker env policy, MCP
+  provenance, skill provenance. Auto-refresh 15s.
+- New bridge endpoints: `GET /bridge/trust`, `POST /bridge/trust/audit`.
+- **NEW** `docs/34-threat-model.md` — operator's security manual.
+  Documents 9 supply-chain attack scenarios with concrete gate
+  citations and the boundary between what Máddu enforces vs what it
+  documents (network egress, OS-level decisions, operator raw shell).
+- **NEW** `docs/36-trust-audit.md` — `maddu trust` reference + file
+  schemas + doctor gate list + cockpit Trust route description.
+- `maddu trust report` enriched into a security-team-shareable
+  Markdown document pulling governance + pins + recent events + MCP
+  inventory + worker-env policy + skill distribution.
+
+### Phase 7 — Hermes runtime adapter
+
+- New `template/maddu/runtime/lib/runtimes/hermes-wrapper.mjs`
+  (mirrors claude/codex wrapper shape). NDJSON splitter, OpenAI-style
+  `prompt_tokens` / `completion_tokens` normalized into spine
+  schema.
+- New `template/maddu/runtimes/hermes.json` descriptor template.
+- `BUILTIN_WRAPPERS` gains `hermes`.
+- `maddu runtime detect hermes` runs `hermes --version`; clean
+  refusal when binary absent.
+- **NEW** `docs/35-hermes-adapter.md` — install, register, use, full
+  security posture citing the four v1.2.0 gates, hard-rule notes.
+- Hermes is the first new runtime added under v1.2.0's trust rails —
+  zero special-case code in spawn. Proves the discipline transfers.
+
+### Phase 8 — Doctor + docs sweep + tag
+
+- `version.json` 1.1.2 → 1.2.0.
+- `package.json` 1.1.2 → 1.2.0.
+- This CHANGELOG entry.
+- `docs/00-index.md` lists 34 / 35 / 36; mirrored under
+  `template/maddu/docs/`.
+- Test-consumer verification: doctor **54 PASS / 0 WARN / 0 FAIL**.
+- Regression: layout-refusal 4/4, stress-harness 11/11 (34 assertions).
+
+### Hard rules
+
+All 8+1 preserved across the eight phases. Rules #4, #5, #6, #9
+graduate from "architectural intent" to "enforced by gate." The
+threat-model doc states which scenarios fall outside Máddu's
+enforcement boundary so the operator knows where to layer OS-level
+defenses (Little Snitch, ufw, etc.).
+
+### Tag
+
+`v1.2.0` annotated tag pushed to origin. 8 PRs landed in sequence on
+main: #76 → #77 → #78 → #79 → #80 → #81 → #82 → (Phase 8 release PR).
+
+---
+
 ## [v1.1.2] · 2026-05-24 · Narrative refresh + P3 backlog patches
 
 Post-v1.1.1 polish release. PR-A is a docs-only narrative refresh that
