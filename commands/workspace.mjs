@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { stat } from 'node:fs/promises';
+import { request } from 'node:http';
 import { parseFlags } from './_args.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -28,10 +29,42 @@ async function loadWorkspacesLib() {
 }
 
 function printHelp() {
-  console.error('Usage: maddu workspace <add|list|remove|activate|show> [args]');
+  console.log([
+    'Usage: maddu workspace <add|list|remove|activate|show> [args]',
+    '',
+    '  add <path> [--id <slug>] [--label "<label>"]',
+    '  list',
+    '  show',
+    '  remove <id>',
+    '  activate <id>     # signals live bridge to reroot when one is running',
+  ].join('\n'));
+}
+
+// Best-effort: POST to a running bridge so its in-memory `active` pointer
+// follows the registry update. If no bridge is up (ECONNREFUSED) we fall
+// through silently and print a restart hint instead.
+function postBridgeActivate(id, port = 4177) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ id });
+    const req = request({
+      host: '127.0.0.1', port, method: 'POST',
+      path: '/bridge/_workspaces/activate',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+      timeout: 1500,
+    }, (res) => {
+      let buf = '';
+      res.on('data', (c) => buf += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: buf }));
+    });
+    req.on('error', (err) => resolve({ error: err.code || err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ error: 'timeout' }); });
+    req.write(body); req.end();
+  });
 }
 
 export default async function workspace(argv) {
+  // --help discipline (B3): detect before any flag validation.
+  if (argv.includes('--help') || argv.includes('-h')) { printHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
   if (!sub) { printHelp(); process.exit(2); }
@@ -96,6 +129,24 @@ export default async function workspace(argv) {
     } catch (err) {
       console.error(`maddu workspace activate: ${err.message}`);
       process.exit(1);
+    }
+    // v1.1.1 B1: signal a running bridge so its active pointer + per-request
+    // workspace resolution follow the registry. The bridge's
+    // `/bridge/_workspaces/activate` route validates that the target id is
+    // already mounted; if it isn't (the workspace was added after `maddu
+    // start`), we print a LOUD restart hint instead of silently mis-routing.
+    const result = await postBridgeActivate(id);
+    if (result && result.status === 200) {
+      console.log(`\x1b[2mbridge rerooted to "${id}" (in-memory active updated)\x1b[0m`);
+    } else if (result && result.status === 404) {
+      console.error('');
+      console.error('\x1b[33mWARNING:\x1b[0m bridge is running but does not have this workspace mounted.');
+      console.error(`  The new workspace "${id}" was added AFTER \`maddu start\`. The bridge is`);
+      console.error('  still rooted in the previously-mounted set. Restart to pick it up:');
+      console.error('    \x1b[1mmaddu stop && maddu start\x1b[0m');
+    } else if (result && result.error && result.error !== 'ECONNREFUSED') {
+      // ECONNREFUSED = no bridge running; that's fine for this code path.
+      console.error(`\x1b[2mbridge signal failed: ${result.error} (workspace registry still updated)\x1b[0m`);
     }
     return;
   }
