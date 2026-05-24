@@ -114,7 +114,7 @@ async function main() {
   // through them so the operator sees the more specific text. Everything
   // else falls back to the global discovery surface (`maddu help`).
   if (rest.includes('--help') || rest.includes('-h')) {
-    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install']);
+    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install', 'task', 'review']);
     if (VERBS_WITH_OWN_HELP.has(raw)) {
       const mod = await import(pathToFileURL(join(repoRoot, 'commands', `${raw}.mjs`)).href);
       await mod.default(rest);

@@ -118,6 +118,25 @@ are no verbose CLI flags to memorize.
 
 ---
 
+## Capabilities (every command traces to a purpose)
+
+Every top-level verb earns its place against the mission and the 9 invariants.
+Grouped by purpose area, each is named here so the surface stays intentional and
+`maddu audit charter` can flag genuine orphans.
+
+| Purpose area | Verb(s) | Purpose (tied to the mission) |
+|---|---|---|
+| Orchestration core | `session`, `register`, `lane`, `slice`, `slice-stop`, `stop`, `worker`, `mailbox` | Drive the one canonical substrate loop — register a session, claim a lane, run a slice, release — each transition one event on the spine. |
+| Planning & autonomy | `pipeline`, `plan`, `goal`, `phase`, `loop`, `coordinator`, `team`, `advise`, `suggest` | First-class auto-revising planning: pipelines and goals decompose work, `phase` and `loop` are the iteration primitives, the `coordinator` fans work across a `team`, and `advise`/`suggest` route intent to the right next move. |
+| Quality & review | `review`, `test`, `lint`, `format`, `doctor` | Keep the surface honest — gate slices through review/test, `lint` and `format` enforce code hygiene, `doctor` enforces the 8+1 hard rules on every install and upgrade. |
+| Default tools | `git`, `install`, `skill`, `task` | The explicit-invocation tool surface an agent reaches for mid-work: version control via `git`, dependency `install`, reusable `skill`s, and ad-hoc `task` tracking. |
+| Supply-chain & trust | `trust`, `sources`, `approval`, `governance`, `mcp` | The audit/portability/supply-chain posture made operable: `trust` pins and verifies dependencies, `sources` and `approval` gate provenance, `governance` sets the per-workspace strict/standard/relaxed tier, and `mcp` brings tools in through allowlisted templates. |
+| Memory & accounting | `memory`, `cost`, `usage`, `log`, `import` | Make work outlive the agent — `memory` and hindsight skills persist learning, `cost`/`usage` and the receipt `log` account for spend, and `import` retroactively populates the ledger. |
+| Discovery & observability | `status`, `events`, `spine`, `search`, `brief`, `help`, `audit` | Watch and replay the event log — `status` and `events` surface live state, `spine` verifies the append-only truth (never auto-repairs), `search` and `brief` query it, `help` is the on-ramp, and `audit` runs this very charter-drift check. |
+| Lifecycle & plumbing | `init`, `start`, `upgrade`, `workspace`, `global`, `runtime`, `schedule`, `checkpoint`, `auth`, `bridges` | Operator/script plumbing only (verbose CLI, no slash on-ramp): `init`/`start`/`upgrade` install and run the spine, `workspace`/`global`/`runtime` configure it, `schedule` fires allowlisted triggers, `checkpoint` snapshots, `auth` keeps device-bound tokens, and `bridges` manages live agent connections. |
+
+---
+
 ## How features earn their place
 
 A feature belongs in Máddu only if it: (a) serves the mission (local-first,

@@ -101,6 +101,10 @@ for end-to-end feature work), `fix-a-bug` (something broken), and
 | "cancel", "stop the slice" | `/maddu-cancel` |
 | "remember this", "note that …" | `/maddu-note` |
 | "what skill should I use for …" | `/maddu-skill` |
+| "search …", "find …", "look up …" (across events/memory/skills/inbox) | `/maddu-search` |
+| "what do we know about …", "recall …", "memory" | `/maddu-memory` |
+| "tasks", "to-do", "what's on the board", "open work items" | `/maddu-task` |
+| "audit the framework", "coherence check", "drift", "dead events" | `/maddu-audit` |
 
 When you dispatch, **tell the operator which pipeline or slash command
 you picked and why**, so they learn the shortcut over time. Never

@@ -61,7 +61,7 @@ maddu runtime spawn hermes --lane backend --focus "..."
 maddu advise hermes "review this design and flag risks"
 
 # 3. Inside a team or pipeline that names hermes as its runtime.
-maddu team open 3 "ship the feature" --runtime hermes
+maddu team open --members 3 --lanes hermes-a,hermes-b,hermes-c --runtime hermes
 ```
 
 The advisor surface (`maddu advise`) is the typical "second opinion"

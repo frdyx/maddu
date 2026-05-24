@@ -43,6 +43,10 @@ defaults to `maddu pipeline run <name> "<goal>"` — `ship-a-feature`
 | "what slash commands exist", "show me the surface" | `/maddu-help` |
 | "cancel" | `/maddu-cancel` |
 | "note that …", "remember this" | `/maddu-note` |
+| "search …", "find …", "look up …" | `/maddu-search` |
+| "what do we know about …", "recall …", "memory" | `/maddu-memory` |
+| "tasks", "to-do", "what's on the board" | `/maddu-task` |
+| "audit the framework", "coherence check", "drift" | `/maddu-audit` |
 
 Only classify operator-sourced messages. Never dispatch from your own
 transcripts. If a slash command isn't installed yet, fall back to

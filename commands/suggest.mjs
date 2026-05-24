@@ -41,6 +41,10 @@ const INTENT_TABLE = [
   { command: '/maddu-cancel',    keywords: ['cancel', 'stop', 'abort', 'kill the slice'] },
   { command: '/maddu-note',      keywords: ['note', 'remember', 'jot down', 'fyi'] },
   { command: '/maddu-skill',     keywords: ['skill', 'recipe', 'pattern'] },
+  { command: '/maddu-search',    keywords: ['search', 'find', 'look up', 'lookup', 'grep'] },
+  { command: '/maddu-memory',    keywords: ['memory', 'recall', 'what do we know', 'remember what'] },
+  { command: '/maddu-task',      keywords: ['task', 'to-do', 'todo', 'board', 'work item'] },
+  { command: '/maddu-audit',     keywords: ['drift', 'coherence', 'dead event', 'audit the framework'] },
   { command: '/maddu-help',      keywords: ['help', "don't know", 'unsure', 'what should i'] },
 ];
 

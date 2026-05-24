@@ -13,8 +13,12 @@ export default async function command(argv) {
   const repoRoot = await resolveRepoRoot(paths);
 
   if (sub === 'set') {
-    const { flags } = parseFlags(rest);
-    const objective = requireFlag(flags, 'objective');
+    const { flags, positional } = parseFlags(rest);
+    // Forgiving form: `maddu goal set "<objective>"` — first positional is
+    // the objective when --objective is absent. --objective stays canonical.
+    const objective = (typeof flags.objective === 'string' && flags.objective.length > 0)
+      ? flags.objective
+      : (positional[0] || requireFlag(flags, 'objective'));
     const raw = flags.constraint;
     const constraints = raw === undefined || raw === true
       ? []
