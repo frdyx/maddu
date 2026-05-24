@@ -21,3 +21,11 @@ export async function loadTools() {
   const dir = await libDir();
   return await import(pathToFileURL(join(dir, 'tools.mjs')).href);
 }
+
+// v1.2.0 Phase 3 — load the secret-scan module for wrapper-level pre-scan.
+// The `secret-scan-active` gate greps each wrapper to confirm it imports
+// this helper, ensuring the scan path can't be regressed silently.
+export async function loadSecretScan() {
+  const dir = await libDir();
+  return await import(pathToFileURL(join(dir, 'secret-scan.mjs')).href);
+}

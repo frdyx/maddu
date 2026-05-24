@@ -203,7 +203,14 @@ export const EVENT_TYPES = {
   MCP_PROVENANCE_VERIFIED:    'MCP_PROVENANCE_VERIFIED',
   MCP_PROVENANCE_MISMATCH:    'MCP_PROVENANCE_MISMATCH',
   MCP_APPROVAL_GRANTED:       'MCP_APPROVAL_GRANTED',
-  WORKER_ENV_FILTERED:        'WORKER_ENV_FILTERED'
+  WORKER_ENV_FILTERED:        'WORKER_ENV_FILTERED',
+  // v1.2.0 Phase 3 — secret detection in tool argv.
+  //   SECRET_DETECTED_IN_ARGV: { tool, pattern_type, argv_index, override? }
+  //   override is set to 'operator-allowed-secret' when the operator
+  //   passed `--allow-secret` to bypass the refusal. The raw matched
+  //   value is NEVER stored in the event payload — only pattern_type
+  //   + argv_index.
+  SECRET_DETECTED_IN_ARGV:    'SECRET_DETECTED_IN_ARGV'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

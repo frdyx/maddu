@@ -4,7 +4,7 @@
 // (rule #4 — no broad new deps without an explicit operator decision).
 
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
-import { loadTools } from './_tools.mjs';
+import { loadTools, loadSecretScan } from './_tools.mjs';
 
 function printInstallHelp() {
   console.log([
@@ -22,6 +22,10 @@ export default async function installCmd(argv) {
   const tools = await loadTools();
   const lane = process.env.MADDU_LANE || null;
   const sessionId = process.env.MADDU_SESSION_ID || null;
+  // v1.2.0 Phase 3 — wrapper-level secret scan (checked by `secret-scan-active` gate).
+  const secretScan = await loadSecretScan();
+  const wrapperScan = secretScan.scanArgv(argv);
+  if (wrapperScan && !secretScan.hasAllowSecret(argv)) { /* central runTool will refuse */ }
   const res = await tools.runTool(repoRoot, { tool: 'install', argv, lane, sessionId, captureOutput: false });
   if (res.refused) {
     console.error(tools.summarize(res));
