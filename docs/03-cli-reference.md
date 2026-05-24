@@ -691,6 +691,67 @@ Full coverage: [28-default-tools.md](28-default-tools.md),
 [32-kanban-and-plans.md](32-kanban-and-plans.md),
 [33-loops-and-coordinator.md](33-loops-and-coordinator.md).
 
+## v1.2.0 commands
+
+### `maddu trust <verb>` *(v1.2.0)*
+
+Supply-chain audit + pin surface. Backed by `.maddu/config/trust.json`.
+
+```bash
+maddu trust audit              # freshness + pin table for direct deps
+maddu trust audit --cve        # also include npm audit CVE summary
+maddu trust audit --fresh      # bypass the 6h npm-view cache
+maddu trust audit --json       # JSON output for tooling
+
+maddu trust pin <pkg> --version <v> [--hash <sha>]
+maddu trust unpin <pkg>
+maddu trust verify             # pin ↔ package.json declared spec ↔ installed
+maddu trust list               # print trust.json
+maddu trust report             # write .maddu/state/trust-report-<date>.md
+maddu trust env-allow <VAR> [--lane <id>]
+```
+
+Doctor gates added: `dependency-freshness`, `dep-pinning-respected`,
+`mcp-provenance-verified`, `worker-env-policy-coherent`,
+`secret-scan-active`, `skill-provenance-required`,
+`strict-mode-approval-active`.
+
+Spine events added: `TRUST_AUDIT_RAN`, `TRUST_PIN_ADDED`,
+`TRUST_PIN_REMOVED`, `TRUST_VIOLATION_DETECTED`,
+`MCP_PROVENANCE_VERIFIED`, `MCP_PROVENANCE_MISMATCH`,
+`MCP_APPROVAL_GRANTED`, `WORKER_ENV_FILTERED`,
+`SECRET_DETECTED_IN_ARGV`, `SKILL_IMPORTED`, `SKILL_TRUSTED`,
+`SKILL_INJECTION_REFUSED`.
+
+### `maddu mcp approve <name>` *(v1.2.0)*
+
+Operator-registered MCPs (`maddu mcp register …`) now tag as
+`provenance: operator-trusted` and are **disabled until approved**.
+
+```bash
+maddu mcp register --name custom-fs --transport stdio --command ./my-server
+# → registered as disabled / pending approval
+
+maddu mcp approve custom-fs    # → enabled, MCP_APPROVAL_GRANTED on spine
+```
+
+Pass `--approve` to `mcp register` to short-circuit the explicit step.
+
+### `maddu skill import <path>` and `maddu skill trust <id>` *(v1.2.0)*
+
+```bash
+maddu skill import ./demo-skill.md            # refuses without --trust
+maddu skill import ./demo-skill.md --trust    # imported as untrusted
+maddu skill trust demo-skill                  # promotes to trusted
+```
+
+The `maddu brief --for-agent` skill auto-injection path refuses
+untrusted imported skills.
+
+See also: [34-threat-model.md](34-threat-model.md),
+[35-hermes-adapter.md](35-hermes-adapter.md),
+[36-trust-audit.md](36-trust-audit.md).
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the
