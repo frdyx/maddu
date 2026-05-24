@@ -11,6 +11,7 @@ The CLI is invoked via the `maddu` binary (installed by `maddu init` or via `npx
 - Comma-separated lists are accepted where flags expect arrays.
 - For `slice-stop --learnings` and `--next`, separators are **semicolons** (because entries often contain commas).
 - Most write subcommands accept an optional `--by <id>` for the actor field.
+- *(v1.1.1)* `--help` / `-h` is detected at the dispatcher before any flag validation. `maddu <verb> --help` always returns help text — never `--<flag> required` errors. Verbs with bespoke usage (start, stop, workspace, plan, lane, install) print their own; others fall back to the global discovery surface (`maddu help`).
 
 ## `maddu init`
 
@@ -61,6 +62,18 @@ Default port: 4177. The bridge listens on `127.0.0.1` only.
 
 If `~/.config/maddu/workspaces.json` exists, the bridge mounts every registered repo simultaneously and routes each HTTP request to the workspace named by the `X-Maddu-Workspace` header (falls back to the registry's `active` field). With no registry, the bridge falls back to walking up from `cwd` for a single `.maddu/` — existing single-repo installs work unchanged.
 
+**v1.1.1:** `maddu start` writes `.maddu/state/bridge.pid` on boot (so `maddu stop` can find the process) and installs SIGINT/SIGTERM handlers — Ctrl+C in the foreground terminal cleanly terminates the bridge instead of leaving a detached node process.
+
+## `maddu stop`
+
+Terminate the running bridge server. *(v1.1.1)*
+
+```bash
+$ maddu stop
+```
+
+Reads `.maddu/state/bridge.pid` and sends SIGTERM (then SIGKILL after a 3 s grace period). If the PID file is missing or stale, probes port 4177 — if a bridge responds but no PID file is known, prints an actionable hint for terminating it manually (`Get-NetTCPConnection` on Windows, `lsof | xargs kill` elsewhere). Exit 0 on success (or no-bridge-running), 1 if a bridge is detected but cannot be killed.
+
 ## `maddu workspace`
 
 Manage the multi-workspace registry. Stored at `~/.config/maddu/workspaces.json` (Linux/macOS) or `%APPDATA%\maddu\workspaces.json` (Windows) — device-bound, never committed.
@@ -74,6 +87,8 @@ $ maddu workspace show
 ```
 
 `<path>` must contain a `.maddu/` directory (i.e. `maddu init` was run there). Ids must match `[a-z][a-z0-9-]{0,40}` and are unique per machine. If `--id` is omitted, it is derived from the directory name.
+
+**v1.1.1:** `maddu workspace activate <id>` POSTs to the running bridge at `/bridge/_workspaces/activate` so its in-memory active pointer follows the registry update — no more silent mis-routing after a swap. If the requested workspace was added *after* `maddu start` (and is therefore not yet mounted), the CLI prints a loud warning with the exact `maddu stop && maddu start` restart command. No bridge running ⇒ silent.
 
 The cockpit's left rail header shows a workspace switcher when more than one workspace is registered; selecting one re-renders every route against that workspace's data. `Ctrl+K` also surfaces a "Switch to workspace: …" entry per registered workspace.
 
@@ -620,10 +635,28 @@ $ maddu log [--since iso] [--lane id] [--op T] [--rebuild] [--json]
 
 # Plans + kanban (Phase 5)
 $ maddu plan new "<title>" [--phases "a,b,c"] [--goal "..."]
-$ maddu plan list / show / add-phase / complete-phase / block-phase
-$ maddu plan revise / complete / cancel / kanban
+$ maddu plan list
+$ maddu plan show <plan-id>
+$ maddu plan add-phase <plan-id> --phase <n> [--intent "..."]
+$ maddu plan complete-phase <plan-id> --phase <n> [--summary "..."]
+$ maddu plan block-phase <plan-id> --phase <n> --reason "..."
+$ maddu plan revise <plan-id> --note "..."
+$ maddu plan complete <plan-id> [--summary "..."]
+$ maddu plan cancel <plan-id> [--reason "..."]
+$ maddu plan kanban
+#
+# v1.1.1: plan id is the first positional argument across every verb;
+# `--plan <id>` is also accepted as an alias. Phase identifier is
+# `--phase <id>` (preferred); `--name <id>` is a deprecated alias that
+# emits a one-time stderr warning. `maddu plan kanban` now aggregates
+# phase status — completed/pending/blocked phases each surface in their
+# own column.
 
 # Loops (Phase 6)
+# v1.1.1: verify exit=0 → completes; non-zero → iterates; identical fail
+# signature twice → halts with reason=stuck-detection; exceeding --max-iter
+# → halts with reason=max-iter-reached. Regression-tested in the synthetic
+# stress harness scenario `ralph-always-fail-halts`.
 $ maddu loop ralph --goal "..." --verify "<cmd>" [--iterate "<cmd>"]
 $ maddu loop plan  --plan <id> [--max-iter N]
 $ maddu loop status / cancel
@@ -642,6 +675,10 @@ $ maddu skill candidate-reject <hash> [--reason "..."]
 
 # Force-claim (Phase 8a)
 $ maddu lane claim --lane <id> --session <sid> --force [--reason "..."]
+#
+# v1.1.1: `lane claim` and `lane release` also accept the positional
+# shorthand: `maddu lane claim <lane-id>`. `--session` falls back to
+# `$MADDU_SESSION_ID` (v0.19.1).
 
 # Slice-stop lineage (Phase 5)
 $ maddu slice-stop --triggered-by plan:<plan-id> --summary "..."

@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
-  "phase": "autonomy-planning-tool-gateway",
+  "version": "1.1.1",
+  "phase": "burn-in-patch",
   "released": "2026-05-24"
 }
