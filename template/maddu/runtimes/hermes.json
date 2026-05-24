@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "hermes",
+  "displayName": "Hermes Agent (Nous Research)",
+  "binary": "hermes",
+  "args": ["exec"],
+  "wrapper": "hermes",
+  "autoRegister": true,
+  "detect": {
+    "command": "hermes --version",
+    "expectExit": 0
+  },
+  "spawn": {
+    "cwd": "."
+  },
+  "modelPreference": {
+    "default": "hermes-3-llama-3.1-70b"
+  },
+  "notes": "Hermes is the first new runtime added under v1.2.0's supply-chain trust rails. Worker spawn passes through worker-env allowlist (default-deny AWS_*/OPENAI_*/etc.), secret-scan argv, tool allowlist, and strict-mode approval gating with zero special-case code.",
+  "v1_2_0_trust_rails": [
+    "worker-env-allowlist: default-deny on AWS_*, OPENAI_*, ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.",
+    "secret-scan-argv: refuses argv elements matching known secret patterns before spawn.",
+    "tool-allowlist: per-lane filtering via .maddu/config/triggers.json.",
+    "strict-mode-approval: in strict governance, requires explicit operator approval before spawn."
+  ]
+}

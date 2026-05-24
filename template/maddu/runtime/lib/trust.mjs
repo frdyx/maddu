@@ -335,39 +335,215 @@ export function diffPinsAgainstSpec(pkg, pinnedPackages) {
 
 // ── audit report renderer (Markdown) ──────────────────────────────────
 
-export function renderReportMarkdown(repoRoot, audit) {
+export function renderReportMarkdown(repoRoot, audit, extras = {}) {
+  // v1.2.0 Phase 6 — security-team-shareable trust posture report.
+  // `audit` is the result of auditRepo(). `extras` carries the surrounding
+  // posture surfaces the report needs: governance, pins, recent
+  // violations/secret/env events, MCP inventory, worker-env policy,
+  // skill provenance distribution, doctor snapshot.
   const lines = [];
-  lines.push(`# Máddu trust audit — ${repoRoot}`);
+  const dateTag = new Date().toISOString();
+  lines.push(`# Máddu trust report — ${repoRoot}`);
   lines.push('');
-  lines.push(`- Audited at: ${audit.auditedAt}`);
-  lines.push(`- Cache hits / misses: ${audit.cacheHits} / ${audit.cacheMisses}`);
+  lines.push(`Generated: ${dateTag}`);
+  lines.push('');
+  lines.push('This report is suitable for handing to a security team. It');
+  lines.push('summarizes the current supply-chain trust posture of this');
+  lines.push('Máddu workspace. See `docs/34-threat-model.md` for the full');
+  lines.push('threat model and enforcement boundary.');
+  lines.push('');
+
+  // §1 Governance + trust posture
+  lines.push('## 1. Governance + trust posture');
+  lines.push('');
+  if (extras.governance) {
+    lines.push(`- Governance mode: \`${extras.governance.mode || 'standard'}\``);
+    const overrides = extras.governance.overrides || {};
+    const overrideKeys = Object.keys(overrides);
+    if (overrideKeys.length) {
+      lines.push(`- Overrides (${overrideKeys.length}):`);
+      for (const k of overrideKeys) {
+        lines.push(`  - \`${k}\`: ${JSON.stringify(overrides[k])}`);
+      }
+    } else {
+      lines.push('- Overrides: (none)');
+    }
+  } else {
+    lines.push('- Governance mode: (unavailable)');
+  }
   lines.push(`- Freshness thresholds (days): warn=${audit.audit.freshness_warn_days}, block=${audit.audit.freshness_block_days}`);
   if (audit.cveSummary) {
-    lines.push(`- CVE total: ${audit.cveSummary.total} (critical=${audit.cveSummary.critical}, high=${audit.cveSummary.high})`);
+    lines.push(`- npm audit CVE total: ${audit.cveSummary.total} (critical=${audit.cveSummary.critical}, high=${audit.cveSummary.high})`);
   }
   lines.push('');
-  lines.push(`## Direct dependencies (${audit.rows.length})`);
+
+  // §2 Pinned packages
+  const pins = extras.pinnedPackages || [];
+  lines.push(`## 2. Pinned packages (${pins.length})`);
   lines.push('');
-  lines.push('| Package | Installed | Age (d) | Freshness | Pin |');
-  lines.push('|---|---|---|---|---|');
-  for (const r of audit.rows) {
-    lines.push(`| ${r.name} | ${r.installedVersion || '—'} | ${r.ageDays ?? '—'} | ${r.freshnessLevel} | ${r.pinStatus} |`);
-  }
-  lines.push('');
-  if (audit.violations.length) {
-    lines.push(`## Violations (${audit.violations.length})`);
-    for (const v of audit.violations) {
-      lines.push(`- ${v.name}: pinViolation=${v.pinViolation}, freshness=${v.freshnessLevel}`);
+  if (pins.length === 0) {
+    lines.push('_(no pins declared in `.maddu/config/trust.json`)_');
+  } else {
+    lines.push('| Package | Pinned version | sha256 |');
+    lines.push('|---|---|---|');
+    for (const p of pins) {
+      lines.push(`| ${p.name} | ${p.version} | ${p.sha256 || '—'} |`);
     }
-    lines.push('');
   }
-  if (audit.warns.length) {
-    lines.push(`## Warnings (${audit.warns.length})`);
-    for (const w of audit.warns) {
-      lines.push(`- ${w.name}: freshness=${w.freshnessLevel}, age=${w.ageDays}d`);
+  lines.push('');
+
+  // §3 Direct dep audit
+  lines.push(`## 3. Direct dependencies (${audit.rows.length})`);
+  lines.push('');
+  if (audit.rows.length === 0) {
+    lines.push('_(no direct dependencies)_');
+  } else {
+    lines.push('| Package | Installed | Age (d) | Freshness | Pin |');
+    lines.push('|---|---|---|---|---|');
+    for (const r of audit.rows) {
+      lines.push(`| ${r.name} | ${r.installedVersion || '—'} | ${r.ageDays ?? '—'} | ${r.freshnessLevel} | ${r.pinStatus} |`);
     }
-    lines.push('');
   }
+  lines.push('');
+
+  // §4 Recent violations
+  const violations = extras.recentViolations || audit.violations || [];
+  lines.push(`## 4. Recent violations (${violations.length})`);
+  lines.push('');
+  if (violations.length === 0) {
+    lines.push('_(no recent violations)_');
+  } else {
+    for (const v of violations) {
+      if (v.ts && v.data) {
+        lines.push(`- \`${v.ts}\` — ${v.data.kind || 'unknown'} on \`${v.data.pkg || '—'}\`: ${v.data.detail || ''}`);
+      } else {
+        lines.push(`- ${v.name}: pinViolation=${v.pinViolation}, freshness=${v.freshnessLevel}`);
+      }
+    }
+  }
+  lines.push('');
+
+  // §5 Recent secret refusals
+  const secretRefusals = extras.recentSecretRefusals || [];
+  lines.push(`## 5. Recent secret-scan refusals (${secretRefusals.length})`);
+  lines.push('');
+  lines.push('_Pattern types only — raw matches are never recorded._');
+  lines.push('');
+  if (secretRefusals.length === 0) {
+    lines.push('_(no recent secret refusals)_');
+  } else {
+    lines.push('| Timestamp | Tool | Pattern type | Argv index | Override |');
+    lines.push('|---|---|---|---|---|');
+    for (const s of secretRefusals) {
+      const d = s.data || {};
+      lines.push(`| ${s.ts} | ${d.tool || '?'} | ${d.pattern_type || d.patternType || '?'} | ${d.argv_index ?? d.position ?? '?'} | ${d.override || 'none'} |`);
+    }
+  }
+  lines.push('');
+
+  // §6 Worker env policy
+  const we = extras.workerEnvPolicy || null;
+  lines.push('## 6. Worker env policy');
+  lines.push('');
+  if (we) {
+    lines.push(`- default_allow patterns: ${we.default_allow.length}`);
+    if (we.default_allow.length) {
+      lines.push('  ```');
+      for (const p of we.default_allow) lines.push(`  ${p}`);
+      lines.push('  ```');
+    }
+    lines.push(`- default_deny_secrets patterns: ${we.default_deny_secrets.length}`);
+    if (we.default_deny_secrets.length) {
+      lines.push('  ```');
+      for (const p of we.default_deny_secrets) lines.push(`  ${p}`);
+      lines.push('  ```');
+    }
+    const perLaneKeys = Object.keys(we.per_lane || {});
+    lines.push(`- per-lane overrides: ${perLaneKeys.length}`);
+    for (const lane of perLaneKeys) {
+      const allow = (we.per_lane[lane]?.allow || []).join(', ') || '(none)';
+      lines.push(`  - \`${lane}\`: allow=${allow}`);
+    }
+  } else {
+    lines.push('_(worker-env policy unavailable)_');
+  }
+  lines.push('');
+  const envFiltered = extras.recentEnvFiltered || [];
+  lines.push(`### Recent worker env-filter events (${envFiltered.length})`);
+  lines.push('');
+  if (envFiltered.length === 0) {
+    lines.push('_(no recent worker spawns)_');
+  } else {
+    lines.push('| Timestamp | Worker | Allowed | Denied |');
+    lines.push('|---|---|---|---|');
+    for (const w of envFiltered) {
+      const d = w.data || {};
+      lines.push(`| ${w.ts} | ${d.workerId || '?'} | ${d.allowedCount ?? '?'} | ${d.deniedCount ?? '?'} |`);
+    }
+  }
+  lines.push('');
+
+  // §7 MCP inventory
+  const mcp = extras.mcpInventory || [];
+  lines.push(`## 7. Active MCP servers (${mcp.length})`);
+  lines.push('');
+  if (mcp.length === 0) {
+    lines.push('_(no MCP servers registered)_');
+  } else {
+    lines.push('| Name | Enabled | Provenance source | Approved |');
+    lines.push('|---|---|---|---|');
+    for (const m of mcp) {
+      const p = m.provenance || {};
+      lines.push(`| ${m.name} | ${m.enabled ? 'yes' : 'no'} | ${p.source || '—'} | ${p.approved === true ? 'yes' : (p.approved === false ? 'pending' : '—')} |`);
+    }
+  }
+  lines.push('');
+
+  // §8 Skill provenance distribution
+  const skill = extras.skillProvenance || null;
+  lines.push('## 8. Skill provenance distribution');
+  lines.push('');
+  if (skill) {
+    lines.push('| Provenance | Count |');
+    lines.push('|---|---|');
+    for (const [k, v] of Object.entries(skill)) {
+      lines.push(`| ${k} | ${v} |`);
+    }
+  } else {
+    lines.push('_(skill provenance unavailable)_');
+  }
+  lines.push('');
+
+  // §9 Doctor gate snapshot
+  const doctor = extras.doctor || null;
+  lines.push('## 9. Doctor gate snapshot');
+  lines.push('');
+  if (doctor) {
+    lines.push(`- Total gates: ${doctor.total}`);
+    lines.push(`- PASS: ${doctor.pass}`);
+    lines.push(`- WARN: ${doctor.warn}`);
+    lines.push(`- FAIL: ${doctor.fail}`);
+    if (doctor.failedGates && doctor.failedGates.length) {
+      lines.push('');
+      lines.push('### Failed gates');
+      for (const g of doctor.failedGates) lines.push(`- ${g}`);
+    }
+    if (doctor.error) {
+      lines.push('');
+      lines.push(`_(doctor run note: ${doctor.error})_`);
+    }
+  } else {
+    lines.push('_(doctor snapshot unavailable — run `maddu doctor` and re-run report)_');
+  }
+  lines.push('');
+
+  lines.push('---');
+  lines.push('');
+  lines.push('See `docs/34-threat-model.md` for what Máddu enforces vs.');
+  lines.push('documents-but-does-not-enforce, and §5 of that doc for');
+  lines.push('OS-level defenses (Little Snitch / ufw / Windows Firewall)');
+  lines.push('that layer with Máddu.');
+  lines.push('');
   return lines.join('\n') + '\n';
 }
 
