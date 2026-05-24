@@ -178,6 +178,33 @@ export default async function init(argv) {
     );
     console.log(`  trust config seeded (freshness warn=30d, block=7d)`);
   }
+  // v1.2.0 Phase 2 — seed worker-env.json with default allow/deny lists. Idempotent.
+  const workerEnvPath = join(configDir, 'worker-env.json');
+  if (!(await exists(workerEnvPath))) {
+    await writeFile(
+      workerEnvPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        default_allow: [
+          'PATH', 'HOME', 'USER', 'USERPROFILE', 'TEMP', 'TMP',
+          'LANG', 'LC_*', 'NODE_*', 'MADDU_*',
+          'SystemRoot', 'SYSTEMROOT', 'COMSPEC', 'PATHEXT', 'WINDIR',
+          'APPDATA', 'LOCALAPPDATA', 'PROCESSOR_*',
+          'TERM', 'SHELL',
+          'CLAUDE_*', 'CLAUDECODE', 'CODEX_*', 'GEMINI_*',
+          'HOMEDRIVE', 'HOMEPATH', 'PWD', 'OLDPWD', 'COMPUTERNAME',
+          'USERDOMAIN', 'USERNAME', 'PUBLIC', 'PROGRAMFILES', 'PROGRAMDATA',
+          'PSModulePath', 'COMMONPROGRAMFILES', 'SYSTEMDRIVE', 'OS',
+        ],
+        default_deny_secrets: [
+          'AWS_*', 'OPENAI_*', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN',
+          'GITLAB_*', 'AZURE_*', 'GCP_*', 'STRIPE_*',
+        ],
+        per_lane: {},
+      }, null, 2) + '\n'
+    );
+    console.log(`  worker env allowlist seeded (default-deny secret-keyed vars)`);
+  }
   // v1.1.0 Phase 3 — seed governance.json with mode: standard. Idempotent.
   const governancePath = join(configDir, 'governance.json');
   if (!(await exists(governancePath))) {

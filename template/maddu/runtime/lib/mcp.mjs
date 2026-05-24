@@ -12,8 +12,29 @@
 import { mkdir, readFile, readdir, stat, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES } from './spine.mjs';
+
+// v1.2.0 Phase 2 — compute the canonical SHA256 of a template descriptor.
+// Hash is over the JSON.stringify of the object with `provenance` field
+// stripped, keys sorted. Same algorithm used by the framework template
+// authoring step (the bake-hashes script).
+export function computeTemplateProvenance(obj) {
+  const clone = JSON.parse(JSON.stringify(obj));
+  delete clone.provenance;
+  delete clone.__source;
+  const canon = JSON.stringify(clone, Object.keys(clone).sort());
+  return createHash('sha256').update(canon).digest('hex');
+}
+
+// Verify a template's declared provenance.sha256 matches its computed
+// hash. Returns { ok, expected, actual }.
+export function verifyTemplateProvenance(obj) {
+  const expected = obj?.provenance?.sha256 || null;
+  const actual = computeTemplateProvenance(obj);
+  return { ok: expected != null && expected === actual, expected, actual };
+}
 
 const TRANSPORTS = ['stdio', 'sse', 'http'];
 const DEFAULT_TEST_TIMEOUT_MS = 3000;

@@ -5,14 +5,24 @@
   "transport": "stdio",
   "stdio": {
     "command": "node",
-    "args": ["./.maddu/mcp/local-search/server.mjs"],
+    "args": [
+      "./.maddu/mcp/local-search/server.mjs"
+    ],
     "env": []
   },
   "requires": [
-    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." },
-    { "binary": "curl", "install": "Install curl from your OS package manager (apt/brew/winget)." }
+    {
+      "binary": "node",
+      "install": "Install Node.js 20+ (https://nodejs.org)."
+    },
+    {
+      "binary": "curl",
+      "install": "Install curl from your OS package manager (apt/brew/winget)."
+    }
   ],
-  "lanes": ["*"],
+  "lanes": [
+    "*"
+  ],
   "scaffold": {
     "files": [
       {
@@ -30,5 +40,11 @@
     "Rule #5 OK: no provider SDK; just curl + JSON over RSS.",
     "Rule #3 OK: local subprocess; no hosted backend dependency.",
     "Rule #4 OK: no new package.json dep (stdlib + curl)."
-  ]
+  ],
+  "provenance": {
+    "source": "framework-shipped",
+    "sha256": "e8bd597f12b4215cdf0a9c902967b5db675b806d1df2f4fc81b9c7ae8d7cae95",
+    "version": "1.2.0",
+    "framework_shipped_at": "2026-05-24"
+  }
 }

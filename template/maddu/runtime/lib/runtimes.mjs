@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
 import { randomBytes } from 'node:crypto';
 import { append, EVENT_TYPES, genWorkerId } from './spine.mjs';
+import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -330,8 +331,20 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   const logFh = await open(logPath, 'a');
   const args = [...(r.args || []), ...(opts.extraArgs || [])];
   const cwd = opts.cwd || r.spawn?.cwd || process.cwd();
+  // v1.2.0 Phase 2 — worker env allowlist. Filter `process.env` BEFORE
+  // injecting MADDU_* bookkeeping vars. Default-deny known secret-keyed
+  // vars (AWS_*, OPENAI_*, ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.); allow
+  // a known-safe baseline (PATH, HOME, USER, LANG, NODE_*, MADDU_*).
+  // Operator can extend per-lane via `maddu trust env-allow`.
+  let envFilter;
+  try {
+    const envCfg = await readWorkerEnvConfig(repoRoot);
+    envFilter = filterEnvForWorker(process.env, envCfg, opts.lane || null);
+  } catch {
+    envFilter = { env: { ...process.env }, allowed: Object.keys(process.env), denied: [] };
+  }
   const env = {
-    ...process.env,
+    ...envFilter.env,
     MADDU_WORKER_ID: workerId,
     MADDU_BRIDGE_URL: opts.bridgeUrl || 'http://127.0.0.1:4177',
     MADDU_RUNTIME: name,
@@ -402,6 +415,23 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     lane: opts.lane || null,
     data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, wrapper: wrapperPath ? (r.wrapper || 'custom') : null, modelHint: resolvedHint || null, stage: opts.stage || null, error }
   });
+  // v1.2.0 Phase 2 — WORKER_ENV_FILTERED event records what was allowed
+  // and denied for this spawn. Denied list is KEYS ONLY — never values —
+  // per the hard constraint on secret logging.
+  try {
+    await append(repoRoot, {
+      type: EVENT_TYPES.WORKER_ENV_FILTERED,
+      actor: effectiveSession,
+      lane: opts.lane || null,
+      data: {
+        workerId,
+        runtime: name,
+        allowedCount: envFilter.allowed.length,
+        denied: envFilter.denied,  // KEYS ONLY — values never logged
+        deniedCount: envFilter.denied.length,
+      },
+    });
+  } catch {}
   if (error) {
     // Mark as exited so projection reflects a failed spawn.
     await append(repoRoot, {

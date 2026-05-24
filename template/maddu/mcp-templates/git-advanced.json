@@ -5,14 +5,24 @@
   "transport": "stdio",
   "stdio": {
     "command": "node",
-    "args": ["./.maddu/mcp/git-advanced/server.mjs"],
+    "args": [
+      "./.maddu/mcp/git-advanced/server.mjs"
+    ],
     "env": []
   },
   "requires": [
-    { "binary": "node", "install": "Install Node.js 20+ (https://nodejs.org)." },
-    { "binary": "git",  "install": "Install git (https://git-scm.com)." }
+    {
+      "binary": "node",
+      "install": "Install Node.js 20+ (https://nodejs.org)."
+    },
+    {
+      "binary": "git",
+      "install": "Install git (https://git-scm.com)."
+    }
   ],
-  "lanes": ["*"],
+  "lanes": [
+    "*"
+  ],
   "scaffold": {
     "files": [
       {
@@ -25,5 +35,11 @@
   "hardRuleNotes": [
     "Rule #5 OK: stdlib + git subprocess.",
     "Rule #8 OK: read-only; cannot touch lane state."
-  ]
+  ],
+  "provenance": {
+    "source": "framework-shipped",
+    "sha256": "edb4d34803328b90954fd37c47afd684c94d5a703ff887871f31279434ed3096",
+    "version": "1.2.0",
+    "framework_shipped_at": "2026-05-24"
+  }
 }

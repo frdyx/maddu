@@ -5,17 +5,32 @@
   "transport": "stdio",
   "stdio": {
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "."
+    ],
     "env": []
   },
   "requires": [
-    { "binary": "npx", "install": "Install Node.js 20+ (https://nodejs.org). npx ships with npm." }
+    {
+      "binary": "npx",
+      "install": "Install Node.js 20+ (https://nodejs.org). npx ships with npm."
+    }
   ],
-  "lanes": ["*"],
+  "lanes": [
+    "*"
+  ],
   "notes": "Sandbox path defaults to the current directory. Edit args to scope tighter (e.g. ./docs). The server is fetched on first start via npx; subsequent starts are cached.",
   "hardRuleNotes": [
     "Rule #5 OK: server runs as a local subprocess; no provider SDK in framework code.",
     "Rule #3 OK: no hosted backend; transport is stdio.",
     "Rule #6 unaffected: no token surface."
-  ]
+  ],
+  "provenance": {
+    "source": "framework-shipped",
+    "sha256": "083a329f43e83d20057a4f05c3d4d0681965a601b1c468809571713cdb763c0a",
+    "version": "1.2.0",
+    "framework_shipped_at": "2026-05-24"
+  }
 }

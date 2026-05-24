@@ -20,6 +20,7 @@ import { readdir, readFile, stat, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
@@ -84,7 +85,8 @@ function badge(h) {
 export default async function mcpCmd(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths, mcp } = await loadSpineLib();
+  const spineLib = await loadSpineLib();
+  const { paths, mcp } = spineLib;
   const repoRoot = await resolveRepoRoot(paths);
 
   if (!sub) {
@@ -149,8 +151,39 @@ export default async function mcpCmd(argv) {
     } else if (transport === 'http') {
       patch.http = { url: flags.url || null };
     }
+    // v1.2.0 Phase 2 — operator-registered MCPs are NOT pre-approved.
+    // They tag as 'operator-trusted' and require explicit `maddu mcp approve <name>`
+    // before they can be enabled. Cockpit + visibleFor surface the badge.
+    patch.provenance = {
+      source: 'operator-trusted',
+      approved: false,
+      registeredAt: new Date().toISOString(),
+    };
+    // Default to disabled-until-approved unless the operator explicitly passes --approve.
+    if (!flags.approve) patch.enabled = false;
+    else patch.provenance.approved = true;
     const saved = await mcp.saveMcp(repoRoot, patch, flags.by || null);
-    console.log(`${ANSI.pass}registered${ANSI.reset}  ${saved.name}  (${saved.transport})`);
+    if (flags.approve) {
+      await spineLib.spine.append(repoRoot, {
+        type: spineLib.spine.EVENT_TYPES.MCP_APPROVAL_GRANTED,
+        data: { name: saved.name, by: flags.by || null },
+      });
+    }
+    console.log(`${ANSI.pass}registered${ANSI.reset}  ${saved.name}  (${saved.transport})  ${saved.provenance?.approved ? '' : ANSI.warn + '[pending approval — run `maddu mcp approve ' + saved.name + '`]' + ANSI.reset}`);
+    return;
+  }
+  if (sub === 'approve') {
+    const name = rest[0];
+    if (!name) { console.error('usage: maddu mcp approve <name>'); process.exit(2); }
+    const r = await mcp.readMcp(repoRoot, name);
+    if (!r) { console.error(`mcp ${name} not found`); process.exit(3); }
+    const next = { ...r, provenance: { ...(r.provenance || {}), source: r.provenance?.source || 'operator-trusted', approved: true, approvedAt: new Date().toISOString() }, enabled: true };
+    await mcp.saveMcp(repoRoot, next, null);
+    await spineLib.spine.append(repoRoot, {
+      type: spineLib.spine.EVENT_TYPES.MCP_APPROVAL_GRANTED,
+      data: { name, by: null },
+    });
+    console.log(`${ANSI.pass}approved${ANSI.reset}  ${name} (now enabled)`);
     return;
   }
 
@@ -257,6 +290,33 @@ export default async function mcpCmd(argv) {
       console.error(`\nInstall the missing binary then re-run \`maddu mcp install ${template}\`.`);
       process.exit(4);
     }
+    // 1b. v1.2.0 Phase 2 — verify template provenance hash. Refuse on
+    // mismatch unless --skip-provenance (kept for emergency overrides;
+    // logged as a violation regardless).
+    const { ok: provOk, expected, actual } = mcp.verifyTemplateProvenance(tpl);
+    if (!provOk && !flags['skip-provenance']) {
+      await spineLib.spine.append(repoRoot, {
+        type: spineLib.spine.EVENT_TYPES.MCP_PROVENANCE_MISMATCH,
+        data: {
+          template: tpl.template,
+          expected,
+          actual,
+          detail: expected == null ? 'no provenance.sha256 declared in template' : 'template content changed since hash was baked',
+        },
+      });
+      console.error(`${ANSI.fail}refused${ANSI.reset}  MCP_PROVENANCE_MISMATCH for template "${tpl.template}"`);
+      console.error(`  expected sha256: ${expected || '(none)'}`);
+      console.error(`  actual sha256:   ${actual}`);
+      console.error(`  Either the template was tampered with or its provenance hash is stale.`);
+      console.error(`  Re-pull the framework or pass --skip-provenance to override (recorded as a violation).`);
+      process.exit(5);
+    }
+    if (provOk) {
+      await spineLib.spine.append(repoRoot, {
+        type: spineLib.spine.EVENT_TYPES.MCP_PROVENANCE_VERIFIED,
+        data: { template: tpl.template, sha256: actual },
+      });
+    }
     // 2. Scaffold any companion files (server.mjs, feeds.json, etc.).
     if (tpl.scaffold && Array.isArray(tpl.scaffold.files)) {
       for (const f of tpl.scaffold.files) {
@@ -279,6 +339,16 @@ export default async function mcpCmd(argv) {
       enabled: true,
       lanes: Array.isArray(tpl.lanes) && tpl.lanes.length ? tpl.lanes : ['*'],
       notes: `Installed from template "${tpl.template}".` + (tpl.notes ? '\n\n' + tpl.notes : ''),
+      // v1.2.0 Phase 2 — provenance tag rides on the saved descriptor so
+      // the cockpit Trust route and the mcp-provenance-verified gate can
+      // tell framework-shipped servers from operator-trusted ones.
+      provenance: {
+        source: 'framework-shipped',
+        templateName: tpl.template,
+        templateSha256: actual,
+        approved: true,  // framework templates are pre-approved
+        installedAt: new Date().toISOString(),
+      },
     };
     if (patch.transport === 'stdio') {
       patch.stdio = {
