@@ -24,6 +24,8 @@ import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSli
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, detectAll, runtimesHealth, spawnWorker } from './lib/runtimes.mjs';
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
+import { readTrustConfig, auditRepo, renderReportMarkdown } from './lib/trust.mjs';
+import { readWorkerEnvConfig } from './lib/worker-env.mjs';
 import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
 import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy } from './lib/global.mjs';
 import { maybeAutoDecide } from './lib/approvals.mjs';
@@ -873,6 +875,73 @@ async function handleBridge(req, res, url, ctx) {
     const health = await mcpHealth(repoRoot);
     const defaults = ['git', 'test', 'format', 'lint', 'install'].map((t) => ({ tool: t, kind: 'default' }));
     return sendJson(res, 200, { defaults, mcp, health, recent: toolEvents });
+  }
+
+  // v1.2.0 Phase 6 — Trust cockpit panel. Aggregates the supply-chain
+  // posture: pin list, last audit summary, recent violations, secret-scan
+  // refusal counts, worker env policy summary, MCP provenance distribution,
+  // skill provenance distribution.
+  if ((path === '/bridge/trust' || path === '/bridge/trust/snapshot') && req.method === 'GET') {
+    const allEvents = await readAll(repoRoot);
+    const cfg = await readTrustConfig(repoRoot);
+    const workerEnvCfg = await readWorkerEnvConfig(repoRoot);
+    const lastAudit = [...allEvents].reverse().find((e) => e.type === 'TRUST_AUDIT_RAN') || null;
+    const violations = allEvents.filter((e) => e.type === 'TRUST_VIOLATION_DETECTED').slice(-20).reverse();
+    const secretRefusals = allEvents.filter((e) => e.type === 'SECRET_DETECTED_IN_ARGV').slice(-20).reverse();
+    const envFiltered = allEvents.filter((e) => e.type === 'WORKER_ENV_FILTERED').slice(-10).reverse();
+    const mcpProvenanceVerified = allEvents.filter((e) => e.type === 'MCP_PROVENANCE_VERIFIED').length;
+    const mcpProvenanceMismatch = allEvents.filter((e) => e.type === 'MCP_PROVENANCE_MISMATCH').length;
+    const mcpRegistry = await listMcp(repoRoot);
+    // Skill provenance distribution via filesystem scan.
+    let skillDist = { 'framework-starter-pack': 0, operator: 0, imported: 0, 'imported-trusted': 0, grandfathered: 0, missing: 0 };
+    try {
+      const { readdir, readFile } = await import('node:fs/promises');
+      const { join } = await import('node:path');
+      const dir = join(repoRoot, '.maddu', 'skills');
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isFile() || !e.name.endsWith('.md')) continue;
+        const body = await readFile(join(dir, e.name), 'utf8');
+        const m = body.match(/^---\n([\s\S]*?)\n---/);
+        if (!m) { skillDist.missing++; continue; }
+        const head = m[1];
+        if (/provenance:\s*framework-starter-pack/.test(head)) skillDist['framework-starter-pack']++;
+        else if (/provenance:\s*operator/.test(head)) skillDist.operator++;
+        else if (/provenance:\s*imported/.test(head)) {
+          if (/trusted:\s*true/.test(head)) skillDist['imported-trusted']++;
+          else skillDist.imported++;
+        }
+        else if (/provenance:\s*pre-v1\.2-grandfathered/.test(head)) skillDist.grandfathered++;
+        else if (!/provenance:/.test(head)) skillDist.missing++;
+      }
+    } catch {}
+    return sendJson(res, 200, {
+      lastAudit,
+      pinnedPackages: cfg.pinnedPackages,
+      auditThresholds: cfg.audit,
+      violations,
+      secretRefusals,
+      envFiltered,
+      workerEnvPolicy: {
+        allow_count: workerEnvCfg.default_allow.length,
+        deny_count: workerEnvCfg.default_deny_secrets.length,
+        per_lane: Object.keys(workerEnvCfg.per_lane || {}).length,
+      },
+      mcpProvenance: {
+        verified: mcpProvenanceVerified,
+        mismatch: mcpProvenanceMismatch,
+        registered: mcpRegistry.length,
+        approved: mcpRegistry.filter((m) => m.provenance?.approved === true).length,
+        pending: mcpRegistry.filter((m) => m.provenance?.approved === false).length,
+      },
+      skillProvenance: skillDist,
+    });
+  }
+  // v1.2.0 Phase 6 — Trigger a fresh audit from the cockpit (POST).
+  if (path === '/bridge/trust/audit' && req.method === 'POST') {
+    const body = (await readBody(req)) || {};
+    const audit = await auditRepo(repoRoot, { fresh: !!body.fresh, includeCves: !!body.cve });
+    return sendJson(res, 200, audit);
   }
 
   // ── mcp registry (Phase C2) ───────────────────────────────────────────

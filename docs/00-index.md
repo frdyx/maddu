@@ -69,6 +69,9 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 | 31 | [31-operations-log.md](31-operations-log.md) | Derived receipt log at `.maddu/log/operations.ndjson`; `maddu log`; cockpit Operations route. *(v1.1.0)* |
 | 32 | [32-kanban-and-plans.md](32-kanban-and-plans.md) | Plan persistence at `.maddu/plans/<id>/`; `PLAN_*` events; auto-revision via slice-stop `--triggered-by`; Kanban projection. *(v1.1.0)* |
 | 33 | [33-loops-and-coordinator.md](33-loops-and-coordinator.md) | Ralph + plan-loops (`maddu loop`); the runtime-agnostic coordinator primitive (`maddu coordinator`). *(v1.1.0)* |
+| 34 | [34-threat-model.md](34-threat-model.md) | The operator's security manual — what Máddu enforces (9 supply-chain attack scenarios + concrete gates) and what it does not. *(v1.2.0)* |
+| 35 | [35-hermes-adapter.md](35-hermes-adapter.md) | Hermes runtime adapter — install, configure, security posture (rides the v1.2.0 trust rails). *(v1.2.0)* |
+| 36 | [36-trust-audit.md](36-trust-audit.md) | `maddu trust` command surface + cockpit Trust route — supply-chain audit + pinning + Markdown report. *(v1.2.0)* |
 
 Reference docs that are not in the numbered series:
 

@@ -90,6 +90,8 @@ const ROUTES = {
                 keywords: 'skill injection injections inlined recipe slice budget' },
   modelrouting: { title: 'Model Routing', group: 'connect', rank: 7,              render: renderModelRoutingRoute, description: 'Per-runtime + per-lane + per-pipeline modelPreference. Active hints by spawn.',
                 keywords: 'model routing modelPreference runtime lane pipeline stage hint' },
+  trust:      { title: 'Trust',      group: 'verify',   rank: 9,                 render: renderTrust,           description: 'Supply-chain trust posture — pins, last audit, violations, MCP provenance, worker env policy, skill provenance distribution. (v1.2.0)',
+                keywords: 'trust supply chain audit pin freshness cve provenance secrets worker env' },
   teststatus: { title: 'Test Status', group: 'verify',   rank: 8,                 render: renderTestStatusRoute, description: 'Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.',
                 keywords: 'test status stress harness upgrade matrix roundtrip ci recent',
                 // v1.0.3 — framework-source-only. The scripts under
@@ -5310,6 +5312,95 @@ function renderSchedule() {
 
 async function fetchMcp() {
   try { const r = await fetch('/bridge/mcp', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+// v1.2.0 Phase 6 — Trust cockpit route. Pulls /bridge/trust and renders the
+// supply-chain posture: pin list, last audit, violations, secret-scan
+// refusals, worker env policy, MCP provenance distribution, skill
+// provenance distribution.
+function renderTrust() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Trust'));
+  root.appendChild(el('p', {}, ROUTES.trust.description));
+
+  const summaryMount = el('div', {}); summaryMount.appendChild(loading('Loading trust posture…'));
+  root.appendChild(panel('Posture', 'Last audit timestamp, pin count, recent violation count', summaryMount));
+
+  const pinsMount = el('div', {});
+  root.appendChild(panel('Pinned packages', 'From .maddu/config/trust.json — locked versions', pinsMount));
+
+  const violationsMount = el('div', {});
+  root.appendChild(panel('Recent violations (last 20)', 'TRUST_VIOLATION_DETECTED — pin drift or freshness block', violationsMount));
+
+  const secretsMount = el('div', {});
+  root.appendChild(panel('Secret refusals (last 20)', 'SECRET_DETECTED_IN_ARGV — pattern type only, never the raw value', secretsMount));
+
+  const envMount = el('div', {});
+  root.appendChild(panel('Worker env policy', 'Default-deny on AWS_*, OPENAI_*, GITHUB_TOKEN. Recent WORKER_ENV_FILTERED summaries.', envMount));
+
+  const mcpMount = el('div', {});
+  root.appendChild(panel('MCP provenance', 'framework-shipped (hash-verified) vs operator-trusted (approved/pending)', mcpMount));
+
+  const skillsMount = el('div', {});
+  root.appendChild(panel('Skill provenance', 'Distribution of provenance across .maddu/skills/', skillsMount));
+
+  function dimBox(text) { return el('div', { style: 'font-size:12px;color:var(--m-fg-2);' }, text); }
+  function row(k, v) { return el('div', { style: 'font-family:var(--m-font-mono);font-size:12px;padding:2px 0;' }, `${k}: ${v}`); }
+
+  async function refresh() {
+    let data;
+    try { data = await (await fetch('/bridge/trust')).json(); }
+    catch (err) { summaryMount.innerHTML = ''; summaryMount.appendChild(dimBox('error loading: ' + err.message)); return; }
+
+    summaryMount.innerHTML = '';
+    const la = data.lastAudit;
+    summaryMount.appendChild(row('last audit', la ? `${la.ts}  audited=${la.data?.audited ?? '?'}  violations=${la.data?.violations ?? 0}  warns=${la.data?.warns ?? 0}` : '— (run `maddu trust audit`)'));
+    summaryMount.appendChild(row('pin count', data.pinnedPackages.length));
+    summaryMount.appendChild(row('freshness thresholds', `warn=${data.auditThresholds.freshness_warn_days}d  block=${data.auditThresholds.freshness_block_days}d`));
+
+    pinsMount.innerHTML = '';
+    if (data.pinnedPackages.length === 0) pinsMount.appendChild(dimBox('(no pins)'));
+    for (const p of data.pinnedPackages) {
+      pinsMount.appendChild(row(p.name, `@${p.version}${p.sha256 ? ` sha256=${p.sha256.slice(0, 12)}…` : ''}`));
+    }
+
+    violationsMount.innerHTML = '';
+    if (data.violations.length === 0) violationsMount.appendChild(dimBox('(no recent violations)'));
+    for (const v of data.violations) {
+      violationsMount.appendChild(row(v.ts, `${v.data?.kind || 'unknown'}  ${v.data?.pkg || '—'}  ${v.data?.detail || ''}`));
+    }
+
+    secretsMount.innerHTML = '';
+    if (data.secretRefusals.length === 0) secretsMount.appendChild(dimBox('(no secret refusals)'));
+    for (const s of data.secretRefusals) {
+      secretsMount.appendChild(row(s.ts, `${s.data?.tool || '?'}  pattern=${s.data?.pattern_type || s.data?.patternType || '?'}  argv_index=${s.data?.argv_index ?? s.data?.position ?? '?'}  override=${s.data?.override || 'none'}`));
+    }
+
+    envMount.innerHTML = '';
+    envMount.appendChild(row('allow', `${data.workerEnvPolicy.allow_count} entries`));
+    envMount.appendChild(row('deny',  `${data.workerEnvPolicy.deny_count} entries`));
+    envMount.appendChild(row('per-lane overrides', data.workerEnvPolicy.per_lane));
+    envMount.appendChild(el('div', { style: 'margin-top:8px;font-weight:bold;' }, 'Recent WORKER_ENV_FILTERED:'));
+    if (data.envFiltered.length === 0) envMount.appendChild(dimBox('(no spawns yet)'));
+    for (const w of data.envFiltered) {
+      envMount.appendChild(row(w.ts, `workerId=${w.data?.workerId}  allowed=${w.data?.allowedCount}  denied=${w.data?.deniedCount}`));
+    }
+
+    mcpMount.innerHTML = '';
+    mcpMount.appendChild(row('verified events',  data.mcpProvenance.verified));
+    mcpMount.appendChild(row('mismatch events',  data.mcpProvenance.mismatch));
+    mcpMount.appendChild(row('registered',       data.mcpProvenance.registered));
+    mcpMount.appendChild(row('approved',         data.mcpProvenance.approved));
+    mcpMount.appendChild(row('pending approval', data.mcpProvenance.pending));
+
+    skillsMount.innerHTML = '';
+    for (const [k, v] of Object.entries(data.skillProvenance)) {
+      skillsMount.appendChild(row(k, v));
+    }
+  }
+  refresh();
+  setInterval(refresh, 15000);
+  return root;
 }
 
 // v1.1.0 Phase 2 — unified Tools cockpit route.
