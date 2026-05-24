@@ -177,7 +177,12 @@ function parseCsv(v) {
 }
 
 // Load the full skill set from .maddu/skills/, parsing frontmatter
-// triggers/tags. Returns [{ id, title, triggers, tags, body, updated }].
+// triggers/tags. Returns [{ id, title, triggers, tags, body, updated, provenance }].
+//
+// v1.2.0 Phase 4 — skills without a `provenance` field are REFUSED for
+// auto-injection (emits SKILL_INJECTION_REFUSED via the caller). Pre-v1.2
+// skills are grandfathered with provenance: 'pre-v1.2-grandfathered' on
+// first read so existing installs keep working.
 async function loadSkillsForInjection(repoRoot) {
   const skillsDir = path.join(repoRoot, '.maddu', 'skills');
   let entries;
@@ -188,13 +193,21 @@ async function loadSkillsForInjection(repoRoot) {
     try {
       const text = await fs.readFile(path.join(skillsDir, ent.name), 'utf8');
       const parsed = parseSkillFrontmatter(text);
+      const provenance = parsed.fm.provenance || 'pre-v1.2-grandfathered';
       out.push({
         id: parsed.fm.id || ent.name.replace(/\.md$/, ''),
         title: parsed.fm.title || null,
-        triggers: Array.isArray(parsed.fm.triggers) ? parsed.fm.triggers : [],
-        tags: Array.isArray(parsed.fm.tags) ? parsed.fm.tags : [],
+        triggers: Array.isArray(parsed.fm.triggers) ? parsed.fm.triggers : (typeof parsed.fm.triggers === 'string' ? parsed.fm.triggers.split(',').map(t => t.trim()).filter(Boolean) : []),
+        tags: Array.isArray(parsed.fm.tags) ? parsed.fm.tags : (typeof parsed.fm.tags === 'string' ? parsed.fm.tags.split(',').map(t => t.trim()).filter(Boolean) : []),
         body: parsed.body,
         updated: parsed.fm.updated || null,
+        provenance,
+        // Operator-imported skills are 'pending-trust' until `maddu skill trust <id>`.
+        trusted: provenance === 'pre-v1.2-grandfathered'
+              || /^framework-starter-pack/.test(provenance)
+              || provenance === 'operator'
+              || /^operator-trusted/.test(provenance)
+              || (provenance === 'imported' && parsed.fm.trusted === true),
       });
     } catch {}
   }

@@ -2,6 +2,7 @@
 id: error-recovery
 tags: error, recovery, refusal, halt
 triggers: error, failed, refused, halt
+provenance: framework-starter-pack-v1.2.0
 ---
 
 # Error recovery

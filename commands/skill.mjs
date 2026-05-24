@@ -192,6 +192,73 @@ export default async function skill(argv) {
     return;
   }
 
+  // v1.2.0 Phase 4 — operator-trusted skill import.
+  //   maddu skill import <path> --trust
+  //   maddu skill trust  <id>
+  if (sub === 'import') {
+    const src = rest[0];
+    if (!src) { console.error('usage: maddu skill import <path> --trust'); process.exit(2); }
+    const { flags } = parseFlags(rest.slice(1));
+    if (!flags.trust) {
+      console.error('refused: skill import requires --trust to confirm the operator has reviewed the source.');
+      console.error('  Importing arbitrary skill files is a trust decision (rule #6 spirit).');
+      console.error('  Re-run with --trust after you have read the file.');
+      process.exit(2);
+    }
+    const { readFile, writeFile, mkdir } = await import('node:fs/promises');
+    const { createHash } = await import('node:crypto');
+    const { join, basename, resolve } = await import('node:path');
+    let body;
+    try { body = await readFile(resolve(src), 'utf8'); }
+    catch (err) { console.error(`refused: cannot read ${src}: ${err.message}`); process.exit(3); }
+    const sha = createHash('sha256').update(body).digest('hex');
+    // Inject provenance frontmatter if absent.
+    let final = body;
+    if (final.startsWith('---')) {
+      const end = final.indexOf('\n---', 4);
+      if (end > 0 && !/\nprovenance\s*:/.test(final.slice(0, end + 4))) {
+        const head = final.slice(0, end);
+        final = head + `\nprovenance: imported\nsource_url: ${typeof flags['source-url'] === 'string' ? flags['source-url'] : src}\nsha256: ${sha}\ntrusted: false` + final.slice(end);
+      }
+    } else {
+      final = `---\nprovenance: imported\nsource_url: ${typeof flags['source-url'] === 'string' ? flags['source-url'] : src}\nsha256: ${sha}\ntrusted: false\n---\n\n` + final;
+    }
+    const dest = join(repoRoot, '.maddu', 'skills', basename(src).replace(/\.md$/i, '') + '.md');
+    await mkdir(join(repoRoot, '.maddu', 'skills'), { recursive: true });
+    await writeFile(dest, final);
+    await spine.append(repoRoot, {
+      type: 'SKILL_IMPORTED',
+      data: { source: src, sha256: sha, trusted: false, dest: dest.replace(repoRoot, '').replace(/^[\\\/]/, '') },
+    });
+    console.log(`${ANSI.pass}imported${ANSI.reset}  ${basename(dest)}  ${ANSI.dim}sha256=${sha.slice(0, 12)}…${ANSI.reset}  ${ANSI.warn}(untrusted — run \`maddu skill trust ${basename(dest, '.md')}\`)${ANSI.reset}`);
+    return;
+  }
+  if (sub === 'trust') {
+    const id = rest[0];
+    if (!id) { console.error('usage: maddu skill trust <id>'); process.exit(2); }
+    const { readFile, writeFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const p = join(repoRoot, '.maddu', 'skills', `${id}.md`);
+    let body;
+    try { body = await readFile(p, 'utf8'); }
+    catch { console.error(`skill ${id} not found`); process.exit(3); }
+    if (body.startsWith('---')) {
+      const end = body.indexOf('\n---', 4);
+      if (end > 0) {
+        let head = body.slice(0, end);
+        if (/\ntrusted\s*:/.test(head)) head = head.replace(/\ntrusted\s*:\s*(false|true)/, '\ntrusted: true');
+        else head += '\ntrusted: true';
+        body = head + body.slice(end);
+        await writeFile(p, body);
+        await spine.append(repoRoot, { type: 'SKILL_TRUSTED', data: { id } });
+        console.log(`${ANSI.pass}trusted${ANSI.reset}  ${id}`);
+        return;
+      }
+    }
+    console.error(`refused: ${id} has no frontmatter to update`);
+    process.exit(4);
+  }
+
   console.error(`maddu skill: unknown subcommand "${sub}"`);
   process.exit(2);
 }

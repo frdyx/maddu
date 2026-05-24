@@ -2,6 +2,7 @@
 id: npm-install-clean
 tags: npm, install, dependencies, rule-4
 triggers: npm install, dependency, add package
+provenance: framework-starter-pack-v1.2.0
 ---
 
 # npm install — clean form

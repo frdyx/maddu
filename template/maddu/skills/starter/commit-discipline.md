@@ -2,6 +2,7 @@
 id: commit-discipline
 tags: git, commit, audit
 triggers: commit, message, git commit
+provenance: framework-starter-pack-v1.2.0
 ---
 
 # Commit discipline
