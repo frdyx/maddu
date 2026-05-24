@@ -901,7 +901,7 @@ async function handleBridge(req, res, url, ctx) {
       const entries = await readdir(dir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isFile() || !e.name.endsWith('.md')) continue;
-        const body = await readFile(join(dir, e.name), 'utf8');
+        const body = (await readFile(join(dir, e.name), 'utf8')).replace(/\r\n/g, '\n');
         const m = body.match(/^---\n([\s\S]*?)\n---/);
         if (!m) { skillDist.missing++; continue; }
         const head = m[1];

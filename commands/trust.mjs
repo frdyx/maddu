@@ -212,13 +212,106 @@ async function cmdList(repoRoot, lib) {
   console.log(JSON.stringify({ ...cfg, __source: undefined }, null, 2));
 }
 
-async function cmdReport(repoRoot, flags, lib) {
+async function cmdReport(repoRoot, flags, lib, spineLib) {
+  // v1.2.0 Phase 6 — security-team-shareable report. Gathers governance,
+  // pins, recent violations/secret/env events, MCP inventory, worker-env
+  // policy, skill provenance distribution, and a doctor snapshot.
   const audit = await lib.auditRepo(repoRoot, { fresh: !!flags.fresh, includeCves: !!flags.cve });
   if (!audit.ok) {
     console.error(`report refused: ${audit.reason}`);
     process.exit(2);
   }
-  const md = lib.renderReportMarkdown(repoRoot, audit);
+
+  const extras = {};
+
+  // Trust pins (from trust.json).
+  try {
+    const cfg = await lib.readTrustConfig(repoRoot);
+    extras.pinnedPackages = cfg.pinnedPackages || [];
+  } catch { extras.pinnedPackages = []; }
+
+  // Governance (layout-aware import).
+  try {
+    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'governance.mjs');
+    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'governance.mjs');
+    const g = await import(pathToFileURL(modPath).href);
+    const cfg = await g.readGovernance(repoRoot);
+    extras.governance = { mode: cfg.mode, overrides: cfg.overrides || {} };
+  } catch {}
+
+  // Worker-env policy.
+  try {
+    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'worker-env.mjs');
+    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'worker-env.mjs');
+    const we = await import(pathToFileURL(modPath).href);
+    extras.workerEnvPolicy = await we.readWorkerEnvConfig(repoRoot);
+  } catch {}
+
+  // Recent spine events: violations, secret refusals, env-filter.
+  try {
+    const allEvents = await spineLib.spine.readAll(repoRoot);
+    extras.recentViolations = allEvents
+      .filter((e) => e.type === 'TRUST_VIOLATION_DETECTED')
+      .slice(-20).reverse();
+    extras.recentSecretRefusals = allEvents
+      .filter((e) => e.type === 'SECRET_DETECTED_IN_ARGV')
+      .slice(-20).reverse();
+    extras.recentEnvFiltered = allEvents
+      .filter((e) => e.type === 'WORKER_ENV_FILTERED')
+      .slice(-20).reverse();
+  } catch {}
+
+  // MCP inventory.
+  try {
+    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'mcp.mjs');
+    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'mcp.mjs');
+    const m = await import(pathToFileURL(modPath).href);
+    extras.mcpInventory = await m.listMcp(repoRoot);
+  } catch { extras.mcpInventory = []; }
+
+  // Skill provenance distribution (filesystem scan of .maddu/skills/).
+  try {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const dist = { 'framework-starter-pack': 0, operator: 0, imported: 0, 'imported-trusted': 0, grandfathered: 0, missing: 0 };
+    const dir = join(repoRoot, '.maddu', 'skills');
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith('.md')) continue;
+      const body = (await readFile(join(dir, e.name), 'utf8')).replace(/\r\n/g, '\n');
+      const m = body.match(/^---\n([\s\S]*?)\n---/);
+      if (!m) { dist.missing++; continue; }
+      const head = m[1];
+      if (/provenance:\s*framework-starter-pack/.test(head)) dist['framework-starter-pack']++;
+      else if (/provenance:\s*operator/.test(head)) dist.operator++;
+      else if (/provenance:\s*imported/.test(head)) {
+        if (/trusted:\s*true/.test(head)) dist['imported-trusted']++;
+        else dist.imported++;
+      }
+      else if (/provenance:\s*pre-v1\.2-grandfathered/.test(head)) dist.grandfathered++;
+      else if (!/provenance:/.test(head)) dist.missing++;
+    }
+    extras.skillProvenance = dist;
+  } catch { extras.skillProvenance = null; }
+
+  // Doctor snapshot. Layout-aware.
+  try {
+    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'gates.mjs');
+    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'gates.mjs');
+    const gates = await import(pathToFileURL(modPath).href);
+    const result = await gates.runGates(repoRoot, { emitEvents: false });
+    const failed = (result.runs || []).filter((r) => r.status === 'fail').map((r) => r.gateId);
+    extras.doctor = {
+      total: result.summary?.total ?? (result.runs?.length || 0),
+      pass: result.summary?.ok ?? 0,
+      warn: result.summary?.warn ?? 0,
+      fail: result.summary?.fail ?? 0,
+      failedGates: failed,
+    };
+  } catch (err) {
+    extras.doctor = { total: 0, pass: 0, warn: 0, fail: 0, error: err.message };
+  }
+
+  const md = lib.renderReportMarkdown(repoRoot, audit, extras);
   const dateTag = new Date().toISOString().slice(0, 10);
   const outDir = join(repoRoot, '.maddu', 'state');
   await mkdir(outDir, { recursive: true });
@@ -263,7 +356,7 @@ export default async function trustCmd(argv) {
     case 'unpin':   return await cmdUnpin(repoRoot, args, lib, spineLib);
     case 'verify':  return await cmdVerify(repoRoot, lib, spineLib);
     case 'list':    return await cmdList(repoRoot, lib);
-    case 'report':  return await cmdReport(repoRoot, flags, lib);
+    case 'report':  return await cmdReport(repoRoot, flags, lib, spineLib);
     case 'env-allow': return await cmdEnvAllow(repoRoot, args, flags, spineLib);
     default:
       console.error(`trust: unknown verb "${verb}". Try \`maddu trust --help\`.`);

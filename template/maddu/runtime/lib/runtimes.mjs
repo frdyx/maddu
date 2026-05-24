@@ -31,6 +31,11 @@ const BUILTIN_WRAPPERS = {
   'claude':   join(__dirname, 'runtimes', 'claude-wrapper.mjs'),
   'codex':    join(__dirname, 'runtimes', 'codex-wrapper.mjs'),
   'gemini':   join(__dirname, 'runtimes', 'gemini-wrapper.mjs'),
+  // v1.2.0 Phase 7 — Hermes Agent (Nous Research). First new runtime added
+  // under the v1.2.0 trust rails — rides through the worker-env allowlist,
+  // secret-scan argv, tool allowlist, and strict-mode approval gating with
+  // zero special-case code in the spawn path.
+  'hermes':   join(__dirname, 'runtimes', 'hermes-wrapper.mjs'),
 };
 
 function wrapperPathFor(descriptor) {
