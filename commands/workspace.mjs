@@ -33,6 +33,7 @@ function printHelp() {
     'Usage: maddu workspace <add|list|remove|activate|show> [args]',
     '',
     '  add <path> [--id <slug>] [--label "<label>"]',
+    '  add --path <path> [--id <slug>] [--label "<label>"]   # v1.2.1: flag form',
     '  list',
     '  show',
     '  remove <id>',
@@ -94,8 +95,21 @@ export default async function workspace(argv) {
 
   if (sub === 'add') {
     const { flags, positional } = parseFlags(rest);
-    const path = positional[0];
-    if (!path) { console.error('maddu workspace add <path> [--id <slug>] [--label "<label>"]'); process.exit(2); }
+    // v1.2.1 F5 — accept both `add <path>` (positional, legacy) and
+    // `add --path <path>` (flag form, aligns with `plan complete --plan`,
+    // etc.). If both are supplied we refuse rather than silently prefer one.
+    const flagPath = typeof flags.path === 'string' ? flags.path : null;
+    const posPath = positional[0] || null;
+    if (flagPath && posPath) {
+      console.error('maddu workspace add: pass <path> OR --path <path>, not both.');
+      process.exit(2);
+    }
+    const path = flagPath || posPath;
+    if (!path) {
+      console.error('maddu workspace add <path> [--id <slug>] [--label "<label>"]');
+      console.error('  or: maddu workspace add --path <path> [--id <slug>] [--label "<label>"]');
+      process.exit(2);
+    }
     const abs = resolve(process.cwd(), path);
     try {
       const w = await ws.addWorkspace({

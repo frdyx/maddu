@@ -149,6 +149,9 @@ const els = {
   uptime: document.getElementById('status-uptime'),
   host: document.getElementById('status-host'),
   port: document.getElementById('status-port'),
+  // v1.2.1 F4 — rail-foot workspace + repoRoot rows.
+  workspace: document.getElementById('status-workspace'),
+  repoRoot: document.getElementById('status-repo-root'),
   approvalsBadge: document.getElementById('approvals-badge'),
   mailboxBadge: document.getElementById('mailbox-badge'),
   tasksBadge: document.getElementById('tasks-badge'),
@@ -232,11 +235,30 @@ async function fetchBridgeStatus() {
   updateChrome();
 }
 
+// v1.2.1 F4 — truncate a long path from the LEFT so the basename always
+// shows. Operator cue: an ellipsis on the left means "more path above this".
+function truncatePathFromLeft(p, max = 40) {
+  if (!p || typeof p !== 'string') return '—';
+  if (p.length <= max) return p;
+  return '…' + p.slice(-(max - 1));
+}
+
 function updateChrome() {
   if (bridgeOk && bridgeStatus) {
     els.bridge.innerHTML = '<span class="signal live"></span>online';
     els.version.textContent = bridgeStatus.version || 'unknown';
     els.uptime.textContent = formatUptime(bridgeStatus.uptimeMs);
+    // v1.2.1 F4 — surface workspace label + repoRoot so the operator can
+    // tell tabs apart when browsing multiple cockpits across repos.
+    if (els.workspace) {
+      els.workspace.textContent = bridgeStatus.workspaceId || '—';
+      els.workspace.title = bridgeStatus.workspaceId || '';
+    }
+    if (els.repoRoot) {
+      const full = bridgeStatus.repoRoot || '';
+      els.repoRoot.textContent = truncatePathFromLeft(full, 40);
+      els.repoRoot.title = full; // hover reveals the full path.
+    }
     // v1.1.0 Phase 3 — governance mode badge (poll once when chrome updates).
     if (els.governance && !els.governance.dataset.fetched) {
       els.governance.dataset.fetched = '1';
@@ -285,6 +307,8 @@ function updateChrome() {
     els.bridge.innerHTML = '<span class="signal"></span>offline';
     els.version.textContent = '—';
     els.uptime.textContent = '—';
+    if (els.workspace) { els.workspace.textContent = '—'; els.workspace.title = ''; }
+    if (els.repoRoot)  { els.repoRoot.textContent  = '—'; els.repoRoot.title  = ''; }
     if (els.governance) { els.governance.textContent = '—'; delete els.governance.dataset.fetched; }
     if (els.approvalsBadge) els.approvalsBadge.hidden = true;
     if (els.mailboxBadge)   els.mailboxBadge.hidden = true;
