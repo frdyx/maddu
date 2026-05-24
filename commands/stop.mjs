@@ -78,8 +78,10 @@ export default async function stopCmd(args = []) {
     return;
   }
 
-  // Path 2: no PID file or pid dead. Probe the port.
-  const probe = await probeBridge(4177);
+  // Path 2: no PID file or pid dead. Probe the port (honor pid-file's port
+  // if it survived past pid loss; defaults to 4177).
+  const probePort = (pidInfo && pidInfo.port) || 4177;
+  const probe = await probeBridge(probePort);
   if (!probe) {
     // Stale PID file? Clean it up so the next start is clean.
     if (pidInfo) {
@@ -92,7 +94,7 @@ export default async function stopCmd(args = []) {
   }
 
   // Bridge responded but we don't know its pid. Inform operator.
-  console.error('maddu stop: bridge is up on 127.0.0.1:4177 but no PID file was found.');
+  console.error(`maddu stop: bridge is up on 127.0.0.1:${probePort} but no PID file was found.`);
   console.error('  The bridge was likely started by an older version (pre-v1.1.1) or by a');
   console.error('  process not owned by this shell. Find and kill it manually:');
   if (process.platform === 'win32') {

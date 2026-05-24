@@ -26,6 +26,7 @@ import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime, d
 import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp, testMcp, testAll as mcpTestAll, mcpHealth, visibleFor as mcpVisibleFor } from './lib/mcp.mjs';
 import { readTrustConfig, auditRepo, renderReportMarkdown } from './lib/trust.mjs';
 import { readWorkerEnvConfig } from './lib/worker-env.mjs';
+import { registerBridge, unregisterBridge } from './lib/bridges-registry.mjs';
 import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
 import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy } from './lib/global.mjs';
 import { maybeAutoDecide } from './lib/approvals.mjs';
@@ -2444,6 +2445,66 @@ function pickPort() {
   return DEFAULT_PORT;
 }
 
+// v1.2.1 F1 — probe a port to see if a Máddu bridge is serving it. Returns
+// { isMaddu: true, repoRoot } if /bridge/status returns the canonical shape,
+// or { isMaddu: false } if the socket responded with anything else / refused.
+async function probePortIsMaddu(host, port) {
+  const http = await import('node:http');
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: host === '0.0.0.0' ? '127.0.0.1' : host,
+      port, method: 'GET', path: '/bridge/status', timeout: 1500,
+    }, (res) => {
+      let buf = '';
+      res.on('data', (c) => buf += c);
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(buf);
+          if (j && j.ok === true && j.bridge === 'maddu') {
+            resolve({ isMaddu: true, repoRoot: j.repoRoot || null });
+            return;
+          }
+        } catch {}
+        resolve({ isMaddu: false });
+      });
+    });
+    req.on('error', () => resolve({ isMaddu: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ isMaddu: false }); });
+    req.end();
+  });
+}
+
+// Best-effort PID lookup for a TCP port. Uses platform-native tools (netstat
+// on Windows, lsof on POSIX). Returns the pid as a number, or null on miss.
+async function findPidOnPort(port) {
+  const { spawn } = await import('node:child_process');
+  const isWin = process.platform === 'win32';
+  const cmd = isWin ? 'netstat' : 'lsof';
+  const args = isWin ? ['-ano'] : ['-ti', `tcp:${port}`];
+  return new Promise((resolve) => {
+    let buf = '';
+    try {
+      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      child.stdout.on('data', (c) => buf += c);
+      child.on('error', () => resolve(null));
+      child.on('close', () => {
+        if (isWin) {
+          // netstat lines look like: "  TCP    127.0.0.1:4177  ... LISTENING  12345"
+          const re = new RegExp(`\\b127\\.0\\.0\\.1:${port}\\b.*LISTENING\\s+(\\d+)`);
+          for (const line of buf.split(/\r?\n/)) {
+            const m = line.match(re);
+            if (m) { resolve(parseInt(m[1], 10)); return; }
+          }
+          resolve(null);
+        } else {
+          const first = buf.split(/\s+/).map((s) => parseInt(s, 10)).find((n) => Number.isFinite(n));
+          resolve(first || null);
+        }
+      });
+    } catch { resolve(null); }
+  });
+}
+
 // Build the { id → repoRoot } map from the registry. If the registry is
 // missing or empty, synthesize a single workspace named `default` from the
 // legacy cwd walk-up — preserves single-repo behavior for existing installs.
@@ -2490,13 +2551,42 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     }
   });
 
-  await new Promise((res, rej) => {
-    server.once('error', rej);
-    server.listen(finalPort, host, res);
-  });
+  // v1.2.1 F1 — wrap listen() with actionable EADDRINUSE detection. If the
+  // port is already held, probe /bridge/status to distinguish a foreign
+  // Máddu bridge (helpful: tell the operator how to switch) from a non-
+  // Máddu process (helpful: tell the operator how to find/free it).
+  try {
+    await new Promise((res, rej) => {
+      server.once('error', rej);
+      server.listen(finalPort, host, res);
+    });
+  } catch (err) {
+    if (err && err.code === 'EADDRINUSE') {
+      const probe = await probePortIsMaddu(host, finalPort);
+      if (probe && probe.isMaddu) {
+        const where = probe.repoRoot || '(unknown repoRoot)';
+        console.error(`maddu start: refused — port ${finalPort} already in use by a Máddu bridge.`);
+        console.error(`  Current bridge serving: ${where}`);
+        console.error(`  To switch workspaces: maddu workspace activate <id> (then refresh cockpit)`);
+        console.error(`  To restart fresh: maddu stop && maddu start`);
+      } else {
+        const pid = await findPidOnPort(finalPort);
+        console.error(`maddu start: refused — port ${finalPort} held by a non-Máddu process.`);
+        if (pid) console.error(`  PID: ${pid}`);
+        console.error(`  Free the port and retry, or use --port <n> to bind elsewhere.`);
+      }
+      process.exit(1);
+    }
+    throw err;
+  }
 
   const firstRoot = ctx.workspaces.get(ctx.active);
   const version = await readVersion(firstRoot);
+  // Write our entry into the bridges registry so `maddu bridges list` can
+  // see us. We unregister on graceful shutdown below.
+  try {
+    await registerBridge({ pid: process.pid, port: finalPort, repoRoot: firstRoot, version });
+  } catch (err) { console.error('bridges-registry write failed:', err.message); }
   console.log(`Máddu bridge v${version} listening on http://${host}:${finalPort}`);
   console.log(`  workspaces: ${ctx.workspaces.size} mounted (${ctx.legacy ? 'legacy single-repo mode' : `registry: ${registryPath()}`})`);
   for (const [id, root] of ctx.workspaces) {
@@ -2563,6 +2653,8 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     console.log('\nShutting down…');
     telegramStopping = true;
     clearInterval(scheduleTimer);
+    // v1.2.1 F2 — clean up our entry in the bridges registry on graceful exit.
+    unregisterBridge(process.pid).catch(() => {});
     server.close(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);

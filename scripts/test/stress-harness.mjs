@@ -439,6 +439,84 @@ async function ralphAlwaysFailHalts() {
   return { name, ok: allOk, duration };
 }
 
+// v1.2.1 F1 — bridge port-collision detection. Boots a real bridge on a
+// pinned non-default port, then issues a second `maddu start` against the
+// same port and asserts the second exits non-zero with the actionable
+// "refused — port held by a Máddu bridge" copy. Locks the v1.2.1 burn-in
+// contract: never crash with bare EADDRINUSE.
+async function portCollisionRefusal() {
+  const name = 'port-collision-refusal';
+  const start = Date.now();
+  const tmpA = await newTmp(name + '-a');
+  const tmpB = await newTmp(name + '-b');
+  let allOk = true;
+  // Pick an unlikely-collision port; honor stress port from env if provided.
+  const PORT = parseInt(process.env.MADDU_STRESS_PORT || '4179', 10);
+  let firstChild = null;
+  try {
+    // Set up a minimal installed layout under tmpA so `maddu start` finds
+    // its own server.js (we copy the framework template path via env).
+    // Faster: invoke the framework bin/maddu.mjs directly which falls back
+    // to the dev-mode server when no maddu/runtime/server.js exists locally.
+    firstChild = spawn(process.execPath, [BIN, 'start', '--port', String(PORT), '--force-active'], {
+      cwd: tmpA,
+      env: { ...process.env, MADDU_PORT: String(PORT) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let firstStdout = '';
+    firstChild.stdout.on('data', (c) => firstStdout += c);
+    firstChild.stderr.on('data', (c) => firstStdout += c);
+    // Wait until the bridge is listening (poll /bridge/status).
+    let listening = false;
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const probe = await new Promise(async (resolve) => {
+        const http = await import('node:http');
+        const req = http.request({ host: '127.0.0.1', port: PORT, path: '/bridge/status', timeout: 500 },
+          (res) => { res.on('data', () => {}); res.on('end', () => resolve(res.statusCode === 200)); });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+        req.end();
+      });
+      if (probe) { listening = true; break; }
+    }
+    allOk = ok(name, 'first bridge bound to port ' + PORT, listening) && allOk;
+
+    // Now run a second `maddu start` against the same port from tmpB. Expect
+    // non-zero exit + actionable copy.
+    const second = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [BIN, 'start', '--port', String(PORT), '--force-active'], {
+        cwd: tmpB,
+        env: { ...process.env, MADDU_PORT: String(PORT) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let buf = '';
+      child.stdout.on('data', (c) => buf += c);
+      child.stderr.on('data', (c) => buf += c);
+      // Give it up to 6s to exit. The collision-refusal path is synchronous
+      // after the listen() error fires; this is plenty of headroom.
+      const killTimer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 6000);
+      child.on('close', (code) => { clearTimeout(killTimer); resolve({ code, out: buf }); });
+    });
+    allOk = ok(name, 'second start refused (non-zero exit)', second.code !== 0, `exit=${second.code}`) && allOk;
+    allOk = ok(name, 'refusal copy mentions port + Máddu bridge', /port \d+ already in use by a Máddu bridge/.test(second.out), `out=${second.out.slice(0, 200)}`) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception during synthesis', false, err.message);
+  } finally {
+    if (firstChild && !firstChild.killed) {
+      try { firstChild.kill('SIGTERM'); } catch {}
+      // Give it 500ms; SIGKILL if still alive.
+      await new Promise((r) => setTimeout(r, 500));
+      try { firstChild.kill('SIGKILL'); } catch {}
+    }
+    await rm(tmpA, { recursive: true, force: true });
+    await rm(tmpB, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 // v1.1.1 — Windows .cmd shim path for npm-family runners. Asserts that
 // spawnSafe routes npm/pnpm/yarn/npx through `shell:true` on Win32 so
 // `.cmd` shims execute under Node 22+ without `spawn EINVAL`.
@@ -538,6 +616,7 @@ const SCENARIOS = {
   'tool-refusals-coherent':   toolRefusalsCoherent,
   'ralph-always-fail-halts':  ralphAlwaysFailHalts,
   'windows-spawn-npm-shim':   windowsSpawnNpmShim,
+  'port-collision-refusal':   portCollisionRefusal,
 };
 
 const overallStart = Date.now();
