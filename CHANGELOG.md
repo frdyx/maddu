@@ -11,6 +11,39 @@ narrative summary.
 
 ---
 
+## [v1.2.2] · 2026-05-24 · Cockpit polish — path popover + scope-pill active state
+
+Two small cockpit UX fixes from the v1.2.1 burn-in.
+
+### Path row — compact display + click-to-copy
+
+The v1.2.1 rail-foot Path row (F4) showed a 40-char left-truncated full path that still overflowed the rail at common widths and offered no easy way to grab the value. v1.2.2:
+
+- Compact display form: `<drive>/…/<basename>` (e.g. `C:/…/snyggare`). Width-bounded.
+- Native browser tooltip (`title` attr) reveals the full path on hover.
+- **Click the Path row to copy the full path to the clipboard** — toast confirms (`Path copied`). Keyboard activation (Enter / Space) works too; row is `role="button"` + `tabIndex=0` with an `aria-label`.
+- CSS adds `max-width: 100%` + `overflow: hidden` + `text-overflow: ellipsis` to `.rail-foot-value` so any rail-foot value (workspace id included) no longer overflows the rail at narrow widths.
+
+Fallback for non-Clipboard-API contexts uses a hidden textarea + `document.execCommand('copy')`.
+
+### Scope pill — visible active state on click
+
+The `This workspace | All workspaces` toggle (`.scope-pill`) had correct CSS for `.scope-btn.active` but the click handler only updated underlying scope state + triggered a content refresh. The pill UI itself never re-applied the `active` class to the clicked button, so the visual indicator was stuck on the first-render state.
+
+Fix: click handler walks the pill's buttons, toggles `.active` to the clicked one, and updates `aria-pressed` for screen readers. No CSS change — the existing styling now actually triggers.
+
+### Cumulative effect
+
+After v1.2.1 (operator UX around multi-bridge / multi-workspace state) + v1.2.2 (cockpit polish), the operator-facing affordances around workspace identity are now consistent:
+
+- Rail-foot shows current workspace label + compact path; click the path to copy.
+- Scope pill visually reflects which scope is active.
+- Cockpit chrome unambiguous across multiple tabs / repos.
+
+No behavior change beyond the cockpit. No new doctor gates, no spine event additions, no API change. Pure rendering + UX fixes.
+
+---
+
 ## [v1.2.1] · 2026-05-24 · Multi-bridge / multi-workspace polish
 
 Patch release closing the five operator-UX findings from the v1.2.0 burn-in
