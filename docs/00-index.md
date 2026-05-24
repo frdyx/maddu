@@ -4,7 +4,7 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v1.1.0** ([changelog](../CHANGELOG.md)) — Autonomy + Planning + Tool Gateway. Five audited default tools (`maddu git/test/format/lint/install`), 5 curated MCP server templates, three workspace governance tiers, a derived operations log, plan persistence with auto-revision, ralph + plan-loop primitives, and a runtime-agnostic coordinator that walks multi-phase plans without depending on any single agent CLI's affordances. Doctor moves to 45 PASS in a fresh consumer install. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v1.1.2** ([changelog](../CHANGELOG.md)) — Autonomy + Planning + Tool Gateway, polished. Five audited default tools (`maddu git/test/format/lint/install`) with cross-stack detectors (npm-family + Python via `pyproject.toml`), 5 curated MCP server templates, three workspace governance tiers, a derived operations log, plan persistence with auto-revision, ralph + plan-loop primitives, and a runtime-agnostic coordinator that walks multi-phase plans without depending on any single agent CLI's affordances. Doctor moves to 47 PASS in a fresh consumer install. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
 
 ## Zero learning curve (v0.18)
 

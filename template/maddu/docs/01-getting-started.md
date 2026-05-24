@@ -157,6 +157,41 @@ $ ./maddu/run lane release --lane harness --session ses_2026...01
 $ ./maddu/run session close --handoff "Done with hello-world"     # uses cached session id
 ```
 
+## Going autonomous (v1.1.x flow)
+
+Once you've done one manual slice, the v1.1.x autonomy primitives let you drive multi-phase work without typing the lifecycle CLI by hand. Three escalation levels, each leans more on the framework:
+
+**Single slice, confident:**
+
+```bash
+$ maddu blast "add a /healthz endpoint"
+# or inside Claude Code / Codex:
+/maddu-blast add a /healthz endpoint
+```
+
+`blast` chains register → suggest lane → claim → run → slice-stop. Picks the first available lane if `suggest` returns empty. Doesn't ask permission.
+
+**Persistent until done:**
+
+```bash
+$ maddu loop ralph "get all tests passing"
+```
+
+Ralph loop iterates: claim → work → verify (`maddu test`) → if green, complete; if red, next iteration. Caps at the governance tier's max-iter (3/5/10) and halts on stuck-detection if two consecutive failures produce identical signatures. Every iteration is a real slice with its own slice-stop in the spine.
+
+**Multi-phase plan, autonomous:**
+
+```bash
+$ maddu plan new "Build URL shortener" --phases "scaffold,storage,api,frontend,tests,docs"
+pln_2026...01
+
+$ maddu coordinator pln_2026...01
+```
+
+The coordinator walks each phase, spawning one worker per phase via the configured runtime (Claude Code, Codex, or future). On every `SLICE_STOP --triggered-by plan:<id>` the plan auto-revises with the new state, learnings, and follow-ups discovered along the way. Plan state lives at `.maddu/plans/<id>/{plan.md,state.json,revisions/}` — rebuildable from spine, replayable forever.
+
+For the cockpit view of autonomous work in flight, see the `plans` and `loops` routes covered in [04-cockpit-tour.md](04-cockpit-tour.md). For the full plan + coordinator reference, see [32-kanban-and-plans.md](32-kanban-and-plans.md) and [33-loops-and-coordinator.md](33-loops-and-coordinator.md).
+
 ## Where to go next
 
 - [02-concepts.md](02-concepts.md) — the mental model in depth.
@@ -164,4 +199,6 @@ $ ./maddu/run session close --handoff "Done with hello-world"     # uses cached 
 - [08-slice-stop-ritual.md](08-slice-stop-ritual.md) — slice-stop payload reference.
 - [20-governance.md](20-governance.md) *(v0.16+)* — orientation digest (`maddu brief`), authoring gates, tracked sources, slice scope-lock, trigger discipline, post-stop review lane.
 - [21-agent-onboarding.md](21-agent-onboarding.md) *(v0.17+)* — `maddu register`, `MADDU.md`/`CLAUDE.md`/`AGENTS.md` at repo root, marker discipline, tree provenance for fan-out, stale-session janitor, agent-context endpoint.
+- [22-slash-commands.md](22-slash-commands.md) + [23-natural-language-routing.md](23-natural-language-routing.md) *(v0.18+)* — the no-learning-curve UX shell.
+- [32-kanban-and-plans.md](32-kanban-and-plans.md) + [33-loops-and-coordinator.md](33-loops-and-coordinator.md) *(v1.1+)* — plans, Kanban, ralph loops, coordinator primitive.
 - [13-troubleshooting.md](13-troubleshooting.md) — if anything misbehaved.
