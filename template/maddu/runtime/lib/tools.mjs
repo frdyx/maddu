@@ -117,6 +117,29 @@ const DANGEROUS = {
         detail: 'install refused: at least one package name required (rule #4 guard)',
       };
     }
+    // v1.1.1 C4: trim+validate every package name BEFORE spawn. Burn-in #4
+    // showed `maddu install ""` crashing with spawn EINVAL because the
+    // empty string passed the count-check but blew up downstream. Allow
+    // npm-spec forms: `name`, `@scope/name`, `name@version`,
+    // `@scope/name@version`, plus a `file:`, `github:`, `git+`, tarball URL
+    // escape hatch for explicit installs.
+    const NPM_NAME = /^@?[a-z0-9_.~-]+(\/[a-z0-9_.~-]+)?(@[a-zA-Z0-9_.+~^*<>=:-]+)?$/i;
+    const ALT_SPEC = /^(file:|github:|gitlab:|bitbucket:|git\+|https?:|[a-z0-9_.~-]+@[a-z0-9_.~-]+:)/i;
+    for (const raw of pkgs) {
+      const pkg = typeof raw === 'string' ? raw.trim() : '';
+      if (pkg.length === 0) {
+        return {
+          reason: 'dangerous-form',
+          detail: 'install refused: empty package name in argv (after trim). Pass a real package spec, not "".',
+        };
+      }
+      if (!NPM_NAME.test(pkg) && !ALT_SPEC.test(pkg)) {
+        return {
+          reason: 'dangerous-form',
+          detail: `install refused: "${pkg}" is not a valid package spec (npm name, scoped name, or file:/git+/http: URL).`,
+        };
+      }
+    }
     return null;
   },
   test:   () => null,
