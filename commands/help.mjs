@@ -83,6 +83,16 @@ const ROSTER = [
       { name: '/maddu-install <pkgs…>', line: 'Audited dep install (npm/pnpm/yarn). Refuses empty list.',    under: 'install' },
     ],
   },
+  {
+    topic: 'trust',
+    title: 'Supply-chain trust (v1.2.0)',
+    items: [
+      { name: '/maddu-trust',                        line: 'Audit direct deps for freshness, pins, CVEs.',                under: 'trust audit' },
+      { name: 'maddu trust pin <pkg> --version <v>', line: 'Lock a package version in .maddu/config/trust.json.',         under: 'trust pin' },
+      { name: 'maddu trust verify',                  line: 'Every pin matches package.json + installed.',                 under: 'trust verify' },
+      { name: 'maddu trust report',                  line: 'Write a Markdown audit report under .maddu/state/.',          under: 'trust report' },
+    ],
+  },
 ];
 
 const C = {
