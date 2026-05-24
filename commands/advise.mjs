@@ -26,19 +26,13 @@
 // in the ADVISOR_INVOKED event AND never call lane.claim. The
 // `advisor-non-claiming` gate (v0.18) keeps that invariant.
 
-import { mkdir, writeFile, appendFile, stat } from 'node:fs/promises';
+import { mkdir, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { exists } from './_libroot.mjs';
 
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
-
-function newId(prefix) {
-  const ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = Math.random().toString(36).slice(2, 8);
-  return `${prefix}_${ts}_${r}`;
-}
 
 // Built-in default invocation patterns for the three runtimes we ship
 // support for out of the box. Operators can override by writing a
@@ -158,7 +152,7 @@ export default async function advise(argv) {
     }
   }
 
-  const advisorId = newId('adv');
+  const advisorId = spine.makeId('adv');
   const parentSessionId = process.env.MADDU_SESSION_ID || null;
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.ADVISOR_INVOKED,

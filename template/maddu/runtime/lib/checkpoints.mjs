@@ -13,9 +13,8 @@
 import { mkdir, readFile, writeFile, appendFile, stat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, makeId } from './spine.mjs';
 
 const TAG_PREFIX = 'maddu/checkpoint/';
 
@@ -30,9 +29,7 @@ function worktreePath(repoRoot, id) {
 }
 
 function genCheckpointId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `chk_${t}_${r}`;
+  return makeId('chk');
 }
 
 async function ensureDir(repoRoot) {

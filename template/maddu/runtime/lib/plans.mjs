@@ -10,14 +10,11 @@
 
 import { mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
-import { append, readAll, EVENT_TYPES } from './spine.mjs';
+import { append, readAll, EVENT_TYPES, makeId } from './spine.mjs';
 
 function genPlanId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(2).toString('hex');
-  return `pln_${t}_${r}`;
+  return makeId('pln', undefined, 2);
 }
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }

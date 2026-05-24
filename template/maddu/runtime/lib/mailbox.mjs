@@ -14,9 +14,8 @@
 
 import { mkdir, readFile, appendFile, writeFile, stat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, makeId } from './spine.mjs';
 
 const MSG_TYPES = ['request', 'info', 'handoff', 'question', 'ack', 'note'];
 
@@ -37,9 +36,7 @@ async function ensureLaneDir(repoRoot, lane) {
 }
 
 function genMsgId(ts) {
-  const t = ts.replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `mbx_${t}_${r}`;
+  return makeId('mbx', ts);
 }
 
 export async function listLaneMailboxes(repoRoot) {

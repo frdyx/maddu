@@ -22,6 +22,7 @@ export const EVENT_TYPES = {
   FRAMEWORK_UPGRADED:   'FRAMEWORK_UPGRADED',
   FRAMEWORK_BOOTED:     'FRAMEWORK_BOOTED',
   DOCTOR_REPORT:        'DOCTOR_REPORT',
+  AUDIT_REPORT:         'AUDIT_REPORT',
   SESSION_REGISTERED:   'SESSION_REGISTERED',
   SESSION_HEARTBEAT:    'SESSION_HEARTBEAT',
   SESSION_CLOSED:       'SESSION_CLOSED',
@@ -73,7 +74,6 @@ export const EVENT_TYPES = {
   IMPORT_REJECTED:       'IMPORT_REJECTED',
   PROPOSAL_CREATED:      'PROPOSAL_CREATED',
   PROPOSAL_DECIDED:      'PROPOSAL_DECIDED',
-  ENFORCER_CHECKED:      'ENFORCER_CHECKED',
   BOSS_MESSAGE:          'BOSS_MESSAGE',
   TELEGRAM_ENABLED:          'TELEGRAM_ENABLED',
   TELEGRAM_DISABLED:         'TELEGRAM_DISABLED',
@@ -134,9 +134,6 @@ export const EVENT_TYPES = {
   // more skill bodies to the orientation digest based on trigger/tag
   // matches. data: { sessionId, triggers, tags, skillIds, totalBytes }.
   SKILL_INJECTED:            'SKILL_INJECTED',
-  // v0.19 Phase 5 — synthetic stress harness signals a rejected NDJSON
-  // line during malformed-event recovery. data: { segment, lineIndex, reason }.
-  SPINE_LINE_REJECTED:       'SPINE_LINE_REJECTED',
   // v1.1.0 Phase 1 — default framework tools (git/test/format/lint/install)
   // emit one event per invocation. TOOL_INVOKED at start, TOOL_COMPLETED on
   // exit, TOOL_REFUSED when allowlist or dangerous-form check blocks before
@@ -214,43 +211,39 @@ export const EVENT_TYPES = {
   // v1.2.0 Phase 4 — skill provenance enforcement.
   //   SKILL_IMPORTED:           { source, sha256, trusted, dest }
   //   SKILL_TRUSTED:            { id }
-  //   SKILL_INJECTION_REFUSED:  { id, reason, provenance? }
   SKILL_IMPORTED:             'SKILL_IMPORTED',
-  SKILL_TRUSTED:              'SKILL_TRUSTED',
-  SKILL_INJECTION_REFUSED:    'SKILL_INJECTION_REFUSED'
+  SKILL_TRUSTED:              'SKILL_TRUSTED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
 
-function genId(ts) {
+// Canonical Máddu id factory: `<prefix>_<ts14>_<hex>`.
+//   prefix : short type tag (evt, ses, tsk, skl, wrk, …).
+//   ts     : ISO timestamp to derive the 14-char compact stamp from;
+//            defaults to now. Pass the event's own ts for evt ids so the
+//            id and the event timestamp line up.
+//   bytes  : entropy width. Defaults to 3 (6 hex chars) — the spine/event
+//            convention. A few short-lived ids (plans, loops, coordinators)
+//            historically use 2 bytes (4 hex chars); they pass bytes=2 so
+//            their exact format is preserved.
+// The ID FORMAT (ts14 + hex entropy) is load-bearing — spine data keys on
+// prefixes and shape — so it must not change. Every local newId/genId
+// across commands/ and runtime/lib/ should route through this.
+export function makeId(prefix, ts = new Date().toISOString(), bytes = 3) {
   const t = ts.replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `evt_${t}_${r}`;
+  const r = randomBytes(bytes).toString('hex');
+  return `${prefix}_${t}_${r}`;
 }
 
-function genSessionId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `ses_${t}_${r}`;
-}
+function genId(ts) { return makeId('evt', ts); }
 
-export function genTaskId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `tsk_${t}_${r}`;
-}
+function genSessionId() { return makeId('ses'); }
 
-export function genSkillId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `skl_${t}_${r}`;
-}
+export function genTaskId() { return makeId('tsk'); }
 
-export function genWorkerId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `wrk_${t}_${r}`;
-}
+export function genSkillId() { return makeId('skl'); }
+
+export function genWorkerId() { return makeId('wrk'); }
 
 async function ensureDirs(paths) {
   await mkdir(paths.state, { recursive: true });

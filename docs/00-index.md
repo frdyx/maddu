@@ -4,7 +4,7 @@
 
 Máddu (North Sámi for *root, origin, ancestry*; pronounced **MOD-doo**) is a project-agnostic agent-orchestration framework. It installs into any git repo with one command, drops a small Node bridge and a single-page cockpit, and stores all state as files under `.maddu/`. No SQLite, no hosted backend, no provider SDK in app code.
 
-Current version: **v1.2.0** ([changelog](../CHANGELOG.md)) — Supply-chain hardening + Hermes adapter. `maddu trust` audit/pin/verify against `package.json`; MCP templates SHA256-verified at install; worker-env allowlist defaults deny `AWS_*` / `OPENAI_*` / `ANTHROPIC_API_KEY` / `GITHUB_TOKEN` etc.; secret-scan refuses argv matching known token patterns before spawn (never logs raw values); skill auto-injection requires explicit `provenance`; strict governance now actually gates `maddu install` behind operator approval; new cockpit Trust route surfaces the live posture; Hermes (Nous Research) runtime lands as the first new runtime under the trust rails. Doctor moves to 54 PASS in a fresh consumer install. New docs: `34-threat-model.md`, `35-hermes-adapter.md`, `36-trust-audit.md`. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
+Current version: **v1.2.3** ([changelog](../CHANGELOG.md)) — Supply-chain hardening + Hermes adapter. `maddu trust` audit/pin/verify against `package.json`; MCP templates SHA256-verified at install; worker-env allowlist defaults deny `AWS_*` / `OPENAI_*` / `ANTHROPIC_API_KEY` / `GITHUB_TOKEN` etc.; secret-scan refuses argv matching known token patterns before spawn (never logs raw values); skill auto-injection requires explicit `provenance`; strict governance now actually gates `maddu install` behind operator approval; new cockpit Trust route surfaces the live posture; Hermes (Nous Research) runtime lands as the first new runtime under the trust rails. Doctor moves to 54 PASS in a fresh consumer install. New docs: `34-threat-model.md`, `35-hermes-adapter.md`, `36-trust-audit.md`. License: Apache-2.0. Repo: <https://github.com/frdyx/maddu>.
 
 ## Zero learning curve (v0.18)
 
@@ -75,6 +75,9 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 
 Reference docs that are not in the numbered series:
 
+- [`charter.md`](charter.md) — the north star: mission, the 8+1 invariants,
+  and the one canonical flow. Read this when any doc or feature seems to
+  disagree with itself — the charter is the intent.
 - [`installation.md`](installation.md) — install requirements and steps.
 - [`hard-rules.md`](hard-rules.md) — the 8 invariants in full, plus the
   do-not-copy reference (including the distinction between forbidden
@@ -86,7 +89,6 @@ Reference docs that are not in the numbered series:
   and the marketing video.
 - [`lanes.md`](lanes.md) — default lane catalog.
 - [`upgrade-policy.md`](upgrade-policy.md) — what `maddu upgrade` touches.
-- [`maddu-v0.3-roadmap.md`](maddu-v0.3-roadmap.md) — phase A/B/C/D feature plan.
 
 ## Where to go next
 

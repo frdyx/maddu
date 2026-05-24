@@ -14,16 +14,21 @@
 // — OR a synthetic shell command for testing.
 
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, makeId } from './spine.mjs';
 import { readPlan, completePhase } from './plans.mjs';
 import { readGovernance, effectiveValue } from './governance.mjs';
 
+// NOTE (v1.3.0 coherence): the per-phase loop below shares its
+// stuck-detection heuristic ("same fail signature twice → halt") with
+// loops.mjs#runLoop, but is intentionally NOT merged with it — this driver
+// emits COORDINATOR_* events, injects MADDU_COORDINATOR_* env, and spawns a
+// subprocess per phase, whereas runLoop emits LOOP_* events and runs
+// caller-supplied verify/iterate callbacks. See commands/loop.mjs for the
+// rationale.
 const PHASE_ITER_CAP = 5;
 
 function genCoordinatorId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  return `crd_${t}_${randomBytes(2).toString('hex')}`;
+  return makeId('crd', undefined, 2);
 }
 
 async function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }

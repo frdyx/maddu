@@ -16,21 +16,10 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { stat } from 'node:fs/promises';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const frameworkRoot = resolve(__dirname, '..');
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+import { loadLib } from './_libroot.mjs';
 
 async function loadTrustLib() {
-  const installed = join(process.cwd(), 'maddu', 'runtime', 'lib', 'trust.mjs');
-  if (await exists(installed)) return await import(pathToFileURL(installed).href);
-  const dev = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'trust.mjs');
-  if (await exists(dev)) return await import(pathToFileURL(dev).href);
-  throw new Error('trust.mjs not in runtime tree — run `maddu upgrade`');
+  return loadLib('trust.mjs');
 }
 
 function printTrustHelp() {
@@ -232,18 +221,14 @@ async function cmdReport(repoRoot, flags, lib, spineLib) {
 
   // Governance (layout-aware import).
   try {
-    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'governance.mjs');
-    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'governance.mjs');
-    const g = await import(pathToFileURL(modPath).href);
+    const g = await loadLib('governance.mjs');
     const cfg = await g.readGovernance(repoRoot);
     extras.governance = { mode: cfg.mode, overrides: cfg.overrides || {} };
   } catch {}
 
   // Worker-env policy.
   try {
-    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'worker-env.mjs');
-    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'worker-env.mjs');
-    const we = await import(pathToFileURL(modPath).href);
+    const we = await loadLib('worker-env.mjs');
     extras.workerEnvPolicy = await we.readWorkerEnvConfig(repoRoot);
   } catch {}
 
@@ -263,9 +248,7 @@ async function cmdReport(repoRoot, flags, lib, spineLib) {
 
   // MCP inventory.
   try {
-    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'mcp.mjs');
-    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'mcp.mjs');
-    const m = await import(pathToFileURL(modPath).href);
+    const m = await loadLib('mcp.mjs');
     extras.mcpInventory = await m.listMcp(repoRoot);
   } catch { extras.mcpInventory = []; }
 
@@ -295,9 +278,7 @@ async function cmdReport(repoRoot, flags, lib, spineLib) {
 
   // Doctor snapshot. Layout-aware.
   try {
-    let modPath = join(process.cwd(), 'maddu', 'runtime', 'lib', 'gates.mjs');
-    if (!(await exists(modPath))) modPath = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'gates.mjs');
-    const gates = await import(pathToFileURL(modPath).href);
+    const gates = await loadLib('gates.mjs');
     const result = await gates.runGates(repoRoot, { emitEvents: false });
     const failed = (result.runs || []).filter((r) => r.status === 'fail').map((r) => r.gateId);
     extras.doctor = {
@@ -324,14 +305,7 @@ async function cmdEnvAllow(repoRoot, args, flags, spineLib) {
   const v = args[0];
   if (!v) { console.error('env-allow refused: VAR name required'); process.exit(2); }
   // Load worker-env library. Layout-aware (installed vs source).
-  let weLib;
-  const installed = join(process.cwd(), 'maddu', 'runtime', 'lib', 'worker-env.mjs');
-  if (await exists(installed)) {
-    weLib = await import(pathToFileURL(installed).href);
-  } else {
-    const dev = join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'worker-env.mjs');
-    weLib = await import(pathToFileURL(dev).href);
-  }
+  const weLib = await loadLib('worker-env.mjs');
   const cfg = await weLib.envAllow(repoRoot, v, flags.lane || null);
   console.log(`env-allow: ${v}${flags.lane ? ` on lane ${flags.lane}` : ' (global)'} — written to .maddu/config/worker-env.json`);
   // Record on the spine. Use TRUST_PIN_ADDED reuse — Phase 6 will add a

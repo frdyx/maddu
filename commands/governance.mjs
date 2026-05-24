@@ -9,26 +9,13 @@
 // Three modes tune operational gates only. The 8+1 hard rules are
 // immutable regardless of mode.
 
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, resolve as pathResolve } from 'node:path';
-import { stat } from 'node:fs/promises';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', fail: '\x1b[31m', red: '\x1b[31m', blue: '\x1b[34m', yellow: '\x1b[33m' };
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FRAMEWORK_ROOT = pathResolve(__dirname, '..');
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
-
 async function loadGovernanceLib() {
-  // Same resolution as _spine.mjs: consumer install first, then framework dev.
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'governance.mjs'),
-    join(FRAMEWORK_ROOT, 'template', 'maddu', 'runtime', 'lib', 'governance.mjs'),
-  ];
-  for (const c of candidates) { if (await exists(c)) return await import(pathToFileURL(c).href); }
-  throw new Error('governance.mjs not found. Run `maddu upgrade`.');
+  return loadLib('governance.mjs');
 }
 
 function modeBadge(mode) {

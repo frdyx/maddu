@@ -15,9 +15,9 @@
 import { mkdir, readFile, writeFile, appendFile, stat, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { platform } from 'node:os';
-import { randomBytes } from 'node:crypto';
 import { configDir } from './workspaces.mjs';
 import { parseNatural, validateCron } from './schedule.mjs';
+import { makeId } from './spine.mjs';
 
 export function globalDir() {
   return join(configDir(), 'global');
@@ -48,9 +48,7 @@ async function ensureSchedulesFile() {
 }
 
 function genScheduleId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `gsch_${t}_${r}`;
+  return makeId('gsch');
 }
 
 // ─── schedules ──────────────────────────────────────────────────────────

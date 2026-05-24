@@ -8,24 +8,12 @@
 //   maddu workspace show
 
 import { resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
-import { stat } from 'node:fs/promises';
 import { request } from 'node:http';
 import { parseFlags } from './_args.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const frameworkRoot = resolve(__dirname, '..');
+import { loadLib } from './_libroot.mjs';
 
 async function loadWorkspacesLib() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'workspaces.mjs'),
-    join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'workspaces.mjs')
-  ];
-  for (const c of candidates) {
-    try { await stat(c); return await import(pathToFileURL(c).href); } catch {}
-  }
-  throw new Error('workspaces.mjs not found. Run `maddu init` first.');
+  return loadLib('workspaces.mjs');
 }
 
 function printHelp() {

@@ -1,0 +1,11 @@
+{
+  "name": "fix-a-bug",
+  "description": "Tight defect-fix loop: reproduce, scope, fix, verify, review. Each stage is a literal maddu invocation so a run lands receipts in the Plans, Loops, Reviews, and Cost cockpit routes.",
+  "stages": [
+    { "name": "reproduce", "intent": "Register and claim the lane to reproduce the defect. `maddu register --runtime claude-code --role implementer --focus \"reproduce <bug>\"`, then `maddu lane claim --lane <lane-id> --focus \"reproduce + fix <bug>\"`." },
+    { "name": "scope", "intent": "Declare the slice scope around the suspect area. `maddu slice scope-declare --paths \"<dirs>\" --focus \"isolate root cause of <bug>\"`." },
+    { "name": "fix", "intent": "Drive the fix with an iterative loop. `maddu loop ralph --focus \"fix <bug>: edit, run failing test, repeat until green\"` so each iteration is recorded in the cockpit Loops route." },
+    { "name": "verify", "intent": "Confirm the fix and no regressions. Run the failing test, then `maddu test` and `maddu doctor` to surface any FAIL rows." },
+    { "name": "review", "intent": "Record the fix and close the slice. `maddu review run --focus \"<bug> fix\"`, then `maddu slice-stop \"SLICE STOP: <summary>...\"` with targets, paths, gates, and learnings." }
+  ]
+}

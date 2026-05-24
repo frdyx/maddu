@@ -16,18 +16,17 @@
 //   maddu mcp install <template> [--name <override>]  (v1.1.0)
 //   maddu mcp uninstall <name>                        (v1.1.0 — alias of remove)
 
-import { readdir, readFile, stat, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { exists as existsFs } from './_libroot.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRAMEWORK_ROOT = pathResolve(__dirname, '..');
-
-async function existsFs(p) { try { await stat(p); return true; } catch { return false; } }
 
 async function templatesDir() {
   const candidates = [

@@ -11,9 +11,8 @@
 
 import { mkdir, readFile, writeFile, appendFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, makeId } from './spine.mjs';
 import { listGlobalSchedules, recordGlobalScheduleFire } from './global.mjs';
 
 function scheduleFile(repoRoot) {
@@ -21,9 +20,7 @@ function scheduleFile(repoRoot) {
 }
 
 function genScheduleId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const r = randomBytes(3).toString('hex');
-  return `sch_${t}_${r}`;
+  return makeId('sch');
 }
 
 async function ensureFile(repoRoot) {
@@ -394,8 +391,6 @@ async function lastTriggerFiredAt(repoRoot, triggerId) {
   }
   return 0;
 }
-
-export function genId() { return genScheduleId(); }
 
 // ─── global scheduler tick (slice 4) ────────────────────────────────────
 // Iterates global schedules and fires each matched one across all targets

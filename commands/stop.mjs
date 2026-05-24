@@ -11,11 +11,10 @@
 //   0 — bridge terminated (or already stopped)
 //   1 — bridge appears to be running but we couldn't stop it
 
-import { readFile, unlink, stat } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+import { exists } from './_libroot.mjs';
 
 function probeBridge(port = 4177) {
   return new Promise((resolve) => {

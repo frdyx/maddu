@@ -17,25 +17,14 @@
 //   maddu plan cancel <plan-id> [--reason "..."]
 //   maddu plan kanban
 
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, resolve as pathResolve } from 'node:path';
-import { stat } from 'node:fs/promises';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', accent: '\x1b[35m', pass: '\x1b[32m', warn: '\x1b[33m', fail: '\x1b[31m' };
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FRAMEWORK_ROOT = pathResolve(__dirname, '..');
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
 async function loadPlans() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'plans.mjs'),
-    join(FRAMEWORK_ROOT, 'template', 'maddu', 'runtime', 'lib', 'plans.mjs'),
-  ];
-  for (const c of candidates) { if (await exists(c)) return await import(pathToFileURL(c).href); }
-  throw new Error('plans.mjs not found. Run `maddu upgrade`.');
+  return loadLib('plans.mjs');
 }
 
 // Canonical plan-id resolver. Order: explicit `--plan <id>` flag, then

@@ -14,6 +14,14 @@
 // `(already registered)` marker. Stale env (session closed) falls
 // through to a fresh registration.
 //
+// NOTE (v1.3.0 coherence): `maddu register` is NOT a thin alias of
+// `maddu session register`, despite the surface resemblance. `session
+// register` emits SESSION_REGISTERED via session.mjs#doRegister; this
+// command emits a DISTINCT event type, SESSION_AUTO_REGISTERED (with
+// source:'cli', env-based idempotency, and cwd-derived defaults). The two
+// event types drive different projection arms, so delegating to doRegister
+// would change observable behavior — they are deliberately kept separate.
+//
 // Emits SESSION_AUTO_REGISTERED with source:'cli'. Phase 2 will extend
 // the event data with parentSessionId when --parent (or
 // MADDU_PARENT_SESSION_ID) is supplied; this Phase-1 cut already

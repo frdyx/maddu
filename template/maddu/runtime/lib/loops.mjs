@@ -8,13 +8,11 @@
 //
 // Cooldown read from the governance tier (Phase 3 lib).
 
-import { randomBytes } from 'node:crypto';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, makeId } from './spine.mjs';
 import { readGovernance, effectiveValue } from './governance.mjs';
 
 function genLoopId() {
-  const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  return `lop_${t}_${randomBytes(2).toString('hex')}`;
+  return makeId('lop', undefined, 2);
 }
 
 async function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }

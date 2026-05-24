@@ -41,8 +41,7 @@ import { createHash } from 'node:crypto';
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+import { exists } from './_libroot.mjs';
 
 function transcriptsRoot() {
   // Claude Code stores transcripts under ~/.claude/projects/<slug>/.

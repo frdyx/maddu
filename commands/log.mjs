@@ -8,25 +8,14 @@
 //   maddu log --rebuild              # re-project from the spine, refresh artifacts
 //   maddu log --json                 # raw JSON output
 
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, resolve as pathResolve } from 'node:path';
-import { stat } from 'node:fs/promises';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', accent: '\x1b[35m' };
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FRAMEWORK_ROOT = pathResolve(__dirname, '..');
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
 async function loadReceipts() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'receipts.mjs'),
-    join(FRAMEWORK_ROOT, 'template', 'maddu', 'runtime', 'lib', 'receipts.mjs'),
-  ];
-  for (const c of candidates) { if (await exists(c)) return await import(pathToFileURL(c).href); }
-  throw new Error('receipts.mjs not found. Run `maddu upgrade`.');
+  return loadLib('receipts.mjs');
 }
 
 export default async function logCmd(argv) {

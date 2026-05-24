@@ -35,10 +35,10 @@ without polluting the spine.
 Never write outside `.maddu/`, `maddu/`, or `maddu.json` unless the
 operator explicitly tells you to.
 
-## The 8 hard rules + candidate #9
+## The 8+1 hard rules
 
 `maddu doctor` verifies all of these on every run. Full rationale in
-`maddu/docs/hard-rules.md`.
+`maddu/docs/hard-rules.md`; the stable charter is `maddu/docs/charter.md`.
 
 1. **Files-only state.** No SQLite, no embedded DB, no hosted DB for feature state.
 2. **Append-only event spine.** The spine wins over any projection.
@@ -48,7 +48,7 @@ operator explicitly tells you to.
 6. **No token export.** OAuth tokens are device-bound. `maddu export` scrubs them.
 7. **Three-layer brand boundary.** Framework shell brand / app brand / content brand never mix.
 8. **Lane ownership.** No two agents may hold the same lane concurrently.
-9. **(Candidate)** Every auto-trigger crosses the gauntlet — scope-lock, gates, allowlist, cooldown.
+9. **Every auto-trigger crosses the gauntlet** (permanent since v0.19.0) — scope-lock, gates, allowlist, cooldown.
 
 ## How to work here
 
@@ -67,21 +67,31 @@ operator explicitly tells you to.
   explicitly.
 - **Auto-trigger discipline.** Mutating commands fired by triggers must
   carry a `triggered_by` envelope and be allowlisted in
-  `.maddu/config/triggers.json`. See candidate rule #9.
+  `.maddu/config/triggers.json`. See hard rule #9.
 
 ## Intent routing (when the operator types something Máddu-shaped)
 
 The operator may type natural language without a slash command prefix.
-Classify the intent and dispatch the matching `/maddu-*` slash command.
-If unsure between two close matches, ask **one** clarifying question —
-not three.
+Classify the intent and dispatch the matching action. If unsure between
+two close matches, ask **one** clarifying question — not three.
+
+**Prefer a pipeline.** For any non-trivial "ship / build / fix / team"
+work, the default is `maddu pipeline run <name> "<goal>"` — not an ad-hoc
+autopilot. Pipelines walk the canonical flow (orient → plan → coordinate
+→ slice → test → review → land → account) and populate the feature
+surfaces. Three default pipelines ship: `ship-a-feature` (the default,
+for end-to-end feature work), `fix-a-bug` (something broken), and
+`plan-and-delegate` (fan-out across disjoint lanes). Reserve ad-hoc
+`/maddu-autopilot` (no pipeline) for genuinely one-off changes.
 
 | Operator phrase shape | Dispatch |
 |---|---|
-| "autopilot …", "ship …", "build …", "do … end to end" | `/maddu-autopilot` |
+| "ship …", "build …", "do … end to end" (non-trivial feature) | `maddu pipeline run ship-a-feature "<goal>"` |
+| "fix …", "… is broken", "bug in …" | `maddu pipeline run fix-a-bug "<goal>"` |
+| "team of N …", "fan out …", "parallelize …" | `maddu pipeline run plan-and-delegate "<goal>"` |
+| "autopilot …", explicit one-off / throwaway change | `/maddu-autopilot` |
 | "plan …", "design …", "think through …" | `/maddu-plan` |
 | "review …", "verify …", "check …" | `/maddu-review` |
-| "team of N …", "fan out …", "parallelize …" | `/maddu-team` |
 | "ask claude/codex/gemini …", "second opinion …" | `/maddu-advise` |
 | "what's going on", "status", "where are we" | `/maddu-status` |
 | "how much have I used", "tokens", "cost" | `/maddu-cost` |
@@ -92,9 +102,9 @@ not three.
 | "remember this", "note that …" | `/maddu-note` |
 | "what skill should I use for …" | `/maddu-skill` |
 
-When you dispatch, **tell the operator which slash command you picked
-and why**, so they learn the shortcut over time. Never silently run a
-pipeline.
+When you dispatch, **tell the operator which pipeline or slash command
+you picked and why**, so they learn the shortcut over time. Never
+silently run a pipeline.
 
 **Discipline:**
 

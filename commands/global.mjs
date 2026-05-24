@@ -19,23 +19,11 @@
 // on its next 30 s tick (schedules) or the next APPROVAL_REQUESTED
 // (policies) — no restart required.
 
-import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { stat } from 'node:fs/promises';
 import { parseFlags } from './_args.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const frameworkRoot = resolve(__dirname, '..');
+import { loadLib } from './_libroot.mjs';
 
 async function loadGlobalLib() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'global.mjs'),
-    join(frameworkRoot, 'template', 'maddu', 'runtime', 'lib', 'global.mjs')
-  ];
-  for (const c of candidates) {
-    try { await stat(c); return await import(pathToFileURL(c).href); } catch {}
-  }
-  throw new Error('global.mjs not found. Run `maddu init` first.');
+  return loadLib('global.mjs');
 }
 
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', fail: '\x1b[31m', accent: '\x1b[35m' };
