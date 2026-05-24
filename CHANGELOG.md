@@ -11,6 +11,46 @@ narrative summary.
 
 ---
 
+## [v1.1.1] · 2026-05-24 · Burn-in patch — Windows spawn, ralph verify, plan argv, lifecycle
+
+Patch release closing the 12 fixes surfaced by the v1.1.0 burn-in inside
+`~/projects/memo/`. Four PRs, no functional surface change, no new
+dependencies. Operator-facing reliability improvements only.
+
+### Headline changes
+
+- **P0 — Windows `spawnSafe` `.cmd` shim (PR-A).** `maddu test/format/lint/install` no longer crash with `spawn EINVAL` on Windows + Node 22+. npm-family runners (`npm`, `pnpm`, `yarn`, `npx`) are now spawned with `shell:true` and conservatively quoted argv so the `.cmd` shims resolve cleanly. `git` still uses the bare-exe path.
+
+- **P1 — Ralph loop verify-contract regression test (PR-A).** New synthetic stress-harness scenario `ralph-always-fail-halts` locks the verify→loop contract in three forms (stable-fail → stuck, distinct-fail → max-iter, pass → complete). Catches regressions where exit-code interpretation flips.
+
+- **P1 — Plan argv standardization (PR-A).** Plan id is now the first positional argument across `show / add-phase / complete-phase / block-phase / revise / complete / cancel`. `--plan <id>` is accepted as an alias and normalized so `maddu plan complete --plan pln_xxx` no longer creates a literal `.maddu/plans/--plan/` directory. Phase identifier canonicalized to `--phase <id>`; `--name <id>` is a deprecated alias that emits a one-time stderr warning.
+
+- **P1 — `lanes-catalog-parseable` doctor gate (PR-A).** New gate validates `.maddu/lanes/catalog.json` parses as JSON and has the v1 shape (`schemaVersion`, `lanes:[{id, scope?}]`, optional `framework`). Burn-in could corrupt the catalog and stay 46/0/0 green; doctor now FAILs with an actionable message and remediation pointer.
+
+- **P1 — Plan kanban phase aggregation (PR-A).** `maddu plan kanban` now buckets phases individually: completed phases land in DONE, blocked phases in BLOCKED, the first pending phase in NOW, the next two in NEXT. A plan whose phases are all done but plan-level status is still `open` surfaces in DONE with a `phases-complete` marker rather than vanishing. The `kanban-coherent` gate treats plan-level vs phase-level rows distinctly.
+
+- **P2 — `maddu workspace activate <id>` reroots a live bridge (PR-B).** The CLI POSTs to `/bridge/_workspaces/activate` so the bridge's in-memory active pointer follows the registry. If the requested workspace isn't yet mounted (added after `maddu start`), the CLI prints a loud `maddu stop && maddu start` warning instead of silently mis-routing.
+
+- **P2 — `maddu stop` + SIGINT/SIGTERM trap on `start` (PR-B).** New `maddu stop` reads `.maddu/state/bridge.pid` and gracefully terminates the bridge (SIGTERM → SIGKILL after a 3 s grace). `maddu start` writes that PID file on boot and installs signal handlers — Ctrl+C cleanly shuts the bridge down instead of leaving a detached node process.
+
+- **P2 — `--help` discipline (PR-B).** `bin/maddu.mjs` intercepts `--help` / `-h` BEFORE dispatching to the verb, so `maddu <verb> --help` never errors out with `--flag required` first. Six verbs ship verb-specific usage (start, stop, workspace, plan, lane, install); everything else falls back to the global discovery surface.
+
+- **P2 — `lane claim` positional shorthand (PR-C).** `maddu lane claim <lane-id>` now works (positional first-arg). `--lane <id>` flag form retained for backward compatibility. Same shorthand added to `lane release`.
+
+- **P2 — `maddu install` validates package specs (PR-C).** Each package arg is trimmed and validated (npm-name regex or file:/github:/git+/https?: URL escape hatches) BEFORE spawn. `maddu install ""` now refuses cleanly with a `TOOL_REFUSED dangerous-form` audit event instead of crashing downstream with EINVAL.
+
+- **Docs sweep (PR-D).** `docs/03-cli-reference.md`, `docs/31-operations-log.md`, `docs/32-kanban-and-plans.md`, `docs/33-loops-and-coordinator.md` (and mirrors under `template/maddu/docs/`) document every v1.1.1 surface change. `docs-in-sync` gate green.
+
+### Deferred to v1.1.2
+
+P3 findings (#15 cross-stack pytest/ruff detection, #20 skill-candidate threshold) logged in `docs/v1.1.2-backlog.md` for future patch.
+
+### Doctor end-state (test consumer)
+
+47 pass · 0 warn · 0 fail across a fresh `maddu init` install. Stress harness 11/11, upgrade matrix 19/19, layout refusal 4/4.
+
+---
+
 ## [v1.1.0] · 2026-05-24 · Autonomy + Planning + Tool Gateway
 
 Largest minor release since v1.0.0. Nine phases, all coordinator-driven

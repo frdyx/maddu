@@ -43,6 +43,16 @@ maddu loop ralph --goal "fix tsc errors" \
 `verify` exit=0 ⇒ ok; non-zero ⇒ fail (and gets its tail captured into
 the signature for stuck-detection).
 
+**Verify-contract guarantees** *(locked in v1.1.1)*:
+
+| verify outcome                               | loop result                                    |
+| -------------------------------------------- | ---------------------------------------------- |
+| exit=0                                       | `LOOP_COMPLETED` at iter=1                     |
+| non-zero, identical signature twice in a row | `LOOP_HALTED reason: stuck-detection`           |
+| non-zero, distinct signature each iteration  | `LOOP_HALTED reason: max-iter-reached`          |
+
+A synthetic stress-harness scenario (`ralph-always-fail-halts`) exercises runLoop directly with in-process verify callbacks to lock the contract against regression. If the operator-supplied `--verify "<cmd>"` looks like it "always passes" when it shouldn't, double-check that the shell expansion preserves the exit code — single-quoted JS scripts inside `cmd.exe /c` on Windows can be interpreted very differently than under POSIX shells.
+
 ### Plan-loop
 
 ```bash

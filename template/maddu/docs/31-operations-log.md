@@ -1,7 +1,17 @@
 # 31. Operations log
 
-Máddu v1.1.0 derives a human-readable operations feed from the
-append-only event spine.
+Máddu v1.1.0 (refined in v1.1.1) derives a human-readable operations
+feed from the append-only event spine.
+
+> **v1.1.1 lifecycle note.** `maddu start` now writes
+> `.maddu/state/bridge.pid` on boot and `maddu stop` cleans it up. The
+> bridge traps SIGINT/SIGTERM so Ctrl+C produces a graceful shutdown.
+> `maddu workspace activate <id>` POSTs to the live bridge so its
+> in-memory workspace pointer follows the registry; if the target
+> workspace isn't already mounted, the CLI prints a loud warning instead
+> of silently mis-routing. Operators can verify reroot in real time via
+> `curl http://127.0.0.1:4177/bridge/status` (response includes the
+> current `repoRoot`/`workspaceId`).
 
 ## Layout
 

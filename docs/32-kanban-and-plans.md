@@ -35,14 +35,35 @@ maddu plan new "Auth refactor" --phases "audit,redesign,migrate,verify" \
                                 --goal "OAuth without rewriting users"
 maddu plan list
 maddu plan show <plan-id>
-maddu plan add-phase --plan <id> --name <n> --intent "..."
-maddu plan complete-phase --plan <id> --name <n> --summary "..."
-maddu plan block-phase --plan <id> --name <n> --reason "..."
-maddu plan revise --plan <id> --note "..."
-maddu plan complete <plan-id>
+maddu plan add-phase <plan-id> --phase <n> --intent "..."
+maddu plan complete-phase <plan-id> --phase <n> --summary "..."
+maddu plan block-phase <plan-id> --phase <n> --reason "..."
+maddu plan revise <plan-id> --note "..."
+maddu plan complete <plan-id> [--summary "..."]
 maddu plan cancel <plan-id> --reason "..."
 maddu plan kanban                                    # board view
 ```
+
+### Argv conventions *(v1.1.1)*
+
+Plan id is the first positional argument across every verb. `--plan <id>` is also accepted as an alias and normalized away — passing both is fine, but you no longer get an accidental `.maddu/plans/--plan/` directory when the dispatcher misparses the flag.
+
+Phase identifier is `--phase <id>`. `--name <id>` is a deprecated alias that still works but emits a one-time stderr warning per process.
+
+`maddu <verb> --help` is detected at the dispatcher before flag validation, so `maddu plan complete-phase --help` always prints usage rather than `--phase required`.
+
+### Kanban phase aggregation *(v1.1.1)*
+
+`maddu plan kanban` now aggregates per-phase status:
+
+| Column   | Contents                                                              |
+| -------- | --------------------------------------------------------------------- |
+| NOW      | First pending phase of every open plan (one row per plan).            |
+| NEXT     | The next two pending phases of every open plan.                       |
+| BLOCKED  | Every blocked phase across all plans (one row per phase).             |
+| DONE     | Every completed phase + plan-level `completed`/`cancelled` rows.      |
+
+A plan whose phases are all completed but whose plan-level status is still `open` surfaces in DONE with a `phases-complete` marker rather than vanishing from every column. The `kanban-coherent` doctor gate treats plan-level vs phase-level rows distinctly, so legitimate cross-column placements (e.g. completed phase in DONE *and* pending phase in NOW for the same plan) no longer trip the coherence check.
 
 ## Auto-revision
 
