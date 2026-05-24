@@ -11,6 +11,46 @@ narrative summary.
 
 ---
 
+## [v1.1.2] · 2026-05-24 · Narrative refresh + P3 backlog patches
+
+Post-v1.1.1 polish release. PR-A is a docs-only narrative refresh that
+brings the README + getting-started doc in line with the v1.1.x autonomy
++ planning + tool gateway shape. PR-B closes the 3 P3 findings deferred
+from the v1.1.0 burn-in.
+
+### PR-A — Narrative refresh (no functional change)
+
+- README badge `1.1.0 → 1.1.2` (was stale through v1.1.1).
+- README 60-second tour: `Máddu v0.19.1` → `Máddu v1.1.2`.
+- `docs/01-getting-started.md` gains a new "Going autonomous (v1.1.x flow)" section after the manual walkthrough. Three escalation levels: `maddu blast` (single confident slice), `maddu loop ralph` (persist until done), `maddu coordinator <plan-id>` (multi-phase autonomous driver). Existing first-timer walkthrough stays intact.
+- `docs/00-index.md` "Current version" → v1.1.2, mentions the new cross-stack detector.
+- All edits mirrored to `template/maddu/docs/`. `docs-in-sync` gate green.
+
+### PR-B — P3 backlog patches
+
+**#15 — Cross-stack detector for Python.** `detectFramework()` in `template/maddu/runtime/lib/tools.mjs` now recognises Python projects via `pyproject.toml` or `requirements.txt`. Test → `pytest`. Format → `ruff format` with `black` fallback. Lint → `ruff check`. Install → `uv add` with `pip install` fallback. Node projects still take precedence when both stacks are present.
+
+**#12 — Consumer-install upgrade refusal text trimmed.** `requireSourceLayout()` in `commands/_manifest.mjs` cuts the refusal output from 13 body lines to 5. Keeps "refused", "consumer install", the correct command, and the redirect — drops the verbose explanation. `scripts/test/layout-refusal.mjs` still passes (test asserts patterns, not exact text).
+
+**#20 — Skill-candidate threshold tuned.** `template/maddu/runtime/lib/skill-candidates.mjs` ships two confidence tiers instead of a single hard `N=3` threshold:
+
+- `N_HIGH = 2` — "high" confidence candidate, emits once on first detection.
+- `N_SOFT = 1` — "soft" suggestion from a single observation, throttled by a 24h per-hash cooldown so the surface doesn't flood.
+
+New event data field `confidence: 'high' | 'soft'` on `SKILL_CANDIDATE_DETECTED`. Older events default to `'high'` on read. Operator surface (`maddu skill candidates list` + cockpit panel) shows both tiers.
+
+### Backlog cleared
+
+`docs/v1.1.2-backlog.md` removed — all 3 P3 findings closed.
+
+### Notes
+
+- No new `package.json` dependencies (rule #4 holds).
+- All edits ship through Node stdlib + `child_process.spawn` (rule #5 holds).
+- Three new Python tool wrappers (`pytest`, `ruff`, `uv`/`pip`) are operator-provided binaries on PATH — Máddu never bundles them, same posture as `npm`/`prettier`/`eslint`.
+
+---
+
 ## [v1.1.1] · 2026-05-24 · Burn-in patch — Windows spawn, ralph verify, plan argv, lifecycle
 
 Patch release closing the 12 fixes surfaced by the v1.1.0 burn-in inside
