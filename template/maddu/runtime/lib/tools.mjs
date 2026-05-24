@@ -390,15 +390,21 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
     }
   }
   // v1.2.0 Phase 3 — argvForSpawn has --allow-secret stripped so the
-  // underlying tool never sees the override token.
+  // underlying tool never sees the override token. fullArgv is what
+  // actually reaches the subprocess; argvForEvents redacts the matched
+  // element so the spine never carries a raw secret value, even on the
+  // operator-override path.
   const fullArgv = [...resolvedRunnerArgs, ...argvForSpawn];
+  const argvForEvents = scan
+    ? argvForSpawn.map((a, i) => (i === scan.argvIndex ? `[REDACTED:${scan.patternType}]` : a))
+    : argvForSpawn;
 
   // 4. Emit TOOL_INVOKED.
   await append(repoRoot, {
     type: EVENT_TYPES.TOOL_INVOKED,
     actor: sessionId,
     lane,
-    data: { tool, argv: argvForSpawn, lane, sessionId, mode: `${resolvedRunner} ${resolvedRunnerArgs.join(' ')}`.trim() },
+    data: { tool, argv: argvForEvents, lane, sessionId, mode: `${resolvedRunner} ${resolvedRunnerArgs.join(' ')}`.trim() },
   });
 
   // 5. Spawn.
@@ -412,7 +418,7 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
     type: EVENT_TYPES.TOOL_COMPLETED,
     actor: sessionId,
     lane,
-    data: { tool, argv: argvForSpawn, lane, sessionId, exitCode: res.code, durationMs },
+    data: { tool, argv: argvForEvents, lane, sessionId, exitCode: res.code, durationMs },
   });
 
   return {
