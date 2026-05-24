@@ -35,8 +35,8 @@ maddu plan new "Auth refactor" --phases "audit,redesign,migrate,verify" \
                                 --goal "OAuth without rewriting users"
 maddu plan list
 maddu plan show <plan-id>
-maddu plan add-phase <plan-id> --phase <n> --intent "..."
-maddu plan complete-phase <plan-id> --phase <n> --summary "..."
+maddu plan add-phase <plan-id> "..."             # auto-numbers; or --phase <n> --intent "..."
+maddu plan complete-phase <plan-id>              # next open phase; or --phase <n> --summary "..."
 maddu plan block-phase <plan-id> --phase <n> --reason "..."
 maddu plan revise <plan-id> --note "..."
 maddu plan complete <plan-id> [--summary "..."]

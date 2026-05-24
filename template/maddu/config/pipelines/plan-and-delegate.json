@@ -3,10 +3,10 @@
   "description": "Multi-lane orchestration shape: goal, plan, open-team, coordinate, converge, close. Each stage is a literal maddu invocation so the run populates the Plans, Pipelines, Reviews, and Cost cockpit routes for a coordinated team.",
   "stages": [
     { "name": "goal", "intent": "Set the top-level goal. `maddu goal set \"<multi-phase objective>\"` so every downstream phase and lane traces back to it." },
-    { "name": "plan", "intent": "Build a lane-disjoint plan. `maddu plan new \"<objective>\"`, then `maddu plan add-phase <plan-id> \"<phase>\" --lane <lane-id>` per phase, keeping lanes disjoint so workers never contend for the same lane." },
-    { "name": "open-team", "intent": "Open a team across the planned lanes. `maddu team open --lanes \"<lane-a>,<lane-b>,...\"` to provision concurrent worker slots." },
+    { "name": "plan", "intent": "Build a lane-disjoint plan. `maddu plan new \"<objective>\"`, then `maddu plan add-phase <plan-id> \"<phase>\"` per phase, keeping the lanes the phases map to disjoint so workers never contend for the same lane." },
+    { "name": "open-team", "intent": "Open a team across the planned lanes. `maddu team open --members <N> --lanes \"<lane-a>,<lane-b>,...\"` (N must equal the lane count; lanes must be disjoint) to provision concurrent worker slots." },
     { "name": "coordinate", "intent": "Dispatch the coordinator over the team. `maddu coordinator <plan-id> --runtime claude-code` to drive phases across lanes; surfaces in the cockpit Pipelines route." },
-    { "name": "converge", "intent": "Review each completed phase as it lands. `maddu review run --plan <plan-id>`, then `maddu plan complete-phase <plan-id> <phase-id>` for each converged phase." },
-    { "name": "close", "intent": "Close the team and account for the run. `maddu team close`, then `maddu cost` to record spend, then `maddu plan complete <plan-id>` to mark the objective done." }
+    { "name": "converge", "intent": "Review each completed phase as it lands. `maddu review run --slice <slice-event-id>`, then `maddu plan complete-phase <plan-id>` (next open phase; pass a phase number to target one) for each converged phase." },
+    { "name": "close", "intent": "Close the team and account for the run. `maddu team close --team-id <team-id>`, then `maddu cost` to record spend, then `maddu plan complete <plan-id>` to mark the objective done." }
   ]
 }

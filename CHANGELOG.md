@@ -11,6 +11,47 @@ narrative summary.
 
 ---
 
+## [v1.3.0] · 2026-05-24 · Completeness — wire the framework to its charter
+
+Máddu had the features; v1.3.0 joins them into one coherent, walkable flow and gives the framework a way to prove it stays coherent with itself. Coordinator-driven, single session, two arcs: the coherence realignment (merged via PR #89) and the completeness work that followed. The 8+1 hard rules are unchanged; this release is about intent, reachability, and ergonomics — not new surface area. Net LoC is negative.
+
+The north star is now a single document: [`docs/charter.md`](docs/charter.md) — one mission, the 8+1 invariants, one canonical execution path. When any doc, agent brief, or feature disagrees with the charter, the charter is the intent and the disagreement is drift to be fixed.
+
+### Connective tissue — the one canonical flow
+
+- **Three default pipelines ship**, seeded on every `init` and carried through `upgrade`: `ship-a-feature` (the default), `fix-a-bug`, and `plan-and-delegate` (team / fan-out). Each stage is a literal `maddu` invocation, so walking a pipeline exercises and populates the Plans, Reviews, Pipelines, Loops, and Cost surfaces.
+- **`MADDU.md` routing defaults non-trivial work to `maddu pipeline run <name> "<goal>"`.** The agent brief states the rule of thumb — *prefer a pipeline* — and maps an operator phrase to the right pipeline, telling the operator which it picked. Ad-hoc `/maddu-autopilot` (no pipeline) is reserved for genuine one-offs. Zero learning curve is preserved: the operator surface stays slash commands + natural language.
+
+### Self-audit — the framework checks itself
+
+- **New `maddu audit` command** (read-only) — a framework-coherence self-audit. Runs six gates: `event-types-reachable` (no dead event types), `command-surface-coherent` (every verb consistent across COMMANDS, tiers, and handler files), `cockpit-routes-reachable` (no route backed solely by a dead event), `docs-indexed` (every doc indexed and every index link resolves), plus the slash-on-ramp and charter-drift checks. Emits an `AUDIT_REPORT` event. Reports 6/6 on a clean tree.
+
+### Charter — one north star, one flow
+
+- **`docs/charter.md`** added and linked from `00-index.md`, the cockpit tour, and concepts: mission, the 8+1 invariants, the one canonical flow, scope boundaries (what Máddu is NOT), and a capability map where every top-level verb traces to a stated purpose (so `audit` can flag genuine orphans).
+- **Permanent hard rule #9 unified** across the charter and `hard-rules.md`: every auto-trigger crosses the gauntlet (`tier:'mutating'` + `triggers.json` allowlist + cooldown + `TRIGGER_FIRED` provenance). Agent briefs (`MADDU.md`, `CLAUDE.section.md`, `AGENTS.section.md`) aligned to the charter's canonical flow.
+
+### Forgiving CLI / agent ergonomics
+
+- **Natural positional forms** now accepted where agents kept reaching for them: `maddu goal set "<obj>"`, `maddu task create "<title>"`, `maddu plan add-phase <plan-id> "<intent>"`, `maddu plan complete-phase <plan-id>`. The explicit flag forms (`--objective`, `--title`, `--phase`/`--intent`, `--summary`) all still work and stay canonical.
+- **Every pipeline / slash / doc invocation corrected** to a verified-runnable form — no doc advertises a command that errors.
+- **Subcommand `--help` routing** for `task` and `review`: `maddu <verb> <sub> --help` is detected at the dispatcher before flag validation, so it prints usage instead of a `required-flag` error.
+
+### Slash on-ramp triage
+
+- **All 53 verbs classified** agent-facing vs operator/plumbing via a new `surface` field, so the slash surface stays intentional rather than mirroring every verb. The audit's `slash-on-ramp` gate enforces that every agent-facing verb has an on-ramp and every CLI-only verb is intentionally so.
+- **Four new agent slashes**, no sprawl: `/maddu-search`, `/maddu-memory`, `/maddu-task`, `/maddu-audit`.
+
+### Internal
+
+- Dead event types and unused exports removed; duplication collapsed via `makeId`, a shared `_libroot.mjs`, and a common `runWrapper`. The cumulative diff is net-negative LoC.
+
+### Gates
+
+- **`maddu doctor` → 58 gates** (was 54). **`maddu audit` → 6/6.** No new dependencies; no hard-rule changes; the spine, projections, and supply-chain posture are unchanged.
+
+---
+
 ## [v1.2.3] · 2026-05-24 · Entity drawer — clickable plans + Kanban cards
 
 Cockpit plans + Kanban cards become clickable. Click any card or row to open a right-side detail drawer showing the full plan state (goal, phases with completion glyphs, revisions, copy plan-id action). New reusable `openEntityDrawer({title, subtitle, body, onClose})` primitive that future cockpit routes can adopt for any entity (skills, MCP servers, advisors, slice-stops, runtimes, etc.).

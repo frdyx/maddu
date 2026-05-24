@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.2.3](https://img.shields.io/badge/version-1.2.3-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.3.0](https://img.shields.io/badge/version-1.3.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,19 +24,16 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.2.3
+## What's new in v1.3.0
 
-**Coherence + supply-chain hardening.** Coordinator-driven, single session. The 8+1 hard rules are now the permanent, stable charter — see [`docs/charter.md`](docs/charter.md).
+**Completeness — wire the framework to its charter.** The features Máddu already had are now joined into one coherent, walkable flow. New north star at [`docs/charter.md`](docs/charter.md): one mission, the 8+1 invariants, one canonical execution path.
 
-- **Default framework tools** ([`docs/28-default-tools.md`](docs/28-default-tools.md)) — five audited subprocess wrappers ship: `maddu git/test/format/lint/install`. Every invocation emits `TOOL_INVOKED/_COMPLETED/_REFUSED` on the spine. Refuses empty commit messages, `git push -f`, empty install lists, no-detector test/format/lint resolution. Per-lane allowlist via `.maddu/config/triggers.json`.
-- **MCP server template gallery** ([`docs/29-mcp-templates.md`](docs/29-mcp-templates.md)) — 5 curated templates ship as JSON descriptors (no new package.json deps): `local-fs`, `local-search`, `calculator`, `git-advanced`, `time-and-date`. `maddu mcp install <template>` checks required binaries, scaffolds companion files, registers.
-- **Workspace governance tiers** ([`docs/30-governance-tiers.md`](docs/30-governance-tiers.md)) — `strict | standard | relaxed` with per-gate overrides. Tunes operational gates only; the 8+1 hard rules stay immutable. Doctor banner + cockpit rail-foot show mode.
-- **Receipt log + Operations feed** ([`docs/31-operations-log.md`](docs/31-operations-log.md)) — every operational event projects to `.maddu/log/operations.ndjson`; readable via `maddu log` and the cockpit `operations` route. Projection regenerable.
-- **Kanban + plan persistence** ([`docs/32-kanban-and-plans.md`](docs/32-kanban-and-plans.md)) — plans live at `.maddu/plans/<id>/{plan.md,state.json,revisions/}`. All mutations via PLAN_* events. Slice-stop with `--triggered-by plan:<id>` auto-revises. New cockpit `plans` route.
-- **Loops + coordinator primitive** ([`docs/33-loops-and-coordinator.md`](docs/33-loops-and-coordinator.md)) — `maddu loop ralph` (persist-until-done) + `maddu coordinator <plan-id>` (multi-phase autonomous driver). Coordinator is runtime-agnostic — does NOT depend on Claude Code's `Agent` tool.
-- **Blast + starter skills + autonomous curation** — `/maddu-blast` chained autonomous run; 8 starter skills seeded on init; suggest-only skill candidate detection from recurring slice-stop patterns.
+- **Three default pipelines** seeded on init/upgrade — `ship-a-feature` (the default), `fix-a-bug`, `plan-and-delegate`. `MADDU.md` now routes any non-trivial work to `maddu pipeline run <name> "<goal>"`; ad-hoc `/maddu-autopilot` is reserved for genuine one-offs. Walking a pipeline populates the Plans, Reviews, Pipelines, Loops, and Cost surfaces.
+- **Framework self-audit** — new `maddu audit` command runs four coherence gates (`event-types-reachable`, `command-surface-coherent`, `cockpit-routes-reachable`, `docs-indexed`) plus slash-on-ramp + charter-drift checks, and emits an `AUDIT_REPORT` event. The framework can now prove it stays coherent with itself.
+- **Forgiving agent ergonomics** — `goal set`, `task create`, `plan add-phase`, and `plan complete-phase` now accept the natural positional form (e.g. `maddu goal set "ship login"`); the explicit flag forms still work. Every pipeline/slash/doc invocation is corrected to a verified-runnable form, and `task` + `review` get subcommand `--help` routing.
+- **Slash on-ramp triage** — all 53 verbs are classified agent-facing vs operator/plumbing (new `surface` field). Four new agent slashes land (`/maddu-search`, `/maddu-memory`, `/maddu-task`, `/maddu-audit`) with no surface sprawl.
 
-See [the v1.2.3 changelog entry](CHANGELOG.md) for the full release notes.
+Doctor now runs 58 gates (was 54); `maddu audit` reports 6/6. See [the v1.3.0 changelog entry](CHANGELOG.md) for the full release notes.
 
 ## Zero learning curve (v0.18)
 
@@ -72,7 +69,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.2.3 installed.
+Máddu v1.3.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -84,7 +81,11 @@ Next step: open this repo in Claude Code or Codex CLI and type:
 That's the operator surface: slash commands. No flags to memorize, no
 CLI verb to recall — type a slash command (or just natural language —
 "ship the login form") and the agent dispatches the right thing and
-tells you which.
+tells you which. For any non-trivial feature or fix the agent reaches
+for a pipeline by default — `maddu pipeline run ship-a-feature "<goal>"`
+(also `fix-a-bug`, `plan-and-delegate`); `/maddu-autopilot` stays for
+genuine one-offs. See [`docs/charter.md`](docs/charter.md) for the one
+canonical flow.
 
 ### Power users / scripts
 
@@ -93,7 +94,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.2.3  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.3.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

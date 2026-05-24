@@ -4,8 +4,8 @@
   "stages": [
     { "name": "reproduce", "intent": "Register and claim the lane to reproduce the defect. `maddu register --runtime claude-code --role implementer --focus \"reproduce <bug>\"`, then `maddu lane claim --lane <lane-id> --focus \"reproduce + fix <bug>\"`." },
     { "name": "scope", "intent": "Declare the slice scope around the suspect area. `maddu slice scope-declare --paths \"<dirs>\" --focus \"isolate root cause of <bug>\"`." },
-    { "name": "fix", "intent": "Drive the fix with an iterative loop. `maddu loop ralph --focus \"fix <bug>: edit, run failing test, repeat until green\"` so each iteration is recorded in the cockpit Loops route." },
+    { "name": "fix", "intent": "Drive the fix with an iterative loop. `maddu loop ralph --goal \"fix <bug>: edit, run failing test, repeat until green\"` so each iteration is recorded in the cockpit Loops route." },
     { "name": "verify", "intent": "Confirm the fix and no regressions. Run the failing test, then `maddu test` and `maddu doctor` to surface any FAIL rows." },
-    { "name": "review", "intent": "Record the fix and close the slice. `maddu review run --focus \"<bug> fix\"`, then `maddu slice-stop \"SLICE STOP: <summary>...\"` with targets, paths, gates, and learnings." }
+    { "name": "review", "intent": "Record the fix and close the slice. Stop the slice first — `maddu slice-stop \"SLICE STOP: <summary>...\"` with targets, paths, gates, and learnings — then `maddu review run --slice <slice-event-id>` to review the slice event." }
   ]
 }

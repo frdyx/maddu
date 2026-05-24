@@ -56,7 +56,21 @@ function runReviewer(binary, args, env, timeoutMs) {
   });
 }
 
+function printReviewHelp() {
+  console.log([
+    'usage: maddu review <subcommand> [args]',
+    '',
+    'subcommands:',
+    '  run --slice <eventId> [--reviewer <name>]',
+    '      Invoke the configured reviewer against a slice-stop event. Emits',
+    '      SLICE_REVIEWED; non-clean verdicts also emit FOLLOWUP_OPENED.',
+    '  status [--limit N]',
+    '  list   [--limit N]   (alias of status)',
+  ].join('\n'));
+}
+
 export default async function command(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) { printReviewHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
   const { paths, spine, projections, runtimes } = await loadSpineLib();

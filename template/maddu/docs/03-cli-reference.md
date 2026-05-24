@@ -393,8 +393,9 @@ Dependency-aware task board.
 ```bash
 $ maddu task list [--status <s>] [--lane <id>] [--owner <sid>]
 $ maddu task show <id>
-$ maddu task create --title "<t>" [--description "<d>"] [--lane <id>] [--owner <sid>] \
+$ maddu task create "<title>" [--description "<d>"] [--lane <id>] [--owner <sid>] \
                     [--blocked-by id1,id2] [--tags a,b] [--status todo|in-progress|blocked]
+#   (`--title "<t>"` is accepted as an alias for the positional title)
 $ maddu task update <id> [--title …] [--status …] [--owner …] [--lane …] \
                          [--add-blocker <id>] [--remove-blocker <id>] [--tags a,b]
 $ maddu task complete <id> [--by <sid>]
@@ -407,7 +408,8 @@ Statuses: `todo`, `in-progress`, `blocked`, `done`, `cancelled`. Completing a ta
 Declare the agent's current objective. Latest `GOAL_DECLARED` wins in the projection and surfaces in `maddu brief` / `#orientation`.
 
 ```bash
-$ maddu goal set --objective "<obj>" [--constraint "<c>" --constraint "<c>" …]
+$ maddu goal set "<obj>" [--constraint "<c>" --constraint "<c>" …]
+#   (`--objective "<obj>"` is accepted as an alias for the positional objective)
 $ maddu goal show
 ```
 
@@ -637,8 +639,10 @@ $ maddu log [--since iso] [--lane id] [--op T] [--rebuild] [--json]
 $ maddu plan new "<title>" [--phases "a,b,c"] [--goal "..."]
 $ maddu plan list
 $ maddu plan show <plan-id>
-$ maddu plan add-phase <plan-id> --phase <n> [--intent "..."]
-$ maddu plan complete-phase <plan-id> --phase <n> [--summary "..."]
+$ maddu plan add-phase <plan-id> "<intent>"   # auto-numbers the next phase
+#   (or pin the number explicitly: --phase <n> [--intent "..."])
+$ maddu plan complete-phase <plan-id>          # completes the next open phase
+#   (or target one: <plan-id> <n>  /  <plan-id> --phase <n> [--summary "..."])
 $ maddu plan block-phase <plan-id> --phase <n> --reason "..."
 $ maddu plan revise <plan-id> --note "..."
 $ maddu plan complete <plan-id> [--summary "..."]

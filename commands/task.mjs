@@ -26,14 +26,32 @@ function colorFor(status) {
 
 function csv(s) { if (!s || s === true) return []; return String(s).split(',').map((x) => x.trim()).filter(Boolean); }
 
+function printTaskHelp() {
+  console.log([
+    'usage: maddu task <subcommand> [args]',
+    '',
+    'subcommands:',
+    '  list [--status <s>] [--lane <id>] [--owner <id>]',
+    '  show <id>',
+    '  create "<title>" [--description "…"] [--lane <id>] [--owner <sid>]',
+    '         [--blocked-by id1,id2] [--tags a,b]',
+    '  update <id> [--title …] [--status …] [--owner …] [--lane …]',
+    '         [--add-blocker <id>] [--remove-blocker <id>]',
+    '  complete <id> [--by <sid>]',
+    '',
+    'Title is the first positional argument on create; `--title "…"` is accepted as an alias.',
+  ].join('\n'));
+}
+
 export default async function task(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) { printTaskHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
   const { paths, spine, projections } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   if (!sub) {
-    console.error('Usage: maddu task <list|show|create|update|complete> [flags]');
+    printTaskHelp();
     process.exit(2);
   }
 
@@ -102,8 +120,12 @@ export default async function task(argv) {
   }
 
   if (sub === 'create') {
-    const { flags } = parseFlags(rest);
-    const title = requireFlag(flags, 'title');
+    const { flags, positional } = parseFlags(rest);
+    // Forgiving form: `maddu task create "<title>"` — first positional is the
+    // title when --title is absent. --title stays the canonical alias.
+    const title = (typeof flags.title === 'string' && flags.title.length > 0)
+      ? flags.title
+      : (positional[0] || requireFlag(flags, 'title'));
     const id = flags.id || spine.genTaskId();
     const blockedBy = csv(flags['blocked-by']);
     const tags = csv(flags.tags);

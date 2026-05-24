@@ -120,41 +120,109 @@ async function runGateChecks(repoRoot, onlyGateId) {
 }
 
 // ── Audit-only check: slash on-ramp ───────────────────────────────────────
-// Every CLI verb (bin COMMANDS) ideally has an agent-facing /maddu-* slash
-// command. The authoritative slash roster is the `under:` field in
-// commands/help.mjs (each entry maps a slash command to the CLI verbs it
-// dispatches). Verbs with no slash backing can't be reached by an agent
-// during a run. Most framework/operator primitives legitimately have none,
-// so this is WARN, listing the gap for visibility.
+// The operator's north star (feedback_no_learning_curve_ux): the operator
+// surface = slash commands + agent-side intent routing, NOT a verbose
+// `maddu cmd --flag value` for every verb. So we DON'T want a 1:1 slash per
+// CLI verb — that would re-create the sprawl we removed. Instead:
+//
+//   - Verbs are classified `surface: 'agent' | 'operator'` in _tiers.mjs.
+//   - An 'agent' verb needs an ON-RAMP: a /maddu-* slash that dispatches it
+//     OR an intent-routing row in MADDU.md. The slash need not be named after
+//     the verb (coordinator → /maddu-coordinate, loop → /maddu-ralph, …), so
+//     we resolve reachability by reading the slash-command files directly
+//     plus a small alias table for the non-obvious mappings.
+//   - 'operator' verbs (install/lifecycle/plumbing) legitimately have no
+//     on-ramp — verbose CLI is their surface. They are NOT flagged.
+//
+// WARN lists only genuine gaps: 'agent' verbs with neither a slash nor a
+// routing row. Ideally zero.
 function extractCommands(binSource) {
   const m = binSource.match(/const\s+COMMANDS\s*=\s*(\[[^\]]+\])/);
   if (!m) return null;
   try { return new Function(`return ${m[1]}`)(); } catch { return null; }
 }
 
+// Slash files don't always name the verb they dispatch in a parseable way;
+// this alias table covers the cases the file-scan can't infer on its own (or
+// where we want the mapping to be explicit + intentional). Maps a CLI verb →
+// the slash command(s) that reach it.
+const SLASH_ALIASES = {
+  coordinator: ['/maddu-coordinate'],
+  loop:        ['/maddu-ralph', '/maddu-plan-loop', '/maddu-blast'],
+  plan:        ['/maddu-plan', '/maddu-plan-loop', '/maddu-coordinate'],
+  events:      ['/maddu-status'],
+  pipeline:    ['/maddu-autopilot', '/maddu-status'],
+};
+
+// Resolve the set of CLI verbs reachable via SOME /maddu-* slash command by
+// scanning the slash-command template bodies for `maddu/run <verb>` and
+// folding in the alias table. Returns a Set of verb strings.
+async function reachableViaSlash() {
+  const reachable = new Set();
+  for (const [verb, slashes] of Object.entries(SLASH_ALIASES)) {
+    if (slashes.length) reachable.add(verb);
+  }
+  const cmdDirs = [
+    join(frameworkRoot(), 'template', 'maddu', 'agent-files', 'commands'),
+    join(frameworkRoot(), 'maddu', 'agent-files', 'commands'),
+  ];
+  for (const dir of cmdDirs) {
+    if (!(await exists(dir))) continue;
+    let names = [];
+    try { names = (await readdir(dir)).filter((n) => n.startsWith('maddu-') && n.endsWith('.md')); }
+    catch { continue; }
+    for (const name of names) {
+      let body = '';
+      try { body = await readFile(join(dir, name), 'utf8'); } catch { continue; }
+      for (const m of body.matchAll(/maddu\/run\s+([a-z][a-z-]*)/g)) reachable.add(m[1]);
+    }
+    break; // first existing dir wins
+  }
+  return reachable;
+}
+
 async function checkSlashOnRamp() {
   const binPath = join(frameworkRoot(), 'bin', 'maddu.mjs');
-  const helpPath = join(frameworkRoot(), 'commands', 'help.mjs');
-  if (!(await exists(binPath)) || !(await exists(helpPath))) {
-    return { level: 'WARN', label: 'slash on-ramp', detail: 'bin/help not adjacent (skipped)' };
+  const tiersPath = join(frameworkRoot(), 'commands', '_tiers.mjs');
+  if (!(await exists(binPath)) || !(await exists(tiersPath))) {
+    return { level: 'WARN', label: 'slash on-ramp', detail: 'bin/_tiers not adjacent (skipped)' };
   }
   const commands = extractCommands(await readFile(binPath, 'utf8'));
   if (!Array.isArray(commands)) {
     return { level: 'WARN', label: 'slash on-ramp', detail: 'could not parse COMMANDS' };
   }
-  const helpSrc = await readFile(helpPath, 'utf8');
-  // Every CLI verb that appears in any `under:` token has a slash on-ramp.
-  const underTokens = [...helpSrc.matchAll(/under:\s*'([^']+)'/g)]
-    .flatMap((m) => m[1].split(',').map((t) => t.trim().split(/\s+/)[0]));
-  const slashed = new Set(underTokens);
-  const noSlash = commands.filter((c) => !slashed.has(c));
-  if (noSlash.length === 0) {
-    return { level: 'PASS', label: 'slash on-ramp', detail: `${commands.length} verb(s), all have a /maddu-* on-ramp` };
+  let tiers = {};
+  try { tiers = (await import(pathToFileURL(tiersPath).href)).default || {}; }
+  catch { return { level: 'WARN', label: 'slash on-ramp', detail: '_tiers.mjs not loadable' }; }
+
+  // Agent-facing verbs are the only ones that need an on-ramp.
+  const agentVerbs = commands.filter((c) => tiers[c]?.surface === 'agent');
+
+  // On-ramp #1: reachable via some /maddu-* slash command.
+  const slashed = await reachableViaSlash();
+
+  // On-ramp #2: named in an intent-routing row in MADDU.md (the natural-
+  // language dispatch table). A verb counts if a row mentions either the
+  // bare verb or a slash that dispatches it.
+  const madduMdPath = join(frameworkRoot(), 'template', 'maddu', 'agent-files', 'MADDU.md');
+  let routingText = '';
+  if (await exists(madduMdPath)) routingText = (await readFile(madduMdPath, 'utf8')).toLowerCase();
+  const routed = (verb) => routingText.includes(`maddu run ${verb}`) || routingText.includes(`maddu ${verb}`);
+
+  const gaps = agentVerbs.filter((c) => !slashed.has(c) && !routed(c));
+
+  const operatorCount = commands.length - agentVerbs.length;
+  if (gaps.length === 0) {
+    return {
+      level: 'PASS',
+      label: 'slash on-ramp',
+      detail: `${agentVerbs.length} agent-facing verb(s) all have an on-ramp; ${operatorCount} operator/plumbing verb(s) intentionally CLI-only`,
+    };
   }
   return {
     level: 'WARN',
     label: 'slash on-ramp',
-    detail: `${noSlash.length}/${commands.length} CLI verb(s) have no /maddu-* slash: ${noSlash.join(', ')}`,
+    detail: `${gaps.length}/${agentVerbs.length} agent-facing verb(s) have no on-ramp (no slash, no routing row): ${gaps.join(', ')}`,
   };
 }
 

@@ -132,10 +132,26 @@ export default async function planCmd(argv) {
   if (sub === 'add-phase') {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
-    const phase = resolvePhaseName(flags);
-    if (!planId) { console.error('usage: maddu plan add-phase <plan-id> --phase <n> [--intent "..."]'); process.exit(2); }
-    if (!phase) { console.error('--phase required'); process.exit(2); }
-    await plans.addPhase(repoRoot, { planId, name: phase, intent: typeof flags.intent === 'string' ? flags.intent : '', by: sessionId });
+    if (!planId) { console.error('usage: maddu plan add-phase <plan-id> [--phase <n>] [--intent "..."]'); process.exit(2); }
+    // Forgiving form: `maddu plan add-phase <plan-id> "<intent>"`. plan-id is
+    // positional[0]; the intent is positional[1]. --intent stays canonical.
+    const positionalIntent = positional.length > 1 ? positional[1] : null;
+    const intent = (typeof flags.intent === 'string') ? flags.intent : (positionalIntent || '');
+    // Phase identifier: --phase (preferred) / --name (deprecated). When
+    // omitted, auto-assign the next phase number = max(existing numeric
+    // phase names, count) + 1 so the natural positional-intent form needs
+    // no phase number.
+    let phase = resolvePhaseName(flags);
+    if (!phase) {
+      const p = await plans.readPlan(repoRoot, planId);
+      const existing = p.phases || [];
+      const maxNum = existing.reduce((m, ph) => {
+        const n = Number(ph.name);
+        return Number.isInteger(n) && n > m ? n : m;
+      }, 0);
+      phase = String(Math.max(maxNum, existing.length) + 1);
+    }
+    await plans.addPhase(repoRoot, { planId, name: phase, intent, by: sessionId });
     console.log(`${ANSI.pass}added${ANSI.reset}  phase  ${phase}`);
     return;
   }
@@ -143,9 +159,25 @@ export default async function planCmd(argv) {
   if (sub === 'complete-phase') {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
-    const phase = resolvePhaseName(flags);
-    if (!planId) { console.error('usage: maddu plan complete-phase <plan-id> --phase <n> [--summary "..."]'); process.exit(2); }
-    if (!phase) { console.error('--phase required'); process.exit(2); }
+    if (!planId) { console.error('usage: maddu plan complete-phase <plan-id> [--phase <n>] [--summary "..."]'); process.exit(2); }
+    // Forgiving form: phase number may come from --phase (preferred),
+    // --name (deprecated), positional[1], or — if all omitted — default to
+    // the lowest still-open (pending) phase.
+    let phase = resolvePhaseName(flags);
+    if (!phase && positional.length > 1) phase = positional[1];
+    if (!phase) {
+      const p = await plans.readPlan(repoRoot, planId);
+      const open = (p.phases || []).filter((ph) => ph.status === 'pending');
+      // "Lowest open phase number": prefer numeric ordering, fall back to
+      // declaration order (first pending).
+      const sorted = [...open].sort((a, b) => {
+        const an = Number(a.name), bn = Number(b.name);
+        if (Number.isInteger(an) && Number.isInteger(bn)) return an - bn;
+        return 0;
+      });
+      if (sorted.length === 0) { console.error('no open phase to complete'); process.exit(3); }
+      phase = sorted[0].name;
+    }
     await plans.completePhase(repoRoot, { planId, name: phase, summary: typeof flags.summary === 'string' ? flags.summary : null, by: sessionId });
     console.log(`${ANSI.pass}completed${ANSI.reset}  phase  ${phase}`);
     return;

@@ -67,6 +67,15 @@ const ROSTER = [
     ],
   },
   {
+    topic: 'corpus',
+    title: 'Search, memory & tasks',
+    items: [
+      { name: '/maddu-search <query>',      line: 'Cross-corpus search: events, memory, skills, mailbox.', under: 'search' },
+      { name: '/maddu-memory [verb]',       line: 'List / search / extract hindsight memory facts.',        under: 'memory list, memory search, memory extract' },
+      { name: '/maddu-task [verb] <args>',  line: 'List / show / create / update / complete tasks.',        under: 'task list, task show, task create, task update, task complete' },
+    ],
+  },
+  {
     topic: 'admin',
     title: 'Cancel',
     items: [
