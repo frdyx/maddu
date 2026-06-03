@@ -11,6 +11,34 @@ narrative summary.
 
 ---
 
+## [v1.4.0] · 2026-06-03 · Empirical insights, a plugin loader, and a tighter core
+
+The first **data-driven** release. After ~8 real projects had been run through Máddu, a cross-project usage audit (8 spines + 125 Claude Code transcripts) asked what is actually *used* vs merely *defined* — and acted on the answer. The 8+1 hard rules are unchanged. Two PRs: #91 (insights + plugin loader + comms demotion) and #92 (Bucket C — skills/review wired into the default flow).
+
+### The finding
+
+A verified producer census showed **90 of 142 event types never fired in any real project**, and only 9 are load-bearing (all lifecycle/bootstrap). They are dead in *burn-in*, not in *code* — every one has a producer — so the lever is **domain demotion, not constant deletion**. Full analysis in [`docs/audit/2026-06-03-usage-audit.md`](docs/audit/2026-06-03-usage-audit.md) + the kill-staging + ADR records beside it.
+
+### `maddu insights` — measure what's used
+
+- **New read-only, agent-facing `maddu insights`** (`/maddu-insights`): harvests `.maddu` spines across registered workspaces + scans transcripts, classifying every event type **load-bearing / occasional / single-project / dormant / dead** by per-project presence (so one high-volume project can't masquerade as broad use). Subcommands `events | dead | verbs | slashes`, `--json`. The repeatable instrument so the dead-type count can be re-checked every release.
+
+### Plugin loader — capabilities outside the core
+
+- **New `maddu plugin`** (`/maddu-plugin`): `list | info | enable | disable`. A capability can ship as a `plugin.json` manifest under `maddu/plugins/<name>/` (bundled) or `.maddu/plugins/` (user, gated by `--trust` + sha256), loaded only when enabled. Files-only enable-state in `.maddu/config/plugins.json`. Contract in [`docs/audit/2026-06-03-ADR-plugin-system.md`](docs/audit/2026-06-03-ADR-plugin-system.md).
+- **Comms demoted to the first plugin.** Telegram / Discord / Email moved out of the bridge's static boot path into `template/maddu/plugins/comms/` (server + boot hooks); **off by default**. Back-compat migration on `upgrade` auto-enables comms if it was previously active. `insights` reclassifies the 19 comms types as `dormant [plugin:comms]` — the honest core-dead count drops 90 → 71. Cockpit Settings panels gate on `GET /bridge/plugins`.
+
+### Bucket C — wire dead subsystems into the default flow
+
+- **Skills funnel fires automatically.** `maddu slice-stop` now auto-detects reusable patterns and emits `SKILL_CANDIDATE_DETECTED` — crossing the rule-#9 gauntlet (allowlist `slice-stop:skill-candidate`, seeded by init/upgrade; `triggered_by` provenance). Previously the detector was only reachable via a manual subcommand nobody ran.
+- **Coordinator enforces review.** `runSliceReview()` extracted into the review lib (shared by the CLI and auto-triggers); the coordinator reviews the newest slice produced during each phase (`SLICE_REVIEWED` + `FOLLOWUP_OPENED`), graceful no-op when no reviewer is configured.
+
+### Verification
+
+audit 6/6 · stress 12/12 · layout-refusal 4/4 · projection-roundtrip OK. Comms and review paths exercised end-to-end (live bridge + synthetic reviewer); cockpit gating browser-verified.
+
+---
+
 ## [v1.3.0] · 2026-05-24 · Completeness — wire the framework to its charter
 
 Máddu had the features; v1.3.0 joins them into one coherent, walkable flow and gives the framework a way to prove it stays coherent with itself. Coordinator-driven, single session, two arcs: the coherence realignment (merged via PR #89) and the completeness work that followed. The 8+1 hard rules are unchanged; this release is about intent, reachability, and ergonomics — not new surface area. Net LoC is negative.
