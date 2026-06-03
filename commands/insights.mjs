@@ -25,14 +25,15 @@
 // a report, not a gate); exit 2 on usage error.
 
 import { parseFlags } from './_args.mjs';
+import { findRepoRoot } from './_resolve.mjs';
 import { loadLib, loadLibOptional } from './_libroot.mjs';
 
 const ANSI = {
-  lb: '\x1b[32m', occ: '\x1b[36m', sp: '\x1b[33m', dead: '\x1b[31m',
+  lb: '\x1b[32m', occ: '\x1b[36m', sp: '\x1b[33m', dormant: '\x1b[35m', dead: '\x1b[31m',
   dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m',
 };
 const CLS_COLOR = {
-  'load-bearing': ANSI.lb, occasional: ANSI.occ, 'single-project': ANSI.sp, dead: ANSI.dead,
+  'load-bearing': ANSI.lb, occasional: ANSI.occ, 'single-project': ANSI.sp, dormant: ANSI.dormant, dead: ANSI.dead,
 };
 function clsTag(cls) { return `${CLS_COLOR[cls] || ''}${cls}${ANSI.reset}`; }
 
@@ -74,7 +75,18 @@ export default async function insights(argv) {
   const workspaces = reg.workspaces || [];
   const definedSet = await lib.definedEventTypes(spineLib);
   const projects = await lib.harvestSpines(workspaces);
-  const matrix = lib.buildMatrix(projects, definedSet);
+
+  // Plugin-owned event types (manifests are bundled, identical across installs)
+  // so a would-be-dead type owned by a plugin reads as dormant, not dead.
+  let pluginOwners = new Map();
+  try {
+    const pluginsLib = await loadLibOptional('plugins.mjs');
+    if (pluginsLib?.allPluginEventOwners) {
+      const ownerRoot = (await findRepoRoot(process.cwd())) || workspaces[0]?.path;
+      if (ownerRoot) pluginOwners = await pluginsLib.allPluginEventOwners(ownerRoot);
+    }
+  } catch {}
+  const matrix = lib.buildMatrix(projects, definedSet, pluginOwners);
 
   // Transcript scan (verbs/slashes) — only when needed.
   const wantTranscripts = (sub === 'verbs' || sub === 'slashes' || (!sub && !flags['no-transcripts']));
@@ -129,20 +141,21 @@ export default async function insights(argv) {
   }
 
   if (!sub || sub === 'events') {
-    console.log(`\n  ${ANSI.bold}Event-type utilization${ANSI.reset}  ${ANSI.dim}defined ${matrix.definedTotal} · ever-fired ${matrix.everFired} · ${matrix.counts['load-bearing']} load-bearing / ${matrix.counts.occasional} occasional / ${matrix.counts['single-project']} single-project / ${matrix.counts.dead} dead${ANSI.reset}`);
-    for (const cls of ['load-bearing', 'occasional', 'single-project']) {
+    console.log(`\n  ${ANSI.bold}Event-type utilization${ANSI.reset}  ${ANSI.dim}defined ${matrix.definedTotal} · ever-fired ${matrix.everFired} · ${matrix.counts['load-bearing']} load-bearing / ${matrix.counts.occasional} occasional / ${matrix.counts['single-project']} single-project / ${matrix.counts.dormant} dormant / ${matrix.counts.dead} dead${ANSI.reset}`);
+    for (const cls of ['load-bearing', 'occasional', 'single-project', 'dormant']) {
       const items = matrix.rows.filter((r) => r.cls === cls);
       if (!items.length) continue;
       console.log(`\n    ${clsTag(cls)} (${items.length})`);
       for (const r of items) {
-        const flag = r.undeclared ? `  ${ANSI.dead}[not in EVENT_TYPES]${ANSI.reset}` : '';
+        const flag = r.undeclared ? `  ${ANSI.dead}[not in EVENT_TYPES]${ANSI.reset}`
+          : (r.owner !== 'core' ? `  ${ANSI.dormant}[${r.owner}]${ANSI.reset}` : '');
         console.log(`      ${r.type.padEnd(32)} ${String(r.count).padStart(7)}×  ${r.projects}/${matrix.n} proj${flag}`);
       }
     }
   }
 
   if (!sub || sub === 'dead' || sub === 'events') {
-    console.log(`\n  ${clsTag('dead')}  ${matrix.deadDefined.length}/${matrix.definedTotal} defined event types never fired in any registered project`);
+    console.log(`\n  ${clsTag('dead')}  ${matrix.deadDefined.length}/${matrix.definedTotal} defined event types (core-owned) never fired in any registered project`);
     if (sub === 'dead' || !sub) {
       for (const t of matrix.deadDefined) console.log(`      ${ANSI.dim}${t}${ANSI.reset}`);
     }

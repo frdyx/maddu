@@ -76,7 +76,12 @@ export function classify(presence, n) {
 }
 
 // Join the harvested projects against the DEFINED event-type set.
-export function buildMatrix(projects, definedSet) {
+//
+// `pluginOwners` (type -> plugin name) reclassifies a would-be-dead type that is
+// actually owned by a plugin: it's `dormant` (the capability exists as a plugin,
+// off in these projects), never `dead`. Only genuinely core-owned types that
+// never fired count toward `deadDefined`.
+export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
   const n = projects.length;
   const globalCount = new Map(); // type -> total occurrences
   const presence = new Map();    // type -> # projects it fired in
@@ -90,18 +95,23 @@ export function buildMatrix(projects, definedSet) {
   const allTypes = new Set([...definedSet, ...seen]);
   const rows = [...allTypes].map((t) => {
     const proj = presence.get(t) || 0;
+    let cls = classify(proj, n);
+    const owner = pluginOwners.get(t) || null;
+    // A plugin-owned type that never fired is dormant (plugin off here), not dead.
+    if (cls === 'dead' && owner) cls = 'dormant';
     return {
       type: t,
       defined: definedSet.has(t),
       count: globalCount.get(t) || 0,
       projects: proj,
-      cls: classify(proj, n),
+      cls,
+      owner: owner ? `plugin:${owner}` : 'core',
       // a type seen in spines but absent from EVENT_TYPES = drift the other way
       undeclared: !definedSet.has(t),
     };
   }).sort((a, b) => b.projects - a.projects || b.count - a.count);
 
-  const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dead: 0 };
+  const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dormant: 0, dead: 0 };
   for (const r of rows) counts[r.cls]++;
   const deadDefined = rows.filter((r) => r.cls === 'dead' && r.defined).map((r) => r.type);
 
