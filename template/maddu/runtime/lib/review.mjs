@@ -6,6 +6,9 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { append, EVENT_TYPES } from './spine.mjs';
+import { readRuntime } from './runtimes.mjs';
 
 const VALID_VERDICTS = new Set(['CLEAN', 'P1', 'P2', 'P3', 'INFO']);
 
@@ -102,3 +105,79 @@ export const VERDICT_TO_FOLLOWUP = {
   P3:    'P3',
   INFO:  null,
 };
+
+export async function readReviewPolicy(repoRoot) {
+  try {
+    return JSON.parse(await fs.readFile(path.join(repoRoot, '.maddu', 'config', 'review-policy.json'), 'utf8'));
+  } catch {
+    return { defaultReviewer: null, lanesRequiringReview: [], severityToFollowupMap: {} };
+  }
+}
+
+function spawnReviewer(binary, args, env, timeoutMs) {
+  return new Promise((resolve) => {
+    const proc = spawn(binary, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    proc.stdout.on('data', (b) => { out += b.toString('utf8'); });
+    proc.stderr.on('data', (b) => { err += b.toString('utf8'); });
+    const t = setTimeout(() => { try { proc.kill('SIGTERM'); } catch {} resolve({ code: null, out, err, timedOut: true }); }, timeoutMs);
+    proc.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err, timedOut: false }); });
+    proc.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out, err: err + String(e), timedOut: false }); });
+  });
+}
+
+// Reusable review-run core (v1.4.0). Extracted from commands/review.mjs so both
+// the CLI and auto-triggers (slice-stop, coordinator) share one path. Returns
+// { skipped, reason } when no reviewer is configured/usable (callers treat this
+// as a graceful no-op), or { ok, verdict, findingsCount, reviewPath, eventId,
+// followupId }. `triggeredBy` rides the SLICE_REVIEWED event for rule-#9
+// provenance when this runs as an auto-trigger.
+export async function runSliceReview(repoRoot, { sliceEventId, reviewer = null, triggeredBy = null, timeoutMs = 10 * 60 * 1000 } = {}) {
+  if (!sliceEventId) return { skipped: true, reason: 'no-slice-event-id' };
+  const policy = await readReviewPolicy(repoRoot);
+  const reviewerName = reviewer || policy.defaultReviewer;
+  if (!reviewerName) return { skipped: true, reason: 'no-reviewer-configured' };
+  const desc = await readRuntime(repoRoot, reviewerName);
+  if (!desc) return { skipped: true, reason: `runtime-not-found:${reviewerName}` };
+  if (desc.kind && desc.kind !== 'reviewer') return { skipped: true, reason: `wrong-kind:${desc.kind}` };
+
+  const args = (desc.args || []).map((a) =>
+    String(a).replace('${SLICE_EVENT_ID}', sliceEventId).replace('${REPO_ROOT}', repoRoot));
+  const env = { MADDU_SLICE_EVENT_ID: sliceEventId, MADDU_REPO_ROOT: repoRoot };
+  const result = await spawnReviewer(desc.binary || 'node', args, env, timeoutMs);
+
+  const parsed = (result.timedOut || result.code !== 0)
+    ? { verdict: 'INFO', findings: [], body: result.timedOut ? `# Reviewer timeout after ${timeoutMs}ms` : `# Reviewer exited ${result.code}\n\n${result.err}` }
+    : parseReview(result.out);
+
+  const reviewPath = await writeReviewArchive(repoRoot, sliceEventId, {
+    verdict: parsed.verdict, findings: parsed.findings, body: parsed.body,
+    reviewerRuntime: reviewerName, reviewedAt: new Date().toISOString(),
+  });
+
+  const ev = await append(repoRoot, {
+    type: EVENT_TYPES.SLICE_REVIEWED,
+    triggered_by: triggeredBy,
+    data: {
+      sliceEventId, verdict: parsed.verdict, findingsCount: parsed.findings.length,
+      reviewerRuntime: reviewerName, reviewPath,
+      ...(result.timedOut || result.code !== 0 ? { evidence: { error: result.err || `exit ${result.code}` } } : {}),
+    },
+  });
+
+  let followupId = null;
+  const severity = (policy.severityToFollowupMap && policy.severityToFollowupMap[parsed.verdict]) || VERDICT_TO_FOLLOWUP[parsed.verdict];
+  if (severity) {
+    const draftScope = parsed.findings
+      .map((f) => (typeof f === 'object' && f.location ? String(f.location).split(':')[0] : null))
+      .filter(Boolean);
+    const fev = await append(repoRoot, {
+      type: EVENT_TYPES.FOLLOWUP_OPENED,
+      triggered_by: triggeredBy,
+      data: { fromReviewEventId: ev.id, severity, draftScope },
+    });
+    followupId = fev.id;
+  }
+
+  return { ok: true, verdict: parsed.verdict, findingsCount: parsed.findings.length, reviewPath, eventId: ev.id, followupId };
+}
