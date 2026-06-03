@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.3.0](https://img.shields.io/badge/version-1.3.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.4.0](https://img.shields.io/badge/version-1.4.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,16 +24,15 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.3.0
+## What's new in v1.4.0
 
-**Completeness — wire the framework to its charter.** The features Máddu already had are now joined into one coherent, walkable flow. New north star at [`docs/charter.md`](docs/charter.md): one mission, the 8+1 invariants, one canonical execution path.
+**Empirical insights, a plugin loader, and a tighter core.** The first data-driven release: a cross-project usage audit (8 real project spines + 125 transcripts) found that **90 of 142 event types never fired in any real run** — dead in burn-in, not in code. v1.4.0 makes that measurable, then acts on it. The 8+1 hard rules are unchanged.
 
-- **Three default pipelines** seeded on init/upgrade — `ship-a-feature` (the default), `fix-a-bug`, `plan-and-delegate`. `MADDU.md` now routes any non-trivial work to `maddu pipeline run <name> "<goal>"`; ad-hoc `/maddu-autopilot` is reserved for genuine one-offs. Walking a pipeline populates the Plans, Reviews, Pipelines, Loops, and Cost surfaces.
-- **Framework self-audit** — new `maddu audit` command runs four coherence gates (`event-types-reachable`, `command-surface-coherent`, `cockpit-routes-reachable`, `docs-indexed`) plus slash-on-ramp + charter-drift checks, and emits an `AUDIT_REPORT` event. The framework can now prove it stays coherent with itself.
-- **Forgiving agent ergonomics** — `goal set`, `task create`, `plan add-phase`, and `plan complete-phase` now accept the natural positional form (e.g. `maddu goal set "ship login"`); the explicit flag forms still work. Every pipeline/slash/doc invocation is corrected to a verified-runnable form, and `task` + `review` get subcommand `--help` routing.
-- **Slash on-ramp triage** — all 53 verbs are classified agent-facing vs operator/plumbing (new `surface` field). Four new agent slashes land (`/maddu-search`, `/maddu-memory`, `/maddu-task`, `/maddu-audit`) with no surface sprawl.
+- **`maddu insights`** (`/maddu-insights`) — reads `.maddu` spines across your registered workspaces and classifies every event type **load-bearing / occasional / single-project / dormant / dead** by per-project presence. The repeatable instrument so utilization is a number you can re-check, not a guess. `events | dead | verbs | slashes`, `--json`.
+- **Plugin loader** (`maddu plugin` · `/maddu-plugin`) — a capability can live *outside* the core, shipped as a `plugin.json` manifest and loaded only when enabled (files-only enable-state; user-added plugins gated by `--trust` + sha256). **Comms (Telegram / Discord / Email) is the first plugin** — off by default, out of the bridge's static boot path. Existing comms users are auto-migrated on `upgrade`.
+- **Dead subsystems wired into the default flow** — `maddu slice-stop` now auto-detects reusable patterns and emits skill candidates (rule-#9 gauntlet), and the coordinator enforces a review of each phase's slice. The skills + review surfaces fire from the natural flow instead of waiting for an agent to remember a manual command.
 
-Doctor now runs 58 gates (was 54); `maddu audit` reports 6/6. See [the v1.3.0 changelog entry](CHANGELOG.md) for the full release notes.
+`maddu audit` reports 6/6 and `maddu insights` shows the honest core-dead count (90 → 71 once comms is plugin-owned). See [the v1.4.0 changelog entry](CHANGELOG.md) and [`docs/audit/`](docs/audit/) for the full audit + decision records.
 
 ## Zero learning curve (v0.18)
 
@@ -56,6 +55,8 @@ one. The verbose CLI stays first-class for scripts and CI.
 | `/maddu-doctor` | Run hard-rule gates and surface findings. |
 | `/maddu-cancel` | Stop the current slice cleanly. |
 | `/maddu-note <text>` | One-liner into the operator inbox. |
+| `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined. |
+| `/maddu-plugin <verb>` | List / enable / disable capabilities that live outside the core. |
 
 Or just type *"ship the login form"*, *"status"*, *"tokens"*. The
 agent classifies the intent from `MADDU.md` and dispatches the
@@ -69,7 +70,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.3.0 installed.
+Máddu v1.4.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -94,7 +95,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.3.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.4.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
