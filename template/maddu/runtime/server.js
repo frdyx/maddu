@@ -35,9 +35,7 @@ import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMask
 import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
 import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
-import * as telegram from './lib/telegram.mjs';
-import * as discord from './lib/discord.mjs';
-import * as emailBridge from './lib/email.mjs';
+import { discoverPlugins } from './lib/plugins.mjs';
 import { readRegistry, writeRegistry, activateWorkspace, registryExists, registryPath } from './lib/workspaces.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -161,6 +159,27 @@ function resolveRequestWorkspace(req, url, ctx) {
   // Fall back to active workspace.
   const active = ctx.active;
   return { repoRoot: ctx.workspaces.get(active), workspaceId: active, fanout: false };
+}
+
+// ── Plugin server hooks ─────────────────────────────────────────────────────
+// Enabled plugins claim their own /bridge/* routes. Loaded once per repoRoot
+// (enable-state is per-workspace) and cached. A plugin's handle(ctx) returns
+// true when it served the request, false to let the core chain continue.
+const _pluginServerCache = new Map(); // repoRoot -> [{ name, handle }]
+async function pluginServerHandlers(repoRoot) {
+  if (_pluginServerCache.has(repoRoot)) return _pluginServerCache.get(repoRoot);
+  const handlers = [];
+  try {
+    for (const p of await discoverPlugins(repoRoot)) {
+      if (!p.enabled || p.error || !p.manifest.server) continue;
+      try {
+        const mod = await import(pathToFileURL(join(p.dir, p.manifest.server)).href);
+        if (typeof mod.handle === 'function') handlers.push({ name: p.name, handle: mod.handle });
+      } catch (err) { console.error(`[plugin:${p.name}] server load failed:`, err.message); }
+    }
+  } catch {}
+  _pluginServerCache.set(repoRoot, handlers);
+  return handlers;
 }
 
 async function handleBridge(req, res, url, ctx) {
@@ -1364,139 +1383,11 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { ok: true, pagesWritten: n });
   }
 
-  // ── telegram (Slice ζ) ────────────────────────────────────────────────
-  // Safety: token never returned over HTTP. Inbound from non-allowlisted
-  // chat_ids is silently dropped. Subsystem is off by default.
-  if (path === '/bridge/telegram/status' && req.method === 'GET') {
-    return sendJson(res, 200, await telegram.status(repoRoot));
-  }
-  if (path === '/bridge/telegram/token' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const masked = await telegram.setToken(repoRoot, body.value, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, masked });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/telegram/allowlist' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!Array.isArray(body.chatIds)) return sendJson(res, 400, { error: 'chatIds[] required' });
-    try {
-      const s = await telegram.setAllowlist(repoRoot, body.chatIds, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, allowedChatIds: s.allowedChatIds });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/telegram/enable' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const s = await telegram.enable(repoRoot, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, state: { enabled: s.enabled, allowedChatIds: s.allowedChatIds } });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/telegram/disable' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    const s = await telegram.disable(repoRoot, body.sessionId || null);
-    return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
-  }
-  if (path === '/bridge/telegram/send' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const rec = await telegram.enqueueOutbound(repoRoot, { chatId: body.chatId, text: body.text }, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, queued: { ts: rec.ts, chatId: rec.chatId, length: rec.text.length } });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/telegram/chats' && req.method === 'GET') {
-    return sendJson(res, 200, { chats: await telegram.listChats(repoRoot) });
-  }
-  if (path === '/bridge/telegram/chat' && req.method === 'GET') {
-    const cid = url.searchParams.get('chatId');
-    if (!cid) return sendJson(res, 400, { error: 'chatId required' });
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 500);
-    return sendJson(res, 200, { chatId: Number(cid), messages: await telegram.readChatLog(repoRoot, cid, limit) });
-  }
-
-  // ── discord (Slice η) ─ outbound-only, allowlisted, off by default ────
-  if (path === '/bridge/discord/status' && req.method === 'GET') {
-    return sendJson(res, 200, await discord.status(repoRoot));
-  }
-  if (path === '/bridge/discord/token' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const masked = await discord.setToken(repoRoot, body.value, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, masked });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/discord/allowlist' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!Array.isArray(body.channelIds)) return sendJson(res, 400, { error: 'channelIds[] required' });
-    try {
-      const s = await discord.setAllowlist(repoRoot, body.channelIds, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, allowedChannelIds: s.allowedChannelIds });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/discord/enable' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const s = await discord.enable(repoRoot, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, state: { enabled: s.enabled, allowedChannelIds: s.allowedChannelIds } });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/discord/disable' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    const s = await discord.disable(repoRoot, body.sessionId || null);
-    return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
-  }
-  if (path === '/bridge/discord/send' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const rec = await discord.enqueueOutbound(repoRoot, { channelId: body.channelId, text: body.text }, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, queued: { ts: rec.ts, channelId: rec.channelId, length: rec.text.length } });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-
-  // ── email (Slice η) ─ outbound-only SMTP, allowlisted, off by default ─
-  if (path === '/bridge/email/status' && req.method === 'GET') {
-    return sendJson(res, 200, await emailBridge.status(repoRoot));
-  }
-  if (path === '/bridge/email/config' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const s = await emailBridge.setConfig(repoRoot, body, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, config: s.config });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/email/password' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const masked = await emailBridge.setPassword(repoRoot, body.value, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, masked });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/email/allowlist' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!Array.isArray(body.recipients)) return sendJson(res, 400, { error: 'recipients[] required' });
-    try {
-      const s = await emailBridge.setAllowlist(repoRoot, body.recipients, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, allowedRecipients: s.allowedRecipients });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/email/enable' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const s = await emailBridge.enable(repoRoot, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
-  }
-  if (path === '/bridge/email/disable' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    const s = await emailBridge.disable(repoRoot, body.sessionId || null);
-    return sendJson(res, 200, { ok: true, state: { enabled: s.enabled } });
-  }
-  if (path === '/bridge/email/send' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const rec = await emailBridge.enqueueOutbound(repoRoot, { to: body.to, subject: body.subject, text: body.text }, body.sessionId || null);
-      return sendJson(res, 200, { ok: true, queued: { ts: rec.ts, to: rec.to, subject: rec.subject } });
-    } catch (e) { return sendJson(res, 400, { error: e.message }); }
+  // ── plugins: enabled plugins claim their own /bridge/* routes ─────────────
+  // (e.g. the `comms` plugin owns /bridge/{telegram,discord,email}/*). A
+  // disabled plugin contributes zero routes — the path simply 404s below.
+  for (const ps of await pluginServerHandlers(repoRoot)) {
+    if (await ps.handle({ path, method: req.method, req, res, url, repoRoot, sendJson, readBody })) return;
   }
 
   // ── events: tail N most recent (no cursor) for charts/sparklines ──────
@@ -2646,25 +2537,33 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     scheduleTickGlobal(ctx.workspaces).catch(() => {});
   }, 200);
 
-  // Telegram/Discord/Email embedded poller — iterates workspaces. Each per-
-  // workspace tick is cheap when state.enabled is false.
-  let telegramStopping = false;
-  async function telegramLoop() {
-    if (telegramStopping) return;
-    for (const [workspaceId, repoRoot] of ctx.workspaces) {
-      try { await telegram.tickPoll(repoRoot); } catch (err) { console.error(`[${workspaceId}] telegram poll`, err.message); }
-      try { await telegram.tickSend(repoRoot); } catch (err) { console.error(`[${workspaceId}] telegram send`, err.message); }
-      try { await discord.tickSend(repoRoot); }  catch (err) { console.error(`[${workspaceId}] discord send`, err.message); }
-      try { await emailBridge.tickSend(repoRoot); } catch (err) { console.error(`[${workspaceId}] email send`, err.message); }
+  // Plugin boot hooks — start a plugin's background loop if it is enabled in any
+  // mounted workspace (the loop itself iterates all workspaces, each tick cheap
+  // when that subsystem is off). The comms poll/send loop lives here now.
+  const pluginStops = [];
+  (async () => {
+    const started = new Set();
+    for (const repoRoot of ctx.workspaces.values()) {
+      let plugins = [];
+      try { plugins = await discoverPlugins(repoRoot); } catch { continue; }
+      for (const p of plugins) {
+        if (!p.enabled || p.error || !p.manifest.boot || started.has(p.name)) continue;
+        started.add(p.name);
+        try {
+          const mod = await import(pathToFileURL(join(p.dir, p.manifest.boot)).href);
+          if (typeof mod.start === 'function') {
+            const handle = mod.start({ workspaces: ctx.workspaces, append, EVENT_TYPES });
+            if (handle && typeof handle.stop === 'function') pluginStops.push(handle.stop);
+            console.log(`[plugin:${p.name}] boot loop started`);
+          }
+        } catch (err) { console.error(`[plugin:${p.name}] boot failed:`, err.message); }
+      }
     }
-    if (telegramStopping) return;
-    setTimeout(telegramLoop, 1500);
-  }
-  setTimeout(telegramLoop, 1000);
+  })();
 
   const shutdown = () => {
     console.log('\nShutting down…');
-    telegramStopping = true;
+    for (const stop of pluginStops) { try { stop(); } catch {} }
     clearInterval(scheduleTimer);
     // v1.2.1 F2 — clean up our entry in the bridges registry on graceful exit.
     unregisterBridge(process.pid).catch(() => {});

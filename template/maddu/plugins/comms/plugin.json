@@ -4,7 +4,8 @@
   "description": "Telegram / Discord / Email bridges — outbound notifications + allowlisted inbound. Off by default; message bodies route through third-party servers.",
   "madduVersionMin": "1.4.0",
   "enabledByDefault": false,
-  "status": "manifest-only (PR1): event types declared + discoverable. server/boot/cockpit hooks + lib move land in PR2 per docs/audit/2026-06-03-ADR-plugin-system.md.",
+  "server": "./server.mjs",
+  "boot": "./boot.mjs",
   "eventTypes": [
     "TELEGRAM_ENABLED",
     "TELEGRAM_DISABLED",

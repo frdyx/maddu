@@ -15,9 +15,9 @@
 
 import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES } from './spine.mjs';
-import { addKey, listKeys, activeValue } from './auth.mjs';
+import { pathsFor } from '../../runtime/lib/paths.mjs';
+import { append, EVENT_TYPES } from '../../runtime/lib/spine.mjs';
+import { addKey, listKeys, activeValue } from '../../runtime/lib/auth.mjs';
 
 const PROVIDER = 'discord';
 const API_BASE = 'https://discord.com/api/v10';
