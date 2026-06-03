@@ -363,6 +363,20 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/health' && req.method === 'GET') {
     return sendJson(res, 200, { ok: true });
   }
+  // Plugins discovered for this workspace — the cockpit gates plugin-owned
+  // panels (e.g. comms) on enabled-state so a disabled plugin shows no UI.
+  if (path === '/bridge/plugins' && req.method === 'GET') {
+    let plugins = [];
+    try {
+      plugins = (await discoverPlugins(repoRoot)).map((p) => ({
+        name: p.name, enabled: !!p.enabled, trusted: !!p.trusted,
+        source: p.source, error: p.error || null,
+        description: p.manifest?.description || null,
+        cockpit: p.manifest?.cockpit || null,
+      }));
+    } catch {}
+    return sendJson(res, 200, { plugins });
+  }
 
   // ── sessions ──────────────────────────────────────────────────────────
   if (path === '/bridge/sessions' && req.method === 'GET') {

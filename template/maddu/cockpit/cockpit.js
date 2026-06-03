@@ -6329,24 +6329,43 @@ function renderSettings() {
   root.appendChild(panelFocus('Runtimes', 'GET /bridge/runtimes  ·  full management in /runtimes', rtMount,
     { id: 'runtimes', keywords: 'runtimes workers claude codex hermes spawn subprocess' }));
 
-  // ── Integrations (Slice ζ + η) — all optional, off by default ────────
-  const tgMount = el('div', {});
-  tgMount.appendChild(loading('Reading Telegram status…'));
-  root.appendChild(panelFocus('Telegram bridge', 'optional · long-poll, allowlisted · message bodies route via Telegram', tgMount,
-    { id: 'telegram', keywords: 'telegram tg messenger chat phone notification mobile bot integrations' }));
-  renderTelegramPanel(tgMount);
+  // ── Integrations (Telegram / Discord / Email) — provided by the `comms`
+  // plugin. Shown only when the plugin is enabled (GET /bridge/plugins), so a
+  // disabled plugin contributes zero cockpit weight. A slot keeps panel order
+  // stable while the enabled-state is fetched asynchronously.
+  const commsSlot = el('div', {});
+  root.appendChild(commsSlot);
+  (async () => {
+    let enabled = false;
+    try {
+      const r = await fetch('/bridge/plugins', { cache: 'no-store' });
+      if (r.ok) { const j = await r.json(); enabled = (j.plugins || []).some((p) => p.name === 'comms' && p.enabled); }
+    } catch {}
+    if (!enabled) {
+      commsSlot.appendChild(panelFocus('Integrations (comms plugin)',
+        'Telegram / Discord / Email — disabled. Enable with `maddu plugin enable comms`, then restart the bridge.',
+        el('div', {}),
+        { id: 'comms', keywords: 'telegram discord email comms plugin integrations notifications disabled enable' }));
+      return;
+    }
+    const tgMount = el('div', {});
+    tgMount.appendChild(loading('Reading Telegram status…'));
+    commsSlot.appendChild(panelFocus('Telegram bridge', 'optional · long-poll, allowlisted · message bodies route via Telegram', tgMount,
+      { id: 'telegram', keywords: 'telegram tg messenger chat phone notification mobile bot integrations' }));
+    renderTelegramPanel(tgMount);
 
-  const dcMount = el('div', {});
-  dcMount.appendChild(loading('Reading Discord status…'));
-  root.appendChild(panelFocus('Discord bridge', 'optional · outbound-only (no gateway) · message bodies route via Discord', dcMount,
-    { id: 'discord', keywords: 'discord channel server guild bot integrations notifications' }));
-  renderDiscordPanel(dcMount);
+    const dcMount = el('div', {});
+    dcMount.appendChild(loading('Reading Discord status…'));
+    commsSlot.appendChild(panelFocus('Discord bridge', 'optional · outbound-only (no gateway) · message bodies route via Discord', dcMount,
+      { id: 'discord', keywords: 'discord channel server guild bot integrations notifications' }));
+    renderDiscordPanel(dcMount);
 
-  const emMount = el('div', {});
-  emMount.appendChild(loading('Reading email status…'));
-  root.appendChild(panelFocus('Email bridge', 'optional · outbound-only SMTP · TLS required (port 465/587)', emMount,
-    { id: 'email', keywords: 'email smtp mail gmail outlook fastmail notifications outbound webhook imap' }));
-  renderEmailPanel(emMount);
+    const emMount = el('div', {});
+    emMount.appendChild(loading('Reading email status…'));
+    commsSlot.appendChild(panelFocus('Email bridge', 'optional · outbound-only SMTP · TLS required (port 465/587)', emMount,
+      { id: 'email', keywords: 'email smtp mail gmail outlook fastmail notifications outbound webhook imap' }));
+    renderEmailPanel(emMount);
+  })();
 
   const pathsMount = el('div', {});
   pathsMount.appendChild(loading('Resolving paths…'));
