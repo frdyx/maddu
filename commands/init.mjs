@@ -215,21 +215,26 @@ export default async function init(argv) {
     console.log(`  governance tier seeded (mode: standard)`);
   }
   const triggersPath = join(configDir, 'triggers.json');
+  // Default rule-#9 auto-trigger allowlist. `slice-stop:skill-candidate`
+  // (v1.4.0) lets slice-stop auto-detect reusable skill patterns; operator
+  // opts out by removing the entry.
+  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate'];
   if (!(await exists(triggersPath))) {
     await writeFile(
       triggersPath,
-      JSON.stringify({ allowed: ['janitor:sessions'] }, null, 2) + '\n'
+      JSON.stringify({ allowed: DEFAULT_TRIGGERS }, null, 2) + '\n'
     );
   } else {
-    // Existing file — merge our entry without disturbing operator additions.
+    // Existing file — merge our entries without disturbing operator additions.
     try {
       const text = await readFile(triggersPath, 'utf8');
       const cur = JSON.parse(text);
       const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
-      if (!allowed.includes('janitor:sessions')) {
-        allowed.push('janitor:sessions');
-        await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
+      let changed = false;
+      for (const t of DEFAULT_TRIGGERS) {
+        if (!allowed.includes(t)) { allowed.push(t); changed = true; }
       }
+      if (changed) await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
     } catch {}
   }
   console.log(`  janitor + trigger allowlist seeded (.maddu/config/)`);

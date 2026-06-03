@@ -17,7 +17,7 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { stat } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -150,5 +150,36 @@ export default async function sliceStop(argv) {
     if (added > 0) console.log(`  hindsight: ${added} fact(s) → .maddu/state/memory.ndjson`);
   } catch (err) {
     console.error(`  hindsight failed (non-fatal): ${err.message}`);
+  }
+
+  // v1.4.0 (Bucket C) — auto-funnel the skills system: after each slice-stop,
+  // detect reusable patterns and emit SKILL_CANDIDATE_DETECTED for any that
+  // crossed threshold. This is what makes the skills funnel fire without the
+  // agent remembering. Rule-#9 gauntlet: only fires when the trigger id is in
+  // the .maddu/config/triggers.json allowlist, and each emit carries
+  // triggered_by provenance. Best-effort; never breaks the slice-stop.
+  try {
+    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
+    let allowed = [];
+    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
+    if (allowed.includes('slice-stop:skill-candidate')) {
+      const candPaths = [
+        join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'),
+        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'),
+      ];
+      for (const c of candPaths) {
+        try {
+          await stat(c);
+          const sc = await import(pathToFileURL(c).href);
+          const emitted = await sc.emitFreshCandidates(repoRoot, sessionId, {
+            kind: 'slice-stop', id: 'skill-candidate', fired_at: ev.ts,
+          });
+          if (emitted.length) console.log(`  skill candidate(s): ${emitted.length} detected → review with \`maddu skill candidates\``);
+          break;
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error(`  skill-candidate detection failed (non-fatal): ${err.message}`);
   }
 }
