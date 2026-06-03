@@ -14,9 +14,10 @@
 // — OR a synthetic shell command for testing.
 
 import { spawn } from 'node:child_process';
-import { append, EVENT_TYPES, makeId } from './spine.mjs';
+import { append, EVENT_TYPES, makeId, readAll } from './spine.mjs';
 import { readPlan, completePhase } from './plans.mjs';
 import { readGovernance, effectiveValue } from './governance.mjs';
+import { runSliceReview } from './review.mjs';
 
 // NOTE (v1.3.0 coherence): the per-phase loop below shares its
 // stuck-detection heuristic ("same fail signature twice → halt") with
@@ -66,12 +67,15 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
   const cooldownMs = effectiveValue(gov, 'loop-cooldown-ms');
 
   const coordinatorId = genCoordinatorId();
-  await append(repoRoot, {
+  const startEv = await append(repoRoot, {
     type: EVENT_TYPES.COORDINATOR_STARTED,
     actor: sessionId, lane: null,
     triggered_by: { planId },
     data: { coordinatorId, planId, runtime, dryRun },
   });
+  // Slices produced during this run are review-eligible (Bucket C, v1.4.0).
+  const startedTs = startEv.ts;
+  const reviewedSlices = new Set();
 
   const phases = (plan.phases || []).filter((p) => p.status !== 'completed');
   for (const phase of phases) {
@@ -162,6 +166,25 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
       triggered_by: { planId, coordinatorId, phase: phase.name },
       data: { coordinatorId, planId, phase: phase.name },
     });
+
+    // v1.4.0 (Bucket C) — enforce the review stage: review the newest slice
+    // produced during this run, if a reviewer runtime is configured. Graceful
+    // no-op (skipped) when none is set up. Never blocks coordination.
+    try {
+      const all = await readAll(repoRoot);
+      const fresh = all.filter((e) => e.type === 'SLICE_STOP' && e.ts >= startedTs && !reviewedSlices.has(e.id));
+      const newest = fresh[fresh.length - 1];
+      if (newest) {
+        reviewedSlices.add(newest.id);
+        const r = await runSliceReview(repoRoot, {
+          sliceEventId: newest.id,
+          triggeredBy: { kind: 'coordinator', id: coordinatorId, fired_at: new Date().toISOString() },
+        });
+        if (r && r.ok) console.log(`[coordinator ${coordinatorId}] reviewed slice ${newest.id}: ${r.verdict}`);
+      }
+    } catch (err) {
+      console.error(`[coordinator ${coordinatorId}] review attempt failed (non-fatal): ${err.message}`);
+    }
   }
 
   await append(repoRoot, {

@@ -106,7 +106,10 @@ export async function detectCandidates(repoRoot) {
 // v1.1.2: soft candidates throttle via SOFT_COOLDOWN_MS to avoid flooding
 // the operator surface on every slice-stop with one-shot patterns. High
 // candidates emit on the first observation (no cooldown).
-export async function emitFreshCandidates(repoRoot, by = null) {
+// `triggeredBy` (v1.4.0): when this runs as an auto-trigger (e.g. from
+// slice-stop), pass the rule-#9 provenance ({kind,id,fired_at}); it rides on
+// each emitted SKILL_CANDIDATE_DETECTED so the auto-fire is auditable.
+export async function emitFreshCandidates(repoRoot, by = null, triggeredBy = null) {
   const all = await readAll(repoRoot);
   const detectedEvents = all.filter((e) => e.type === EVENT_TYPES.SKILL_CANDIDATE_DETECTED);
   const lastEmitByHash = new Map();
@@ -130,6 +133,7 @@ export async function emitFreshCandidates(repoRoot, by = null) {
     await append(repoRoot, {
       type: EVENT_TYPES.SKILL_CANDIDATE_DETECTED,
       actor: by, lane: null,
+      triggered_by: triggeredBy,
       data: { hash: c.hash, tags: c.tags, examples: c.examples.slice(0, 5), confidence: c.confidence },
     });
     emitted.push(c);

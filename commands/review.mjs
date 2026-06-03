@@ -6,7 +6,6 @@
 // status: print counts per verdict + last N reviews.
 // list:   alias for `status --limit N`.
 
-import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -27,34 +26,8 @@ async function loadReviewLib(repoRoot) {
   throw new Error('review.mjs not found');
 }
 
-async function readReviewPolicy(repoRoot) {
-  try {
-    return JSON.parse(await fs.readFile(path.join(repoRoot, '.maddu', 'config', 'review-policy.json'), 'utf8'));
-  } catch {
-    return { defaultReviewer: null, lanesRequiringReview: [], severityToFollowupMap: {} };
-  }
-}
-
-function runReviewer(binary, args, env, timeoutMs) {
-  return new Promise((resolve) => {
-    const proc = spawn(binary, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    proc.stdout.on('data', (b) => { out += b.toString('utf8'); });
-    proc.stderr.on('data', (b) => { err += b.toString('utf8'); });
-    const t = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch {}
-      resolve({ code: null, out, err, timedOut: true });
-    }, timeoutMs);
-    proc.on('exit', (code) => {
-      clearTimeout(t);
-      resolve({ code, out, err, timedOut: false });
-    });
-    proc.on('error', (e) => {
-      clearTimeout(t);
-      resolve({ code: -1, out, err: err + String(e), timedOut: false });
-    });
-  });
-}
+// Reviewer spawn + policy read + SLICE_REVIEWED emit now live in the review lib
+// (runSliceReview), shared with the slice-stop + coordinator auto-triggers.
 
 function printReviewHelp() {
   console.log([
@@ -73,87 +46,28 @@ export default async function command(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printReviewHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths, spine, projections, runtimes } = await loadSpineLib();
+  const { paths, projections } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   if (sub === 'run') {
     const { flags } = parseFlags(rest);
     const sliceEventId = requireFlag(flags, 'slice');
-    const policy = await readReviewPolicy(repoRoot);
-    const reviewerName = (typeof flags.reviewer === 'string' ? flags.reviewer : null) || policy.defaultReviewer;
-    if (!reviewerName) {
-      console.error('error: no reviewer configured (set review-policy.json:defaultReviewer or pass --reviewer NAME)');
-      process.exit(2);
-    }
-    const desc = await runtimes.readRuntime(repoRoot, reviewerName);
-    if (!desc) {
-      console.error(`error: runtime "${reviewerName}" not found`);
-      process.exit(2);
-    }
-    if (desc.kind && desc.kind !== 'reviewer') {
-      console.error(`error: runtime "${reviewerName}" has kind=${desc.kind} (expected 'reviewer')`);
-      process.exit(2);
-    }
     const reviewLib = await loadReviewLib(repoRoot);
-    const TIMEOUT_MS = 10 * 60 * 1000;
-
-    const args = (desc.args || []).map((a) =>
-      String(a)
-        .replace('${SLICE_EVENT_ID}', sliceEventId)
-        .replace('${REPO_ROOT}', repoRoot)
-    );
-    const env = { MADDU_SLICE_EVENT_ID: sliceEventId, MADDU_REPO_ROOT: repoRoot };
-    const startedAt = new Date().toISOString();
-    const result = await runReviewer(desc.binary || 'node', args, env, TIMEOUT_MS);
-
-    let parsed;
-    if (result.timedOut || result.code !== 0) {
-      parsed = {
-        verdict: 'INFO',
-        findings: [],
-        body: result.timedOut ? `# Reviewer timeout after ${TIMEOUT_MS}ms` : `# Reviewer exited ${result.code}\n\n${result.err}`,
-      };
-    } else {
-      parsed = reviewLib.parseReview(result.out);
+    const reviewer = (typeof flags.reviewer === 'string' ? flags.reviewer : null);
+    // Shared core (template/maddu/runtime/lib/review.mjs#runSliceReview) — same
+    // path the slice-stop + coordinator auto-triggers use.
+    const res = await reviewLib.runSliceReview(repoRoot, { sliceEventId, reviewer });
+    if (res.skipped) {
+      const hint = res.reason === 'no-reviewer-configured'
+        ? 'no reviewer configured (set review-policy.json:defaultReviewer or pass --reviewer NAME)'
+        : res.reason;
+      console.error(`error: ${hint}`);
+      process.exit(2);
     }
-
-    const reviewPath = await reviewLib.writeReviewArchive(repoRoot, sliceEventId, {
-      verdict: parsed.verdict,
-      findings: parsed.findings,
-      body: parsed.body,
-      reviewerRuntime: reviewerName,
-      reviewedAt: new Date().toISOString(),
-    });
-
-    const ev = await spine.append(repoRoot, {
-      type: spine.EVENT_TYPES.SLICE_REVIEWED,
-      data: {
-        sliceEventId,
-        verdict: parsed.verdict,
-        findingsCount: parsed.findings.length,
-        reviewerRuntime: reviewerName,
-        reviewPath,
-        ...(result.timedOut || result.code !== 0 ? { evidence: { error: result.err || `exit ${result.code}` } } : {}),
-      },
-    });
-
-    console.log(`review run: slice=${sliceEventId} verdict=${parsed.verdict} findings=${parsed.findings.length}`);
-    console.log(`  archive: ${reviewPath}`);
-    console.log(`  event: ${ev.id}`);
-
-    // Optional FOLLOWUP_OPENED
-    const severity = (policy.severityToFollowupMap && policy.severityToFollowupMap[parsed.verdict])
-      || reviewLib.VERDICT_TO_FOLLOWUP[parsed.verdict];
-    if (severity) {
-      const draftScope = parsed.findings
-        .map((f) => (typeof f === 'object' && f.location ? String(f.location).split(':')[0] : null))
-        .filter(Boolean);
-      const fev = await spine.append(repoRoot, {
-        type: spine.EVENT_TYPES.FOLLOWUP_OPENED,
-        data: { fromReviewEventId: ev.id, severity, draftScope },
-      });
-      console.log(`  follow-up: severity=${severity} event=${fev.id}`);
-    }
+    console.log(`review run: slice=${sliceEventId} verdict=${res.verdict} findings=${res.findingsCount}`);
+    console.log(`  archive: ${res.reviewPath}`);
+    console.log(`  event: ${res.eventId}`);
+    if (res.followupId) console.log(`  follow-up: event=${res.followupId}`);
     return;
   }
 

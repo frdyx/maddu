@@ -159,18 +159,21 @@ export default async function upgrade(argv) {
     const configDir = join(repoRoot, '.maddu', 'config');
     await mkdir(configDir, { recursive: true });
     const triggersPath = join(configDir, 'triggers.json');
+    // v1.4.0 adds slice-stop:skill-candidate to the default allowlist.
+    const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate'];
     if (await exists(triggersPath)) {
       const text = await readFile(triggersPath, 'utf8');
       const cur = JSON.parse(text);
       const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
-      if (!allowed.includes('janitor:sessions')) {
-        allowed.push('janitor:sessions');
-        await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
+      let changed = false;
+      for (const t of DEFAULT_TRIGGERS) {
+        if (!allowed.includes(t)) { allowed.push(t); changed = true; }
       }
+      if (changed) await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
     } else {
       await writeFile(
         triggersPath,
-        JSON.stringify({ allowed: ['janitor:sessions'] }, null, 2) + '\n'
+        JSON.stringify({ allowed: DEFAULT_TRIGGERS }, null, 2) + '\n'
       );
     }
   } catch (err) {
