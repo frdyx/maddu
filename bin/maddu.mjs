@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -78,6 +78,8 @@ Commands:
   trust          Subcommands: audit | pin | unpin | verify | list | report | env-allow. Supply-chain audit + pinning. (v1.2.0)
   bridges        Subcommands: list | kill-all. Device-scope view of running Máddu bridges. (v1.2.1)
   audit          Framework-coherence self-audit: events | commands | cockpit | slash | docs | charter. [--json] (v1.3.0)
+  insights       Cross-project usage: events | dead | verbs | slashes. What's actually utilized vs defined. [--json] (v1.4.0)
+  plugin         Subcommands: list | info | enable | disable. Capabilities that live outside the core. [--trust] [--json] (v1.4.0)
 
 Flags:
   --version      Print framework version.
