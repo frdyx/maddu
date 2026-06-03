@@ -76,6 +76,10 @@ export default {
     await walkMjsAndJs(join(root, 'commands'), files);
     await walkMjsAndJs(join(root, 'template', 'maddu', 'runtime'), files);
     await walkMjsAndJs(join(root, 'template', 'maddu', 'cockpit'), files);
+    // Plugins are producers too — a plugin (e.g. comms) emits its declared event
+    // types from template/maddu/plugins/<name>/. Scan them so a type whose
+    // producer lives in a plugin is reachable, not falsely flagged dead.
+    await walkMjsAndJs(join(root, 'template', 'maddu', 'plugins'), files);
     const scanFiles = files.filter((f) => f !== spinePath);
 
     // Count references per type across the corpus.

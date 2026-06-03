@@ -220,6 +220,35 @@ export default async function upgrade(argv) {
     console.error(`  (pipeline seed skipped: ${err.message})`);
   }
 
+  // v1.4.0 — comms back-compat: the Telegram/Discord/Email subsystems moved
+  // from the bridge's static boot path into the `comms` plugin (off by default).
+  // A repo that had any of them enabled must keep working, so if their state
+  // shows enabled we seed `comms` into the plugin enable-state. Idempotent;
+  // never disables an already-listed plugin.
+  try {
+    const stateDir = join(repoRoot, '.maddu', 'state');
+    let wasEnabled = false;
+    for (const f of ['telegram.json', 'discord.json', 'email.json']) {
+      try {
+        const s = JSON.parse(await readFile(join(stateDir, f), 'utf8'));
+        if (s && s.enabled === true) { wasEnabled = true; break; }
+      } catch {}
+    }
+    if (wasEnabled) {
+      const pluginsCfg = join(repoRoot, '.maddu', 'config', 'plugins.json');
+      let cfg = { enabled: [] };
+      try { cfg = JSON.parse(await readFile(pluginsCfg, 'utf8')); cfg.enabled = Array.isArray(cfg.enabled) ? cfg.enabled : []; } catch {}
+      if (!cfg.enabled.includes('comms')) {
+        cfg.enabled = [...new Set([...cfg.enabled, 'comms'])].sort();
+        await mkdir(dirname(pluginsCfg), { recursive: true });
+        await writeFile(pluginsCfg, JSON.stringify(cfg, null, 2) + '\n');
+        console.log('  comms plugin auto-enabled (was active before the plugin split)');
+      }
+    }
+  } catch (err) {
+    console.error(`  (comms back-compat seed skipped: ${err.message})`);
+  }
+
   // v0.17 agent-native bootstrap — re-run the agent-file sync. Same
   // helper as init, but the helper-discovered framework root is the
   // installed maddu/ directory in the consumer (init lives in the
