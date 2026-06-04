@@ -57,6 +57,8 @@ Files NOT prefixed `maddu-` are operator-owned and never touched.
 | `/maddu-audit [scope]` | Framework-coherence self-audit: events, commands, cockpit, slash, docs, charter. | `audit` |
 | `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined (load-bearing / dormant / dead). | `insights` |
 | `/maddu-plugin <verb>` | List / inspect / enable / disable capabilities that live outside the core (e.g. comms). | `plugin` |
+| `/maddu-orient` | Session-start briefing: goal + success-condition progress (✓/○/?) + curated handoff + trail. | `orient` |
+| `/maddu-handoff <set\|show>` | Curate the cross-session "▶ RESUME HERE" handoff surfaced by orient. | `handoff` |
 
 One file per command, each ≤ 2 KB, all installed raw (no marker wrap — see
 above) under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.

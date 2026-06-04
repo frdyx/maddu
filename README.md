@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.4.0](https://img.shields.io/badge/version-1.4.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.6.0](https://img.shields.io/badge/version-1.6.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,15 +24,15 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.4.0
+## What's new in v1.6.0
 
-**Empirical insights, a plugin loader, and a tighter core.** The first data-driven release: a cross-project usage audit (8 real project spines + 125 transcripts) found that **90 of 142 event types never fired in any real run** — dead in burn-in, not in code. v1.4.0 makes that measurable, then acts on it. The 8+1 hard rules are unchanged.
+**Orchestration handoff — goal progress + a cross-session briefing.** For big multi-session projects: a goal-anchored session-start briefing that survives compaction (inspired by posto's `/orch:status`), built by extending Máddu's existing primitives. The 8+1 hard rules are unchanged.
 
-- **`maddu insights`** (`/maddu-insights`) — reads `.maddu` spines across your registered workspaces and classifies every event type **load-bearing / occasional / single-project / dormant / dead** by per-project presence. The repeatable instrument so utilization is a number you can re-check, not a guess. `events | dead | verbs | slashes`, `--json`.
-- **Plugin loader** (`maddu plugin` · `/maddu-plugin`) — a capability can live *outside* the core, shipped as a `plugin.json` manifest and loaded only when enabled (files-only enable-state; user-added plugins gated by `--trust` + sha256). **Comms (Telegram / Discord / Email) is the first plugin** — off by default, out of the bridge's static boot path. Existing comms users are auto-migrated on `upgrade`.
-- **Dead subsystems wired into the default flow** — `maddu slice-stop` now auto-detects reusable patterns and emits skill candidates (rule-#9 gauntlet), and the coordinator enforces a review of each phase's slice. The skills + review surfaces fire from the natural flow instead of waiting for an agent to remember a manual command.
+- **Goal success conditions** — `maddu goal set "<obj>" --success "<verify-cmd>::<text>"` records measurable, command-verifiable conditions (≤5).
+- **`maddu orient`** (`/maddu-orient`) — the "session always starts here" briefing: runs each success condition's verify command → **✓ met / ○ pending / ? unverifiable**, and renders the objective, the curated handoff, and the recent slice-stop trail. When all conditions are met it suggests closing the goal / a release. Complements `brief` (per-turn) and `status` (live).
+- **Curated cross-session handoff** — `maddu handoff set "<markdown>"` / `show` (`/maddu-handoff`): the "▶ RESUME HERE" narrative (next slice, blockers, queue) a fresh session reads first. Plus a cockpit **Goal** panel.
 
-`maddu audit` reports 6/6 and `maddu insights` shows the honest core-dead count (90 → 71 once comms is plugin-owned). See [the v1.4.0 changelog entry](CHANGELOG.md) and [`docs/audit/`](docs/audit/) for the full audit + decision records.
+Just prior, **v1.5.0** made Máddu **spawn + track real sub-workers** — the coordinator and `maddu team spawn` launch tracked workers (`WORKER_*`), and an authed agent's own sub-agents register as tracked child sessions (`session tree`). See [the changelog](CHANGELOG.md) for both releases.
 
 ## Zero learning curve (v0.18)
 
@@ -57,6 +57,8 @@ one. The verbose CLI stays first-class for scripts and CI.
 | `/maddu-note <text>` | One-liner into the operator inbox. |
 | `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined. |
 | `/maddu-plugin <verb>` | List / enable / disable capabilities that live outside the core. |
+| `/maddu-orient` | Session-start briefing: goal + success-progress + curated handoff. |
+| `/maddu-handoff <set\|show>` | Curate the cross-session "▶ RESUME HERE" handoff. |
 
 Or just type *"ship the login form"*, *"status"*, *"tokens"*. The
 agent classifies the intent from `MADDU.md` and dispatches the
@@ -70,7 +72,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.4.0 installed.
+Máddu v1.6.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -95,7 +97,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.4.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.6.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

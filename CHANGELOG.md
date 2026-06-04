@@ -11,6 +11,31 @@ narrative summary.
 
 ---
 
+## [v1.6.0] · 2026-06-04 · Orchestration handoff — goal progress + cross-session briefing
+
+Built for big multi-session projects: a goal-anchored session-start briefing that survives compaction, inspired by the posto `/orch:status` system. Extends existing primitives (spine + goal/brief/handoff/slice-stops) rather than adding a parallel system — the 8+1 hard rules are unchanged. Plan: [`docs/audit/2026-06-04-PLAN-orchestration-handoff.md`](docs/audit/2026-06-04-PLAN-orchestration-handoff.md).
+
+- **Goal success conditions** — `GOAL_DECLARED` gains `success: [{text, verify}]`; `maddu goal set "<obj>" --success "<verify-cmd>::<text>"` (repeatable, ≤5). Measurable, command-verifiable conditions.
+- **`maddu orient`** — the "session always starts here" briefing: runs each success condition's verify command → **✓ met / ○ pending / ? unverifiable**, and renders objective + success-progress + constraints + the curated handoff + recent slice-stop trail. When all verifiable conditions are met it suggests reviewing + closing the goal / a release. Read-only; complements `brief` (per-turn) and `status` (live snapshot). `/maddu-orient`.
+- **Curated cross-session handoff** — `maddu handoff set "<markdown>"` / `show` + new `HANDOFF_SET` event. The operator/agent-maintained "▶ RESUME HERE" narrative (next slice, blockers, queue, decisions), surfaced first by `orient`. `/maddu-handoff`.
+- **Session-open ritual** — `MADDU.md` / `CLAUDE` / `AGENTS` briefs lead a fresh session with `maddu orient`.
+- **Cockpit Goal panel** — a Goal route (objective + success conditions + constraints + curated handoff), `GET /bridge/goal`.
+
+Verified: full flow exercised (goal → orient runs verify cmds → ✓/○/? + handoff + completion nudge); audit 6/6, stress 12/12, layout-refusal 4/4, projection-roundtrip OK.
+
+---
+
+## [v1.5.0] · 2026-06-03 · Real sub-worker spawn + tracking
+
+Máddu now actually spawns and tracks sub-workers — closing the audit's biggest dead surface (`WORKER_*` fired in 0/8 projects) not by demoting workers but by wiring the flow that drives them. Merged via PR #93.
+
+- **Coordinator spawns tracked workers** — `spawnWorker` gains a `wait` mode (awaits exit, emits a real `WORKER_EXITED`); the coordinator's `--runtime` branch (formerly a stub) spawns a tracked worker per phase, exit code driving the phase.
+- **`maddu team spawn`** — fans out N tracked workers across disjoint lanes **concurrently** (full lifecycle `TEAM_OPENED → MEMBER_JOINED → WORKER_SPAWNED/EXITED → MEMBER_LEFT → TEAM_CLOSED`); resurrects `TEAM_MEMBER_*`.
+- **OAuth sub-worker tracking** — directive so an authed main agent registers its own sub-agents (which inherit OAuth) as tracked child sessions (`register --parent` → `session tree`), complementing headless spawn (for API-keyed runtimes).
+- **Windows + security fixes** — `shell:true` for `.cmd`/`.ps1` shims; synchronous exit/error handlers (crash fix); the agent task delivered via **stdin** (never argv) to close a shell-injection vector.
+
+---
+
 ## [v1.4.0] · 2026-06-03 · Empirical insights, a plugin loader, and a tighter core
 
 The first **data-driven** release. After ~8 real projects had been run through Máddu, a cross-project usage audit (8 spines + 125 Claude Code transcripts) asked what is actually *used* vs merely *defined* — and acted on the answer. The 8+1 hard rules are unchanged. Two PRs: #91 (insights + plugin loader + comms demotion) and #92 (Bucket C — skills/review wired into the default flow).
