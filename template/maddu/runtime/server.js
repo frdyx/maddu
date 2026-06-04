@@ -363,6 +363,26 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/health' && req.method === 'GET') {
     return sendJson(res, 200, { ok: true });
   }
+  // v1.6.0 — goal + curated handoff for the cockpit Goal panel. Read-only
+  // projection slice: objective, success conditions (text + whether they carry a
+  // verify command), constraints, phase, and the curated handoff. Live ✓/○/?
+  // evaluation is NOT done here (running operator verify commands on an HTTP GET
+  // would be unsafe) — that lives in the `maddu orient` CLI.
+  if (path === '/bridge/goal' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    const goal = proj.goal || null;
+    return sendJson(res, 200, {
+      goal: goal ? {
+        objective: goal.objective,
+        constraints: goal.constraints || [],
+        success: (goal.success || []).map((s) => ({ text: s.text, verifiable: !!s.verify })),
+        setAt: goal.setAt || null,
+      } : null,
+      phase: proj.phase || null,
+      handoff: proj.handoff || null,
+      recentSliceStops: (proj.sliceStops || []).slice(-3).reverse().map((s) => ({ summary: s.summary, next: s.next || [] })),
+    });
+  }
   // Plugins discovered for this workspace — the cockpit gates plugin-owned
   // panels (e.g. comms) on enabled-state so a disabled plugin shows no UI.
   if (path === '/bridge/plugins' && req.method === 'GET') {
