@@ -118,6 +118,16 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "what do we know about …", "recall …", "memory" | `/maddu-memory` |
 | "tasks", "to-do", "what's on the board", "open work items" | `/maddu-task` |
 | "audit the framework", "coherence check", "drift", "dead events" | `/maddu-audit` |
+| "I need a tool for …", "connect to <service>", "use the <X> MCP", "the runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
+
+**When a task needs a capability the runtime lacks** (calling an external
+service, a database, a SaaS API) — that is the signal to reach for
+`/maddu-mcp`, which registers + enables an MCP server for it. This is a
+*directive*, not an auto-trigger: "needs a tool" can't be detected safely
+from the flow, so it's your judgment call. Once enabled, the tool is on the
+gateway and the task continues. (Contrast: the trust-audit-on-deps-change
+and checkpoint-before-coordinator-run triggers DO fire automatically — see
+the auto-trigger allowlist in `.maddu/config/triggers.json`.)
 
 When you dispatch, **tell the operator which pipeline or slash command
 you picked and why**, so they learn the shortcut over time. Never

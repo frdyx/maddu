@@ -94,7 +94,7 @@ async function writeRecord(repoRoot, rec) {
   await appendFile(indexFile(repoRoot), JSON.stringify(rec) + '\n');
 }
 
-export async function createCheckpoint(repoRoot, { lane = null, title = null, by = null } = {}) {
+export async function createCheckpoint(repoRoot, { lane = null, title = null, by = null, triggeredBy = null } = {}) {
   if (!(await gitAvailable(repoRoot))) {
     throw new Error('not inside a git work tree (or git is not available)');
   }
@@ -122,7 +122,8 @@ export async function createCheckpoint(repoRoot, { lane = null, title = null, by
   await append(repoRoot, {
     type: EVENT_TYPES.CHECKPOINT_CREATED,
     actor: by, lane,
-    data: { id, commit: record.commit, title: record.title, tag }
+    ...(triggeredBy ? { triggered_by: triggeredBy } : {}),
+    data: { id, commit: record.commit, title: record.title, tag, ...(triggeredBy ? { triggered_by: triggeredBy } : {}) }
   });
   return record;
 }

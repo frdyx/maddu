@@ -159,8 +159,9 @@ export default async function upgrade(argv) {
     const configDir = join(repoRoot, '.maddu', 'config');
     await mkdir(configDir, { recursive: true });
     const triggersPath = join(configDir, 'triggers.json');
-    // v1.4.0 adds slice-stop:skill-candidate to the default allowlist.
-    const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate'];
+    // v1.4.0 adds slice-stop:skill-candidate; v1.7.0 adds slice-stop:trust-audit
+    // + coordinator:pre-run-checkpoint (invocation-logic).
+    const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit', 'coordinator:pre-run-checkpoint'];
     if (await exists(triggersPath)) {
       const text = await readFile(triggersPath, 'utf8');
       const cur = JSON.parse(text);

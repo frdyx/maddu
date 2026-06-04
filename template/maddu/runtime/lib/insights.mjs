@@ -75,6 +75,35 @@ export function classify(presence, n) {
   return 'occasional';
 }
 
+// ── Dormant-by-design registry (v1.7.0 invocation-logic) ───────────────
+// Core event types that fire ONLY under a specific operator posture
+// (API-key auth instead of OAuth, opt-in schedules, manual dep-pinning) or
+// an attack/edge condition — not in the default flow. A type here that never
+// fired is NOT a gap; it's insurance working as intended. Separating these
+// from genuinely-dead types keeps `insights dead` honest: the dead count
+// then reflects real "nothing invokes it" gaps worth fixing, which is the
+// whole point of the invocation-logic work. Map: type -> why-dormant.
+export const DORMANT_BY_DESIGN = new Map([
+  ['AUTH_KEY_ADDED',           'API-key auth path; OAuth is the default'],
+  ['AUTH_KEY_REMOVED',         'API-key auth path; OAuth is the default'],
+  ['AUTH_KEY_ROTATED',         'API-key auth path; OAuth is the default'],
+  ['AUTH_KEY_RATE_LIMITED',    'fires only on a provider rate-limit response'],
+  ['SCHEDULE_CREATED',         'operator opt-in recurring tasks'],
+  ['SCHEDULE_UPDATED',         'operator opt-in recurring tasks'],
+  ['SCHEDULE_REMOVED',         'operator opt-in recurring tasks'],
+  ['SCHEDULE_FIRED',           'operator opt-in recurring tasks'],
+  ['TRUST_PIN_ADDED',          'fires only when an operator pins a dependency'],
+  ['TRUST_PIN_REMOVED',        'fires only when an operator unpins a dependency'],
+  ['MCP_PROVENANCE_VERIFIED',  'fires only under MCP use with provenance checks'],
+  ['MCP_PROVENANCE_MISMATCH',  'attack/tamper signal under MCP provenance checks'],
+  ['MCP_APPROVAL_GRANTED',     'fires only under gated MCP approval'],
+  ['WORKER_ENV_FILTERED',      'fires only when a real worker spawn strips env'],
+  ['IMPORT_ACCEPTED',          'cross-machine spine import only'],
+  ['IMPORT_REJECTED',          'cross-machine spine import only'],
+  ['CHECKPOINT_WORKTREE_CREATED',    'fires only when an operator materializes a checkpoint worktree'],
+  ['CHECKPOINT_ROLLBACK_REQUESTED',  'fires only when an operator rolls back to a checkpoint'],
+]);
+
 // Join the harvested projects against the DEFINED event-type set.
 //
 // `pluginOwners` (type -> plugin name) reclassifies a would-be-dead type that is
@@ -97,15 +126,20 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
     const proj = presence.get(t) || 0;
     let cls = classify(proj, n);
     const owner = pluginOwners.get(t) || null;
+    const dormantReason = DORMANT_BY_DESIGN.get(t) || null;
     // A plugin-owned type that never fired is dormant (plugin off here), not dead.
     if (cls === 'dead' && owner) cls = 'dormant';
+    // A core type that fires only under a specific posture/edge is dormant
+    // by design, not a gap (v1.7.0). Plugin ownership takes precedence.
+    else if (cls === 'dead' && dormantReason) cls = 'dormant';
     return {
       type: t,
       defined: definedSet.has(t),
       count: globalCount.get(t) || 0,
       projects: proj,
       cls,
-      owner: owner ? `plugin:${owner}` : 'core',
+      owner: owner ? `plugin:${owner}` : (dormantReason ? 'dormant-by-design' : 'core'),
+      dormantReason: owner ? null : dormantReason,
       // a type seen in spines but absent from EVENT_TYPES = drift the other way
       undeclared: !definedSet.has(t),
     };
@@ -114,8 +148,9 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
   const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dormant: 0, dead: 0 };
   for (const r of rows) counts[r.cls]++;
   const deadDefined = rows.filter((r) => r.cls === 'dead' && r.defined).map((r) => r.type);
+  const dormantByDesign = rows.filter((r) => r.cls === 'dormant' && r.owner === 'dormant-by-design').map((r) => r.type);
 
-  return { n, rows, counts, deadDefined, definedTotal: definedSet.size, everFired: seen.size };
+  return { n, rows, counts, deadDefined, dormantByDesign, definedTotal: definedSet.size, everFired: seen.size };
 }
 
 // ── Transcript scan (verb + slash BEHAVIOR) — best-effort, host-specific ─────

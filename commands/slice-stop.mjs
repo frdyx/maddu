@@ -182,4 +182,40 @@ export default async function sliceStop(argv) {
   } catch (err) {
     console.error(`  skill-candidate detection failed (non-fatal): ${err.message}`);
   }
+
+  // v1.7.0 (invocation-logic) — auto-funnel the supply-chain trust audit:
+  // after a slice-stop, if the dependency surface changed since the last
+  // audit, run a fresh `trust audit`. This wires the missing WHEN so
+  // freshness/pin violations on newly-added deps get caught in the natural
+  // flow instead of only on a manual audit. Same rule-#9 gauntlet as
+  // skill-candidate: gated on the `slice-stop:trust-audit` allowlist entry,
+  // every emission carries triggered_by + a TRIGGER_FIRED record, cooldown
+  // respected inside the trigger. Best-effort; never breaks the slice-stop.
+  try {
+    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
+    let allowed = [];
+    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
+    if (allowed.includes('slice-stop:trust-audit')) {
+      const candPaths = [
+        join(process.cwd(), 'maddu', 'runtime', 'lib', 'trust-trigger.mjs'),
+        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'trust-trigger.mjs'),
+      ];
+      for (const c of candPaths) {
+        try {
+          await stat(c);
+          const tt = await import(pathToFileURL(c).href);
+          const res = await tt.auditIfDepsChanged(repoRoot, sessionId, {
+            kind: 'slice-stop', id: 'trust-audit', fired_at: ev.ts,
+          });
+          if (res.ran) {
+            const v = res.violations;
+            console.log(`  trust audit (deps changed): ${res.audited} dep(s) audited${v ? `, ${v} violation(s) → \`maddu trust report\`` : ', clean'}`);
+          }
+          break;
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error(`  trust-audit trigger failed (non-fatal): ${err.message}`);
+  }
 }

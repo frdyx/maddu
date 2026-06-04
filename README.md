@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.6.0](https://img.shields.io/badge/version-1.6.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.7.0](https://img.shields.io/badge/version-1.7.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,15 +24,16 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.6.0
+## What's new in v1.7.0
 
-**Orchestration handoff — goal progress + a cross-session briefing.** For big multi-session projects: a goal-anchored session-start briefing that survives compaction (inspired by posto's `/orch:status`), built by extending Máddu's existing primitives. The 8+1 hard rules are unchanged.
+**Invocation logic — wire WHEN the still-dead domains fire.** A usage audit found whole domains dead not because they were broken but because *nothing in the flow invoked them*. v1.7.0 gives each a **defined, safe trigger condition** — or honestly marks it operator-on-demand. The principle: don't force; give a clear WHEN. Every auto-trigger crosses the rule-#9 gauntlet.
 
-- **Goal success conditions** — `maddu goal set "<obj>" --success "<verify-cmd>::<text>"` records measurable, command-verifiable conditions (≤5).
-- **`maddu orient`** (`/maddu-orient`) — the "session always starts here" briefing: runs each success condition's verify command → **✓ met / ○ pending / ? unverifiable**, and renders the objective, the curated handoff, and the recent slice-stop trail. When all conditions are met it suggests closing the goal / a release. Complements `brief` (per-turn) and `status` (live).
-- **Curated cross-session handoff** — `maddu handoff set "<markdown>"` / `show` (`/maddu-handoff`): the "▶ RESUME HERE" narrative (next slice, blockers, queue) a fresh session reads first. Plus a cockpit **Goal** panel.
+- **Trust audit on deps-change** — at slice-stop, if your dependency surface changed since the last audit, Máddu re-runs the supply-chain trust audit, so freshness/pin drift on newly-added deps is caught in-flow instead of only on a manual run.
+- **Checkpoint before a coordinator run** — a real multi-phase coordinator run snapshots HEAD (a `maddu/checkpoint/*` git tag) first, giving you a clean rollback point before workers mutate the repo.
+- **MCP as a directive** — "a task needs an external tool" can't be detected safely, so it's an intent-routing cue in the agent briefs, not an auto-fire.
+- **Honest gap list** — `maddu insights dead` now separates genuine "nothing invokes it" gaps from capabilities that are dormant-by-design (API-key auth, opt-in schedules, manual pinning). Each opt-out is one line in `.maddu/config/triggers.json`.
 
-Just prior, **v1.5.0** made Máddu **spawn + track real sub-workers** — the coordinator and `maddu team spawn` launch tracked workers (`WORKER_*`), and an authed agent's own sub-agents register as tracked child sessions (`session tree`). See [the changelog](CHANGELOG.md) for both releases.
+Just prior, **v1.6.0** brought the **orchestration handoff** (goal success-conditions + `maddu orient` + curated cross-session handoff), and **v1.5.0** made Máddu **spawn + track real sub-workers**. See [the changelog](CHANGELOG.md) for all three.
 
 ## Zero learning curve (v0.18)
 
@@ -72,7 +73,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.6.0 installed.
+Máddu v1.7.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -97,7 +98,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.6.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.7.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

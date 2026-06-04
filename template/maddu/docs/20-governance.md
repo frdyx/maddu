@@ -167,6 +167,35 @@ When a schedule fires with `action.kind = 'command'`, `schedule.tick` runs the t
 3. Check `cooldownMs` against the most recent `TRIGGER_FIRED` for this trigger id.
 4. On green: emit `TRIGGER_FIRED` with `triggered_by.kind = 'schedule'`.
 
+### Embedded flow triggers (flat-id allowlist)
+
+Some auto-triggers fire *inside* a flow step rather than from a schedule. They
+emit their domain event with `triggered_by` provenance plus a `TRIGGER_FIRED`
+record, and are gated on a flat string id in the same `allowed` array:
+
+```json
+{ "allowed": [
+    "janitor:sessions",
+    "slice-stop:skill-candidate",
+    "slice-stop:trust-audit",
+    "coordinator:pre-run-checkpoint"
+] }
+```
+
+| Trigger id | Fires | When (the invocation logic) |
+|---|---|---|
+| `slice-stop:skill-candidate` | at slice-stop | a reusable tag-pattern crossed threshold (v1.4.0) |
+| `slice-stop:trust-audit` | at slice-stop | the dependency surface changed since the last `TRUST_AUDIT_RAN` — re-audits so freshness/pin drift on new deps is caught in-flow (v1.7.0) |
+| `coordinator:pre-run-checkpoint` | before a real coordinator run | a multi-phase worker run is about to mutate the repo — snapshots HEAD as a git-tag checkpoint so the operator can roll back (v1.7.0) |
+
+The operator opts out of any by removing its entry. These are *defined WHEN*
+conditions, not "fire always" — the whole point of the v1.7.0 invocation-logic
+pass was to give still-dead domains a clear, safe trigger condition (or leave
+them operator-on-demand) rather than forcing them. Capabilities whose WHEN
+can't be detected safely (e.g. "a task needs an external MCP tool") stay
+*directives* in the agent briefs, not auto-triggers. See `maddu insights dead`
+for the gap list and its `dormant-by-design` partition.
+
 For auto-actions that *should* run but only when an agent is present, use the pending-actions queue:
 
 ```js

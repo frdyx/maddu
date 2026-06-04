@@ -112,6 +112,7 @@ export default async function insights(argv) {
       eventMatrix: {
         definedTotal: matrix.definedTotal, everFired: matrix.everFired, counts: matrix.counts,
         rows: matrix.rows, deadDefined: matrix.deadDefined,
+        dormantByDesign: matrix.dormantByDesign || [],
       },
       transcripts: transcripts && {
         filesScanned: transcripts.filesScanned,
@@ -158,6 +159,18 @@ export default async function insights(argv) {
     console.log(`\n  ${clsTag('dead')}  ${matrix.deadDefined.length}/${matrix.definedTotal} defined event types (core-owned) never fired in any registered project`);
     if (sub === 'dead' || !sub) {
       for (const t of matrix.deadDefined) console.log(`      ${ANSI.dim}${t}${ANSI.reset}`);
+    }
+    // v1.7.0 — dormant-by-design is insurance, not a gap. Listed apart so the
+    // dead count above reads as genuine "nothing invokes it" work.
+    const dbd = matrix.dormantByDesign || [];
+    if (dbd.length) {
+      console.log(`\n  ${ANSI.dormant}dormant-by-design${ANSI.reset}  ${dbd.length} type(s) fire only under a specific posture/edge (expected, not a gap)`);
+      if (sub === 'dead' || !sub) {
+        for (const t of dbd) {
+          const reason = lib.DORMANT_BY_DESIGN?.get(t);
+          console.log(`      ${ANSI.dim}${t.padEnd(32)} ${reason || ''}${ANSI.reset}`);
+        }
+      }
     }
   }
 
