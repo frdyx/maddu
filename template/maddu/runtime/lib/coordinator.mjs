@@ -18,6 +18,7 @@ import { append, EVENT_TYPES, makeId, readAll } from './spine.mjs';
 import { readPlan, completePhase } from './plans.mjs';
 import { readGovernance, effectiveValue } from './governance.mjs';
 import { runSliceReview } from './review.mjs';
+import { spawnWorker } from './runtimes.mjs';
 
 // NOTE (v1.3.0 coherence): the per-phase loop below shares its
 // stuck-detection heuristic ("same fail signature twice → halt") with
@@ -121,15 +122,35 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
         const shell = isWin ? 'cmd.exe' : 'sh';
         const args = isWin ? ['/c', syntheticPhaseCmd] : ['-c', syntheticPhaseCmd];
         result = await runPhaseSubprocess(shell, args, env, { cwd: repoRoot, timeoutMs: 60000 });
+      } else if (runtime) {
+        // v1.5.0 — real-runtime mode: spawn the configured runtime as a
+        // tracked Máddu worker (WORKER_SPAWNED/EXITED + an auto-registered
+        // child session linked to this coordinator's session) and use the
+        // worker's exit code as the phase result. The phase intent rides in
+        // env (MADDU_COORDINATOR_PHASE) and as an extra arg so a runtime
+        // descriptor can route it into the agent's prompt. Awaits exit via
+        // spawnWorker's wait mode.
+        try {
+          const w = await spawnWorker(repoRoot, runtime, {
+            wait: true,
+            session: sessionId,
+            stage: phase.name,
+            label: `coordinator ${coordinatorId} · ${phase.name}`,
+            extraArgs: phase.intent ? [phase.intent] : [],
+          });
+          result = {
+            code: w.error ? -1 : (w.exitCode == null ? 0 : w.exitCode),
+            stdout: `[runtime:${runtime} worker:${w.workerId} exit:${w.exitCode}]`,
+            stderr: w.error || '',
+          };
+        } catch (err) {
+          result = { code: -1, stdout: '', stderr: `spawn failed: ${err.message}` };
+        }
       } else {
-        // Real-runtime mode: spawn the operator's chosen runtime via the
-        // existing runtimes descriptor surface. We don't depend on
-        // Claude Code's Agent tool — the subprocess is just a normal
-        // worker that reads the coordinator env vars.
-        // This branch is exercised by the operator setting --runtime.
-        // For Phase 7 verification the synthetic mode is sufficient.
-        const fallback = runtime || 'shell';
-        result = { code: 0, stdout: `[runtime:${fallback}] phase ${phase.name} — no spawn helper wired (use --synthetic-cmd for end-to-end)`, stderr: '' };
+        // No runtime and no synthetic command — nothing to execute. Keep the
+        // phase a no-op success (legacy behaviour) but tell the operator how
+        // to make it real.
+        result = { code: 0, stdout: `[no runtime] phase ${phase.name} — pass --runtime <name> to spawn a tracked worker, or --synthetic-cmd for a smoke run`, stderr: '' };
       }
 
       const sig = `exit=${result.code}:${(result.stderr || result.stdout).slice(-80)}`;

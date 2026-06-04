@@ -395,12 +395,18 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   const wrapperPath = wrapperPathFor(r);
   const spawnBinary = wrapperPath ? process.execPath : r.binary;
   const spawnArgs = wrapperPath ? [wrapperPath, r.binary, ...args] : args;
+  // v1.5.0 — wait mode. Synchronous drivers (the coordinator, a team
+  // fan-out) need to spawn a worker and await its exit to use the exit code
+  // as the phase/lane result. In that mode we do NOT detach/unref, and we
+  // emit a real WORKER_EXITED on completion (not just on spawn error). The
+  // default (fire-and-forget, detached) path is unchanged.
+  const waitForExit = !!opts.wait;
   try {
     child = spawn(spawnBinary, spawnArgs, {
-      cwd, env, stdio: ['ignore', logFh.fd, logFh.fd], detached: true
+      cwd, env, stdio: ['ignore', logFh.fd, logFh.fd], detached: !waitForExit
     });
     pid = child.pid;
-    child.unref();
+    if (!waitForExit) child.unref();
   } catch (err) {
     error = err.message;
   } finally {
@@ -441,6 +447,23 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
       actor: null, lane: null,
       data: { id: workerId, exitCode: -1, reason: error }
     });
+    return { workerId, pid, log: logPath, error, exitCode: -1 };
   }
+
+  // v1.5.0 — wait mode: await the worker's exit and emit a real WORKER_EXITED
+  // carrying the actual exit code, so callers can branch on success/failure.
+  if (waitForExit && child) {
+    const exitCode = await new Promise((resolve) => {
+      child.on('exit', (code) => resolve(code == null ? -1 : code));
+      child.on('error', () => resolve(-1));
+    });
+    await append(repoRoot, {
+      type: EVENT_TYPES.WORKER_EXITED,
+      actor: effectiveSession, lane: opts.lane || null,
+      data: { id: workerId, exitCode, runtime: name, sessionId: effectiveSession }
+    });
+    return { workerId, pid, log: logPath, error: null, exitCode };
+  }
+
   return { workerId, pid, log: logPath, error };
 }
