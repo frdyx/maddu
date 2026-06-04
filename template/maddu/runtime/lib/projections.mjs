@@ -526,6 +526,9 @@ export async function project(repoRoot) {
         goal = {
           objective: ev.data.objective || '',
           constraints: Array.isArray(ev.data.constraints) ? ev.data.constraints : [],
+          // v1.6.0 — measurable success conditions [{ text, verify }]. Older
+          // GOAL_DECLARED events without it project to [] (forward-compat).
+          success: Array.isArray(ev.data.success) ? ev.data.success : [],
           setAt: ev.ts
         };
         break;
