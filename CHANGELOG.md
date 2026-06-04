@@ -11,6 +11,20 @@ narrative summary.
 
 ---
 
+## [v1.7.0] · 2026-06-04 · Invocation logic — wire WHEN the still-dead domains fire
+
+The 2026-06-03 usage audit found whole domains dead not because they were broken but because *nothing in the flow invoked them*. v1.7.0 gives each still-dead domain a **defined, safe trigger condition** wired into the flow — or honestly marks it operator-on-demand. The principle: don't force; give a clear WHEN. Every auto-trigger crosses the rule-#9 gauntlet (allowlist entry + `triggered_by` provenance + `TRIGGER_FIRED` + cooldown).
+
+- **trust-audit on deps-change** — at slice-stop, if the dependency surface changed since the last `TRUST_AUDIT_RAN` (a stable `depsFingerprint` of direct deps + lockfiles), Máddu re-runs the supply-chain audit. Freshness/pin drift on newly-added deps is now caught in-flow instead of only on a manual `maddu trust audit`. Gated on `slice-stop:trust-audit`; resurrects `TRUST_VIOLATION_DETECTED` + `TRIGGER_FIRED`.
+- **checkpoint before a coordinator run** — a real coordinator run spawns workers that mutate the repo across phases; Máddu now snapshots HEAD (a `maddu/checkpoint/*` git tag) *before* the run so the operator has a rollback point. Skipped for dry-run/synthetic. Gated on `coordinator:pre-run-checkpoint`; resurrects `CHECKPOINT_CREATED`.
+- **mcp as a directive** — "a task needs an external tool the runtime lacks" can't be detected safely from the flow, so mcp gets an intent-routing row in the agent briefs (`MADDU.md` / `CLAUDE` / `AGENTS`), not an auto-trigger.
+- **dormant-by-design registry** — `maddu insights dead` now separates genuine "nothing invokes it" gaps from capabilities that fire only under a specific posture/edge (API-key auth, opt-in schedules, manual dep-pinning, MCP provenance). Dead count on the real registry: 72 → 54, with 18 surfaced as dormant-by-design (each with a reason).
+- **Docs** — governance doc gains an "embedded flow triggers" section (the flat-id allowlist + the WHEN table); init/upgrade seed the two new trigger ids.
+
+Verified: unit (fingerprint) + end-to-end (trust fires once on deps-change then unchanged-gate skips; coordinator checkpoint precedes phases with a real git tag); audit 6/6, stress 12/12, layout-refusal 4/4, projection-roundtrip, advise-spawn 16, upgrade-matrix 19.
+
+---
+
 ## [v1.6.0] · 2026-06-04 · Orchestration handoff — goal progress + cross-session briefing
 
 Built for big multi-session projects: a goal-anchored session-start briefing that survives compaction, inspired by the posto `/orch:status` system. Extends existing primitives (spine + goal/brief/handoff/slice-stops) rather than adding a parallel system — the 8+1 hard rules are unchanged. Plan: [`docs/audit/2026-06-04-PLAN-orchestration-handoff.md`](docs/audit/2026-06-04-PLAN-orchestration-handoff.md).
