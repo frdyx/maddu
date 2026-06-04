@@ -35,6 +35,7 @@ let allWorkspacesMode = false; // when true, /bridge/_all/* gets `_all`.
 // glyphs, and the mobile dock. Anchor routes (the five depth-upgrade
 // signatures) carry anchor:true and render with the filled ◆ glyph.
 const ROUTES = {
+  goal:       { title: 'Goal',       group: 'decide',    anchor: true,  rank: 0,  render: renderGoal,       description: 'The objective + measurable success conditions + constraints + the curated cross-session handoff. Run `maddu orient` for live success-condition verification.' },
   conductor:  { title: 'Conductor',  group: 'decide',    anchor: true,  rank: 1,  render: renderConductor,  description: 'Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.' },
   boss:       { title: 'BOSS',       group: 'decide',    anchor: true,  rank: 2,  render: renderBoss,       description: 'BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate.' },
   queue:      { title: 'Queue',      group: 'decide',    rank: 3,                 render: renderQueueBoard, description: 'Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.' },
@@ -3703,6 +3704,52 @@ function renderChats() {
     mount.appendChild(list);
   });
 
+  return root;
+}
+
+// v1.6.0 — Goal panel: objective + measurable success conditions + constraints
+// + the curated cross-session handoff. Read-only (GET /bridge/goal). Live ✓/○/?
+// success verification is the `maddu orient` CLI's job (running operator verify
+// commands on an HTTP GET would be unsafe), so conditions show as declared here.
+function renderGoal() {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Goal'));
+  root.appendChild(el('p', {}, ROUTES.goal.description));
+  const mount = el('div', {});
+  mount.appendChild(loading('Reading goal + handoff…'));
+  root.appendChild(panelFocus('Goal & handoff', 'GET /bridge/goal · run `maddu orient` for live success checks', mount,
+    { id: 'goal', keywords: 'goal objective success conditions constraints handoff resume next briefing' }));
+  (async () => {
+    let data = null;
+    try { const r = await fetch('/bridge/goal', { cache: 'no-store' }); if (r.ok) data = await r.json(); } catch {}
+    mount.textContent = '';
+    if (!data || !data.goal) {
+      mount.appendChild(el('p', {}, 'No goal set. Run: maddu goal set "<objective>" --success "<cmd>::<text>"'));
+      return;
+    }
+    const g = data.goal;
+    mount.appendChild(el('p', {}, el('strong', {}, g.objective || '(no objective)')));
+    if (data.phase) mount.appendChild(el('p', {}, 'phase: ' + (data.phase.name || data.phase)));
+    mount.appendChild(el('h3', {}, `Success conditions (${g.success.length})`));
+    const ul = el('ul', {});
+    for (const s of g.success) ul.appendChild(el('li', {}, (s.verifiable ? '◇ ' : '? ') + s.text + (s.verifiable ? '' : ' — unverifiable')));
+    if (!g.success.length) ul.appendChild(el('li', {}, '(none)'));
+    mount.appendChild(ul);
+    if (g.constraints.length) {
+      mount.appendChild(el('h3', {}, `Constraints (${g.constraints.length})`));
+      const cl = el('ul', {});
+      for (const c of g.constraints) cl.appendChild(el('li', {}, c));
+      mount.appendChild(cl);
+    }
+    mount.appendChild(el('h3', {}, '▶ Curated handoff'));
+    mount.appendChild(el('pre', {}, (data.handoff && data.handoff.body) ? data.handoff.body : '(none — set with: maddu handoff set "…")'));
+    if (data.recentSliceStops && data.recentSliceStops.length) {
+      mount.appendChild(el('h3', {}, 'Recent slice-stops'));
+      const tl = el('ul', {});
+      for (const t of data.recentSliceStops) tl.appendChild(el('li', {}, t.summary || '—'));
+      mount.appendChild(tl);
+    }
+  })();
   return root;
 }
 

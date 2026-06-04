@@ -6,13 +6,23 @@ agent orchestration with an append-only NDJSON event spine. State lives in
 is the single source of truth for how to participate in a Máddu repo
 without violating its invariants.
 
-If you only do **three** things every turn, make them these:
+**A fresh session starts with `orient`** — the goal-anchored briefing (goal +
+success-condition progress + the curated "▶ RESUME HERE" handoff + recent trail):
 
 ```
-./maddu/run brief         # what's going on
+./maddu/run orient        # session-start briefing — the session always starts here
+```
+
+Then, every turn:
+
+```
+./maddu/run brief         # lighter per-turn orientation digest
 ./maddu/run register      # idempotent session bootstrap
 ./maddu/run status        # cockpit-equivalent terminal snapshot
 ```
+
+End a substantial session by curating the handoff for the next one:
+`./maddu/run handoff set "▶ RESUME HERE: …"`.
 
 `register` is idempotent on `MADDU_SESSION_ID` — repeat invocations from
 the same shell are a no-op, so you can call it at the start of every turn

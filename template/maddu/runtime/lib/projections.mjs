@@ -59,6 +59,8 @@ export async function project(repoRoot) {
   // Governance Phase 1: goal + phase declarations (latest wins).
   let goal = null;
   let phase = null;
+  // v1.6.0 — curated cross-session handoff (latest HANDOFF_SET wins).
+  let handoff = null;
 
   // Governance Phase 2: gate runs + tracked-source hashes.
   const gateRuns = [];                        // capped 200
@@ -526,8 +528,14 @@ export async function project(repoRoot) {
         goal = {
           objective: ev.data.objective || '',
           constraints: Array.isArray(ev.data.constraints) ? ev.data.constraints : [],
+          // v1.6.0 — measurable success conditions [{ text, verify }]. Older
+          // GOAL_DECLARED events without it project to [] (forward-compat).
+          success: Array.isArray(ev.data.success) ? ev.data.success : [],
           setAt: ev.ts
         };
+        break;
+      case 'HANDOFF_SET':
+        handoff = { body: ev.data.body || '', by: ev.data.by || ev.actor || null, setAt: ev.ts };
         break;
       case 'PHASE_DECLARED':
         phase = {
@@ -746,6 +754,8 @@ export async function project(repoRoot) {
     bossTranscripts: Object.fromEntries(bossTranscripts),
     // Governance Phase 1: latest declared goal + phase (null if never set).
     goal,
+    // v1.6.0 — latest curated handoff (null if never set).
+    handoff,
     phase,
     // Governance Phase 2: gate runs + tracked-source hashes.
     gates: {

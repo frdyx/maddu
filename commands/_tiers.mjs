@@ -97,6 +97,12 @@ export default {
   // v1.4.0 — cross-project empirical usage audit. Read-only (scans registered
   // workspaces' spines + transcripts, writes nothing); safe to auto-trigger.
   insights:     { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  // v1.6.0 — session-start briefing. Read-only (runs operator-declared verify
+  // commands + reads the spine; writes nothing).
+  orient:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  // v1.6.0 — curated cross-session handoff. `set` writes a HANDOFF_SET event;
+  // mutating, operator/agent-explicit.
+  handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
   // v1.4.0 — plugin loader: capabilities that live outside the core. list/info
   // are read-only-shaped but the verb dispatches into enable/disable writes, so
   // the verb is mutating; auto-trigger forbidden (operator-explicit, like mcp).

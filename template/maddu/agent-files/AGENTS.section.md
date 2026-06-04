@@ -2,7 +2,9 @@
 
 This repo uses **Máddu** — local-first agent orchestration. **Before doing anything else:**
 
-1. Run `./maddu/run brief` to read the turn-start orientation.
+1. **Fresh session?** Run `./maddu/run orient` — the goal-anchored session-start
+   briefing (success-condition progress + curated handoff). Then `./maddu/run brief`
+   for the per-turn digest.
 2. Run `./maddu/run register` to register your session (idempotent on `MADDU_SESSION_ID`).
 3. Claim a lane before editing files: `./maddu/run lane claim --lane <id>`.
 4. End every meaningful unit of work with `./maddu/run slice-stop ...`.

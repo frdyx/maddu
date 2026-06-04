@@ -212,7 +212,11 @@ export const EVENT_TYPES = {
   //   SKILL_IMPORTED:           { source, sha256, trusted, dest }
   //   SKILL_TRUSTED:            { id }
   SKILL_IMPORTED:             'SKILL_IMPORTED',
-  SKILL_TRUSTED:              'SKILL_TRUSTED'
+  SKILL_TRUSTED:              'SKILL_TRUSTED',
+  // v1.6.0 — curated cross-session handoff. The operator/agent's "▶ RESUME HERE"
+  // narrative (next slice, blockers, queue, decisions-pending). Latest wins.
+  //   HANDOFF_SET: { body, by }
+  HANDOFF_SET:                'HANDOFF_SET'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
