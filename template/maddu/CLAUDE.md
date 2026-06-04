@@ -27,11 +27,12 @@ explicitly tells you to.
 
 ## Mandatory first actions (every fresh session)
 
-Every turn starts the same way the agent brief prescribes: orient, then
-register, then read state.
+A fresh session starts with `maddu orient` (the goal-anchored session-start
+briefing); every turn then orients, registers, and reads state.
 
 ```bash
-maddu brief         # turn-start orientation digest
+maddu orient        # session-start briefing: goal + success-progress + handoff (fresh session)
+maddu brief         # per-turn orientation digest
 maddu register      # idempotent session bootstrap (no-op on MADDU_SESSION_ID)
 maddu status        # cockpit-equivalent terminal snapshot
 ```
