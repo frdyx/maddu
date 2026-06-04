@@ -413,12 +413,24 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   // contain spaces that shell-quoting would mangle. Mirrors the npm-family
   // shell:true fix (v1.1.1) for the worker-spawn path.
   const useShell = process.platform === 'win32' && !wrapperPath;
+  // v1.5.0 — SECURE task delivery: an agent-supplied task is piped to the
+  // worker's STDIN, never placed in argv. This is the injection-safe channel
+  // (a task with shell metacharacters can't escape into the command line under
+  // shell:true). `claude -p` / `codex exec` read the prompt from stdin. The task
+  // is also in env MADDU_TASK. Callers pass `opts.task`, not an argv arg.
+  const taskStdin = (typeof opts.task === 'string' && opts.task.length > 0) ? opts.task : null;
   let exitPromise = null;
   try {
     child = spawn(spawnBinary, spawnArgs, {
-      cwd, env, stdio: ['ignore', logFh.fd, logFh.fd], detached: !waitForExit, shell: useShell
+      cwd, env, stdio: [taskStdin ? 'pipe' : 'ignore', logFh.fd, logFh.fd], detached: !waitForExit, shell: useShell
     });
     pid = child.pid;
+    // Feed the task to stdin then close it, so the worker can start. Guard
+    // against EPIPE if the process exits before reading.
+    if (taskStdin && child.stdin) {
+      child.stdin.on('error', () => {});
+      try { child.stdin.write(taskStdin); child.stdin.end(); } catch {}
+    }
     // Attach exit/error handlers SYNCHRONOUSLY — before any await — so an early
     // spawn 'error' event (e.g. ENOENT on a missing binary) is handled, not
     // thrown as an uncaught exception that crashes the process.

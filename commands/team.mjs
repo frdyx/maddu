@@ -142,7 +142,7 @@ async function spawnTeam(flags) {
     try {
       w = await runtimes.spawnWorker(repoRoot, runtime, {
         wait: true, lane, session: parent, stage: 'team',
-        label: `${label} · ${lane}`, task, extraArgs: [task],
+        label: `${label} · ${lane}`, task,
       });
       exitCode = w.error ? -1 : (w.exitCode == null ? 0 : w.exitCode);
       error = w.error || null;

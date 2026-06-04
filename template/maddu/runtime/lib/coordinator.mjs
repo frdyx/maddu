@@ -137,7 +137,6 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
             stage: phase.name,
             label: `coordinator ${coordinatorId} · ${phase.name}`,
             task: phase.intent || null,
-            extraArgs: phase.intent ? [phase.intent] : [],
           });
           result = {
             code: w.error ? -1 : (w.exitCode == null ? 0 : w.exitCode),
