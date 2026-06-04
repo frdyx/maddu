@@ -218,7 +218,7 @@ export default async function init(argv) {
   // Default rule-#9 auto-trigger allowlist. `slice-stop:skill-candidate`
   // (v1.4.0) lets slice-stop auto-detect reusable skill patterns; operator
   // opts out by removing the entry.
-  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate'];
+  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit'];
   if (!(await exists(triggersPath))) {
     await writeFile(
       triggersPath,

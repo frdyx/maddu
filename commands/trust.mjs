@@ -104,6 +104,7 @@ async function cmdAudit(repoRoot, flags, lib, spineLib) {
     console.log(`Máddu trust audit — ${repoRoot}`);
     renderAuditTable(audit);
   }
+  const depsHash = await lib.depsFingerprint(repoRoot).catch(() => null);
   await spineLib.spine.append(repoRoot, {
     type: spineLib.spine.EVENT_TYPES.TRUST_AUDIT_RAN,
     data: {
@@ -115,6 +116,7 @@ async function cmdAudit(repoRoot, flags, lib, spineLib) {
       cacheHits: audit.cacheHits,
       cacheMisses: audit.cacheMisses,
       cveTotal: audit.cveSummary?.total ?? null,
+      depsHash,
     },
   });
   for (const v of audit.violations) {

@@ -130,6 +130,30 @@ export function listDirectDeps(pkg) {
   return out;
 }
 
+// ── deps fingerprint (v1.7.0 invocation-logic) ─────────────────────────
+// A stable hash of the direct-dependency surface + any lockfile. The
+// trust-audit auto-trigger compares this against the depsHash stamped on
+// the last TRUST_AUDIT_RAN to decide whether deps changed since the last
+// audit (and therefore whether a fresh audit is worth running). Returns
+// null when there is no package.json (nothing to audit).
+const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'];
+
+export async function depsFingerprint(repoRoot) {
+  const pkg = await readPackageJson(repoRoot);
+  if (!pkg) return null;
+  const deps = listDirectDeps(pkg)
+    .map((d) => `${d.field}:${d.name}@${d.spec}`)
+    .sort();
+  let lockBytes = '';
+  for (const lf of LOCKFILES) {
+    const p = join(repoRoot, lf);
+    if (await exists(p)) {
+      try { lockBytes += `${lf} ${await readFile(p, 'utf8')} `; } catch {}
+    }
+  }
+  return sha256Hex(`${deps.join('\n')}${lockBytes}`).slice(0, 16);
+}
+
 // ── audit core ────────────────────────────────────────────────────────
 
 // Get installed version of a package from `npm ls --json` (best-effort).
