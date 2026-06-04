@@ -26,7 +26,9 @@ the matching action. Always tell them which one you picked.
 **Prefer a pipeline.** Non-trivial "ship / build / fix / team" work
 defaults to `maddu pipeline run <name> "<goal>"` — `ship-a-feature`
 (default, end-to-end), `fix-a-bug` (broken), `plan-and-delegate`
-(fan-out). Reserve ad-hoc `/maddu-autopilot` for genuine one-offs.
+(fan-out; its coordinate stage spawns a tracked Máddu worker per phase
+via `coordinator --runtime <name>` when a runtime is registered — see
+`maddu runtime list`). Reserve ad-hoc `/maddu-autopilot` for genuine one-offs.
 
 | Phrase shape | Dispatch |
 |---|---|

@@ -81,7 +81,10 @@ autopilot. Pipelines walk the canonical flow (orient → plan → coordinate
 → slice → test → review → land → account) and populate the feature
 surfaces. Three default pipelines ship: `ship-a-feature` (the default,
 for end-to-end feature work), `fix-a-bug` (something broken), and
-`plan-and-delegate` (fan-out across disjoint lanes). Reserve ad-hoc
+`plan-and-delegate` (fan-out across disjoint lanes — its coordinate
+stage spawns a tracked Máddu worker per phase via `coordinator
+--runtime <name>`, so the fan-out is visible to Máddu; requires a
+runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 `/maddu-autopilot` (no pipeline) for genuinely one-off changes.
 
 | Operator phrase shape | Dispatch |
