@@ -21,12 +21,13 @@ Procedure:
    them as a numbered list.
 4. Choose how the team executes — two modes:
    - **Máddu-spawned (tracked):** if a runtime descriptor exists
-     (`./maddu/run runtime list`), build a lane-disjoint plan and run
-     `./maddu/run coordinator <plan-id> --runtime <name>`. Máddu spawns a
-     tracked worker per phase (`WORKER_SPAWNED`/`WORKER_EXITED` + a child
-     session) — the cockpit shows the fan-out as a worker tree. This is the
-     `plan-and-delegate` pipeline's path. Prefer this when you want the workers
-     visible to Máddu.
+     (`./maddu/run runtime list`), run
+     `./maddu/run team spawn --runtime <name> --task "$ARGUMENTS" --lanes "<a,b,...>"`.
+     Máddu spawns a tracked worker per lane **concurrently** (full lifecycle:
+     `TEAM_OPENED` → `TEAM_MEMBER_JOINED` → `WORKER_SPAWNED`/`WORKER_EXITED` →
+     `TEAM_MEMBER_LEFT` → `TEAM_CLOSED`) — the cockpit shows a live team. Prefer
+     this for true parallel fan-out visible to Máddu. (For sequential
+     phase-by-phase work, `coordinator <plan-id> --runtime <name>` instead.)
    - **Manual fan-out:** each member opens `/maddu-autopilot <their focus>` in
      its own session. NOTE: sub-agents launched by Claude Code's own Agent tool
      run *inside* Claude Code and do NOT appear as Máddu workers unless they
