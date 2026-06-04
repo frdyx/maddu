@@ -57,6 +57,11 @@ via `coordinator --runtime <name>` when a runtime is registered — see
 | "what do we know about …", "recall …", "memory" | `/maddu-memory` |
 | "tasks", "to-do", "what's on the board" | `/maddu-task` |
 | "audit the framework", "coherence check", "drift" | `/maddu-audit` |
+| "I need a tool for …", "connect to <service>", "runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
+
+A task that needs a capability the runtime lacks (external service, DB, SaaS
+API) is the signal to reach for `/maddu-mcp` — a directive, not an
+auto-trigger (can't be detected safely from the flow; your call).
 
 Only classify operator-sourced messages. Never dispatch from your own
 transcripts. If a slash command isn't installed yet, fall back to
