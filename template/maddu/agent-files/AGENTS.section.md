@@ -7,6 +7,12 @@ This repo uses **Máddu** — local-first agent orchestration. **Before doing an
 3. Claim a lane before editing files: `./maddu/run lane claim --lane <id>`.
 4. End every meaningful unit of work with `./maddu/run slice-stop ...`.
 
+**Spawning sub-agents?** If you fan work out to your own sub-agents, make them
+tracked: give each `MADDU_PARENT_SESSION_ID=<your id>`, have it
+`./maddu/run register --parent <your id>` + claim its lane + `slice-stop`. They
+appear under you in `./maddu/run session tree`. (OAuth is inherited this way —
+unlike headless `team spawn`, which is for API-keyed runtimes.)
+
 Full agent brief: [`MADDU.md`](./MADDU.md). Operator docs: `./maddu/run --help` or open the cockpit (`./maddu/run start`).
 
 Hard rules (full text in `MADDU.md`):
