@@ -355,6 +355,11 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     // cwd may have been overridden by opts.cwd.
     MADDU_REPO_ROOT: repoRoot,
   };
+  // v1.5.0 — the worker's task, exposed as a SAFE env channel (never shell-
+  // interpolated). A runtime descriptor/wrapper can read MADDU_TASK instead of
+  // taking the task through argv — the injection-safe way to pass an
+  // agent-supplied prompt on the Windows shell-spawn path.
+  if (typeof opts.task === 'string' && opts.task) env.MADDU_TASK = opts.task;
   // v0.19 Phase 4 — model routing hint. Caller may resolve in advance
   // and pass opts.modelHint as a literal, OR pass the precedence inputs
   // (lanePref, pipelineStagePref, stage) and let spawnWorker resolve via
@@ -401,12 +406,31 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   // emit a real WORKER_EXITED on completion (not just on spawn error). The
   // default (fire-and-forget, detached) path is unchanged.
   const waitForExit = !!opts.wait;
+  // Windows: runtime binaries are usually .cmd/.ps1 shims (claude, codex, npm),
+  // which Node's spawn can't exec without a shell. Use shell:true on win32 for
+  // the DIRECT binary path — but NOT when a wrapper is used, since that path is
+  // `node <wrapper-script>` (node is a real exe) and the wrapper/cwd paths often
+  // contain spaces that shell-quoting would mangle. Mirrors the npm-family
+  // shell:true fix (v1.1.1) for the worker-spawn path.
+  const useShell = process.platform === 'win32' && !wrapperPath;
+  let exitPromise = null;
   try {
     child = spawn(spawnBinary, spawnArgs, {
-      cwd, env, stdio: ['ignore', logFh.fd, logFh.fd], detached: !waitForExit
+      cwd, env, stdio: ['ignore', logFh.fd, logFh.fd], detached: !waitForExit, shell: useShell
     });
     pid = child.pid;
-    if (!waitForExit) child.unref();
+    // Attach exit/error handlers SYNCHRONOUSLY — before any await — so an early
+    // spawn 'error' event (e.g. ENOENT on a missing binary) is handled, not
+    // thrown as an uncaught exception that crashes the process.
+    if (waitForExit) {
+      exitPromise = new Promise((resolve) => {
+        child.on('exit', (code) => resolve(code == null ? -1 : code));
+        child.on('error', () => resolve(-1));
+      });
+    } else {
+      child.on('error', () => {}); // detached fire-and-forget: never let it throw
+      child.unref();
+    }
   } catch (err) {
     error = err.message;
   } finally {
@@ -450,13 +474,11 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
     return { workerId, pid, log: logPath, error, exitCode: -1 };
   }
 
-  // v1.5.0 — wait mode: await the worker's exit and emit a real WORKER_EXITED
-  // carrying the actual exit code, so callers can branch on success/failure.
-  if (waitForExit && child) {
-    const exitCode = await new Promise((resolve) => {
-      child.on('exit', (code) => resolve(code == null ? -1 : code));
-      child.on('error', () => resolve(-1));
-    });
+  // v1.5.0 — wait mode: await the worker's exit (handlers attached at spawn
+  // time above) and emit a real WORKER_EXITED carrying the actual exit code,
+  // so callers can branch on success/failure.
+  if (waitForExit && child && exitPromise) {
+    const exitCode = await exitPromise;
     await append(repoRoot, {
       type: EVENT_TYPES.WORKER_EXITED,
       actor: effectiveSession, lane: opts.lane || null,
