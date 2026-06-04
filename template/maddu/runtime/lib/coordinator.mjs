@@ -35,6 +35,17 @@ function genCoordinatorId() {
 
 async function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
+// Rule-#9 allowlist reader (same flat `allowed: [string]` schema slice-stop
+// and schedule.mjs use). Best-effort: missing/unparseable → empty.
+async function readTriggersAllowlist(repoRoot) {
+  const { readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  try {
+    const parsed = JSON.parse(await readFile(join(repoRoot, '.maddu', 'config', 'triggers.json'), 'utf8'));
+    return Array.isArray(parsed?.allowed) ? parsed.allowed : [];
+  } catch { return []; }
+}
+
 function runPhaseSubprocess(cmd, args, env, opts = {}) {
   return new Promise((resolve) => {
     let stdout = '', stderr = '';
@@ -77,6 +88,39 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
   // Slices produced during this run are review-eligible (Bucket C, v1.4.0).
   const startedTs = startEv.ts;
   const reviewedSlices = new Set();
+
+  // v1.7.0 (invocation-logic) — checkpoint-before-risky-op. A real
+  // coordinator run spawns workers that mutate the repo across multiple
+  // phases; an auto-snapshot before that gives the operator a clean
+  // rollback point. This is the WHEN that was missing for the checkpoint
+  // domain (CHECKPOINT_* never fired in any real project). Skipped for
+  // dry-run / synthetic smoke tests (no real mutation). Rule-#9 gauntlet:
+  // gated on the `coordinator:pre-run-checkpoint` allowlist entry, emits
+  // TRIGGER_FIRED + CHECKPOINT_CREATED carrying triggered_by. Best-effort
+  // (no git / no tag → coordinator proceeds; the snapshot is a safety net,
+  // not a precondition).
+  if (!dryRun && !syntheticPhaseCmd) {
+    try {
+      const allowed = await readTriggersAllowlist(repoRoot);
+      if (allowed.includes('coordinator:pre-run-checkpoint')) {
+        const cp = await import('./checkpoints.mjs');
+        if (await cp.gitAvailable(repoRoot)) {
+          const provenance = { kind: 'coordinator', id: coordinatorId, fired_at: startedTs };
+          await append(repoRoot, {
+            type: EVENT_TYPES.TRIGGER_FIRED,
+            actor: sessionId, lane: null,
+            data: { triggerId: 'coordinator:pre-run-checkpoint', reason: 'pre-coordinator-run', planId, triggered_by: provenance },
+          });
+          const rec = await cp.createCheckpoint(repoRoot, {
+            by: sessionId,
+            title: `before coordinator ${coordinatorId} (plan ${planId})`,
+            triggeredBy: provenance,
+          });
+          console.log(`  checkpoint ${rec.id} created before coordinator run (rollback: maddu checkpoint rollback ${rec.id})`);
+        }
+      }
+    } catch { /* snapshot is best-effort; never blocks the run */ }
+  }
 
   const phases = (plan.phases || []).filter((p) => p.status !== 'completed');
   for (const phase of phases) {

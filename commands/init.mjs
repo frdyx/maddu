@@ -216,9 +216,11 @@ export default async function init(argv) {
   }
   const triggersPath = join(configDir, 'triggers.json');
   // Default rule-#9 auto-trigger allowlist. `slice-stop:skill-candidate`
-  // (v1.4.0) lets slice-stop auto-detect reusable skill patterns; operator
-  // opts out by removing the entry.
-  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit'];
+  // (v1.4.0) auto-detects reusable skill patterns; `slice-stop:trust-audit`
+  // (v1.7.0) re-audits deps when the dependency surface changed;
+  // `coordinator:pre-run-checkpoint` (v1.7.0) snapshots HEAD before a real
+  // coordinator run. Operator opts out of any by removing its entry.
+  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit', 'coordinator:pre-run-checkpoint'];
   if (!(await exists(triggersPath))) {
     await writeFile(
       triggersPath,
