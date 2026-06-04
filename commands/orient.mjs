@@ -1,25 +1,41 @@
-// `maddu orient` — the session-start briefing (v1.6.0).
+// `maddu orient` — the session-start briefing (v1.6.0; enriched v1.6.1).
 //
 // "The session always starts here." Where `brief` is a lightweight per-turn
 // digest and `status` is a live snapshot, `orient` is the goal-anchored
-// orientation: it runs the goal's measurable success conditions and renders a
-// posto-style status block — objective, success-progress (✓ met / ○ pending /
-// ? unverifiable), constraints, phase, counters, the curated handoff, and the
-// recent slice-stop trail. When all success conditions are met it suggests
-// closing the goal / a release (informational, never forced).
+// orientation. It runs the goal's measurable success conditions and renders a
+// posto-/orch:status-style block: project/branch/phase header, objective,
+// success-progress (✓ met / ○ pending / ? unverifiable), constraints, counters,
+// a typed recent timeline, the curated handoff, and a completion suggestion.
+//
+// `--json` emits the full structured briefing so the `/maddu-orient` slash can
+// render the designed view + an interactive decision menu when one is pending.
 //
 // Read-only: runs operator-declared verify commands (subprocesses) and reads the
 // spine; writes nothing. Flags: --json, --no-verify (skip running commands).
 
 import { spawnSync } from 'node:child_process';
+import { basename } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
 const C = {
   bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
-  met: '\x1b[32m', pending: '\x1b[36m', unver: '\x1b[33m', rule: '\x1b[2m',
+  met: '\x1b[32m', pending: '\x1b[36m', unver: '\x1b[33m',
 };
 const VERIFY_TIMEOUT_MS = 120000;
+const RULE = '─'.repeat(54);
+
+function gitBranch(repoRoot) {
+  try {
+    const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', timeout: 5000 });
+    if (r.status === 0 && r.stdout) return r.stdout.trim();
+  } catch {}
+  return null;
+}
+
+function cleanSummary(s) {
+  return String(s || '—').replace(/\s+/g, ' ').replace(/^["'\s]+/, '').trim().slice(0, 100) || '—';
+}
 
 function evalCondition(cond, repoRoot, runVerify) {
   if (!cond.verify) return { ...cond, state: 'unverifiable' };
@@ -33,14 +49,31 @@ function evalCondition(cond, repoRoot, runVerify) {
   }
 }
 
-const MARK = { met: `${C.met}✓ met${C.reset}`, pending: `${C.pending}○ pending${C.reset}`, unverifiable: `${C.unver}? unverifiable${C.reset}`, skipped: `${C.dim}· skipped${C.reset}` };
+const MARK = {
+  met: `${C.met}✓ met${C.reset}`, pending: `${C.pending}○ pending${C.reset}`,
+  unverifiable: `${C.unver}? unverifiable${C.reset}`, skipped: `${C.dim}· skipped${C.reset}`,
+};
+
+// Milestone event types that belong on the recent timeline, with a short label
+// and a one-line describer.
+const TIMELINE_TYPES = {
+  PIPELINE_COMPLETED:   (d) => `pipeline ${d.name || d.pipelineRunId || ''} complete`,
+  COORDINATOR_COMPLETED:(d) => `coordinator ${d.coordinatorId || ''} (${d.phaseCount ?? '?'} phases)`,
+  SLICE_REVIEWED:       (d) => `review ${d.sliceEventId || ''} → ${d.verdict || '?'}`,
+  CHECKPOINT_CREATED:   (d) => `checkpoint ${d.label || d.id || ''}`,
+  TEAM_CLOSED:          (d) => `team ${d.teamId || ''} closed`,
+  FRAMEWORK_UPGRADED:   (d) => `upgraded → v${d.version || '?'}`,
+  SLICE_STOP:           (d) => cleanSummary(d.summary),
+};
 
 export default async function orient(argv) {
   const { flags } = parseFlags(argv);
   const runVerify = !flags['no-verify'];
-  const { paths, projections } = await loadSpineLib();
+  const { paths, projections, spine } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const proj = await projections.project(repoRoot);
+  let events = [];
+  try { events = await spine.readAll(repoRoot); } catch {}
 
   const goal = proj.goal || null;
   const success = Array.isArray(goal?.success) ? goal.success : [];
@@ -48,53 +81,90 @@ export default async function orient(argv) {
   const metCount = evaluated.filter((c) => c.state === 'met').length;
   const verifiable = evaluated.filter((c) => c.verify).length;
   const pendingCount = evaluated.filter((c) => c.state === 'pending').length;
-  const allMet = verifiable > 0 && pendingCount === 0 && evaluated.every((c) => c.state !== 'pending');
+  const allMet = verifiable > 0 && pendingCount === 0;
+
+  // Counters from the full spine.
+  const countType = (t) => events.reduce((n, e) => n + (e.type === t ? 1 : 0), 0);
+  const counters = {
+    sessions: (proj.sessions || []).length,
+    slices: countType('SLICE_STOP'),
+    pipelines: countType('PIPELINE_COMPLETED'),
+    workers: countType('WORKER_SPAWNED'),
+    reviews: countType('SLICE_REVIEWED'),
+    checkpoints: countType('CHECKPOINT_CREATED'),
+  };
+
+  // Typed recent timeline (last 3 milestone events).
+  const timeline = events
+    .filter((e) => TIMELINE_TYPES[e.type])
+    .slice(-3).reverse()
+    .map((e) => ({ type: e.type, ts: e.ts, label: TIMELINE_TYPES[e.type](e.data || {}) }));
 
   const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
-  const trail = stops.slice(-3).reverse();
+  const trail = stops.slice(-3).reverse().map((s) => ({ summary: cleanSummary(s.summary), next: s.next || [] }));
   const claims = Array.isArray(proj.claims) ? proj.claims : [];
   const approvals = Array.isArray(proj.approvals) ? proj.approvals.filter((a) => a.status === 'requested' || a.status === 'pending') : [];
-  const curatedHandoff = proj.handoff?.body || null; // inc3 populates this
+  const handoff = proj.handoff || null;
+  const branch = gitBranch(repoRoot);
+  const project = basename(repoRoot);
+  const phaseName = proj.phase ? (proj.phase.name || proj.phase) : null;
+  const updated = goal?.setAt || (events.length ? events[events.length - 1].ts : null);
+  // A decision is "pending" when the goal is complete (close/release) or the
+  // curated handoff explicitly flags one.
+  const handoffFlagsDecision = !!(handoff?.body && /decision pending|operator decision|RESUME HERE|pending:/i.test(handoff.body));
+  const decisionPending = allMet || handoffFlagsDecision;
 
   if (flags.json) {
     process.stdout.write(JSON.stringify({
-      goal: goal ? { objective: goal.objective, constraints: goal.constraints, phase: proj.phase || null } : null,
+      project, branch, phase: phaseName, updated,
+      goal: goal ? { objective: goal.objective, constraints: goal.constraints || [] } : null,
       success: evaluated, metCount, verifiable, allMet,
+      counters, timeline,
+      handoff: handoff ? { body: handoff.body, setAt: handoff.setAt } : null,
       recentSliceStops: trail, openApprovals: approvals.length, activeClaims: claims.length,
-      curatedHandoff,
+      decisionPending,
     }, null, 2) + '\n');
     return;
   }
 
-  const line = `${C.rule}${'─'.repeat(54)}${C.reset}`;
   console.log(`${C.bold}═══ MÁDDU ORIENT ═══${C.reset}  ${C.dim}session-start briefing${C.reset}`);
+  console.log(`${C.dim}Project: ${project}${branch ? '   Branch: ' + branch : ''}${phaseName ? '   Phase: ' + phaseName : ''}${updated ? '   Updated: ' + updated : ''}${C.reset}`);
+
   if (!goal) {
     console.log(`\n  ${C.unver}⚠ NO GOAL DEFINED${C.reset} — set one: maddu goal set "<objective>" --success "<cmd>::<text>"`);
   } else {
-    console.log(`\n${line}\n${C.bold}GOAL${C.reset}   ${proj.phase ? C.dim + 'phase ' + (proj.phase.name || proj.phase) + C.reset : ''}\n${line}`);
+    console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}GOAL${C.reset}\n${C.dim}${RULE}${C.reset}`);
     console.log(`  ${goal.objective || C.unver + '⚠ not defined' + C.reset}`);
     console.log(`\n  ${C.bold}Success conditions${C.reset} (${metCount}/${success.length} met${runVerify ? '' : ', verify skipped'}):`);
     if (!success.length) console.log(`    ${C.dim}(none — add with: maddu goal set … --success "<cmd>::<text>")${C.reset}`);
-    for (const c of evaluated) console.log(`    ${MARK[c.state] || c.state}  ${c.text}${c.exitCode ? C.dim + ' (exit ' + c.exitCode + ')' + C.reset : ''}`);
+    for (const c of evaluated) console.log(`    ${MARK[c.state] || c.state}  ${c.text}${c.verify ? C.dim + '  — ' + c.verify + C.reset : ''}`);
     if (goal.constraints?.length) {
       console.log(`\n  ${C.bold}Constraints${C.reset} (${goal.constraints.length}):`);
       for (const k of goal.constraints) console.log(`    • ${k}`);
     }
   }
 
-  console.log(`\n${line}\n${C.bold}HANDOFF${C.reset}\n${line}`);
-  if (curatedHandoff) console.log(curatedHandoff);
+  console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}COUNTERS${C.reset}\n${C.dim}${RULE}${C.reset}`);
+  console.log(`  Sessions: ${counters.sessions}   Slices: ${counters.slices}   Pipelines: ${counters.pipelines}`);
+  console.log(`  Workers: ${counters.workers}   Reviews: ${counters.reviews}   Checkpoints: ${counters.checkpoints}`);
+
+  if (timeline.length) {
+    console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}RECENT TIMELINE${C.reset} (last ${timeline.length})\n${C.dim}${RULE}${C.reset}`);
+    for (const t of timeline) console.log(`  ${C.dim}[${t.type.toLowerCase().replace(/_/g, '-')}]${C.reset} ${t.label}`);
+  }
+
+  console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}HANDOFF — RESUME HERE${C.reset}\n${C.dim}${RULE}${C.reset}`);
+  if (handoff?.body) console.log(handoff.body);
   else console.log(`  ${C.dim}(no curated handoff — set one with: maddu handoff set "<RESUME HERE …>")${C.reset}`);
   if (trail.length) {
-    console.log(`\n  ${C.bold}Recent slice-stops${C.reset} (last ${trail.length}):`);
+    console.log(`\n  ${C.bold}Recent slice-stops${C.reset}:`);
     for (const s of trail) {
-      console.log(`    · ${s.summary || '—'}`);
-      if (Array.isArray(s.next) && s.next.length) console.log(`      ${C.dim}next: ${s.next.join('; ')}${C.reset}`);
+      console.log(`    · ${s.summary}`);
+      if (s.next.length) console.log(`      ${C.dim}next: ${s.next.join('; ')}${C.reset}`);
     }
   }
 
-  console.log(`\n  ${C.dim}open approvals: ${approvals.length}  ·  active lane claims: ${claims.length}  ·  slice-stops: ${stops.length}${C.reset}`);
-
+  console.log(`\n  ${C.dim}open approvals: ${approvals.length}  ·  active lane claims: ${claims.length}${C.reset}`);
   if (allMet) {
     console.log(`\n  ${C.met}✓ all ${verifiable} verifiable success condition(s) met.${C.reset} Consider: review the work, then close the goal / cut a release.`);
   } else if (success.length) {
