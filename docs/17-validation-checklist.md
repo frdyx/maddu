@@ -52,6 +52,11 @@ Where the cockpit is referenced, assume `http://127.0.0.1:4177/`.
 
 If you don't intend to use Telegram, skip this section.
 
+Telegram / Discord / Email ship in the **`comms` plugin**, off by default (v1.4.0).
+Enable it before the panel and endpoints exist:
+
+- [ ] `maddu plugin enable comms`, then restart the bridge (`maddu stop && maddu start`).
+- [ ] `maddu plugin list` shows `comms` as `enabled`; the Settings route now shows the Telegram/Discord/Email panels.
 - [ ] Create a bot with `@BotFather`. Save the token (`<digits>:<35+ chars>`).
 - [ ] Message `@userinfobot` from your own account to get your numeric `chat_id`.
 - [ ] In the cockpit, `Ctrl+K` → `tele` → land on the Telegram panel.

@@ -54,9 +54,12 @@ Files NOT prefixed `maddu-` are operator-owned and never touched.
 | `/maddu-cost [axis]` | Token / call rollup per session, day, runtime, model. | `cost` |
 | `/maddu-cancel [reason]` | Stop the current slice cleanly — heartbeat-close + slice-stop. | `session close`, `slice-stop` |
 | `/maddu-note <text>` | Append a one-liner to the operator inbox. | `mailbox send` |
+| `/maddu-audit [scope]` | Framework-coherence self-audit: events, commands, cockpit, slash, docs, charter. | `audit` |
+| `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined (load-bearing / dormant / dead). | `insights` |
+| `/maddu-plugin <verb>` | List / inspect / enable / disable capabilities that live outside the core (e.g. comms). | `plugin` |
 
-13 files, each ≤ 2 KB, all installed raw (no marker wrap — see above)
-under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.
+One file per command, each ≤ 2 KB, all installed raw (no marker wrap — see
+above) under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.
 
 ## Display discipline (re-print pattern)
 

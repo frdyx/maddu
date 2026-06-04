@@ -138,7 +138,7 @@ That's the loop.
 Open the command palette with `Ctrl+K` (or `⌘K` on macOS). Three kinds of result appear:
 
 - **Routes** (◇ outlined, ◆ filled for anchor routes) — every page in the cockpit.
-- **Sub-targets** (▸ lime) — specific panels inside a route. Typing `tele` lands you on Settings → Telegram.
+- **Sub-targets** (▸ lime) — specific panels inside a route. Typing `mcp` lands you on Settings → MCP registry. (The Telegram/Discord/Email panels appear here only when the `comms` plugin is enabled.)
 - **Actions** (▷ electric blue) — verbs the cockpit can run. Typing `wiki` surfaces "Rebuild wiki from spine" as an action; Enter runs it directly.
 
 Try `Ctrl+K` → `memory` → arrow-down to **Re-extract hindsight memory** → Enter. The toast confirms the run.
