@@ -2,13 +2,16 @@
 //
 // Subcommands:
 //   maddu team open --members <N> --lanes <a,b,c> [--label "..."]
-//     Opens a team and pre-declares disjoint lanes. Emits TEAM_OPENED +
-//     TEAM_LANE_ALLOCATED for each lane. Returns the teamId. Child
-//     sessions are NOT spawned by this command — that's the slash
-//     command's job (Phase 5 /maddu-team). This command is the spine
-//     bookkeeping primitive: pre-allocate the lanes so the
-//     rule-8-team-lane-disjoint gate can refuse overlaps before any
-//     work starts.
+//     Bookkeeping primitive: opens a team and pre-declares disjoint lanes
+//     (TEAM_OPENED + TEAM_LANE_ALLOCATED). Does NOT spawn workers — pairs
+//     with manual fan-out or the /maddu-team slash.
+//
+//   maddu team spawn --runtime <name> --task "<goal>" --lanes <a,b,c> [--label]
+//     (v1.5.0) Opens a team AND spawns a tracked Máddu worker per lane
+//     CONCURRENTLY (true parallel fan-out vs the coordinator's sequential
+//     phases). Full lifecycle: TEAM_OPENED → TEAM_MEMBER_JOINED ×N → each
+//     worker runs the task (WORKER_SPAWNED/EXITED) → TEAM_MEMBER_LEFT ×N →
+//     TEAM_CLOSED. Requires a runtime descriptor (`maddu runtime list`).
 //
 //   maddu team status [--team-id <id>]
 //     Print all open teams (or one specific team's detail).
@@ -86,6 +89,81 @@ async function openTeam(flags) {
   }
 }
 
+// v1.5.0 — `maddu team spawn`: open a team across disjoint lanes AND spawn a
+// tracked Máddu worker per lane CONCURRENTLY (Promise.all), each running the
+// shared task. Unlike `coordinator` (sequential phases), this is true parallel
+// fan-out. Emits the full team lifecycle (TEAM_OPENED → MEMBER_JOINED ×N →
+// worker runs → MEMBER_LEFT ×N → TEAM_CLOSED) plus WORKER_SPAWNED/EXITED per
+// worker, so the cockpit shows a live, tracked team.
+async function spawnTeam(flags) {
+  const lanes = String(flags.lanes || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const runtime = typeof flags.runtime === 'string' ? flags.runtime : null;
+  const task = (typeof flags.task === 'string' && flags.task) || (typeof flags.t === 'string' && flags.t) || null;
+  if (!runtime) { console.error('maddu team spawn: --runtime <name> required'); process.exit(2); }
+  if (!task) { console.error('maddu team spawn: --task "<goal>" required'); process.exit(2); }
+  if (!lanes.length) { console.error('maddu team spawn: --lanes "a,b,c" required'); process.exit(2); }
+  const dup = lanes.find((l, i) => lanes.indexOf(l) !== i);
+  if (dup) { console.error(`maddu team spawn: lanes must be disjoint; "${dup}" appears twice`); process.exit(2); }
+
+  const { paths, spine, projections, runtimes } = await loadSpineLib();
+  const repoRoot = await resolveRepoRoot(paths);
+
+  // Runtime must exist — fail fast with an actionable error.
+  const desc = await runtimes.readRuntime(repoRoot, runtime);
+  if (!desc) {
+    console.error(`maddu team spawn: runtime "${runtime}" not found. Register one first, e.g.\n  maddu runtime register --name ${runtime} --binary <bin> --args "-p"`);
+    process.exit(1);
+  }
+  // Courtesy pre-check: refuse lanes already held (rule #8 boundary is the gate).
+  const proj = await projections.project(repoRoot);
+  const held = (proj.claims || []).filter((c) => lanes.includes(c.lane)).map((c) => c.lane);
+  if (held.length) { console.error(`maddu team spawn: lane(s) already claimed — ${held.join(', ')}`); process.exit(1); }
+
+  const parent = process.env.MADDU_SESSION_ID || null;
+  const teamId = spine.makeId('team');
+  const label = flags.label || `team-spawn-${lanes.length}`;
+  await spine.append(repoRoot, {
+    type: spine.EVENT_TYPES.TEAM_OPENED, actor: parent,
+    data: { teamId, label, members: lanes.length, lanes: lanes.slice(), parentSessionId: parent },
+  });
+  for (const lane of lanes) {
+    await spine.append(repoRoot, { type: spine.EVENT_TYPES.TEAM_LANE_ALLOCATED, actor: parent, data: { teamId, lane } });
+  }
+
+  console.log(`team ${teamId}: spawning ${lanes.length} worker(s) concurrently [runtime=${runtime}] …`);
+
+  const results = await Promise.all(lanes.map(async (lane) => {
+    const memberId = spine.makeId('mbr');
+    await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.TEAM_MEMBER_JOINED, actor: memberId,
+      data: { teamId, lane, sessionId: memberId },
+    });
+    let w = null, exitCode = -1, error = null;
+    try {
+      w = await runtimes.spawnWorker(repoRoot, runtime, {
+        wait: true, lane, session: parent, stage: 'team',
+        label: `${label} · ${lane}`, task,
+      });
+      exitCode = w.error ? -1 : (w.exitCode == null ? 0 : w.exitCode);
+      error = w.error || null;
+    } catch (err) { error = err.message; }
+    await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.TEAM_MEMBER_LEFT, actor: memberId,
+      data: { teamId, lane, sessionId: memberId, workerId: w ? w.workerId : null, exitCode, error },
+    });
+    return { lane, workerId: w ? w.workerId : null, exitCode, error };
+  }));
+
+  await spine.append(repoRoot, { type: spine.EVENT_TYPES.TEAM_CLOSED, actor: parent, data: { teamId, openMembers: [] } });
+
+  const failed = results.filter((r) => r.error || r.exitCode !== 0);
+  for (const r of results) {
+    console.log(`  ${r.lane.padEnd(16)} ${r.error ? 'ERROR ' + r.error : 'exit ' + r.exitCode}  ${r.workerId || ''}`);
+  }
+  console.log(`team ${teamId} ${failed.length ? `completed with ${failed.length} failure(s)` : 'completed cleanly'}`);
+  if (failed.length) process.exit(1);
+}
+
 async function teamStatus(flags) {
   const { paths, projections } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
@@ -145,11 +223,12 @@ export default async function team(argv) {
   const [sub, ...rest] = argv;
   const { flags } = parseFlags(rest);
   if (!sub) {
-    console.error('maddu team: subcommand required (open | status | close)');
+    console.error('maddu team: subcommand required (open | spawn | status | close)');
     process.exit(2);
   }
   switch (sub) {
     case 'open':   return openTeam(flags);
+    case 'spawn':  return spawnTeam(flags);
     case 'status': return teamStatus(flags);
     case 'close':  return closeTeam(flags);
     default:

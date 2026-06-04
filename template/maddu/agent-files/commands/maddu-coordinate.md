@@ -15,9 +15,21 @@ The operator wants the coordinator to walk a plan through to completion.
 Mechanics (coordinator.mjs):
 
 - Reads `.maddu/plans/<plan-id>/state.json` (Phase 5 projection).
-- For each open phase, spawns a subprocess (synthetic shell, dry-run, or operator's runtime) with `MADDU_COORDINATOR_PLAN_ID`, `MADDU_COORDINATOR_PHASE`, `MADDU_COORDINATOR_ID`, `MADDU_COORDINATOR_ITER` env vars.
+- For each open phase, with `--runtime <name>` it **spawns that runtime as a
+  tracked Máddu worker** (v1.5.0): `spawnWorker` launches the runtime subprocess,
+  passes the phase intent (env `MADDU_COORDINATOR_PHASE` + as an arg), awaits its
+  exit, and the exit code drives the phase. Each spawn emits `WORKER_SPAWNED` +
+  `WORKER_EXITED` and auto-registers a child session — the cockpit shows the
+  fan-out as a worker tree. Without `--runtime`, pass `--dry-run` (each phase
+  succeeds immediately) or `--synthetic-cmd "<bash>"`.
 - 5-iter cap per phase + stuck-detection (2x identical fail signature → halt).
-- Phase complete → emits `PLAN_PHASE_COMPLETED` (Phase 5 auto-revises state.json).
-- Events: `COORDINATOR_STARTED`, `COORDINATOR_PHASE_STARTED`, `COORDINATOR_PHASE_COMPLETED`, `COORDINATOR_HALTED`, `COORDINATOR_COMPLETED`.
+- Phase complete → emits `PLAN_PHASE_COMPLETED`; the coordinator then reviews the
+  newest slice from that phase if a reviewer is configured (`SLICE_REVIEWED`).
+- Events: `COORDINATOR_STARTED`, `COORDINATOR_PHASE_STARTED`, `COORDINATOR_PHASE_COMPLETED`, `COORDINATOR_HALTED`, `COORDINATOR_COMPLETED`, plus `WORKER_*` per spawn.
 
-**Important:** the coordinator does NOT use Claude Code's Agent tool. It's a Máddu-native primitive that works with any runtime. To exercise it end-to-end without a worker spawn, pass `--dry-run` (each phase succeeds immediately) or `--synthetic-cmd "<bash>"` (the command runs per phase with the coordinator env vars).
+**Prerequisite for tracked workers:** a runtime descriptor must exist. If
+`./maddu/run runtime list` is empty, register one first — e.g. for Claude Code:
+`./maddu/run runtime register --name claude-code --binary claude --args "-p" --detect "claude --version"` (the phase intent is appended as the prompt; adjust
+binary/args to your CLI's headless form). The coordinator does NOT use Claude
+Code's in-process Agent tool — it spawns a real subprocess via the descriptor, so
+the worker is visible to Máddu.
