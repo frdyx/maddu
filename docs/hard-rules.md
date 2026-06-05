@@ -1,8 +1,36 @@
 # Hard rules
 
-Máddu enforces eight invariants. `maddu doctor` verifies them on every install and every upgrade. A repo that violates any of them is not a Máddu repo.
+Máddu enforces eight invariants. `maddu doctor` verifies them on every install and every upgrade.
 
-These rules are non-negotiable because each one prevents a specific failure mode observed in prior agent-orchestration systems we studied (AionUi, Hermes, and others — see [`research/`](research/)).
+## Scope: these rules govern Máddu, not your product
+
+**Read this before reading the rules.** Every invariant below is about **how
+Máddu itself is built** — Máddu's own orchestration code that lives under
+`.maddu/` and `maddu/` (the CLI, the bridge server `maddu/runtime/server.js`,
+the cockpit SPA, the harness scripts). They describe the framework's
+construction, and `maddu doctor` only ever scans those framework files.
+
+**They do NOT constrain the product / host project you are building *with*
+Máddu.** The application in the rest of the repo is yours: it may use any
+provider SDK (`openai`, `@anthropic-ai/sdk`, …), any hosted backend, any
+database (SQLite, Postgres, a hosted DB), OAuth flows and encrypted token
+tables, cron jobs, and real publishing/posting engines — whatever the product
+requires. That is governed by the **project's own** `CLAUDE.md` at the repo
+root, not by Máddu. Máddu *orchestrates* the work (sessions, lanes, the spine,
+review gates); it never dictates the product's architecture.
+
+So "Máddu's rules forbid token storage / provider SDKs / hosted backends" is
+**only** a statement about Máddu's framework layer. It is never a reason for an
+agent to stub, mock, or cripple the thing it is shipping. When a product
+feature needs a real integration, build the real integration — and if you want
+Máddu to help reach an external capability, that's what `maddu mcp` is for.
+
+When phrasing below says "app code", it means **Máddu's** app (the bridge and
+cockpit), not your application.
+
+---
+
+These rules are non-negotiable *for the framework* because each one prevents a specific failure mode observed in prior agent-orchestration systems we studied (AionUi, Hermes, and others — see [`research/`](research/)). A repo whose **Máddu layer** violates any of them is not a sound Máddu install.
 
 ## 1. Files-only state
 

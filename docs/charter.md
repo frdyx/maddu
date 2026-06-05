@@ -24,8 +24,15 @@ feature count. Every feature must earn its place against that posture.
 ## The invariants (the stable charter — do not drift)
 
 The **8+1 hard rules** ([`hard-rules.md`](hard-rules.md)), enforced by
-`maddu doctor` on every install and upgrade. *A repo that violates any of them is
-not a Máddu repo.*
+`maddu doctor` on every install and upgrade.
+
+> **Scope:** these invariants govern **how Máddu itself is built** — Máddu's
+> own code under `.maddu/` and `maddu/` (CLI, bridge, cockpit). They do **not**
+> constrain the product / host project built *with* Máddu, which may use any
+> SDK, hosted backend, database, or token storage it needs (the project's own
+> repo-root `CLAUDE.md` governs that). `maddu doctor` only scans the framework
+> layer. "app code" below means **Máddu's** app (bridge/cockpit), not yours.
+> *A Máddu **layer** that violates any of these is not a sound install.*
 
 1. **Files-only state** — every state write is append-only NDJSON, a rebuildable
    JSON projection, or a typed Markdown/JSON definition. No SQLite, no embedded
