@@ -47,15 +47,25 @@ operator explicitly tells you to.
 
 ## The 8+1 hard rules
 
-`maddu doctor` verifies all of these on every run. Full rationale in
-`maddu/docs/hard-rules.md`; the stable charter is `maddu/docs/charter.md`.
+> **⚠️ SCOPE.** These rules govern **how Máddu itself is built** (Máddu's own
+> code under `.maddu/` and `maddu/` — the CLI, bridge, cockpit). They are
+> **NOT** constraints on the product / host project you are building *with*
+> Máddu. Your application may use any SDK, hosted backend, database,
+> OAuth/token storage, cron, or real publishing engine it needs — that's the
+> project's call, governed by the repo-root `CLAUDE.md`, not by Máddu. Never
+> stub, mock, or cripple a product feature because of a Máddu rule; build the
+> real thing. `maddu doctor` only ever checks Máddu's own framework files.
 
-1. **Files-only state.** No SQLite, no embedded DB, no hosted DB for feature state.
+`maddu doctor` verifies all of these (against the **framework layer only**) on
+every run. Full rationale in `maddu/docs/hard-rules.md`; the stable charter is
+`maddu/docs/charter.md`.
+
+1. **Files-only state** *(Máddu's)*. No SQLite/embedded/hosted DB for *Máddu's* feature state.
 2. **Append-only event spine.** The spine wins over any projection.
-3. **No hosted backends.** Provider APIs are called from local subprocess workers.
-4. **No broad new dependencies.** Node stdlib where possible.
-5. **No provider SDKs in app code.** Only worker subprocesses own the API call.
-6. **No token export.** OAuth tokens are device-bound. `maddu export` scrubs them.
+3. **No hosted backends** *(Máddu has none)*. Máddu calls provider APIs from local subprocess workers.
+4. **No broad new dependencies** *(in Máddu)*. Máddu's own code is Node stdlib where possible.
+5. **No provider SDKs in *Máddu's* app code.** Only worker subprocesses own the API call. (Your product may import any SDK.)
+6. **No token export** *(of Máddu's tokens)*. Máddu's OAuth tokens are device-bound. `maddu export` scrubs them.
 7. **Three-layer brand boundary.** Framework shell brand / app brand / content brand never mix.
 8. **Lane ownership.** No two agents may hold the same lane concurrently.
 9. **Every auto-trigger crosses the gauntlet** (permanent since v0.19.0) — scope-lock, gates, allowlist, cooldown.

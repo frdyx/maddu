@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.8.0] · 2026-06-05 · Rule scope boundary — Máddu's rules govern Máddu, not your product
+
+Fixes a framing bug that was crippling end products. The 8+1 hard rules describe **how Máddu itself is built** (the framework's own code under `.maddu/` + `maddu/` — CLI, bridge, cockpit), but the agent-facing wording stated them without scope, so agents building a product *with* Máddu applied "no provider SDKs / no hosted backends / no token storage" to **the product** — stubbing real features (e.g. a social planner that modeled "connected" channels but refused to actually publish). The rules were never meant to constrain the host project.
+
+- **Scope banner on every agent-facing surface** — the worker brief (`template/maddu/CLAUDE.md`), `MADDU.md`, `CLAUDE`/`AGENTS` sections, `hard-rules.md`, `charter.md`, and the governance slash now state up front: these invariants govern the **Máddu framework layer only**; the product may use any SDK, hosted backend, database, OAuth/token storage, cron, or real publishing engine it needs — that's the project's own repo-root `CLAUDE.md`'s call. Never stub a product feature because of a Máddu rule; build the real thing (and reach for `maddu mcp` when a task needs an external capability).
+- **`rule-2-no-sqlite` gate scoped to the framework** — it previously scanned the repo-root `package.json`, which in a host repo is the *product's* manifest, so a product depending on `better-sqlite3` was wrongly flagged. It now only evaluates Máddu's own manifest (`name === "maddu"`); a consumer install never ships a Máddu-owned `package.json`, so the product's deps are out of scope. (rule-1/5/6 were already correctly scoped to `.maddu/`/`maddu/`.)
+
+Verified: a temp consumer install whose product uses `better-sqlite3` + `openai` + `@anthropic-ai/sdk` + token storage now passes `doctor` clean on rules #1/#2/#5; upgrade-matrix 19 (58 doctor passes), stress 12/12; audit 6/6. No new commands; the framework's own invariants are unchanged.
+
+---
+
 ## [v1.7.0] · 2026-06-04 · Invocation logic — wire WHEN the still-dead domains fire
 
 The 2026-06-03 usage audit found whole domains dead not because they were broken but because *nothing in the flow invoked them*. v1.7.0 gives each still-dead domain a **defined, safe trigger condition** wired into the flow — or honestly marks it operator-on-demand. The principle: don't force; give a clear WHEN. Every auto-trigger crosses the rule-#9 gauntlet (allowlist entry + `triggered_by` provenance + `TRIGGER_FIRED` + cooldown).

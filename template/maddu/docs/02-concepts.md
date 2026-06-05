@@ -6,7 +6,9 @@ The mental model for working with Máddu. Read this once and the rest of the doc
 
 ## Files-only state
 
-Every piece of state Máddu writes is a plain file under `.maddu/`. No SQLite. No embedded DB. No hosted service. If you can `cat` it, Máddu wrote it; if you cannot, Máddu did not.
+Every piece of state **Máddu** writes is a plain file under `.maddu/`. No SQLite. No embedded DB. No hosted service. If you can `cat` it, Máddu wrote it; if you cannot, Máddu did not.
+
+> **Scope:** this is about *Máddu's own* orchestration state, not the product you're building with Máddu. Your application may use SQLite, Postgres, a hosted DB, object storage — whatever it needs. The files-only rule constrains the framework layer (`.maddu/` + `maddu/`), never your app. See the scope note in [hard-rules.md](hard-rules.md).
 
 ```
 .maddu/events/000000000001.ndjson   # the spine — one event per line

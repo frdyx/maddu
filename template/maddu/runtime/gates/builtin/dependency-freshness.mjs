@@ -1,5 +1,13 @@
 // v1.2.0 Phase 1 — `dependency-freshness` gate.
 //
+// SCOPE (v1.8.0 clarification): this is a supply-chain SAFETY check on the
+// *project's* direct dependencies — a service Máddu offers the product, not a
+// Máddu construction rule and not a ban on any dependency. It flags deps
+// published inside the attack window (a freshly-published version can be a
+// supply-chain compromise). It is advisory (WARN) except in `strict`
+// governance, which the operator opts into. It never says "don't use X" — only
+// "this version is very new; audit before trusting it."
+//
 // Inspects the last TRUST_AUDIT_RAN event (if any) plus a re-read of
 // `.maddu/config/trust.json` thresholds. Surfaces:
 //   - PASS  no fresh-install warnings (or no audit yet)

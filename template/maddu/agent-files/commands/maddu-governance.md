@@ -23,4 +23,4 @@ Refusal handling:
 - Switching to `relaxed` requires `--reason "<why>"`. Pass the operator's stated reason verbatim.
 - Setting an override key not in the valid set is refused; surface the valid keys list from the error output and ask the operator which they meant.
 
-Reminder: the 8+1 hard rules (files-only state, append-only spine, no hosted backend, no broad deps, no provider SDKs, device-bound tokens, three-layer brand boundary, lane ownership, auto-trigger gauntlet) are NEVER affected by mode. Only operational gates tune.
+Reminder: the 8+1 hard rules (files-only state, append-only spine, no hosted backend, no broad deps, no provider SDKs, device-bound tokens, three-layer brand boundary, lane ownership, auto-trigger gauntlet) are NEVER affected by mode. Only operational gates tune. (They also only govern the **Máddu framework layer** — `.maddu/` + `maddu/` — never the product you're building; your app may use any SDK / backend / DB / token storage it needs.)

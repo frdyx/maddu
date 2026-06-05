@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.7.0](https://img.shields.io/badge/version-1.7.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.8.0](https://img.shields.io/badge/version-1.8.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,16 +24,14 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.7.0
+## What's new in v1.8.0
 
-**Invocation logic — wire WHEN the still-dead domains fire.** A usage audit found whole domains dead not because they were broken but because *nothing in the flow invoked them*. v1.7.0 gives each a **defined, safe trigger condition** — or honestly marks it operator-on-demand. The principle: don't force; give a clear WHEN. Every auto-trigger crosses the rule-#9 gauntlet.
+**Rule scope boundary — Máddu's rules govern Máddu, not your product.** The 8+1 hard rules describe how *Máddu itself* is built (files-only state, no provider SDKs in the bridge/cockpit, device-bound tokens). They were never meant to constrain the product you build *with* Máddu — but the agent-facing wording didn't say so, and agents were applying "no SDKs / no hosted backends / no token storage" to their own product, stubbing real features.
 
-- **Trust audit on deps-change** — at slice-stop, if your dependency surface changed since the last audit, Máddu re-runs the supply-chain trust audit, so freshness/pin drift on newly-added deps is caught in-flow instead of only on a manual run.
-- **Checkpoint before a coordinator run** — a real multi-phase coordinator run snapshots HEAD (a `maddu/checkpoint/*` git tag) first, giving you a clean rollback point before workers mutate the repo.
-- **MCP as a directive** — "a task needs an external tool" can't be detected safely, so it's an intent-routing cue in the agent briefs, not an auto-fire.
-- **Honest gap list** — `maddu insights dead` now separates genuine "nothing invokes it" gaps from capabilities that are dormant-by-design (API-key auth, opt-in schedules, manual pinning). Each opt-out is one line in `.maddu/config/triggers.json`.
+- **Every agent-facing surface now states the scope up front** — the rules govern the **framework layer** (`.maddu/` + `maddu/`); your application may use any SDK, hosted backend, database, OAuth/token storage, or real publishing engine it needs. That's your project's `CLAUDE.md`'s call, not Máddu's. Never stub a product feature because of a Máddu rule.
+- **`rule-2-no-sqlite` gate scoped to the framework** — it no longer flags a product that depends on `better-sqlite3` (it previously scanned the product's `package.json`). `doctor` only ever checks Máddu's own files.
 
-Just prior, **v1.6.0** brought the **orchestration handoff** (goal success-conditions + `maddu orient` + curated cross-session handoff), and **v1.5.0** made Máddu **spawn + track real sub-workers**. See [the changelog](CHANGELOG.md) for all three.
+Just prior, **v1.7.0** wired **invocation logic** (trust-audit-on-deps-change, checkpoint-before-coordinator, dormant-by-design gap list), **v1.6.0** the **orchestration handoff**, and **v1.5.0** real **sub-worker spawn + tracking**. See [the changelog](CHANGELOG.md).
 
 ## Zero learning curve (v0.18)
 
@@ -73,7 +71,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.7.0 installed.
+Máddu v1.8.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -98,7 +96,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.7.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.8.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

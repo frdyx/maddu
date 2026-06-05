@@ -113,15 +113,29 @@ Exceptions:
 
 ## The 8+1 hard rules (do not violate)
 
-See [`docs/hard-rules.md`](../docs/hard-rules.md) for full rationale and
-[`docs/charter.md`](../docs/charter.md) for the stable charter. Summary:
+> **⚠️ SCOPE — read this first.** These invariants govern **how Máddu itself
+> is built** — Máddu's own orchestration code under `.maddu/` and `maddu/`
+> (the CLI, the bridge server, the cockpit). **They do NOT constrain the
+> product / host project you are building with Máddu.** Your application may
+> use any provider SDK, hosted backend, database (SQLite, Postgres, hosted
+> DB), OAuth/token storage, cron, or real publishing engine it needs —
+> whatever the product requires is the product's call, governed by the
+> **project's own** `CLAUDE.md` (the repo-root one), not by Máddu. Máddu
+> orchestrates the work; it never dictates the product's architecture. So:
+> "Máddu forbids token storage / SDKs / hosted backends" is **only** true of
+> Máddu's framework layer — never a reason to cripple, mock, or stub the
+> thing you're shipping. When in doubt, build the real product feature.
 
-1. **Files-only state.** No SQLite, no embedded DB, no hosted DB for feature state.
+See [`docs/hard-rules.md`](../docs/hard-rules.md) for full rationale and
+[`docs/charter.md`](../docs/charter.md) for the stable charter. Summary (each
+rule is about the **Máddu framework layer**):
+
+1. **Files-only state.** No SQLite, no embedded DB, no hosted DB for *Máddu's* feature state.
 2. **Append-only event spine.** The spine wins over any projection.
-3. **No hosted backends.** Provider APIs are called from local subprocess workers.
-4. **No broad new dependencies.** Node stdlib where possible.
-5. **No provider SDKs in app code.** Only worker subprocesses own the API call.
-6. **No token export.** OAuth tokens are device-bound at
+3. **No hosted backends** *(for Máddu)*. Máddu calls provider APIs from local subprocess workers; it ships no SaaS. (Your product may have any backend it wants.)
+4. **No broad new dependencies** *(in Máddu)*. Máddu's own code is Node stdlib where possible. (Your product's `package.json` is yours.)
+5. **No provider SDKs in *Máddu's* app code** — the bridge / cockpit / harness never import an SDK; only worker subprocesses own the API call. (Your product may import any SDK.)
+6. **No token export** *(of Máddu's OAuth tokens)*. Máddu's tokens are device-bound at
    `~/.config/maddu/auth/` (Linux/macOS) or `%APPDATA%\maddu\auth\` (Windows).
    `maddu export` scrubs them; `maddu import` refuses to overwrite them.
 7. **Three-layer brand boundary.** Framework shell brand / app brand /

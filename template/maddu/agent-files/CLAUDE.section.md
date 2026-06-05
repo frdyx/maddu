@@ -17,14 +17,17 @@ unlike headless `team spawn`, which is for API-keyed runtimes.)
 
 Full agent brief: [`MADDU.md`](./MADDU.md). Operator docs: `./maddu/run --help` or open the cockpit (`./maddu/run start`).
 
-Hard rules (full text in `MADDU.md`):
+Hard rules (full text in `MADDU.md`) — **these govern the Máddu framework
+layer (`.maddu/` + `maddu/`), NOT the product you're building.** Your app may
+use any SDK / hosted backend / DB / token storage it needs (the repo-root
+`CLAUDE.md`'s call); never stub a product feature because of a Máddu rule:
 
 - Files-only state · Append-only spine · No hosted backends · No broad deps
-- No provider SDKs in app code · No token export
+- No provider SDKs in app code · No token export *(all "for Máddu's own code")*
 - Three-layer brand boundary · Lane ownership
 - #9: every auto-trigger crosses the gauntlet (permanent)
 
-`maddu doctor` verifies all of these.
+`maddu doctor` verifies all of these against Máddu's own files only.
 
 ### Intent routing (operator natural language → slash command)
 

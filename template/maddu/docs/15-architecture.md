@@ -92,7 +92,10 @@ The three layers never reference each other. `maddu doctor` checks the directori
 
 ## Why files-only
 
-Every operational property Máddu cares about reduces to a property of files on disk:
+This is about **Máddu's own state** (the framework layer) — not a constraint on
+the product you build with Máddu, which may use any datastore it needs. Every
+operational property Máddu cares about *for its own orchestration state*
+reduces to a property of files on disk:
 
 | Want | How files give it |
 |---|---|
