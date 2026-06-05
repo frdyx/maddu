@@ -52,7 +52,7 @@ Both modes work side-by-side. The rest of this guide uses `./maddu/run …` to m
 $ maddu doctor
 ```
 
-Doctor checks the 8 hard rules ([06-hard-rules.md](06-hard-rules.md)), the install manifest, port 4177 availability, and a few other invariants. Expect all PASS on a fresh install.
+Doctor checks the 8 hard rules ([06-hard-rules.md](06-hard-rules.md)), the install manifest, port 4177 availability, and a few other invariants — all scoped to **Máddu's own framework files**, never your product code. Expect all PASS on a fresh install.
 
 ## 3. Boot the bridge
 

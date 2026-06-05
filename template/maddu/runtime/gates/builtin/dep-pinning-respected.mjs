@@ -1,5 +1,13 @@
 // v1.2.0 Phase 1 — `dep-pinning-respected` gate.
 //
+// SCOPE (v1.8.0 clarification): this is an OPT-IN supply-chain service Máddu
+// offers for the *project's* dependencies — NOT one of Máddu's own
+// construction rules and NOT a constraint on what the product may depend on.
+// It does nothing unless the operator explicitly pins a package via
+// `maddu trust pin`. With no pins (the default), it skips. When the operator
+// HAS pinned packages, this confirms the project's package.json still matches
+// those operator-chosen pins. It never forbids adding or using a dependency.
+//
 // For every entry in `.maddu/config/trust.json` `pinnedPackages`:
 //   - If the package is absent from package.json → FAIL.
 //   - If declared spec doesn't exactly equal the pinned version → FAIL.
@@ -24,7 +32,7 @@ export default {
   id: 'dep-pinning-respected',
   label: 'dependency pinning respected',
   severity: 'critical',
-  description: 'Every entry in trust.json `pinnedPackages` matches the package.json declared version.',
+  description: "Opt-in supply-chain check: operator-declared pins in trust.json still match the project's package.json (no pins → skipped; never forbids a dependency).",
   run: async (ctx) => {
     const trust = await loadTrust();
     const cfg = await trust.readTrustConfig(ctx.repoRoot);
