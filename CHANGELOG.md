@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.9.1] · 2026-06-09 · `maddu learn` — Windows judgment-worker spawn fix
+
+Patch on v1.9.0. The judgment worker (`maddu learn run`) couldn't spawn the provider CLI on Windows: npm installs `claude`/`codex` as `.cmd` shims, and modern Node refuses to spawn those without a shell (`spawn claude ENOENT`). The fallback handled it gracefully (wrote a review digest), but the autonomous judge never ran.
+
+- **Prompt now goes to the worker on STDIN** for the built-in `claude`/`codex` runtimes (`learnArgs` drop the `${prompt}` arg). Safer than a KB-scale JSON prompt on argv, and it lets us use a shell only for the (data-free) command line.
+- **Shell only for a bare `.cmd` shim on Windows** — an absolute `.exe` path still spawns shell-free; nothing untrusted ever reaches the command line (no `DEP0190`). argv-mode runtimes (`gemini`, custom descriptors, tests) are unchanged; descriptors can opt in/out via a `stdin` field.
+
+Verified end-to-end on Windows against real sessions (the `claude` judge filtered 56 candidates → durable corrections written to the project brief + memory). New `learn-spawn` stdin scenario; full suite green.
+
 ## [v1.9.0] · 2026-06-09 · Failure learning — `maddu learn` (inspired by Headroom)
 
 Máddu now learns from its own past sessions. Inspired by the [Headroom](https://github.com/chopratejas/headroom) project's failure-learning + memory ideas (the compression engine was not a fit; the *learning loop* was), `maddu learn` mines Claude Code transcripts for tool calls that **failed and were later resolved**, and distils the real lessons into durable corrections — extending the existing hindsight/`insights` machinery rather than bolting on a new subsystem.

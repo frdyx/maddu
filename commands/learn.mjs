@@ -31,11 +31,17 @@ import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
+// `stdin: true` runtimes receive the (large, multi-line) judgment prompt on
+// STDIN instead of argv. This is both safer (no shell-quoting of a KB-scale JSON
+// prompt) and the only thing that works on Windows, where npm installs these
+// CLIs as `.cmd` shims that modern Node can only spawn via a shell — and a shell
+// can't carry the prompt as an argument without mangling it. claude/codex read
+// stdin in print/exec mode; gemini needs the prompt in argv.
 const BUILTIN_LEARN = {
-  claude:        { binary: 'claude', learnArgs: ['--print', '${prompt}'], authProvider: 'claude' },
-  'claude-code': { binary: 'claude', learnArgs: ['--print', '${prompt}'], authProvider: 'claude' },
-  codex:         { binary: 'codex',  learnArgs: ['exec', '${prompt}'],     authProvider: 'codex'  },
-  gemini:        { binary: 'gemini', learnArgs: ['-p', '${prompt}'],       authProvider: 'gemini' },
+  claude:        { binary: 'claude', learnArgs: ['--print'], authProvider: 'claude', stdin: true },
+  'claude-code': { binary: 'claude', learnArgs: ['--print'], authProvider: 'claude', stdin: true },
+  codex:         { binary: 'codex',  learnArgs: ['exec', '-'], authProvider: 'codex', stdin: true },
+  gemini:        { binary: 'gemini', learnArgs: ['-p', '${prompt}'], authProvider: 'gemini', stdin: false },
 };
 
 function resolveLearnConfig(descriptor, runtimeName) {
@@ -44,6 +50,8 @@ function resolveLearnConfig(descriptor, runtimeName) {
     binary: descriptor?.binary || builtin.binary || runtimeName,
     learnArgs: descriptor?.learnArgs || descriptor?.adviseArgs || builtin.learnArgs || ['${prompt}'],
     authProvider: descriptor?.authProvider || builtin.authProvider || runtimeName,
+    // Descriptors may opt in/out explicitly; otherwise inherit the builtin.
+    stdin: descriptor?.stdin != null ? !!descriptor.stdin : !!builtin.stdin,
   };
 }
 
@@ -55,14 +63,37 @@ async function isProviderSignedIn(authLib, providerName) {
   } catch { return false; }
 }
 
-function spawnJudge({ binary, args, timeoutMs, env }) {
+function spawnJudge({ binary, args, timeoutMs, env, stdinText = null }) {
   return new Promise((resolve) => {
     let stdout = '', stderr = '', timedOut = false, child;
+    // When the prompt goes on stdin, argv carries no untrusted data, so it's
+    // safe to use a shell on Windows to resolve a `.cmd`/`.ps1` npm shim. In
+    // argv mode (e.g. tests, gemini) we never use a shell — the prompt would be
+    // mangled — keeping that path byte-exact and injection-free.
+    // A shell is needed ONLY to resolve a bare npm `.cmd`/`.ps1` shim on Windows
+    // (e.g. `claude`) — modern Node can't spawn those directly. An absolute path
+    // to an .exe spawns fine without a shell, so we never shell those (and avoid
+    // quoting paths-with-spaces). Bare command + stdin prompt = nothing untrusted
+    // on the command line.
+    const isBareCommand = !/[\\/]/.test(binary);
+    const useShell = !!stdinText && process.platform === 'win32' && isBareCommand;
+    // With shell:true, pass ONE static string (args are trusted; the prompt is
+    // on stdin) so Node doesn't warn about un-escaped args (DEP0190).
+    const cmd = useShell ? [binary, ...args].join(' ') : binary;
+    const spawnArgs = useShell ? [] : args;
     try {
-      child = spawn(binary, args, { env, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+      child = spawn(cmd, spawnArgs, {
+        env,
+        stdio: [stdinText != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+        shell: useShell,
+      });
     } catch (err) {
       resolve({ status: 'spawn-error', stdout: '', stderr: err.message, exitCode: -1 });
       return;
+    }
+    if (stdinText != null && child.stdin) {
+      child.stdin.on('error', () => {});
+      try { child.stdin.write(stdinText); child.stdin.end(); } catch {}
     }
     const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch {} }, timeoutMs);
     child.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
@@ -219,8 +250,13 @@ export default async function learnCmd(argv) {
 
   const workerId = spine.makeId('wrk');
   const prompt = learn.buildJudgePrompt(digest);
-  const finalArgs = cfg.learnArgs.map((a) => (a === '${prompt}' ? prompt : a));
-  const result = await spawnJudge({ binary: cfg.binary, args: finalArgs, timeoutMs: timeoutSec * 1000, env: process.env });
+  // stdin runtimes get the prompt piped (safe + Windows-.cmd compatible); argv
+  // runtimes get the literal ${prompt} token substituted.
+  const finalArgs = cfg.stdin ? cfg.learnArgs : cfg.learnArgs.map((a) => (a === '${prompt}' ? prompt : a));
+  const result = await spawnJudge({
+    binary: cfg.binary, args: finalArgs, timeoutMs: timeoutSec * 1000,
+    env: process.env, stdinText: cfg.stdin ? prompt : null,
+  });
 
   if (result.status !== 'ok') {
     const { mdPath } = await writeDigest(repoRoot, paths, learn, digest, spine, actor);
