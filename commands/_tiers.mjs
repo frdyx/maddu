@@ -107,4 +107,8 @@ export default {
   // are read-only-shaped but the verb dispatches into enable/disable writes, so
   // the verb is mutating; auto-trigger forbidden (operator-explicit, like mcp).
   plugin:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  // v1.9.0 — failure-learning. `run` spawns a judgment worker + writes
+  // corrections (agent-file + memory); mutating and auto-trigger forbidden
+  // (operator/agent-explicit, like advise). `digest` is the read-only fallback.
+  learn:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
 };

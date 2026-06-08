@@ -11,6 +11,21 @@ narrative summary.
 
 ---
 
+## [v1.9.0] · 2026-06-09 · Failure learning — `maddu learn` (inspired by Headroom)
+
+Máddu now learns from its own past sessions. Inspired by the [Headroom](https://github.com/chopratejas/headroom) project's failure-learning + memory ideas (the compression engine was not a fit; the *learning loop* was), `maddu learn` mines Claude Code transcripts for tool calls that **failed and were later resolved**, and distils the real lessons into durable corrections — extending the existing hindsight/`insights` machinery rather than bolting on a new subsystem.
+
+- **Deterministic miner + failure→success pairer** (`runtime/lib/learn.mjs`) — reads the same `~/.claude/projects/<slug>/*.jsonl` transcripts the token ledger uses, pairs each failed tool call with the nearest later success of the same tool, and classifies it into five categories (`file-path`, `env-command`, `search-scope`, `large-file`, `command-pattern`). Pure core, no provider SDK; content-hashed candidate ids make re-mining idempotent.
+- **Spawned-worker judgment, parent-only spine writes** — `maddu learn run` spawns the configured runtime **CLI** as a subprocess (same hard-rule-#5 boundary as `maddu advise`) to judge which candidates are real and word them; the parent parses the worker's JSON and is the *only* process that writes the spine. No runtime signed in (or a worker failure) falls back to a reviewable digest (`maddu learn digest`) instead of crashing.
+- **Two destinations** (Headroom's split) — stable project facts → a marker-delimited block (`<!-- BEGIN MADDU LEARN v1 -->`) in the **project-root `CLAUDE.md`** (framework block never clobbered); volatile patterns → a `kind:'correction'` fact in `.maddu/memory.ndjson` (`maddu memory list --kind correction`). Corrections describe the **product**, never Máddu's rules — enforced by tests.
+- **Supersession chains** — facts carry `supersedes:<priorId>`; `maddu memory list` shows the current view (`--all` for history), `maddu memory supersede` / `maddu memory history` manage chains. Event-sourced (`MEMORY_FACT_SUPERSEDED` carries the full fact), so chains survive `maddu memory extract --rebuild`.
+- **Reversible briefings (retrieve-on-demand)** — `maddu orient --curate` persists the full briefing and shows a budget-bounded view + a `maddu learn retrieve <id>` pointer (`runtime/lib/briefings.mjs`); curation never silently drops detail. `BRIEFING_CURATED` records provenance.
+- **6 new event types**, all but the load-bearing `LEARN_MINED` registered **dormant-by-design** so `maddu insights dead` stays honest. New `/maddu-learn` slash + intent-routing rows; `docs/37-failure-learning.md`.
+
+Verified: 6 new fixture-based tests (`learn-events-registered`, `learn-miner`, `learn-fallback`, `learn-spawn`, `memory-supersession`, `reversible-briefings`, `learn-e2e`) + full prior suite — 15/15 green. `maddu audit` 6/6; no regressions to existing commands (default `orient` stays read-only). Planned + tracked inside Máddu itself via `maddu plan` (dogfood).
+
+---
+
 ## [v1.8.0] · 2026-06-05 · Rule scope boundary — Máddu's rules govern Máddu, not your product
 
 Fixes a framing bug that was crippling end products. The 8+1 hard rules describe **how Máddu itself is built** (the framework's own code under `.maddu/` + `maddu/` — CLI, bridge, cockpit), but the agent-facing wording stated them without scope, so agents building a product *with* Máddu applied "no provider SDKs / no hosted backends / no token storage" to **the product** — stubbing real features (e.g. a social planner that modeled "connected" channels but refused to actually publish). The rules were never meant to constrain the host project.

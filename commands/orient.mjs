@@ -10,13 +10,17 @@
 // `--json` emits the full structured briefing so the `/maddu-orient` slash can
 // render the designed view + an interactive decision menu when one is pending.
 //
-// Read-only: runs operator-declared verify commands (subprocesses) and reads the
-// spine; writes nothing. Flags: --json, --no-verify (skip running commands).
+// Read-only by default: runs operator-declared verify commands (subprocesses)
+// and reads the spine; writes nothing. Flags: --json, --no-verify (skip running
+// commands). The OPT-IN --curate flag (v1.9.0) makes the briefing reversible:
+// it persists the full handoff original and shows a truncated view + a
+// `maddu learn retrieve <id>` pointer (so curation never silently drops detail).
 
 import { spawnSync } from 'node:child_process';
 import { basename } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib } from './_libroot.mjs';
 
 const C = {
   bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
@@ -154,8 +158,25 @@ export default async function orient(argv) {
   }
 
   console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}HANDOFF — RESUME HERE${C.reset}\n${C.dim}${RULE}${C.reset}`);
-  if (handoff?.body) console.log(handoff.body);
-  else console.log(`  ${C.dim}(no curated handoff — set one with: maddu handoff set "<RESUME HERE …>")${C.reset}`);
+  if (handoff?.body) {
+    // --curate (opt-in): persist the full handoff and show a reversible,
+    // budget-bounded view with a retrieve pointer. Default stays read-only.
+    if (flags.curate) {
+      try {
+        const briefings = await loadLib('briefings.mjs');
+        const budget = Number(flags['curate-budget'] || 800);
+        const { curated, dropped, briefingId } = await briefings.curate(repoRoot, {
+          kind: 'orient', full: handoff.body, budget, by: process.env.MADDU_SESSION_ID || null,
+        });
+        console.log(curated);
+        if (dropped) console.log(`  ${C.dim}(reversible briefing ${briefingId} — full original retrievable)${C.reset}`);
+      } catch { console.log(handoff.body); }
+    } else {
+      console.log(handoff.body);
+    }
+  } else {
+    console.log(`  ${C.dim}(no curated handoff — set one with: maddu handoff set "<RESUME HERE …>")${C.reset}`);
+  }
   if (trail.length) {
     console.log(`\n  ${C.bold}Recent slice-stops${C.reset}:`);
     for (const s of trail) {

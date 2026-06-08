@@ -1,14 +1,17 @@
-// `maddu memory <subcommand>` — list / search / extract.
+// `maddu memory <subcommand>` — list / search / extract / supersede / history.
 //
 // Usage:
-//   maddu memory list   [--kind <rule|constraint|discovery|followup|touched|gate|summary>] [--limit N]
+//   maddu memory list   [--kind <rule|constraint|discovery|...|correction>] [--limit N] [--all]
 //   maddu memory search <query> [--kind ...] [--limit N]
 //   maddu memory extract [--rebuild]
+//   maddu memory supersede --prior <factId> --text "<new fact>" [--kind <k>] [--reason "<why>"]
+//   maddu memory history <factId>
 //
-// memory.ndjson is a derived projection of SLICE_STOP events. It lives at
-// .maddu/state/memory.ndjson and is appended after every `maddu slice-stop`.
-// Use --rebuild to truncate and re-derive from the entire spine.
+// memory.ndjson is a derived projection of SLICE_STOP events (+ v1.9.0 learn
+// corrections). It lives at .maddu/memory.ndjson. `list` shows the CURRENT view
+// (facts not retired by a later supersession); pass --all for the full history.
 
+import { createHash } from 'node:crypto';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 
@@ -25,7 +28,8 @@ function colorFor(kind) {
     followup: ANSI.warn,
     touched: ANSI.dim,
     gate: ANSI.pass,
-    summary: ANSI.bold
+    summary: ANSI.bold,
+    correction: ANSI.accent
   }[kind] || '';
 }
 
@@ -35,7 +39,8 @@ function printFact(f) {
   const c = colorFor(f.kind);
   const tags = f.tags.length ? `  ${ANSI.dim}${f.tags.join(' ')}${ANSI.reset}` : '';
   console.log(`${ANSI.dim}${fmtTime(f.ts)}${ANSI.reset}  ${c}${f.kind.padEnd(11)}${ANSI.reset}  ${f.text}${tags}`);
-  console.log(`              ${ANSI.dim}from ${f.source.event}${ANSI.reset}`);
+  const prov = f.source?.event || f.source?.candidate || (f.supersedes ? `supersedes ${f.supersedes}` : '—');
+  console.log(`              ${ANSI.dim}from ${prov}${ANSI.reset}`);
 }
 
 export default async function memory(argv) {
@@ -48,16 +53,46 @@ export default async function memory(argv) {
     const args = sub === 'list' ? rest : argv;
     const { flags } = parseFlags(args);
     const limit = parseInt(flags.limit, 10);
-    const facts = await hindsight.searchMemory(repoRoot, '', {
-      kind: flags.kind || null,
-      limit: Number.isFinite(limit) ? limit : 50
-    });
-    console.log(`${ANSI.bold}MEMORY  (${facts.length} fact${facts.length === 1 ? '' : 's'})${ANSI.reset}`);
+    const lim = Number.isFinite(limit) ? limit : 50;
+    // Default to the CURRENT view (hide superseded). --all shows full history.
+    const base = flags.all
+      ? await hindsight.readMemory(repoRoot)
+      : (hindsight.currentFacts ? await hindsight.currentFacts(repoRoot) : await hindsight.readMemory(repoRoot));
+    let facts = flags.kind ? base.filter((f) => f.kind === flags.kind) : base;
+    facts = facts.slice(-lim);
+    const scope = flags.all ? 'all' : 'current';
+    console.log(`${ANSI.bold}MEMORY  (${facts.length} ${scope} fact${facts.length === 1 ? '' : 's'})${ANSI.reset}`);
     if (facts.length === 0) {
-      console.log(`  (no facts yet — slice-stops auto-populate this)`);
+      console.log(`  (no facts yet — slice-stops + \`maddu learn\` populate this)`);
     } else {
       for (const f of facts) printFact(f);
     }
+    return;
+  }
+
+  if (sub === 'history') {
+    const id = rest[0];
+    if (!id) { console.error('Usage: maddu memory history <factId>'); process.exit(2); }
+    const chain = hindsight.historyOf ? await hindsight.historyOf(repoRoot, id) : [];
+    if (!chain.length) { console.error(`maddu memory history: no fact ${id}`); process.exit(1); }
+    console.log(`${ANSI.bold}HISTORY ${id}  (${chain.length} version${chain.length === 1 ? '' : 's'}, newest first)${ANSI.reset}`);
+    for (const f of chain) printFact(f);
+    return;
+  }
+
+  if (sub === 'supersede') {
+    const { flags } = parseFlags(rest);
+    const prior = flags.prior && flags.prior !== true ? String(flags.prior) : null;
+    const text = flags.text && flags.text !== true ? String(flags.text) : null;
+    if (!prior || !text) { console.error('Usage: maddu memory supersede --prior <factId> --text "<new fact>" [--kind <k>] [--reason "<why>"]'); process.exit(2); }
+    const existing = await hindsight.readMemory(repoRoot);
+    const priorFact = existing.find((f) => f.id === prior);
+    if (!priorFact) { console.error(`maddu memory supersede: no fact ${prior}`); process.exit(1); }
+    const kind = (flags.kind && flags.kind !== true) ? String(flags.kind) : priorFact.kind;
+    const newId = 'mem_sup_' + createHash('sha1').update(`${prior}|${text}`).digest('hex').slice(0, 10);
+    const fact = { v: 1, id: newId, ts: new Date().toISOString(), kind, text, tags: priorFact.tags || [], source: priorFact.source || {} };
+    const next = await hindsight.supersede(repoRoot, { priorId: prior, fact, reason: (flags.reason && flags.reason !== true) ? String(flags.reason) : null });
+    console.log(`superseded ${prior} → ${next.id}`);
     return;
   }
 
