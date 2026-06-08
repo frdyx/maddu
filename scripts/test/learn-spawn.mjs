@@ -147,7 +147,40 @@ async function scenarioAuthFallback() {
   await rm(tmp, { recursive: true, force: true });
 }
 
+// v1.9.1 — stdin judgment path (how the built-in claude/codex runtimes run,
+// and the only thing that works for npm `.cmd` shims on Windows). The fake
+// judge reads the prompt from STDIN instead of argv.
+const FAKE_JUDGE_STDIN = [
+  'let buf = "";',
+  'process.stdin.setEncoding("utf8");',
+  'process.stdin.on("data", (d) => { buf += d; });',
+  'process.stdin.on("end", () => {',
+  '  const m = buf.match(/<CANDIDATES>\\s*([\\s\\S]*?)\\s*<\\/CANDIDATES>/);',
+  '  let cands = []; try { cands = JSON.parse(m[1]); } catch {}',
+  '  const out = cands.map((c) => ({ id: c.id, verdict: "accept", destination: "memory",',
+  '    category: c.category, text: c.category + ": " + c.success }));',
+  '  process.stdout.write(JSON.stringify(out));',
+  '});',
+].join('\n');
+
+async function scenarioStdinSpawn() {
+  const tmp = await makeTmpInstall();
+  const fake = join(tmp, 'fake-judge-stdin.mjs');
+  await writeFile(fake, FAKE_JUDGE_STDIN);
+  // Descriptor opts into stdin: prompt is piped, argv carries no prompt token.
+  await writeFile(join(tmp, '.maddu', 'runtimes', 'fakestdin.json'), JSON.stringify({
+    name: 'fakestdin', binary: process.execPath, learnArgs: [fake], stdin: true, authProvider: 'fakestdin',
+  }, null, 2) + '\n');
+  const res = await runCli(['learn', 'run', '--runtime', 'fakestdin', '--no-auth-check', '--root', FIXTURE_ROOT], { cwd: tmp });
+  ok('stdin: exit 0', res.code === 0, `exit=${res.code} ${res.stderr.slice(0, 150)}`);
+  const events = await readSpine(tmp);
+  ok('stdin: 5 LEARN_JUDGED (prompt delivered via stdin)', events.filter((e) => e.type === 'LEARN_JUDGED').length === 5, `got=${events.filter((e) => e.type === 'LEARN_JUDGED').length}`);
+  ok('stdin: correction facts persisted', (await readMemory(tmp)).filter((f) => f.kind === 'correction').length === 5);
+  await rm(tmp, { recursive: true, force: true });
+}
+
 await scenarioRealSpawn();
+await scenarioStdinSpawn();
 await scenarioAuthFallback();
 
 console.log('');
