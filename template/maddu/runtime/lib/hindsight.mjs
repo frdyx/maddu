@@ -10,9 +10,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
-import { readAll } from './spine.mjs';
+import { readAll, append } from './spine.mjs';
 
-export const FACT_KINDS = ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary'];
+// v1.9.0 adds 'correction' — a durable lesson distilled by `maddu learn` from a
+// failed→succeeded tool-call pair (Headroom-style). Unlike the SLICE_STOP-derived
+// kinds, corrections originate from LEARN_CORRECTION_WRITTEN spine events and are
+// replayed on rebuild (see rebuildMemory) so they survive a memory rebuild.
+export const FACT_KINDS = ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary', 'correction'];
 
 function memoryPath(repoRoot) {
   return join(pathsFor(repoRoot).state, 'memory.ndjson');
@@ -147,17 +151,114 @@ export async function extractEvent(repoRoot, ev) {
   return fresh.length;
 }
 
+// ── v1.9.0 corrections (kind:'correction') ─────────────────────────────────
+// A correction is a durable lesson `maddu learn` distilled from a failed→
+// succeeded tool-call pair. Built here so both the live writer (commands/
+// learn.mjs) and the rebuild replay agree on the exact fact shape.
+//   correctionId: stable, content-derived id (so re-running learn is idempotent)
+//   supersedes:   optional prior fact id this correction replaces (chains)
+export function buildCorrectionFact({ correctionId, text, category, supersedes = null, ts = null, source = {} }) {
+  const exts = (text.match(/\.[a-z0-9]{2,5}\b/g) || []).map((e) => `ext:${e.slice(1)}`);
+  const tags = ['learn', `cat:${category}`, ...exts];
+  const fact = {
+    v: 1,
+    id: correctionId,
+    ts: ts || new Date().toISOString(),
+    kind: 'correction',
+    text,
+    tags,
+    source,
+  };
+  if (supersedes) fact.supersedes = supersedes;
+  return fact;
+}
+
+// Idempotent single-fact append — skips if the id is already present. Used for
+// corrections + supersession entries so re-runs never duplicate.
+export async function appendFactIfNew(repoRoot, fact) {
+  const existing = new Set((await readMemory(repoRoot)).map((f) => f.id));
+  if (existing.has(fact.id)) return 0;
+  return appendFacts(repoRoot, [fact]);
+}
+
+// ── v1.9.0 supersession chains ──────────────────────────────────────────────
+// A fact carrying `supersedes:<priorId>` retires the prior fact. The chain is
+// derivable purely from the facts (and therefore from the spine, since
+// corrections are replayed on rebuild), so it survives rebuildMemory.
+
+// Current view: facts not retired by any later fact's `supersedes` pointer.
+export async function currentFacts(repoRoot) {
+  const all = await readMemory(repoRoot);
+  const retired = new Set();
+  for (const f of all) if (f.supersedes) retired.add(f.supersedes);
+  return all.filter((f) => !retired.has(f.id));
+}
+
+// Full supersession chain that `factId` participates in, newest → oldest.
+export async function historyOf(repoRoot, factId) {
+  const all = await readMemory(repoRoot);
+  const byId = new Map(all.map((f) => [f.id, f]));
+  const supersededBy = new Map();
+  for (const f of all) if (f.supersedes) supersededBy.set(f.supersedes, f);
+  // Walk forward to the newest fact in the chain.
+  let head = byId.get(factId);
+  const fwdSeen = new Set();
+  while (head && supersededBy.has(head.id) && !fwdSeen.has(head.id)) {
+    fwdSeen.add(head.id);
+    head = supersededBy.get(head.id);
+  }
+  // Collect newest → oldest via the `supersedes` back-pointers.
+  const chain = [];
+  const seen = new Set();
+  let node = head;
+  while (node && !seen.has(node.id)) {
+    seen.add(node.id);
+    chain.push(node);
+    node = node.supersedes ? byId.get(node.supersedes) : null;
+  }
+  return chain;
+}
+
+// Supersede `priorId` with a new fact. Appends the new fact (carrying the
+// back-pointer) and records a MEMORY_FACT_SUPERSEDED event so the link is
+// event-sourced. The new fact's id is content-derived by the caller.
+export async function supersede(repoRoot, { priorId, fact, reason = null }) {
+  const next = { ...fact, supersedes: priorId };
+  // The event carries the FULL new fact so rebuildMemory can reconstruct the
+  // chain — supersession is therefore derivable purely from the spine.
+  await append(repoRoot, {
+    type: 'MEMORY_FACT_SUPERSEDED',
+    actor: null,
+    lane: null,
+    data: { factId: next.id, supersedes: priorId, kind: next.kind, reason, fact: next },
+  });
+  await appendFactIfNew(repoRoot, next);
+  return next;
+}
+
 // Re-extract the entire spine — truncates memory.ndjson and rebuilds. Used by
-// `maddu memory extract --rebuild`.
+// `maddu memory extract --rebuild`. v1.9.0: also replays correction facts
+// carried on LEARN_CORRECTION_WRITTEN events (destination:'memory'), so
+// `maddu learn` corrections + their supersession chains survive a rebuild.
 export async function rebuildMemory(repoRoot) {
   const events = await readAll(repoRoot);
   const all = [];
   for (const ev of events) {
     if (ev.type === 'SLICE_STOP') all.push(...extractFromSliceStop(ev));
+    else if (ev.type === 'LEARN_CORRECTION_WRITTEN' && ev.data?.destination === 'memory' && ev.data?.fact) {
+      all.push(ev.data.fact);
+    } else if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.fact) {
+      // Replay supersession entries so chains survive a rebuild.
+      all.push(ev.data.fact);
+    }
   }
+  // Dedup by id (first write wins) — corrections may be re-emitted on re-run.
+  const seen = new Set();
+  const deduped = [];
+  for (const f of all) { if (!f || seen.has(f.id)) continue; seen.add(f.id); deduped.push(f); }
   const p = await ensureMemoryFile(repoRoot);
-  await writeFile(p, all.map((f) => JSON.stringify(f)).join('\n') + (all.length ? '\n' : ''));
-  return all.length;
+  await writeFile(p, deduped.map((f) => JSON.stringify(f)).join('\n') + (deduped.length ? '\n' : ''));
+  return deduped.length;
 }
 
 export async function readMemory(repoRoot) {

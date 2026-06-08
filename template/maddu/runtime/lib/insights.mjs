@@ -102,6 +102,13 @@ export const DORMANT_BY_DESIGN = new Map([
   ['IMPORT_REJECTED',          'cross-machine spine import only'],
   ['CHECKPOINT_WORKTREE_CREATED',    'fires only when an operator materializes a checkpoint worktree'],
   ['CHECKPOINT_ROLLBACK_REQUESTED',  'fires only when an operator rolls back to a checkpoint'],
+  // v1.9.0 failure-learning — fire only when `maddu learn` runs (LEARN_MINED is
+  // the load-bearing entry point and is intentionally NOT listed here).
+  ['LEARN_DIGEST_WRITTEN',     'no-provider fallback path; autonomous judging is the default'],
+  ['LEARN_JUDGED',             'fires only when a `maddu learn` judgment worker runs'],
+  ['LEARN_CORRECTION_WRITTEN', 'fires only when `maddu learn` writes a correction'],
+  ['MEMORY_FACT_SUPERSEDED',   'fires only when a memory fact is superseded'],
+  ['BRIEFING_CURATED',         'fires only under a curated (--curate) orient/handoff briefing'],
 ]);
 
 // Join the harvested projects against the DEFINED event-type set.

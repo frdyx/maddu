@@ -128,6 +128,8 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "what do we know about …", "recall …", "memory" | `/maddu-memory` |
 | "tasks", "to-do", "what's on the board", "open work items" | `/maddu-task` |
 | "audit the framework", "coherence check", "drift", "dead events" | `/maddu-audit` |
+| "learn from my mistakes", "what went wrong", "review past failures", "mine my sessions" | `/maddu-learn` |
+| "what corrections do we have", "learned project facts" | `/maddu-memory` (then `--kind correction`) |
 | "I need a tool for …", "connect to <service>", "use the <X> MCP", "the runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
 
 **When a task needs a capability the runtime lacks** (calling an external

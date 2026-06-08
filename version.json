@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
-  "phase": "rule-scope-boundary",
-  "released": "2026-06-05"
+  "version": "1.9.0",
+  "phase": "failure-learning",
+  "released": "2026-06-09"
 }

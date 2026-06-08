@@ -216,7 +216,30 @@ export const EVENT_TYPES = {
   // v1.6.0 — curated cross-session handoff. The operator/agent's "▶ RESUME HERE"
   // narrative (next slice, blockers, queue, decisions-pending). Latest wins.
   //   HANDOFF_SET: { body, by }
-  HANDOFF_SET:                'HANDOFF_SET'
+  HANDOFF_SET:                'HANDOFF_SET',
+  // v1.9.0 — failure-learning (`maddu learn`). Mine Claude Code session
+  // transcripts for failed tool calls paired with the later success that
+  // resolved them, judge the pairs in a spawned worker (provider SDK lives in
+  // the subprocess, never in core), and write typed corrections to two
+  // destinations. The parent process is the ONLY spine writer.
+  //   LEARN_MINED:              { mined, paired, candidates, slug, since }
+  //   LEARN_DIGEST_WRITTEN:     { digestPath, candidates }  (no-provider fallback)
+  //   LEARN_JUDGED:             { candidateId, category, verdict, destination, workerId }
+  //   LEARN_CORRECTION_WRITTEN: { correctionId, category, destination:'agent-file'|'memory', target }
+  LEARN_MINED:                'LEARN_MINED',
+  LEARN_DIGEST_WRITTEN:       'LEARN_DIGEST_WRITTEN',
+  LEARN_JUDGED:               'LEARN_JUDGED',
+  LEARN_CORRECTION_WRITTEN:   'LEARN_CORRECTION_WRITTEN',
+  // v1.9.0 — memory supersession chains. When a fact changes, a new fact
+  // carries `supersedes:<priorFactId>` and this event records the link so the
+  // chain survives a `rebuildMemory` replay (events are the source of truth).
+  //   MEMORY_FACT_SUPERSEDED: { factId, supersedes, kind, reason }
+  MEMORY_FACT_SUPERSEDED:     'MEMORY_FACT_SUPERSEDED',
+  // v1.9.0 — reversible briefings (retrieve-on-demand / CCR). A curated
+  // orient/handoff briefing persists its full original so dropped detail stays
+  // retrievable via `maddu learn retrieve <briefingId>`.
+  //   BRIEFING_CURATED: { briefingId, kind:'orient'|'handoff', originalRef, dropped }
+  BRIEFING_CURATED:           'BRIEFING_CURATED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

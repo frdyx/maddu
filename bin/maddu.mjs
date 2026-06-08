@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin', 'orient', 'handoff'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin', 'orient', 'handoff', 'learn'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -82,6 +82,7 @@ Commands:
   plugin         Subcommands: list | info | enable | disable. Capabilities that live outside the core. [--trust] [--json] (v1.4.0)
   orient         Session-start briefing: goal + success-progress (run verify cmds) + handoff + trail. [--json] [--no-verify] (v1.6.0)
   handoff        Subcommands: set "<markdown>" | show. Curated "▶ RESUME HERE" cross-session handoff. (v1.6.0)
+  learn          Mine past sessions for failed→succeeded tool calls; distil corrections. run | digest | list | show. (v1.9.0)
 
 Flags:
   --version      Print framework version.

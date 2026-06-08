@@ -756,6 +756,49 @@ See also: [34-threat-model.md](34-threat-model.md),
 [35-hermes-adapter.md](35-hermes-adapter.md),
 [36-trust-audit.md](36-trust-audit.md).
 
+## v1.9.0 commands
+
+### `maddu learn <verb>` *(v1.9.0)*
+
+Mine past Claude Code sessions for tool calls that failed and were later
+resolved, and distil durable **project** corrections. The corrections describe
+your product (paths, commands, quirks) — never Máddu's hard rules.
+
+```bash
+$ maddu learn run                    # mine → spawn judgment worker → write corrections
+$ maddu learn run --since 2026-06-01 --slug myrepo
+$ maddu learn digest                 # no-provider fallback: write a review digest only
+$ maddu learn list                   # corrections written so far
+$ maddu learn show <correctionId>    # one correction + provenance
+$ maddu learn retrieve <briefingId>  # full original of a curated (reversible) briefing
+```
+
+`run` mines deterministically, then spawns the configured runtime **CLI** as a
+subprocess to judge the candidates (hard rule #5: no provider SDK in core; the
+parent is the only spine writer). Accepted corrections route to two
+destinations — stable facts to a marker block in the project-root `CLAUDE.md`,
+volatile patterns to `kind:'correction'` memory facts. Emits `LEARN_MINED`,
+`LEARN_JUDGED`, `LEARN_CORRECTION_WRITTEN` (or `LEARN_DIGEST_WRITTEN` on the
+fallback path). See [37-failure-learning.md](37-failure-learning.md).
+
+### `maddu memory` — supersession *(v1.9.0)*
+
+```bash
+$ maddu memory list --kind correction      # current view (superseded facts hidden)
+$ maddu memory list --all                  # full history, including retired facts
+$ maddu memory supersede --prior <id> --text "<new fact>" [--reason "…"]
+$ maddu memory history <factId>            # the whole chain, newest → oldest
+```
+
+Supersession is event-sourced (`MEMORY_FACT_SUPERSEDED` carries the full fact),
+so chains survive `maddu memory extract --rebuild`.
+
+### `maddu orient --curate` *(v1.9.0)*
+
+Opt-in reversible briefing: persists the full handoff original and prints a
+budget-bounded view plus a `maddu learn retrieve <id>` pointer (emits
+`BRIEFING_CURATED`). Default `maddu orient` stays read-only.
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the
@@ -794,6 +837,7 @@ on line 1.
 | `/maddu-coordinate <plan-id>` | `coordinator` *(v1.1.0)* |
 | `/maddu-blast <task>` | chained: register → claim → loop → slice-stop *(v1.1.0)* |
 | `/maddu-skills-review` | `skill candidates list` *(v1.1.0)* |
+| `/maddu-learn [run\|digest]` | `learn` *(v1.9.0)* |
 
 See [22-slash-commands.md](22-slash-commands.md) for the full
 reference, including the raw-frontmatter rationale and how to add
