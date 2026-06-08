@@ -208,6 +208,12 @@ maddu slice-stop "SLICE STOP: …"
 
 # Search across the corpus
 maddu search "<query>"
+
+# Learn from past sessions: mine failed→succeeded tool calls into
+# durable corrections for THIS project (paths, commands, quirks).
+maddu learn digest      # review candidates only — writes nothing but a digest
+maddu learn run         # judge + write corrections (project CLAUDE.md + memory)
+maddu memory list --kind correction   # what learn has captured
 ```
 
 ## When you're stuck
