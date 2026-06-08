@@ -11,6 +11,10 @@ narrative summary.
 
 ---
 
+## [v1.9.2] · 2026-06-09 · `maddu learn` named in the framework worker brief
+
+Doc completeness for the v1.9.0 feature. The installed worker brief (`template/maddu/CLAUDE.md`, which `maddu init` drops and `maddu upgrade` re-syncs into consumer repos) now lists `maddu learn digest` / `learn run` / `memory list --kind correction` in its "Useful commands" block, so agents in a consumer project discover the capability from the brief — not only via the `/maddu-learn` slash and intent routing (already shipped in v1.9.0). No behavior change; the *capability* shipped in v1.9.0/v1.9.1, and the corrections it writes remain project-scoped (never propagated into the framework template).
+
 ## [v1.9.1] · 2026-06-09 · `maddu learn` — Windows judgment-worker spawn fix
 
 Patch on v1.9.0. The judgment worker (`maddu learn run`) couldn't spawn the provider CLI on Windows: npm installs `claude`/`codex` as `.cmd` shims, and modern Node refuses to spawn those without a shell (`spawn claude ENOENT`). The fallback handled it gracefully (wrote a review digest), but the autonomous judge never ran.
