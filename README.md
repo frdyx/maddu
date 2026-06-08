@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.8.0](https://img.shields.io/badge/version-1.8.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.9.0](https://img.shields.io/badge/version-1.9.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,14 +24,16 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.8.0
+## What's new in v1.9.0
 
-**Rule scope boundary — Máddu's rules govern Máddu, not your product.** The 8+1 hard rules describe how *Máddu itself* is built (files-only state, no provider SDKs in the bridge/cockpit, device-bound tokens). They were never meant to constrain the product you build *with* Máddu — but the agent-facing wording didn't say so, and agents were applying "no SDKs / no hosted backends / no token storage" to their own product, stubbing real features.
+**Failure learning — `maddu learn`.** Máddu now learns from its own past sessions. It mines your Claude Code transcripts for tool calls that **failed and were later resolved** (the Headroom-style failure→success correlation) and distils the real lessons into durable corrections — extending the existing hindsight/memory machinery instead of bolting on a new subsystem.
 
-- **Every agent-facing surface now states the scope up front** — the rules govern the **framework layer** (`.maddu/` + `maddu/`); your application may use any SDK, hosted backend, database, OAuth/token storage, or real publishing engine it needs. That's your project's `CLAUDE.md`'s call, not Máddu's. Never stub a product feature because of a Máddu rule.
-- **`rule-2-no-sqlite` gate scoped to the framework** — it no longer flags a product that depends on `better-sqlite3` (it previously scanned the product's `package.json`). `doctor` only ever checks Máddu's own files.
+- **Deterministic miner, provider-free** — pairs each failed tool call with the later success that fixed it, across five categories (file-path, env-command, search-scope, large-file, command-pattern). Reads the same transcripts the token ledger does; idempotent.
+- **Spawned-worker judgment** — `maddu learn run` spawns the runtime CLI as a subprocess to judge + word the corrections (hard rule #5 intact: no provider SDK in core; the parent is the only spine writer). No runtime signed in? It writes a reviewable digest instead of failing.
+- **Two destinations** — stable project facts land in a marker-delimited block of your project-root `CLAUDE.md`; volatile patterns become queryable `kind:'correction'` memory facts. Corrections describe **your product**, never Máddu's rules.
+- **Supersession chains + reversible briefings** — `maddu memory supersede`/`history` (current-vs-`--all`), and `maddu orient --curate` + `maddu learn retrieve <id>` keep curated briefings' full originals retrievable.
 
-Just prior, **v1.7.0** wired **invocation logic** (trust-audit-on-deps-change, checkpoint-before-coordinator, dormant-by-design gap list), **v1.6.0** the **orchestration handoff**, and **v1.5.0** real **sub-worker spawn + tracking**. See [the changelog](CHANGELOG.md).
+Just prior, **v1.8.0** drew the **rule scope boundary** (the 8+1 hard rules govern Máddu's own framework layer — not the product you build with it), **v1.7.0** wired **invocation logic**, **v1.6.0** the **orchestration handoff**, and **v1.5.0** real **sub-worker spawn + tracking**. See [the changelog](CHANGELOG.md).
 
 ## Zero learning curve (v0.18)
 
@@ -58,6 +60,7 @@ one. The verbose CLI stays first-class for scripts and CI.
 | `/maddu-plugin <verb>` | List / enable / disable capabilities that live outside the core. |
 | `/maddu-orient` | Session-start briefing: goal + success-progress + curated handoff. |
 | `/maddu-handoff <set\|show>` | Curate the cross-session "▶ RESUME HERE" handoff. |
+| `/maddu-learn [run\|digest]` | Mine past sessions for failed→succeeded tool calls; distil project corrections. |
 
 Or just type *"ship the login form"*, *"status"*, *"tokens"*. The
 agent classifies the intent from `MADDU.md` and dispatches the
@@ -71,7 +74,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.8.0 installed.
+Máddu v1.9.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -96,7 +99,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.8.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.9.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
@@ -176,13 +179,13 @@ Switch context across five repos without booting five bridges.
 
 Each repo's spine stays its own source of truth while the cockpit gives you the aggregated view.
 
-**Slice-stops are the only path into memory.**
+**Memory enters only through structured events.**
 
 Nothing enters long-term memory without a structured event saying so.
 
-Every working slice ends with a `SLICE_STOP` event; the hindsight extractor reads only `SLICE_STOP` events, and this is the only way new facts reach `.maddu/state/memory.ndjson` or skills land in `.maddu/skills/`.
+Every working slice ends with a `SLICE_STOP` event the hindsight extractor reads; `maddu learn` adds a second event-sourced path, distilling `kind:'correction'` facts from past failed→succeeded tool calls via `LEARN_CORRECTION_WRITTEN`. Both reach `.maddu/memory.ndjson` only through the spine — and both replay on a rebuild.
 
-Derived ≠ projected: memory is exactly what slice-stops produced, which means it stays auditable, replayable, and deletable.
+Derived ≠ projected: memory is exactly what those events produced, which means it stays auditable, replayable, and deletable (`maddu memory list` shows the current view; supersession chains keep the history).
 
 **Zero provider SDKs, zero cloud relay.**
 
