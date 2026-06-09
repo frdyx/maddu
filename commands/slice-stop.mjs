@@ -218,4 +218,64 @@ export default async function sliceStop(argv) {
   } catch (err) {
     console.error(`  trust-audit trigger failed (non-fatal): ${err.message}`);
   }
+
+  // v1.10.0 (invocation-logic 2) — auto-set the curated handoff: after a
+  // slice-stop, derive a "▶ RESUME HERE" narrative (summary + next steps) and
+  // append HANDOFF_SET so `maddu orient` is never empty. Same rule-#9 gauntlet:
+  // gated on `slice-stop:auto-handoff`, carries triggered_by + TRIGGER_FIRED.
+  // Best-effort; never breaks the slice-stop.
+  try {
+    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
+    let allowed = [];
+    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
+    if (allowed.includes('slice-stop:auto-handoff')) {
+      const candPaths = [
+        join(process.cwd(), 'maddu', 'runtime', 'lib', 'handoff-trigger.mjs'),
+        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'handoff-trigger.mjs'),
+      ];
+      for (const c of candPaths) {
+        try {
+          await stat(c);
+          const ht = await import(pathToFileURL(c).href);
+          const res = await ht.maybeSetHandoff(repoRoot, ev, sessionId, {
+            kind: 'slice-stop', id: 'auto-handoff', fired_at: ev.ts,
+          });
+          if (res.ran) console.log(`  handoff: updated → \`maddu orient\``);
+          break;
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error(`  auto-handoff trigger failed (non-fatal): ${err.message}`);
+  }
+
+  // v1.10.0 (invocation-logic 2) — auto-review: after a slice-stop, run the
+  // configured reviewer over this slice. Graceful no-op when no `kind:'reviewer'`
+  // runtime exists (so on-by-default is safe — it only spawns when an operator
+  // opted in). Cooldown-guarded. Same rule-#9 gauntlet: gated on
+  // `slice-stop:auto-review`, carries triggered_by + TRIGGER_FIRED. Best-effort.
+  try {
+    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
+    let allowed = [];
+    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
+    if (allowed.includes('slice-stop:auto-review')) {
+      const candPaths = [
+        join(process.cwd(), 'maddu', 'runtime', 'lib', 'review-trigger.mjs'),
+        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'review-trigger.mjs'),
+      ];
+      for (const c of candPaths) {
+        try {
+          await stat(c);
+          const rt = await import(pathToFileURL(c).href);
+          const res = await rt.maybeReviewSliceStop(repoRoot, ev, sessionId, {
+            kind: 'slice-stop', id: 'auto-review', fired_at: ev.ts,
+          });
+          if (res.ran) console.log(`  auto-review: ${res.verdict}${res.findingsCount ? `, ${res.findingsCount} finding(s)` : ''} → \`maddu review status\``);
+          break;
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.error(`  auto-review trigger failed (non-fatal): ${err.message}`);
+  }
 }

@@ -219,8 +219,11 @@ export default async function init(argv) {
   // (v1.4.0) auto-detects reusable skill patterns; `slice-stop:trust-audit`
   // (v1.7.0) re-audits deps when the dependency surface changed;
   // `coordinator:pre-run-checkpoint` (v1.7.0) snapshots HEAD before a real
-  // coordinator run. Operator opts out of any by removing its entry.
-  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit', 'coordinator:pre-run-checkpoint'];
+  // coordinator run; `slice-stop:auto-handoff` (v1.10.0) keeps the orient
+  // "▶ RESUME HERE" fresh from each slice; `slice-stop:auto-review` (v1.10.0)
+  // runs a configured reviewer over each slice (no-op until a `kind:'reviewer'`
+  // runtime exists). Operator opts out of any by removing its entry.
+  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit', 'coordinator:pre-run-checkpoint', 'slice-stop:auto-handoff', 'slice-stop:auto-review'];
   if (!(await exists(triggersPath))) {
     await writeFile(
       triggersPath,

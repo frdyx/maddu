@@ -178,15 +178,19 @@ record, and are gated on a flat string id in the same `allowed` array:
     "janitor:sessions",
     "slice-stop:skill-candidate",
     "slice-stop:trust-audit",
-    "coordinator:pre-run-checkpoint"
+    "coordinator:pre-run-checkpoint",
+    "slice-stop:auto-handoff",
+    "slice-stop:auto-review"
 ] }
 ```
 
 | Trigger id | Fires | When (the invocation logic) |
 |---|---|---|
-| `slice-stop:skill-candidate` | at slice-stop | a reusable tag-pattern crossed threshold (v1.4.0) |
+| `slice-stop:skill-candidate` | at slice-stop | a tag-set RECURS across ≥2 slices (v1.4.0; v1.10.0 generalized the tags to `area:<dir>`/`ext:<ext>` so it fires in any product, not just Máddu's own conventions, and is high-confidence-only) |
 | `slice-stop:trust-audit` | at slice-stop | the dependency surface changed since the last `TRUST_AUDIT_RAN` — re-audits so freshness/pin drift on new deps is caught in-flow (v1.7.0) |
 | `coordinator:pre-run-checkpoint` | before a real coordinator run | a multi-phase worker run is about to mutate the repo — snapshots HEAD as a git-tag checkpoint so the operator can roll back (v1.7.0) |
+| `slice-stop:auto-handoff` | at slice-stop | always — derives a "▶ RESUME HERE" handoff (summary + next steps) and emits `HANDOFF_SET` so `maddu orient` is never empty; latest-wins, manual `handoff set` still overrides (v1.10.0) |
+| `slice-stop:auto-review` | at slice-stop | a reviewer is configured — runs `runSliceReview` over the slice (`SLICE_REVIEWED`/`FOLLOWUP_OPENED`). **No-op when no `kind:'reviewer'` runtime exists**, so on-by-default never bills by surprise; cooldown-guarded (v1.10.0) |
 
 The operator opts out of any by removing its entry. These are *defined WHEN*
 conditions, not "fire always" — the whole point of the v1.7.0 invocation-logic

@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.10.0] · 2026-06-09 · Invocation-logic pass 2 — light up the dead skills, handoff & review domains
+
+Real burn-in across 8 projects showed whole shipped domains that `maddu insights dead` flagged as never-firing — not broken, just never invoked in the flow (the v1.7.0 diagnosis again). This wires the *WHEN* for three of them, all through the rule-#9 trigger gauntlet (allowlist + `triggered_by` + `TRIGGER_FIRED`, best-effort). **No new event types or commands** — pure invocation wiring; the audit surface is unchanged.
+
+- **Auto-handoff at slice-stop** (`slice-stop:auto-handoff`, `runtime/lib/handoff-trigger.mjs`). `HANDOFF_SET` was dead yet `maddu orient` reads it, so "▶ RESUME HERE" was blank everywhere. Each slice-stop now derives a resume narrative (summary + next steps) and emits `HANDOFF_SET`. Latest-wins; a manual `maddu handoff set` still overrides until the next slice.
+- **Skill-candidate detection now fires for real products** (`runtime/lib/skill-candidates.mjs`). `tagsFromSliceStop` only recognized Máddu's own conventions (`.md`→docs, `commands/`→command, `gates/`→gate), so a product touching `src/auth/*.ts` yielded <2 tags and nothing ever bucketed. Generalized to add `area:<parent-dir>` + `ext:<ext>` tags (skipping generic dirs like `src`/`app`). Also **high-confidence only**: the single-observation soft tier (`N_SOFT=1` + 24h cooldown) is dropped — a tag-set must recur (≥2 slices) before `SKILL_CANDIDATE_DETECTED` emits. Still suggest-only; never auto-writes a skill.
+- **Auto-review after slice-stop** (`slice-stop:auto-review`, `runtime/lib/review-trigger.mjs`). Reuses the shared `runSliceReview` core, which **gracefully no-ops when no `kind:'reviewer'` runtime is configured** — so on-by-default is safe and never bills by surprise; only when an operator has set up a reviewer does it spawn (cooldown-guarded). Emits `SLICE_REVIEWED`/`FOLLOWUP_OPENED` with provenance.
+- Both new triggers added to `init.mjs` `DEFAULT_TRIGGERS` (merged into existing installs on upgrade); documented in `docs/20-governance.md`.
+
+Verified: 3 new fixture/CLI tests (`auto-handoff`, `skill-candidate-generalized`, `auto-review`) + full suite — 18/18 green. `maddu audit` 6/6. Planned + tracked inside Máddu via `maddu plan` (dogfood).
+
 ## [v1.9.2] · 2026-06-09 · `maddu learn` named in the framework worker brief
 
 Doc completeness for the v1.9.0 feature. The installed worker brief (`template/maddu/CLAUDE.md`, which `maddu init` drops and `maddu upgrade` re-syncs into consumer repos) now lists `maddu learn digest` / `learn run` / `memory list --kind correction` in its "Useful commands" block, so agents in a consumer project discover the capability from the brief — not only via the `/maddu-learn` slash and intent routing (already shipped in v1.9.0). No behavior change; the *capability* shipped in v1.9.0/v1.9.1, and the corrections it writes remain project-scoped (never propagated into the framework template).

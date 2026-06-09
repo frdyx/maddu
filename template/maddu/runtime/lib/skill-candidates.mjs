@@ -1,14 +1,14 @@
 // v1.1.0 Phase 8c — autonomous skill candidate detection.
-// v1.1.2 — threshold tuning. Burn-in showed N=3 was too tight for short
-// runs (a 6-slice walk surfaced nothing). Now: N_HIGH=2 produces "high"
-// confidence candidates; N_SOFT=1 produces "soft" suggestions throttled
-// by a 24h per-hash cooldown so they don't flood the operator surface.
+// v1.10.0 — generalized tag extraction (area:/ext: tags so recurring work
+// surfaces in ANY product, not only Máddu's own file conventions) and
+// high-confidence only: a tag-set must RECUR (≥N_HIGH distinct slices) before
+// it emits. The single-observation "soft" tier was dropped — it produced
+// one-shot noise that never converged into useful skills.
 //
-// Scans slice-stops + memory facts for recurring tag patterns. When a
-// tag set is observed across the threshold (with no existing skill
-// covering it), emits a SKILL_CANDIDATE_DETECTED with the candidate
-// hash and `confidence: 'high' | 'soft'`. The operator can approve
-// (materialize a real skill) or reject via
+// Scans slice-stops for recurring tag patterns. When a tag set is observed
+// across the threshold (with no existing skill covering it), emits a
+// SKILL_CANDIDATE_DETECTED with the candidate hash and `confidence:'high'`.
+// The operator approves (materialize a real skill) or rejects via
 // `maddu skill candidate-reject <hash>`.
 //
 // Suggest-only — never auto-writes a skill file. Operator's call.
@@ -19,8 +19,6 @@ import { join } from 'node:path';
 import { readAll, append, EVENT_TYPES } from './spine.mjs';
 
 const N_HIGH = 2;
-const N_SOFT = 1;
-const SOFT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
 // Back-compat alias for any existing import; equals the high-confidence threshold.
 const N = N_HIGH;
 
@@ -30,20 +28,34 @@ function hashTags(tags) {
   return createHash('sha256').update(tags.sort().join('|')).digest('hex').slice(0, 12);
 }
 
+// Generic parent-dir names that carry no "area" signal (every repo has them).
+const GENERIC_DIRS = new Set(['', '.', '..', 'src', 'app', 'lib', 'test', 'tests', 'spec', 'dist', 'build', 'packages', 'apps']);
+
 function tagsFromSliceStop(ev) {
   const d = ev.data || {};
   const out = new Set();
   for (const t of (d.targets || [])) {
-    const lower = t.toLowerCase();
+    const lower = String(t).toLowerCase().replace(/\\/g, '/');
+    // Máddu-flavored tags (kept for the framework's own dogfooding).
     if (/\.md$/.test(lower)) out.add('docs');
     if (/\.test\.|spec\./.test(lower)) out.add('test');
     if (/\.json$/.test(lower)) out.add('config');
     if (/commands\//.test(lower)) out.add('command');
     if (/gates\//.test(lower)) out.add('gate');
+    // v1.10.0 — product-generic tags so recurring work surfaces in ANY repo,
+    // not only Máddu's own file conventions: the immediate parent directory
+    // (the "area" of the codebase) + the file extension.
+    const segs = lower.split('/').filter(Boolean);
+    if (segs.length >= 2) {
+      const parent = segs[segs.length - 2];
+      if (!GENERIC_DIRS.has(parent)) out.add(`area:${parent}`);
+    }
+    const extm = /\.([a-z0-9]{1,6})$/.exec(segs[segs.length - 1] || '');
+    if (extm) out.add(`ext:${extm[1]}`);
   }
   for (const g of (d.gates || [])) {
-    if (g.startsWith('rule-')) out.add('hard-rule');
-    if (/test|stress|harness/.test(g)) out.add('test');
+    if (String(g).startsWith('rule-')) out.add('hard-rule');
+    if (/test|stress|harness/.test(String(g))) out.add('test');
   }
   const summary = (d.summary || '').toLowerCase();
   for (const word of ['commit', 'install', 'lint', 'test', 'format', 'plan', 'loop', 'coordinator']) {
@@ -90,13 +102,15 @@ export async function detectCandidates(repoRoot) {
   }
   const candidates = [];
   for (const [hash, b] of buckets) {
-    if (b.examples.length < N_SOFT) continue;
+    // v1.10.0 — high-confidence only: a tag-set must RECUR (≥N_HIGH distinct
+    // slices) before it surfaces. The single-observation "soft" tier was
+    // dropped — it produced one-shot noise that never converged into useful
+    // skills, especially once tag extraction generalized.
+    if (b.examples.length < N_HIGH) continue;
     if (decided.get(hash) === 'rejected' || decided.get(hash) === 'approved') continue;
     // Skip if any tag is already an existing skill id.
     if (b.tags.some((t) => existing.has(t))) continue;
-    // v1.1.2 — confidence tier. High = ≥N_HIGH (2) repetitions; soft = N_SOFT (1)
-    // single observation, throttled later by the per-hash cooldown.
-    b.confidence = b.examples.length >= N_HIGH ? 'high' : 'soft';
+    b.confidence = 'high';
     candidates.push(b);
   }
   return candidates;
@@ -120,16 +134,10 @@ export async function emitFreshCandidates(repoRoot, by = null, triggeredBy = nul
     if (!lastEmitByHash.has(h) || ts > lastEmitByHash.get(h)) lastEmitByHash.set(h, ts);
   }
   const candidates = await detectCandidates(repoRoot);
-  const now = Date.now();
   const emitted = [];
   for (const c of candidates) {
     const lastEmit = lastEmitByHash.get(c.hash);
-    if (c.confidence === 'high') {
-      if (lastEmit) continue; // High candidates emit once; subsequent runs are no-ops.
-    } else {
-      // Soft candidate: skip if same hash emitted within the cooldown window.
-      if (lastEmit && (now - lastEmit) < SOFT_COOLDOWN_MS) continue;
-    }
+    if (lastEmit) continue; // Each candidate hash emits once; subsequent runs are no-ops.
     await append(repoRoot, {
       type: EVENT_TYPES.SKILL_CANDIDATE_DETECTED,
       actor: by, lane: null,
