@@ -216,6 +216,20 @@ maddu learn run         # judge + write corrections (project CLAUDE.md + memory)
 maddu memory list --kind correction   # what learn has captured
 ```
 
+### Full agent command surface
+
+You usually reach these through slash commands or natural language (see
+[`agent-files/MADDU.md`](agent-files/MADDU.md) §"Intent routing"), but every one
+is a real verb you can call directly. Run `maddu help` for flags.
+
+- **Orient & state:** `maddu orient` · `maddu brief` · `maddu status` · `maddu register` · `maddu insights`
+- **Plan & coordinate:** `maddu plan` · `maddu goal` · `maddu phase` · `maddu loop` · `maddu coordinator` · `maddu team` · `maddu pipeline` · `maddu handoff`
+- **Do the work:** `maddu slice` · `maddu slice-stop` · `maddu review` · `maddu advise` · `maddu suggest` · `maddu search` · `maddu task`
+- **Memory & learning:** `maddu memory` · `maddu learn` · `maddu skill`
+- **Tools (audited subprocess wrappers):** `maddu git` · `maddu test` · `maddu format` · `maddu lint` · `maddu install`
+- **Capabilities & governance:** `maddu mcp` · `maddu plugin` · `maddu governance` · `maddu trust` · `maddu audit`
+- **Accounting:** `maddu cost` · `maddu log` · `maddu help`
+
 ## When you're stuck
 
 1. Open the cockpit (`maddu start`) and press `?` to read the docs.

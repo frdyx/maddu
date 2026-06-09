@@ -89,6 +89,8 @@ const GATE_IDS = {
   commands: 'command-surface-coherent',
   cockpit: 'cockpit-routes-reachable',
   docs: 'docs-indexed',
+  defaults: 'defaults-single-sourced',
+  brief: 'brief-coherence',
 };
 
 function gateRunToCheck(run) {
@@ -260,7 +262,7 @@ async function checkCharterDrift() {
   };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -283,6 +285,8 @@ export default async function audit(argv) {
   if (!sub || sub === 'commands') checks.push(...await runGateChecks(repoRoot, GATE_IDS.commands));
   if (!sub || sub === 'cockpit') checks.push(...await runGateChecks(repoRoot, GATE_IDS.cockpit));
   if (!sub || sub === 'docs') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docs));
+  if (!sub || sub === 'defaults') checks.push(...await runGateChecks(repoRoot, GATE_IDS.defaults));
+  if (!sub || sub === 'brief') checks.push(...await runGateChecks(repoRoot, GATE_IDS.brief));
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());

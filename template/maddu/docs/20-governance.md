@@ -102,6 +102,10 @@ maddu doctor --severity critical           # filter by severity
 | model-hint-shape | safety | `modelPreference` on runtimes / lanes / pipeline stages has valid shape (string or `{default,plan,exec,verify,review}`) | v0.19.0 |
 | stress-harness-recent | warn | synthetic stress harness ran in the last 30 days (records last-run at `.maddu/state/stress-last-run.json`) | v0.19.0 |
 | upgrade-matrix-recent | warn | upgrade-path matrix ran since the last `maddu.json` install (records last-run at `.maddu/state/upgrade-matrix-last-run.json`) | v0.19.0 |
+| defaults-single-sourced | safety | `init.mjs` + `upgrade.mjs` seed config defaults via `commands/_config-seed.mjs`; neither re-inlines `DEFAULT_TRIGGERS`/pipelines/config constants (prevents the init↔upgrade drift that silently dropped v1.10.0 triggers on upgrade) | v1.11.0 |
+| brief-coherence | warn | every agent-facing `COMMANDS` verb is named in the worker brief `template/maddu/CLAUDE.md` (closes the gap that shipped `learn` without a brief mention) | v1.11.0 |
+
+**Config defaults are single-sourced.** All `.maddu/config/*.json` defaults (the rule-#9 trigger allowlist, janitor/trust/worker-env/governance, the pipeline catalog) live in `commands/_config-seed.mjs` and are seeded by BOTH `maddu init` and `maddu upgrade` via one `seedConfigDefaults()` call — so the two commands can't drift. Every write is write-if-missing; `triggers.json` merges new entries without removing operator additions; an operator-edited config is never overwritten. `maddu upgrade` now backfills every config default (so a repo installed before a config existed gets it on upgrade — including `worker-env.json`'s default-deny-secrets). The `defaults-single-sourced` gate fails if anyone re-inlines a default.
 
 ## Tracked sources
 

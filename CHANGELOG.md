@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.11.0] · 2026-06-09 · Drift-proofing — single-source config seeding + coherence guard gates
+
+Shipping v1.10.0 surfaced a class of bug: `DEFAULT_TRIGGERS` was duplicated inline in `commands/init.mjs` AND `commands/upgrade.mjs`, and the upgrade copy went stale — so existing repos upgrading to v1.10.0 got the new trigger *code* but not the `slice-stop:auto-handoff`/`auto-review` allowlist entries, and the features silently didn't fire. The same class hid a security gap: `janitor`/`trust`/`worker-env`/`governance` configs were seeded by `init` only and **never backfilled on upgrade** (so an old repo never got `worker-env.json`'s default-deny-secrets list). This release fixes it for good — eliminate the drift by construction, then guard against its return.
+
+- **Single-source config seeding** (`commands/_config-seed.mjs`). One module owns every `.maddu/config/*.json` default (triggers, janitor, trust, worker-env, governance, pipeline catalog) AND the seeding logic. Both `init` and `upgrade` call one `seedConfigDefaults()` — they can no longer diverge. Every write is write-if-missing; `triggers.json` merges add-missing without dropping operator entries; operator-edited files are never overwritten. **`maddu upgrade` now backfills all config defaults** (fixes the stale triggers AND the init-only security gap).
+- **Guard gate `defaults-single-sourced`** (`safety`/FAIL). Source-scans `init.mjs` + `upgrade.mjs`: fails if either re-inlines a default constant or stops importing `_config-seed.mjs`. Makes "both must single-source" an enforced invariant, not a convention.
+- **Guard gate `brief-coherence`** (`warn`). Every agent-facing `COMMANDS` verb must be named in the worker brief (`template/maddu/CLAUDE.md`) — closing the gap that shipped `learn` (v1.9.0) without a brief mention. Fixing it surfaced that **24 commands were never in the brief**; the brief now carries a complete grouped "agent command surface" reference (31 verbs).
+- `maddu audit` grows 6 → **8 checks** (adds `defaults` + `brief`); both gates also auto-run under `maddu doctor`. No new event types or CLI commands.
+
+Verified: 3 new tests (`config-seed-parity`, `gate-defaults-single-sourced`, `gate-brief-coherence`) + full suite — 21/21 green; `upgrade-matrix` 19/19 + `stress` 12/12 confirm init/upgrade still install cleanly. `maddu audit` 8/8. Tracked via `maddu plan` (dogfood).
+
 ## [v1.10.0] · 2026-06-09 · Invocation-logic pass 2 — light up the dead skills, handoff & review domains
 
 Real burn-in across 8 projects showed whole shipped domains that `maddu insights dead` flagged as never-firing — not broken, just never invoked in the flow (the v1.7.0 diagnosis again). This wires the *WHEN* for three of them, all through the rule-#9 trigger gauntlet (allowlist + `triggered_by` + `TRIGGER_FIRED`, best-effort). **No new event types or commands** — pure invocation wiring; the audit surface is unchanged.

@@ -150,78 +150,24 @@ export default async function upgrade(argv) {
   // bit, which `copyFile` doesn't preserve.
   await ensureShimExecutable(repoRoot);
 
-  // v0.17 Phase 5 — backfill the janitor's trigger allowlist entry
-  // for existing v0.16 repos so the trigger-discipline gate doesn't
-  // trip on the first auto-close fire. janitor.json itself is optional
-  // (readJanitorConfig falls back to baked-in defaults), so we only
-  // write it when missing and never disturb operator overrides.
+  // v1.11.0 — backfill ALL framework config defaults on upgrade, single-sourced
+  // with `maddu init` via commands/_config-seed.mjs so the two can't drift.
+  // This fixes the pre-v1.11.0 bug where upgrade's inline DEFAULT_TRIGGERS went
+  // stale (missing v1.10.0 auto-handoff/auto-review) and where janitor / trust /
+  // worker-env / governance were never backfilled on upgrade (a repo installed
+  // before a config existed never got its defaults — incl. worker-env's
+  // default-deny-secrets). Write-if-missing; triggers.json merges add-missing;
+  // operator edits are never disturbed.
   try {
-    const configDir = join(repoRoot, '.maddu', 'config');
-    await mkdir(configDir, { recursive: true });
-    const triggersPath = join(configDir, 'triggers.json');
-    // v1.4.0 adds slice-stop:skill-candidate; v1.7.0 adds slice-stop:trust-audit
-    // + coordinator:pre-run-checkpoint (invocation-logic).
-    const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit', 'coordinator:pre-run-checkpoint'];
-    if (await exists(triggersPath)) {
-      const text = await readFile(triggersPath, 'utf8');
-      const cur = JSON.parse(text);
-      const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
-      let changed = false;
-      for (const t of DEFAULT_TRIGGERS) {
-        if (!allowed.includes(t)) { allowed.push(t); changed = true; }
-      }
-      if (changed) await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
-    } else {
-      await writeFile(
-        triggersPath,
-        JSON.stringify({ allowed: DEFAULT_TRIGGERS }, null, 2) + '\n'
-      );
-    }
+    const { seedConfigDefaults } = await import('./_config-seed.mjs');
+    const seeded = await seedConfigDefaults(repoRoot, { templateRoot: TEMPLATE_ROOT });
+    const parts = [];
+    if (seeded.triggersAdded.length) parts.push(`triggers +${seeded.triggersAdded.length}`);
+    if (seeded.configsSeeded.length) parts.push(`config ${seeded.configsSeeded.join('/')}`);
+    if (seeded.pipelinesSeeded.length) parts.push(`pipelines ${seeded.pipelinesSeeded.length}`);
+    if (parts.length) console.log(`  config defaults backfilled: ${parts.join(', ')}`);
   } catch (err) {
-    console.error(`  (janitor trigger allowlist seed skipped: ${err.message})`);
-  }
-
-  // v0.18 Phase 4 — seed the built-in pipeline if it's missing. Same
-  // idempotent pattern as the janitor / triggers configs: never disturb
-  // an existing operator-edited copy.
-  try {
-    const pipelinesDir = join(repoRoot, '.maddu', 'config', 'pipelines');
-    await mkdir(pipelinesDir, { recursive: true });
-    // v1.3.0 — re-seed the default pipeline catalog for repos predating it.
-    // Same idempotency contract as init: per-file, only when missing, never
-    // disturb operator-edited copies. Read each from the template source dir
-    // when present; `plan-exec-verify-fix` keeps an inline fallback for
-    // back-compat with checkouts that lack the source .json.
-    const PLAN_EXEC_VERIFY_FIX = {
-      name: 'plan-exec-verify-fix',
-      description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
-      stages: [
-        { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
-        { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
-        { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
-        { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
-      ],
-    };
-    const DEFAULT_PIPELINES = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
-    const pipelineSrcDir = join(TEMPLATE_ROOT, 'maddu', 'config', 'pipelines');
-    for (const name of DEFAULT_PIPELINES) {
-      const dst = join(pipelinesDir, `${name}.json`);
-      if (await exists(dst)) continue;
-      let body = null;
-      const src = join(pipelineSrcDir, `${name}.json`);
-      if (await exists(src)) {
-        body = await readFile(src, 'utf8');
-        if (!body.endsWith('\n')) body += '\n';
-      } else if (name === 'plan-exec-verify-fix') {
-        body = JSON.stringify(PLAN_EXEC_VERIFY_FIX, null, 2) + '\n';
-      } else {
-        continue;
-      }
-      await writeFile(dst, body);
-      console.log(`  pipeline seeded: ${name}`);
-    }
-  } catch (err) {
-    console.error(`  (pipeline seed skipped: ${err.message})`);
+    console.error(`  (config defaults backfill skipped: ${err.message})`);
   }
 
   // v1.4.0 — comms back-compat: the Telegram/Discord/Email subsystems moved

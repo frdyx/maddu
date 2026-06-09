@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.10.0](https://img.shields.io/badge/version-1.10.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.11.0](https://img.shields.io/badge/version-1.11.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,15 +24,15 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.10.0
+## What's new in v1.11.0
 
-**Invocation-logic pass 2 — light up the dead domains.** After real burn-in across many projects, `maddu insights dead` showed shipped domains that never fire — not because they're broken, but because nothing in the flow invokes them (or they were tuned for Máddu's own repo). v1.10.0 wires the *WHEN* for three of them, all through the rule-#9 trigger gauntlet (allowlist + `triggered_by` provenance + `TRIGGER_FIRED`). **No new event types or commands** — pure wiring.
+**Drift-proofing — make the framework structurally hard to break.** Shipping v1.10.0 exposed a class of bug: config defaults (`DEFAULT_TRIGGERS`, and the janitor/trust/worker-env/governance configs) were seeded by `maddu init` and `maddu upgrade` from *separate inline copies* that drifted — so upgraded repos silently missed the new triggers, and an old repo never got `worker-env.json`'s default-deny-secrets list. v1.11.0 fixes it for good.
 
-- **Auto-handoff at slice-stop** — `HANDOFF_SET` was dead, yet `maddu orient` reads it, so "▶ RESUME HERE" was always empty. Now each slice-stop derives a resume narrative (summary + next steps) and sets it; manual `handoff set` still overrides.
-- **Skills loop now fires for real products** — the skill-candidate detector only understood Máddu's *own* file conventions (`commands/`, `gates/`), so it produced nothing in a real codebase. Tag extraction is generalized to `area:<dir>`/`ext:<ext>`, and it's high-confidence-only (a tag-set must recur).
-- **Auto-review after slice-stop** — runs your configured reviewer over each slice (`SLICE_REVIEWED`/`FOLLOWUP_OPENED`). Safe by default: a **no-op unless you've set up a `kind:'reviewer'` runtime**, so it never bills by surprise; cooldown-guarded.
+- **Single-source config seeding** — one module (`commands/_config-seed.mjs`) owns every `.maddu/config/` default *and* the seeding logic; `init` and `upgrade` both call it, so they can't diverge. `upgrade` now backfills all config defaults (write-if-missing, never clobbering operator edits).
+- **Two new coherence gates** — `defaults-single-sourced` (FAILs if anyone re-inlines a default) and `brief-coherence` (WARNs if a command isn't named in the worker brief — the gap that shipped `learn` without one). Both auto-run under `maddu doctor`; `maddu audit` grows to **8 checks**.
+- **A more complete worker brief** — fixing the brief gate surfaced that 24 commands were never in the brief; it now carries a grouped reference to the full agent command surface (31 verbs).
 
-Just prior, **v1.9.0** added **failure learning** (`maddu learn` mines past sessions for failed→succeeded tool calls and distils durable project corrections), **v1.8.0** drew the **rule scope boundary**, **v1.7.0** wired the first **invocation-logic** pass, and **v1.6.0** the **orchestration handoff**. See [the changelog](CHANGELOG.md).
+No new event types or CLI commands — the framework just got harder to silently break. Just prior, **v1.10.0** wired three dead domains (auto-handoff, skill-candidates, auto-review), **v1.9.0** added **failure learning** (`maddu learn`), and **v1.8.0** drew the **rule scope boundary**. See [the changelog](CHANGELOG.md).
 
 ## Zero learning curve (v0.18)
 
@@ -73,7 +73,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.10.0 installed.
+Máddu v1.11.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -98,7 +98,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.10.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.11.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
