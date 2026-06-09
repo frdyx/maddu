@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.12.0] · 2026-06-09 · Project blueprint — `maddu blueprint`
+
+A new command that exports a single portable, agent-ready handoff of **how a whole project was built**, so you can carry it into a new (non-Máddu) repo and have an agent reproduce the operation as a **variable-driven** system. The inverse of `maddu learn`: `learn` distils corrections; `blueprint` distils the workflow. Fully deterministic (no LLM, no network).
+
+- **One command, the essentials** (`commands/blueprint.mjs` + `runtime/lib/blueprint.mjs`). Mines the project's Claude Code transcripts and scans the real product repo(s), then writes `.maddu/state/blueprints/<slug>-<id>.md` with: an **intake schema** (the variables to ask the user — brand/vertical/source URLs — as a JSON contract), the **procedure** (genesis prompt + operator instruction sequence, sub-agent/eval sessions filtered), **problems & fixes** (reuses `learn`'s failure→success pairing), **iteration hotspots** + **what was researched**, the **actual product** (clone URL + stack + scripts + a required-reading file checklist), an **output contract** + **acceptance criteria** (derived from the real `package.json` scripts/schemas), real-data/legal **guardrails** (auto-added when crawling/PII is in scope), and a paste-ready **generalization prompt**.
+- **Multi-repo aware** — `--slug crawl,forge --repo a,b` merges one project that spans several repos; repos the build wrote into are auto-detected. `--full` includes file trees (off by default to stay lean). Lean: a real crawl+forge export is ~230 lines.
+- **Scope-safe** — it exports the *product's* history for *your* external use; no scope-boundary concern.
+- New `/maddu-blueprint` slash + intent routing; `docs/38-blueprint.md`. `maddu audit` stays 8/8 (the v1.11.0 brief/charter/slash gates were satisfied for the new verb).
+
+Verified: fixture-based `blueprint` test (operator/sub-agent split, categorized actions, intake-schema inference, deterministic render) + full suite — 22/22 green; `maddu audit` 8/8. Validated against real projects (lulu / crawl+forge). Tracked via `maddu plan` (dogfood).
+
 ## [v1.11.0] · 2026-06-09 · Drift-proofing — single-source config seeding + coherence guard gates
 
 Shipping v1.10.0 surfaced a class of bug: `DEFAULT_TRIGGERS` was duplicated inline in `commands/init.mjs` AND `commands/upgrade.mjs`, and the upgrade copy went stale — so existing repos upgrading to v1.10.0 got the new trigger *code* but not the `slice-stop:auto-handoff`/`auto-review` allowlist entries, and the features silently didn't fire. The same class hid a security gap: `janitor`/`trust`/`worker-env`/`governance` configs were seeded by `init` only and **never backfilled on upgrade** (so an old repo never got `worker-env.json`'s default-deny-secrets list). This release fixes it for good — eliminate the drift by construction, then guard against its return.
