@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.14.0] · 2026-06-09 · Spine tamper-evidence — forward `prev_hash` chain
+
+Upgrades the spine's core claim from *legible* to *tamper-**evident***. Parseability and referential checks catch damage, but a *consistent* rewrite of an interior event — flip an `APPROVAL_DECIDED` from deny→allow on line 200, leaving valid JSON — was invisible to `spine verify`. Now it isn't. Charter-level decision (operator-ruled): the spine should be trustworthy independent of git.
+
+- **Forward `prev_hash` chain** (`runtime/lib/spine.mjs`). Every event now carries `prev_hash` = the SHA-256 of the immediately-preceding event's **stored line** (the literal NDJSON bytes — so a copy on any machine recomputes the same hash; no canonical-JSON ambiguity). The genesis event is `null`. Computed via a ≤64 KB tail-read so the cost stays flat regardless of segment size. Pure stdlib `crypto` — no new dependency (rule #4 safe), every line stays independently `cat`-able (rule #1 safe).
+- **`chain-integrity` in `spine verify`** (`runtime/lib/verify.mjs`). Recomputes the chain and flags the first link that doesn't match (`chain_broken`), pinpointing where history was altered or an event inserted/removed; `chain_gap` flags an unchained event appearing after the chain began. **WARN, not FAIL** — the no-mutex append path means a rare concurrent write can also fork the chain, so the verifier reports and the operator adjudicates (tamper vs. concurrency). **Never auto-repaired** (rule #2).
+- **Forward-only — no migration.** Events written before v1.14.0 have no `prev_hash`; the chain is checked only from the first event that has one, so existing spines (and every consumer install) keep verifying clean and adopt the chain on their next append.
+- **Docs:** charter invariant #2 + `hard-rules.md` (verify list) now state tamper-evidence; `15-architecture.md` documents the design; the v1.13.0 proposal (`docs/research/spine-tamper-evidence-proposal.md`) is marked ACCEPTED/as-shipped.
+
+Verified: new `spine-chain-integrity` test (fresh chain clean · interior tamper → `chain_broken` · forward-only legacy boundary clean); the real mixed spine (legacy + chained tail) verifies 0 fails / 0 warns; `maddu audit` 10/10, doctor green+info, stress 15/15, upgrade matrix 19/0 (fresh + every upgrade path), full suite green.
+
 ## [v1.13.0] · 2026-06-09 · Robustness hardening — tighten the guarantees, don't bolt on machinery
 
 A safeguard-focused pass over the parts of Máddu whose whole value is the audit / portability / supply-chain posture. Every change *tightens an existing guarantee* — no SQLite, no daemon, no queue, no mutex, no new dependency, no spine auto-repair. Tier-1 closes real safety gaps; Tier-2 makes existing claims checkable; Tier-3 + tightenings drift-proof the surface.

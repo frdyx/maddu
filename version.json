@@ -1,5 +1,5 @@
 {
-  "version": "1.13.0",
-  "phase": "robustness-hardening",
+  "version": "1.14.0",
+  "phase": "spine-tamper-evidence",
   "released": "2026-06-09"
 }

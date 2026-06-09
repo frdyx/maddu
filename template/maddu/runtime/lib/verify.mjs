@@ -53,7 +53,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
-import { EVENT_TYPES } from './spine.mjs';
+import { EVENT_TYPES, hashLine } from './spine.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -145,6 +145,11 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   const startedCoordinators = new Set();  // COORDINATOR_STARTED.data.coordinatorId
   const invokedAdvisors = new Set();      // ADVISOR_INVOKED.data.advisorId
   let installedAt = null;                // FRAMEWORK_INSTALLED.ts — lower bound for ts sanity
+  // v1.14.0 forward `prev_hash` chain. prevLineHash spans segments (the chain is
+  // continuous across rolls). chainStarted flips true at the first event that
+  // carries prev_hash — everything before it is pre-v1.14.0 legacy and unchecked.
+  let prevLineHash = null;
+  let chainStarted = false;
 
   outer:
   for (const segName of segs) {
@@ -178,6 +183,12 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
       if (!line.trim()) continue;
       const lineNo = i + 1;
 
+      // Chain-integrity bookkeeping (v1.14.0): hash this stored line and capture
+      // the previous line's hash, then advance — so every early `continue` below
+      // still carries the chain forward correctly.
+      const thisPrev = prevLineHash;
+      prevLineHash = hashLine(line);
+
       // ─── Parseability ───
       let ev;
       try { ev = JSON.parse(line); }
@@ -198,6 +209,23 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
         push(issue('FAIL', 'non_object', `${segName}:${lineNo}: line is not a JSON object`,
           { segment: segName, line: lineNo }));
         continue;
+      }
+
+      // ─── Chain integrity (v1.14.0, forward-only prev_hash) ───
+      // WARN, not FAIL: a mismatch is the tamper signal, but the no-mutex
+      // append path means a rare concurrent write can also fork the chain — so
+      // the verifier reports it and the operator decides (never auto-repaired).
+      if ('prev_hash' in ev) {
+        if (ev.prev_hash !== thisPrev) {
+          push(issue('WARN', 'chain_broken',
+            `${ev.id}: prev_hash does not match the preceding event's stored-line hash — history altered, an event inserted/removed, or a concurrent append forked the chain`,
+            { segment: segName, line: lineNo, eventId: ev.id }));
+        }
+        chainStarted = true;
+      } else if (chainStarted) {
+        push(issue('WARN', 'chain_gap',
+          `${ev.id}: event lacks prev_hash after the chain began (a pre-v1.14.0 writer or a hand edit)`,
+          { segment: segName, line: lineNo, eventId: ev.id }));
       }
 
       // ─── Envelope ───
