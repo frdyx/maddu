@@ -111,4 +111,7 @@ export default {
   // corrections (agent-file + memory); mutating and auto-trigger forbidden
   // (operator/agent-explicit, like advise). `digest` is the read-only fallback.
   learn:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  // v1.12.0 — portable project-blueprint export. Reads transcripts + spine and
+  // writes a brief artifact under .maddu/state/blueprints/; no spine mutation.
+  blueprint:    { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
 };
