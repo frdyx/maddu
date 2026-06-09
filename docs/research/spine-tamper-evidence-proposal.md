@@ -1,8 +1,10 @@
 # Proposal — spine tamper-evidence (`prev_hash` chain)
 
-> **Status:** OPEN charter-level decision. Operator's call, not an agent's — this
-> changes the event envelope (hard rule #2 territory). Written during the v1.13.0
-> hardening pass; deliberately **no code shipped**.
+> **Status:** ACCEPTED — **Option A implemented in v1.14.0** (operator ruling,
+> 2026-06-09). Forward-only `prev_hash` chain in `spine.append()` + a report-only
+> `chain_broken`/`chain_gap` check in `verify.mjs`; no migration (legacy events
+> unchained). The design below is the as-shipped record. Written during the v1.13.0
+> hardening pass as an OPEN charter-level decision; resolved at v1.14.0.
 
 ## The question
 

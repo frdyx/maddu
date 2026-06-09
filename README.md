@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.13.0](https://img.shields.io/badge/version-1.13.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.14.0](https://img.shields.io/badge/version-1.14.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,15 +24,11 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.13.0
+## What's new in v1.14.0
 
-**Robustness hardening — tighten the guarantees, don't bolt on machinery.** A safeguard pass over the parts whose whole value is the audit / portability / supply-chain posture. No SQLite, no daemon, no queue, no mutex, no new dependency, no spine auto-repair — every change *tightens an existing guarantee*.
+**Spine tamper-evidence — forward `prev_hash` chain.** The spine's core claim moves from *legible* to *tamper-**evident***. Parseability and referential checks catch damage, but a *consistent* interior rewrite — flip an `APPROVAL_DECIDED` from deny→allow, leaving valid JSON — used to slip past `spine verify`. Now every event carries a `prev_hash` (SHA-256 of the preceding event's stored line), and `spine verify` recomputes the chain and pinpoints the first altered link. Pure stdlib, no dependency, every line still `cat`-able, never auto-repaired. Forward-only — old spines keep verifying and adopt the chain on their next append.
 
-- **Safety gaps closed** — `spine verify` now distinguishes a **torn trailing line** (interrupted append, safe to trim) from interior corruption; the bridge **rejects non-loopback `Host`/`Origin`** (DNS-rebinding defense) before touching the spine; **`maddu blueprint` output is secret-scanned** before it's written; and the framework-repo `doctor` FAIL is now a self-explanatory `INFO` line.
-- **Claims made checkable** — a determinism test for `blueprint` + `learn`, extended `spine verify` referential coverage (teams/pipelines/plans/loops/coordinators/advisors), and a **hard-rule ↔ gate traceability** matrix kept honest by a new `maddu audit` sub-check (now **10 checks**).
-- **Drift-proofing** — the previously-dormant two-doc-tree sync check is surfaced via `maddu audit` (with recorded-divergence support); `slice-stop` cross-checks declared scope against the real `git diff`; and a `learn-corrections-coherent` gate proves the on-disk learn block matches the spine. The stress harness is now **15 scenarios**.
-
-Just prior, **v1.12.0** added **`maddu blueprint`** (portable variable-driven project handoff), **v1.11.0** was **drift-proofing**, and **v1.9.0** added **failure learning** (`maddu learn`). See [the changelog](CHANGELOG.md).
+Just prior, **v1.13.0** was a **robustness-hardening** pass (torn-line detection, bridge DNS-rebinding defense, blueprint secret-scan, hard-rule↔gate traceability, `maddu audit` now 10 checks); **v1.12.0** added **`maddu blueprint`** (portable variable-driven project handoff); **v1.9.0** added **failure learning** (`maddu learn`). See [the changelog](CHANGELOG.md).
 
 ## Zero learning curve (v0.18)
 
@@ -73,7 +69,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.13.0 installed.
+Máddu v1.14.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -98,7 +94,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.13.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.14.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
