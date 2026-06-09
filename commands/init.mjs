@@ -153,137 +153,15 @@ export default async function init(argv) {
     console.log(`  updated .gitignore (token paths only)`);
   }
 
-  // 6a. v0.17 Phase 5 — janitor config + triggers allowlist. Ships
-  //     defaults; operator can edit (30min stale, 4hr auto-close) or
-  //     remove the trigger from the allowlist to disable.
-  const configDir = join(cwd, '.maddu', 'config');
-  await mkdir(configDir, { recursive: true });
-  const janitorPath = join(configDir, 'janitor.json');
-  if (!(await exists(janitorPath))) {
-    await writeFile(
-      janitorPath,
-      JSON.stringify({ staleAfterMs: 1800000, autoCloseAfterMs: 14400000 }, null, 2) + '\n'
-    );
-  }
-  // v1.2.0 Phase 1 — seed trust.json with default freshness thresholds. Idempotent.
-  const trustPath = join(configDir, 'trust.json');
-  if (!(await exists(trustPath))) {
-    await writeFile(
-      trustPath,
-      JSON.stringify({
-        schemaVersion: 1,
-        pinnedPackages: [],
-        audit: { freshness_warn_days: 30, freshness_block_days: 7 },
-      }, null, 2) + '\n'
-    );
-    console.log(`  trust config seeded (freshness warn=30d, block=7d)`);
-  }
-  // v1.2.0 Phase 2 — seed worker-env.json with default allow/deny lists. Idempotent.
-  const workerEnvPath = join(configDir, 'worker-env.json');
-  if (!(await exists(workerEnvPath))) {
-    await writeFile(
-      workerEnvPath,
-      JSON.stringify({
-        schemaVersion: 1,
-        default_allow: [
-          'PATH', 'HOME', 'USER', 'USERPROFILE', 'TEMP', 'TMP',
-          'LANG', 'LC_*', 'NODE_*', 'MADDU_*',
-          'SystemRoot', 'SYSTEMROOT', 'COMSPEC', 'PATHEXT', 'WINDIR',
-          'APPDATA', 'LOCALAPPDATA', 'PROCESSOR_*',
-          'TERM', 'SHELL',
-          'CLAUDE_*', 'CLAUDECODE', 'CODEX_*', 'GEMINI_*',
-          'HOMEDRIVE', 'HOMEPATH', 'PWD', 'OLDPWD', 'COMPUTERNAME',
-          'USERDOMAIN', 'USERNAME', 'PUBLIC', 'PROGRAMFILES', 'PROGRAMDATA',
-          'PSModulePath', 'COMMONPROGRAMFILES', 'SYSTEMDRIVE', 'OS',
-        ],
-        default_deny_secrets: [
-          'AWS_*', 'OPENAI_*', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN',
-          'GITLAB_*', 'AZURE_*', 'GCP_*', 'STRIPE_*',
-        ],
-        per_lane: {},
-      }, null, 2) + '\n'
-    );
-    console.log(`  worker env allowlist seeded (default-deny secret-keyed vars)`);
-  }
-  // v1.1.0 Phase 3 — seed governance.json with mode: standard. Idempotent.
-  const governancePath = join(configDir, 'governance.json');
-  if (!(await exists(governancePath))) {
-    await writeFile(
-      governancePath,
-      JSON.stringify({ mode: 'standard', overrides: {} }, null, 2) + '\n'
-    );
-    console.log(`  governance tier seeded (mode: standard)`);
-  }
-  const triggersPath = join(configDir, 'triggers.json');
-  // Default rule-#9 auto-trigger allowlist. `slice-stop:skill-candidate`
-  // (v1.4.0) auto-detects reusable skill patterns; `slice-stop:trust-audit`
-  // (v1.7.0) re-audits deps when the dependency surface changed;
-  // `coordinator:pre-run-checkpoint` (v1.7.0) snapshots HEAD before a real
-  // coordinator run; `slice-stop:auto-handoff` (v1.10.0) keeps the orient
-  // "▶ RESUME HERE" fresh from each slice; `slice-stop:auto-review` (v1.10.0)
-  // runs a configured reviewer over each slice (no-op until a `kind:'reviewer'`
-  // runtime exists). Operator opts out of any by removing its entry.
-  const DEFAULT_TRIGGERS = ['janitor:sessions', 'slice-stop:skill-candidate', 'slice-stop:trust-audit', 'coordinator:pre-run-checkpoint', 'slice-stop:auto-handoff', 'slice-stop:auto-review'];
-  if (!(await exists(triggersPath))) {
-    await writeFile(
-      triggersPath,
-      JSON.stringify({ allowed: DEFAULT_TRIGGERS }, null, 2) + '\n'
-    );
-  } else {
-    // Existing file — merge our entries without disturbing operator additions.
-    try {
-      const text = await readFile(triggersPath, 'utf8');
-      const cur = JSON.parse(text);
-      const allowed = Array.isArray(cur?.allowed) ? cur.allowed : [];
-      let changed = false;
-      for (const t of DEFAULT_TRIGGERS) {
-        if (!allowed.includes(t)) { allowed.push(t); changed = true; }
-      }
-      if (changed) await writeFile(triggersPath, JSON.stringify({ ...cur, allowed }, null, 2) + '\n');
-    } catch {}
-  }
-  console.log(`  janitor + trigger allowlist seeded (.maddu/config/)`);
-
-  // 6a-v0.18 — seed the built-in `plan-exec-verify-fix` pipeline. Like
-  // janitor.json, operators can edit or delete; init re-seeds only when
-  // missing (idempotent across re-runs).
-  const pipelinesDir = join(configDir, 'pipelines');
-  await mkdir(pipelinesDir, { recursive: true });
-  // v1.3.0 — seed the default pipeline catalog. `ship-a-feature` is the
-  // DEFAULT shape; `fix-a-bug` + `plan-and-delegate` cover the other two
-  // common run shapes. `plan-exec-verify-fix` is kept (back-compat) as an
-  // inline fallback below. Each .json source lives under
-  // template/maddu/config/pipelines/ so the source repo validates them; we
-  // read from there when present, otherwise fall back to inline. Seeding is
-  // idempotent per-file (only when missing) so operator edits survive re-runs.
-  const PLAN_EXEC_VERIFY_FIX = {
-    name: 'plan-exec-verify-fix',
-    description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
-    stages: [
-      { name: 'plan',   intent: 'Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane.' },
-      { name: 'exec',   intent: 'Claim the lane. Implement the change. Heartbeat at each meaningful step.' },
-      { name: 'verify', intent: 'Run `maddu doctor` + the project test suite. Surface any FAIL rows.' },
-      { name: 'fix',    intent: 'Address failures. Repeat exec→verify until clean. Slice-stop with summary.' },
-    ],
-  };
-  const DEFAULT_PIPELINES = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
-  const pipelineSrcDir = join(TEMPLATE_ROOT, 'maddu', 'config', 'pipelines');
-  for (const name of DEFAULT_PIPELINES) {
-    const dst = join(pipelinesDir, `${name}.json`);
-    if (await exists(dst)) continue;
-    let body = null;
-    const src = join(pipelineSrcDir, `${name}.json`);
-    if (await exists(src)) {
-      body = await readFile(src, 'utf8');
-      if (!body.endsWith('\n')) body += '\n';
-    } else if (name === 'plan-exec-verify-fix') {
-      body = JSON.stringify(PLAN_EXEC_VERIFY_FIX, null, 2) + '\n';
-    } else {
-      continue; // no source and no inline fallback — skip
-    }
-    await writeFile(dst, body);
-    console.log(`  pipeline seeded: ${name}`);
-  }
+  // 6a. Seed every framework config default under .maddu/config/ — janitor,
+  //     trust, worker-env, governance, the rule-#9 trigger allowlist, and the
+  //     default pipeline catalog. Single-sourced in commands/_config-seed.mjs
+  //     (shared with `maddu upgrade`) so the two can't drift; write-if-missing,
+  //     never disturbs operator edits. Enforced by the
+  //     `defaults-single-sourced` gate.
+  const { seedConfigDefaults } = await import('./_config-seed.mjs');
+  const seeded = await seedConfigDefaults(cwd, { templateRoot: TEMPLATE_ROOT });
+  console.log(`  config defaults seeded (.maddu/config/): triggers +${seeded.triggersAdded.length}${seeded.configsSeeded.length ? ', ' + seeded.configsSeeded.join('/') : ''}${seeded.pipelinesSeeded.length ? ', pipelines ' + seeded.pipelinesSeeded.length : ''}`);
 
   // 6b. v0.17 agent-native bootstrap — drop MADDU.md + marker-delimited
   //     sections into CLAUDE.md / AGENTS.md at the repo root. The
