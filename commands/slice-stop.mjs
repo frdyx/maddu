@@ -44,6 +44,29 @@ async function loadGatesLib() {
   return null;
 }
 
+// D2 (v1.13.0): derive the ACTUAL changed files from git so the slice-scope
+// gate isn't limited to what the agent self-reported via --targets/--paths.
+// The gate is only as honest as the paths it's handed; an agent that edits
+// outside scope and simply omits those files from its flags would otherwise
+// pass. `git diff --name-only HEAD` covers staged + unstaged tracked edits;
+// `ls-files --others` adds new untracked files. Repo-relative, forward-slashed.
+// Returns null when not a git repo / git unavailable — slice-stop never breaks.
+async function gitTouchedPaths(repoRoot) {
+  try {
+    const { execFileSync } = await import('node:child_process');
+    const run = (args) => execFileSync('git', ['-C', repoRoot, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const tracked = run(['diff', '--name-only', 'HEAD']).split('\n');
+    const untracked = run(['ls-files', '--others', '--exclude-standard']).split('\n');
+    return [...tracked, ...untracked]
+      .map((p) => p.trim().replace(/\\/g, '/'))
+      .filter(Boolean)
+      // Exclude Máddu's own state churn — every slice-stop writes the spine,
+      // sessions, and projections. That is framework bookkeeping, not the
+      // slice's product/code surface the scope gate governs.
+      .filter((p) => !p.startsWith('.maddu/') && p !== 'maddu.json');
+  } catch { return null; }
+}
+
 export default async function sliceStop(argv) {
   const { flags, positional } = parseFlags(argv);
   // v0.19.1 PR-B2: accept first positional arg as --summary if the flag
@@ -65,8 +88,25 @@ export default async function sliceStop(argv) {
   // Skipped when no scope is declared for the current slice (opt-in).
   const sliceId = (typeof flags['slice-id'] === 'string' ? flags['slice-id'] : null)
     || process.env.MADDU_SLICE_ID || null;
-  const touchedPaths = [...csv(flags.targets), ...csv(flags.paths)];
+  const reportedPaths = [...csv(flags.targets), ...csv(flags.paths)];
+  let touchedPaths = reportedPaths;
   if (sliceId) {
+    // D2: cross-check the self-reported paths against git's actual working-tree
+    // changes. Union them in so an out-of-scope edit the agent didn't declare
+    // is still seen by the slice-scope gate. `--no-git-diff` opts out (e.g. a
+    // non-git workspace or a deliberately partial slice-stop).
+    if (flags['no-git-diff'] !== true) {
+      const gitTouched = await gitTouchedPaths(repoRoot);
+      if (gitTouched && gitTouched.length) {
+        const set = new Set(reportedPaths);
+        for (const p of gitTouched) set.add(p);
+        touchedPaths = [...set];
+        const omitted = gitTouched.filter((p) => !reportedPaths.includes(p));
+        if (omitted.length) {
+          console.error(`  slice-scope: cross-checked ${gitTouched.length} git working-tree change(s); ${omitted.length} not in --targets/--paths`);
+        }
+      }
+    }
     const gatesLib = await loadGatesLib();
     if (gatesLib?.runGates) {
       // Build ctx with extra slice-scope-specific fields.

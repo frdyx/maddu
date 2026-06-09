@@ -90,7 +90,7 @@ Three brand domains exist in any Máddu installation:
 2. **App brand** — the brand of whatever application the host repo is building. Owned by the project. Lives wherever the project keeps app brand data.
 3. **Content brand** — per-campaign, per-asset, per-output brand. Owned by the project's content authors.
 
-These never mix. Cockpit tokens never leak into app brand. App brand never leaks into content. Content brand never leaks into cockpit. `maddu doctor` checks the directories don't reference each other.
+These never mix. Cockpit tokens never leak into app brand. App brand never leaks into content. Content brand never leaks into cockpit. This boundary is enforced **by construction**: the framework ships only the cockpit shell brand (`maddu/cockpit/tokens.css`) and never writes app or content brand. App and content brand are project-owned with no fixed framework path, so there is no runtime doctor gate for this rule — it is traced as *enforced-by-construction* in [39-rule-gate-traceability.md](39-rule-gate-traceability.md).
 
 **Why:** Prior systems (notably AionUi) repeatedly leaked cockpit aesthetics into user-saved brand profiles. The boundary makes that impossible by construction.
 

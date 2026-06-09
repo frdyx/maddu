@@ -1,5 +1,5 @@
 {
-  "version": "1.12.0",
-  "phase": "project-blueprint",
+  "version": "1.13.0",
+  "phase": "robustness-hardening",
   "released": "2026-06-09"
 }

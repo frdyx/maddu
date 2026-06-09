@@ -239,7 +239,15 @@ export const EVENT_TYPES = {
   // orient/handoff briefing persists its full original so dropped detail stays
   // retrievable via `maddu learn retrieve <briefingId>`.
   //   BRIEFING_CURATED: { briefingId, kind:'orient'|'handoff', originalRef, dropped }
-  BRIEFING_CURATED:           'BRIEFING_CURATED'
+  BRIEFING_CURATED:           'BRIEFING_CURATED',
+  // v1.13.0 (A3) — bridge loopback origin enforcement. The bridge serves the
+  // cockpit over 127.0.0.1; a malicious web page can reach it via DNS
+  // rebinding (resolving its own hostname to loopback) and drive endpoints
+  // that mutate the spine. The bridge rejects any request whose Host/Origin
+  // hostname is not loopback with 403, and records the rejection here (rate-
+  // limited per offending origin to avoid spine flooding). data:
+  //   { reason:'host'|'origin', host, origin, path, method }
+  BRIDGE_ORIGIN_REJECTED:     'BRIDGE_ORIGIN_REJECTED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
@@ -336,7 +344,35 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
   if (triggered_by) ev.triggered_by = triggered_by;
   const seg = await currentSegment(paths);
-  await appendFile(join(paths.events, seg), JSON.stringify(ev) + '\n');
+
+  // ── Concurrency + framing (A2 / hard rule #2) ──
+  //
+  // There IS a real concurrent-writer path: the long-lived bridge
+  // (runtime/server.js) and a short-lived CLI invocation (`maddu slice-stop`,
+  // `maddu doctor`, …) can both call append() against the same segment at the
+  // same instant. Máddu deliberately has no mutex (lane claims coordinate
+  // AGENTS, not spine bytes). The lock here is the OS: appendFile opens with
+  // flag 'a' (O_APPEND), and an O_APPEND write is positioned at EOF and is
+  // atomic for sizes under PIPE_BUF (4096 on Linux; Windows FILE_APPEND_DATA is
+  // atomic for appends too). A serialized event line is virtually always under
+  // that, so two concurrent appends never interleave bytes — they serialize
+  // into two whole lines. The flag is passed explicitly so this guarantee is
+  // not silently lost if someone later swaps in a positional write.
+  //
+  // Framing invariant: exactly ONE event per physical line. JSON.stringify
+  // escapes any embedded newline to "\\n", so a serialized event can never
+  // contain a raw LF — assert it, because the verifier's torn-trailing-line
+  // detection (and NDJSON itself) depends on one-event-per-line being absolute.
+  //
+  // Durability: we do NOT fsync per append (the spine IS the WAL — see
+  // docs/15-architecture.md). A crash between write() and the OS flushing can
+  // leave a truncated final line; that is detected, not auto-repaired, by
+  // `maddu spine verify` (issue kind `torn_trailing_line`).
+  const line = JSON.stringify(ev);
+  if (line.includes('\n')) {
+    throw new Error('spine.append: serialized event contains a raw newline — NDJSON framing invariant violated');
+  }
+  await appendFile(join(paths.events, seg), line + '\n', { flag: 'a' });
   return ev;
 }
 

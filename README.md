@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.12.0](https://img.shields.io/badge/version-1.12.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.13.0](https://img.shields.io/badge/version-1.13.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,15 +24,15 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.12.0
+## What's new in v1.13.0
 
-**Project blueprint — `maddu blueprint`.** Export a single portable, agent-ready handoff of *how a whole project was built*, so you can carry it into a new (non-Máddu) repo and have an agent reproduce the operation as a **variable-driven** system — not a one-off clone. It's the inverse of `maddu learn`: `learn` distils corrections; `blueprint` distils the workflow. Fully deterministic (no LLM).
+**Robustness hardening — tighten the guarantees, don't bolt on machinery.** A safeguard pass over the parts whose whole value is the audit / portability / supply-chain posture. No SQLite, no daemon, no queue, no mutex, no new dependency, no spine auto-repair — every change *tightens an existing guarantee*.
 
-- **The essentials, lean** — mines the project's transcripts + scans the real product repo(s) and writes one Markdown file: an **intake schema** (the variables to ask the user — brand/vertical/source URLs — as a JSON contract), the **procedure** (genesis prompt + instruction sequence), **problems & fixes** (reuses `learn`'s failure→success pairing), **what was researched** + **iteration hotspots**, the **actual product** (clone URL + stack + a required-reading checklist), an **output contract** + **acceptance criteria**, real-data **guardrails**, and a paste-ready **generalization prompt**.
-- **Multi-repo aware** — `maddu blueprint --slug crawl,forge --repo a,b` merges one project that spans several repos (repos the build wrote into are auto-detected). `--full` adds file trees.
-- **Structure-first handoff** — every future run starts by collecting the typed intake variables, not parsing free text; the repo is the authoritative ground truth, the blueprint is the map.
+- **Safety gaps closed** — `spine verify` now distinguishes a **torn trailing line** (interrupted append, safe to trim) from interior corruption; the bridge **rejects non-loopback `Host`/`Origin`** (DNS-rebinding defense) before touching the spine; **`maddu blueprint` output is secret-scanned** before it's written; and the framework-repo `doctor` FAIL is now a self-explanatory `INFO` line.
+- **Claims made checkable** — a determinism test for `blueprint` + `learn`, extended `spine verify` referential coverage (teams/pipelines/plans/loops/coordinators/advisors), and a **hard-rule ↔ gate traceability** matrix kept honest by a new `maddu audit` sub-check (now **10 checks**).
+- **Drift-proofing** — the previously-dormant two-doc-tree sync check is surfaced via `maddu audit` (with recorded-divergence support); `slice-stop` cross-checks declared scope against the real `git diff`; and a `learn-corrections-coherent` gate proves the on-disk learn block matches the spine. The stress harness is now **15 scenarios**.
 
-Just prior, **v1.11.0** was **drift-proofing** (single-source config seeding + coherence gates; `maddu audit` is now 8 checks), **v1.10.0** wired three dead domains, and **v1.9.0** added **failure learning** (`maddu learn`). See [the changelog](CHANGELOG.md).
+Just prior, **v1.12.0** added **`maddu blueprint`** (portable variable-driven project handoff), **v1.11.0** was **drift-proofing**, and **v1.9.0** added **failure learning** (`maddu learn`). See [the changelog](CHANGELOG.md).
 
 ## Zero learning curve (v0.18)
 
@@ -73,7 +73,7 @@ matching slash command. Full reference:
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.12.0 installed.
+Máddu v1.13.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -98,7 +98,7 @@ themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.12.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.13.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

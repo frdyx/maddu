@@ -101,6 +101,85 @@ function sendJson(res, status, obj) {
   send(res, status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, JSON.stringify(obj));
 }
 
+// ── A3 (v1.13.0): loopback origin enforcement — DNS-rebinding defense ──
+//
+// The bridge serves the cockpit and its spine-mutating endpoints over
+// 127.0.0.1. A web page the operator merely visits can, via DNS rebinding
+// (resolve evil.com → 127.0.0.1), make the browser issue requests to
+// 127.0.0.1:4177 and drive those endpoints. We defeat it the standard way:
+// require the request's Host hostname (and Origin, when present) to be
+// loopback. A browser CANNOT forge the Host hostname — a page served from
+// evil.com always sends `Host: evil.com`, never `Host: 127.0.0.1` — so the
+// check is sound and adds zero dependencies (stdlib header parsing only).
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+function hostnameOf(hostHeader) {
+  if (!hostHeader) return null;
+  let h = String(hostHeader).trim().toLowerCase();
+  if (h.startsWith('[')) {                       // [::1]:port → ::1
+    const end = h.indexOf(']');
+    return end >= 0 ? h.slice(1, end) : h.slice(1);
+  }
+  const colon = h.lastIndexOf(':');              // strip a trailing :<port> only
+  if (colon >= 0 && /^\d+$/.test(h.slice(colon + 1))) h = h.slice(0, colon);
+  return h;
+}
+
+function isLoopbackHostname(h, boundHost) {
+  if (h === null) return false;
+  return LOOPBACK_HOSTNAMES.has(h) || h === DEFAULT_HOST || (boundHost && h === String(boundHost).toLowerCase());
+}
+
+// Rate-limit rejection events so a flood of hostile requests can't balloon the
+// spine. In-memory only (no state file) — bounded, files-only-respecting.
+const _originRejectLast = new Map(); // offendingKey -> ts(ms)
+const ORIGIN_REJECT_COOLDOWN_MS = 10_000;
+
+// Returns true if the request was rejected (a 403 has been sent); false to let
+// the request proceed. Exported for unit tests (server.js only boots when
+// invoked directly, so importing it here is side-effect-free).
+export async function enforceLoopbackOrigin(req, res, ctx, boundHost) {
+  const hostHeader = req.headers['host'];
+  const originHeader = req.headers['origin'];
+  let reason = null;
+  // Host hostname must be loopback. An ABSENT Host means a non-browser
+  // low-level client (curl, the CLI probe) — browsers always send Host, so
+  // its absence can never be a rebinding attack; allow it.
+  if (hostHeader && !isLoopbackHostname(hostnameOf(hostHeader), boundHost)) {
+    reason = 'host';
+  }
+  // Origin, when present and not the opaque "null", must also be loopback.
+  if (!reason && originHeader && originHeader !== 'null') {
+    let oh;
+    try { oh = new URL(originHeader).hostname.toLowerCase(); } catch { oh = '__invalid__'; }
+    if (!isLoopbackHostname(oh, boundHost)) reason = 'origin';
+  }
+  if (!reason) return false;
+
+  try {
+    const key = `${reason}:${hostHeader || ''}|${originHeader || ''}`;
+    const now = Date.now();
+    if (now - (_originRejectLast.get(key) || 0) >= ORIGIN_REJECT_COOLDOWN_MS) {
+      _originRejectLast.set(key, now);
+      const repoRoot = ctx?.workspaces?.get(ctx.active);
+      if (repoRoot) {
+        await append(repoRoot, {
+          type: EVENT_TYPES.BRIDGE_ORIGIN_REJECTED,
+          actor: null, lane: null,
+          data: { reason, host: hostHeader || null, origin: originHeader || null, path: req.url, method: req.method },
+        });
+      }
+    }
+  } catch {}
+
+  sendJson(res, 403, {
+    error: 'forbidden_origin',
+    reason,
+    detail: 'bridge accepts loopback (127.0.0.1 / localhost) requests only — non-loopback Host/Origin rejected (DNS-rebinding defense)',
+  });
+  return true;
+}
+
 async function readBody(req, maxBytes = 1024 * 1024) {
   const chunks = [];
   let total = 0;
@@ -2478,6 +2557,8 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
 
   const server = createServer(async (req, res) => {
     try {
+      // A3: reject non-loopback Host/Origin before any routing (DNS-rebinding).
+      if (await enforceLoopbackOrigin(req, res, ctx, host)) return;
       const url = new URL(req.url, `http://${host}:${finalPort}`);
       if (url.pathname.startsWith('/bridge/')) {
         return await handleBridge(req, res, url, ctx);
