@@ -24,12 +24,12 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
+import { spawnWorker, isProviderSignedIn } from './_worker-spawn.mjs';
 
 // `stdin: true` runtimes receive the (large, multi-line) judgment prompt on
 // STDIN instead of argv. This is both safer (no shell-quoting of a KB-scale JSON
@@ -53,59 +53,6 @@ function resolveLearnConfig(descriptor, runtimeName) {
     // Descriptors may opt in/out explicitly; otherwise inherit the builtin.
     stdin: descriptor?.stdin != null ? !!descriptor.stdin : !!builtin.stdin,
   };
-}
-
-async function isProviderSignedIn(authLib, providerName) {
-  try {
-    const providers = await authLib.listProviders();
-    const p = providers.find((x) => x.provider === providerName);
-    return !!(p && p.keyCount > 0 && p.activeKeyTail);
-  } catch { return false; }
-}
-
-function spawnJudge({ binary, args, timeoutMs, env, stdinText = null }) {
-  return new Promise((resolve) => {
-    let stdout = '', stderr = '', timedOut = false, child;
-    // When the prompt goes on stdin, argv carries no untrusted data, so it's
-    // safe to use a shell on Windows to resolve a `.cmd`/`.ps1` npm shim. In
-    // argv mode (e.g. tests, gemini) we never use a shell — the prompt would be
-    // mangled — keeping that path byte-exact and injection-free.
-    // A shell is needed ONLY to resolve a bare npm `.cmd`/`.ps1` shim on Windows
-    // (e.g. `claude`) — modern Node can't spawn those directly. An absolute path
-    // to an .exe spawns fine without a shell, so we never shell those (and avoid
-    // quoting paths-with-spaces). Bare command + stdin prompt = nothing untrusted
-    // on the command line.
-    const isBareCommand = !/[\\/]/.test(binary);
-    const useShell = !!stdinText && process.platform === 'win32' && isBareCommand;
-    // With shell:true, pass ONE static string (args are trusted; the prompt is
-    // on stdin) so Node doesn't warn about un-escaped args (DEP0190).
-    const cmd = useShell ? [binary, ...args].join(' ') : binary;
-    const spawnArgs = useShell ? [] : args;
-    try {
-      child = spawn(cmd, spawnArgs, {
-        env,
-        stdio: [stdinText != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-        shell: useShell,
-      });
-    } catch (err) {
-      resolve({ status: 'spawn-error', stdout: '', stderr: err.message, exitCode: -1 });
-      return;
-    }
-    if (stdinText != null && child.stdin) {
-      child.stdin.on('error', () => {});
-      try { child.stdin.write(stdinText); child.stdin.end(); } catch {}
-    }
-    const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch {} }, timeoutMs);
-    child.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
-    child.stderr.on('data', (b) => { stderr += b.toString('utf8'); });
-    child.on('error', (err) => { clearTimeout(timer); resolve({ status: 'spawn-error', stdout, stderr: stderr + '\n' + err.message, exitCode: -1 }); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) resolve({ status: 'timeout', stdout, stderr, exitCode: code });
-      else if (code === 0) resolve({ status: 'ok', stdout, stderr, exitCode: code });
-      else resolve({ status: 'nonzero-exit', stdout, stderr, exitCode: code });
-    });
-  });
 }
 
 // Stable, content-derived id so re-running learn on the same accepted pair
@@ -253,7 +200,7 @@ export default async function learnCmd(argv) {
   // stdin runtimes get the prompt piped (safe + Windows-.cmd compatible); argv
   // runtimes get the literal ${prompt} token substituted.
   const finalArgs = cfg.stdin ? cfg.learnArgs : cfg.learnArgs.map((a) => (a === '${prompt}' ? prompt : a));
-  const result = await spawnJudge({
+  const result = await spawnWorker({
     binary: cfg.binary, args: finalArgs, timeoutMs: timeoutSec * 1000,
     env: process.env, stdinText: cfg.stdin ? prompt : null,
   });
