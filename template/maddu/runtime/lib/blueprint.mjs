@@ -21,6 +21,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { transcriptsRoot, listSessionFiles, parseTranscript, mineTranscripts } from './learn.mjs';
+import { redactText } from './secret-scan.mjs';
 
 // ── Operator prompt extraction ──────────────────────────────────────────────
 
@@ -636,5 +637,11 @@ export function renderBlueprint({ slug, prompts = [], actions = {}, problems = [
   L.push('6. DONE only when every "Acceptance criteria" checkbox passes (incl. one real {brand}+{vertical} generated end-to-end).');
   L.push('```');
   L.push('');
-  return L.join('\n');
+  // A4 (v1.13.0): blueprint mines transcripts + scans real product repos, then
+  // writes a PORTABLE handoff meant to travel into other repos. That is exactly
+  // the artifact that can carry a secret (an API key pasted into a prompt, a
+  // `.env` line read off disk) across the export boundary hard rule #6 protects.
+  // Scrub through the canonical secret-scan engine before returning, so every
+  // path that writes a blueprint emits a redacted one.
+  return redactText(L.join('\n')).text;
 }

@@ -91,6 +91,11 @@ const GATE_IDS = {
   docs: 'docs-indexed',
   defaults: 'defaults-single-sourced',
   brief: 'brief-coherence',
+  // C1 (v1.13.0): docs-in-sync was effectively dormant — doctor early-returns
+  // in the framework repo and consumer installs skip it (no template/). Audit
+  // is the framework-coherence command that DOES run here, so surface the
+  // two-tree divergence where it's visible.
+  docsSync: 'docs-in-sync',
 };
 
 function gateRunToCheck(run) {
@@ -262,7 +267,66 @@ async function checkCharterDrift() {
   };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief']);
+// ── Audit-only check: rule ↔ gate traceability (B3, v1.13.0) ──────────────
+// Single source of truth for the matrix in docs/39-rule-gate-traceability.md.
+// Every hard rule maps to enforcing gate(s) OR carries a `structural` note
+// (enforced by construction, not a runtime gate). FAILs if a rule has neither,
+// or if it references a gate id that no longer exists on disk — catching the
+// silent drift where a rule quietly loses its only enforcer.
+const RULE_GATES = {
+  '1 files-only':         { gates: ['rule-1-files-only', 'rule-2-no-sqlite'] },
+  '2 append-only-spine':  { gates: ['spine-integrity', 'plan-state-derivable', 'receipts-coherent'] },
+  '3 no-hosted-backends': { structural: 'no relay/SaaS/telemetry shipped; only network listener is the loopback bridge' },
+  '4 no-broad-deps':      { gates: ['dependency-freshness', 'dep-pinning-respected', 'mcp-template-shape'] },
+  '5 no-provider-sdks':   { gates: ['rule-5-no-provider-sdks'] },
+  '6 no-token-export':    { gates: ['rule-6-no-token-leaks', 'secret-scan-active', 'worker-env-policy-coherent'] },
+  '7 brand-boundary':     { structural: 'app/content brand are project-owned with no fixed framework path; cockpit brand contained in maddu/cockpit/' },
+  '8 lane-ownership':     { gates: ['rule-8-no-duplicate-claims', 'rule-8-team-lane-disjoint', 'lane-force-discipline', 'advisor-non-claiming'] },
+  '9 trigger-gauntlet':   { gates: ['command-tier-discipline'] },
+};
+
+async function presentGateIds() {
+  const dir = join(frameworkRoot(), 'template', 'maddu', 'runtime', 'gates', 'builtin');
+  const ids = new Set();
+  let files = [];
+  try { files = (await readdir(dir)).filter((f) => f.endsWith('.mjs')); } catch { return ids; }
+  for (const f of files) {
+    let src = '';
+    try { src = await readFile(join(dir, f), 'utf8'); } catch { continue; }
+    const m = src.match(/id:\s*'([^']+)'/);
+    if (m) ids.add(m[1]);
+  }
+  return ids;
+}
+
+async function checkRuleGateTraceability() {
+  const present = await presentGateIds();
+  if (present.size === 0) {
+    return { level: 'WARN', label: 'rule-gate traceability', detail: 'builtin gates dir not found (skipped)' };
+  }
+  const uncovered = [];   // rules with no gate AND no structural note
+  const dangling = [];    // referenced gate ids that no longer exist
+  for (const [rule, spec] of Object.entries(RULE_GATES)) {
+    const gates = spec.gates || [];
+    if (gates.length === 0 && !spec.structural) { uncovered.push(rule); continue; }
+    for (const g of gates) if (!present.has(g)) dangling.push(`${rule}→${g}`);
+  }
+  const problems = [];
+  if (uncovered.length) problems.push(`uncovered rule(s): ${uncovered.join(', ')}`);
+  if (dangling.length) problems.push(`dangling gate ref(s): ${dangling.join(', ')}`);
+  if (problems.length) {
+    return { level: 'FAIL', label: 'rule-gate traceability', detail: problems.join('; ') };
+  }
+  const ruleCount = Object.keys(RULE_GATES).length;
+  const structural = Object.values(RULE_GATES).filter((s) => !(s.gates?.length) && s.structural).length;
+  return {
+    level: 'PASS',
+    label: 'rule-gate traceability',
+    detail: `${ruleCount} hard rule(s) all enforced (${ruleCount - structural} by gate, ${structural} by construction); no dangling gate refs`,
+  };
+}
+
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -287,10 +351,12 @@ export default async function audit(argv) {
   if (!sub || sub === 'docs') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docs));
   if (!sub || sub === 'defaults') checks.push(...await runGateChecks(repoRoot, GATE_IDS.defaults));
   if (!sub || sub === 'brief') checks.push(...await runGateChecks(repoRoot, GATE_IDS.brief));
+  if (!sub || sub === 'docs-sync') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docsSync));
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());
   if (!sub || sub === 'charter') checks.push(await checkCharterDrift());
+  if (!sub || sub === 'traceability') checks.push(await checkRuleGateTraceability());
 
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const c of checks) counts[c.level]++;

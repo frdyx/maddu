@@ -11,6 +11,44 @@ narrative summary.
 
 ---
 
+## [v1.14.0] · 2026-06-09 · Spine tamper-evidence — forward `prev_hash` chain
+
+Upgrades the spine's core claim from *legible* to *tamper-**evident***. Parseability and referential checks catch damage, but a *consistent* rewrite of an interior event — flip an `APPROVAL_DECIDED` from deny→allow on line 200, leaving valid JSON — was invisible to `spine verify`. Now it isn't. Charter-level decision (operator-ruled): the spine should be trustworthy independent of git.
+
+- **Forward `prev_hash` chain** (`runtime/lib/spine.mjs`). Every event now carries `prev_hash` = the SHA-256 of the immediately-preceding event's **stored line** (the literal NDJSON bytes — so a copy on any machine recomputes the same hash; no canonical-JSON ambiguity). The genesis event is `null`. Computed via a ≤64 KB tail-read so the cost stays flat regardless of segment size. Pure stdlib `crypto` — no new dependency (rule #4 safe), every line stays independently `cat`-able (rule #1 safe).
+- **`chain-integrity` in `spine verify`** (`runtime/lib/verify.mjs`). Recomputes the chain and flags the first link that doesn't match (`chain_broken`), pinpointing where history was altered or an event inserted/removed; `chain_gap` flags an unchained event appearing after the chain began. **WARN, not FAIL** — the no-mutex append path means a rare concurrent write can also fork the chain, so the verifier reports and the operator adjudicates (tamper vs. concurrency). **Never auto-repaired** (rule #2).
+- **Forward-only — no migration.** Events written before v1.14.0 have no `prev_hash`; the chain is checked only from the first event that has one, so existing spines (and every consumer install) keep verifying clean and adopt the chain on their next append.
+- **Docs:** charter invariant #2 + `hard-rules.md` (verify list) now state tamper-evidence; `15-architecture.md` documents the design; the v1.13.0 proposal (`docs/research/spine-tamper-evidence-proposal.md`) is marked ACCEPTED/as-shipped.
+
+Verified: new `spine-chain-integrity` test (fresh chain clean · interior tamper → `chain_broken` · forward-only legacy boundary clean); the real mixed spine (legacy + chained tail) verifies 0 fails / 0 warns; `maddu audit` 10/10, doctor green+info, stress 15/15, upgrade matrix 19/0 (fresh + every upgrade path), full suite green.
+
+## [v1.13.0] · 2026-06-09 · Robustness hardening — tighten the guarantees, don't bolt on machinery
+
+A safeguard-focused pass over the parts of Máddu whose whole value is the audit / portability / supply-chain posture. Every change *tightens an existing guarantee* — no SQLite, no daemon, no queue, no mutex, no new dependency, no spine auto-repair. Tier-1 closes real safety gaps; Tier-2 makes existing claims checkable; Tier-3 + tightenings drift-proof the surface.
+
+**Tier 1 — safety gaps**
+
+- **Framework-repo `doctor` is self-explanatory** (`commands/doctor.mjs`). The expected `maddu.json missing` FAIL in the framework *source* repo (it's the framework, never installed into anything) is now an `INFO` line — detected structurally (`package.json name === "maddu"` + `template/maddu/` + `commands/`). A genuinely broken consumer install still FAILs. No bogus install marker gets written to silence it.
+- **Spine append durability + torn-line detection** (`runtime/lib/spine.mjs`, `verify.mjs`). `append()` now passes an explicit `O_APPEND` flag and asserts the NDJSON framing invariant (one event per line). `spine verify` distinguishes a **`torn_trailing_line`** (a write interrupted mid-append — safe to trim) from interior `unparseable` corruption, with inline remediation and no auto-repair. The concurrency + durability model is documented in `15-architecture.md` (and the prior false "fsynced" claim corrected).
+- **Bridge loopback origin enforcement — DNS-rebinding defense** (`runtime/server.js`). Requests whose `Host`/`Origin` hostname is not loopback are rejected `403 forbidden_origin` before any routing, with a rate-limited `BRIDGE_ORIGIN_REJECTED` spine event. A browser cannot forge the `Host` hostname, so a rebound page can't drive the spine-mutating endpoints. Stdlib only; threat-model scenario 10; `05-bridge-endpoints.md`.
+- **Blueprint output is secret-scanned** (`runtime/lib/secret-scan.mjs`, `blueprint.mjs`). `redactText()` (reusing the canonical secret patterns) scrubs every rendered blueprint before it is written, so a key pasted into a transcript or a `.env` line scanned off disk can't ride the portable handoff across the rule-#6 boundary.
+
+**Tier 2 — make the claims checkable**
+
+- **Determinism test** for `blueprint` + `learn` — two independent renders over identical fixtures must be byte-identical (timestamp isolated as the only variable).
+- **`spine verify` referential coverage** extended to six orchestration-lifecycle families (teams, pipelines, plans, loops, coordinators, advisors) using the forward-compatible present-but-unknown WARN pattern; a full coverage map lives in `verify.mjs`.
+- **Hard-rule ↔ gate traceability** — new `docs/39-rule-gate-traceability.md` + a `rule-gate traceability` sub-check of `maddu audit` (mapping in `commands/audit.mjs` is the single source of truth). Rules 3 and 7 are documented as enforced-by-construction; the hard-rules.md Rule 7 overclaim (no such doctor gate existed) is corrected.
+- **Stress harness** grew to 15 scenarios — permanent coverage for torn trailing writes, rejected browser origins, and blueprint secret redaction.
+
+**Tier 3 + tightenings**
+
+- **Two-doc-tree guard surfaced** — the dormant `docs-in-sync` gate (it never ran in any normal flow) is now wired into `maddu audit`, and supports recorded intentional divergence via `docs/doc-sync-exceptions.json` (diff = decision, not accident).
+- **git-diff slice-scope** — `slice-stop` cross-checks the agent-reported `--targets`/`--paths` against the real `git diff` working tree, so an unreported out-of-scope edit is still caught by the slice-scope gate.
+- **`learn-corrections-coherent` gate** — every bullet in the machine-owned `maddu learn` block must trace to a `LEARN_CORRECTION_WRITTEN` spine event, catching hand-injected corrections.
+- **Hash-chain tamper-evidence** raised as an explicit charter decision (`docs/research/spine-tamper-evidence-proposal.md`) — **proposal only, no envelope change**, since it would alter the event shape.
+
+Verified: `maddu audit` 10/10 (was 8 — added rule-gate traceability + docs-in-sync), `spine verify` 0 fails/0 warns on the real spine, `doctor` green+info, stress harness 15/15, upgrade matrix 19/0, plus focused tests for every item above. New event type: `BRIDGE_ORIGIN_REJECTED` (150 → confirmed all reachable). Every change landed as its own reviewed slice on the spine.
+
 ## [v1.12.0] · 2026-06-09 · Project blueprint — `maddu blueprint`
 
 A new command that exports a single portable, agent-ready handoff of **how a whole project was built**, so you can carry it into a new (non-Máddu) repo and have an agent reproduce the operation as a **variable-driven** system. The inverse of `maddu learn`: `learn` distils corrections; `blueprint` distils the workflow. Fully deterministic (no LLM, no network).

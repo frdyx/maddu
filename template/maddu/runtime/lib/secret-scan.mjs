@@ -82,6 +82,39 @@ export function scanArgv(argv) {
   return null;
 }
 
+// Redact secrets from free TEXT (a generated blueprint / handoff that may embed
+// transcript turns or scanned product-repo content — e.g. an API key pasted
+// into a prompt, or a `.env` line read off disk). Reuses the SAME canonical
+// PATTERNS as scanArgv — one source of truth for "what a secret looks like" —
+// applied globally so every occurrence becomes `[REDACTED:<pattern_type>]`.
+// The matched value is replaced in place, NEVER returned.
+//
+// Returns { text, redactions } where redactions is a count keyed by
+// pattern_type. Deterministic (same input → same output), so callers that
+// assert determinism (e.g. the blueprint determinism test) stay stable.
+export function redactText(input) {
+  let text = typeof input === 'string' ? input : String(input ?? '');
+  const redactions = {};
+  const bump = (t) => { redactions[t] = (redactions[t] || 0) + 1; };
+
+  // High-entropy value adjacent to a sensitive key name FIRST: keep the key
+  // name + separator, redact only the value so the surrounding line stays
+  // readable. Running this before the prefix patterns means a value sitting
+  // after `aws_secret_access_key=` is scrubbed even though that prefix pattern
+  // matches only the key name.
+  const gHE = new RegExp(`(${SENSITIVE_KEY_NAMES}\\s*[=:]\\s*['"]?)([A-Za-z0-9+/=]{40,})`, 'ig');
+  text = text.replace(gHE, (_m, head) => {
+    bump('high-entropy-adjacent-to-secret-key');
+    return `${head}[REDACTED:high-entropy-adjacent-to-secret-key]`;
+  });
+
+  for (const { type, re } of PATTERNS) {
+    const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+    text = text.replace(g, () => { bump(type); return `[REDACTED:${type}]`; });
+  }
+  return { text, redactions };
+}
+
 // Operator override helpers. `--allow-secret` is a Máddu-level token —
 // stripped from argv before spawn so the underlying tool never sees it.
 export function hasAllowSecret(argv) {

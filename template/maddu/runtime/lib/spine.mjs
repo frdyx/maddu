@@ -9,9 +9,9 @@
 // IDs are timestamp + 6 hex chars. Monotonic enough for human reading;
 // total ordering comes from segment file index + line number.
 
-import { mkdir, readFile, readdir, stat, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, writeFile, appendFile, open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
 import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 
@@ -239,7 +239,15 @@ export const EVENT_TYPES = {
   // orient/handoff briefing persists its full original so dropped detail stays
   // retrievable via `maddu learn retrieve <briefingId>`.
   //   BRIEFING_CURATED: { briefingId, kind:'orient'|'handoff', originalRef, dropped }
-  BRIEFING_CURATED:           'BRIEFING_CURATED'
+  BRIEFING_CURATED:           'BRIEFING_CURATED',
+  // v1.13.0 (A3) — bridge loopback origin enforcement. The bridge serves the
+  // cockpit over 127.0.0.1; a malicious web page can reach it via DNS
+  // rebinding (resolving its own hostname to loopback) and drive endpoints
+  // that mutate the spine. The bridge rejects any request whose Host/Origin
+  // hostname is not loopback with 403, and records the rejection here (rate-
+  // limited per offending origin to avoid spine flooding). data:
+  //   { reason:'host'|'origin', host, origin, path, method }
+  BRIDGE_ORIGIN_REJECTED:     'BRIDGE_ORIGIN_REJECTED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
@@ -327,6 +335,48 @@ export async function ensureSpine(repoRoot) {
   return paths;
 }
 
+// ── Tamper-evidence: forward `prev_hash` chain (v1.14.0) ──
+//
+// Each event carries `prev_hash` = the SHA-256 of the EXACT stored line of the
+// immediately-preceding event (the literal NDJSON line, trailing CR stripped so
+// a CRLF-normalized copy verifies identically). Hashing the stored line — not a
+// re-serialization — sidesteps any canonical-JSON ambiguity: the bytes on disk
+// are the same on every machine. The genesis event (empty spine) carries
+// `prev_hash: null`. `maddu spine verify` recomputes the chain and flags the
+// first link that doesn't match (history altered, or an event inserted/removed).
+// Forward-only: events written before v1.14.0 have no `prev_hash`; the chain is
+// only checked from the first event that has one, so no migration is needed.
+// Both this writer and the verifier import `hashLine` so they can never drift.
+export function hashLine(line) {
+  return createHash('sha256').update(String(line).replace(/\r$/, ''), 'utf8').digest('hex');
+}
+
+// Return the exact stored text of the last non-empty event line across all
+// segments, or null for an empty spine. Tail-reads (≤64 KB) so the cost stays
+// flat regardless of segment size — a single event line is always well under
+// that, so the final complete line is captured even from a 10 MB segment.
+async function lastEventLine(paths) {
+  const segs = await listSegments(paths);
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const p = join(paths.events, segs[i]);
+    let st;
+    try { st = await stat(p); } catch { continue; }
+    if (st.size === 0) continue;
+    const readLen = Math.min(st.size, 65536);
+    const fh = await open(p, 'r');
+    try {
+      const buf = Buffer.alloc(readLen);
+      await fh.read(buf, 0, readLen, st.size - readLen);
+      const lines = buf.toString('utf8').split('\n').filter((l) => l.trim());
+      if (lines.length) return lines[lines.length - 1];
+    } finally { await fh.close(); }
+    // Pathological: a single line longer than 64 KB — fall back to a full read.
+    const lines = (await readFile(p, 'utf8')).split('\n').filter((l) => l.trim());
+    if (lines.length) return lines[lines.length - 1];
+  }
+  return null;
+}
+
 export async function append(repoRoot, { type, actor = null, lane = null, data = {}, triggered_by = null }) {
   if (!EVENT_TYPES[type]) {
     throw new Error(`unknown event type: ${type}`);
@@ -335,8 +385,41 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
   if (triggered_by) ev.triggered_by = triggered_by;
+  // Tamper-evidence (v1.14.0): link to the prior event by hashing its stored
+  // line. Computed before the append so it reflects the true predecessor;
+  // genesis (empty spine) → null.
+  const prevLine = await lastEventLine(paths);
+  ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
   const seg = await currentSegment(paths);
-  await appendFile(join(paths.events, seg), JSON.stringify(ev) + '\n');
+
+  // ── Concurrency + framing (A2 / hard rule #2) ──
+  //
+  // There IS a real concurrent-writer path: the long-lived bridge
+  // (runtime/server.js) and a short-lived CLI invocation (`maddu slice-stop`,
+  // `maddu doctor`, …) can both call append() against the same segment at the
+  // same instant. Máddu deliberately has no mutex (lane claims coordinate
+  // AGENTS, not spine bytes). The lock here is the OS: appendFile opens with
+  // flag 'a' (O_APPEND), and an O_APPEND write is positioned at EOF and is
+  // atomic for sizes under PIPE_BUF (4096 on Linux; Windows FILE_APPEND_DATA is
+  // atomic for appends too). A serialized event line is virtually always under
+  // that, so two concurrent appends never interleave bytes — they serialize
+  // into two whole lines. The flag is passed explicitly so this guarantee is
+  // not silently lost if someone later swaps in a positional write.
+  //
+  // Framing invariant: exactly ONE event per physical line. JSON.stringify
+  // escapes any embedded newline to "\\n", so a serialized event can never
+  // contain a raw LF — assert it, because the verifier's torn-trailing-line
+  // detection (and NDJSON itself) depends on one-event-per-line being absolute.
+  //
+  // Durability: we do NOT fsync per append (the spine IS the WAL — see
+  // docs/15-architecture.md). A crash between write() and the OS flushing can
+  // leave a truncated final line; that is detected, not auto-repaired, by
+  // `maddu spine verify` (issue kind `torn_trailing_line`).
+  const line = JSON.stringify(ev);
+  if (line.includes('\n')) {
+    throw new Error('spine.append: serialized event contains a raw newline — NDJSON framing invariant violated');
+  }
+  await appendFile(join(paths.events, seg), line + '\n', { flag: 'a' });
   return ev;
 }
 

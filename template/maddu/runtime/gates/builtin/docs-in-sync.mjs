@@ -46,6 +46,19 @@ async function listMarkdown(dir) {
     .sort();
 }
 
+// C1 (v1.13.0): optional recorded-divergence allowlist. The two trees default
+// to byte-equal, but a doc may legitimately differ (e.g. a root-only contributor
+// note). Listing it in docs/doc-sync-exceptions.json — `{ "divergent": {
+// "file.md": "why" } }` — makes the divergence a recorded DECISION: the gate
+// reports it but does not fail. An UNrecorded divergence still fails, so
+// accidental drift can never hide.
+async function readExceptions(repoRoot) {
+  try {
+    const parsed = JSON.parse(await readFile(join(repoRoot, 'docs', 'doc-sync-exceptions.json'), 'utf8'));
+    return (parsed && typeof parsed.divergent === 'object' && parsed.divergent) || {};
+  } catch { return {}; }
+}
+
 export default {
   id: 'docs-in-sync',
   label: 'docs in sync',
@@ -82,19 +95,29 @@ export default {
       if (hashText(a) !== hashText(b)) drifted.push(f);
     }
 
-    if (onlyInSource.length === 0 && onlyInTemplate.length === 0 && drifted.length === 0) {
-      return { ok: true, message: `${inBoth.length} doc file(s) in sync` };
+    // Partition divergence into RECORDED (intentional, allowlisted) vs
+    // ACCIDENTAL. Only accidental divergence fails the gate.
+    const exceptions = await readExceptions(ctx.repoRoot);
+    const allowed = (f) => Object.prototype.hasOwnProperty.call(exceptions, f);
+    const recorded = [...new Set([...drifted, ...onlyInSource, ...onlyInTemplate].filter(allowed))];
+    const accDrift = drifted.filter((f) => !allowed(f));
+    const accOnlySource = onlyInSource.filter((f) => !allowed(f));
+    const accOnlyTemplate = onlyInTemplate.filter((f) => !allowed(f));
+
+    if (accDrift.length === 0 && accOnlySource.length === 0 && accOnlyTemplate.length === 0) {
+      const note = recorded.length ? ` (${recorded.length} intentionally divergent, recorded in doc-sync-exceptions.json)` : '';
+      return { ok: true, message: `${inBoth.length} doc file(s) in sync${note}`, evidence: recorded.length ? { recorded } : undefined };
     }
 
     const problems = [];
-    if (onlyInSource.length) problems.push(`${onlyInSource.length} only in docs/`);
-    if (onlyInTemplate.length) problems.push(`${onlyInTemplate.length} only in template/maddu/docs/`);
-    if (drifted.length) problems.push(`${drifted.length} drifted`);
+    if (accOnlySource.length) problems.push(`${accOnlySource.length} only in docs/`);
+    if (accOnlyTemplate.length) problems.push(`${accOnlyTemplate.length} only in template/maddu/docs/`);
+    if (accDrift.length) problems.push(`${accDrift.length} drifted`);
 
     return {
       ok: false,
-      message: `docs out of sync: ${problems.join(', ')} — run \`cp docs/*.md template/maddu/docs/\` and commit`,
-      evidence: { onlyInSource, onlyInTemplate, drifted },
+      message: `docs out of sync: ${problems.join(', ')} — reconcile (\`cp docs/*.md template/maddu/docs/\`) or record the divergence in docs/doc-sync-exceptions.json`,
+      evidence: { onlyInSource: accOnlySource, onlyInTemplate: accOnlyTemplate, drifted: accDrift, recorded },
     };
   },
 };

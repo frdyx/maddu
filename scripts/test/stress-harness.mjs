@@ -293,6 +293,70 @@ async function malformedEventRecovery() {
   return { name, ok: allOk, duration };
 }
 
+// A2 (v1.13.0) — torn-trailing-line detection. A write interrupted mid-append
+// (crash, or a concurrent writer above the atomic-append size) leaves a final
+// physical line that is truncated JSON with NO terminating newline. `maddu
+// spine verify` must flag that DISTINCTLY from interior corruption: a torn
+// trailer is the only never-durably-committed event (safe to trim), whereas an
+// interior bad line is real mid-history data loss. This scenario asserts both
+// classes are reported under their own issue kinds.
+async function tornTrailingWrite() {
+  const name = 'torn-trailing-write';
+  const start = Date.now();
+  const { spine } = await loadSpine();
+  const verify = await import(pathToFileURL(join(LIB, 'verify.mjs')).href);
+  let allOk = true;
+
+  // ── Sub-case A: genuine torn trailer (no terminating newline). ──
+  const tmpA = await newTmp(name + '-torn');
+  try {
+    const sid = genId('ses');
+    await spine.append(tmpA, { type: 'SESSION_REGISTERED', actor: sid, data: { role: 'implementer' } });
+    for (let i = 0; i < 5; i++) await spine.append(tmpA, { type: 'SESSION_HEARTBEAT', actor: sid });
+    const segPath = join(tmpA, '.maddu', 'events', '000000000001.ndjson');
+    // Simulate a crash mid-append: partial JSON, NO trailing newline.
+    await appendFile(segPath, '{"v":1,"id":"evt_20260609180000_abc','utf8');
+
+    const res = await verify.verifySpine(tmpA);
+    const torn = res.issues.filter((i) => i.kind === 'torn_trailing_line');
+    const unparseable = res.issues.filter((i) => i.kind === 'unparseable');
+    allOk = ok(name, 'torn trailer flagged as torn_trailing_line', torn.length === 1, `got=${torn.length}`) && allOk;
+    allOk = ok(name, 'torn trailer NOT mislabeled unparseable', unparseable.length === 0, `got=${unparseable.length}`) && allOk;
+    allOk = ok(name, 'remediation message present (trim guidance)', /trim/i.test(torn[0]?.detail || '')) && allOk;
+    allOk = ok(name, 'torn trailer is the only FAIL', res.counts.FAIL === 1, `fails=${res.counts.FAIL}`) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception (torn sub-case)', false, err.message);
+  } finally {
+    await rm(tmpA, { recursive: true, force: true });
+  }
+
+  // ── Sub-case B: interior corruption stays `unparseable`, not torn. ──
+  const tmpB = await newTmp(name + '-interior');
+  try {
+    const sid = genId('ses');
+    await spine.append(tmpB, { type: 'SESSION_REGISTERED', actor: sid, data: { role: 'implementer' } });
+    const segPath = join(tmpB, '.maddu', 'events', '000000000001.ndjson');
+    // Interior bad line WITH a terminating newline, then a valid event after it
+    // (so the file ends in a properly-terminated line — not torn).
+    await appendFile(segPath, 'this is not json\n', 'utf8');
+    await spine.append(tmpB, { type: 'SESSION_HEARTBEAT', actor: sid });
+
+    const res = await verify.verifySpine(tmpB);
+    const torn = res.issues.filter((i) => i.kind === 'torn_trailing_line');
+    const unparseable = res.issues.filter((i) => i.kind === 'unparseable');
+    allOk = ok(name, 'interior bad line flagged unparseable', unparseable.length === 1, `got=${unparseable.length}`) && allOk;
+    allOk = ok(name, 'interior bad line NOT flagged torn', torn.length === 0, `got=${torn.length}`) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception (interior sub-case)', false, err.message);
+  } finally {
+    await rm(tmpB, { recursive: true, force: true });
+  }
+
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 async function suggestAmbiguous() {
   const name = 'suggest-ambiguous';
   const start = Date.now();
@@ -602,6 +666,77 @@ async function toolRefusalsCoherent() {
   return { name, ok: allOk, duration };
 }
 
+// A3 (v1.13.0) — bridge loopback-origin enforcement under the harness. A
+// browser-shaped request whose Host/Origin hostname is not loopback (DNS
+// rebinding) must be rejected 403 and recorded on the spine; legit loopback
+// traffic passes. Exercises enforceLoopbackOrigin directly (server.js boots
+// only when invoked as main, so importing it is side-effect-free).
+async function rejectedBrowserOrigin() {
+  const name = 'rejected-browser-origin';
+  const start = Date.now();
+  const tmp = await newTmp(name);
+  let allOk = true;
+  try {
+    const { enforceLoopbackOrigin } = await import(pathToFileURL(join(FRAMEWORK_ROOT, 'template', 'maddu', 'runtime', 'server.js')).href);
+    const { spine } = await loadSpine();
+    const ctx = { active: 'w', workspaces: new Map([['w', tmp]]) };
+    const mkRes = () => { const r = { code: null, ended: false }; r.writeHead = (s) => { r.code = s; }; r.end = () => { r.ended = true; }; return r; };
+    const mkReq = (h, o) => ({ headers: { ...(h ? { host: h } : {}), ...(o ? { origin: o } : {}) }, url: '/bridge/lanes/claim', method: 'POST' });
+
+    const accept = await enforceLoopbackOrigin(mkReq('127.0.0.1:4177'), mkRes(), ctx, '127.0.0.1');
+    allOk = ok(name, 'loopback Host accepted', accept === false) && allOk;
+
+    const r1 = mkRes();
+    const rejH = await enforceLoopbackOrigin(mkReq('evil.example:4177'), r1, ctx, '127.0.0.1');
+    allOk = ok(name, 'spoofed Host rejected 403', rejH === true && r1.code === 403) && allOk;
+
+    const r2 = mkRes();
+    const rejO = await enforceLoopbackOrigin(mkReq('127.0.0.1:4177', 'http://evil.example'), r2, ctx, '127.0.0.1');
+    allOk = ok(name, 'cross-origin rejected 403', rejO === true && r2.code === 403) && allOk;
+
+    const events = await spine.readAll(tmp);
+    const rej = events.filter((e) => e.type === 'BRIDGE_ORIGIN_REJECTED');
+    allOk = ok(name, 'BRIDGE_ORIGIN_REJECTED recorded on spine', rej.length >= 1, `count=${rej.length}`) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception', false, err.message);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
+// A4 (v1.13.0) — blueprint secret redaction under the harness. A planted
+// credential in a transcript prompt must be scrubbed from the portable
+// blueprint before it can cross the export boundary (hard rule #6).
+async function blueprintSecretRedaction() {
+  const name = 'blueprint-secret-redaction';
+  const start = Date.now();
+  let allOk = true;
+  try {
+    const scan = await import(pathToFileURL(join(LIB, 'secret-scan.mjs')).href);
+    const bp = await import(pathToFileURL(join(LIB, 'blueprint.mjs')).href);
+    const fakeAws = 'AKIAIOSFODNN7EXAMPLE';
+    const fakeAnt = 'sk-ant-api03-AAAABBBBCCCCDDDDEEEE';
+    const md = bp.renderBlueprint({
+      slug: 'stress', generatedAt: '2026-06-09T00:00:00.000Z',
+      prompts: [{ text: `Build it. keys: ${fakeAws} ${fakeAnt}`, ts: '2026-06-09T00:00:00.000Z' }],
+      actions: {}, problems: [], variables: [], products: [], relatedRepos: [],
+    });
+    allOk = ok(name, 'AWS key redacted from blueprint', !md.includes(fakeAws)) && allOk;
+    allOk = ok(name, 'Anthropic key redacted from blueprint', !md.includes(fakeAnt)) && allOk;
+    allOk = ok(name, 'redaction markers present', /\[REDACTED:/.test(md)) && allOk;
+    const { text } = scan.redactText('ghp_' + 'A'.repeat(36));
+    allOk = ok(name, 'redactText scrubs github token', /\[REDACTED:github-token\]/.test(text)) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception', false, err.message);
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 // --- runner ------------------------------------------------------------
 
 const SCENARIOS = {
@@ -611,6 +746,9 @@ const SCENARIOS = {
   'advisor-cannot-claim':     advisorCannotClaim,
   'large-spine-replay':       largeSpineReplay,
   'malformed-event-recovery': malformedEventRecovery,
+  'torn-trailing-write':      tornTrailingWrite,
+  'rejected-browser-origin':  rejectedBrowserOrigin,
+  'blueprint-secret-redaction': blueprintSecretRedaction,
   'suggest-ambiguous':        suggestAmbiguous,
   'upgrade-marker-collision': upgradeMarkerCollision,
   'tool-refusals-coherent':   toolRefusalsCoherent,

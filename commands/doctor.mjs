@@ -18,7 +18,7 @@
 //   --severity <level>   filter built-in + operator gates by severity
 //   --all                run gates per registered workspace
 
-import { stat } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createServer, request as httpRequest } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -30,6 +30,7 @@ const ANSI = {
   pass: '\x1b[32m',
   warn: '\x1b[33m',
   fail: '\x1b[31m',
+  info: '\x1b[36m',
   dim: '\x1b[2m',
   bold: '\x1b[1m',
   reset: '\x1b[0m'
@@ -39,7 +40,28 @@ function tag(level) {
   if (level === 'PASS') return `${ANSI.pass}PASS${ANSI.reset}`;
   if (level === 'WARN') return `${ANSI.warn}WARN${ANSI.reset}`;
   if (level === 'FAIL') return `${ANSI.fail}FAIL${ANSI.reset}`;
+  if (level === 'INFO') return `${ANSI.info}INFO${ANSI.reset}`;
   return level;
+}
+
+// A1 (v1.13.0): is this repo the Máddu framework *source* (a clone of
+// frdyx/maddu or the npm-extracted package), as opposed to a consumer
+// install produced by `maddu init`? The framework source has no
+// `maddu.json` install marker by design — it IS the framework, it was
+// never installed into anything. Detect it structurally so the
+// missing-marker check can be informational here without weakening the
+// real FAIL for a genuinely broken consumer install. Signals (all three):
+//   - package.json `name === "maddu"`
+//   - a `template/maddu/` source tree (only the source layout has this)
+//   - a `commands/` CLI handler dir at the root
+async function isFrameworkSourceRepo(repoRoot) {
+  try {
+    const pkg = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'));
+    if (pkg.name !== 'maddu') return false;
+  } catch { return false; }
+  if (!(await exists(join(repoRoot, 'template', 'maddu')))) return false;
+  if (!(await exists(join(repoRoot, 'commands')))) return false;
+  return true;
 }
 
 // v1.1.0 Phase 3 — print the current governance mode as a banner so
@@ -151,6 +173,20 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
 
   const madduJson = await readMadduJson(repoRoot);
   if (!madduJson) {
+    // A1: in the framework *source* repo the install marker is intentionally
+    // absent — this repo IS Máddu, it was never installed into anything.
+    // Downgrade to an explicit informational line so an operator/agent running
+    // doctor here doesn't read red-FAIL as breakage (and doesn't "fix" it by
+    // writing a bogus maddu.json into the framework root). A genuinely broken
+    // consumer install still FAILs below.
+    if (await isFrameworkSourceRepo(repoRoot)) {
+      checks.push({
+        level: 'INFO',
+        label: `${tagLabel}install marker`,
+        detail: 'framework source repo — install marker (maddu.json) intentionally absent; run inside a consumer install to verify install integrity.',
+      });
+      return checks;
+    }
     checks.push({ level: 'FAIL', label: `${tagLabel}maddu.json`, detail: `missing at ${repoRoot}` });
     return checks;
   }
@@ -366,10 +402,11 @@ export default async function doctor(argv) {
     console.log(`  ${tag(c.level)}  ${c.label}${ANSI.dim}  ${c.detail}${ANSI.reset}`);
   }
 
-  const counts = { PASS: 0, WARN: 0, FAIL: 0 };
+  const counts = { PASS: 0, WARN: 0, FAIL: 0, INFO: 0 };
   for (const c of checks) counts[c.level]++;
   console.log();
-  console.log(`  ${ANSI.bold}Summary:${ANSI.reset}  ${counts.PASS} pass · ${counts.WARN} warn · ${counts.FAIL} fail`);
+  const infoSuffix = counts.INFO > 0 ? ` · ${counts.INFO} info` : '';
+  console.log(`  ${ANSI.bold}Summary:${ANSI.reset}  ${counts.PASS} pass · ${counts.WARN} warn · ${counts.FAIL} fail${infoSuffix}`);
 
   // Append a DOCTOR_REPORT event to each repo's spine via the proper
   // spine.append API (generates a unique random id and respects segment

@@ -17,7 +17,7 @@ One compromised npm package on one developer's machine got access to
 ("local-first, files-only, no hosted backend, no provider SDKs in
 framework code, device-bound tokens") into enforced gates.
 
-## The 9 attack scenarios
+## The 10 attack scenarios
 
 Each scenario lists the attack, what Máddu enforces, what it does NOT
 enforce, and the concrete gate / spine event family that catches it
@@ -275,6 +275,46 @@ misread that as "lifts all gates."
 - The operator's mental model. Documentation (this doc, plus
   `docs/30-governance-tiers.md`) makes the strict/standard/relaxed
   distinction explicit.
+
+### 10. Malicious web page drives the bridge via DNS rebinding
+
+**Attack:** The operator visits `evil.com` in a browser while the
+bridge is running. The page's JavaScript points its own hostname at
+`127.0.0.1` (DNS rebinding) and issues `fetch()` calls to
+`http://127.0.0.1:4177/bridge/*` — including spine-mutating endpoints
+(lane claims, approvals, schedule edits). The browser, believing it is
+talking to `evil.com`, attaches no same-origin protection the bridge
+would otherwise get for free. This is the classic local-service-from-
+the-browser attack and squarely inside the "least-trust shell around
+the operator's machine" remit.
+
+**Máddu enforcement (v1.13.0):**
+
+- `enforceLoopbackOrigin` in `runtime/server.js` runs **before any
+  routing**. It rejects a request when the `Host` header's hostname —
+  or the `Origin` header's hostname, when an `Origin` is present — is
+  not loopback (`127.0.0.1` / `localhost` / `::1`, or the explicitly
+  bound host). A browser **cannot forge the `Host` hostname**: a page
+  served from `evil.com` always sends `Host: evil.com`, even after a
+  DNS rebind, so it never satisfies the loopback check.
+- Rejection returns `403 {"error":"forbidden_origin","reason":"host"|"origin"}`
+  and appends a `BRIDGE_ORIGIN_REJECTED` event (`{reason, host, origin,
+  path, method}`) to the active workspace spine — rate-limited per
+  offending origin (10 s) so a flood of hostile requests cannot balloon
+  the spine.
+- Stdlib header checks only — zero new dependencies, no proxy, every
+  hard rule respected.
+
+**Máddu does NOT enforce:**
+
+- A non-browser process on the machine talking to the bridge. Requests
+  with no `Host` header (curl, the CLI probe) are allowed by design —
+  the threat is specifically the *browser*, which always sends `Host`.
+  Process-level isolation is the OS's job (see *Integration with
+  OS-level defenses*).
+- The operator deliberately binding the bridge to a non-loopback
+  interface. That hostname is then accepted; exposing the bridge to a
+  network is an explicit operator choice outside the rebinding model.
 
 ## Operator responsibilities
 

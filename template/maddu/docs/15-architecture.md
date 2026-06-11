@@ -139,12 +139,31 @@ Every transition is one event on the spine. Replay the events and you can recons
 
 `maddu start` after an unclean shutdown is safe:
 
-- Spine is append-only and fsynced — no corruption from a kill -9.
+- Spine is append-only; a `kill -9` can leave at most a single **torn final line** (a write interrupted before the OS flushed it). That is detected — not auto-repaired — by `maddu spine verify` (see *Concurrency and durability* below).
 - Projections rebuild on first read.
 - Active sessions and claims remain in the spine; the bridge reads them on boot.
 - A `FRAMEWORK_BOOTED` event is appended.
 
 The only state that can be "lost" across a restart is an in-flight HTTP response. Clients that poll (long-poll, repeated GETs) recover automatically.
+
+## Concurrency and durability
+
+The spine is the one authoritative artifact (hard rule #2), so its append path has to survive two failure classes the lane model does **not** cover: two processes appending at the same instant, and a crash mid-write.
+
+**Who writes.** There is a real concurrent-writer path. The long-lived **bridge** (`runtime/server.js`) and any short-lived **CLI** invocation (`maddu slice-stop`, `maddu doctor`, a scheduled trigger) both call `spine.append()` against the same current segment. Máddu deliberately has no mutex — *lane claims coordinate agents, not spine bytes*.
+
+**The lock is the OS.** `append()` opens the segment with flag `'a'` (`O_APPEND`). An `O_APPEND` write is positioned at end-of-file and is **atomic** for sizes under `PIPE_BUF` (4096 bytes on Linux; Windows `FILE_APPEND_DATA` is likewise atomic for appends). A serialized event line is virtually always under that, so two concurrent appends never interleave bytes — they serialize into two whole lines. The flag is passed explicitly in `append()` so this guarantee can't be silently lost by a later switch to a positional write. A **framing invariant** backs it up: exactly one event per physical line. `JSON.stringify` escapes any embedded newline to `\n`, and `append()` asserts the serialized line contains no raw `LF` before writing — so the one-event-per-line property the verifier depends on is absolute. (The only residual risk is an event serialized larger than `PIPE_BUF` racing another writer; in practice events are well under it, and the torn-line check below catches any interleave that did occur.)
+
+**Durability is deliberately best-effort.** `append()` does **not** `fsync` per write — the spine *is* the WAL (see *What's deliberately absent*), and forcing a disk flush on every event would trade the framework's whole-machine throughput for a guarantee the verifier already provides at read time. A crash between `write()` and the OS flushing its buffers can therefore leave a **truncated final line**.
+
+**Torn line ≠ interior corruption.** `maddu spine verify` distinguishes the two:
+
+- `torn_trailing_line` — the last physical line of the last segment is unterminated (no trailing newline) and unparseable. This is the signature of an interrupted append: the event was *never durably committed*, and the operator can safely trim that one partial line. The verifier prints the remediation inline.
+- `unparseable` — a bad line anywhere else means real mid-history data loss, a different and more serious condition.
+
+Both are `FAIL`. The verifier is strictly read-only: it reports, it **never auto-repairs** (hard rule #2). The operator trims the torn trailer (or rolls back to a checkpoint for interior damage), then records a `slice-stop`.
+
+**Tamper-evidence (v1.14.0).** Parseability and referential checks catch *damage*, but not a *consistent* rewrite — edit an interior event so it stays valid JSON and the old verifier stayed green. So each event now carries a forward **`prev_hash`**: the SHA-256 of the immediately-preceding event's stored line (the literal NDJSON bytes, so a copy on any machine recomputes the same hash — no canonical-JSON ambiguity). `spine verify` recomputes the chain and flags the first link that doesn't match (`chain_broken`), pinpointing where history was altered or an event inserted/removed. It is **forward-only** — events written before v1.14.0 have no `prev_hash` and are skipped, so no migration is needed and old spines keep verifying. Because the append path has no mutex (lane claims coordinate agents, not bytes), a rare concurrent append can also fork the chain — so `chain_broken` is a `WARN` the operator adjudicates (tamper vs. concurrency), never an auto-repair. This makes the spine tamper-**evident**, independent of whether it lives in git.
 
 ## What's deliberately absent
 

@@ -13,10 +13,47 @@
 // Read-only. Never mutates the spine. Operator decides how to address
 // flagged issues (manual edit + slice-stop, checkpoint rollback, etc.).
 
+// ── Referential coverage map (B2, v1.13.0) ──
+// Every event type either HAS a referential rule below or is intentionally
+// unconstrained. Keep this honest as the vocabulary grows.
+//
+// CHECKED — child must resolve to a prior anchor (severity in parens):
+//   APPROVAL_DECIDED                         → APPROVAL_REQUESTED                 (FAIL)
+//   SESSION_{HEARTBEAT,CLOSED,AUTO_CLOSED,STALE_DETECTED} → SESSION_REGISTERED/AUTO_REGISTERED (FAIL/WARN)
+//   SESSION_{REGISTERED,AUTO_REGISTERED}.parentSessionId  → prior session        (FAIL)
+//   LANE_RELEASED                            → LANE_CLAIMED                       (FAIL)
+//   TASK_{UPDATED,COMPLETED}                 → TASK_CREATED                       (FAIL)
+//   WORKER_{HEARTBEAT,EXITED,KILLED}         → WORKER_SPAWNED                     (WARN)
+//   SCHEDULE_FIRED                           → live SCHEDULE_CREATED              (WARN)
+//   SLICE_REVIEWED                           → SLICE_STOP                         (FAIL)
+//   SLICE_SCOPE_EXPANDED / SLICE_FUNCTIONAL_APPROVED → SLICE_SCOPE_DECLARED       (FAIL)
+//   PENDING_ACTION_DRAINED                   → PENDING_ACTION_ENQUEUED            (FAIL)
+//   FOLLOWUP_OPENED                          → SLICE_REVIEWED                     (FAIL)
+//   TEAM_{LANE_ALLOCATED,MEMBER_JOINED,MEMBER_LEFT,CLOSED}        → TEAM_OPENED         (WARN) [B2]
+//   PIPELINE_{STAGE_ENTERED,STAGE_EXITED,COMPLETED,HALTED}        → PIPELINE_STARTED    (WARN) [B2]
+//   PLAN_{PHASE_ADDED,PHASE_COMPLETED,PHASE_BLOCKED,REVISED,COMPLETED,CANCELLED} → PLAN_CREATED (WARN) [B2]
+//   LOOP_{ITERATION_STARTED,ITERATION_COMPLETED,HALTED,COMPLETED} → LOOP_STARTED        (WARN) [B2]
+//   COORDINATOR_{PHASE_STARTED,PHASE_COMPLETED,HALTED,COMPLETED}  → COORDINATOR_STARTED (WARN) [B2]
+//   ADVISOR_ARTIFACT_WRITTEN                 → ADVISOR_INVOKED                    (WARN) [B2]
+//
+// INTENTIONALLY UNCONSTRAINED — no parent-anchor invariant; flagging would be
+// over-constraining (the "create" may legitimately predate an export/replay
+// window, or the event is a standalone record):
+//   * remove/disable/rotate lifecycle: TRUST_PIN_REMOVED, MCP_*, AUTH_KEY_*,
+//     SKILL_{UPDATED,DELETED,APPLIED,TRUSTED}, SKILL_CANDIDATE_{APPROVED,REJECTED},
+//     CHECKPOINT_{REMOVED,ROLLBACK_REQUESTED,WORKTREE_CREATED}, *_{DISABLED,ALLOWLIST_SET}.
+//   * standalone records: DOCTOR_REPORT, AUDIT_REPORT, GATE_RAN, TRIGGER_FIRED,
+//     GOVERNANCE_MODE_CHANGED, TOKEN_USAGE_REPORTED, INBOX_MESSAGE, MAILBOX_*,
+//     IMPORT_*, PROPOSAL_*, BOSS_MESSAGE, HANDOFF_SET, BRIEFING_CURATED,
+//     GOAL_DECLARED, PHASE_DECLARED, SLASH_COMMANDS_SYNCED, AGENT_FILE_SYNCED,
+//     SECRET_DETECTED_IN_ARGV, TOOL_{INVOKED,COMPLETED,REFUSED}, WORKER_ENV_FILTERED,
+//     BRIDGE_ORIGIN_REJECTED, LEARN_*, SOURCE_HASH_RECOMPUTED.
+//   * MEMORY_FACT_SUPERSEDED.supersedes is validated by hindsight's replay, not here.
+
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
-import { EVENT_TYPES } from './spine.mjs';
+import { EVENT_TYPES, hashLine } from './spine.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -96,7 +133,23 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   const sliceStopIds = new Set();        // SLICE_STOP.id (Phase 5)
   // (lane, sessionId) → "claimed" / "released". Used to verify LANE_RELEASED has a prior LANE_CLAIMED.
   const laneClaims = new Map();
+  // B2 (v1.13.0) — orchestration-lifecycle anchors. Each family's child events
+  // carry the parent id; a child whose parent was never opened is an orphan,
+  // exactly like the TASK / WORKER / SCHEDULE checks above. WARN (not FAIL):
+  // these are higher-level coordination heads-up, and the field is checked only
+  // when PRESENT so old/forward-compat events without it are never flagged.
+  const openedTeams = new Set();          // TEAM_OPENED.data.teamId
+  const startedPipelines = new Set();     // PIPELINE_STARTED.data.pipelineRunId
+  const createdPlans = new Set();         // PLAN_CREATED.data.planId
+  const startedLoops = new Set();         // LOOP_STARTED.data.loopId
+  const startedCoordinators = new Set();  // COORDINATOR_STARTED.data.coordinatorId
+  const invokedAdvisors = new Set();      // ADVISOR_INVOKED.data.advisorId
   let installedAt = null;                // FRAMEWORK_INSTALLED.ts — lower bound for ts sanity
+  // v1.14.0 forward `prev_hash` chain. prevLineHash spans segments (the chain is
+  // continuous across rolls). chainStarted flips true at the first event that
+  // carries prev_hash — everything before it is pre-v1.14.0 legacy and unchecked.
+  let prevLineHash = null;
+  let chainStarted = false;
 
   outer:
   for (const segName of segs) {
@@ -109,6 +162,17 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
     try { st = await stat(abs); } catch { st = { size: text.length }; }
 
     const lines = text.split('\n');
+    // A2: torn-trailing-line detection. A well-formed segment always ends each
+    // event with '\n', so a complete file ends in a newline and split() yields
+    // a final empty element. A file whose last physical line is non-empty (no
+    // terminating newline) is the classic signature of a write interrupted
+    // mid-append — a crash, or a concurrent writer whose line exceeded the
+    // atomic-append threshold. That is a DIFFERENT failure class from a corrupt
+    // interior line (which means real data loss in the middle of history): the
+    // torn trailer is the only event never durably committed, and the operator
+    // can safely trim it. We flag it distinctly so the remediation differs.
+    const isLastSegment = segName === segs[segs.length - 1];
+    const fileEndsWithNewline = text.endsWith('\n');
     let evCount = 0;
     let firstTs = null;
     let lastTs = null;
@@ -119,19 +183,49 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
       if (!line.trim()) continue;
       const lineNo = i + 1;
 
+      // Chain-integrity bookkeeping (v1.14.0): hash this stored line and capture
+      // the previous line's hash, then advance — so every early `continue` below
+      // still carries the chain forward correctly.
+      const thisPrev = prevLineHash;
+      prevLineHash = hashLine(line);
+
       // ─── Parseability ───
       let ev;
       try { ev = JSON.parse(line); }
       catch (err) {
-        push(issue('FAIL', 'unparseable',
-          `${segName}:${lineNo}: ${err.message}`,
-          { segment: segName, line: lineNo }));
+        const isTornTrailer = isLastSegment && !fileEndsWithNewline && i === lines.length - 1;
+        if (isTornTrailer) {
+          push(issue('FAIL', 'torn_trailing_line',
+            `${segName}:${lineNo}: trailing line is truncated/unterminated JSON — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event was never durably committed. Remediation: manually trim the final partial line, then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
+            { segment: segName, line: lineNo }));
+        } else {
+          push(issue('FAIL', 'unparseable',
+            `${segName}:${lineNo}: ${err.message}`,
+            { segment: segName, line: lineNo }));
+        }
         continue;
       }
       if (!ev || typeof ev !== 'object') {
         push(issue('FAIL', 'non_object', `${segName}:${lineNo}: line is not a JSON object`,
           { segment: segName, line: lineNo }));
         continue;
+      }
+
+      // ─── Chain integrity (v1.14.0, forward-only prev_hash) ───
+      // WARN, not FAIL: a mismatch is the tamper signal, but the no-mutex
+      // append path means a rare concurrent write can also fork the chain — so
+      // the verifier reports it and the operator decides (never auto-repaired).
+      if ('prev_hash' in ev) {
+        if (ev.prev_hash !== thisPrev) {
+          push(issue('WARN', 'chain_broken',
+            `${ev.id}: prev_hash does not match the preceding event's stored-line hash — history altered, an event inserted/removed, or a concurrent append forked the chain`,
+            { segment: segName, line: lineNo, eventId: ev.id }));
+        }
+        chainStarted = true;
+      } else if (chainStarted) {
+        push(issue('WARN', 'chain_gap',
+          `${ev.id}: event lacks prev_hash after the chain began (a pre-v1.14.0 writer or a hand edit)`,
+          { segment: segName, line: lineNo, eventId: ev.id }));
       }
 
       // ─── Envelope ───
@@ -472,6 +566,102 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           } else if (!reviewedSlices.has(reviewId)) {
             push(issue('FAIL', 'orphan_followup_opened',
               `${ev.id}: FOLLOWUP_OPENED references unknown SLICE_REVIEWED ${reviewId}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        // ── B2: orchestration-lifecycle referential checks (WARN) ──
+        case 'TEAM_OPENED':
+          if (ev.data?.teamId) openedTeams.add(ev.data.teamId);
+          break;
+        case 'TEAM_LANE_ALLOCATED':
+        case 'TEAM_MEMBER_JOINED':
+        case 'TEAM_MEMBER_LEFT':
+        case 'TEAM_CLOSED': {
+          const tid = ev.data?.teamId;
+          if (tid && !openedTeams.has(tid)) {
+            push(issue('WARN', 'orphan_team_event',
+              `${ev.id}: ${ev.type} references unknown team ${tid} (no prior TEAM_OPENED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'PIPELINE_STARTED':
+          if (ev.data?.pipelineRunId) startedPipelines.add(ev.data.pipelineRunId);
+          break;
+        case 'PIPELINE_STAGE_ENTERED':
+        case 'PIPELINE_STAGE_EXITED':
+        case 'PIPELINE_COMPLETED':
+        case 'PIPELINE_HALTED': {
+          const pid = ev.data?.pipelineRunId;
+          if (pid && !startedPipelines.has(pid)) {
+            push(issue('WARN', 'orphan_pipeline_event',
+              `${ev.id}: ${ev.type} references unknown pipeline ${pid} (no prior PIPELINE_STARTED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'PLAN_CREATED':
+          if (ev.data?.planId) createdPlans.add(ev.data.planId);
+          break;
+        case 'PLAN_PHASE_ADDED':
+        case 'PLAN_PHASE_COMPLETED':
+        case 'PLAN_PHASE_BLOCKED':
+        case 'PLAN_REVISED':
+        case 'PLAN_COMPLETED':
+        case 'PLAN_CANCELLED': {
+          const pid = ev.data?.planId;
+          if (pid && !createdPlans.has(pid)) {
+            push(issue('WARN', 'orphan_plan_event',
+              `${ev.id}: ${ev.type} references unknown plan ${pid} (no prior PLAN_CREATED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'LOOP_STARTED':
+          if (ev.data?.loopId) startedLoops.add(ev.data.loopId);
+          break;
+        case 'LOOP_ITERATION_STARTED':
+        case 'LOOP_ITERATION_COMPLETED':
+        case 'LOOP_HALTED':
+        case 'LOOP_COMPLETED': {
+          const lid = ev.data?.loopId;
+          if (lid && !startedLoops.has(lid)) {
+            push(issue('WARN', 'orphan_loop_event',
+              `${ev.id}: ${ev.type} references unknown loop ${lid} (no prior LOOP_STARTED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'COORDINATOR_STARTED':
+          if (ev.data?.coordinatorId) startedCoordinators.add(ev.data.coordinatorId);
+          break;
+        case 'COORDINATOR_PHASE_STARTED':
+        case 'COORDINATOR_PHASE_COMPLETED':
+        case 'COORDINATOR_HALTED':
+        case 'COORDINATOR_COMPLETED': {
+          const cid = ev.data?.coordinatorId;
+          if (cid && !startedCoordinators.has(cid)) {
+            push(issue('WARN', 'orphan_coordinator_event',
+              `${ev.id}: ${ev.type} references unknown coordinator ${cid} (no prior COORDINATOR_STARTED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'ADVISOR_INVOKED':
+          if (ev.data?.advisorId) invokedAdvisors.add(ev.data.advisorId);
+          break;
+        case 'ADVISOR_ARTIFACT_WRITTEN': {
+          const aid = ev.data?.advisorId;
+          if (aid && !invokedAdvisors.has(aid)) {
+            push(issue('WARN', 'orphan_advisor_event',
+              `${ev.id}: ADVISOR_ARTIFACT_WRITTEN references unknown advisor ${aid} (no prior ADVISOR_INVOKED)`,
               { segment: segName, line: lineNo, eventId: ev.id }));
           }
           break;

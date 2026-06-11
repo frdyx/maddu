@@ -7,7 +7,8 @@ The bridge is a Node HTTP server in `maddu/runtime/server.js`. It binds to `127.
 - All responses are `application/json; charset=utf-8` with `cache-control: no-store` unless they are static cockpit assets.
 - Request bodies are JSON, up to 1 MB.
 - Errors return `{"error": "<message>", ...}` with a 4xx status.
-- No auth tokens are required in v0.3 — the bridge is bound to `127.0.0.1` and trusts the local OS. CORS is not configured; the cockpit is served from the same origin.
+- No auth tokens are required — the bridge is bound to `127.0.0.1` and trusts the local OS. CORS is not configured; the cockpit is served from the same origin.
+- **Loopback-origin enforcement (v1.13.0, DNS-rebinding defense).** Before any routing, the bridge rejects requests whose `Host` hostname — or `Origin` hostname, when an `Origin` header is present — is not loopback (`127.0.0.1` / `localhost` / `::1`, or the explicitly bound host). Rejected requests get `403 {"error":"forbidden_origin","reason":"host"|"origin"}` and append a rate-limited `BRIDGE_ORIGIN_REJECTED` event to the active workspace spine. A browser cannot forge the `Host` hostname, so a page served from another origin (even one that rebinds its DNS to `127.0.0.1`) can never drive these endpoints. Non-browser clients that send no `Host` header (curl, the CLI health probe) are unaffected. See [34-threat-model.md](34-threat-model.md) scenario 10.
 
 ## Status / health
 
