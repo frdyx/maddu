@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.14.0](https://img.shields.io/badge/version-1.14.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.15.0](https://img.shields.io/badge/version-1.15.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -24,17 +24,19 @@ npx github:frdyx/maddu init
 
 ---
 
-## What's new in v1.14.0
+## What it is
 
-**Spine tamper-evidence — forward `prev_hash` chain.** The spine's core claim moves from *legible* to *tamper-**evident***. Parseability and referential checks catch damage, but a *consistent* interior rewrite — flip an `APPROVAL_DECIDED` from deny→allow, leaving valid JSON — used to slip past `spine verify`. Now every event carries a `prev_hash` (SHA-256 of the preceding event's stored line), and `spine verify` recomputes the chain and pinpoints the first altered link. Pure stdlib, no dependency, every line still `cat`-able, never auto-repaired. Forward-only — old spines keep verifying and adopt the chain on their next append.
+Three moving parts, and nothing else:
 
-Just prior, **v1.13.0** was a **robustness-hardening** pass (torn-line detection, bridge DNS-rebinding defense, blueprint secret-scan, hard-rule↔gate traceability, `maddu audit` now 10 checks); **v1.12.0** added **`maddu blueprint`** (portable variable-driven project handoff); **v1.9.0** added **failure learning** (`maddu learn`). See [the changelog](CHANGELOG.md).
+- **The spine** — `.maddu/events/*.ndjson`, an append-only event log. It is the single source of truth. Every approval, session boundary, lane claim, and slice of work is one line. It replays deterministically on any machine.
+- **The bridge** — one Node process on `127.0.0.1:4177`. It serves the cockpit over loopback, runs the gates, and spawns agent subprocess workers with credentials handed in at spawn-time. It imports zero provider SDKs.
+- **The cockpit** — a static HTML+JS page the bridge serves. A read-only window onto the spine and its projections: watch and replay what your agents did.
 
-## Zero learning curve (v0.18)
+Everything under `.maddu/state/` is a *projection* — rebuildable from the spine, discarded on conflict. The spine always wins. There is no `maddu spine repair`, by design: corruption surfaces by name with file-and-line precision, and the operator decides remediation.
 
-Inside Claude Code or Codex CLI, type a slash command — or just
-natural language. Máddu picks the right action and tells you which
-one. The verbose CLI stays first-class for scripts and CI.
+## The operator surface
+
+Inside Claude Code or Codex CLI, type a slash command — or just natural language. Máddu picks the right action and tells you which one. The verbose CLI stays first-class for scripts and CI.
 
 | Slash command | What it does |
 |---|---|
@@ -56,20 +58,15 @@ one. The verbose CLI stays first-class for scripts and CI.
 | `/maddu-orient` | Session-start briefing: goal + success-progress + curated handoff. |
 | `/maddu-handoff <set\|show>` | Curate the cross-session "▶ RESUME HERE" handoff. |
 | `/maddu-learn [run\|digest]` | Mine past sessions for failed→succeeded tool calls; distil project corrections. |
+| `/maddu-blueprint` | Export how a project was built as a portable, variable-driven handoff. |
 
-Or just type *"ship the login form"*, *"status"*, *"tokens"*. The
-agent classifies the intent from `MADDU.md` and dispatches the
-matching slash command. Full reference:
-[22-slash-commands.md](docs/22-slash-commands.md) +
-[23-natural-language-routing.md](docs/23-natural-language-routing.md).
-
----
+Or just type *"ship the login form"*, *"status"*, *"tokens"*. The agent classifies the intent from `MADDU.md` and dispatches the matching slash command. Full reference: [22-slash-commands.md](docs/22-slash-commands.md) + [23-natural-language-routing.md](docs/23-natural-language-routing.md).
 
 ## 60-second tour
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.14.0 installed.
+Máddu v1.15.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -78,23 +75,15 @@ Next step: open this repo in Claude Code or Codex CLI and type:
   /maddu-autopilot <task>    # end-to-end task pipeline
 ```
 
-That's the operator surface: slash commands. No flags to memorize, no
-CLI verb to recall — type a slash command (or just natural language —
-"ship the login form") and the agent dispatches the right thing and
-tells you which. For any non-trivial feature or fix the agent reaches
-for a pipeline by default — `maddu pipeline run ship-a-feature "<goal>"`
-(also `fix-a-bug`, `plan-and-delegate`); `/maddu-autopilot` stays for
-genuine one-offs. See [`docs/charter.md`](docs/charter.md) for the one
-canonical flow.
+That's the operator surface: slash commands. No flags to memorize, no CLI verb to recall — type a slash command (or just natural language, "ship the login form") and the agent dispatches the right thing and tells you which. For any non-trivial feature or fix the agent reaches for a pipeline by default — `maddu pipeline run ship-a-feature "<goal>"` (also `fix-a-bug`, `plan-and-delegate`); `/maddu-autopilot` stays for genuine one-offs. See [`docs/charter.md`](docs/charter.md) for the one canonical flow.
 
 ### Power users / scripts
 
-The verbose CLI is always available — it's what the slash commands
-themselves dispatch under the hood:
+The verbose CLI is always available — it's what the slash commands themselves dispatch under the hood:
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.14.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.15.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
@@ -138,6 +127,22 @@ The bridge is one Node process bound to `127.0.0.1:4177`. The spine is `.maddu/e
 
 *Every event you'll ever debug is one line in this file.*
 
+## What Máddu does
+
+Six benefits (next section) explain *why* the spine is shaped the way it is. This is *what you actually run on top of it* — the command surface, grouped by the job. Every verb is a real `maddu` subcommand and every step lands as an event on the spine.
+
+**Orchestrate the work.** Register a session, claim a lane, and a slice is yours to edit; `slice-stop` seals it with a structured summary that feeds hindsight. For anything non-trivial the default isn't an ad-hoc agent run — it's a **pipeline** (`maddu pipeline run ship-a-feature "<goal>"`, plus `fix-a-bug` and `plan-and-delegate`) that walks the one canonical flow: orient → plan → coordinate → slice → test → review → land → account. `maddu plan` is kanban-backed and auto-revising; `maddu goal`/`maddu phase` anchor it; `maddu coordinator` and `maddu team` fan work out across disjoint lanes so two agents never write the same files.
+
+**Govern it.** `maddu doctor` is a fan-out gate runner over framework built-ins plus operator gates you drop at `.maddu/gates/*.mjs`; each gate emits a `GATE_RAN` event. An optional **scope-lock** (`maddu slice scope-declare`) refuses out-of-scope edits before a slice can stop, with a bounded `scope-expand`. And the **trigger gauntlet** (permanent hard rule #9) means no mutating command auto-fires without a declared tier, an allowlist entry, a respected cooldown, and a `TRIGGER_FIRED` event carrying its provenance — automation never happens off the record.
+
+**Trust and audit it.** `maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, torn-trailing-line detection, referential integrity across the event-type relationships (including the orchestration families — teams, pipelines, plans, loops, coordinators, advisors), and — since v1.14.0 — a forward `prev_hash` **tamper-evidence chain** that pinpoints the first altered line if interior history is consistently rewritten. `maddu doctor` runs the same check on every invocation. There is no auto-repair: the verifier reports, the operator decides.
+
+**Work across every repo.** `maddu workspace add` registers a repo; one bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per request, and `/bridge/_all/*` fans out reads across all mounts. Each repo's spine stays its own source of truth.
+
+**Learn and hand off.** `maddu learn` mines past Claude Code transcripts for failed→succeeded tool-call pairs, has a spawned worker judge them, and writes typed corrections to two event-sourced destinations (a marker block in the project `CLAUDE.md` and `kind:'correction'` memory facts) — so the next agent stops repeating this project's mistakes. `maddu blueprint` is the inverse: it distils *how a whole project was built* into one portable, variable-driven handoff (intake schema + procedure + problems&fixes + a pointer to the real product repo), optionally polished into prose with `--distill`. `maddu orient` and `maddu handoff` keep the cross-session "resume here" briefing curated and never empty.
+
+Full agent contract → [`MADDU.md`](template/maddu/agent-files/MADDU.md) (dropped at your repo root on `init`) · governance reference → [docs/20-governance.md](docs/20-governance.md) · agent onboarding → [docs/21-agent-onboarding.md](docs/21-agent-onboarding.md).
+
 ## Why Máddu
 
 Six design choices, and what each one lets you do that you couldn't before.
@@ -162,7 +167,7 @@ The spine wins over any projection — audit immutability is operator-provable, 
 
 Spine corruption surfaces immediately, by name, with file and line precision.
 
-`maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, and referential integrity across eight event-type relationships; `maddu doctor` runs the same check on every invocation up to a 50k event cap.
+`maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, referential integrity, torn-line detection, and a forward `prev_hash` tamper-evidence chain; `maddu doctor` runs the same check on every invocation up to a 50k event cap.
 
 No `maddu spine repair` exists by design — the operator reads the failure and decides remediation. Verifiable, not just declared.
 
@@ -190,56 +195,21 @@ The bridge and cockpit import nothing from `anthropic`, `openai`, or `@google/ge
 
 Máddu spawns no models, stores no secrets, calls no clouds — supply-chain integrity holds, and your credentials never traverse a remote service.
 
-## Agent-native bootstrap · v0.17
+## The 8+1 hard rules
 
-*Closes the loop opened by v0.16: every governance surface is contingent on agents being participants in the spine. v0.16 built the surfaces; v0.17 puts the agents on the spine **by default**.*
-
-**One canonical brief at repo root.** `maddu init` drops `MADDU.md` (the full agent contract), plus marker-delimited stanzas in `CLAUDE.md` and `AGENTS.md` that point at it. Marker discipline (`<!-- BEGIN MADDU v1 -->` / `<!-- END MADDU v1 -->`) means project content outside the markers is never touched. Any LLM CLI reading a root-level agent file learns Máddu on first turn.
-
-**Zero-keystroke session register.** `maddu register` (vs. the longer `session register --role … --label … --focus …`). Idempotent: re-running in the same shell with `MADDU_SESSION_ID` set returns the cached id instead of duplicating. The agent's mandatory first command of every turn.
-
-**Tree provenance for fan-out.** A parent terminal that spawns N sub-agents now produces N distinct sessions, each linking back via `parentSessionId`. `maddu session tree` shows the tree; the cockpit's Orientation route renders it live. Runtime descriptors gain `autoRegister: true` — the bridge registers a fresh child session per `spawnWorker` call.
-
-**Self-cleaning sessions.** A stale-session janitor runs inline on every `/bridge/projection` read (no daemon, no new timer thread). Default 30 min stale → `SESSION_STALE_DETECTED`; 4 hr → `SESSION_AUTO_CLOSED` (allowlisted-mutating per hard rule #9). Thresholds configurable via `.maddu/config/janitor.json`.
-
-**Agents read their context with one command.** `maddu brief --for-agent` (text) and `GET /bridge/agent-context` (JSON) return everything an agent needs to bootstrap: goal, phase, active session, open follow-ups, lane catalog, recent slice-stops, three first-commands. `MADDU.md` tells agents to call this at every turn start.
-
-**Sessions panel in the cockpit.** `#orientation` now shows the live session tree alongside goal/phase/follow-ups. Stale-session count surfaces in the same view. Janitor activity is visible.
-
-Full reference → [docs/21-agent-onboarding.md](docs/21-agent-onboarding.md). What changes when you upgrade → [CHANGELOG v0.17.0](CHANGELOG.md).
-
-## The governance layer · v0.16
-
-*Six opt-in surfaces an agent picks up over the substrate above. A repo that ignores `.maddu/config/` and `.maddu/gates/` behaves exactly as v0.15 — adoption is per-feature, none of it mandatory.*
-
-**Turn-start orientation.** `maddu brief` prints goal, phase, active session, last slice-stop, counters, open follow-ups, plus the rendered handoff from the most recent slice — and writes deterministic projections to `.maddu/state/orientation.json` + `.maddu/state/handoff.md`. Same spine in, same bytes out. Set goal/phase with `maddu goal set` / `maddu phase set`.
-
-**Extensible gate runner.** `maddu doctor` is now a fan-out runner over framework-shipped built-in gates plus operator gates dropped at `.maddu/gates/*.mjs`. Each gate exports `{id, severity, run(ctx)}` and emits a `GATE_RAN` event per invocation. Includes a `tracked-source-drift` gate driven by `.maddu/config/tracked-sources.json` — pin your SSOT files, `maddu sources rebuild` snapshots their hashes, doctor fails on drift.
-
-**Optional slice scope-lock.** `maddu slice scope-declare --paths a,b,c` locks a slice's surface. The built-in `slice-scope` gate refuses out-of-scope edits before `slice-stop` succeeds. Expansion bound (`+5 files OR +30%`) caps scope creep; `scope-expand` widens within the bound. After `approve-functional`, only doc-like edits pass.
-
-**Trigger discipline + pending-actions queue.** No mutating command auto-fires without (a) a tier in `commands/_tiers.mjs`, (b) an allowlist entry in `.maddu/config/triggers.json`, (c) a respected cooldown. Every successful auto-fire emits `TRIGGER_FIRED` with `triggered_by` provenance. Read-only auto-actions land in a queue surfaced to the next live agent via `maddu brief --drain`. This is permanent hard rule #9.
-
-**Post-stop review lane.** A reviewer is a runtime with `kind: 'reviewer'` — a separate reasoning lane that runs against a sealed slice. `maddu review run --slice <id>` spawns it, parses `{verdict, findings}` from JSON or YAML-frontmatter output, archives a markdown at `.maddu/reviews/<id>.md`, emits `SLICE_REVIEWED`, and auto-opens `FOLLOWUP_OPENED` for non-clean verdicts. Catches the semantic regressions structural gates can't see.
-
-**Three new cockpit routes.** `/orientation`, `/gates`, `/reviews` — read-only views over the projections above. Zero new long-poll subscribers; same event-stream wiring as every existing route.
-
-Full reference → [docs/20-governance.md](docs/20-governance.md). Authoritative design spec → [docs/research/governance-ultraplan.md](docs/research/governance-ultraplan.md).
-
-## The eight hard rules
-
-*Eight invariants. `maddu doctor` verifies them on every install and every upgrade. A repo that violates any of them is not a Máddu repo.*
+*Nine invariants. `maddu doctor` verifies them on every install and every upgrade, and `maddu audit` traces each one to the gate (or the construction) that enforces it. A repo that violates any of them is not a Máddu repo.* They govern **how Máddu itself is built** — its own orchestration code — never the product you build *with* it; see the scope banner in [`docs/hard-rules.md`](docs/hard-rules.md).
 
 | # | Rule | What it prevents |
 |---|---|---|
 | 1 | Files-only state | SQLite corruption, opaque feature state, schema-migration hazards |
-| 2 | Append-only event spine | Mutable history, replay-divergence between machines |
+| 2 | Append-only event spine (tamper-evident) | Mutable history, replay-divergence, silent interior rewrites |
 | 3 | No hosted backends | Telemetry, vendor lock-in, "Máddu Cloud" |
 | 4 | No broad dependencies | Supply-chain risk, transitive vulnerabilities |
 | 5 | No provider SDKs in app code | Hidden API keys, SDK churn in the orchestrator |
 | 6 | No token export | Portable credentials, cross-machine leak |
 | 7 | Three-layer brand boundary | Framework / app / content brand bleed |
 | 8 | Lane ownership | Two agents writing the same files |
+| 9 | Every auto-trigger crosses the gauntlet | Off-the-record automation mutating state |
 
 Read the full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 
@@ -249,10 +219,10 @@ Read the full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices, governance | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
-| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) *(v0.16)* — orientation, gates, scope-lock, triggers, reviews | [Architecture](docs/15-architecture.md) — two-process model | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
-| [Agent onboarding](docs/21-agent-onboarding.md) *(v0.17)* — auto-bootstrap, marker discipline, tree provenance | | | |
+| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — orientation, gates, scope-lock, triggers, reviews | [Architecture](docs/15-architecture.md) — two-process model, concurrency, tamper-evidence | [Validation checklist](docs/17-validation-checklist.md) — pre-release |
+| [Agent onboarding](docs/21-agent-onboarding.md) — auto-bootstrap, marker discipline, tree provenance | [Charter](docs/charter.md) — the stable invariants | [Rule↔gate traceability](docs/39-rule-gate-traceability.md) — which gate enforces which rule | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
-Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Roadmap status, version history, per-slice notes → [CHANGELOG.md](CHANGELOG.md).
+Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Full version history, per-slice notes → [CHANGELOG.md](CHANGELOG.md).
 
 ## Why the name
 
@@ -262,7 +232,7 @@ Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM
 
 Apache-2.0. See [`LICENSE`](LICENSE).
 
-*Contributing:* the framework is pre-1.0; expect tag-boundary changes. Non-trivial PRs end with a slice-stop — include the summary in the PR description. Issues and discussions welcome at [github.com/frdyx/maddu](https://github.com/frdyx/maddu/issues).
+*Contributing:* Máddu is post-1.0 but evolves fast — expect tag-boundary changes, and read [`docs/charter.md`](docs/charter.md) for the invariants that won't. Non-trivial PRs end with a slice-stop — include the summary in the PR description. Issues and discussions welcome at [github.com/frdyx/maddu](https://github.com/frdyx/maddu/issues).
 
 <div align="center">
 

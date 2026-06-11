@@ -247,7 +247,13 @@ export const EVENT_TYPES = {
   // hostname is not loopback with 403, and records the rejection here (rate-
   // limited per offending origin to avoid spine flooding). data:
   //   { reason:'host'|'origin', host, origin, path, method }
-  BRIDGE_ORIGIN_REJECTED:     'BRIDGE_ORIGIN_REJECTED'
+  BRIDGE_ORIGIN_REJECTED:     'BRIDGE_ORIGIN_REJECTED',
+  // v1.15.0 — `maddu blueprint --distill` spawned a provider CLI (subprocess,
+  // hard rule #5) to rewrite the deterministic skeleton into prose. Recorded on
+  // success only; an unmet auth gate or worker failure falls back to the
+  // deterministic export and emits nothing. data:
+  //   { runtime, provider, slug, skeletonBytes, distilledBytes, outPath }
+  BLUEPRINT_DISTILLED:        'BLUEPRINT_DISTILLED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

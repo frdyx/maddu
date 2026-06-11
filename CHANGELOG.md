@@ -11,6 +11,27 @@ narrative summary.
 
 ---
 
+## [v1.15.0] · 2026-06-11 · Blueprint robustness (`--distill`) + README rework
+
+Two unrelated pieces, one release. First, `maddu blueprint` graduates from prototype: its deterministic extractor is hardened and pinned, and an optional LLM **distill** pass is added on top of the now-tested base. Second, the README is reorganized from version-archaeology to a product-first description of what Máddu is today.
+
+**Blueprint — harden the deterministic extractor**
+
+- **Edge cases pinned with fixtures** (`scripts/test/blueprint-hardening.mjs`). Locks the graceful behaviors the happy-path test didn't cover: malformed / non-JSON / truncated / null-content transcript lines are *skipped*, never thrown on (a corrupt transcript can't abort an export); a slug that matches nothing returns empty structures; Windows backslash paths normalize (repoRoots inferred + deduped, Claude Code's own `~/.claude/projects/` dirs excluded); `inferVariables({})` is `[]`; and the **output contract** holds on all-empty input — `renderBlueprint` still emits the title, the intake schema, and the generalization prompt, deterministically.
+- **`--since` fails loud** (`commands/blueprint.mjs`). A malformed `--since` used to parse to `NaN` and silently disable the filter, quietly widening the export. It now errors with exit 2.
+
+**Blueprint — `--distill` (optional prose pass)**
+
+- **`maddu blueprint --distill`** spawns a provider CLI (`--runtime claude|codex|gemini`, default claude) to rewrite the deterministic skeleton into a flowing narrative, written to a sibling `*-distilled.md`. The deterministic export stays **canonical and is never replaced**. The worker is told to invent nothing, preserve every fact, reproduce the intake-schema JSON and generalization-prompt blocks verbatim, and keep `[REDACTED:…]` markers intact. Emits `BLUEPRINT_DISTILLED` on success.
+- **Best-effort with graceful fallback.** No sign-in (and no `--no-auth-check`), a worker failure, or an unusable result all fall back to the deterministic blueprint with a notice and exit 0 — the export is already valid. (Hard rule #5: the provider call happens only in the spawned subprocess; the CLI imports no SDK.)
+- **Shared spawn primitives** (`commands/_worker-spawn.mjs`, NEW). The Windows-`.cmd`-shim-aware `spawnWorker` and the `isProviderSignedIn` auth gate — previously private to `learn` — are extracted into one audited module that both `learn` and `blueprint --distill` import, so the security-sensitive spawn logic is single-sourced (no drift). `learn` is rewired to it with no behavior change.
+
+**README — product-first rework**
+
+- Reorganized from a stack of version-tagged "what's new in v0.16 / v0.17 / v0.18" sections (which read like a changelog and made a v1.x product look mid-construction) into capability sections describing what Máddu does now. Fixed factual drift: the "pre-1.0" contributing note, "the **eight** hard rules" (it's been **8+1** since v0.19), the spine-verify relationship count, and surfaced tamper-evidence / blueprint / learn / audit as current surface rather than footnotes.
+
+Verified: 2 new tests (`blueprint-hardening`, `blueprint-distill`) + all 6 `learn` tests green after the spawn extraction; `maddu audit` 10/10, doctor green+info, spine 0/0, full suite green.
+
 ## [v1.14.0] · 2026-06-09 · Spine tamper-evidence — forward `prev_hash` chain
 
 Upgrades the spine's core claim from *legible* to *tamper-**evident***. Parseability and referential checks catch damage, but a *consistent* rewrite of an interior event — flip an `APPROVAL_DECIDED` from deny→allow on line 200, leaving valid JSON — was invisible to `spine verify`. Now it isn't. Charter-level decision (operator-ruled): the spine should be trustworthy independent of git.
