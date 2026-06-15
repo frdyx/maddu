@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [Unreleased] - 2026-06-15 - Fleet audit drift hardening
+
+- **Workspace roles for fleet reports** (`workspaces.mjs`, `workspace.mjs`, `doctor.mjs`). Registry entries now carry a reporting-only role: `project`, `fixture`, or `archive`. `memo` and `python-tiny` can stay registered as cross-workspace test fixtures without looking like production drift, and `doctor --all` labels them as `[id:fixture]`.
+- **Trust gate matches the actual wrapper architecture** (`secret-scan-active`). The gate now verifies the shared `commands/_tools.mjs#runWrapper` path instead of the old per-wrapper import contract, so the audit checks the code Maddu actually runs.
+- **Lane release is idempotent at the command boundary** (`lane.mjs`, `verify.mjs`). Releasing an unclaimed lane writes no event, releasing another session's claim is refused, true never-claimed releases still fail verification, and duplicate releases after a valid claim warn instead of poisoning the spine.
+- **Upgrade events preserve `prev_hash`** (`upgrade.mjs`). Upgrade now appends `FRAMEWORK_UPGRADED`, `AGENT_FILE_SYNCED`, and `SLASH_COMMANDS_SYNCED` through `spine.append`, preventing future chain gaps in already-chained installs.
+- **Spine-integrity gate surfaces warnings** (`spine-integrity`). Warn-only verifier findings now appear as WARN rows in `doctor` instead of being summarized as `0 warns`.
+
+Verified: new focused tests (`workspace-roles`, `lane-release-idempotent`, `upgrade-prev-hash`), `maddu audit` 10/10, docs-sync green, source spine 0 fails / 0 warns, fleet doctor 523 pass / 10 warn / 0 fail after refreshing 9 registered workspaces.
+
 ## [v1.15.0] · 2026-06-11 · Blueprint robustness (`--distill`) + README rework
 
 Two unrelated pieces, one release. First, `maddu blueprint` graduates from prototype: its deterministic extractor is hardened and pinned, and an optional LLM **distill** pass is added on top of the now-tested base. Second, the README is reorganized from version-archaeology to a product-first description of what Máddu is today.
