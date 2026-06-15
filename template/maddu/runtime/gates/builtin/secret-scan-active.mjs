@@ -10,9 +10,10 @@
 //   1. `template/maddu/runtime/lib/secret-scan.mjs` exports `scanArgv`.
 //   2. `tools.mjs` imports secret-scan AND calls `scanArgv(` before
 //      reaching `spawnSafe`.
-//   3. Each of the 5 default tool wrappers
-//      (`commands/{git,test,format,lint,install}.mjs`) imports
-//      `loadSecretScan` AND calls `scanArgv(` before invoking `runTool`.
+//   3. The shared wrapper body (`commands/_tools.mjs#runWrapper`) imports
+//      `loadSecretScan`, calls `scanArgv(` before invoking `runTool`, and
+//      each of the 5 default tool wrappers
+//      (`commands/{git,test,format,lint,install}.mjs`) delegates to it.
 //   4. No SECRET_DETECTED_IN_ARGV spine event carries a string field
 //      long enough to contain a raw secret value (>200 chars) —
 //      defensive sanity check that raw values never leaked into events.
@@ -34,6 +35,7 @@ async function exists(p) { try { await stat(p); return true; } catch { return fa
 
 async function locateWrapper(repoRoot, name) {
   const candidates = [
+    join(repoRoot, 'maddu', 'commands', name),
     join(FRAMEWORK_COMMANDS, name),
     join(repoRoot, 'commands', name),
   ];
@@ -41,6 +43,10 @@ async function locateWrapper(repoRoot, name) {
     if (await exists(p)) return p;
   }
   return null;
+}
+
+async function locateCommandHelper(repoRoot) {
+  return locateWrapper(repoRoot, '_tools.mjs');
 }
 
 export default {
@@ -69,7 +75,27 @@ export default {
       return { ok: false, message: 'tools.mjs imports secret-scan but never calls scanArgv()' };
     }
 
-    // Wrapper-level grep checks.
+    // Shared wrapper-level grep checks. v1.3.0 consolidated the five
+    // default wrappers into runWrapper(), so the secret scan is load-bearing
+    // in one helper rather than duplicated in every thin command file.
+    const helperPath = await locateCommandHelper(ctx.repoRoot);
+    if (!helperPath) {
+      return { ok: false, message: 'commands/_tools.mjs not found; cannot verify wrapper-level secret scan' };
+    }
+    const helperSrc = await readFile(helperPath, 'utf8');
+    if (!/loadSecretScan/.test(helperSrc)) {
+      return { ok: false, message: 'commands/_tools.mjs does not expose/use loadSecretScan' };
+    }
+    const scanIx = helperSrc.search(/scanArgv\s*\(/);
+    if (scanIx < 0) {
+      return { ok: false, message: 'commands/_tools.mjs never calls scanArgv(...) in runWrapper' };
+    }
+    const runToolIx = helperSrc.search(/runTool\s*\(/);
+    if (runToolIx >= 0 && scanIx > runToolIx) {
+      return { ok: false, message: 'commands/_tools.mjs calls scanArgv(...) after runTool(...)' };
+    }
+
+    // Thin-wrapper grep checks.
     const wrapperProblems = [];
     let wrappersChecked = 0;
     let wrappersUnreachable = 0;
@@ -78,10 +104,11 @@ export default {
       if (!p) { wrappersUnreachable++; continue; }
       wrappersChecked++;
       const body = await readFile(p, 'utf8');
-      const importsHelper = /loadSecretScan/.test(body);
-      const callsScan = /scanArgv\s*\(/.test(body);
-      if (!importsHelper) wrapperProblems.push({ wrapper: w, kind: 'missing-import', detail: `${w} does not import loadSecretScan` });
-      if (!callsScan)    wrapperProblems.push({ wrapper: w, kind: 'missing-scan-call', detail: `${w} does not call scanArgv(...)` });
+      const importsRunWrapper = /import\s*\{\s*runWrapper\s*\}\s*from\s*['"]\.\/_tools\.mjs['"]/.test(body);
+      const tool = w.replace(/\.mjs$/, '');
+      const callsRunWrapper = new RegExp(`runWrapper\\s*\\(\\s*['"]${tool}['"]`).test(body);
+      if (!importsRunWrapper) wrapperProblems.push({ wrapper: w, kind: 'missing-runWrapper-import', detail: `${w} does not import runWrapper from ./_tools.mjs` });
+      if (!callsRunWrapper)   wrapperProblems.push({ wrapper: w, kind: 'missing-runWrapper-call', detail: `${w} does not delegate to runWrapper('${tool}', ...)` });
     }
     if (wrappersChecked > 0 && wrapperProblems.length > 0) {
       return {
@@ -116,7 +143,7 @@ export default {
                    : (mod.knownPatternTypes ? mod.knownPatternTypes() : []);
     return {
       ok: true,
-      message: `secret-scan wired (tools.mjs + ${wrappersChecked}/${WRAPPERS.length} wrappers, ${patterns.length} pattern types)${wrappersUnreachable ? `; ${wrappersUnreachable} wrapper(s) unreachable` : ''}`,
+      message: `secret-scan wired (tools.mjs + runWrapper + ${wrappersChecked}/${WRAPPERS.length} wrappers, ${patterns.length} pattern types)${wrappersUnreachable ? `; ${wrappersUnreachable} wrapper(s) unreachable` : ''}`,
     };
   },
 };

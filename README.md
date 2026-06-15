@@ -135,9 +135,9 @@ Six benefits (next section) explain *why* the spine is shaped the way it is. Thi
 
 **Govern it.** `maddu doctor` is a fan-out gate runner over framework built-ins plus operator gates you drop at `.maddu/gates/*.mjs`; each gate emits a `GATE_RAN` event. An optional **scope-lock** (`maddu slice scope-declare`) refuses out-of-scope edits before a slice can stop, with a bounded `scope-expand`. And the **trigger gauntlet** (permanent hard rule #9) means no mutating command auto-fires without a declared tier, an allowlist entry, a respected cooldown, and a `TRIGGER_FIRED` event carrying its provenance — automation never happens off the record.
 
-**Trust and audit it.** `maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, torn-trailing-line detection, referential integrity across the event-type relationships (including the orchestration families — teams, pipelines, plans, loops, coordinators, advisors), and — since v1.14.0 — a forward `prev_hash` **tamper-evidence chain** that pinpoints the first altered line if interior history is consistently rewritten. `maddu doctor` runs the same check on every invocation. There is no auto-repair: the verifier reports, the operator decides.
+**Trust and audit it.** `maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, torn-trailing-line detection, referential integrity across the event-type relationships (including the orchestration families — teams, pipelines, plans, loops, coordinators, advisors), and — since v1.14.0 — a forward `prev_hash` **tamper-evidence chain** that pinpoints the first altered line if interior history is consistently rewritten. `maddu doctor` runs the same check on every invocation and surfaces warn-only findings as WARN rows. There is no auto-repair: the verifier reports, the operator decides.
 
-**Work across every repo.** `maddu workspace add` registers a repo; one bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per request, and `/bridge/_all/*` fans out reads across all mounts. Each repo's spine stays its own source of truth.
+**Work across every repo.** `maddu workspace add` registers a repo; optional workspace roles separate projects, fixtures, and archives in reports. One bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per request, and `/bridge/_all/*` fans out reads across all mounts. Each repo's spine stays its own source of truth.
 
 **Learn and hand off.** `maddu learn` mines past Claude Code transcripts for failed→succeeded tool-call pairs, has a spawned worker judge them, and writes typed corrections to two event-sourced destinations (a marker block in the project `CLAUDE.md` and `kind:'correction'` memory facts) — so the next agent stops repeating this project's mistakes. `maddu blueprint` is the inverse: it distils *how a whole project was built* into one portable, variable-driven handoff (intake schema + procedure + problems&fixes + a pointer to the real product repo), optionally polished into prose with `--distill`. `maddu orient` and `maddu handoff` keep the cross-session "resume here" briefing curated and never empty.
 
@@ -167,7 +167,7 @@ The spine wins over any projection — audit immutability is operator-provable, 
 
 Spine corruption surfaces immediately, by name, with file and line precision.
 
-`maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, referential integrity, torn-line detection, and a forward `prev_hash` tamper-evidence chain; `maddu doctor` runs the same check on every invocation up to a 50k event cap.
+`maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, referential integrity, torn-line detection, and a forward `prev_hash` tamper-evidence chain; `maddu doctor` runs the same check on every invocation up to a 50k event cap and keeps verifier warnings visible.
 
 No `maddu spine repair` exists by design — the operator reads the failure and decides remediation. Verifiable, not just declared.
 
@@ -175,7 +175,7 @@ No `maddu spine repair` exists by design — the operator reads the failure and 
 
 Switch context across five repos without booting five bridges.
 
-`maddu workspace add` registers a repo in `~/.config/maddu/workspaces.json`; one bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per-request, and `/bridge/_all/*` fans out reads across all mounts with each row tagged by workspace.
+`maddu workspace add` registers a repo in `~/.config/maddu/workspaces.json`; optional roles (`project`, `fixture`, `archive`) make fleet reports clearer without changing routing. One bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per-request, and `/bridge/_all/*` fans out reads across all mounts with each row tagged by workspace.
 
 Each repo's spine stays its own source of truth while the cockpit gives you the aggregated view.
 

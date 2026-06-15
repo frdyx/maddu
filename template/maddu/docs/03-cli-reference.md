@@ -79,14 +79,15 @@ Reads `.maddu/state/bridge.pid` and sends SIGTERM (then SIGKILL after a 3 s grac
 Manage the multi-workspace registry. Stored at `~/.config/maddu/workspaces.json` (Linux/macOS) or `%APPDATA%\maddu\workspaces.json` (Windows) — device-bound, never committed.
 
 ```bash
-$ maddu workspace add <path> [--id <slug>] [--label "<label>"]
+$ maddu workspace add <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]
 $ maddu workspace list
 $ maddu workspace remove <id>
 $ maddu workspace activate <id>
+$ maddu workspace role <id> <project|fixture|archive>
 $ maddu workspace show
 ```
 
-`<path>` must contain a `.maddu/` directory (i.e. `maddu init` was run there). Ids must match `[a-z][a-z0-9-]{0,40}` and are unique per machine. If `--id` is omitted, it is derived from the directory name.
+`<path>` must contain a `.maddu/` directory (i.e. `maddu init` was run there). Ids must match `[a-z][a-z0-9-]{0,40}` and are unique per machine. If `--id` is omitted, it is derived from the directory name. `--role` defaults to `project`; use `fixture` for canary/test repos and `archive` for reference repos. Roles affect reporting only.
 
 **v1.1.1:** `maddu workspace activate <id>` POSTs to the running bridge at `/bridge/_workspaces/activate` so its in-memory active pointer follows the registry update — no more silent mis-routing after a swap. If the requested workspace was added *after* `maddu start` (and is therefore not yet mounted), the CLI prints a loud warning with the exact `maddu stop && maddu start` restart command. No bridge running ⇒ silent.
 
@@ -353,7 +354,7 @@ $ maddu spine verify [--json]
 $ maddu spine show <eventId>
 ```
 
-`verify` walks every segment under `.maddu/events/` and runs the checks described in the *Verifiable, not just declared* paragraph of [hard-rules.md](hard-rules.md) — parseability, envelope shape, event-id uniqueness, id-format (with exemptions for well-known fixed-suffix events like `evt_…_init00`), timestamp monotonicity within each segment, schema-version consistency, segment continuity, and referential integrity (orphan `APPROVAL_DECIDED`, dangling `LANE_RELEASED`, unknown-session `SESSION_CLOSED`, etc.).
+`verify` walks every segment under `.maddu/events/` and runs the checks described in the *Verifiable, not just declared* paragraph of [hard-rules.md](hard-rules.md) — parseability, envelope shape, event-id uniqueness, id-format (with exemptions for well-known fixed-suffix events like `evt_…_init00`), timestamp monotonicity within each segment, schema-version consistency, segment continuity, and referential integrity (orphan `APPROVAL_DECIDED`, never-claimed or duplicate `LANE_RELEASED`, unknown-session `SESSION_CLOSED`, etc.).
 
 Exit code: `0` on a clean run or WARN-only run; `1` if any FAIL. `--json` emits the raw verifier result for tooling — useful in CI pipelines.
 

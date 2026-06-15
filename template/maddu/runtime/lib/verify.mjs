@@ -21,7 +21,7 @@
 //   APPROVAL_DECIDED                         → APPROVAL_REQUESTED                 (FAIL)
 //   SESSION_{HEARTBEAT,CLOSED,AUTO_CLOSED,STALE_DETECTED} → SESSION_REGISTERED/AUTO_REGISTERED (FAIL/WARN)
 //   SESSION_{REGISTERED,AUTO_REGISTERED}.parentSessionId  → prior session        (FAIL)
-//   LANE_RELEASED                            → LANE_CLAIMED                       (FAIL)
+//   LANE_RELEASED                            → active or historical LANE_CLAIMED  (FAIL for never-claimed, WARN for duplicate release)
 //   TASK_{UPDATED,COMPLETED}                 → TASK_CREATED                       (FAIL)
 //   WORKER_{HEARTBEAT,EXITED,KILLED}         → WORKER_SPAWNED                     (WARN)
 //   SCHEDULE_FIRED                           → live SCHEDULE_CREATED              (WARN)
@@ -133,6 +133,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   const sliceStopIds = new Set();        // SLICE_STOP.id (Phase 5)
   // (lane, sessionId) → "claimed" / "released". Used to verify LANE_RELEASED has a prior LANE_CLAIMED.
   const laneClaims = new Map();
+  const laneEverClaimed = new Set();
   // B2 (v1.13.0) — orchestration-lifecycle anchors. Each family's child events
   // carry the parent id; a child whose parent was never opened is an orphan,
   // exactly like the TASK / WORKER / SCHEDULE checks above. WARN (not FAIL):
@@ -410,15 +411,22 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
         case 'LANE_CLAIMED': {
           const key = `${ev.lane}::${ev.actor}`;
           laneClaims.set(key, 'claimed');
+          laneEverClaimed.add(key);
           break;
         }
 
         case 'LANE_RELEASED': {
           const key = `${ev.lane}::${ev.actor}`;
           if (laneClaims.get(key) !== 'claimed') {
-            push(issue('FAIL', 'orphan_lane_release',
-              `${ev.id}: LANE_RELEASED for (${ev.lane}, ${ev.actor}) with no prior matching LANE_CLAIMED`,
-              { segment: segName, line: lineNo, eventId: ev.id }));
+            if (laneEverClaimed.has(key)) {
+              push(issue('WARN', 'duplicate_lane_release',
+                `${ev.id}: LANE_RELEASED for (${ev.lane}, ${ev.actor}) after that claim was already released`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            } else {
+              push(issue('FAIL', 'orphan_lane_release',
+                `${ev.id}: LANE_RELEASED for (${ev.lane}, ${ev.actor}) with no prior matching LANE_CLAIMED`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
           } else {
             laneClaims.set(key, 'released');
           }

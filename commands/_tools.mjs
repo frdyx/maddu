@@ -8,8 +8,8 @@ export async function loadTools() {
 }
 
 // v1.2.0 Phase 3 — load the secret-scan module for wrapper-level pre-scan.
-// The `secret-scan-active` gate greps each wrapper to confirm it imports
-// this helper, ensuring the scan path can't be regressed silently.
+// The `secret-scan-active` gate verifies this helper is called from
+// runWrapper before the shared tools.runTool path can spawn a subprocess.
 export async function loadSecretScan() {
   return loadLib('secret-scan.mjs');
 }

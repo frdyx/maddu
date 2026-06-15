@@ -30,6 +30,15 @@ export default {
           evidence: { counts: r.counts },
         };
       }
+      if (r.counts.WARN > 0) {
+        const warns = r.counts.WARN;
+        return {
+          ok: true,
+          status: 'warn',
+          message: `${r.events.toLocaleString()} events · ${r.segments.length} segment${r.segments.length === 1 ? '' : 's'} · 0 fails · ${warns} warn${warns === 1 ? '' : 's'}`,
+          evidence: { counts: r.counts, events: r.events, segments: r.segments.length },
+        };
+      }
       return {
         ok: true,
         message: `${r.events.toLocaleString()} events · ${r.segments.length} segment${r.segments.length === 1 ? '' : 's'} · 0 fails · 0 warns`,

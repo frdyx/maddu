@@ -163,6 +163,26 @@ function gateRunToCheck(run, tagLabel) {
   return { level, label: labelText, detail: run.message };
 }
 
+function workspaceRoleValue(w) {
+  return (w?.role || 'project').toString().trim().toLowerCase() || 'project';
+}
+
+function workspaceDoctorLabel(w) {
+  const role = workspaceRoleValue(w);
+  return role === 'project' ? w.id : `${w.id}:${role}`;
+}
+
+function workspaceRoleSummary(workspaces) {
+  const counts = new Map();
+  for (const w of workspaces) {
+    const role = workspaceRoleValue(w);
+    counts.set(role, (counts.get(role) || 0) + 1);
+  }
+  const nonProject = [...counts.entries()].filter(([role]) => role !== 'project');
+  if (nonProject.length === 0) return '';
+  return ` (${nonProject.map(([role, count]) => `${count} ${role}`).join(', ')})`;
+}
+
 // Per-repo gate-runner wrapper. Preserves prior doctor behavior (the
 // install-integrity / hard-rules / spine / approval / session-cache checks
 // are now individual gates) and prepends the maddu.json / framework-version
@@ -288,6 +308,9 @@ async function validateRegistry() {
   const issues = [];
   for (const w of reg.workspaces) {
     if (!w.id || !w.path) { issues.push(`malformed entry: ${JSON.stringify(w)}`); continue; }
+    if (ws.validWorkspaceRole && !ws.validWorkspaceRole(w.role)) {
+      issues.push(`workspace "${w.id}": invalid role "${w.role}"`);
+    }
     if (seenIds.has(w.id)) issues.push(`duplicate id: ${w.id}`);
     if (seenPaths.has(w.path)) issues.push(`duplicate path: ${w.path}`);
     seenIds.add(w.id); seenPaths.add(w.path);
@@ -303,7 +326,7 @@ async function validateRegistry() {
     issues.push(`active "${reg.active}" is not a registered workspace`);
   }
   if (issues.length === 0) {
-    checks.push({ level: 'PASS', label: 'workspace registry', detail: `${reg.workspaces.length} workspaces, active: ${reg.active || '(none)'}` });
+    checks.push({ level: 'PASS', label: 'workspace registry', detail: `${reg.workspaces.length} workspaces${workspaceRoleSummary(reg.workspaces)}, active: ${reg.active || '(none)'}` });
   } else {
     // Unreachable paths and missing .maddu/ are WARN, not FAIL, so an
     // unmounted external drive doesn't break the whole report.
@@ -332,7 +355,7 @@ export default async function doctor(argv) {
       console.log(`${tag('FAIL')}  --all requires a workspace registry. Run \`maddu workspace add <path>\` first.`);
       process.exit(1);
     }
-    repoTargets = regResult.workspaces.map((w) => ({ repoRoot: w.path, label: w.id }));
+    repoTargets = regResult.workspaces.map((w) => ({ repoRoot: w.path, label: workspaceDoctorLabel(w) }));
   } else {
     const cwdRepo = await findRepoRoot(process.cwd());
     if (!cwdRepo) {
@@ -355,7 +378,7 @@ export default async function doctor(argv) {
     // v1.1.0 Phase 3 — governance mode banner.
     await printGovernanceBanner(repoRoot);
   } else if (repoTargets.length > 0) {
-    console.log(`${ANSI.bold}Máddu doctor${ANSI.reset}  ${repoTargets.length} workspaces`);
+    console.log(`${ANSI.bold}Máddu doctor${ANSI.reset}  ${repoTargets.length} workspaces${workspaceRoleSummary(regResult.workspaces)}`);
   }
 
   const gateOpts = {

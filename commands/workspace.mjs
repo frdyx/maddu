@@ -1,10 +1,11 @@
 // `maddu workspace <subcommand>` — multi-workspace registry.
 //
 // Usage:
-//   maddu workspace add <path> [--id <slug>] [--label "<label>"]
+//   maddu workspace add <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]
 //   maddu workspace list
 //   maddu workspace remove <id>
 //   maddu workspace activate <id>
+//   maddu workspace role <id> <project|fixture|archive>
 //   maddu workspace show
 
 import { resolve } from 'node:path';
@@ -18,13 +19,14 @@ async function loadWorkspacesLib() {
 
 function printHelp() {
   console.log([
-    'Usage: maddu workspace <add|list|remove|activate|show> [args]',
+    'Usage: maddu workspace <add|list|remove|activate|role|show> [args]',
     '',
-    '  add <path> [--id <slug>] [--label "<label>"]',
-    '  add --path <path> [--id <slug>] [--label "<label>"]   # v1.2.1: flag form',
+    '  add <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]',
+    '  add --path <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]',
     '  list',
     '  show',
     '  remove <id>',
+    '  role <id> <project|fixture|archive>',
     '  activate <id>     # signals live bridge to reroot when one is running',
   ].join('\n'));
 }
@@ -70,7 +72,8 @@ export default async function workspace(argv) {
     console.log(`\x1b[1mWORKSPACES  (${reg.workspaces.length})\x1b[0m  registry: ${ws.registryPath()}`);
     for (const w of reg.workspaces) {
       const tag = w.id === reg.active ? '\x1b[32m●\x1b[0m' : ' ';
-      console.log(`  ${tag} ${w.id.padEnd(22)} ${w.label.padEnd(28)} ${w.path}`);
+      const role = (w.role || 'project').padEnd(8);
+      console.log(`  ${tag} ${w.id.padEnd(22)} ${role} ${w.label.padEnd(28)} ${w.path}`);
     }
     return;
   }
@@ -94,8 +97,8 @@ export default async function workspace(argv) {
     }
     const path = flagPath || posPath;
     if (!path) {
-      console.error('maddu workspace add <path> [--id <slug>] [--label "<label>"]');
-      console.error('  or: maddu workspace add --path <path> [--id <slug>] [--label "<label>"]');
+      console.error('maddu workspace add <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]');
+      console.error('  or: maddu workspace add --path <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]');
       process.exit(2);
     }
     const abs = resolve(process.cwd(), path);
@@ -103,9 +106,10 @@ export default async function workspace(argv) {
       const w = await ws.addWorkspace({
         path: abs,
         id: typeof flags.id === 'string' ? flags.id : null,
-        label: typeof flags.label === 'string' ? flags.label : null
+        label: typeof flags.label === 'string' ? flags.label : null,
+        role: typeof flags.role === 'string' ? flags.role : null
       });
-      console.log(`added  ${w.id}  ${w.label}  ${w.path}`);
+      console.log(`added  ${w.id}  ${w.role || 'project'}  ${w.label}  ${w.path}`);
     } catch (err) {
       console.error(`maddu workspace add: ${err.message}`);
       process.exit(1);
@@ -119,6 +123,20 @@ export default async function workspace(argv) {
     const ok = await ws.removeWorkspace(id);
     if (!ok) { console.error(`unknown workspace: ${id}`); process.exit(1); }
     console.log(`removed  ${id}`);
+    return;
+  }
+
+  if (sub === 'role') {
+    const id = rest[0];
+    const role = rest[1];
+    if (!id || !role) { console.error('maddu workspace role <id> <project|fixture|archive>'); process.exit(2); }
+    try {
+      const w = await ws.setRole(id, role);
+      console.log(`role  ${w.id}  ${w.role}`);
+    } catch (err) {
+      console.error(`maddu workspace role: ${err.message}`);
+      process.exit(1);
+    }
     return;
   }
 

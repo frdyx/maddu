@@ -171,7 +171,7 @@ $ maddu memory extract --rebuild
 
 If the spine itself is wrong, that is a bug — open an issue with the offending event id.
 
-## Doctor reports `spine integrity` FAIL *(v0.15+)*
+## Doctor reports `spine integrity` WARN/FAIL *(v0.15+)*
 
 Run the full verifier for detail:
 
@@ -185,6 +185,9 @@ Common findings + remediation:
 - **`segment_gap`** — a numbered segment file is missing between the existing ones. Usually a botched filesystem operation. Restore from git history (`git log -- .maddu/events/<missing>.ndjson`) or accept the gap as a known void.
 - **`orphan_approval_decided`** — an `APPROVAL_DECIDED` references an `approvalId` that doesn't exist in the spine. Almost always a synthetic test event left behind; locate via `./maddu/run spine show <id>` and remove if appropriate.
 - **`duplicate_id`** — two events share the same id. Replay artifact; the first event is canonical.
+- **`chain_gap` / `chain_broken`** — the forward `prev_hash` chain is missing or mismatched after chaining began. These are WARN findings because old writers, hand edits, or concurrent appends can create them; inspect the surrounding events and decide whether the gap is expected history or suspected tampering.
+- **`duplicate_lane_release`** — a lane release followed a valid claim that was already released. This is WARN; current `maddu lane release` treats unclaimed releases as a no-op so new duplicates should not be written.
+- **`orphan_lane_release`** — a lane release has no historical matching claim. This is FAIL; inspect the lane history and either restore the missing claim or remove the bad release after operator review.
 
 No `maddu spine repair` exists by design — the spine is sacred. Remediation is always manual or via `maddu checkpoint rollback`.
 

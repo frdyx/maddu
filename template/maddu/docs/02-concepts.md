@@ -44,7 +44,7 @@ Example: the cockpit Dashboard route renders by fetching `GET /bridge/projection
 
 ## Workspaces
 
-A **workspace** is the scope above a repo: one entry in the device-local registry at `~/.config/maddu/workspaces.json` (Linux/macOS) or `%APPDATA%\maddu\workspaces.json` (Windows). Each entry pairs a kebab-case `id` (e.g. `client-acme`) with the absolute path to a repo containing `.maddu/`.
+A **workspace** is the scope above a repo: one entry in the device-local registry at `~/.config/maddu/workspaces.json` (Linux/macOS) or `%APPDATA%\maddu\workspaces.json` (Windows). Each entry pairs a kebab-case `id` (e.g. `client-acme`) with the absolute path to a repo containing `.maddu/`, plus reporting metadata such as `label` and `role`.
 
 ```bash
 $ maddu workspace add ~/projects/maddu --id maddu --label "Máddu"
@@ -55,6 +55,8 @@ $ maddu workspace list
 The bridge mounts every registered workspace at once and routes each HTTP request to one of them via the `X-Maddu-Workspace` header. The cockpit's left rail header surfaces a switcher; `Ctrl+K` exposes "Switch to workspace: …" actions. With no registry the bridge falls back to walking up from `cwd` for a single `.maddu/`, so existing single-repo installs keep working.
 
 The registry is device-bound — it follows the same path pattern as auth tokens and is **never** committed or synced across machines. Each repo's `.maddu/` remains the sole source of truth for that repo; the registry is just orchestration scaffolding.
+
+Workspace roles are reporting metadata only: `project` is the default, `fixture` marks canary/test repos that should stay in fleet audits, and `archive` marks registered repos kept for reference. Roles do not change routing or gate behavior.
 
 ## Lanes
 
