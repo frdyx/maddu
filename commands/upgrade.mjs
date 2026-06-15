@@ -14,9 +14,9 @@
 //   • Project state under .maddu/{events,state,sessions,inbox,archive,*/project}
 //     is never touched.
 
-import { mkdir, readFile, writeFile, unlink, appendFile, copyFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, unlink, copyFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
 import {
@@ -231,16 +231,11 @@ export default async function upgrade(argv) {
     console.error(`  (agent-file sync skipped: ${err.message})`);
   }
 
-  // Append FRAMEWORK_UPGRADED to spine.
-  const eventsSegment = join(repoRoot, '.maddu', 'events', '000000000001.ndjson');
-  const ts = new Date().toISOString();
-  const ev = {
-    v: 1,
-    id: 'evt_' + ts.replace(/[-:T.Z]/g, '').slice(0, 14) + '_upgr00',
-    ts,
-    type: 'FRAMEWORK_UPGRADED',
-    actor: null,
-    lane: null,
+  // Append upgrade events through the spine layer so chained installs keep
+  // their prev_hash continuity.
+  const spine = await import(pathToFileURL(join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'spine.mjs')).href);
+  const ev = await spine.append(repoRoot, {
+    type: spine.EVENT_TYPES.FRAMEWORK_UPGRADED,
     data: {
       from: fromVersion,
       to: toVersion,
@@ -250,40 +245,25 @@ export default async function upgrade(argv) {
       skipped: actions.skip.length,
       warnings: actions.warnings
     }
-  };
-  await appendFile(eventsSegment, JSON.stringify(ev) + '\n');
+  });
 
   if (agentFileSync) {
-    const ts2 = new Date().toISOString();
-    const ev2 = {
-      v: 1,
-      id: 'evt_' + ts2.replace(/[-:T.Z]/g, '').slice(0, 14) + '_' + randomBytes(3).toString('hex'),
-      ts: ts2,
-      type: 'AGENT_FILE_SYNCED',
-      actor: null,
-      lane: null,
+    await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.AGENT_FILE_SYNCED,
       data: { files: agentFileSync.files, action: agentFileSync.action, perFile: agentFileSync.perFile }
-    };
-    await appendFile(eventsSegment, JSON.stringify(ev2) + '\n');
+    });
   }
 
   if (slashSync) {
-    const ts3 = new Date().toISOString();
-    const ev3 = {
-      v: 1,
-      id: 'evt_' + ts3.replace(/[-:T.Z]/g, '').slice(0, 14) + '_' + randomBytes(3).toString('hex'),
-      ts: ts3,
-      type: 'SLASH_COMMANDS_SYNCED',
-      actor: null,
-      lane: null,
+    await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.SLASH_COMMANDS_SYNCED,
       data: {
         action: slashSync.action,
         files: slashSync.files,
         perFile: slashSync.perFile,
         reason: slashSync.reason || null,
       }
-    };
-    await appendFile(eventsSegment, JSON.stringify(ev3) + '\n');
+    });
   }
 
   console.log(`\nUpgraded to v${toVersion}. (event ${ev.id})`);

@@ -14,7 +14,8 @@ the registry is just a pointer file on your machine.
 - **The registry is device-local pointers.**
   `~/.config/maddu/workspaces.json` (Linux/macOS) or
   `%APPDATA%\maddu\workspaces.json` (Windows). Never committed, never
-  exported.
+  exported. Each entry may carry a reporting-only `role`: `project`
+  (default), `fixture` (canary/test repo), or `archive` (reference repo).
 - **One HTTP port, N repos.** `maddu start` reads the registry and
   mounts every entry. Each `/bridge/*` request carries an
   `X-Maddu-Workspace: <id>` header naming the target repo. Missing
@@ -28,16 +29,19 @@ the registry is just a pointer file on your machine.
 ### CLI
 
 ```bash
-$ maddu workspace add <path> [--id <slug>] [--label "<label>"]
+$ maddu workspace add <path> [--id <slug>] [--label "<label>"] [--role project|fixture|archive]
 $ maddu workspace list
 $ maddu workspace remove <id>
 $ maddu workspace activate <id>
+$ maddu workspace role <id> <project|fixture|archive>
 $ maddu workspace show
 ```
 
 `<path>` must contain a `.maddu/` directory — i.e. `maddu init` was run
 there first. Ids must match `[a-z][a-z0-9-]{0,40}` and are unique per
 machine. If `--id` is omitted, it is derived from the directory name.
+Roles do not change routing or gate behavior; they make fleet reports
+clearer.
 
 ### Example
 
@@ -48,8 +52,8 @@ $ maddu workspace add ~/code/repo-a
 $ maddu workspace add ~/code/repo-b
 $ maddu workspace list
 WORKSPACES  (2)  registry: ~/.config/maddu/workspaces.json
-  ● repo-a                 repo-a              ~/code/repo-a
-    repo-b                 repo-b              ~/code/repo-b
+  ● repo-a                 project  repo-a              ~/code/repo-a
+    repo-b                 project  repo-b              ~/code/repo-b
 $ maddu start
 Máddu bridge v0.13.0 listening on http://127.0.0.1:4177
   workspaces: 2 mounted (registry: ~/.config/maddu/workspaces.json)

@@ -45,7 +45,7 @@ A claim writes to `.maddu/lanes/claims.json`:
 
 ## Releasing a lane
 
-A lane is released when the holding session closes or runs `maddu slice-stop`. Slice-stop appends a `LANE_RELEASED` event to the spine and removes the claim entry.
+A lane is released with `maddu lane release <lane-id> --session <session-id>` (or the `--lane` flag form). Releasing a lane with no active claim is a no-op; trying to release another session's active claim is refused. `maddu spine verify` treats a release with no historical claim as a failure and a duplicate release after a valid claim as a warning.
 
 ## Cross-lane coordination
 

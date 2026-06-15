@@ -275,7 +275,10 @@ async function handleBridge(req, res, url, ctx) {
       const reg = await readRegistry();
       for (const w of reg.workspaces) {
         const row = list.find((r) => r.id === w.id);
-        if (row) row.label = w.label;
+        if (row) {
+          row.label = w.label;
+          row.role = w.role || 'project';
+        }
       }
     } catch {}
     return sendJson(res, 200, { workspaces: list, active: ctx.active, legacy: ctx.legacy });

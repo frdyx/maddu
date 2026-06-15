@@ -117,6 +117,16 @@ export default async function lane(argv) {
       process.exit(2);
     }
     const sid = flags.session;
+    const proj = await projections.project(repoRoot);
+    const existing = proj.claims.find((c) => c.lane === lid);
+    if (!existing) {
+      console.log(`released  ${lid}  (no active claim)`);
+      return;
+    }
+    if (existing.sessionId !== sid) {
+      console.error(`lane "${lid}" is claimed by ${existing.sessionId}; ${sid} cannot release it`);
+      process.exit(3);
+    }
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LANE_RELEASED,
       actor: sid,

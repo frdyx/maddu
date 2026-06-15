@@ -72,7 +72,7 @@ emits.
 | `dep-pinning-respected` | critical | Every `pinnedPackages` entry in `trust.json` matches `package.json` declared spec. |
 | `mcp-provenance-verified` | critical | Every shipped MCP template's SHA256 hash matches the canonical hash of its content (with provenance stripped). Every enabled MCP descriptor under `.maddu/mcp/` is approved. |
 | `worker-env-policy-coherent` | critical | `worker-env.json` declares all required deny prefixes. |
-| `secret-scan-active` | critical | `secret-scan.mjs` exports `scanArgv`; `tools.mjs` calls it; every default tool wrapper calls `loadSecretScan`; no `SECRET_DETECTED_IN_ARGV` event payload field exceeds 200 chars. |
+| `secret-scan-active` | critical | `secret-scan.mjs` exports `scanArgv`; `tools.mjs` calls it; the shared `runWrapper` calls `loadSecretScan`/`scanArgv` before `runTool`; every default tool wrapper delegates to `runWrapper`; no `SECRET_DETECTED_IN_ARGV` event payload field exceeds 200 chars. |
 | `skill-provenance-required` | safety | Every skill in `.maddu/skills/` declares a `provenance` field. WARN on imported-pending-trust. |
 | `strict-mode-approval-active` | critical | In strict mode, every gated `TOOL_INVOKED` has a preceding allow `APPROVAL_DECIDED` in scope. |
 
