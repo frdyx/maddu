@@ -59,6 +59,8 @@ via `coordinator --runtime <name>` when a runtime is registered — see
 | "search …", "find …", "look up …" | `/maddu-search` |
 | "what do we know about …", "recall …", "memory" | `/maddu-memory` |
 | "tasks", "to-do", "what's on the board" | `/maddu-task` |
+| "test MÃ¡ddu itself", "run the framework test suite", "self-test" | `/maddu-self-test` |
+| "run tests", "test the project", "verify project tests", "adaptive tests" | `/maddu-test` |
 | "audit the framework", "coherence check", "drift" | `/maddu-audit` |
 | "I need a tool for …", "connect to <service>", "runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
 

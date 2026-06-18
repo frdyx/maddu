@@ -87,7 +87,8 @@ const ROSTER = [
     title: 'Default tools (v1.1.0)',
     items: [
       { name: '/maddu-git <argv…>',     line: 'Audited git wrapper; refuses empty -m and `push -f`.',        under: 'git' },
-      { name: '/maddu-test [argv…]',    line: 'Auto-detect test runner (npm test / vitest / jest / mocha).', under: 'test' },
+      { name: '/maddu-test [opts]',     line: 'Project tests; legacy auto-detect by default, adaptive profiles with --profile.', under: 'test' },
+      { name: '/maddu-self-test [opts]', line: 'Run the Máddu source self-test suite (quick by default).',    under: 'self-test' },
       { name: '/maddu-format [argv…]',  line: 'Auto-detect formatter (prettier / npm run format).',          under: 'format' },
       { name: '/maddu-lint [argv…]',    line: 'Auto-detect linter (eslint / npm run lint).',                 under: 'lint' },
       { name: '/maddu-install <pkgs…>', line: 'Audited dep install (npm/pnpm/yarn). Refuses empty list.',    under: 'install' },

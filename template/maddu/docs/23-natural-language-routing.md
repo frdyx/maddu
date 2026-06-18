@@ -62,6 +62,9 @@ Shipped in `MADDU.md` (full), with compact copies in `CLAUDE.md` and
 | "cancel", "stop the slice" | `/maddu-cancel` |
 | "remember this", "note that …" | `/maddu-note` |
 | "what skill should I use for …" | `/maddu-skill` |
+| "test Máddu itself", "run the framework test suite", "self-test" | `/maddu-self-test` |
+
+| "run tests", "test the project", "verify project tests", "adaptive tests" | `/maddu-test` |
 
 ## Discipline
 

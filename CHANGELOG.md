@@ -11,7 +11,21 @@ narrative summary.
 
 ---
 
-## [Unreleased] - 2026-06-15 - Fleet audit drift hardening
+## [v1.16.0] · 2026-06-18 · Test command split — source self-test + adaptive project tests
+
+Two strands land together. First, the overloaded `maddu test` splits cleanly into two commands: a source-only framework self-test runner and an adaptive project-test harness for consumer repos. Second, the fleet-audit drift hardening that landed on `main` after v1.15.0 is finalized under this release.
+
+**`maddu self-test` — source framework runner**
+
+- **Source-only self-test command** (`commands/self-test.mjs`, `scripts/test/run-all.mjs`, `scripts/test/_self-test-runner.mjs`). Auto-discovers `scripts/test/*.mjs` and adds three smoke checks (`audit docs-sync`, `audit`, `spine verify`) behind `smoke`, `quick`, and `full` profiles with `--list`, `--only`, `--skip`, `--bail`, `--json`, and `--no-report`. Refuses outside a Máddu source checkout. `npm test` now runs the quick profile; `npm run test:full` adds stress + upgrade coverage.
+- **Self-test reporting and gate** (`self-test-recent`). Quick/full runs write `.maddu/state/self-test-last-run.json` and detailed reports under `.maddu/state/self-test-reports/`; doctor warns when the source suite is stale, failed, missing, or only smoke-verified. Consumer installs skip the gate.
+- **Agent-facing surface** (`/maddu-self-test`). Help, slash-command templates, natural-language routing, README, and mirrored docs now distinguish host-project `maddu test` from framework-source `maddu self-test`.
+
+**`maddu test` — adaptive project-test harness**
+
+- **Opt-in adaptive profiles** (`commands/_project-test-runner.mjs`). Plain `maddu test` keeps the exact v1.1 detected-runner wrapper; adaptive flags switch to a discovery harness — npm scripts / vitest / jest / mocha / pytest, with `.maddu/config/test-harness.json` overrides — exposing `smoke`/`quick`/`full` profiles, `--list`, `--only`, `--skip`, `--bail`, `--json`, `--no-report`, and `--changed` (git-diff-mapped task selection). Both paths cross the tool gauntlet (allowance + secret-scan + `TOOL_INVOKED`/`TOOL_COMPLETED`). Reports land under `.maddu/state/project-test-*`, guarded by the WARN-only `project-test-recent` gate for consumer repos.
+
+**Fleet audit drift hardening** (merged to `main` after v1.15.0, versioned here)
 
 - **Workspace roles for fleet reports** (`workspaces.mjs`, `workspace.mjs`, `doctor.mjs`). Registry entries now carry a reporting-only role: `project`, `fixture`, or `archive`. `memo` and `python-tiny` can stay registered as cross-workspace test fixtures without looking like production drift, and `doctor --all` labels them as `[id:fixture]`.
 - **Trust gate matches the actual wrapper architecture** (`secret-scan-active`). The gate now verifies the shared `commands/_tools.mjs#runWrapper` path instead of the old per-wrapper import contract, so the audit checks the code Maddu actually runs.
@@ -19,7 +33,7 @@ narrative summary.
 - **Upgrade events preserve `prev_hash`** (`upgrade.mjs`). Upgrade now appends `FRAMEWORK_UPGRADED`, `AGENT_FILE_SYNCED`, and `SLASH_COMMANDS_SYNCED` through `spine.append`, preventing future chain gaps in already-chained installs.
 - **Spine-integrity gate surfaces warnings** (`spine-integrity`). Warn-only verifier findings now appear as WARN rows in `doctor` instead of being summarized as `0 warns`.
 
-Verified: new focused tests (`workspace-roles`, `lane-release-idempotent`, `upgrade-prev-hash`), `maddu audit` 10/10, docs-sync green, source spine 0 fails / 0 warns, fleet doctor 523 pass / 10 warn / 0 fail after refreshing 9 registered workspaces.
+Verified: new harnesses (`self-test-runner` 19/0, `project-test-harness` 27/0) plus the fleet-audit focused tests (`workspace-roles`, `lane-release-idempotent`, `upgrade-prev-hash`); `maddu self-test` quick **39/0**; `maddu audit` **10/0**; docs in sync; source spine 0 fails / 0 warns.
 
 ## [v1.15.0] · 2026-06-11 · Blueprint robustness (`--distill`) + README rework
 

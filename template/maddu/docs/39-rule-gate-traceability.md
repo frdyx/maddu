@@ -75,7 +75,7 @@ to a **charter-coherence concern** (keeping the surface honest — the charter's
   `model-hint-shape`, `tool-allowlist`, `suggest-engine-deterministic`,
   `skills-starter-pack-installed`.
 - **Harness freshness (verification posture):** `stress-harness-recent`,
-  `upgrade-matrix-recent`.
+  `upgrade-matrix-recent`, `self-test-recent`, `project-test-recent`.
 
 No built-in gate is unjustified; no hard rule is unenforced (rules 3 and 7 by
 documented construction). The `maddu audit` sub-check holds this true over time.

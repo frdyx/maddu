@@ -102,6 +102,8 @@ maddu doctor --severity critical           # filter by severity
 | model-hint-shape | safety | `modelPreference` on runtimes / lanes / pipeline stages has valid shape (string or `{default,plan,exec,verify,review}`) | v0.19.0 |
 | stress-harness-recent | warn | synthetic stress harness ran in the last 30 days (records last-run at `.maddu/state/stress-last-run.json`) | v0.19.0 |
 | upgrade-matrix-recent | warn | upgrade-path matrix ran since the last `maddu.json` install (records last-run at `.maddu/state/upgrade-matrix-last-run.json`) | v0.19.0 |
+| self-test-recent | warn | framework source `maddu self-test` ran recently with a green quick/full profile (records last-run at `.maddu/state/self-test-last-run.json`) | v1.16.0 |
+| project-test-recent | warn | consumer repo adaptive `maddu test --profile quick\|full` ran recently and green (records last-run at `.maddu/state/project-test-last-run.json`) | v1.16.0 |
 | defaults-single-sourced | safety | `init.mjs` + `upgrade.mjs` seed config defaults via `commands/_config-seed.mjs`; neither re-inlines `DEFAULT_TRIGGERS`/pipelines/config constants (prevents the init↔upgrade drift that silently dropped v1.10.0 triggers on upgrade) | v1.11.0 |
 | brief-coherence | warn | every agent-facing `COMMANDS` verb is named in the worker brief `template/maddu/CLAUDE.md` (closes the gap that shipped `learn` without a brief mention) | v1.11.0 |
 
@@ -276,12 +278,13 @@ A green governance layer means:
 |---|---|---|
 | 1 | spine integrity | `maddu spine verify` exits 0 |
 | 2 | doctor | `maddu doctor` exits 0 |
-| 3 | projection round-trip | `node scripts/test/projection-roundtrip.mjs` exits 0 |
-| 4 | no DPS-domain leak | `grep -RIE '(5 Laws\|IntentExecutor\|puppeteer scenario)' template/ commands/ bin/` empty |
-| 5 | no SDK imports in framework | `grep -RIE 'import .*(anthropic\|openai)' template/maddu commands` empty |
-| 6 | no new npm deps | `git diff package.json` shows none |
-| 7 | hard rules 1–8 | doctor's hard-rule gates all PASS |
-| 8 | cockpit | `/orientation`, `/gates`, `/reviews` all 200 + render |
+| 3 | source self-test | `maddu self-test` exits 0 in the framework source checkout |
+| 4 | projection round-trip | covered by quick self-test; directly runnable as `node scripts/test/projection-roundtrip.mjs` |
+| 5 | no DPS-domain leak | `grep -RIE '(5 Laws\|IntentExecutor\|puppeteer scenario)' template/ commands/ bin/` empty |
+| 6 | no SDK imports in framework | `grep -RIE 'import .*(anthropic\|openai)' template/maddu commands` empty |
+| 7 | no new npm deps | `git diff package.json` shows none |
+| 8 | hard rules 1–8 | doctor's hard-rule gates all PASS |
+| 9 | cockpit | `/orientation`, `/gates`, `/reviews` all 200 + render |
 
 ## What to copy from DPS, what to skip
 

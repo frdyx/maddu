@@ -53,6 +53,17 @@ the signature for stuck-detection).
 
 A synthetic stress-harness scenario (`ralph-always-fail-halts`) exercises runLoop directly with in-process verify callbacks to lock the contract against regression. If the operator-supplied `--verify "<cmd>"` looks like it "always passes" when it shouldn't, double-check that the shell expansion preserves the exit code — single-quoted JS scripts inside `cmd.exe /c` on Windows can be interpreted very differently than under POSIX shells.
 
+For agent-written project code, prefer the adaptive project-test verifier when
+the repo has more than one test shape:
+
+```bash
+maddu loop ralph --goal "fix tests until green" \
+  --verify "maddu test --profile quick --bail"
+```
+
+That keeps Ralph's loop bounded to the project's discovered test contract,
+prints stable failing test ids, and leaves test creation suggest-only.
+
 ### Plan-loop
 
 ```bash
@@ -115,7 +126,7 @@ COORDINATOR_COMPLETED       { coordinatorId, planId, phaseCount }
 | "fix tsc errors until clean" | `maddu loop ralph` |
 | "walk plan X through all phases" | `maddu coordinator X` |
 | "implement TODO list across audit→build→verify" | plan + coordinator |
-| "retry npm test until pass" | `maddu loop ralph` |
+| "retry project tests until pass" | `maddu loop ralph --verify "maddu test --profile quick --bail"` |
 | "manual phase progression" | `maddu plan complete-phase` |
 
 ## Gates

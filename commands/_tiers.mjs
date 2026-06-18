@@ -69,6 +69,7 @@ export default {
   // (the slash command path is the explicit-invocation surface).
   git:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
   test:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  'self-test':  { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
   format:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
   lint:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
   install:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },

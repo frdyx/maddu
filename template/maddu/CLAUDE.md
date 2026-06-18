@@ -203,6 +203,12 @@ curl -fsS http://127.0.0.1:4177/bridge/auth
 # Run the doctor
 maddu doctor
 
+# Run this project's adaptive quick test profile
+maddu test --profile quick --bail
+
+# Run Maddu's source-repo test harness (framework source checkout only)
+maddu self-test
+
 # Slice-stop
 maddu slice-stop "SLICE STOP: …"
 
@@ -226,7 +232,7 @@ is a real verb you can call directly. Run `maddu help` for flags.
 - **Plan & coordinate:** `maddu plan` · `maddu goal` · `maddu phase` · `maddu loop` · `maddu coordinator` · `maddu team` · `maddu pipeline` · `maddu handoff`
 - **Do the work:** `maddu slice` · `maddu slice-stop` · `maddu review` · `maddu advise` · `maddu suggest` · `maddu search` · `maddu task`
 - **Memory & learning:** `maddu memory` · `maddu learn` · `maddu skill` · `maddu blueprint`
-- **Tools (audited subprocess wrappers):** `maddu git` · `maddu test` · `maddu format` · `maddu lint` · `maddu install`
+- **Tools (audited subprocess wrappers):** `maddu git` · `maddu test` · `maddu self-test` · `maddu format` · `maddu lint` · `maddu install`
 - **Capabilities & governance:** `maddu mcp` · `maddu plugin` · `maddu governance` · `maddu trust` · `maddu audit`
 - **Accounting:** `maddu cost` · `maddu log` · `maddu help`
 

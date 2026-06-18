@@ -1,6 +1,6 @@
 {
   "name": "maddu",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "The Source of local truth — a files-only, local-first orchestration framework for AI agents inside any git repo.",
   "type": "module",
   "bin": {
@@ -10,7 +10,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "doctor": "node ./bin/maddu.mjs doctor"
+    "doctor": "node ./bin/maddu.mjs doctor",
+    "test": "node ./bin/maddu.mjs self-test",
+    "test:smoke": "node ./bin/maddu.mjs self-test --profile smoke",
+    "test:full": "node ./bin/maddu.mjs self-test --profile full"
   },
   "files": [
     "bin/",
