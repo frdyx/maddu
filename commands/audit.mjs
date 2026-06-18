@@ -259,9 +259,11 @@ async function checkCharterDrift() {
   }
   const commands = extractCommands(await readFile(binPath, 'utf8')) || [];
   const charter = (await readFile(charterPath, 'utf8')).toLowerCase();
-  // A feature is "traceable" if its verb literal appears anywhere in the
-  // charter text (as a word). Untraceable verbs are surfaced for review.
-  const untraceable = commands.filter((c) => !new RegExp(`\\b${c.replace(/[-/]/g, '[-/]?')}\\b`).test(charter));
+  // A feature is "traceable" only if its verb appears as a BACKTICK-QUOTED token
+  // (`verb`) — the charter's capability-table convention. A bare word match used
+  // to false-pass on incidental prose (e.g. "architecture, not omission" let the
+  // `architecture` verb look traceable while it was absent from the verb table).
+  const untraceable = commands.filter((c) => !charter.includes('`' + c + '`'));
   if (untraceable.length === 0) {
     return { level: 'PASS', label: 'charter drift', detail: `all ${commands.length} feature(s) traceable to ${charterPath.split(/[\\/]/).pop()}` };
   }
