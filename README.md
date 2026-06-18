@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.16.0](https://img.shields.io/badge/version-1.16.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.17.0](https://img.shields.io/badge/version-1.17.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -53,6 +53,7 @@ Inside Claude Code or Codex CLI, type a slash command — or just natural langua
 | `/maddu-doctor` | Run hard-rule gates and surface findings. |
 | `/maddu-test [opts]` | Run project tests; adaptive profiles are available with `--profile`. |
 | `/maddu-self-test [opts]` | Run the Máddu source self-test suite; quick by default. |
+| `/maddu-debt` | Ledger of deliberate shortcuts; flags the ones with no upgrade trigger. |
 | `/maddu-cancel` | Stop the current slice cleanly. |
 | `/maddu-note <text>` | One-liner into the operator inbox. |
 | `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined. |
@@ -68,7 +69,7 @@ Or just type *"ship the login form"*, *"status"*, *"tokens"*. The agent classifi
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.16.0 installed.
+Máddu v1.17.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -85,7 +86,7 @@ The verbose CLI is always available — it's what the slash commands themselves 
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.16.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.17.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

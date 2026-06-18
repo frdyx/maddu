@@ -198,6 +198,18 @@ $ maddu slice-stop --session <id> --summary "<s>" \
 
 Comma-separated for plain lists; semicolons for `--learnings` and `--next`. Auto-triggers hindsight extraction.
 
+Each stop also records two deterministic, WARN-only checks on the event (printed, never blocking): a **risk** level (`none`→`critical`, classified from the touched paths — auth/secret/token/schema/migration or a broad change rank highest) and a **deliverables** check (each `--targets` file that neither exists on disk nor shows in git is flagged as a hollow deliverable). A high/critical-risk slice escalates the post-stop auto-review past its cooldown. *(v1.17.0)*
+
+## `maddu debt`
+
+Ledger of deliberate-shortcut markers across the source tree. Read-only.
+
+```bash
+$ maddu debt [list] [--json] [--no-write] [--repo <dir>]
+```
+
+Scans for markers of the shape `maddu-debt: <what>. ceiling: <limit>. upgrade: <trigger>.` and renders them grouped by file. A marker with **no `upgrade:` trigger** is flagged `[no-trigger]` — the shortcut nobody recorded a reason to revisit. Writes a derived cache to `.maddu/state/debt-ledger.json` (suppress with `--no-write`) and appends one `DEBT_SCANNED` event. The number to drive toward zero is the no-trigger count. *(v1.17.0)*
+
 ## `maddu approval`
 
 Manage the approvals ledger.

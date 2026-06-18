@@ -44,6 +44,19 @@ async function loadGatesLib() {
   return null;
 }
 
+// v1.17.0 — load a runtime lib (risk classifier / deliverable verifier) from
+// the source tree or an installed runtime layout.
+async function loadRuntimeLib(name) {
+  const candidates = [
+    join(process.cwd(), 'maddu', 'runtime', 'lib', name),
+    join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', name),
+  ];
+  for (const p of candidates) {
+    try { await stat(p); return await import(pathToFileURL(p).href); } catch {}
+  }
+  return null;
+}
+
 // D2 (v1.13.0): derive the ACTUAL changed files from git so the slice-scope
 // gate isn't limited to what the agent self-reported via --targets/--paths.
 // The gate is only as honest as the paths it's handed; an agent that edits
@@ -145,6 +158,27 @@ export default async function sliceStop(argv) {
     }
   }
 
+  // v1.17.0 — two deterministic checks over the slice's paths, both best-effort
+  // and WARN-only (they record + print, never break the stop):
+  //   risk         — classify change-risk so it lives on the spine and the
+  //                  review-trigger can escalate on auth/secret/schema/broad edits.
+  //   deliverables — verify each declared --targets file actually exists (catch
+  //                  a worker reporting a deliverable it never produced).
+  let risk = null;
+  let deliverables = null;
+  try {
+    const gitTouched = (flags['no-git-diff'] === true) ? null : await gitTouchedPaths(repoRoot);
+    const riskLib = await loadRuntimeLib('risk-assess.mjs');
+    if (riskLib?.assessRisk) {
+      const basis = touchedPaths.length ? touchedPaths : (gitTouched || []);
+      risk = riskLib.assessRisk(basis);
+    }
+    const delivLib = await loadRuntimeLib('deliverables.mjs');
+    if (delivLib?.verifyDeliverables) {
+      deliverables = await delivLib.verifyDeliverables({ repoRoot, targets: csv(flags.targets), gitTouched });
+    }
+  } catch {}
+
   const ev = await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.SLICE_STOP,
     actor: sessionId,
@@ -158,9 +192,20 @@ export default async function sliceStop(argv) {
       gates: csv(flags.gates),
       learnings: ssv(flags.learnings),
       next: ssv(flags.next),
-      reason: flags.reason || null
+      reason: flags.reason || null,
+      risk,
+      deliverables
     }
   });
+
+  // Surface both checks immediately so the operator sees them without a round-trip.
+  if (risk && risk.level !== 'none' && risk.level !== 'low') {
+    const note = risk.signals.length ? ` — ${risk.signals.join('; ')}` : '';
+    console.error(`  risk: ${risk.level}${note}`);
+  }
+  if (deliverables && deliverables.missing.length) {
+    console.error(`  deliverables: ${deliverables.missing.length} declared target(s) not found — ${deliverables.missing.join(', ')}`);
+  }
 
   // Auto-revise the named plan if triggered_by carries a planId.
   if (triggered_by && triggered_by.planId) {

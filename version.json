@@ -1,5 +1,5 @@
 {
-  "version": "1.16.0",
-  "phase": "test-harness-split",
+  "version": "1.17.0",
+  "phase": "robustness-bundle",
   "released": "2026-06-18"
 }

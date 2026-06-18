@@ -253,7 +253,13 @@ export const EVENT_TYPES = {
   // success only; an unmet auth gate or worker failure falls back to the
   // deterministic export and emits nothing. data:
   //   { runtime, provider, slug, skeletonBytes, distilledBytes, outPath }
-  BLUEPRINT_DISTILLED:        'BLUEPRINT_DISTILLED'
+  BLUEPRINT_DISTILLED:        'BLUEPRINT_DISTILLED',
+  // v1.17.0 — `maddu debt` scanned the source tree for deliberate-shortcut
+  // markers (`maddu-debt: <what>. ceiling: <limit>. upgrade: <trigger>.`) and
+  // wrote the derived ledger to .maddu/state/debt-ledger.json. Read-only over
+  // the source tree (not spine-derived); this event is the spine record of the
+  // scan. data: { markers, noTrigger, files, ledgerPath }
+  DEBT_SCANNED:               'DEBT_SCANNED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
