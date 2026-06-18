@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.34.0] · 2026-06-18 · Architecture refactor (16) — server split, slice 10 (collaboration routes)
+
+Phase 9, tenth slice — the BOSS / proposal collaboration subsystem (the last large cohesive route group with real logic).
+
+- **`runtime/lib/bridge-routes-collab.mjs`** — `routeProposals` (`/bridge/proposals/*`: list, create with the enforcer check + transcript mirroring, decide) and `routeBoss` (`/bridge/boss/*`: transcript sessions, fetch, post). The two are intertwined (a proposal mirrors itself into the BOSS transcript as `BOSS_MESSAGE` events), so they live together. Each reads only the request (`req`, `res`, `path`) + the resolved `repoRoot`. No import trimming — `enforcerCheck` stays (the `/bridge/enforcer/check` route still uses it).
+- `server.js` **1 193 → 1 063** (−130; cumulative **2 705 → 1 063**, ~61% off the original bridge monolith).
+- Verified on a live bridge: `/bridge/proposals` + `/bridge/boss/sessions` + `/bridge/boss/sessions/<id>` GET **200**; `proposals` (no summary/action) and `boss/message` (no text) **400**; `proposals/<id>/decide` with a bad decision **400** and with a valid decision on an unknown id **404**; and the fall-through guard — `/bridge/docs` (defined *after* the block) still **200**s.
+- New `bridge-routes-collab` self-test (9 assertions: dispatch contract + the `/bridge/docs` fall-through + GET shapes + validation 400s + decide 404 — capturing `res` stub + async-iterable `req` stubs, no spine mutation).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **57/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (still 1 monolith: cockpit.js).
+
 ## [v1.33.0] · 2026-06-18 · Architecture refactor (15) — server split, slice 9 (work-execution routes)
 
 Phase 9, ninth slice — another **batched** route-group extraction: the five contiguous work-execution groups in `handleBridge`.
