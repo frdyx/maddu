@@ -30,7 +30,7 @@ globalThis.document = {
   getElementById(id) { return id === 'toast-region' ? toastRegion : null; },
 };
 
-const { el, panel, placeholder, formatUptime, formatAge, ageTone, formatTs, compactPath, truncatePathFromLeft, showToast } =
+const { el, panel, placeholder, formatUptime, formatAge, ageTone, formatTs, compactPath, truncatePathFromLeft, loading, loadingFor, showToast } =
   await import('../../template/maddu/cockpit/cockpit-util.mjs').catch(() =>
     import('../../template/maddu/cockpit/cockpit-util.js'));
 
@@ -93,6 +93,15 @@ ok('panel head holds title', p.children[0].children[0].children[0].text === 'Tit
 
 const empty = placeholder('Nothing', 'soon');
 ok('placeholder is an empty-state', empty.className === 'empty-state');
+
+// loading / loadingFor (skeleton placeholders, el-only leaves)
+const ld = loading('Fetching…');
+ok('loading → .skel-state', ld.className === 'skel-state');
+ok('loading caption uses text', ld.children[ld.children.length - 1].children[0].text === 'Fetching…');
+ok('loading default caption', loading().children[3].children[0].text === 'Loading…');
+ok('loadingFor grid → .skel-state w/ .skel-grid', loadingFor('grid').children[0].className === 'skel-grid');
+ok('loadingFor kpi → .skel-kpi-strip', loadingFor('kpi').children[0].className === 'skel-kpi-strip');
+ok('loadingFor unknown falls back to loading', loadingFor('nope', 't').className === 'skel-state' && loadingFor('nope').children.length === 4);
 
 // showToast — appends a .toast into #toast-region (no-op without a region).
 toastRegion.children = [];
