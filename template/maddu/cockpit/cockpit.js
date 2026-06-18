@@ -1,6 +1,11 @@
 // Máddu cockpit — vanilla SPA. No framework, no build step.
 // Hash-routed; views render into #route-view.
 
+// Pure leaf utilities (DOM builder + formatters) live in a sibling module —
+// the first slice of decomposing this file. Browser ES module import; the
+// bridge serves cockpit-util.js as application/javascript.
+import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime } from './cockpit-util.js';
+
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
 // X-Maddu-Workspace header naming which one this call is for. The fetch
@@ -238,28 +243,7 @@ async function fetchBridgeStatus() {
 
 // v1.2.1 F4 — truncate a long path from the LEFT so the basename always
 // shows. Operator cue: an ellipsis on the left means "more path above this".
-function truncatePathFromLeft(p, max = 40) {
-  if (!p || typeof p !== 'string') return '—';
-  if (p.length <= max) return p;
-  return '…' + p.slice(-(max - 1));
-}
-
-// v1.2.2 — compact "drive-root … basename" form for the rail-foot Path row.
-// Keeps the drive prefix (so operator sees C:/ vs D:/), an ellipsis for the
-// middle, and the last path segment (basename, the part that names the repo).
-// Width-bounded; the native browser tooltip (title attr) reveals the full path
-// on hover, and a click copies the full path to the clipboard.
-function compactPath(p) {
-  if (!p || typeof p !== 'string') return '—';
-  // Normalize separators for display + drop trailing slashes.
-  const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = norm.split('/').filter(Boolean);
-  if (parts.length <= 2) return norm;
-  // Windows drive root pattern (e.g. `C:`): keep as-is; else use the first segment.
-  const root = /^[A-Za-z]:$/.test(parts[0]) ? parts[0] : parts[0];
-  const tail = parts[parts.length - 1];
-  return `${root}/…/${tail}`;
-}
+// truncatePathFromLeft / compactPath → moved to cockpit-util.js (v1.24.0).
 
 // v1.2.2 — copy any string to the clipboard with a single-shot toast.
 // Falls back to a hidden textarea for environments without the Clipboard API
@@ -500,17 +484,7 @@ function setBanner(text, severity = 'info') {
   }
 }
 
-function formatUptime(ms) {
-  if (typeof ms !== 'number') return '—';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return s + 's';
-  const m = Math.floor(s / 60);
-  if (m < 60) return m + 'm';
-  const h = Math.floor(m / 60);
-  if (h < 24) return h + 'h ' + (m % 60) + 'm';
-  const d = Math.floor(h / 24);
-  return d + 'd ' + (h % 24) + 'h';
-}
+// formatUptime → moved to cockpit-util.js (v1.24.0).
 
 // ─── Inspector (persistent right panel) ─────────────────────────────────
 //
@@ -1219,39 +1193,7 @@ function renderRoute() {
 
 /* ─────────────── views ─────────────── */
 
-function el(tag, attrs = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === 'class') node.className = v;
-    else if (k === 'html') node.innerHTML = v;
-    else node.setAttribute(k, v);
-  }
-  for (const c of [].concat(children)) {
-    if (c == null) continue;
-    node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
-  }
-  return node;
-}
-
-function panel(title, aside, body) {
-  return el('div', { class: 'panel' }, [
-    el('div', { class: 'panel-head' }, [
-      el('span', { class: 'panel-title' }, title),
-      aside ? el('span', { class: 'panel-aside' }, aside) : null
-    ]),
-    body
-  ]);
-}
-
-// Phase 5 — Unified empty state. Same signature as the old placeholder()
-// helper so every call site upgrades automatically.
-function placeholder(name, planned) {
-  return el('div', { class: 'empty-state' }, [
-    el('div', { class: 'empty-state-glyph', 'aria-hidden': 'true' }, '◌'),
-    el('div', { class: 'empty-state-title' }, name),
-    el('div', { class: 'empty-state-hint' }, planned || '')
-  ]);
-}
+// el / panel / placeholder → moved to cockpit-util.js (v1.24.0).
 
 // ─── Sub-target system (programmatic) ───────────────────────────────────
 // Runtime registry — every searchable sub-target the cockpit knows about.

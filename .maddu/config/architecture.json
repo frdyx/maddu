@@ -20,7 +20,7 @@
     { "from": "plugins", "allow": ["runtime-libs"] },
     { "from": "cockpit", "allow": [] },
     { "from": "runtime-libs", "allow": [] },
-    { "from": "scripts", "allow": ["commands", "runtime-libs", "gates", "bridge"] },
+    { "from": "scripts", "allow": ["commands", "runtime-libs", "gates", "bridge", "cockpit"] },
     { "from": "agent-briefs", "allow": [] },
     { "from": "docs", "allow": [] }
   ],
