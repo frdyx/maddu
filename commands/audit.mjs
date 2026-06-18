@@ -101,6 +101,11 @@ const GATE_IDS = {
   // Skips gracefully when a repo declares no contract (the framework source
   // itself declares none), so it's a PASS here until a product opts in.
   architecture: 'architecture-drift',
+  // v1.19.0 — generated-artifacts-current: every single-sourced artifact is
+  // byte-equal to a fresh render of its authored source. The enforcement arm
+  // of the generated-artifact discipline; supersedes the hand-mirror drift
+  // gates as content moves behind generators.
+  generated: 'generated-artifacts-current',
 };
 
 function gateRunToCheck(run) {
@@ -447,7 +452,7 @@ async function checkCapabilityDocs() {
   return { level: 'PASS', label: 'capability-docs', detail: `${keys.length} verb(s) mapped; ${withDoc} with an in-depth doc, all present` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'capability-docs']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'capability-docs', 'generated']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -474,6 +479,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'brief') checks.push(...await runGateChecks(repoRoot, GATE_IDS.brief));
   if (!sub || sub === 'docs-sync') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docsSync));
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
+  if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());
