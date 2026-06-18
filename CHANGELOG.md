@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.18.1] · 2026-06-18 · Charter coherence — `architecture` is a capability verb
+
+A patch surfaced while mirroring the charter into the marketing site. `maddu architecture` shipped in v1.18.0 but was never added to the charter's capability-verb table — and `maddu audit`'s `charter-drift` check passed it anyway, because the bare word "architecture" appears in charter prose ("*architecture, not omission*"). The check was matching incidental words, not table membership.
+
+- **`architecture` added to the charter** (`docs/charter.md` + mirror) under **Quality & review**, alongside `doctor` — a structural-quality gate. The capability table now lists all **62** verbs.
+- **`charter-drift` tightened** (`commands/audit.mjs`) — a verb is traceable only if it appears as a **backtick-quoted token** (`` `verb` ``, the table convention), not as any prose word. Closes the false-positive class; all 62 verbs verified genuinely table-listed.
+
+Verified: `maddu audit` **12/0** (charter drift: 62 traceable), `maddu self-test` quick **45/0**, docs in sync, spine 0/0.
+
 ## [v1.18.0] · 2026-06-18 · Architecture drift — `maddu architecture` (MVP)
 
 Structural/architectural drift is the dominant failure mode when many agents build a large system over time: the real import graph silently diverges from the intended structure. This makes intended architecture explicit, extracts the real graph, compares them, records the drift on the spine, visualizes it, and gates **new** drift with a baseline ratchet — the same observe → record → compare → gate → ratchet model as the rest of the framework.
