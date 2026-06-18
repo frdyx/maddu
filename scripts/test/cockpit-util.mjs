@@ -11,18 +11,26 @@
 // Minimal document stub — el/panel/placeholder are the only DOM users, and they
 // only touch createElement/createTextNode/appendChild/setAttribute/className/
 // innerHTML. Build a tiny node model that records enough to assert against.
+function mkNode(tag) {
+  return {
+    tag, className: '', innerHTML: '', textContent: '', attrs: {}, children: [],
+    classList: { _s: new Set(), add(c) { this._s.add(c); } },
+    parentNode: null,
+    setAttribute(k, v) { this.attrs[k] = v; },
+    addEventListener() {},
+    appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
+    removeChild(c) { this.children = this.children.filter((x) => x !== c); },
+    get firstChild() { return this.children[0]; },
+  };
+}
+const toastRegion = mkNode('div');
 globalThis.document = {
-  createElement(tag) {
-    return {
-      tag, className: '', innerHTML: '', attrs: {}, children: [],
-      setAttribute(k, v) { this.attrs[k] = v; },
-      appendChild(c) { this.children.push(c); return c; },
-    };
-  },
+  createElement(tag) { return mkNode(tag); },
   createTextNode(text) { return { text }; },
+  getElementById(id) { return id === 'toast-region' ? toastRegion : null; },
 };
 
-const { el, panel, placeholder, formatUptime, compactPath, truncatePathFromLeft } =
+const { el, panel, placeholder, formatUptime, compactPath, truncatePathFromLeft, showToast } =
   await import('../../template/maddu/cockpit/cockpit-util.mjs').catch(() =>
     import('../../template/maddu/cockpit/cockpit-util.js'));
 
@@ -66,6 +74,13 @@ ok('panel head holds title', p.children[0].children[0].children[0].text === 'Tit
 
 const empty = placeholder('Nothing', 'soon');
 ok('placeholder is an empty-state', empty.className === 'empty-state');
+
+// showToast — appends a .toast into #toast-region (no-op without a region).
+toastRegion.children = [];
+showToast('hello', 'ok');
+ok('showToast appends a toast node', toastRegion.children.length === 1);
+ok('showToast sets the toast text', toastRegion.children[0].textContent === 'hello');
+ok('showToast tags the level class', toastRegion.children[0].classList._s.has('ok'));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
