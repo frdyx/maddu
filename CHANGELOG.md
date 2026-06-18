@@ -11,6 +11,23 @@ narrative summary.
 
 ---
 
+## [v1.33.0] · 2026-06-18 · Architecture refactor (15) — server split, slice 9 (work-execution routes)
+
+Phase 9, ninth slice — another **batched** route-group extraction: the five contiguous work-execution groups in `handleBridge`.
+
+- **`runtime/lib/bridge-routes-work.mjs`** — five `route<Group>` functions:
+  - `routeWorkers` — `/bridge/workers/*` (Phase B5, spawn/heartbeat/exit/kill)
+  - `routeSkills` — `/bridge/skills/*` (Phase B4, SKILL.md recipes)
+  - `routeTasks` — `/bridge/tasks/*` (Phase B3, kanban)
+  - `routeMailbox` — `/bridge/mailbox/*` (Phase B2, cross-lane bus)
+  - `routeMemory` — `/bridge/memory/*` (Phase A3, hindsight facts)
+- Each reads only the request (`req`, `res`, `path`, `url`) + the resolved `repoRoot`. Four shared lib-import lines are trimmed of their now-block-only symbols (`genTaskId`/`genWorkerId`/`genSessionId` off the spine line — the last is left over from slice 6's session move; `rebuildMemory`; the four mailbox CRUD fns; and five skills fns — `server.js` keeps `listSkills`/`searchMemory`/`extractEvent`/`readMemory`/`mailboxTotalUnread`, still used by surviving routes).
+- `server.js` **1 434 → 1 193** (−241; cumulative **2 705 → 1 193**, ~56% off the original bridge monolith).
+- Verified on a live bridge: every group's GET **200** (`workers`, `skills`, `tasks`, `mailbox-counts`, `mailbox/<lane>`, `memory`, `memory/search`); validation 400s (`skills`/`tasks` no title); unknown worker + task ids **404** *within* the group; and the fall-through guard — `/bridge/learning` (defined *after* the span) still **200**s.
+- New `bridge-routes-work` self-test (11 assertions across all five groups: dispatch contract, GET shapes, validation 400s, in-group 404 — capturing `res` stub + async-iterable `req` stubs, no spine mutation).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **55/0 deterministic** (the unrelated `token-wrapper-emission` test flaked under the higher fixture concurrency but passes **2/2 in isolation** and the suite is green with it skipped — the known transient), `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (still 1 monolith: cockpit.js).
+
 ## [v1.32.0] · 2026-06-18 · Architecture refactor (14) — server split, slice 8 (capability routes) · **server.js is no longer a monolith**
 
 Phase 9, eighth slice — a **batched** route-group extraction (four groups in one release, since each is the same proven dispatch-contract shape). **With this slice `server.js` (1 434 lines) drops below the 1 500-line monolith threshold — the mass ratchet now tracks only `cockpit.js`.**
