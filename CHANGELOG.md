@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.28.0] · 2026-06-18 · Architecture refactor (10) — server split, slice 4 (bootstrap helpers)
+
+Phase 9, fourth slice. The bridge's **pre-listen bootstrap helpers** move out of `server.js`.
+
+- **`runtime/lib/bridge-bootstrap.mjs`** — everything `start()` resolves *before* it creates the HTTP server: `resolveRepoRoot`, `detectFrameworkLayout`, `readVersion` (which repo, which framework version + layout) plus `pickPort`, `probePortIsMaddu`, `findPidOnPort` (which port to bind, and — on `EADDRINUSE` — who already holds it). Pure resolution over the filesystem + local machine, no bridge request state, so they live in `runtime-libs`. `pickPort` now takes the default port explicitly; `runtimeRoot` is recomputed from the module's own location (the proven `dirname(dirname(...))` pattern). Now-unused `existsSync` + `resolve` imports dropped from `server.js`.
+- `server.js` **2 035 → 1 941** (−94; cumulative **2 705 → 1 941**, ~28% off the bridge monolith).
+- Verified on a live bridge: a normal boot exercises `pickPort`/`readVersion`/`detectFrameworkLayout`/`buildWorkspaceMap` (`/bridge/status` + `/bridge/version` return the right version + layout), and a second boot on a held port exercises the `EADDRINUSE` → `probePortIsMaddu` path (correctly reports "already in use by a Máddu bridge" + the serving repo).
+- New `bridge-bootstrap` self-test (15 assertions: export surface + `detectFrameworkLayout` source/unknown branches + `pickPort` env-override/validation + `readVersion` dev-fallback + `probePortIsMaddu` closed-port).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **51/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (baseline ratcheted to server.js 1 941), live-bridge smoke (boot + EADDRINUSE both paths).
+
 ## [v1.27.0] · 2026-06-18 · Architecture refactor (9) — server split, slice 3 (workspace fan-out)
 
 Phase 9, third slice. The `/bridge/_all/*` **multi-workspace fan-out** helpers move out of `server.js`.
