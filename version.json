@@ -1,5 +1,5 @@
 {
-  "version": "1.28.0",
-  "phase": "architecture-refactor-10-server-split-4",
+  "version": "1.29.0",
+  "phase": "architecture-refactor-11-server-split-5-routes",
   "released": "2026-06-18"
 }

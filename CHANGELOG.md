@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.29.0] · 2026-06-18 · Architecture refactor (11) — server split, slice 5 (registry route groups)
+
+Phase 9, fifth slice — the first **route-group** extraction out of the `handleBridge` if-chain (the monolith's hard core). The two structurally identical capability-registry CRUD groups move out.
+
+- **`runtime/lib/bridge-routes-registries.mjs`** — `routeMcp` (the `/bridge/mcp/*` group, Phase C2) and `routeRuntimes` (the `/bridge/runtimes/*` group, Phase C1). Each reads only the request (`req`, `res`, `path`) + the resolved `repoRoot`, so it lifts cleanly into `runtime-libs`.
+- **Dispatch contract (new, reusable for future route slices):** `route<Group>(rctx)` sends the response and returns `true` when it owns the path, or `false` to let `handleBridge` fall through to the next group. A one-line `reply()` shim (sendJson-then-`return true`) preserves the original `return sendJson(...)` flow verbatim. In `handleBridge` each block collapses to `{ if (await routeMcp({ req, res, path, repoRoot })) return; }`. The MCP/runtime-only lib imports leave `server.js` (it keeps just `listMcp`/`mcpHealth`/`listRuntimes`, still used by the status + tools routes).
+- `server.js` **1 941 → 1 837** (−104; cumulative **2 705 → 1 837**, ~32% off the bridge monolith).
+- Verified on a live bridge: `/bridge/mcp`, `/bridge/runtimes`, `/bridge/mcp/visible/<lane>` all **200**; an unknown registry name **404**s *within* the group; and — the critical check for the fall-through contract — `/bridge/status` (a route defined *after* the extracted blocks) still **200**s.
+- New `bridge-routes-registries` self-test (14 assertions: the dispatch contract — `false`+no-response on non-match, `true`+200 on match, in-group 404 — via a capturing `res` stub).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **52/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (baseline ratcheted to server.js 1 837), live-bridge smoke (registry endpoints + fall-through).
+
 ## [v1.28.0] · 2026-06-18 · Architecture refactor (10) — server split, slice 4 (bootstrap helpers)
 
 Phase 9, fourth slice. The bridge's **pre-listen bootstrap helpers** move out of `server.js`.
