@@ -11,6 +11,20 @@ narrative summary.
 
 ---
 
+## [v1.40.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — backbone card leaf
+
+Third decomposition slice — the first new leaf MODULE of Phase 1. The pure
+data→DOM "card" renderers of the v0.18 backbone routes move out together.
+
+- **`cockpit/cockpit-backbone-cards.js`** (new leaf) — `renderAdvisorsCard`, `renderSkillInjectionsCard`, `renderModelRoutingRuntimes/Lanes/Pipelines`, `renderTestStatusCard`, `renderTeamsCard`, `renderPipelinesCard`, `renderCostCard`, `renderSlashCheatsheet` (+ module-private helpers `formatModelPref`, `ageMs`, `ageDays`, `SLASH_CHEATSHEET`). Each takes already-fetched data and returns a DOM subtree; imports only `el`/`placeholder`. The route render functions that fetch + call these stay in `cockpit.js` (they couple to `bindRouteRefresh`/`ROUTES`) and import the cards back.
+- `renderTeamsCard` (an orphaned v0.18 backbone card with no caller) was relocated with its siblings rather than deleted, and is intentionally not imported back.
+- **`scripts/test/cockpit-backbone-cards.mjs`** (new fixture) — 28 assertions: every export present, empty→placeholder, populated→panel-rows.
+- Re-baselined the cockpit mass floor `8456 → 8196` (−260 lines).
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens**; **Gate A** boots + renders all 42 routes.
+
+Verified: `maddu self-test` 62/62 (the `token-wrapper-emission` concurrency flake re-ran green in isolation, as in prior releases), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.39.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — loading-skeleton leaf
 
 Second decomposition slice. The skeleton-placeholder helpers move to the leaf.

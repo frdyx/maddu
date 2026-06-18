@@ -1,5 +1,5 @@
 {
-  "version": "1.39.0",
-  "phase": "cockpit-decomposition-loading",
+  "version": "1.40.0",
+  "phase": "cockpit-decomposition-backbone-cards",
   "released": "2026-06-19"
 }
