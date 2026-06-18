@@ -12,14 +12,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
-import { ensureSpine, append, readAll, readSince, EVENT_TYPES, genSessionId, genTaskId, genWorkerId } from './lib/spine.mjs';
+import { ensureSpine, append, readAll, readSince, EVENT_TYPES } from './lib/spine.mjs';
 import { project } from './lib/projections.mjs';
 import { runJanitor } from './lib/janitor.mjs';
 import { buildAgentContext, renderAgentContextText } from './lib/agent-context.mjs';
 import { buildOrientation, renderHandoff } from './lib/handoff.mjs';
-import { readMemory, searchMemory, extractEvent, rebuildMemory } from './lib/hindsight.mjs';
-import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts, totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
-import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './lib/skills.mjs';
+import { readMemory, searchMemory, extractEvent } from './lib/hindsight.mjs';
+import { totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
+import { listSkills } from './lib/skills.mjs';
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes } from './lib/runtimes.mjs';
 import { listMcp, mcpHealth } from './lib/mcp.mjs';
@@ -48,6 +48,7 @@ import { routeMcp, routeRuntimes } from './lib/bridge-routes-registries.mjs';
 import { routeSessions, routeLanes } from './lib/bridge-routes-lanes.mjs';
 import { routeApprovals } from './lib/bridge-routes-approvals.mjs';
 import { routeImports, routeAuth, routeCheckpoints, routeSchedules } from './lib/bridge-routes-capabilities.mjs';
+import { routeWorkers, routeSkills, routeTasks, routeMailbox, routeMemory } from './lib/bridge-routes-work.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -605,254 +606,12 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { ...out, kinds: SEARCH_KINDS });
   }
 
-  // ── workers / heartbeat (Phase B5) ────────────────────────────────────
-  if (path === '/bridge/workers' && req.method === 'GET') {
-    const proj = await project(repoRoot);
-    return sendJson(res, 200, { workers: proj.workers });
-  }
-  if (path === '/bridge/workers' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    const id = body.id || genWorkerId();
-    const ev = await append(repoRoot, {
-      type: EVENT_TYPES.WORKER_SPAWNED,
-      actor: body.sessionId || null,
-      lane: body.lane || null,
-      data: {
-        id,
-        command: body.command || null,
-        args: body.args || [],
-        pid: body.pid || null,
-        sessionId: body.sessionId || null
-      }
-    });
-    return sendJson(res, 200, { ok: true, workerId: id, event: ev });
-  }
-  if (path.startsWith('/bridge/workers/')) {
-    const rest = path.slice('/bridge/workers/'.length);
-    if (rest.endsWith('/heartbeat') && req.method === 'POST') {
-      const id = rest.slice(0, -'/heartbeat'.length);
-      const body = (await readBody(req)) || {};
-      await append(repoRoot, {
-        type: EVENT_TYPES.WORKER_HEARTBEAT,
-        actor: body.sessionId || null,
-        lane: null,
-        data: { id, focus: body.focus || null }
-      });
-      return sendJson(res, 200, { ok: true });
-    }
-    if (rest.endsWith('/exit') && req.method === 'POST') {
-      const id = rest.slice(0, -'/exit'.length);
-      const body = (await readBody(req)) || {};
-      await append(repoRoot, {
-        type: EVENT_TYPES.WORKER_EXITED,
-        actor: body.sessionId || null,
-        lane: null,
-        data: { id, exitCode: body.exitCode ?? 0 }
-      });
-      return sendJson(res, 200, { ok: true });
-    }
-    if (rest.endsWith('/kill') && req.method === 'POST') {
-      const id = rest.slice(0, -'/kill'.length);
-      const body = (await readBody(req)) || {};
-      await append(repoRoot, {
-        type: EVENT_TYPES.WORKER_KILLED,
-        actor: body.by || null,
-        lane: null,
-        data: { id, reason: body.reason || null }
-      });
-      return sendJson(res, 200, { ok: true });
-    }
-    if (req.method === 'GET' && !rest.includes('/')) {
-      const proj = await project(repoRoot);
-      const w = proj.workers.find((x) => x.id === rest);
-      if (!w) return sendJson(res, 404, { error: 'worker not found', id: rest });
-      return sendJson(res, 200, w);
-    }
-  }
-
-  // ── skills (Phase B4) ─────────────────────────────────────────────────
-
-  if (path === '/bridge/skills' && req.method === 'GET') {
-    const all = await listSkills(repoRoot);
-    return sendJson(res, 200, { skills: all });
-  }
-  if (path === '/bridge/skills' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!body.title) return sendJson(res, 400, { error: 'title required' });
-    const saved = await saveSkill(repoRoot, body);
-    return sendJson(res, 200, { ok: true, skill: saved });
-  }
-  if (path === '/bridge/skills/from-slice' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!body.eventId) return sendJson(res, 400, { error: 'eventId required' });
-    const all = await readAll(repoRoot);
-    const ev = all.find((e) => e.id === body.eventId);
-    if (!ev) return sendJson(res, 404, { error: 'event not found' });
-    if (ev.type !== 'SLICE_STOP') return sendJson(res, 400, { error: 'event is not a SLICE_STOP' });
-    const draft = draftFromSliceStop(ev);
-    const saved = await saveSkill(repoRoot, {
-      ...draft,
-      title: body.title || draft.title,
-      when: body.when || draft.when,
-      tags: body.tags || draft.tags,
-      by: body.by || null
-    });
-    return sendJson(res, 200, { ok: true, skill: saved });
-  }
-  if (path.startsWith('/bridge/skills/')) {
-    const rest = path.slice('/bridge/skills/'.length);
-    if (rest.endsWith('/apply') && req.method === 'POST') {
-      const id = rest.slice(0, -'/apply'.length);
-      const body = (await readBody(req)) || {};
-      try {
-        const s = await applySkill(repoRoot, id, body.by || null, body.sessionId || null);
-        return sendJson(res, 200, { ok: true, applied: { id, title: s.title } });
-      } catch (err) { return sendJson(res, 404, { error: err.message }); }
-    }
-    if (req.method === 'GET' && !rest.includes('/')) {
-      const s = await readSkill(repoRoot, rest);
-      if (!s) return sendJson(res, 404, { error: 'skill not found', id: rest });
-      return sendJson(res, 200, s);
-    }
-    if (req.method === 'POST' && !rest.includes('/')) {
-      const body = (await readBody(req)) || {};
-      const saved = await saveSkill(repoRoot, { ...body, id: rest });
-      return sendJson(res, 200, { ok: true, skill: saved });
-    }
-    if (req.method === 'DELETE' && !rest.includes('/')) {
-      const body = (await readBody(req)) || {};
-      await deleteSkill(repoRoot, rest, body.by || null);
-      return sendJson(res, 200, { ok: true });
-    }
-  }
-
-  // ── tasks (Phase B3) ──────────────────────────────────────────────────
-  if (path === '/bridge/tasks' && req.method === 'GET') {
-    const proj = await project(repoRoot);
-    return sendJson(res, 200, { tasks: proj.tasks });
-  }
-  if (path === '/bridge/tasks' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!body.title) return sendJson(res, 400, { error: 'title required' });
-    const id = body.id || genTaskId();
-    const ev = await append(repoRoot, {
-      type: EVENT_TYPES.TASK_CREATED,
-      actor: body.createdBy || null,
-      lane: body.lane || null,
-      data: {
-        id,
-        title: body.title,
-        description: body.description || '',
-        status: body.status || 'todo',
-        owner: body.owner || null,
-        blockedBy: body.blockedBy || [],
-        tags: body.tags || [],
-        metadata: body.metadata || {}
-      }
-    });
-    return sendJson(res, 200, { ok: true, taskId: id, event: ev });
-  }
-  // /bridge/tasks/<id>/update | /bridge/tasks/<id>/complete | GET /bridge/tasks/<id>
-  if (path.startsWith('/bridge/tasks/')) {
-    const rest = path.slice('/bridge/tasks/'.length);
-    if (rest.endsWith('/complete') && req.method === 'POST') {
-      const id = rest.slice(0, -'/complete'.length);
-      const body = (await readBody(req)) || {};
-      const ev = await append(repoRoot, {
-        type: EVENT_TYPES.TASK_COMPLETED,
-        actor: body.by || null,
-        lane: null,
-        data: { id }
-      });
-      return sendJson(res, 200, { ok: true, event: ev });
-    }
-    if (rest.endsWith('/update') && req.method === 'POST') {
-      const id = rest.slice(0, -'/update'.length);
-      const body = (await readBody(req)) || {};
-      const ev = await append(repoRoot, {
-        type: EVENT_TYPES.TASK_UPDATED,
-        actor: body.by || null,
-        lane: body.lane !== undefined ? body.lane : null,
-        data: { id, ...body, by: undefined }
-      });
-      return sendJson(res, 200, { ok: true, event: ev });
-    }
-    if (req.method === 'GET' && !rest.includes('/')) {
-      const proj = await project(repoRoot);
-      const t = proj.tasks.find((x) => x.id === rest);
-      if (!t) return sendJson(res, 404, { error: 'task not found', id: rest });
-      return sendJson(res, 200, t);
-    }
-  }
-
-  // ── mailbox (Phase B2) ────────────────────────────────────────────────
-  if (path === '/bridge/mailbox-counts' && req.method === 'GET') {
-    const c = await mailboxCounts(repoRoot);
-    return sendJson(res, 200, { counts: c, total: Object.values(c).reduce((s, v) => s + v.unread, 0) });
-  }
-  if (path.startsWith('/bridge/mailbox/') && req.method === 'GET') {
-    const rest = decodeURIComponent(path.slice('/bridge/mailbox/'.length));
-    if (rest && !rest.includes('/')) {
-      const msgs = await readMailbox(repoRoot, rest);
-      return sendJson(res, 200, { lane: rest, messages: msgs });
-    }
-  }
-  if (path.startsWith('/bridge/mailbox/') && req.method === 'POST') {
-    const rest = decodeURIComponent(path.slice('/bridge/mailbox/'.length));
-    // /bridge/mailbox/<lane>/read  vs  /bridge/mailbox/<lane>
-    if (rest.endsWith('/read')) {
-      const lane = rest.slice(0, -'/read'.length);
-      const body = (await readBody(req)) || {};
-      if (!body.messageId) return sendJson(res, 400, { error: 'messageId required' });
-      const r = await mailboxMarkRead(repoRoot, lane, body.messageId, body.by || null);
-      return sendJson(res, 200, r);
-    }
-    if (rest && !rest.includes('/')) {
-      const body = (await readBody(req)) || {};
-      if (!body.subject) return sendJson(res, 400, { error: 'subject required' });
-      try {
-        const msg = await mailboxSend(repoRoot, rest, {
-          from: body.from || null,
-          type: body.type || 'note',
-          subject: body.subject,
-          summary: body.summary || '',
-          body: body.body || ''
-        });
-        return sendJson(res, 200, { ok: true, message: msg });
-      } catch (err) {
-        return sendJson(res, 400, { error: err.message });
-      }
-    }
-  }
-
-  // ── memory / hindsight (Phase A3) ─────────────────────────────────────
-  if (path === '/bridge/memory' && req.method === 'GET') {
-    const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
-    const kind = url.searchParams.get('kind') || null;
-    const facts = await searchMemory(repoRoot, '', { kind, limit });
-    return sendJson(res, 200, { facts, count: facts.length });
-  }
-  if (path === '/bridge/memory/search' && req.method === 'GET') {
-    const q = url.searchParams.get('q') || '';
-    const kind = url.searchParams.get('kind') || null;
-    const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
-    const facts = await searchMemory(repoRoot, q, { kind, limit });
-    return sendJson(res, 200, { query: q, kind, facts, count: facts.length });
-  }
-  if (path === '/bridge/memory/extract' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (body.rebuild) {
-      const n = await rebuildMemory(repoRoot);
-      return sendJson(res, 200, { ok: true, rebuilt: true, facts: n });
-    }
-    // Otherwise: re-extract incrementally (dedupe via deterministic ids).
-    const events = await readAll(repoRoot);
-    let added = 0;
-    for (const ev of events) {
-      if (ev.type === 'SLICE_STOP') added += await extractEvent(repoRoot, ev);
-    }
-    return sendJson(res, 200, { ok: true, added });
-  }
+  // ── workers / skills / tasks / mailbox / memory → routes in ./lib/bridge-routes-work.mjs
+  { if (await routeWorkers({ req, res, path, url, repoRoot })) return; }
+  { if (await routeSkills({ req, res, path, url, repoRoot })) return; }
+  { if (await routeTasks({ req, res, path, url, repoRoot })) return; }
+  { if (await routeMailbox({ req, res, path, url, repoRoot })) return; }
+  { if (await routeMemory({ req, res, path, url, repoRoot })) return; }
 
   // ── learning (Slice δ) ────────────────────────────────────────────────
   // Hindsight memory grouped + filtered for the cockpit Learning route.
