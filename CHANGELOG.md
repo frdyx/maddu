@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.36.1] · 2026-06-18 · Docs sweep — architecture refactor
+
+Docs-only patch closing the two doc gaps the v1.19.0→v1.36.0 architecture refactor left behind. No code or behavior change.
+
+- **`docs/03-cli-reference.md`** — the `maddu architecture` block now lists the `mass` subcommand (`maddu architecture mass [--baseline]`, the monolith + duplicate-file ratchet added in v1.26.0); previously only the deep-dive `40-architecture-drift.md` covered it.
+- **`docs/00-index.md`** — version banner refreshed from a stale **v1.12.0 / 57 verbs / audit 6/6** to **v1.36.0 / 62 verbs / audit 14/14**, with a one-paragraph summary of the refactor (bridge un-monolithed, rules + docs single-sourced/generated, `docs-in-sync` retired, `architecture` contract + mass ratchet) — noting no user-facing surface changed.
+- `template/maddu/docs/{00-index,03-cli-reference}.md` regenerated from source via `scripts/generate.mjs` (the mirror is generated, not hand-edited).
+
+The refactor's gate/governance docs (`20-governance.md`, `39-rule-gate-traceability.md`, `40-architecture-drift.md`) were already current — `generated-artifacts-current` (supersedes `docs-in-sync`) and `architecture-mass` were documented as they shipped.
+
+Verified: `maddu audit` **14/0** (incl. `generated-artifacts-current` — mirror byte-equal), `maddu self-test` **58/0**, `maddu architecture` **0 drift**, `generate --check` clean (52 artifacts current).
+
 ## [v1.36.0] · 2026-06-18 · Architecture refactor (18) — cockpit split, slice 3 (comms panels + shared toast)
 
 Phase 8, third slice. The three comms-plugin **settings panels** move out, and the shared **toast helper** becomes a proper leaf so view modules can reuse it.
