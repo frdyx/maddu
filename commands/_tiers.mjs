@@ -115,4 +115,8 @@ export default {
   // v1.12.0 — portable project-blueprint export. Reads transcripts + spine and
   // writes a brief artifact under .maddu/state/blueprints/; no spine mutation.
   blueprint:    { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  // v1.17.0 — deliberate-shortcut ledger. Read-only (scans the source tree,
+  // writes a derived .maddu/state cache + one best-effort DEBT_SCANNED event);
+  // safe to auto-trigger so the ledger can refresh on a schedule.
+  debt:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
 };

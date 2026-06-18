@@ -14,6 +14,7 @@
 //   - docs-indexed               (gate, safety)
 //   - slash on-ramp              (audit-only) CLI verbs with no /maddu-* slash
 //   - charter drift              (audit-only) features not traceable to charter
+//   - rule-invariant drift       (audit-only) a hard-rule phrase dropped from a brief
 //
 // Subcommands (positional):
 //   (bare)    run every check
@@ -326,7 +327,83 @@ async function checkRuleGateTraceability() {
   };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability']);
+// ── Audit-only check: rule-invariant drift (v1.17.0) ──────────────────────
+// The 8+1 hard rules + the framework-scope banner are duplicated across every
+// agent-facing brief (the worker CLAUDE.md, the full MADDU.md, and the compact
+// CLAUDE/AGENTS section files). docs-in-sync guards byte-equal MIRRORED docs,
+// but these briefs are deliberately NOT byte-equal — each is phrased for its
+// surface — so nothing catches a load-bearing rule or scope carve-out being
+// reworded out of one copy (an agent then reads a weakened rule and acts on
+// it). This pins the invariant phrases: if a brief that must carry one stops
+// containing it, FAIL with the exact (file, phrase) miss. Inspired by
+// ponytail's check-rule-copies.js — a canary, not full equality.
+const RULE_FILES = {
+  worker:  'template/maddu/CLAUDE.md',
+  brief:   'template/maddu/agent-files/MADDU.md',
+  claudeS: 'template/maddu/agent-files/CLAUDE.section.md',
+  agentsS: 'template/maddu/agent-files/AGENTS.section.md',
+};
+const ALL_RULE_FILES = Object.values(RULE_FILES);
+// Phrases matched case-insensitively as substrings — robust to the per-surface
+// phrasing differences while still catching a rule that's reworded away. A
+// phrase with no `files` applies to every brief; scoped phrases list theirs.
+const RULE_INVARIANTS = [
+  { phrase: 'files-only state' },
+  { phrase: 'append-only' },
+  { phrase: 'no hosted backends' },
+  { phrase: 'no broad' },                 // "no broad new dependencies" / "no broad deps"
+  { phrase: 'no provider sdks' },
+  { phrase: 'no token export' },
+  { phrase: 'three-layer brand boundary' },
+  { phrase: 'lane ownership' },
+  { phrase: 'every auto-trigger crosses the gauntlet' },
+  { phrase: 'framework layer' },          // the scope boundary
+  { phrase: 'product feature' },          // the anti-crippling carve-out ("never stub/cripple a product feature")
+  { phrase: '8+1 hard rules', files: [RULE_FILES.worker, RULE_FILES.brief] },
+  // v1.17.0 — the routing-discipline carve-out: never route off pasted content
+  // (logs/transcripts/echoes). Lives only in the surfaces that carry the intent
+  // table, not the worker brief.
+  { phrase: 'pasted content is context', files: [RULE_FILES.brief, RULE_FILES.claudeS, RULE_FILES.agentsS] },
+];
+
+export async function checkRuleInvariants(rootDir = frameworkRoot()) {
+  const cache = new Map();
+  async function bodyOf(rel) {
+    if (cache.has(rel)) return cache.get(rel);
+    const p = join(rootDir, ...rel.split('/'));
+    let body = null;
+    // Normalize whitespace so a phrase that line-wraps in one brief but not
+    // another still matches — drift is a reworded rule, not a different wrap.
+    if (await exists(p)) { try { body = (await readFile(p, 'utf8')).toLowerCase().replace(/\s+/g, ' '); } catch {} }
+    cache.set(rel, body);
+    return body;
+  }
+  const misses = [];
+  const skipped = new Set();
+  for (const inv of RULE_INVARIANTS) {
+    const files = inv.files || ALL_RULE_FILES;
+    const needle = inv.phrase.toLowerCase().replace(/\s+/g, ' ');
+    for (const rel of files) {
+      const body = await bodyOf(rel);
+      if (body === null) { skipped.add(rel); continue; }
+      if (!body.includes(needle)) misses.push(`${rel.split('/').pop()} ⨯ "${inv.phrase}"`);
+    }
+  }
+  if (misses.length) {
+    return { level: 'FAIL', label: 'rule-invariant drift', detail: `dropped invariant(s): ${misses.join('; ')}` };
+  }
+  if (skipped.size === ALL_RULE_FILES.length) {
+    return { level: 'WARN', label: 'rule-invariant drift', detail: 'no agent-brief files found (skipped)' };
+  }
+  const checked = ALL_RULE_FILES.length - skipped.size;
+  return {
+    level: 'PASS',
+    label: 'rule-invariant drift',
+    detail: `${RULE_INVARIANTS.length} invariant phrase(s) intact across ${checked} agent brief(s)`,
+  };
+}
+
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -357,6 +434,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());
   if (!sub || sub === 'charter') checks.push(await checkCharterDrift());
   if (!sub || sub === 'traceability') checks.push(await checkRuleGateTraceability());
+  if (!sub || sub === 'invariants') checks.push(await checkRuleInvariants());
 
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const c of checks) counts[c.level]++;

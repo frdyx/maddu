@@ -16,6 +16,7 @@
 
 import { readAll, append, EVENT_TYPES } from './spine.mjs';
 import { runSliceReview } from './review.mjs';
+import { escalatesReview } from './risk-assess.mjs';
 
 const COOLDOWN_MS = 10 * 60 * 1000; // 10 min — don't re-review on every rapid slice.
 
@@ -37,12 +38,19 @@ async function lastFiredAt(repoRoot) {
 export async function maybeReviewSliceStop(repoRoot, ev, sessionId = null, triggeredBy = null) {
   if (!ev || ev.type !== 'SLICE_STOP') return { skipped: 'not-a-slice-stop' };
 
-  // Cooldown FIRST — never spawn a (billed) reviewer within the window.
+  // v1.17.0 — a high/critical-risk slice (touched auth/secrets/schema, or a
+  // broad change) escalates past the cooldown: the one case where re-reviewing
+  // a rapid slice is worth the spend. Ordinary slices still respect the window.
+  const riskLevel = ev.data?.risk?.level || null;
+  const escalate = escalatesReview(riskLevel);
+
+  // Cooldown FIRST — never spawn a (billed) reviewer within the window, unless
+  // the slice's risk escalates it.
   const now = Date.now();
-  if (now - (await lastFiredAt(repoRoot)) < COOLDOWN_MS) return { skipped: 'cooldown' };
+  if (!escalate && now - (await lastFiredAt(repoRoot)) < COOLDOWN_MS) return { skipped: 'cooldown' };
 
   const fired_at = new Date().toISOString();
-  const provenance = triggeredBy || { kind: 'slice-stop', id: 'auto-review', fired_at };
+  const provenance = triggeredBy || { kind: 'slice-stop', id: 'auto-review', fired_at, risk: riskLevel };
 
   // runSliceReview no-ops cleanly when no reviewer is configured (no spawn, no
   // cost) and stamps SLICE_REVIEWED/FOLLOWUP_OPENED with the provenance.
@@ -53,7 +61,7 @@ export async function maybeReviewSliceStop(repoRoot, ev, sessionId = null, trigg
   await append(repoRoot, {
     type: EVENT_TYPES.TRIGGER_FIRED,
     actor: sessionId,
-    data: { triggerId: 'slice-stop:auto-review', reason: 'slice-stopped', sliceEventId: ev.id, verdict: res.verdict, triggered_by: provenance },
+    data: { triggerId: 'slice-stop:auto-review', reason: escalate ? `slice-stopped (risk: ${riskLevel})` : 'slice-stopped', risk: riskLevel, escalated: escalate, sliceEventId: ev.id, verdict: res.verdict, triggered_by: provenance },
   });
 
   return { ran: true, verdict: res.verdict, findingsCount: res.findingsCount };
