@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.27.0] · 2026-06-18 · Architecture refactor (9) — server split, slice 3 (workspace fan-out)
+
+Phase 9, third slice. The `/bridge/_all/*` **multi-workspace fan-out** helpers move out of `server.js`.
+
+- **`runtime/lib/bridge-fanout.mjs`** — `workspaceLabels`, `tagRow`/`tagRows`, `fanoutBuild`, and the five aggregators (`fanoutProjection`, `fanoutConductor`, `fanoutApprovals`, `fanoutQueue`, `fanoutEventsRecent`) extracted. Each takes the request `ctx` (its `workspaces` Map) and merges the same single-workspace builders the legacy routes call — pure aggregation over canonical projections/spine, no closures over bridge globals, so they belong in `runtime-libs`. `server.js` **2 237 → 2 035** (−202; cumulative **2 705 → 2 035**, ~25% off the bridge monolith).
+- A clean extraction this time (the slice-2 lesson — watch for interspersed shared helpers — held: these five were only ever reached from the five `_all` route handlers). Verified by booting the bridge and curling every endpoint: `/bridge/_all/{projection,conductor,approvals,queue,events/recent}` all return **200** with correct `workspace_label`-tagged, merged multi-workspace data.
+- New `bridge-fanout` self-test (20 assertions: the export surface + `tagRow`/`tagRows` stamping + `fanoutBuild`'s parallel-iterate and per-workspace error-isolation contract via a stub builder).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **50/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (baseline ratcheted to server.js 2 035), live-bridge smoke (all `_all` endpoints 200).
+
 ## [v1.26.0] · 2026-06-18 · Architecture refactor (8) — server split, slice 2 (projection builders)
 
 Phase 9, second slice. The four cockpit **projection builders** move out of `server.js`.
