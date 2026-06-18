@@ -1,0 +1,69 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Tools"
+    </h2>
+    <p>
+      "Unified tool gateway — 5 default tools (git/test/format/lint/install), active MCP servers, last 20 invocations. (v1.1.0)"
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Default tools (5)"
+        </span>
+        <span class="panel-aside">
+          "git · test · format · lint · install — audited subprocess wrappers (v1.1.0 P1)"
+        </span>
+      </div>
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "MCP servers"
+        </span>
+        <span class="panel-aside">
+          "Active registrations (v1.1.0 P2 templates installable via maddu mcp install)"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No MCP servers registered"
+          </div>
+          <div class="empty-state-hint">
+            "Run `maddu mcp templates list` to see the 5 curated templates."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Recent tool events (last 20)"
+        </span>
+        <span class="panel-aside">
+          "TOOL_INVOKED / TOOL_COMPLETED / TOOL_REFUSED"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No tool events yet"
+          </div>
+          <div class="empty-state-hint">
+            "Run a default tool (e.g. `maddu git status`) to populate."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

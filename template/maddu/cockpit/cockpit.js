@@ -8552,4 +8552,5 @@ function renderSlashCheatsheet() {
   return wrap;
 }
 
-boot();
+export { boot, renderRoute, ROUTES };
+if (!globalThis.__MADDU_COCKPIT_TEST__) boot();

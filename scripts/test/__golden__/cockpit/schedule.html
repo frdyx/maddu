@@ -1,0 +1,54 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Schedule"
+    </h2>
+    <p>
+      "NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note)."
+    </p>
+    <div style="display:flex;gap:6px;margin-bottom:12px;align-items:center;">
+      <input placeholder="title (e.g. Daily summary)" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="natural (e.g. every evening at 6pm)" style="flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);min-width:160px;">
+      <button>
+        "Create"
+      </button>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "enabled · disabled · fire totals"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No schedules"
+          </div>
+          <div class="empty-state-hint">
+            "Create one to populate this summary."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="empty-state">
+        <div aria-hidden="true" class="empty-state-glyph">
+          "◌"
+        </div>
+        <div class="empty-state-title">
+          "No schedules yet"
+        </div>
+        <div class="empty-state-hint">
+          "Create one above, or via `maddu schedule create --natural "every hour" --title "ping"`."
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

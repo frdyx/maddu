@@ -1,0 +1,71 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "MCP Registry"
+    </h2>
+    <p>
+      "Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering."
+    </p>
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+      <input placeholder="name" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <select style="background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;">
+        <option value="stdio">
+          "stdio"
+        </option>
+        <option value="sse">
+          "sse"
+        </option>
+        <option value="http">
+          "http"
+        </option>
+      </select>
+      <input placeholder="command (stdio) or url (sse/http)" style="flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="args (comma, stdio only)" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="lanes (comma, * = any)" style="width:140px;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <button>
+        "Register"
+      </button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:12px;">
+      <button>
+        "Test all"
+      </button>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "transports · enabled · health"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No MCP servers"
+          </div>
+          <div class="empty-state-hint">
+            "Register one to populate this summary."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="empty-state">
+        <div aria-hidden="true" class="empty-state-glyph">
+          "◌"
+        </div>
+        <div class="empty-state-title">
+          "No MCP servers registered"
+        </div>
+        <div class="empty-state-hint">
+          "Register one above, or via `maddu mcp register`."
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

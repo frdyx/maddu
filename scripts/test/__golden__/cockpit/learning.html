@@ -1,0 +1,90 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Learning"
+    </h2>
+    <p>
+      "Durable findings distilled from slice-stops. Browse by kind, lane, recency. Hindsight worker writes; nothing here is hand-edited."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Findings"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/learning · grouped by kind + lane"
+        </span>
+        <div class="panel-head" style="gap:8px;flex-wrap:wrap;">
+          <select aria-label="Kind filter" class="m-select">
+            <option value="">
+              "all kinds"
+            </option>
+            <option value="rule">
+              "rule"
+            </option>
+            <option value="constraint">
+              "constraint"
+            </option>
+            <option value="discovery">
+              "discovery"
+            </option>
+            <option value="followup">
+              "followup"
+            </option>
+            <option value="touched">
+              "touched"
+            </option>
+            <option value="gate">
+              "gate"
+            </option>
+            <option value="summary">
+              "summary"
+            </option>
+          </select>
+          <select aria-label="Lane filter" class="m-select">
+            <option value="">
+              "all lanes"
+            </option>
+          </select>
+          <input aria-label="Query" class="m-input" placeholder="substring query…">
+          <button class="m-btn">
+            "Re-extract"
+          </button>
+        </div>
+      </div>
+      <div>
+        <div class="kpi-strip">
+          <div class="kpi-tile">
+            <div class="kpi-num">
+            <div class="kpi-lbl">
+              "facts"
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Recent findings"
+        </span>
+        <span class="panel-aside">
+          "click a row to open in Inspector"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No findings"
+          </div>
+          <div class="empty-state-hint">
+            "Run a slice-stop with --learnings to populate this."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

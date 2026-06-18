@@ -1,0 +1,75 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Events"
+    </h2>
+    <p>
+      "Live cursor stream of the append-only spine. Filters by type. Pause/resume."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Activity"
+        </span>
+        <span class="panel-aside">
+          "last 60 min · 200-event type mix"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No events"
+          </div>
+          <div class="empty-state-hint">
+            "Spine is empty."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Stream"
+        </span>
+        <span>
+          <select class="" style="font-family: var(--m-font-mono); font-size: 12px; background: var(--m-bg-2); color: var(--m-fg-1); border: 1px solid; padding: 4px 8px; border-width: var(--m-line); border-style: var(--m-line); border-color: var(--m-line);">
+            <option value="">
+              "(all)"
+            </option>
+            <option value="FRAMEWORK_*">
+              "FRAMEWORK_*"
+            </option>
+            <option value="SESSION_*">
+              "SESSION_*"
+            </option>
+            <option value="LANE_*">
+              "LANE_*"
+            </option>
+            <option value="SLICE_STOP">
+              "SLICE_STOP"
+            </option>
+            <option value="APPROVAL_*">
+              "APPROVAL_*"
+            </option>
+            <option value="DOCTOR_REPORT">
+              "DOCTOR_REPORT"
+            </option>
+            <option value="INBOX_MESSAGE">
+              "INBOX_MESSAGE"
+            </option>
+          </select>
+          <button>
+            "Pause"
+          </button>
+          <button>
+            "Clear"
+          </button>
+        </span>
+      </div>
+      <div style="max-height: 70vh; overflow: auto; border:1px solid var(--m-line); background:var(--m-bg-1);">
+    </div>
+  </div>
+</section>

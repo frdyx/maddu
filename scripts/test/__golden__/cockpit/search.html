@@ -1,0 +1,50 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Search"
+    </h2>
+    <p>
+      "Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox."
+    </p>
+    <input placeholder="Type to search across all corpora…" style="width:100%;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:8px 12px;font-family:var(--m-font-mono);font-size:13px;" type="text">
+    <div style="display:flex;gap:12px;margin:8px 0;flex-wrap:wrap;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-2);">
+      <label for="k-event" style="cursor:pointer;color:var(--m-fg-2);">
+        <input checked="checked" id="k-event" style="margin-right:4px;" type="checkbox">
+        "event"
+      </label>
+      <label for="k-slice" style="cursor:pointer;color:var(--m-fg-2);">
+        <input checked="checked" id="k-slice" style="margin-right:4px;" type="checkbox">
+        "slice"
+      </label>
+      <label for="k-memory" style="cursor:pointer;color:var(--m-fg-2);">
+        <input checked="checked" id="k-memory" style="margin-right:4px;" type="checkbox">
+        "memory"
+      </label>
+      <label for="k-skill" style="cursor:pointer;color:var(--m-fg-2);">
+        <input checked="checked" id="k-skill" style="margin-right:4px;" type="checkbox">
+        "skill"
+      </label>
+      <label for="k-mailbox" style="cursor:pointer;color:var(--m-fg-2);">
+        <input checked="checked" id="k-mailbox" style="margin-right:4px;" type="checkbox">
+        "mailbox"
+      </label>
+      <label for="k-inbox" style="cursor:pointer;color:var(--m-fg-2);">
+        <input checked="checked" id="k-inbox" style="margin-right:4px;" type="checkbox">
+        "inbox"
+      </label>
+    </div>
+    <div>
+      <div class="empty-state">
+        <div aria-hidden="true" class="empty-state-glyph">
+          "◌"
+        </div>
+        <div class="empty-state-title">
+          "Type a query"
+        </div>
+        <div class="empty-state-hint">
+          "Substring match across events, slice-stops, memory, skills, mailbox, inbox."
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

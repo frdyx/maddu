@@ -1,0 +1,96 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view" style="max-width: none;">
+    <p style="margin:0 0 12px;">
+      "OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule."
+    </p>
+    <div class="wb">
+      <div class="wb-pane">
+        <div class="wb-pane-head">
+          <span class="wb-pane-title">
+            "Lanes"
+          </span>
+          <span>
+            <span style="cursor: pointer; color: var(--m-fg-2); font-family: var(--m-font-mono);">
+              "all"
+            </span>
+          </span>
+        </div>
+        <div class="wb-pane-body">
+          <div class="skel-state">
+            <div class="skel-line skel-line-lg">
+            <div class="skel-line skel-line-md">
+            <div class="skel-line skel-line-sm">
+            <div aria-live="polite" class="skel-text">
+              "Fetching lanes…"
+            </div>
+          </div>
+        </div>
+        <div class="wb-pane-head" style="border-top:1px solid var(--m-line);">
+          <span class="wb-pane-title">
+            "Active sessions"
+          </span>
+          <span class="wb-list-count" id="wb-sess-count">
+            "0"
+          </span>
+        </div>
+        <div class="wb-pane-body" style="max-height:200px;flex:none;">
+          <div class="skel-state">
+            <div class="skel-line skel-line-lg">
+            <div class="skel-line skel-line-md">
+            <div class="skel-line skel-line-sm">
+            <div aria-live="polite" class="skel-text">
+              "Fetching sessions…"
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="wb-pane" style="min-width:0;">
+        <div class="wb-tabs">
+          <div class="wb-tab active">
+            "Stream"
+            <span class="wb-tab-count" id="wb-tab-count-stream">
+              "0"
+            </span>
+          </div>
+          <div class="wb-tab">
+            "Slices"
+            <span class="wb-tab-count" id="wb-tab-count-slices">
+              "0"
+            </span>
+          </div>
+          <div class="wb-tab">
+            "Approvals"
+            <span class="wb-tab-count" id="wb-tab-count-approvals">
+              "0"
+            </span>
+          </div>
+          <div class="wb-tab">
+            "Memory"
+            <span class="wb-tab-count" id="wb-tab-count-memory">
+              "0"
+            </span>
+          </div>
+        </div>
+        <div class="wb-center-body">
+      </div>
+      <div class="wb-pane">
+        <div class="wb-pane-head">
+          <span class="wb-pane-title">
+            "Status"
+          </span>
+          <span id="wb-status-version">
+        </div>
+        <div style="overflow:auto;flex:1;">
+          <div class="skel-state">
+            <div class="skel-line skel-line-lg">
+            <div class="skel-line skel-line-md">
+            <div class="skel-line skel-line-sm">
+            <div aria-live="polite" class="skel-text">
+              "Fetching status…"
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

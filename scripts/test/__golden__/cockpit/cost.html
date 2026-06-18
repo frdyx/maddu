@@ -1,0 +1,33 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Cost"
+    </h2>
+    <p>
+      "Token / call rollup per session, day, model, runtime. Surfaces unreported-token gaps honestly."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Token + call rollup"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/cost"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No token usage reported"
+          </div>
+          <div class="empty-state-hint">
+            "Workers emit TOKEN_USAGE_REPORTED events with at least { runtime, sessionId, model, ts }. `maddu cost --unreported-count` surfaces gaps honestly."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

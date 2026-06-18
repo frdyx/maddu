@@ -1,0 +1,61 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Auth"
+    </h2>
+    <p>
+      "Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only."
+    </p>
+    <div class="panel" style="border-left:3px solid var(--m-accent-warm);">
+      <div class="panel-title" style="color:var(--m-accent-warm);">
+        "TOKEN BOUNDARY"
+      </div>
+      <div class="event-actor" style="margin-top:6px;color:var(--m-fg-2);">
+        "Raw key values are never returned by /bridge/auth. The cockpit only sees label + last-4 chars."
+        "To add a key, use the CLI:"
+        <code style="color:var(--m-fg-0);">
+          "echo sk-… | maddu auth add <provider> --label "personal""
+        </code>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "providers · keys · rate-limit state"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No providers"
+          </div>
+          <div class="empty-state-hint">
+            "Add a key to populate the summary."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:12px;align-items:start;">
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No providers"
+          </div>
+          <div class="empty-state-hint">
+            "Add a key via: maddu auth add anthropic --label personal --value … Storage path:"
+          </div>
+        </div>
+      </div>
+      <div>
+    </div>
+  </div>
+</section>

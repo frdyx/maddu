@@ -2,3 +2,8 @@
 # `#!/usr/bin/env bash` shebang line gets `\r` appended on Linux/macOS
 # checkouts coming from a Windows clone and the kernel rejects it.
 template/maddu/run text eol=lf
+
+# Cockpit golden snapshots: written with LF by cockpit-snapshot.mjs and diffed
+# byte-for-byte against the serializer's LF output. Pin to LF so a Windows
+# checkout doesn't rewrite them to CRLF (the gate also normalizes on read).
+scripts/test/__golden__/cockpit/*.html text eol=lf

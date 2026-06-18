@@ -1,0 +1,170 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Approvals"
+    </h2>
+    <p>
+      "Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded."
+    </p>
+    <div class="panel" data-focus="summary summary open decisions distribution overview">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "open queue + decision distribution"
+        </span>
+      </div>
+      <div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;">
+          <div class="widget-donut">
+            <svg height="140" viewBox="0 0 140 140" width="140">
+              <circle cx="70" cy="70" fill="none" r="61" stroke="var(--m-bg-3)" stroke-width="18">
+              <text fill="var(--m-fg-0)" font-family="'IBM Plex Sans Condensed', sans-serif" font-size="24" font-weight="600" text-anchor="middle" x="70" y="75">
+                "0"
+              </text>
+              <text fill="var(--m-fg-3)" font-family="'IBM Plex Sans', sans-serif" font-size="10" letter-spacing="0.06em" text-anchor="middle" text-transform="uppercase" x="70" y="92">
+                "decided"
+              </text>
+            </svg>
+            <div class="widget-donut-legend">
+          </div>
+          <div class="widget-grid">
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Open queue"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-accent-2)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Decided"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-accent)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Standing policies"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Allow total"
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="open-queue open queue pending awaiting decision">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Open queue"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/approvals"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No pending approvals"
+          </div>
+          <div class="empty-state-hint">
+            "A worker can request one via POST /bridge/approvals/request."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="ledger ledger decided audit history approval">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Decision ledger"
+        </span>
+        <span class="panel-aside">
+          ".maddu/events/*.ndjson · APPROVAL_DECIDED"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No decisions yet"
+          </div>
+          <div class="empty-state-hint">
+            "Decisions appended as APPROVAL_DECIDED events."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="policies standing policies allow-always allow-once deny rules">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Standing policies"
+        </span>
+        <span class="panel-aside">
+          "APPROVAL_POLICY_SET"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No standing policies"
+          </div>
+          <div class="empty-state-hint">
+            "Choose "Allow always" or "Deny always" on a decision, or set via `maddu approval policy`."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="global-policies global standing policies machine-scope allow-always deny">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Standing policies (global)"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/_global/policies"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No global policies"
+          </div>
+          <div class="empty-state-hint">
+            "`maddu global policy add --tool <name> --decision deny`"
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,130 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Operations"
+    </h2>
+    <p>
+      "Live work in flight. Slice-stops, verifications, checkpoints."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Receipt log"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/operations · derived from spine · last 50"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No receipts yet"
+          </div>
+          <div class="empty-state-hint">
+            "Run any operational command (e.g. `maddu git status`) to populate."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="activity activity slice-stops memory facts 7-day timeline">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Activity"
+        </span>
+        <span class="panel-aside">
+          "slice-stops + memory facts · last 7 days"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No activity"
+          </div>
+          <div class="empty-state-hint">
+            "Slice-stops will appear here as they happen."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="slice-ledger slice ledger SLICE_STOP events history">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Slice ledger"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/projection · SLICE_STOP events"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "Empty"
+          </div>
+          <div class="empty-state-hint">
+            "Run `maddu slice-stop` to append the first entry."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="hindsight hindsight memory facts learnings extraction">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Hindsight memory"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/memory · facts derived from slice-stops"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No facts yet"
+          </div>
+          <div class="empty-state-hint">
+            "Slice-stops auto-populate this. Try `maddu slice-stop --learnings "A; B" --next "C"`."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="checkpoints checkpoints git tags rollback restore">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Checkpoints"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/checkpoints · git tags at maddu/checkpoint/<id>"
+        </span>
+      </div>
+      <div>
+        <div style="margin-bottom:8px;">
+          <button class="btn-allow">
+            "+ checkpoint"
+          </button>
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No checkpoints"
+          </div>
+          <div class="empty-state-hint">
+            "Click + to tag the current HEAD."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

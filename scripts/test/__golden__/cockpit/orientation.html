@@ -1,0 +1,101 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Orientation"
+    </h2>
+    <p>
+      "Turn-start digest. Goal, phase, last slice, open follow-ups."
+    </p>
+    <div class="panel" data-focus="orientation-brief goal phase orientation brief handoff">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Brief"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/orientation · goal / phase / last slice / open follow-ups"
+        </span>
+      </div>
+      <div>
+        <table class="ledger">
+          <tr>
+            <td class="event-actor">
+              "Goal"
+            </td>
+            <td>
+          </tr>
+          <tr>
+            <td class="event-actor">
+              "Phase"
+            </td>
+            <td>
+          </tr>
+          <tr>
+            <td class="event-actor">
+              "Active session"
+            </td>
+            <td>
+          </tr>
+          <tr>
+            <td class="event-actor">
+              "Last slice"
+            </td>
+            <td>
+          </tr>
+          <tr>
+            <td class="event-actor">
+              "Counters"
+            </td>
+            <td>
+              "[]"
+            </td>
+          </tr>
+          <tr>
+            <td class="event-actor">
+              "Open follow-ups"
+            </td>
+            <td>
+              "0"
+            </td>
+          </tr>
+        </table>
+        <pre class="docs-body">
+      </div>
+    </div>
+    <div class="panel" data-focus="orientation-sessions sessions tree janitor stale auto-close parent child">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Sessions"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/projection · sessions tree + janitor activity"
+        </span>
+      </div>
+      <div>
+        <div class="widget-stat">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value">
+              "0"
+            </span>
+            <span class="widget-stat-trend">
+              "total · 0 root(s)"
+            </span>
+          </div>
+          <div class="widget-stat-label">
+            "janitor: 0 stale · auto-closed"
+          </div>
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No sessions yet"
+          </div>
+          <div class="empty-state-hint">
+            "Run `./maddu/run register` to bootstrap one."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

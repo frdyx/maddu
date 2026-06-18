@@ -1,0 +1,277 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Dashboard"
+    </h2>
+    <p>
+      "Snapshot of every lane, every spawned worker, every open approval."
+    </p>
+    <div class="widget-grid">
+      <div class="widget-stat clickable">
+        <div class="widget-stat-num">
+          <span class="widget-stat-value" style="color:var(--m-accent-2)">
+            "—"
+          </span>
+        </div>
+        <div class="widget-stat-label">
+          "Events"
+        </div>
+      </div>
+      <div class="widget-stat clickable">
+        <div class="widget-stat-num">
+          <span class="widget-stat-value" style="color:var(--m-accent)">
+            "—"
+          </span>
+        </div>
+        <div class="widget-stat-label">
+          "Active sessions"
+        </div>
+      </div>
+      <div class="widget-stat clickable">
+        <div class="widget-stat-num">
+          <span class="widget-stat-value" style="color:var(--m-accent)">
+            "—"
+          </span>
+        </div>
+        <div class="widget-stat-label">
+          "Open approvals"
+        </div>
+      </div>
+      <div class="widget-stat clickable">
+        <div class="widget-stat-num">
+          <span class="widget-stat-value" style="color:var(--m-accent)">
+            "—"
+          </span>
+        </div>
+        <div class="widget-stat-label">
+          "Open tasks"
+        </div>
+      </div>
+      <div class="widget-stat clickable">
+        <div class="widget-stat-num">
+          <span class="widget-stat-value" style="color:var(--m-ok)">
+            "—"
+          </span>
+        </div>
+        <div class="widget-stat-label">
+          "Stuck workers"
+        </div>
+      </div>
+      <div class="widget-stat clickable">
+        <div class="widget-stat-num">
+          <span class="widget-stat-value" style="color:var(--m-accent)">
+            "—"
+          </span>
+        </div>
+        <div class="widget-stat-label">
+          "Mailbox unread"
+        </div>
+      </div>
+    </div>
+    <div class="widget-donut-row-pair">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">
+            "Tasks by status"
+          </span>
+          <span class="panel-aside">
+            "GET /bridge/projection"
+          </span>
+        </div>
+        <div class="widget-donut">
+          <svg height="140" viewBox="0 0 140 140" width="140">
+            <circle cx="70" cy="70" fill="none" r="61" stroke="var(--m-bg-3)" stroke-width="18">
+            <text fill="var(--m-fg-0)" font-family="'IBM Plex Sans Condensed', sans-serif" font-size="24" font-weight="600" text-anchor="middle" x="70" y="75">
+              "0"
+            </text>
+            <text fill="var(--m-fg-3)" font-family="'IBM Plex Sans', sans-serif" font-size="10" letter-spacing="0.06em" text-anchor="middle" text-transform="uppercase" x="70" y="92">
+              "tasks"
+            </text>
+          </svg>
+          <div class="widget-donut-legend">
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">
+            "Workers by status"
+          </span>
+          <span class="panel-aside">
+            "GET /bridge/projection · 15 s stuck threshold"
+          </span>
+        </div>
+        <div class="widget-donut">
+          <svg height="140" viewBox="0 0 140 140" width="140">
+            <circle cx="70" cy="70" fill="none" r="61" stroke="var(--m-bg-3)" stroke-width="18">
+            <text fill="var(--m-fg-0)" font-family="'IBM Plex Sans Condensed', sans-serif" font-size="24" font-weight="600" text-anchor="middle" x="70" y="75">
+              "0"
+            </text>
+            <text fill="var(--m-fg-3)" font-family="'IBM Plex Sans', sans-serif" font-size="10" letter-spacing="0.06em" text-anchor="middle" text-transform="uppercase" x="70" y="92">
+              "workers"
+            </text>
+          </svg>
+          <div class="widget-donut-legend">
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Event activity"
+        </span>
+        <span class="panel-aside">
+          "last 60 min · 24 buckets · GET /bridge/events/recent"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No events yet"
+          </div>
+          <div class="empty-state-hint">
+            "Run `maddu session register` or any slice-stop."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Capacity"
+        </span>
+        <span class="panel-aside">
+          "enabled · accepted · registered"
+        </span>
+      </div>
+      <div>
+        <div class="widget-bar">
+          <div class="widget-bar-head">
+            <span class="widget-bar-label">
+              "MCP servers enabled"
+            </span>
+            <span class="widget-bar-right">
+              "0 / 0"
+            </span>
+          </div>
+          <div class="widget-bar-track">
+            <div class="widget-bar-fill" style="width:0%; background:var(--m-accent-2)">
+          </div>
+        </div>
+        <div class="widget-bar">
+          <div class="widget-bar-head">
+            <span class="widget-bar-label">
+              "Schedules enabled"
+            </span>
+            <span class="widget-bar-right">
+              "0 / 0"
+            </span>
+          </div>
+          <div class="widget-bar-track">
+            <div class="widget-bar-fill" style="width:0%; background:var(--m-accent)">
+          </div>
+        </div>
+        <div class="widget-bar">
+          <div class="widget-bar-head">
+            <span class="widget-bar-label">
+              "Imports accepted vs total"
+            </span>
+            <span class="widget-bar-right">
+              "0 / 0"
+            </span>
+          </div>
+          <div class="widget-bar-track">
+            <div class="widget-bar-fill" style="width:0%; background:var(--m-ok)">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Bridge"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/status"
+        </span>
+      </div>
+      <dl class="kv">
+        <dt>
+          "bridge"
+        </dt>
+        <dd>
+          <span class="signal live">
+          "online"
+        </dd>
+        <dt>
+          "version"
+        </dt>
+        <dd>
+          "1.37.0-harness"
+        </dd>
+        <dt>
+          "host"
+        </dt>
+        <dd>
+          "127.0.0.1:4177"
+        </dd>
+        <dt>
+          "uptime"
+        </dt>
+        <dd>
+          "1h 0m"
+        </dd>
+        <dt>
+          "repo root"
+        </dt>
+        <dd>
+          "/repo/maddu"
+        </dd>
+        <dt>
+          "state"
+        </dt>
+        <dd>
+          ".maddu/"
+        </dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Hard rules"
+        </span>
+        <span class="panel-aside">
+          "docs/hard-rules.md"
+        </span>
+      </div>
+      <ul class="hard-rules">
+        <li>
+          "Files-only state"
+        </li>
+        <li>
+          "No SQLite / DB"
+        </li>
+        <li>
+          "No hosted backends"
+        </li>
+        <li>
+          "No broad new deps"
+        </li>
+        <li>
+          "No provider SDKs in app code"
+        </li>
+        <li>
+          "No token export"
+        </li>
+        <li>
+          "Three-layer brand boundary"
+        </li>
+        <li>
+          "Lane ownership"
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>

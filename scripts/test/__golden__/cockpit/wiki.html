@@ -1,0 +1,94 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Wiki"
+    </h2>
+    <p>
+      "Auto-maintained per-lane wiki. The Wiki Updater syncs pages from slice-stops; the Drift Drawer flags pages that fell behind."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Actions"
+        </span>
+        <span class="panel-aside">
+          "Rebuild rewrites every page from the spine — safe, idempotent."
+        </span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="m-btn">
+          "Rebuild wiki"
+        </button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Drift Drawer"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/wiki · pages older than the latest slice-stop on their lane"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No drift"
+          </div>
+          <div class="empty-state-hint">
+            "Every wiki page is at least as fresh as its lane's last slice-stop."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Pages"
+        </span>
+        <span class="panel-aside">
+          "one page per lane · auto-stamped on slice-stop"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No pages"
+          </div>
+          <div class="empty-state-hint">
+            "Run a slice-stop or POST /bridge/wiki/rebuild."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Page"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/wiki/page"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "Pick a page"
+          </div>
+          <div class="empty-state-hint">
+            "Click a page on the left to read its rendered markdown."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

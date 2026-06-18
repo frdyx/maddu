@@ -1,0 +1,36 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Reviews"
+    </h2>
+    <p>
+      "Post-stop reviews. Verdict counts + per-review markdown."
+    </p>
+    <div class="panel" data-focus="recent-reviews reviews verdict findings P1 P2 P3 followup">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Recent reviews"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/reviews · SLICE_REVIEWED events"
+        </span>
+      </div>
+      <div>
+        <div class="widget-stat-label">
+          "Clean · P1 · P2 · P3 · Info"
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No reviews yet"
+          </div>
+          <div class="empty-state-hint">
+            "Run `maddu review run --slice <id>` after a slice-stop."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

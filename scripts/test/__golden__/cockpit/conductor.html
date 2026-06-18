@@ -1,0 +1,365 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Conductor"
+    </h2>
+    <p>
+      "Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board."
+    </p>
+    <div class="conductor-next">
+      <div class="next-command tone-accent" style="cursor: pointer;">
+        <span class="next-command-glyph">
+          "▸"
+        </span>
+        <div class="next-command-body">
+          <div class="next-command-text">
+          <div class="next-command-hint">
+          <div class="next-command-meta">
+            <span class="next-command-pill tone-accent">
+            <span class="next-command-route">
+              "→ /"
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="widget-grid">
+        <div class="widget-stat clickable">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value" style="color:var(--m-fg-3)">
+          </div>
+          <div class="widget-stat-label">
+            "Active claims"
+          </div>
+        </div>
+        <div class="widget-stat clickable">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value" style="color:var(--m-ok)">
+          </div>
+          <div class="widget-stat-label">
+            "Open approvals"
+          </div>
+        </div>
+        <div class="widget-stat clickable">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value" style="color:var(--m-ok)">
+          </div>
+          <div class="widget-stat-label">
+            "Stuck workers"
+          </div>
+        </div>
+        <div class="widget-stat clickable">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value" style="color:var(--m-ok)">
+          </div>
+          <div class="widget-stat-label">
+            "Idle sessions"
+          </div>
+        </div>
+        <div class="widget-stat clickable">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value" style="color:var(--m-accent)">
+          </div>
+          <div class="widget-stat-label">
+            "Open tasks"
+          </div>
+        </div>
+        <div class="widget-stat clickable">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value" style="color:var(--m-ok)">
+              "0s"
+            </span>
+          </div>
+          <div class="widget-stat-label">
+            "Last slice-stop"
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="board now next waiting done board kanban work-in-flight">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Now · Next · Waiting · Done"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/conductor"
+        </span>
+      </div>
+      <div class="conductor-board">
+        <div class="board-grid">
+          <div class="board-col">
+            <div class="board-col-head tone-blue">
+              <span class="board-col-title">
+                "Now"
+              </span>
+              <span class="board-col-count">
+                "0"
+              </span>
+            </div>
+            <div class="board-col-hint">
+              "in-progress"
+            </div>
+            <div class="board-empty">
+              "—"
+            </div>
+          </div>
+          <div class="board-col">
+            <div class="board-col-head tone-accent">
+              <span class="board-col-title">
+                "Next"
+              </span>
+              <span class="board-col-count">
+                "0"
+              </span>
+            </div>
+            <div class="board-col-hint">
+              "ready · no blockers"
+            </div>
+            <div class="board-empty">
+              "—"
+            </div>
+          </div>
+          <div class="board-col">
+            <div class="board-col-head tone-warn">
+              <span class="board-col-title">
+                "Waiting"
+              </span>
+              <span class="board-col-count">
+                "0"
+              </span>
+            </div>
+            <div class="board-col-hint">
+              "blocked on dependency"
+            </div>
+            <div class="board-empty">
+              "—"
+            </div>
+          </div>
+          <div class="board-col">
+            <div class="board-col-head tone-ok">
+              <span class="board-col-title">
+                "Done"
+              </span>
+              <span class="board-col-count">
+                "0"
+              </span>
+            </div>
+            <div class="board-col-hint">
+              "recent · last 8"
+            </div>
+            <div class="board-empty">
+              "—"
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="queue queue scheduler dispatch preflight parked reason-code" style="cursor: pointer;">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Queue Board"
+        </span>
+        <span class="panel-aside">
+          "scheduler · queue · dispatch · preflights"
+        </span>
+      </div>
+      <div>
+        <div class="widget-segbar">
+          <div class="widget-segbar-track">
+          <div class="widget-segbar-legend">
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="score score matrix progress per-lane claims reason">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Operation Score Matrix"
+        </span>
+        <span class="panel-aside">
+          "per-lane progress · claims · reason codes"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No lanes"
+          </div>
+          <div class="empty-state-hint">
+            "Lane catalog is empty."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="last-slice last slice-stop recent ritual learning">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Last slice-stop"
+        </span>
+        <span class="panel-aside">
+          "most recent ritual close"
+        </span>
+      </div>
+      <div>
+        <dl class="kv">
+          <dt>
+            "id"
+          </dt>
+          <dd>
+          <dt>
+            "when"
+          </dt>
+          <dd>
+          <dt>
+            "age"
+          </dt>
+          <dd>
+            "0s"
+          </dd>
+          <dt>
+            "summary"
+          </dt>
+          <dd>
+        </dl>
+      </div>
+    </div>
+    <div class="panel" data-focus="slash-cheatsheet slash commands cheatsheet quick reference maddu-help maddu-autopilot">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Slash-command quick reference"
+        </span>
+        <span class="panel-aside">
+          "/maddu-*"
+        </span>
+      </div>
+      <div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-help"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Discovery guide — list commands by topic."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-doctor"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Run hard-rule gates and surface findings."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-autopilot"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Register → claim → pipeline → slice-stop."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-plan"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Plan-only stage; write a brief artifact."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-review"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Post-stop review of a slice."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-team"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Open N child sessions with disjoint lanes."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-advise"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Non-claiming advisor query; artifact-only."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-status"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Pretty-print state across surfaces."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-cost"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Token / call rollup."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-skill"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "List / search / apply skills."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-cancel"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "Stop the current slice cleanly."
+          </div>
+        </div>
+        <div class="panel-row">
+          <div class="panel-row-head">
+            <span class="mono">
+              "/maddu-note"
+            </span>
+          </div>
+          <div class="panel-row-detail">
+            "One-liner into the operator inbox."
+          </div>
+        </div>
+        <p class="dim">
+          "Natural language works too — type "ship the login form" or "status" and the agent will pick the slash command for you. See MADDU.md §"Intent routing"."
+        </p>
+      </div>
+    </div>
+  </div>
+</section>

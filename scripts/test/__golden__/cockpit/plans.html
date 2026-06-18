@@ -1,0 +1,67 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Plans"
+    </h2>
+    <p>
+      "Multi-phase plan persistence + Kanban (Now / Next / Blocked / Done). State derived from spine PLAN_* events. (v1.1.0)"
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Kanban"
+        </span>
+        <span class="panel-aside">
+          "Now · Next · Blocked · Done (derived from PLAN_* events)"
+        </span>
+      </div>
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+          <div style="border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;">
+            <div style="font-family:var(--m-font-mono);font-size:12px;color:#6cf;margin-bottom:6px;">
+              "Now (0)"
+            </div>
+          </div>
+          <div style="border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;">
+            <div style="font-family:var(--m-font-mono);font-size:12px;color:#cb6;margin-bottom:6px;">
+              "Next (0)"
+            </div>
+          </div>
+          <div style="border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;">
+            <div style="font-family:var(--m-font-mono);font-size:12px;color:#e77;margin-bottom:6px;">
+              "Blocked (0)"
+            </div>
+          </div>
+          <div style="border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;">
+            <div style="font-family:var(--m-font-mono);font-size:12px;color:#7c7;margin-bottom:6px;">
+              "Done (0)"
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "All plans"
+        </span>
+        <span class="panel-aside">
+          "Open + completed + cancelled (newest first)"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No plans yet"
+          </div>
+          <div class="empty-state-hint">
+            "Create one with `maddu plan new "<title>" --phases "a,b,c"`."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

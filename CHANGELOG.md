@@ -11,6 +11,19 @@ narrative summary.
 
 ---
 
+## [v1.37.0] · 2026-06-19 · Cockpit verification harness (Phase 0)
+
+Re-opens the architecture refactor's cockpit decomposition by removing its blocker: every prior cockpit slice could only be verified by an operator hard-refreshing `127.0.0.1:4177`. This release makes the cockpit SPA **verifiable headlessly** — no browser binary, no operator — so future slices self-verify like the server slices did (`move code → maddu self-test → green → ship`).
+
+- **`scripts/test/_cockpit-dom-env.mjs`** (shared harness, `_`-prefixed so it is not discovered as a test) — stands up a pure-JS DOM via [happy-dom](https://github.com/capricorn86/happy-dom) (a dev-only `devDependency`), feeds it the real `cockpit/index.html` scaffold, a deterministic fake bridge (fixed timestamps/ids; the event long-poll parks so `streamLoop` never spins), and frozen time (`Date.now()` / no-arg `new Date()` fixed; `new Date(iso)` still parses fixtures). Stable serializer (sorted attrs, normalized whitespace, masked volatile tokens). Browser-parity: collected timers cleared on teardown; fire-and-forget async-refresher rejections tolerated (a browser logs them, Node would crash).
+- **`scripts/test/cockpit-boot.mjs`** (Gate A) — imports the whole cockpit module graph, `boot()`s, and renders **all 42 routes** into a non-empty `#route-view` without a synchronous throw. Verified fail-proof against a deliberately broken import.
+- **`scripts/test/cockpit-snapshot.mjs`** (Gate B) — serializes every route's settled DOM + the persistent chrome (rail/dock) and diffs against committed goldens under `scripts/test/__golden__/cockpit/` (43 goldens). `UPDATE_GOLDENS=1` re-captures after an intentional change. Verified sensitive (a one-token golden change flags exactly that route) and idempotent.
+- **`template/maddu/cockpit/cockpit.js`** — the only shipped-code change is a prod-identical two-line seam at the entry tail: `export { boot, renderRoute, ROUTES };` + `if (!globalThis.__MADDU_COCKPIT_TEST__) boot();`. In a browser the flag is undefined, so it boots exactly as before.
+- Both gates **graceful-skip** (print `SKIP`, exit 0) when happy-dom is absent, so a zero-install consumer checkout's `maddu self-test` stays green. `docs/26-stress-testing.md` documents the harness; the stale "cockpit rendering is not covered" caveat is corrected.
+- Re-baselined the cockpit mass floor `8555 → 8556` (`maddu architecture mass --baseline`) for the necessary +1-line seam — Phase 1+ shrinks far below it.
+
+Verified: `maddu self-test` **61/0** (the 2 new gates discovered + green), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**, `generate --check` clean (52 artifacts). Gate A proven to fail on a broken module graph; Gate B proven to fail on any DOM diff. The seam is prod-identical ESM (the `export` is inert in an entry module; the guard is false in a browser), and Gate A boots the real module graph + renders all 42 routes under an ESM loader — so the headless gates stand in for the per-slice operator refresh from here on.
+
 ## [v1.36.1] · 2026-06-18 · Docs sweep — architecture refactor
 
 Docs-only patch closing the two doc gaps the v1.19.0→v1.36.0 architecture refactor left behind. No code or behavior change.
