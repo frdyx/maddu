@@ -16,9 +16,15 @@
 
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 export const SOURCE_EXTS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py'];
 export const FAIL_ON = new Set(['none', 'new', 'any']);
+// Structural-mass defaults: a file over this many lines is a "monolith". The
+// import graph can't see file mass (a 9000-line file is one node), so this is a
+// separate dimension. 1500 cleanly separates genuine monoliths from large-but-
+// reasonable modules in this repo; override via contract options.mass.maxLines.
+export const MASS_MAX_LINES = 1500;
 
 const SKIP_DIRS = new Set([
   '.git', 'node_modules', '.maddu', 'dist', 'build', 'out', 'coverage',
@@ -433,4 +439,107 @@ export async function scaffoldContract(repoRoot) {
     rules: modules.map((m) => ({ from: m.name, allow: [] })),
     options: { failOn: 'none', allowCycles: false, onUndeclared: 'warn' },
   };
+}
+
+// ── structural mass ──────────────────────────────────────────────────────────
+// A second dimension the import graph is blind to: file MASS (line count) and
+// exact-duplicate code files. Scopes to SOURCE_EXTS (code) — scanning docs or
+// the agent briefs would flag the intentional generated mirrors as duplicates.
+
+export function massOptions(contract) {
+  const m = (contract && contract.options && contract.options.mass) || {};
+  return {
+    maxLines: Number.isInteger(m.maxLines) && m.maxLines > 0 ? m.maxLines : MASS_MAX_LINES,
+    failOn: FAIL_ON.has(m.failOn) ? m.failOn : 'none',
+    ignore: Array.isArray(m.ignore) ? m.ignore.map((g) => globToRegExp(g)) : [],
+  };
+}
+
+function countLines(body) {
+  if (body.length === 0) return 0;
+  let n = 1;
+  for (let i = 0; i < body.length; i++) if (body[i] === '\n') n++;
+  // A trailing newline shouldn't inflate the count by one phantom line.
+  if (body[body.length - 1] === '\n') n--;
+  return n;
+}
+
+// Scan code files for line/byte mass + exact duplicates. `ignore` is a list of
+// RegExp (repo-relative path matchers). Returns files sorted largest-first.
+export async function scanMass(repoRoot, { maxLines = MASS_MAX_LINES, ignore = [] } = {}) {
+  const files = [];
+  const byHash = new Map();
+  for await (const rel of walk(repoRoot)) {
+    const dot = rel.lastIndexOf('.');
+    const ext = dot < 0 ? '' : rel.slice(dot);
+    if (!SOURCE_EXTS.includes(ext)) continue;
+    if (ignore.some((re) => re.test(rel))) continue;
+    let body;
+    try { body = await readFile(join(repoRoot, rel), 'utf8'); } catch { continue; }
+    const lines = countLines(body);
+    const bytes = Buffer.byteLength(body, 'utf8');
+    files.push({ path: rel, lines, bytes });
+    const hash = createHash('sha256').update(body.replace(/\r\n/g, '\n')).digest('hex');
+    if (!byHash.has(hash)) byHash.set(hash, []);
+    byHash.get(hash).push(rel);
+  }
+  files.sort((a, b) => b.lines - a.lines || a.path.localeCompare(b.path));
+  const oversize = files.filter((f) => f.lines > maxLines);
+  const duplicates = [...byHash.values()].filter((g) => g.length > 1).map((g) => g.sort());
+  const totals = files.reduce((t, f) => ({ files: t.files + 1, lines: t.lines + f.lines, bytes: t.bytes + f.bytes }), { files: 0, lines: 0, bytes: 0 });
+  return { files, oversize, duplicates, totals, maxLines };
+}
+
+export async function loadMassBaseline(repoRoot) {
+  const path = join(repoRoot, '.maddu', 'state', 'architecture', 'mass-baseline.json');
+  try { const doc = JSON.parse(await readFile(path, 'utf8')); return { files: doc.files || {}, ts: doc.ts || null, path }; }
+  catch { return { files: {}, ts: null, path }; }
+}
+
+export async function writeMassBaseline(repoRoot, scan, ts) {
+  const dir = join(repoRoot, '.maddu', 'state', 'architecture');
+  await mkdir(dir, { recursive: true });
+  const files = {};
+  for (const f of scan.oversize) files[f.path] = f.lines;
+  const path = join(dir, 'mass-baseline.json');
+  await writeFile(path, JSON.stringify({ schemaVersion: 1, ts, maxLines: scan.maxLines, files }, null, 2) + '\n');
+  return { path, count: scan.oversize.length };
+}
+
+// Ratchet: with failOn 'new', a NEW monolith (not baselined) OR a baselined
+// monolith that GREW (more lines than its baseline) blocks — so monoliths may
+// only shrink. 'any' blocks on any oversize file; 'none' is warn-only.
+export function evaluateMass(scan, baseline, failOn) {
+  const baseFiles = baseline.files || {};
+  const fresh = scan.oversize.filter((f) => !(f.path in baseFiles));
+  const grown = scan.oversize.filter((f) => f.path in baseFiles && f.lines > baseFiles[f.path]);
+  let blocking = false;
+  if (failOn === 'any') blocking = scan.oversize.length > 0;
+  else if (failOn === 'new') blocking = fresh.length > 0 || grown.length > 0;
+  return { failOn, oversize: scan.oversize.length, fresh, grown, duplicates: scan.duplicates.length, blocking };
+}
+
+export function renderMassReport(scan, massEval) {
+  const L = [];
+  const fmt = (f) => `  ${String(f.lines).padStart(6)}  ${f.path}`;
+  if (scan.oversize.length) {
+    L.push(`Monoliths (> ${scan.maxLines} lines), ${scan.oversize.length}:`);
+    for (const f of scan.oversize) {
+      const tag = massEval && massEval.fresh.includes(f) ? '  (new)' : (massEval && massEval.grown.includes(f) ? '  (grown)' : '');
+      L.push(fmt(f) + tag);
+    }
+  } else {
+    L.push(`No monoliths over ${scan.maxLines} lines.`);
+  }
+  if (scan.duplicates.length) {
+    L.push('');
+    L.push(`Exact-duplicate code files (${scan.duplicates.length} group(s)):`);
+    for (const g of scan.duplicates) L.push(`  ${g.join('  ==  ')}`);
+  }
+  L.push('');
+  L.push(`Totals: ${scan.totals.files} code file(s) · ${scan.totals.lines} lines · ${(scan.totals.bytes / 1024).toFixed(0)} KiB`);
+  if (massEval) {
+    L.push(`Enforcement: failOn:${massEval.failOn} — ${massEval.fresh.length} new / ${massEval.grown.length} grown vs baseline`);
+  }
+  return L.join('\n');
 }

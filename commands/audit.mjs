@@ -96,6 +96,10 @@ const GATE_IDS = {
   // Skips gracefully when a repo declares no contract (the framework source
   // itself declares none), so it's a PASS here until a product opts in.
   architecture: 'architecture-drift',
+  // v1.23.0 — architecture-mass: the monolith ratchet (file mass, the dimension
+  // the import graph can't see). Baselined monoliths may only shrink; a new or
+  // grown one fails. Skips when no contract / mass config.
+  mass: 'architecture-mass',
   // v1.19.0 — generated-artifacts-current: every single-sourced artifact is
   // byte-equal to a fresh render of its authored source, and no payload file is
   // an orphan (no source). The enforcement arm of the generated-artifact
@@ -449,7 +453,7 @@ async function checkCapabilityDocs() {
   return { level: 'PASS', label: 'capability-docs', detail: `${keys.length} verb(s) mapped; ${withDoc} with an in-depth doc, all present` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'capability-docs', 'generated']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -475,6 +479,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'defaults') checks.push(...await runGateChecks(repoRoot, GATE_IDS.defaults));
   if (!sub || sub === 'brief') checks.push(...await runGateChecks(repoRoot, GATE_IDS.brief));
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
+  if (!sub || sub === 'mass') checks.push(...await runGateChecks(repoRoot, GATE_IDS.mass));
   if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
 
   // Audit-only checks.

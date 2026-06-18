@@ -79,6 +79,32 @@ maddu architecture baseline    # grandfather existing violations (the ratchet)
 (`.maddu/state/architecture/diagram.mmd`) with violations as red dashed edges —
 your architecture, visualized, no dependency.
 
+## Structural mass (`maddu architecture mass`)
+
+The import graph is blind to **file mass**: a 9 000-line file is one node. A
+second dimension reports it — per-file line counts, the files over a monolith
+threshold, and exact-duplicate code files (copy-paste the graph can't see):
+
+```bash
+maddu architecture mass            # report monoliths + duplicate code files
+maddu architecture mass --baseline # record today's monoliths as the floor
+```
+
+Thresholds and enforcement live in the contract under `options.mass`:
+
+```jsonc
+"mass": { "maxLines": 1500, "failOn": "new" }
+```
+
+The ratchet is **shrink-only**: with `failOn:"new"`, a *new* file over the
+threshold OR a baselined monolith that *grew* fails the `architecture-mass`
+gate (run by `maddu audit`); a baselined monolith that shrinks passes, and one
+that drops below the threshold leaves the set entirely. So existing monoliths
+are grandfathered but can only get smaller. Scoped to code (`SOURCE_EXTS`) —
+generated mirrors (docs, agent briefs) are intentionally excluded so they don't
+register as duplicates. The baseline is `mass-baseline.json` (tracked, like the
+contract, so CI enforces it).
+
 ## Scope (MVP)
 
 This is the **code import graph** — modules, layers, cycles. Runtime/service
