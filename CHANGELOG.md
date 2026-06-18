@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.21.0] · 2026-06-18 · Architecture refactor (3) — the doc tree is generated, not hand-mirrored
+
+Phase 5 (plan `pln_20260618130134_3ce2`): the bundled docs payload is now **generated** from the authored source. The user-facing docs are authored at the repo root (`docs/`) and shipped to consumers as `template/maddu/docs/`; the two trees were kept byte-equal by hand and policed by `docs-in-sync`. Now the payload tree is derived from the source.
+
+- **The engine gains a `mirror` generator** — it expands to one unit per source file (top-level `*.md`), and is **EOL-preserving**: each target is written in its own existing newline style, so the 48 content-equal docs produce **zero churn** while genuine edits to `docs/*.md` propagate to the payload. (The two trees differ today only in line endings; a naive copy would have flipped every line.)
+- **`docs-tree` generator** mirrors `docs/*.md` → `template/maddu/docs/*.md` (48 files). Repo-only doc subdirs (`audit/`, `research/`, `sessions/`, …) never ship and are untouched. `generated-artifacts-current` now covers **52 artifacts** (4 briefs + 48 docs).
+- `generation-engine` fixture grew **18 → 25** (mirror write/skip/filter/EOL-preserve/propagate).
+
+`docs-in-sync` stays green and active — its retirement (with `rule-invariant`) is the next phase, and is **deliberately deferred**: the supersession turned out to be subtler than a clean delete (`docs-in-sync` also flags orphan files; `rule-invariant` guards rule *substance*, not just duplication), so those gates need careful repurposing rather than removal.
+
+Verified: `maddu audit` **14/0** (`docs in sync` + `generated-artifacts-current` both green), `maddu self-test` **46/0**, `maddu architecture` **0 drift**, zero doc-tree churn.
+
 ## [v1.20.1] · 2026-06-18 · Architecture refactor (2b) — the compact rule stanza joins the registry
 
 Completes the rule single-sourcing: the third brief surface — the compact `.section.md` stanza (read by both Claude Code and Codex) — is now generated from the same `rules.json` registry, so **all four** agent briefs derive their hard-rules text from one source.
