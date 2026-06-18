@@ -14,6 +14,13 @@ template/.maddu/
 !.maddu/config/
 .maddu/config/*
 !.maddu/config/architecture.json
+# Likewise the structural-mass baseline (the monolith ratchet floor) must ship so
+# the architecture-mass gate enforces "monoliths may only shrink" in CI.
+!.maddu/state/
+.maddu/state/*
+!.maddu/state/architecture/
+.maddu/state/architecture/*
+!.maddu/state/architecture/mass-baseline.json
 .omc/
 
 # Brand and marketing assets are NOT part of the public repo.

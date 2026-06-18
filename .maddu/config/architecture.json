@@ -27,6 +27,10 @@
   "options": {
     "failOn": "new",
     "allowCycles": false,
-    "onUndeclared": "warn"
+    "onUndeclared": "warn",
+    "mass": {
+      "maxLines": 1500,
+      "failOn": "new"
+    }
   }
 }

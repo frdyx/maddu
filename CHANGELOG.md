@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.23.0] · 2026-06-18 · Architecture refactor (5) — structural mass: the monolith ratchet
+
+Phase 7 (plan `pln_20260618130134_3ce2`): `maddu architecture` gains a second dimension the import graph is blind to — **file mass**. A 9 000-line file is one node to the dependency graph; this measures the thing the cockpit/server splits are actually about.
+
+- **`maddu architecture mass`** reports per-file line/byte counts, the files over a monolith threshold, and exact-duplicate code files (copy-paste the graph can't see). Scoped to code (`SOURCE_EXTS`) so the generated mirrors (docs, agent briefs) don't register as duplicates. Stdlib only (rule #4).
+- **A shrink-only ratchet.** `options.mass` in the contract (`{ "maxLines": 1500, "failOn": "new" }`) + `maddu architecture mass --baseline` grandfather today's monoliths into `mass-baseline.json` (tracked, like the contract). The new **`architecture-mass`** gate (run by `maddu audit`, now **13 → 14**) then fails on a *new* file over the threshold or a baselined monolith that *grew* — so `cockpit.js` (9 260) and `server.js` (2 705) are recorded and can only get smaller. A monolith that drops below the threshold leaves the set entirely.
+- New `architecture-mass` self-test fixture (13 assertions: counting, dup grouping, the failOn ladder, baseline, grow/shrink/clear).
+
+This is the instrument for the remaining work: the cockpit and server splits now have a gate that measures progress and blocks regression. The two monoliths are the only files over 1 500 lines (everything else is ≤ 840).
+
+Verified: `maddu audit` **14/0** (`architecture-mass`: 2 baselined monoliths, 0 new/grown), `maddu self-test` **46/0**, `maddu architecture` **0 drift**.
+
 ## [v1.22.0] · 2026-06-18 · Architecture refactor (4) — retire the policing gate (the proof)
 
 Phase 6 (plan `pln_20260618130134_3ce2`), the payoff: a drift-policing gate that existed **only** to catch hand-maintained duplication is now **deleted**, because the duplication is gone. This is the proof the single-sourcing worked.

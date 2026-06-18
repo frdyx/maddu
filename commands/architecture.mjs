@@ -25,13 +25,13 @@ import { exists, loadLibOptional } from './_libroot.mjs';
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', warn: '\x1b[33m', red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m' };
 
 function usage() {
-  console.error('maddu architecture: usage — maddu architecture [init|scan|diagram|baseline] [--repo <dir>] [--fail-on none|new|any] [--json] [--force]');
+  console.error('maddu architecture: usage — maddu architecture [init|scan|diagram|baseline|mass] [--repo <dir>] [--fail-on none|new|any] [--baseline] [--json] [--force]');
 }
 
 export default async function architecture(argv) {
   const { flags, positional } = parseFlags(argv);
   const sub = positional[0] || 'scan';
-  if (!['init', 'scan', 'diagram', 'baseline'].includes(sub)) { usage(); process.exit(2); }
+  if (!['init', 'scan', 'diagram', 'baseline', 'mass'].includes(sub)) { usage(); process.exit(2); }
 
   const json = !!flags.json;
   const repoRoot = flags.repo ? String(flags.repo) : ((await findRepoRoot(process.cwd())) || process.cwd());
@@ -64,6 +64,31 @@ export default async function architecture(argv) {
   if (!contract) {
     console.error(`maddu architecture: no contract at ${contractPath}. Run \`maddu architecture init\` first.`);
     process.exit(2);
+  }
+
+  // ── mass (structural mass: monoliths + duplicate code) ──────────────────────
+  if (sub === 'mass') {
+    const mopts = arch.massOptions(contract);
+    const massFailOn = (flags['fail-on'] && arch.FAIL_ON.has(String(flags['fail-on']))) ? String(flags['fail-on']) : mopts.failOn;
+    const scan = await arch.scanMass(repoRoot, { maxLines: mopts.maxLines, ignore: mopts.ignore });
+    if (flags.baseline === true) {
+      const ts = new Date().toISOString();
+      const { path, count } = await arch.writeMassBaseline(repoRoot, scan, ts);
+      if (json) process.stdout.write(JSON.stringify({ massBaseline: path, count }, null, 2) + '\n');
+      else {
+        console.log(`${ANSI.bold}Baselined ${count} monolith(s)${ANSI.reset}  ${path}`);
+        console.log(`  ${ANSI.dim}Now set options.mass.failOn:"new" to fail on a new or grown monolith.${ANSI.reset}`);
+      }
+      process.exit(0);
+    }
+    const baseline = await arch.loadMassBaseline(repoRoot);
+    const massEval = arch.evaluateMass(scan, baseline, massFailOn);
+    if (json) process.stdout.write(JSON.stringify({ ...scan, eval: massEval }, null, 2) + '\n');
+    else {
+      console.log(`${ANSI.bold}Architecture mass${ANSI.reset} — ${repoRoot}\n`);
+      console.log(arch.renderMassReport(scan, massEval));
+    }
+    process.exit(massEval.blocking ? 1 : 0);
   }
 
   const opts = arch.contractOptions(contract);
