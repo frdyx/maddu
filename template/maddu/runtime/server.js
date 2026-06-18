@@ -8,8 +8,7 @@
 
 import { createServer } from 'node:http';
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
@@ -45,6 +44,7 @@ import { MIME, send, sendJson, hostnameOf, isLoopbackHostname, readBody, serveSt
 // repo-root → data, no bridge state. The second server-split slice.
 import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc } from './lib/bridge-builders.mjs';
 import { fanoutProjection, fanoutConductor, fanoutApprovals, fanoutQueue, fanoutEventsRecent } from './lib/bridge-fanout.mjs';
+import { resolveRepoRoot, detectFrameworkLayout, readVersion, pickPort, probePortIsMaddu, findPidOnPort } from './lib/bridge-bootstrap.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -56,40 +56,8 @@ const DEFAULT_PORT = 4177;
 // MIME / send / sendJson / hostnameOf / isLoopbackHostname / readBody /
 // serveStatic → moved to ./lib/http-util.mjs (v1.25.0).
 
-// Repo root resolution: walk up from cwd to find .maddu/. If not found, fall
-// back to the runtime's grandparent (dev mode running from template/maddu/runtime/).
-async function resolveRepoRoot() {
-  const found = await findRepoRoot(process.cwd());
-  if (found) return found;
-  const devFallback = resolve(runtimeRoot, '..', '..');
-  return devFallback;
-}
-
-// v1.0.3 — detect framework-source vs consumer-install layout from the repo
-// root. Source: contributor clone of frdyx/maddu — has template/maddu/runtime/.
-// Installed: consumer scaffold — flat maddu/runtime/. Cockpit uses this to
-// hide framework-only routes (Test Status etc.) where their data sources
-// don't ship.
-function detectFrameworkLayout(repoRoot) {
-  if (!repoRoot) return 'unknown';
-  if (existsSync(join(repoRoot, 'template', 'maddu', 'runtime'))) return 'source';
-  if (existsSync(join(repoRoot, 'maddu', 'runtime'))) return 'installed';
-  return 'unknown';
-}
-
-async function readVersion(repoRoot) {
-  try {
-    const v = JSON.parse(await readFile(join(repoRoot, 'maddu.json'), 'utf8'));
-    return v.framework_version || v.version || 'unknown';
-  } catch {
-    try {
-      const v = JSON.parse(await readFile(join(runtimeRoot, '..', '..', '..', 'version.json'), 'utf8'));
-      return v.version + '-dev';
-    } catch {
-      return 'unknown';
-    }
-  }
-}
+// resolveRepoRoot / detectFrameworkLayout / readVersion → moved to
+// ./lib/bridge-bootstrap.mjs (v1.28.0). Imported above.
 
 // ── A3 (v1.13.0): loopback origin enforcement — DNS-rebinding defense ──
 // The Host/Origin loopback check below defeats DNS rebinding; its stdlib header
@@ -1789,71 +1757,8 @@ async function handleBridge(req, res, url, ctx) {
 // buildConductor / buildQueueBoard / buildClaimMap / buildBacklinks → moved
 // to ./lib/bridge-builders.mjs (v1.26.0).
 
-function pickPort() {
-  const fromEnv = parseInt(process.env.MADDU_PORT || '', 10);
-  if (Number.isFinite(fromEnv) && fromEnv > 0 && fromEnv < 65536) return fromEnv;
-  return DEFAULT_PORT;
-}
-
-// v1.2.1 F1 — probe a port to see if a Máddu bridge is serving it. Returns
-// { isMaddu: true, repoRoot } if /bridge/status returns the canonical shape,
-// or { isMaddu: false } if the socket responded with anything else / refused.
-async function probePortIsMaddu(host, port) {
-  const http = await import('node:http');
-  return new Promise((resolve) => {
-    const req = http.request({
-      host: host === '0.0.0.0' ? '127.0.0.1' : host,
-      port, method: 'GET', path: '/bridge/status', timeout: 1500,
-    }, (res) => {
-      let buf = '';
-      res.on('data', (c) => buf += c);
-      res.on('end', () => {
-        try {
-          const j = JSON.parse(buf);
-          if (j && j.ok === true && j.bridge === 'maddu') {
-            resolve({ isMaddu: true, repoRoot: j.repoRoot || null });
-            return;
-          }
-        } catch {}
-        resolve({ isMaddu: false });
-      });
-    });
-    req.on('error', () => resolve({ isMaddu: false }));
-    req.on('timeout', () => { req.destroy(); resolve({ isMaddu: false }); });
-    req.end();
-  });
-}
-
-// Best-effort PID lookup for a TCP port. Uses platform-native tools (netstat
-// on Windows, lsof on POSIX). Returns the pid as a number, or null on miss.
-async function findPidOnPort(port) {
-  const { spawn } = await import('node:child_process');
-  const isWin = process.platform === 'win32';
-  const cmd = isWin ? 'netstat' : 'lsof';
-  const args = isWin ? ['-ano'] : ['-ti', `tcp:${port}`];
-  return new Promise((resolve) => {
-    let buf = '';
-    try {
-      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'] });
-      child.stdout.on('data', (c) => buf += c);
-      child.on('error', () => resolve(null));
-      child.on('close', () => {
-        if (isWin) {
-          // netstat lines look like: "  TCP    127.0.0.1:4177  ... LISTENING  12345"
-          const re = new RegExp(`\\b127\\.0\\.0\\.1:${port}\\b.*LISTENING\\s+(\\d+)`);
-          for (const line of buf.split(/\r?\n/)) {
-            const m = line.match(re);
-            if (m) { resolve(parseInt(m[1], 10)); return; }
-          }
-          resolve(null);
-        } else {
-          const first = buf.split(/\s+/).map((s) => parseInt(s, 10)).find((n) => Number.isFinite(n));
-          resolve(first || null);
-        }
-      });
-    } catch { resolve(null); }
-  });
-}
+// pickPort / probePortIsMaddu / findPidOnPort → moved to
+// ./lib/bridge-bootstrap.mjs (v1.28.0). Imported above.
 
 // Build the { id → repoRoot } map from the registry. If the registry is
 // missing or empty, synthesize a single workspace named `default` from the
@@ -1873,7 +1778,7 @@ async function buildWorkspaceMap() {
 }
 
 export async function start({ host = DEFAULT_HOST, port } = {}) {
-  const finalPort = port || pickPort();
+  const finalPort = port || pickPort(DEFAULT_PORT);
   const ws = await buildWorkspaceMap();
   const ctx = { workspaces: ws.map, active: ws.active, legacy: ws.legacy };
 
