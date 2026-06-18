@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.25.0] · 2026-06-18 · Architecture refactor (7) — server split, slice 1 (HTTP transport)
+
+Phase 9 (plan `pln_20260618130134_3ce2`), first slice. `server.js` is a 2 705-line bridge monolith; this begins decomposing it along HTTP boundaries, pure helpers first (Codex's order).
+
+- **`runtime/lib/http-util.mjs`** — the seven pure transport helpers (`MIME`, `send`, `sendJson`, `hostnameOf`, `isLoopbackHostname`, `readBody`, `serveStatic`) extracted out of `server.js`. Bridge state never flows through them, so they live in `runtime-libs` (the `bridge → runtime-libs` edge is already allowed). `serveStatic` now takes `cockpitDir` explicitly; `isLoopbackHostname` drops a redundant `DEFAULT_HOST` term (`127.0.0.1` is already in the loopback set). Now-unused `node:path` imports trimmed.
+- **`http-util` self-test** (26 assertions) covers the response writers, the loopback hostname parsing (DNS-rebinding defense), the JSON body reader (parse / empty / oversize / invalid), and static serving including the path-traversal property (a `..` can never leak a parent-dir file) and the SPA fallback.
+- `server.js` **2 705 → 2 630** (the `architecture-mass` ratchet confirms shrink-only).
+
+Unlike the cockpit, the bridge **is** verifiable headlessly: booted on a spare port, the live bridge served `/bridge/status` (JSON), a static `.js` (correct MIME), the SPA fallback, rejected a spoofed `Host: evil.com` with **403** (loopback guard intact, rule #3), and parsed a POST body — all through the extracted helpers.
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **48/0**, `maddu architecture` **0 drift**, `bridge-origin-guard` green, live-bridge smoke green.
+
 ## [v1.24.0] · 2026-06-18 · Architecture refactor (6) — cockpit split, slice 1 (prove the pattern)
 
 Phase 8 (plan `pln_20260618130134_3ce2`), first slice. `cockpit.js` is a 9 260-line SPA monolith; this begins decomposing it into browser-native ES modules — **no bundler, no build step**, the bridge already serves `.js`/`.mjs` as `application/javascript`.

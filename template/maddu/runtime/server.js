@@ -9,7 +9,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, dirname, extname, normalize, resolve, sep } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
@@ -37,6 +37,10 @@ import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
 import { discoverPlugins } from './lib/plugins.mjs';
 import { readRegistry, writeRegistry, activateWorkspace, registryExists, registryPath } from './lib/workspaces.mjs';
+// Pure HTTP transport plumbing (response writers, loopback parsing, body reader,
+// static serving) — the first slice of decomposing this file. Bridge state never
+// flows through these, so they live in runtime-libs.
+import { MIME, send, sendJson, hostnameOf, isLoopbackHostname, readBody, serveStatic } from './lib/http-util.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -45,16 +49,8 @@ const cockpitDir = join(runtimeRoot, '..', 'cockpit');
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 4177;
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.mjs': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.woff2': 'font/woff2'
-};
+// MIME / send / sendJson / hostnameOf / isLoopbackHostname / readBody /
+// serveStatic → moved to ./lib/http-util.mjs (v1.25.0).
 
 // Repo root resolution: walk up from cwd to find .maddu/. If not found, fall
 // back to the runtime's grandparent (dev mode running from template/maddu/runtime/).
@@ -91,44 +87,9 @@ async function readVersion(repoRoot) {
   }
 }
 
-function send(res, status, headers, body) {
-  res.writeHead(status, headers);
-  if (body !== undefined) res.end(body);
-  else res.end();
-}
-
-function sendJson(res, status, obj) {
-  send(res, status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, JSON.stringify(obj));
-}
-
 // ── A3 (v1.13.0): loopback origin enforcement — DNS-rebinding defense ──
-//
-// The bridge serves the cockpit and its spine-mutating endpoints over
-// 127.0.0.1. A web page the operator merely visits can, via DNS rebinding
-// (resolve evil.com → 127.0.0.1), make the browser issue requests to
-// 127.0.0.1:4177 and drive those endpoints. We defeat it the standard way:
-// require the request's Host hostname (and Origin, when present) to be
-// loopback. A browser CANNOT forge the Host hostname — a page served from
-// evil.com always sends `Host: evil.com`, never `Host: 127.0.0.1` — so the
-// check is sound and adds zero dependencies (stdlib header parsing only).
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
-
-function hostnameOf(hostHeader) {
-  if (!hostHeader) return null;
-  let h = String(hostHeader).trim().toLowerCase();
-  if (h.startsWith('[')) {                       // [::1]:port → ::1
-    const end = h.indexOf(']');
-    return end >= 0 ? h.slice(1, end) : h.slice(1);
-  }
-  const colon = h.lastIndexOf(':');              // strip a trailing :<port> only
-  if (colon >= 0 && /^\d+$/.test(h.slice(colon + 1))) h = h.slice(0, colon);
-  return h;
-}
-
-function isLoopbackHostname(h, boundHost) {
-  if (h === null) return false;
-  return LOOPBACK_HOSTNAMES.has(h) || h === DEFAULT_HOST || (boundHost && h === String(boundHost).toLowerCase());
-}
+// The Host/Origin loopback check below defeats DNS rebinding; its stdlib header
+// parsing (hostnameOf / isLoopbackHostname) now lives in ./lib/http-util.mjs.
 
 // Rate-limit rejection events so a flood of hostile requests can't balloon the
 // spine. In-memory only (no state file) — bounded, files-only-respecting.
@@ -180,44 +141,8 @@ export async function enforceLoopbackOrigin(req, res, ctx, boundHost) {
   return true;
 }
 
-async function readBody(req, maxBytes = 1024 * 1024) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > maxBytes) throw new Error('body too large');
-    chunks.push(chunk);
-  }
-  if (chunks.length === 0) return null;
-  const text = Buffer.concat(chunks).toString('utf8');
-  if (!text.trim()) return null;
-  try { return JSON.parse(text); }
-  catch { throw new Error('invalid JSON body'); }
-}
-
-async function serveStatic(res, urlPath) {
-  const cleanPath = urlPath.split('?')[0].split('#')[0];
-  const rel = cleanPath === '/' ? '/index.html' : cleanPath;
-  const normalized = normalize(rel).replace(/^[\\/]+/, '');
-  const absolute = resolve(cockpitDir, normalized);
-  if (!absolute.startsWith(cockpitDir + sep) && absolute !== cockpitDir) {
-    return sendJson(res, 403, { error: 'forbidden' });
-  }
-  try {
-    const st = await stat(absolute);
-    if (!st.isFile()) throw new Error('not a file');
-    const buf = await readFile(absolute);
-    const mime = MIME[extname(absolute).toLowerCase()] || 'application/octet-stream';
-    return send(res, 200, { 'content-type': mime, 'cache-control': 'no-store' }, buf);
-  } catch {
-    try {
-      const buf = await readFile(join(cockpitDir, 'index.html'));
-      return send(res, 200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' }, buf);
-    } catch {
-      return sendJson(res, 404, { error: 'cockpit_missing' });
-    }
-  }
-}
+// readBody / serveStatic → moved to ./lib/http-util.mjs (v1.25.0).
+// serveStatic now takes cockpitDir explicitly (see its call site).
 
 // Resolve the workspace for an incoming request.
 //   - X-Maddu-Workspace header takes precedence.
@@ -2566,7 +2491,7 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
       if (url.pathname.startsWith('/bridge/')) {
         return await handleBridge(req, res, url, ctx);
       }
-      return await serveStatic(res, url.pathname);
+      return await serveStatic(res, url.pathname, cockpitDir);
     } catch (err) {
       console.error('bridge error:', err);
       return sendJson(res, 500, { error: 'internal', detail: err?.message || String(err) });
