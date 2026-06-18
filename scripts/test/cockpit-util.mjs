@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+// cockpit-util (v1.24.0) — the pure leaf utilities extracted from cockpit.js as
+// the first slice of decomposing the SPA monolith. cockpit.js can't be tested
+// in node (it boots a browser SPA), but these extracted helpers are pure (plus
+// el's thin DOM build), so we can import the module with a minimal `document`
+// stub and assert behavior is preserved — regression coverage the monolith
+// never had, and a guard that the extraction didn't change output.
+//
+// Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
+
+// Minimal document stub — el/panel/placeholder are the only DOM users, and they
+// only touch createElement/createTextNode/appendChild/setAttribute/className/
+// innerHTML. Build a tiny node model that records enough to assert against.
+globalThis.document = {
+  createElement(tag) {
+    return {
+      tag, className: '', innerHTML: '', attrs: {}, children: [],
+      setAttribute(k, v) { this.attrs[k] = v; },
+      appendChild(c) { this.children.push(c); return c; },
+    };
+  },
+  createTextNode(text) { return { text }; },
+};
+
+const { el, panel, placeholder, formatUptime, compactPath, truncatePathFromLeft } =
+  await import('../../template/maddu/cockpit/cockpit-util.mjs').catch(() =>
+    import('../../template/maddu/cockpit/cockpit-util.js'));
+
+let passed = 0;
+let failed = 0;
+function ok(name, cond, extra = '') {
+  console.log(`  ${cond ? '[PASS]' : '[FAIL]'} ${name}${extra ? ` - ${extra}` : ''}`);
+  if (cond) passed++; else failed++;
+}
+
+// formatUptime
+ok('formatUptime non-number → dash', formatUptime('x') === '—');
+ok('formatUptime seconds', formatUptime(5000) === '5s');
+ok('formatUptime minutes', formatUptime(5 * 60 * 1000) === '5m');
+ok('formatUptime hours+min', formatUptime((2 * 60 + 3) * 60 * 1000) === '2h 3m');
+ok('formatUptime days+hours', formatUptime((26) * 60 * 60 * 1000) === '1d 2h');
+
+// truncatePathFromLeft
+ok('truncate short path unchanged', truncatePathFromLeft('abc', 40) === 'abc');
+ok('truncate long path keeps tail', truncatePathFromLeft('x'.repeat(50), 10) === '…' + 'x'.repeat(9));
+ok('truncate non-string → dash', truncatePathFromLeft(null) === '—');
+
+// compactPath
+ok('compactPath short → as-is', compactPath('C:/repo') === 'C:/repo');
+ok('compactPath long → root/…/tail', compactPath('C:/a/b/c/repo') === 'C:/…/repo');
+ok('compactPath backslashes normalized', compactPath('C:\\a\\b\\c\\repo') === 'C:/…/repo');
+
+// el / panel / placeholder (DOM build via the stub)
+const node = el('div', { class: 'x', 'data-id': '7', html: '<b>h</b>' }, ['t', el('span', {}, [])]);
+ok('el sets tag', node.tag === 'div');
+ok('el sets className from class', node.className === 'x');
+ok('el sets plain attribute', node.attrs['data-id'] === '7');
+ok('el sets innerHTML from html', node.innerHTML === '<b>h</b>');
+ok('el appends a text node for a string child', node.children[0].text === 't');
+ok('el appends a node child', node.children[1].tag === 'span');
+ok('el skips null children', el('div', {}, ['a', null, 'b']).children.length === 2);
+
+const p = panel('Title', 'aside', el('div', {}, []));
+ok('panel wraps in .panel', p.className === 'panel');
+ok('panel head holds title', p.children[0].children[0].children[0].text === 'Title');
+
+const empty = placeholder('Nothing', 'soon');
+ok('placeholder is an empty-state', empty.className === 'empty-state');
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

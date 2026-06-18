@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.24.0] · 2026-06-18 · Architecture refactor (6) — cockpit split, slice 1 (prove the pattern)
+
+Phase 8 (plan `pln_20260618130134_3ce2`), first slice. `cockpit.js` is a 9 260-line SPA monolith; this begins decomposing it into browser-native ES modules — **no bundler, no build step**, the bridge already serves `.js`/`.mjs` as `application/javascript`.
+
+- **`cockpit-util.js`** — the six pure leaf utilities (`el` the DOM builder, `panel`, `placeholder`, `formatUptime`, `compactPath`, `truncatePathFromLeft`) extracted into a sibling module; `cockpit.js` now `import`s them. Chosen first because they depend on nothing in the cockpit module scope (`el` alone has ~1 400 call sites), so the extraction is behavior-preserving and the no-bundler split pattern is proven end-to-end before touching stateful subsystems.
+- **`cockpit-util` self-test** (21 assertions) imports the module with a minimal `document` stub and asserts each function's output — regression coverage the monolith never had, and proof the move changed nothing.
+- `cockpit.js` **9 260 → 9 202 lines** (the `architecture-mass` ratchet confirms it only shrank). The `scripts → cockpit` test edge was added to the architecture contract (the drift guard caught it).
+
+This is deliberately a small, safe first slice: the cockpit runs in a browser and can't be self-tested headlessly, so later slices (inspector, views, the bridge API client) land incrementally — the mass ratchet lets each one ship as long as `cockpit.js` keeps shrinking. (Aside: `cockpit.css` already held the styling — the old "no usable cockpit.css" note was stale, so there's no CSS-extraction step.)
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **47/0**, `maddu architecture` **0 drift**. **Operator note:** load the cockpit and confirm it renders — browser module-loading is the one thing not headlessly verifiable.
+
 ## [v1.23.0] · 2026-06-18 · Architecture refactor (5) — structural mass: the monolith ratchet
 
 Phase 7 (plan `pln_20260618130134_3ce2`): `maddu architecture` gains a second dimension the import graph is blind to — **file mass**. A 9 000-line file is one node to the dependency graph; this measures the thing the cockpit/server splits are actually about.
