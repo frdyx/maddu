@@ -1,0 +1,67 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Mailbox"
+    </h2>
+    <p>
+      "Per-lane mailbox bus. Async handoffs without simultaneous lane mutation."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "unread distribution across lane mailboxes"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No mailboxes"
+          </div>
+          <div class="empty-state-hint">
+            "Distribution will appear once a lane gets its first message."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Lanes"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/mailbox-counts"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No lane mailboxes yet"
+          </div>
+          <div class="empty-state-hint">
+            "Send the first message via `/mail <lane> <subject>` or `maddu mailbox send`."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Messages"
+        </span>
+        <span class="panel-aside">
+          "select a lane"
+        </span>
+      </div>
+      <div>
+    </div>
+  </div>
+</section>

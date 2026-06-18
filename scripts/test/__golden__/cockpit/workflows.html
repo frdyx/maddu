@@ -1,0 +1,223 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Workflows"
+    </h2>
+    <p>
+      "Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Blueprint"
+        </span>
+        <span class="panel-aside">
+          "click any node to open its route"
+        </span>
+      </div>
+      <div class="workflow-wrap">
+        <svg class="workflow-svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 1100 260">
+          <g class="workflow-edges">
+            <path class="workflow-edge" d="M 120 120 C 210 120, 150 60, 180 60">
+            <path class="workflow-edge" d="M 120 120 C 210 120, 150 180, 180 180">
+            <path class="workflow-edge" d="M 300 60 C 400 60, 340 60, 380 60">
+            <path class="workflow-edge" d="M 300 60 C 400 60, 340 180, 380 180">
+            <path class="workflow-edge" d="M 300 180 C 400 180, 340 60, 380 60">
+            <path class="workflow-edge" d="M 300 180 C 400 180, 340 180, 380 180">
+            <path class="workflow-edge" d="M 500 60 C 600 60, 540 120, 580 120">
+            <path class="workflow-edge" d="M 500 180 C 600 180, 540 120, 580 120">
+            <path class="workflow-edge" d="M 700 120 C 790 120, 730 60, 760 60">
+            <path class="workflow-edge" d="M 700 120 C 790 120, 730 180, 760 180">
+            <path class="workflow-edge" d="M 880 180 C 970 180, 910 60, 940 60">
+            <path class="workflow-edge" d="M 880 180 C 970 180, 910 180, 940 180">
+            <path class="workflow-edge" d="M 880 60 C 880 60, 820 180, 760 180">
+          </g>
+          <g class="workflow-nodes">
+            <g aria-label="Operator" class="workflow-node" role="button" tabindex="0" transform="translate(0, 98)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Operator"
+              </text>
+            </g>
+            <g aria-label="BOSS" class="workflow-node" role="button" tabindex="0" transform="translate(180, 38)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "BOSS"
+              </text>
+            </g>
+            <g aria-label="Enforcer" class="workflow-node" role="button" tabindex="0" transform="translate(180, 158)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Enforcer"
+              </text>
+            </g>
+            <g aria-label="Queue" class="workflow-node" role="button" tabindex="0" transform="translate(380, 38)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Queue"
+              </text>
+            </g>
+            <g aria-label="Claims" class="workflow-node" role="button" tabindex="0" transform="translate(380, 158)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Claims"
+              </text>
+            </g>
+            <g aria-label="Fleet" class="workflow-node" role="button" tabindex="0" transform="translate(580, 98)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Fleet"
+              </text>
+            </g>
+            <g aria-label="Gates" class="workflow-node" role="button" tabindex="0" transform="translate(760, 38)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Gates"
+              </text>
+            </g>
+            <g aria-label="Reports" class="workflow-node" role="button" tabindex="0" transform="translate(760, 158)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Reports"
+              </text>
+            </g>
+            <g aria-label="Learning" class="workflow-node" role="button" tabindex="0" transform="translate(940, 38)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Learning"
+              </text>
+            </g>
+            <g aria-label="Wiki" class="workflow-node" role="button" tabindex="0" transform="translate(940, 158)">
+              <rect class="workflow-node-rect" height="44" rx="6" width="120">
+              <text class="workflow-node-label" text-anchor="middle" x="60" y="27">
+                "Wiki"
+              </text>
+            </g>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Legend"
+        </span>
+        <span class="panel-aside">
+          "every node maps to a route"
+        </span>
+      </div>
+      <div class="workflow-legend">
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Operator"
+          </span>
+          <span>
+            "Drives every slice via Conductor + composer."
+          </span>
+          <a class="workflow-legend-go mono" href="#/conductor">
+            "#/conductor"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "BOSS"
+          </span>
+          <span>
+            "Proposes low-risk handoffs and slices (LLM voice)."
+          </span>
+          <a class="workflow-legend-go mono" href="#/boss">
+            "#/boss"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Enforcer"
+          </span>
+          <span>
+            "Deterministic — cites state, refuses unsafe actions."
+          </span>
+          <a class="workflow-legend-go mono" href="#/boss">
+            "#/boss"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Queue"
+          </span>
+          <span>
+            "Scheduler / Queue / Dispatch / Preflights — every parked card has a reason code."
+          </span>
+          <a class="workflow-legend-go mono" href="#/queue">
+            "#/queue"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Claims"
+          </span>
+          <span>
+            "Active lane claims by session — write-lock + handoff."
+          </span>
+          <a class="workflow-legend-go mono" href="#/claims">
+            "#/claims"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Fleet"
+          </span>
+          <span>
+            "Sessions on lanes — claude-code, codex, hermes, future agents."
+          </span>
+          <a class="workflow-legend-go mono" href="#/agents">
+            "#/agents"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Gates"
+          </span>
+          <span>
+            "Focused verification — scoped checks instead of full cycles."
+          </span>
+          <a class="workflow-legend-go mono" href="#/operations">
+            "#/operations"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Reports"
+          </span>
+          <span>
+            "Slice-stop ledger, approvals ledger, verification reports."
+          </span>
+          <a class="workflow-legend-go mono" href="#/events">
+            "#/events"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Learning"
+          </span>
+          <span>
+            "Hindsight memory — facts distilled from slice-stops."
+          </span>
+          <a class="workflow-legend-go mono" href="#/learning">
+            "#/learning"
+          </a>
+        </div>
+        <div class="workflow-legend-row">
+          <span class="pill tone-accent">
+            "Wiki"
+          </span>
+          <span>
+            "Wiki Updater — auto-stamps per-lane pages on every slice-stop."
+          </span>
+          <a class="workflow-legend-go mono" href="#/wiki">
+            "#/wiki"
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

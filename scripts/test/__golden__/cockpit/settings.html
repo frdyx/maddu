@@ -1,0 +1,268 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Settings"
+    </h2>
+    <p>
+      "Bridge, lanes, providers, tokens, integrations, MCP registry."
+    </p>
+    <div class="panel" data-focus="bridge bridge http server port host status uptime version">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Bridge"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/status"
+        </span>
+      </div>
+      <div>
+        <dl class="kv">
+          <dt>
+            "status"
+          </dt>
+          <dd>
+            <span class="signal live">
+            "online"
+          </dd>
+          <dt>
+            "version"
+          </dt>
+          <dd>
+            "1.37.0-harness"
+          </dd>
+          <dt>
+            "host"
+          </dt>
+          <dd>
+            "127.0.0.1:4177"
+          </dd>
+          <dt>
+            "uptime"
+          </dt>
+          <dd>
+            "1h 0m"
+          </dd>
+          <dt>
+            "pid"
+          </dt>
+          <dd>
+            "—"
+          </dd>
+        </dl>
+      </div>
+    </div>
+    <div class="panel" data-focus="lanes lanes zones lease handoff policy catalog">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Lanes"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/lanes · edit .maddu/lanes/catalog.json"
+        </span>
+      </div>
+      <div>
+        <div style="margin-bottom:10px;color:var(--m-fg-2);font-size:13px;display:flex;justify-content:space-between;align-items:center;">
+          <span>
+            "0 lanes · 0 claimed · 0 with runtime bindings"
+          </span>
+          <button>
+            "Open Swarm →"
+          </button>
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No lanes"
+          </div>
+          <div class="empty-state-hint">
+            "Define lanes in .maddu/lanes/catalog.json."
+          </div>
+        </div>
+        <div class="lanes-add">
+          <input class="lanes-edit-input lanes-edit-input-narrow" placeholder="new-lane-id" type="text">
+          <input class="lanes-edit-input" placeholder="scope description" type="text">
+          <button class="btn-allow">
+            "Add lane"
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="providers providers anthropic openai api keys credentials oauth tokens">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Providers"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/auth · full management in /auth"
+        </span>
+      </div>
+      <div>
+        <div style="margin-bottom:8px;color:var(--m-fg-2);font-size:13px;">
+          "0 providers · tokens stay device-bound (rule #6)"
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No providers"
+          </div>
+          <div class="empty-state-hint">
+            "Sign in via /auth or `maddu auth add --provider <p> --key …`."
+          </div>
+        </div>
+        <button style="margin-top: 8px;">
+          "Open Auth →"
+        </button>
+      </div>
+    </div>
+    <div class="panel" data-focus="mcp mcp model-context-protocol servers tools stdio sse">
+      <div class="panel-head">
+        <span class="panel-title">
+          "MCP registry"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/mcp · full management in /mcp"
+        </span>
+      </div>
+      <div>
+        <div style="margin-bottom:10px;color:var(--m-fg-2);font-size:13px;display:flex;justify-content:space-between;align-items:center;">
+          <span>
+            "0 servers · 0 enabled · bridge-owned (rule #5)"
+          </span>
+          <button>
+            "Open MCP →"
+          </button>
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No MCP servers"
+          </div>
+          <div class="empty-state-hint">
+            "Register one in /mcp or `maddu mcp add --name … --transport stdio --command …`."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" data-focus="runtimes runtimes workers claude codex hermes spawn subprocess">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Runtimes"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/runtimes · full management in /runtimes"
+        </span>
+      </div>
+      <div>
+        <div style="margin-bottom:8px;color:var(--m-fg-2);font-size:13px;">
+          "0 runtimes registered · 0 detected on this host"
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No runtimes"
+          </div>
+          <div class="empty-state-hint">
+            "Register one in /runtimes or `maddu runtime register --name … --binary …`."
+          </div>
+        </div>
+        <button style="margin-top: 8px;">
+          "Open Runtimes →"
+        </button>
+      </div>
+    </div>
+    <div>
+      <div class="panel" data-focus="comms telegram discord email comms plugin integrations notifications disabled enable">
+        <div class="panel-head">
+          <span class="panel-title">
+            "Integrations (comms plugin)"
+          </span>
+          <span class="panel-aside">
+            "Telegram / Discord / Email — disabled. Enable with `maddu plugin enable comms`, then restart the bridge."
+          </span>
+        </div>
+        <div>
+      </div>
+    </div>
+    <div class="panel" data-focus="paths storage paths repo state cockpit directory">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Storage paths"
+        </span>
+        <span class="panel-aside">
+          "Resolved at bridge boot"
+        </span>
+      </div>
+      <div>
+        <dl class="kv">
+          <dt>
+            "repo root"
+          </dt>
+          <dd>
+            "/repo/maddu"
+          </dd>
+          <dt>
+            "state dir"
+          </dt>
+          <dd>
+            "—"
+          </dd>
+          <dt>
+            "cockpit dir"
+          </dt>
+          <dd>
+            "—"
+          </dd>
+          <dt>
+            "auth dir"
+          </dt>
+          <dd>
+            "~/.config/maddu/auth/ · %APPDATA%\maddu\auth\ on Windows"
+          </dd>
+        </dl>
+      </div>
+    </div>
+    <div class="panel" data-focus="hardrules hard rules invariants compliance security boundary files-only sqlite hosted deps sdk token export brand lane ownership">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Hard rules · Docs"
+        </span>
+        <span class="panel-aside">
+          "Open the manual"
+        </span>
+      </div>
+      <div>
+        <p>
+          "Máddu enforces eight invariants: files-only state, append-only spine, no hosted backends, no broad deps, no provider SDKs in app code, no token export, three-layer brand boundary, lane ownership."
+          <a href="#/docs?p=hard-rules" style="color:var(--m-accent-2)">
+            "Read the full rationale →"
+          </a>
+        </p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+          <button>
+            "Hard rules"
+          </button>
+          <button>
+            "Getting started"
+          </button>
+          <button>
+            "Concepts"
+          </button>
+          <button>
+            "CLI reference"
+          </button>
+          <button>
+            "Architecture"
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

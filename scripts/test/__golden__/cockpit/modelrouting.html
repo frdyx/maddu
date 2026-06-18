@@ -1,0 +1,79 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Model Routing"
+    </h2>
+    <p>
+      "Per-runtime + per-lane + per-pipeline modelPreference. Active hints by spawn."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Per-runtime modelPreference"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/runtimes"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No runtime descriptors"
+          </div>
+          <div class="empty-state-hint">
+            "Register a runtime under `.maddu/runtimes/` or via `maddu runtime add`."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Per-lane defaults"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/lanes"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No lanes with model defaults"
+          </div>
+          <div class="empty-state-hint">
+            "Add `defaults.modelPreference` to a lane in `.maddu/lanes/catalog.json`."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Per-pipeline stage hints"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/pipelines"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No pipelines with stage hints"
+          </div>
+          <div class="empty-state-hint">
+            "Pipeline stages can declare `modelPreference` to route different stages to different models."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

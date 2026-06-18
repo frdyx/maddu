@@ -1,0 +1,141 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Trust"
+    </h2>
+    <p>
+      "Supply-chain trust posture — pins, last audit, violations, MCP provenance, worker env policy, skill provenance distribution. (v1.2.0)"
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Posture"
+        </span>
+        <span class="panel-aside">
+          "Last audit timestamp, pin count, recent violation count"
+        </span>
+      </div>
+      <div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "last audit: audited= violations= warns="
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "pin count: 0"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "freshness thresholds: warn=d block=d"
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Pinned packages"
+        </span>
+        <span class="panel-aside">
+          "From .maddu/config/trust.json — locked versions"
+        </span>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--m-fg-2);">
+          "(no pins)"
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Recent violations (last 20)"
+        </span>
+        <span class="panel-aside">
+          "TRUST_VIOLATION_DETECTED — pin drift or freshness block"
+        </span>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--m-fg-2);">
+          "(no recent violations)"
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Secret refusals (last 20)"
+        </span>
+        <span class="panel-aside">
+          "SECRET_DETECTED_IN_ARGV — pattern type only, never the raw value"
+        </span>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--m-fg-2);">
+          "(no secret refusals)"
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Worker env policy"
+        </span>
+        <span class="panel-aside">
+          "Default-deny on AWS_*, OPENAI_*, GITHUB_TOKEN. Recent WORKER_ENV_FILTERED summaries."
+        </span>
+      </div>
+      <div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "allow: entries"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "deny: entries"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "per-lane overrides:"
+        </div>
+        <div style="margin-top:8px;font-weight:bold;">
+          "Recent WORKER_ENV_FILTERED:"
+        </div>
+        <div style="font-size:12px;color:var(--m-fg-2);">
+          "(no spawns yet)"
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "MCP provenance"
+        </span>
+        <span class="panel-aside">
+          "framework-shipped (hash-verified) vs operator-trusted (approved/pending)"
+        </span>
+      </div>
+      <div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "verified events:"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "mismatch events:"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "registered:"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "approved:"
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:12px;padding:2px 0;">
+          "pending approval:"
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Skill provenance"
+        </span>
+        <span class="panel-aside">
+          "Distribution of provenance across .maddu/skills/"
+        </span>
+      </div>
+      <div>
+    </div>
+  </div>
+</section>

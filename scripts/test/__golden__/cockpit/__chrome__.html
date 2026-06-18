@@ -1,0 +1,545 @@
+<aside class="rail">
+  <div class="rail-mark">
+    <img alt="" aria-hidden="true" class="rail-mark-svg" height="22" src="/brand-mark.svg" width="22">
+    <span class="rail-mark-name">
+      "Máddu"
+    </span>
+  </div>
+  <div class="rail-workspace" hidden="" id="rail-workspace">
+  <nav aria-label="Cockpit routes" class="rail-nav">
+    <div class="rail-group has-active" data-group="decide">
+      <button aria-controls="rail-group-decide" aria-expanded="true" class="rail-group-head" type="button">
+        <span aria-hidden="true" class="rail-group-tick">
+        <span aria-hidden="true" class="rail-group-glyph">
+          "◆"
+        </span>
+        <span class="rail-group-label">
+          "DECIDE"
+        </span>
+        <span aria-hidden="true" class="rail-group-count">
+          "9"
+        </span>
+        <span aria-hidden="true" class="rail-group-chev">
+          "›"
+        </span>
+      </button>
+      <div class="rail-group-list" id="rail-group-decide">
+        <a class="rail-link anchor active" data-route="conductor" href="#/conductor" title="Command-control: what is safe to do next? KPI strip, next-command, operation score matrix, Now/Next/Waiting/Done board.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◆"
+          </span>
+          <span class="rail-link-label">
+            "Conductor"
+          </span>
+        </a>
+        <a class="rail-link anchor" data-route="boss" href="#/boss" title="BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◆"
+          </span>
+          <span class="rail-link-label">
+            "BOSS"
+          </span>
+        </a>
+        <a class="rail-link" data-route="queue" href="#/queue" title="Scheduler / Queue / Dispatch / Preflights kanban. Every parked card carries a reason code and a safe next action.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Queue"
+          </span>
+        </a>
+        <a class="rail-link" data-route="claims" href="#/claims" title="Active claims by lane — who is holding what, lease state, heartbeat age. Request handoff with one click.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Claims"
+          </span>
+        </a>
+        <a class="rail-link" data-route="approvals" href="#/approvals" title="Pending tool / subprocess approvals. Allow-once, allow-always, or deny — every decision recorded.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Approvals"
+          </span>
+          <span class="rail-link-badge" hidden="" id="approvals-badge">
+            "0"
+          </span>
+        </a>
+        <a class="rail-link" data-route="tasks" href="#/tasks" title="Dependency-aware task board. Completing a task auto-unblocks dependents.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Tasks"
+          </span>
+          <span class="rail-link-badge" hidden="" id="tasks-badge">
+            "0"
+          </span>
+        </a>
+        <a class="rail-link" data-route="plans" href="#/plans" title="Multi-phase plan persistence + Kanban (Now / Next / Blocked / Done). State derived from spine PLAN_* events. (v1.1.0)">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Plans"
+          </span>
+        </a>
+        <a class="rail-link anchor" data-route="goal" href="#/goal" title="The objective + measurable success conditions + constraints + the curated cross-session handoff. Run `maddu orient` for live success-condition verification.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◆"
+          </span>
+          <span class="rail-link-label">
+            "Goal"
+          </span>
+        </a>
+        <a class="rail-link" data-route="orientation" href="#/orientation" title="Turn-start digest. Goal, phase, last slice, open follow-ups.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Orientation"
+          </span>
+        </a>
+      </div>
+    </div>
+    <div class="rail-group collapsed" data-group="operate">
+      <button aria-controls="rail-group-operate" aria-expanded="false" class="rail-group-head" type="button">
+        <span aria-hidden="true" class="rail-group-tick">
+        <span aria-hidden="true" class="rail-group-glyph">
+          "◈"
+        </span>
+        <span class="rail-group-label">
+          "OPERATE"
+        </span>
+        <span aria-hidden="true" class="rail-group-count">
+          "12"
+        </span>
+        <span aria-hidden="true" class="rail-group-chev">
+          "›"
+        </span>
+      </button>
+      <div class="rail-group-list" id="rail-group-operate">
+        <a class="rail-link anchor" data-route="workflows" href="#/workflows" title="Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◆"
+          </span>
+          <span class="rail-link-label">
+            "Workflows"
+          </span>
+        </a>
+        <a class="rail-link" data-route="agents" href="#/agents" title="Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Agents"
+          </span>
+        </a>
+        <a class="rail-link" data-route="teams" href="#/teams" title="Lane ownership map — who is responsible for what, who is currently writing, who scored last.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Teams"
+          </span>
+        </a>
+        <a class="rail-link" data-route="workbench" href="#/workbench" title="OS-like 3-pane shell. Left: lanes + sessions. Center: live event stream filtered by selection. Right: status counts, approvals, mailbox, schedule.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Workbench"
+          </span>
+        </a>
+        <a class="rail-link" data-route="chats" href="#/chats" title="Conversation surfaces. History, attachments, replay.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Chats"
+          </span>
+        </a>
+        <a class="rail-link" data-route="mailbox" href="#/mailbox" title="Per-lane mailbox bus. Async handoffs without simultaneous lane mutation.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Mailbox"
+          </span>
+          <span class="rail-link-badge" hidden="" id="mailbox-badge">
+            "0"
+          </span>
+        </a>
+        <a class="rail-link" data-route="swarm" href="#/swarm" title="Multi-agent fan-out. Lane-bound workers and their mailboxes.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Swarm"
+          </span>
+        </a>
+        <a class="rail-link" data-route="pipelines" href="#/pipelines" title="Pipeline runs with stage timeline. plan-exec-verify-fix and related multi-stage workflows.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Pipelines"
+          </span>
+        </a>
+        <a class="rail-link" data-route="cost" href="#/cost" title="Token / call rollup per session, day, model, runtime. Surfaces unreported-token gaps honestly.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Cost"
+          </span>
+        </a>
+        <a class="rail-link" data-route="advisors" href="#/advisors" title="Non-claiming advisor query artifacts. Runtime + session + ts + first-line preview.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Advisors"
+          </span>
+        </a>
+        <a class="rail-link" data-route="skillinjections" href="#/skillinjections" title="Log of SKILL_INJECTED events — which skill, which slice, when. Bounded by the skill-injection-bounded gate.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Skill Injections"
+          </span>
+        </a>
+        <a class="rail-link" data-route="loops" href="#/loops" title="Ralph + plan-loops with iteration count, status, stuck-detection. (v1.1.0)">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Loops"
+          </span>
+        </a>
+      </div>
+    </div>
+    <div class="rail-group collapsed" data-group="verify">
+      <button aria-controls="rail-group-verify" aria-expanded="false" class="rail-group-head" type="button">
+        <span aria-hidden="true" class="rail-group-tick">
+        <span aria-hidden="true" class="rail-group-glyph">
+          "⌬"
+        </span>
+        <span class="rail-group-label">
+          "VERIFY"
+        </span>
+        <span aria-hidden="true" class="rail-group-count">
+          "9"
+        </span>
+        <span aria-hidden="true" class="rail-group-chev">
+          "›"
+        </span>
+      </button>
+      <div class="rail-group-list" id="rail-group-verify">
+        <a class="rail-link anchor" data-route="learning" href="#/learning" title="Durable findings distilled from slice-stops. Browse by kind, lane, recency. Hindsight worker writes; nothing here is hand-edited.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◆"
+          </span>
+          <span class="rail-link-label">
+            "Learning"
+          </span>
+        </a>
+        <a class="rail-link anchor" data-route="wiki" href="#/wiki" title="Auto-maintained per-lane wiki. The Wiki Updater syncs pages from slice-stops; the Drift Drawer flags pages that fell behind.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◆"
+          </span>
+          <span class="rail-link-label">
+            "Wiki"
+          </span>
+        </a>
+        <a class="rail-link" data-route="events" href="#/events" title="Live cursor stream of the append-only spine. Filters by type. Pause/resume.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Events"
+          </span>
+        </a>
+        <a class="rail-link" data-route="operations" href="#/operations" title="Live work in flight. Slice-stops, verifications, checkpoints.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Operations"
+          </span>
+        </a>
+        <a class="rail-link" data-route="search" href="#/search" title="Cross-corpus search over events, slice-stops, memory, skills, mailbox, and inbox.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Search"
+          </span>
+        </a>
+        <a class="rail-link" data-route="gates" href="#/gates" title="Recent gate runs. Filter by verdict / severity / gate id.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Gates"
+          </span>
+        </a>
+        <a class="rail-link" data-route="reviews" href="#/reviews" title="Post-stop reviews. Verdict counts + per-review markdown.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Reviews"
+          </span>
+        </a>
+        <a class="rail-link" data-route="teststatus" href="#/teststatus" title="Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Test Status"
+          </span>
+        </a>
+        <a class="rail-link" data-route="trust" href="#/trust" title="Supply-chain trust posture — pins, last audit, violations, MCP provenance, worker env policy, skill provenance distribution. (v1.2.0)">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Trust"
+          </span>
+        </a>
+      </div>
+    </div>
+    <div class="rail-group collapsed" data-group="connect">
+      <button aria-controls="rail-group-connect" aria-expanded="false" class="rail-group-head" type="button">
+        <span aria-hidden="true" class="rail-group-tick">
+        <span aria-hidden="true" class="rail-group-glyph">
+          "⌗"
+        </span>
+        <span class="rail-group-label">
+          "CONNECT"
+        </span>
+        <span aria-hidden="true" class="rail-group-count">
+          "8"
+        </span>
+        <span aria-hidden="true" class="rail-group-chev">
+          "›"
+        </span>
+      </button>
+      <div class="rail-group-list" id="rail-group-connect">
+        <a class="rail-link" data-route="runtimes" href="#/runtimes" title="Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Runtimes"
+          </span>
+        </a>
+        <a class="rail-link" data-route="mcp" href="#/mcp" title="Bridge-owned MCP server registry. stdio / sse / http transports. Per-lane visibility filtering.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "MCP"
+          </span>
+        </a>
+        <a class="rail-link" data-route="auth" href="#/auth" title="Multi-API-key store with rotation. Keys live in your OS auth dir — never served raw over HTTP. Last 4 chars only.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Auth"
+          </span>
+        </a>
+        <a class="rail-link" data-route="imports" href="#/imports" title="Safe import gateway. Foreign artifacts in — provider secrets always out. Rejected payloads are logged with paths + pattern names only.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Imports"
+          </span>
+        </a>
+        <a class="rail-link" data-route="schedule" href="#/schedule" title="NL→cron scheduler. The bridge polls every 30 s; matching schedules fire their action (default: inbox note).">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Schedule"
+          </span>
+        </a>
+        <a class="rail-link" data-route="settings" href="#/settings" title="Bridge, lanes, providers, tokens, integrations, MCP registry.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Settings"
+          </span>
+        </a>
+        <a class="rail-link" data-route="tools" href="#/tools" title="Unified tool gateway — 5 default tools (git/test/format/lint/install), active MCP servers, last 20 invocations. (v1.1.0)">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Tools"
+          </span>
+        </a>
+        <a class="rail-link" data-route="modelrouting" href="#/modelrouting" title="Per-runtime + per-lane + per-pipeline modelPreference. Active hints by spawn.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Model Routing"
+          </span>
+        </a>
+      </div>
+    </div>
+    <div class="rail-group collapsed" data-group="reference">
+      <button aria-controls="rail-group-reference" aria-expanded="false" class="rail-group-head" type="button">
+        <span aria-hidden="true" class="rail-group-tick">
+        <span aria-hidden="true" class="rail-group-glyph">
+          "☷"
+        </span>
+        <span class="rail-group-label">
+          "REFERENCE"
+        </span>
+        <span aria-hidden="true" class="rail-group-count">
+          "4"
+        </span>
+        <span aria-hidden="true" class="rail-group-chev">
+          "›"
+        </span>
+      </button>
+      <div class="rail-group-list" id="rail-group-reference">
+        <a class="rail-link" data-route="dashboard" href="#/dashboard" title="Snapshot of every lane, every spawned worker, every open approval.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Dashboard"
+          </span>
+        </a>
+        <a class="rail-link" data-route="roadmap" href="#/roadmap" title="Planned slices, tagged versions, dependency graph.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Roadmap"
+          </span>
+        </a>
+        <a class="rail-link" data-route="skills" href="#/skills" title="Reusable recipes distilled from slice-stops. SKILL.md format under .maddu/skills/.">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Skills"
+          </span>
+        </a>
+        <a class="rail-link" data-route="docs" href="#/docs" title="End-user manual. Install, concepts, CLI, cockpit tour, troubleshooting. Open from any route with ?">
+          <span aria-hidden="true" class="rail-link-glyph">
+            "◇"
+          </span>
+          <span class="rail-link-label">
+            "Docs"
+          </span>
+        </a>
+      </div>
+    </div>
+  </nav>
+  <div class="rail-foot">
+    <div class="rail-foot-row">
+      <span class="rail-foot-label">
+        "Workspace"
+      </span>
+      <span class="rail-foot-value" data-truncate="basename-visible" id="status-workspace" title="maddu">
+        "maddu"
+      </span>
+    </div>
+    <div class="rail-foot-row">
+      <span class="rail-foot-label">
+        "Path"
+      </span>
+      <span aria-label="Copy workspace path to clipboard" class="rail-foot-value" data-copy-bound="1" data-full-path="/repo/maddu" data-truncate="basename-visible" id="status-repo-root" role="button" tabindex="0" title="/repo/maddu  ·  click to copy">
+        "/repo/maddu"
+      </span>
+    </div>
+    <div class="rail-foot-row">
+      <span class="rail-foot-label">
+        "Bridge"
+      </span>
+      <span class="rail-foot-value" id="status-bridge">
+        <span class="signal live">
+        "online"
+      </span>
+    </div>
+    <div class="rail-foot-row">
+      <span class="rail-foot-label">
+        "Version"
+      </span>
+      <span class="rail-foot-value" id="status-version">
+        "1.37.0-harness"
+      </span>
+    </div>
+    <div class="rail-foot-row">
+      <span class="rail-foot-label">
+        "Mode"
+      </span>
+      <span class="rail-foot-value" data-fetched="1" id="status-governance">
+        <span style="color:#6cf;">
+      </span>
+    </div>
+    <div class="rail-foot-row">
+      <span class="rail-foot-label">
+        "Uptime"
+      </span>
+      <span class="rail-foot-value" id="status-uptime">
+        "1h 0m"
+      </span>
+    </div>
+  </div>
+</aside>
+
+<nav aria-label="Mobile groups" class="dock" hidden="" id="dock">
+  <button aria-label="Decide — what is safe to do next" class="dock-btn active" data-group="decide" type="button">
+    <span aria-hidden="true" class="dock-btn-glyph">
+      "◆"
+    </span>
+    <span class="dock-btn-label">
+      "Decide"
+    </span>
+  </button>
+  <button aria-label="Operate — agents, lanes, conversations" class="dock-btn" data-group="operate" type="button">
+    <span aria-hidden="true" class="dock-btn-glyph">
+      "◈"
+    </span>
+    <span class="dock-btn-label">
+      "Operate"
+    </span>
+  </button>
+  <button aria-label="Verify — evidence, memory, wiki" class="dock-btn" data-group="verify" type="button">
+    <span aria-hidden="true" class="dock-btn-glyph">
+      "⌬"
+    </span>
+    <span class="dock-btn-label">
+      "Verify"
+    </span>
+  </button>
+  <button aria-label="Connect — runtimes, auth, integrations" class="dock-btn" data-group="connect" type="button">
+    <span aria-hidden="true" class="dock-btn-glyph">
+      "⌗"
+    </span>
+    <span class="dock-btn-label">
+      "Connect"
+    </span>
+  </button>
+  <button aria-label="Reference — dashboard, docs, roadmap" class="dock-btn" data-group="reference" type="button">
+    <span aria-hidden="true" class="dock-btn-glyph">
+      "☷"
+    </span>
+    <span class="dock-btn-label">
+      "Reference"
+    </span>
+  </button>
+</nav>

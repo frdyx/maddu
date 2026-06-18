@@ -1,0 +1,127 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view boss-view">
+    <h2>
+      "BOSS"
+    </h2>
+    <p>
+      "BOSS proposes · Enforcer cites · Operator decides. Terminal transcript, proposal cards with risk pill, approve/reject/negotiate."
+    </p>
+    <div class="boss-strip">
+      <div class="boss-strip-row">
+        <div class="boss-strip-tile tone-neutral">
+          <div class="boss-strip-value">
+          <div class="boss-strip-label">
+            "Active claims"
+          </div>
+        </div>
+        <div class="boss-strip-tile tone-ok">
+          <div class="boss-strip-value">
+          <div class="boss-strip-label">
+            "Open approvals"
+          </div>
+        </div>
+        <div class="boss-strip-tile tone-ok">
+          <div class="boss-strip-value">
+          <div class="boss-strip-label">
+            "Stuck workers"
+          </div>
+        </div>
+        <div class="boss-strip-tile tone-accent">
+          <div class="boss-strip-value">
+          <div class="boss-strip-label">
+            "Open tasks"
+          </div>
+        </div>
+        <div class="boss-strip-tile tone-ok">
+          <div class="boss-strip-value">
+            "0s"
+          </div>
+          <div class="boss-strip-label">
+            "Last slice"
+          </div>
+        </div>
+      </div>
+      <div class="boss-strip-next tone-accent">
+        <span class="boss-strip-next-glyph">
+          "▸"
+        </span>
+        <span class="boss-strip-next-text">
+        <span class="next-command-pill tone-accent">
+      </div>
+    </div>
+    <div class="boss-sessions">
+    <div class="boss-transcript">
+      <div class="boss-transcript-inner">
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "Empty transcript"
+          </div>
+          <div class="empty-state-hint">
+            "No messages on this session yet."
+          </div>
+        </div>
+      </div>
+    </div>
+    <form class="boss-composer" data-boss-session="default">
+      <div class="boss-composer-row">
+        <select class="lanes-edit-select">
+          <option value="">
+            "— freeform message —"
+          </option>
+          <option value="claim-lane">
+            "claim-lane"
+          </option>
+          <option value="release-lane">
+            "release-lane"
+          </option>
+          <option value="slice-stop">
+            "slice-stop"
+          </option>
+          <option value="request-handoff">
+            "request-handoff"
+          </option>
+          <option value="approve">
+            "approve"
+          </option>
+          <option value="run-focused-gate">
+            "run-focused-gate"
+          </option>
+          <option value="write-file">
+            "write-file"
+          </option>
+        </select>
+        <select class="lanes-edit-select">
+          <option value="low">
+            "risk: low"
+          </option>
+          <option value="medium">
+            "risk: medium"
+          </option>
+          <option value="high">
+            "risk: high"
+          </option>
+        </select>
+      </div>
+      <div class="boss-composer-row boss-composer-fields">
+        <span class="boss-field-hint">
+          "freeform — no enforcer fields"
+        </span>
+      </div>
+      <textarea class="boss-composer-text" placeholder="Propose an action or say something. Shift+Enter for newline." rows="3">
+      <div class="boss-composer-row">
+        <button class="m-btn" type="button">
+          "Pre-check (Enforcer)"
+        </button>
+        <button class="m-btn" type="button">
+          "Just say it"
+        </button>
+        <button class="btn-allow" type="submit">
+          "Send proposal"
+        </button>
+      </div>
+    </form>
+  </div>
+</section>

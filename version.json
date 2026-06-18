@@ -1,5 +1,5 @@
 {
-  "version": "1.36.1",
-  "phase": "docs-sweep-architecture-refactor",
-  "released": "2026-06-18"
+  "version": "1.37.0",
+  "phase": "cockpit-verification-harness",
+  "released": "2026-06-19"
 }

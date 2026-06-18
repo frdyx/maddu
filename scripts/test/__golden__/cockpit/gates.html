@@ -1,0 +1,44 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Gates"
+    </h2>
+    <p>
+      "Recent gate runs. Filter by verdict / severity / gate id."
+    </p>
+    <div class="panel" data-focus="gate-runs gates gate-ran doctor verdict severity">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Recent gate runs"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/gates · GATE_RAN events"
+        </span>
+      </div>
+      <div>
+        <div class="widget-stat">
+          <div class="widget-stat-num">
+            <span class="widget-stat-value">
+            <span class="widget-stat-trend up">
+              "ok · fail · warn"
+            </span>
+          </div>
+          <div class="widget-stat-label">
+            "last run:"
+          </div>
+        </div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No runs yet"
+          </div>
+          <div class="empty-state-hint">
+            "Run `maddu doctor` to populate."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

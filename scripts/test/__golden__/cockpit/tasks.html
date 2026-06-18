@@ -1,0 +1,142 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Tasks"
+    </h2>
+    <p>
+      "Dependency-aware task board. Completing a task auto-unblocks dependents."
+    </p>
+    <div style="display:flex;gap:6px;margin-bottom:12px;">
+      <input placeholder="New task title…" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="lane (opt)" style="width:140px;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <button>
+        "Create"
+      </button>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">
+            "Summary"
+          </span>
+          <span class="panel-aside">
+            "0 total"
+          </span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;margin-bottom:14px;">
+          <div class="widget-donut">
+            <svg height="140" viewBox="0 0 140 140" width="140">
+              <circle cx="70" cy="70" fill="none" r="61" stroke="var(--m-bg-3)" stroke-width="18">
+              <text fill="var(--m-fg-0)" font-family="'IBM Plex Sans Condensed', sans-serif" font-size="24" font-weight="600" text-anchor="middle" x="70" y="75">
+                "0"
+              </text>
+              <text fill="var(--m-fg-3)" font-family="'IBM Plex Sans', sans-serif" font-size="10" letter-spacing="0.06em" text-anchor="middle" text-transform="uppercase" x="70" y="92">
+                "tasks"
+              </text>
+            </svg>
+            <div class="widget-donut-legend">
+          </div>
+          <div class="widget-grid">
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Open"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-accent-2)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "In progress"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Blocked"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Done"
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="taskboard">
+        <div class="task-col">
+          <div class="task-col-head">
+            <span>
+              "in progress"
+            </span>
+            <span class="task-col-count">
+              "0"
+            </span>
+          </div>
+          <div class="task-col-body">
+        </div>
+        <div class="task-col">
+          <div class="task-col-head">
+            <span>
+              "todo"
+            </span>
+            <span class="task-col-count">
+              "0"
+            </span>
+          </div>
+          <div class="task-col-body">
+        </div>
+        <div class="task-col">
+          <div class="task-col-head">
+            <span>
+              "blocked"
+            </span>
+            <span class="task-col-count">
+              "0"
+            </span>
+          </div>
+          <div class="task-col-body">
+        </div>
+        <div class="task-col">
+          <div class="task-col-head">
+            <span>
+              "done"
+            </span>
+            <span class="task-col-count">
+              "0"
+            </span>
+          </div>
+          <div class="task-col-body">
+        </div>
+        <div class="task-col">
+          <div class="task-col-head">
+            <span>
+              "cancelled"
+            </span>
+            <span class="task-col-count">
+              "0"
+            </span>
+          </div>
+          <div class="task-col-body">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

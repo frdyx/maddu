@@ -47,6 +47,19 @@ maddu self-test --list --profile full   # discover exact test ids
 
 Severity: **warn**. In the framework source checkout, warns when no quick/full self-test has run, the last run failed, the last successful run was smoke-only, or the last quick/full run is older than 14 days. Consumer installs skip this gate.
 
+## Cockpit verification harness
+
+Location: `scripts/test/cockpit-boot.mjs` (Gate A) + `scripts/test/cockpit-snapshot.mjs` (Gate B), sharing `scripts/test/_cockpit-dom-env.mjs`. Both are discovered by `maddu self-test` like any other script.
+
+The cockpit is a browser SPA with no build step, so it historically could only be verified by an operator hard-refreshing `127.0.0.1:4177`. This harness verifies it **headlessly** — no browser binary, no operator — by standing up a pure-JS DOM ([happy-dom](https://github.com/capricorn86/happy-dom), a dev-only `devDependency`), feeding it the real `cockpit/index.html` scaffold + a deterministic fake bridge + frozen time, then importing and booting the actual shipped `cockpit.js`.
+
+- **Gate A — boot + render-all-routes.** Imports the whole cockpit module graph (catches a broken static import / export / circular break), `boot()`s, and renders every route into a non-empty `#route-view` without a synchronous throw. The headless replacement for the per-slice operator refresh.
+- **Gate B — render-regression snapshots.** Serializes the settled DOM of every route (sorted attributes, normalized whitespace, masked timestamps/ids) and compares it to a committed golden under `scripts/test/__golden__/cockpit/`. Moving a render function to a new module must produce byte-identical DOM; any diff is a regression. Re-capture after an intentional change with `UPDATE_GOLDENS=1 node scripts/test/cockpit-snapshot.mjs` and review the golden diff in the PR.
+
+To make `cockpit.js` importable under test without auto-booting, its entry tail is a two-line seam: `export { boot, renderRoute, ROUTES };` followed by `if (!globalThis.__MADDU_COCKPIT_TEST__) boot();`. In a browser the flag is undefined, so it boots exactly as before; the harness sets the flag before import and drives `boot()`/`renderRoute()` itself.
+
+Both gates **graceful-skip** (print `SKIP`, exit 0) when happy-dom is absent, so a zero-install consumer checkout's `maddu self-test` stays green. Run `npm i -D happy-dom` in the source checkout to exercise them.
+
 ## Synthetic stress harness
 
 Location: `scripts/test/stress-harness.mjs`.
@@ -147,7 +160,7 @@ Keep individual scenarios under ~5s. Synthesize state directly when possible —
 ## What this doesn't cover (deliberately)
 
 - **Live provider calls.** Stress runs without real API keys; provider CLIs are stubbed via tiny node scripts. Real-world friction is Phase 8's burn-in.
-- **Cockpit rendering.** The cockpit consumes projections like any other reader; stress validates the projection layer, not the SPA.
+- **Cockpit rendering.** The stress harness validates the projection layer, not the SPA. Cockpit boot + per-route render *is* covered headlessly by the [cockpit verification harness](#cockpit-verification-harness) above; what remains operator-only is pixel-level visual styling.
 - **Cross-machine sync.** Single-machine stress only. Multi-machine spine merge is a v1.x topic.
 
 ## See also

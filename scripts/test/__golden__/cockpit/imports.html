@@ -1,0 +1,160 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Imports"
+    </h2>
+    <p>
+      "Safe import gateway. Foreign artifacts in — provider secrets always out. Rejected payloads are logged with paths + pattern names only."
+    </p>
+    <div class="panel" style="border-left:3px solid var(--m-accent-warm);">
+      <div class="panel-title" style="color:var(--m-accent-warm);">
+        "TOKEN BOUNDARY"
+      </div>
+      <div class="event-actor" style="margin-top:6px;color:var(--m-fg-2);">
+        "Any payload containing a key-shaped string is rejected entirely. The rejection log records the JSON path and pattern name only — never the value."
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Compose"
+        </span>
+        <span class="panel-aside">
+          "POST /bridge/imports"
+        </span>
+      </div>
+      <textarea placeholder="{
+  "title": "…",
+  "body": "# …\n…"
+}" rows="10" style="width:100%;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:10px;font-family:var(--m-font-mono);font-size:12px;">
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+        <span style="font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-3);">
+          "kind:"
+        </span>
+        <select style="background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;">
+          <option value="skill">
+            "skill"
+          </option>
+          <option value="memory-note">
+            "memory-note"
+          </option>
+          <option value="lane">
+            "lane"
+          </option>
+          <option value="brief">
+            "brief"
+          </option>
+          <option value="inbox-note">
+            "inbox-note"
+          </option>
+        </select>
+        <button>
+          "Scan only"
+        </button>
+        <button class="btn-allow">
+          "Submit"
+        </button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "accepted vs rejected · breakdown by kind"
+        </span>
+      </div>
+      <div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;">
+          <div class="widget-donut">
+            <svg height="140" viewBox="0 0 140 140" width="140">
+              <circle cx="70" cy="70" fill="none" r="61" stroke="var(--m-bg-3)" stroke-width="18">
+              <text fill="var(--m-fg-0)" font-family="'IBM Plex Sans Condensed', sans-serif" font-size="24" font-weight="600" text-anchor="middle" x="70" y="75">
+                "0"
+              </text>
+              <text fill="var(--m-fg-3)" font-family="'IBM Plex Sans', sans-serif" font-size="10" letter-spacing="0.06em" text-anchor="middle" text-transform="uppercase" x="70" y="92">
+                "imports"
+              </text>
+            </svg>
+            <div class="widget-donut-legend">
+          </div>
+          <div>
+            <div class="widget-bar">
+              <div class="widget-bar-head">
+                <span class="widget-bar-label">
+                  "Accepted"
+                </span>
+                <span class="widget-bar-right">
+                  "0 / 0"
+                </span>
+              </div>
+              <div class="widget-bar-track">
+                <div class="widget-bar-fill" style="width:0%; background:var(--m-ok)">
+              </div>
+            </div>
+            <div class="widget-bar">
+              <div class="widget-bar-head">
+                <span class="widget-bar-label">
+                  "Rejected (secrets)"
+                </span>
+                <span class="widget-bar-right">
+                  "0 / 0"
+                </span>
+              </div>
+              <div class="widget-bar-track">
+                <div class="widget-bar-fill" style="width:0%; background:var(--m-danger)">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Accepted"
+        </span>
+        <span class="panel-aside">
+          ".maddu/imports/accepted.ndjson"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No imports yet"
+          </div>
+          <div class="empty-state-hint">
+            "Compose a payload above and click Submit."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Rejected (secrets detected)"
+        </span>
+        <span class="panel-aside">
+          ".maddu/imports/rejected-secrets.ndjson"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No rejections"
+          </div>
+          <div class="empty-state-hint">
+            "Good. No secret-shaped payloads attempted."
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

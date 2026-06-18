@@ -1,0 +1,60 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Runtimes"
+    </h2>
+    <p>
+      "Pluggable subprocess workers — Claude Code, Codex, Hermes, future agents. Descriptor + detection + spawn."
+    </p>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <input placeholder="name (e.g. claude-code)" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="binary" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="args (comma)" style="flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <input placeholder="detect command (e.g. claude --version)" style="flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;" type="text">
+      <button>
+        "Register"
+      </button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:12px;">
+      <button>
+        "Detect all"
+      </button>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "detected · capabilities · spawn surface"
+        </span>
+      </div>
+      <div>
+        <div class="empty-state">
+          <div aria-hidden="true" class="empty-state-glyph">
+            "◌"
+          </div>
+          <div class="empty-state-title">
+            "No runtimes"
+          </div>
+          <div class="empty-state-hint">
+            "Register one to populate this summary."
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="empty-state">
+        <div aria-hidden="true" class="empty-state-glyph">
+          "◌"
+        </div>
+        <div class="empty-state-title">
+          "No runtimes registered"
+        </div>
+        <div class="empty-state-hint">
+          "Register one above, or via `maddu runtime register --name … --binary …`."
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

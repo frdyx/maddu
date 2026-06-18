@@ -1,0 +1,91 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Swarm"
+    </h2>
+    <p>
+      "Multi-agent fan-out. Lane-bound workers and their mailboxes."
+    </p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Summary"
+        </span>
+        <span class="panel-aside">
+          "workers + sessions distribution"
+        </span>
+      </div>
+      <div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;">
+          <div class="widget-donut">
+            <svg height="140" viewBox="0 0 140 140" width="140">
+              <circle cx="70" cy="70" fill="none" r="61" stroke="var(--m-bg-3)" stroke-width="18">
+              <text fill="var(--m-fg-0)" font-family="'IBM Plex Sans Condensed', sans-serif" font-size="24" font-weight="600" text-anchor="middle" x="70" y="75">
+                "0"
+              </text>
+              <text fill="var(--m-fg-3)" font-family="'IBM Plex Sans', sans-serif" font-size="10" letter-spacing="0.06em" text-anchor="middle" text-transform="uppercase" x="70" y="92">
+                "workers"
+              </text>
+            </svg>
+            <div class="widget-donut-legend">
+          </div>
+          <div class="widget-grid">
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-accent)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Active sessions"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Running workers"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-ok)">
+                  "0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Stuck workers"
+              </div>
+            </div>
+            <div class="widget-stat">
+              <div class="widget-stat-num">
+                <span class="widget-stat-value" style="color:var(--m-accent-2)">
+                  "0/0"
+                </span>
+              </div>
+              <div class="widget-stat-label">
+                "Lanes claimed"
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Lane roster"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/lanes"
+        </span>
+      </div>
+      <div>
+        <dl class="kv">
+      </div>
+    </div>
+  </div>
+</section>
