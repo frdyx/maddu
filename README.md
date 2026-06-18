@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.18.1](https://img.shields.io/badge/version-1.18.1-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.18.2](https://img.shields.io/badge/version-1.18.2-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -70,7 +70,7 @@ Or just type *"ship the login form"*, *"status"*, *"tokens"*. The agent classifi
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.18.1 installed.
+Máddu v1.18.2 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -87,7 +87,7 @@ The verbose CLI is always available — it's what the slash commands themselves 
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.18.1  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.18.2  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312

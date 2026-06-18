@@ -409,7 +409,45 @@ export async function checkRuleInvariants(rootDir = frameworkRoot()) {
   };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture']);
+// ── Audit-only check: capability-docs map coherence (v1.18.2) ──────────────
+// docs/capability-docs.json maps every capability verb to its in-depth doc (or
+// null where the charter row + CLI reference is the depth). The marketing site
+// consumes it to build per-verb subpages, so it must not drift: its keys must
+// be exactly the COMMANDS set, and every referenced doc must exist. Without
+// this guard the map silently rots the moment a verb is added (the same class
+// of drift the charter-drift tightening just closed).
+async function checkCapabilityDocs() {
+  const mapPath = join(frameworkRoot(), 'docs', 'capability-docs.json');
+  const binPath = join(frameworkRoot(), 'bin', 'maddu.mjs');
+  if (!(await exists(mapPath))) return { level: 'WARN', label: 'capability-docs', detail: 'docs/capability-docs.json not found (skipped)' };
+  if (!(await exists(binPath))) return { level: 'WARN', label: 'capability-docs', detail: 'bin/maddu.mjs not adjacent (skipped)' };
+  let map;
+  try { map = JSON.parse(await readFile(mapPath, 'utf8')); }
+  catch (err) { return { level: 'FAIL', label: 'capability-docs', detail: `capability-docs.json invalid JSON: ${err.message}` }; }
+  if (map.schemaVersion !== 1 || !map.verbs || typeof map.verbs !== 'object') {
+    return { level: 'FAIL', label: 'capability-docs', detail: 'capability-docs.json must declare schemaVersion 1 and a verbs object' };
+  }
+  const commands = extractCommands(await readFile(binPath, 'utf8')) || [];
+  const cmdSet = new Set(commands);
+  const keys = Object.keys(map.verbs);
+  const keySet = new Set(keys);
+  const missing = commands.filter((c) => !keySet.has(c));
+  const extra = keys.filter((k) => !cmdSet.has(k));
+  const docsDir = join(frameworkRoot(), map.docsDir || 'docs');
+  const dangling = [];
+  for (const [verb, doc] of Object.entries(map.verbs)) {
+    if (doc && !(await exists(join(docsDir, doc)))) dangling.push(`${verb}→${doc}`);
+  }
+  const problems = [];
+  if (missing.length) problems.push(`verb(s) absent from map: ${missing.join(', ')}`);
+  if (extra.length) problems.push(`map key(s) not a command: ${extra.join(', ')}`);
+  if (dangling.length) problems.push(`dangling doc ref(s): ${dangling.join(', ')}`);
+  if (problems.length) return { level: 'FAIL', label: 'capability-docs', detail: problems.join('; ') };
+  const withDoc = Object.values(map.verbs).filter(Boolean).length;
+  return { level: 'PASS', label: 'capability-docs', detail: `${keys.length} verb(s) mapped; ${withDoc} with an in-depth doc, all present` };
+}
+
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'capability-docs']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -442,6 +480,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'charter') checks.push(await checkCharterDrift());
   if (!sub || sub === 'traceability') checks.push(await checkRuleGateTraceability());
   if (!sub || sub === 'invariants') checks.push(await checkRuleInvariants());
+  if (!sub || sub === 'capability-docs') checks.push(await checkCapabilityDocs());
 
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const c of checks) counts[c.level]++;

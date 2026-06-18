@@ -79,6 +79,15 @@ $ curl -X POST http://127.0.0.1:4177/bridge/slice-stop \
    Each fact carries provenance back to the originating `SLICE_STOP` event id. See [10-skills-and-hindsight.md](10-skills-and-hindsight.md).
 3. **Surfaces.** The slice-stop shows in `maddu status`, in the cockpit Operations route, and (later) in any skill distilled from it.
 
+## Automatic checks at stop (v1.17.0)
+
+Every slice-stop runs two deterministic, **WARN-only** checks over its paths — recorded on the `SLICE_STOP` event and printed, never blocking the stop:
+
+- **Change risk.** A risk level (`none` → `critical`) classified from the touched paths: edits to `auth` / secrets / tokens / `schema` / migrations, or a broad change across many files, rank highest. A **high/critical** slice escalates the post-stop auto-review past its cooldown. The level lives on the event so `orient` and the audit trail surface it.
+- **Declared deliverables.** Each `--targets` file is verified to actually exist on disk (or show in git as deleted/renamed). A target that's *named but absent* — a worker reporting a deliverable it never produced — is flagged. This catches hollow claims, and it covers spawned sub-workers too (they run the same ritual).
+
+Both are best-effort: a non-git workspace or an unreadable path degrades to `none` rather than ever erroring. They make every stop self-auditing without adding a gate. See [40-architecture-drift.md](40-architecture-drift.md) for the related *structural* drift gate.
+
 ## How slice-stop is different from a commit
 
 - A commit is git's record of file content. A slice-stop is Máddu's record of agent intent and outcome.
