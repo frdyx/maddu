@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.30.0] · 2026-06-18 · Architecture refactor (12) — server split, slice 6 (lane-ownership route groups)
+
+Phase 9, sixth slice — the second route-group extraction, applying the v1.29.0 dispatch contract to the **lane-ownership subsystem** (the substrate behind rule #8).
+
+- **`runtime/lib/bridge-routes-lanes.mjs`** — `routeSessions` (the `/bridge/sessions/*` lifecycle group) and `routeLanes` (the `/bridge/lanes/*` catalog + claim group, plus `/bridge/claims/handoff`). Each reads only the request (`req`, `res`, `path`) + the resolved `repoRoot`. No lib imports needed trimming from `server.js` this time — every function the groups use (`append`, `project`, `pathsFor`, `ensureSpine`, …) is still used by surviving routes.
+- `server.js` **1 837 → 1 657** (−180; cumulative **2 705 → 1 657**, ~39% off the bridge monolith).
+- Verified on a live bridge: `/bridge/sessions` + `/bridge/lanes` GET **200** (real data); `sessions/heartbeat` and `lanes/claim` with no body **400**; an unknown lane DELETE **404** *within* the group; and the fall-through guard — `/bridge/claims` GET (the claims projection, defined *after* the block, owned by a different handler) still **200**s rather than being swallowed by `routeLanes` (which owns only `/bridge/claims/handoff`).
+- New `bridge-routes-lanes` self-test (9 assertions: dispatch contract + the `/bridge/claims` fall-through + a read-only 400-validation branch via an empty async-iterable `req` stub, so it never mutates the spine).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **53/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (baseline ratcheted to server.js 1 657), live-bridge smoke (lane/session endpoints + fall-through).
+
 ## [v1.29.0] · 2026-06-18 · Architecture refactor (11) — server split, slice 5 (registry route groups)
 
 Phase 9, fifth slice — the first **route-group** extraction out of the `handleBridge` if-chain (the monolith's hard core). The two structurally identical capability-registry CRUD groups move out.
