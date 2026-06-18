@@ -8,6 +8,7 @@ import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime
 import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './cockpit-widgets.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 import { renderAdvisorsCard, renderSkillInjectionsCard, renderModelRoutingRuntimes, renderModelRoutingLanes, renderModelRoutingPipelines, renderTestStatusCard, renderPipelinesCard, renderCostCard, renderSlashCheatsheet } from './cockpit-backbone-cards.js';
+import { classifyEvent, eventRow, prepend, makeDecisionButton } from './cockpit-event-rows.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -3874,19 +3875,7 @@ async function fetchApprovals(scopeRoute) {
   } catch { return null; }
 }
 
-async function postApprovalDecision(approvalId, decision, reason, workspaceId) {
-  const headers = { 'content-type': 'application/json' };
-  // In "all workspaces" mode the row carries its origin workspace id; pin
-  // the write to that spine so the decision lands in the right repo and
-  // not in the currently-active one.
-  if (workspaceId) headers['X-Maddu-Workspace'] = workspaceId;
-  const r = await fetch('/bridge/approvals/respond', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ approvalId, decision, reason })
-  });
-  return r.json();
-}
+// postApprovalDecision → moved to cockpit-event-rows.js (v1.41.0).
 
 function renderApprovals() {
   const root = el('div', { class: 'view' });
@@ -4048,72 +4037,7 @@ function renderApprovals() {
   return root;
 }
 
-function classifyEvent(type) {
-  // SINGLE-EVENT specials first
-  if (type === 'SLICE_STOP')              return 't-slice';
-  if (type === 'DOCTOR_REPORT')           return 't-doctor';
-  if (type === 'INBOX_MESSAGE')           return 't-inbox';
-
-  // Lifecycle & versioning ops — lavender (framework family)
-  if (type.startsWith('FRAMEWORK_'))      return 't-framework';
-  if (type.startsWith('CHECKPOINT_'))     return 't-framework';
-
-  // Session & infrastructure runtime — cyan
-  if (type.startsWith('SESSION_'))        return 't-session';
-  if (type.startsWith('WORKER_'))         return 't-session';
-  if (type.startsWith('RUNTIME_'))        return 't-session';
-  if (type.startsWith('MCP_'))            return 't-session';
-  if (type.startsWith('SCHEDULE_'))       return 't-session';
-
-  // Lane work — mint green
-  if (type.startsWith('LANE_'))           return 't-lane';
-  if (type.startsWith('MAILBOX_'))        return 't-lane';
-  if (type.startsWith('TASK_'))           return 't-lane';
-
-  // Sensitive ops (approvals, auth, imports) — amber warn
-  if (type.startsWith('APPROVAL_'))       return 't-approval';
-  if (type.startsWith('AUTH_KEY_'))       return 't-approval';
-  if (type.startsWith('IMPORT_'))         return 't-approval';
-
-  // Knowledge work — bold cream (slice family)
-  if (type.startsWith('SKILL_'))          return 't-slice';
-
-  return '';
-}
-
-function summarize(ev) {
-  const d = ev.data || {};
-  switch (ev.type) {
-    case 'FRAMEWORK_INSTALLED': return `installed v${d.version} (${d.files} files)`;
-    case 'FRAMEWORK_UPGRADED':  return `${d.from} → ${d.to}  +${d.added} ~${d.updated} -${d.removed}`;
-    case 'FRAMEWORK_BOOTED':    return `bridge on :${d.port}`;
-    case 'DOCTOR_REPORT':       return `${d.counts.PASS} pass · ${d.counts.WARN} warn · ${d.counts.FAIL} fail`;
-    case 'SESSION_REGISTERED':  return `${d.role || '—'}  ${d.label || ''}`;
-    case 'SESSION_HEARTBEAT':   return d.focus || '';
-    case 'SESSION_CLOSED':      return d.handoff || '';
-    case 'LANE_CLAIMED':        return d.focus || '';
-    case 'LANE_RELEASED':       return '';
-    case 'SLICE_STOP':          return d.summary || '';
-    case 'INBOX_MESSAGE':       return d.message || '';
-    case 'APPROVAL_REQUESTED':  return `${d.tool}  ${d.action || ''}`;
-    case 'APPROVAL_DECIDED':    return `${d.decision}  ${d.tool || ''}`;
-    case 'APPROVAL_POLICY_SET': return `${d.decision}  ${d.tool}@${d.lane || '*'}`;
-    default: return '';
-  }
-}
-
-function eventRow(ev, fresh = false) {
-  const row = el('div', { class: 'event-row' + (fresh ? ' new' : '') }, [
-    el('span', { class: 'event-time' }, ev.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
-    el('span', { class: `event-type ${classifyEvent(ev.type)}` }, ev.type),
-    el('span', { class: 'event-lane' }, ev.lane || '—'),
-    el('span', {}, [
-      el('span', { class: 'event-summary' }, summarize(ev) + '  '),
-      el('span', { class: 'event-actor' }, ev.actor ? `· ${ev.actor}` : '')
-    ])
-  ]);
-  return row;
-}
+// classifyEvent / summarize / eventRow → moved to cockpit-event-rows.js (v1.41.0).
 
 function renderEvents() {
   const root = el('div', { class: 'view' });
@@ -4217,26 +4141,7 @@ function renderEvents() {
   return root;
 }
 
-function prepend(parent, child) {
-  if (parent.firstChild) parent.insertBefore(child, parent.firstChild);
-  else parent.appendChild(child);
-}
-
-function makeDecisionButton(decision, label, klass, approvalId, onDone, workspaceId) {
-  const btn = el('button', { class: klass }, label);
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    btn.textContent = '…';
-    try {
-      await postApprovalDecision(approvalId, decision, null, workspaceId);
-      onDone();
-    } catch (err) {
-      btn.textContent = 'error';
-      console.error(err);
-    }
-  });
-  return btn;
-}
+// prepend / makeDecisionButton → moved to cockpit-event-rows.js (v1.41.0).
 
 async function fetchMailboxCounts() {
   try {

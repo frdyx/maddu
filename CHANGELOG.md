@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.41.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — event-row leaf
+
+Fourth decomposition slice. The spine-event rendering + approval-decision-button helpers move to a leaf.
+
+- **`cockpit/cockpit-event-rows.js`** (new leaf) — `classifyEvent` (event-type → colour-family class), `eventRow` (one spine-stream row), `prepend` (head-insert), `makeDecisionButton` (approval decision button), plus module-private `summarize` (row payload text) and `postApprovalDecision` (the POST, which only `makeDecisionButton` uses). Depends only on `el` + global `fetch` + injected callbacks. The route renderers that subscribe to the live `stream` bus (Events, Workbench, Approvals, BOSS) stay in `cockpit.js` and import these back.
+- **`scripts/test/cockpit-event-rows.mjs`** (new fixture) — 20 assertions: classify mapping, row shape + fresh flag, prepend ordering, decision-button structure.
+- Re-baselined the cockpit mass floor `8196 → 8101`.
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens**; **Gate A** boots + renders all 42 routes.
+
+Verified: `maddu self-test` **63/63** (`token-wrapper-emission` confirmed green in isolation), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.40.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — backbone card leaf
 
 Third decomposition slice — the first new leaf MODULE of Phase 1. The pure
