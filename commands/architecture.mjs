@@ -16,24 +16,13 @@
 // read-only over the source tree; init/baseline write config/state. Exit 0
 // unless the failOn ladder marks the scan blocking (then 1); 2 on usage error.
 
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
-import { exists } from './_libroot.mjs';
+import { exists, loadLibOptional } from './_libroot.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', warn: '\x1b[33m', red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m' };
-
-async function loadLib(name) {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', name),
-    join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', name),
-  ];
-  for (const p of candidates) { if (await exists(p)) { try { return await import(pathToFileURL(p).href); } catch {} } }
-  return null;
-}
 
 function usage() {
   console.error('maddu architecture: usage — maddu architecture [init|scan|diagram|baseline] [--repo <dir>] [--fail-on none|new|any] [--json] [--force]');
@@ -46,7 +35,7 @@ export default async function architecture(argv) {
 
   const json = !!flags.json;
   const repoRoot = flags.repo ? String(flags.repo) : ((await findRepoRoot(process.cwd())) || process.cwd());
-  const arch = await loadLib('architecture.mjs');
+  const arch = await loadLibOptional('architecture.mjs');
   if (!arch) { console.error('maddu architecture: architecture lib not found'); process.exit(2); }
 
   // ── init ──────────────────────────────────────────────────────────────────
@@ -127,7 +116,7 @@ export default async function architecture(argv) {
 
   // Best-effort spine record + trend signal.
   try {
-    const spine = await loadLib('spine.mjs');
+    const spine = await loadLibOptional('spine.mjs');
     if (spine?.append && spine.EVENT_TYPES?.ARCHITECTURE_SCANNED) {
       await spine.append(repoRoot, {
         type: spine.EVENT_TYPES.ARCHITECTURE_SCANNED,
