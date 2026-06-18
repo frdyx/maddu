@@ -229,7 +229,7 @@ Six surfaces that put agents on the spine by default. Every governance primitive
 
 Project content outside the markers is **never** overwritten. `maddu upgrade` updates the marker section in place; if no markers exist, the section is prepended above existing content with a blank line separator.
 
-The `agent-file-current` gate (severity `safety`) fails `maddu doctor` when the marker sections drift from the canonical template — same enforcement pattern as v0.16.2's `docs-in-sync`.
+The `agent-file-current` gate (severity `safety`) fails `maddu doctor` when the marker sections drift from the canonical template — the same template-vs-installed sync pattern introduced in v0.16.2.
 
 ### Zero-keystroke session register
 

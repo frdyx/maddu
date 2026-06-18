@@ -64,7 +64,7 @@ async function main() {
   const root = await makeFakeSource();
   try {
     const smoke = await buildSelfTestPlan({ frameworkRoot: root, profile: 'smoke' });
-    ok('smoke profile has 3 smoke checks', smoke.tasks.map((t) => t.id).join(',') === 'audit-docs-sync,audit,spine-verify');
+    ok('smoke profile has 3 smoke checks', smoke.tasks.map((t) => t.id).join(',') === 'audit-generated,audit,spine-verify');
 
     const quick = await buildSelfTestPlan({ frameworkRoot: root, profile: 'quick' });
     const quickIds = quick.tasks.map((t) => t.id);

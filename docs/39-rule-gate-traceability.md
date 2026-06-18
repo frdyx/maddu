@@ -67,7 +67,7 @@ to a **charter-coherence concern** (keeping the surface honest — the charter's
   `governance-mode-coherent`, `strict-mode-approval-active`.
 - **Framework coherence (charter "features earn their place"):**
   `event-types-reachable`, `command-surface-coherent`, `cockpit-routes-reachable`,
-  `docs-indexed`, `docs-in-sync`, `defaults-single-sourced`, `brief-coherence`,
+  `docs-indexed`, `generated-artifacts-current`, `defaults-single-sourced`, `brief-coherence`,
   `help-roster-matches-cli`, `intent-routing-current`, `agent-file-current`,
   `slash-command-display-pattern`, `slash-commands-installed`,
   `command-tier-discipline`, `framework-layout`, `install-integrity`,

@@ -1,7 +1,7 @@
 // Agent-file-current gate — v0.17 Phase 4.
 //
-// Extends the docs-in-sync pattern (v0.16.2) to the three repo-root
-// agent files. Each install ships canonical templates under
+// Extends the template-vs-installed sync pattern (v0.16.2) to the three
+// repo-root agent files. Each install ships canonical templates under
 // `maddu/agent-files/` (consumer) or `template/maddu/agent-files/`
 // (framework source). This gate asserts:
 //
@@ -16,7 +16,7 @@
 // agent-file sync.
 //
 // In the framework source repo (no consumer install of itself), the
-// gate no-ops gracefully — same pattern as docs-in-sync.
+// gate no-ops gracefully.
 
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';

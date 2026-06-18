@@ -1,11 +1,13 @@
 // v1.19.0 — verifies every single-sourced artifact is current: its generated
-// target is byte-equal to a fresh render from its authored source. This is the
+// target is byte-equal to a fresh render from its authored source, and no
+// payload file is an orphan (a target with no source). This is the
 // generated-artifact discipline's enforcement: drift between a source and its
-// derived copy fails here instead of silently shipping. As the rule registry
-// and doc tree move behind generators, this gate SUPERSEDES the hand-mirroring
-// drift gates (docs-in-sync, rule-invariant) — they get retired once their
-// content is generated. Skips cleanly when authored sources are absent (a
-// consumer install never carries them).
+// derived copy fails here instead of silently shipping. With the rule registry
+// and doc tree now behind generators, this gate SUPERSEDED and RETIRED the
+// hand-mirror docs-in-sync gate (v1.22.0) — it covers both byte-equality
+// (stronger than the old LF-normalized compare) and orphan detection. Skips
+// cleanly when authored sources are absent (a consumer install never carries
+// them).
 
 import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
@@ -19,10 +21,15 @@ export default {
     if (!lib || !lib.checkGenerators) return { ok: true, message: 'generation engine not present (skipped)' };
     const drifted = await lib.checkGenerators(ctx.repoRoot);
     if (drifted.length) {
+      const orphans = drifted.filter((d) => d.orphan);
+      const stale = drifted.filter((d) => !d.orphan);
+      const parts = [];
+      if (stale.length) parts.push(`${stale.length} out of date — run \`node scripts/generate.mjs\``);
+      if (orphans.length) parts.push(`${orphans.length} orphan(s) with no source — remove or add the source: ${orphans.map((o) => o.target).join(', ')}`);
       return {
         ok: false,
-        message: `${drifted.length} generated artifact(s) out of date — run \`node scripts/generate.mjs\``,
-        evidence: { drifted: drifted.map((d) => ({ id: d.id, target: d.target })) },
+        message: `generated artifacts: ${parts.join('; ')}`,
+        evidence: { drifted: drifted.map((d) => ({ id: d.id, target: d.target, orphan: !!d.orphan })) },
       };
     }
     const all = await lib.runGenerators(ctx.repoRoot, { mode: 'check' });

@@ -87,7 +87,7 @@ maddu doctor --severity critical           # filter by severity
 | tracked-source-drift | critical | tracked SSOT files unchanged since last rebuild | v0.16.0 |
 | command-tier-discipline | safety | every CLI command has a tier in `_tiers.mjs` | v0.16.0 |
 | slice-scope | critical | slices that declare scope stay within it | v0.16.0 |
-| docs-in-sync | safety | `docs/*.md` and `template/maddu/docs/*.md` byte-equal (framework source repo only; no-ops in consumer installs) | v0.16.2 |
+| generated-artifacts-current | safety | every single-sourced artifact (the four agent briefs from `rules.json`; the `template/maddu/docs/*.md` payload mirrored from `docs/`) is byte-equal to a fresh render of its source, with no orphan payload files (framework source repo only). Retired and supersedes `docs-in-sync` in v1.22.0 | v1.19.0 |
 | agent-file-current | safety | `MADDU.md` / `CLAUDE.md` / `AGENTS.md` marker stanzas match canonical template | v0.17.0 |
 | framework-layout | critical | detects framework layout (source / installed) and refuses to operate from an unknown layout | v0.17.1 |
 | slash-commands-installed | safety | both `.claude/commands/` and `.codex/commands/` exist; every `maddu-*.md` template is installed in both surfaces with marker-block body byte-equal to the framework copy | v0.18.0 |

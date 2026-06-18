@@ -27,7 +27,7 @@
 //
 // In the framework source repo with no .claude/.codex consumer layout
 // at the root, the gate no-ops gracefully — same pattern as
-// docs-in-sync / agent-file-current.
+// agent-file-current.
 
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';

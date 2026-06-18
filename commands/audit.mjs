@@ -92,19 +92,16 @@ const GATE_IDS = {
   docs: 'docs-indexed',
   defaults: 'defaults-single-sourced',
   brief: 'brief-coherence',
-  // C1 (v1.13.0): docs-in-sync was effectively dormant — doctor early-returns
-  // in the framework repo and consumer installs skip it (no template/). Audit
-  // is the framework-coherence command that DOES run here, so surface the
-  // two-tree divergence where it's visible.
-  docsSync: 'docs-in-sync',
   // v1.18.0 — architecture-drift: declared contract vs real import graph.
   // Skips gracefully when a repo declares no contract (the framework source
   // itself declares none), so it's a PASS here until a product opts in.
   architecture: 'architecture-drift',
   // v1.19.0 — generated-artifacts-current: every single-sourced artifact is
-  // byte-equal to a fresh render of its authored source. The enforcement arm
-  // of the generated-artifact discipline; supersedes the hand-mirror drift
-  // gates as content moves behind generators.
+  // byte-equal to a fresh render of its authored source, and no payload file is
+  // an orphan (no source). The enforcement arm of the generated-artifact
+  // discipline. RETIRED docs-in-sync (v1.22.0): the doc tree is now generated
+  // from docs/ and this gate covers both byte-equality (stronger) and orphans
+  // (the only coverage docs-in-sync had that wasn't redundant).
   generated: 'generated-artifacts-current',
 };
 
@@ -339,15 +336,15 @@ async function checkRuleGateTraceability() {
 }
 
 // ── Audit-only check: rule-invariant drift (v1.17.0) ──────────────────────
-// The 8+1 hard rules + the framework-scope banner are duplicated across every
-// agent-facing brief (the worker CLAUDE.md, the full MADDU.md, and the compact
-// CLAUDE/AGENTS section files). docs-in-sync guards byte-equal MIRRORED docs,
-// but these briefs are deliberately NOT byte-equal — each is phrased for its
-// surface — so nothing catches a load-bearing rule or scope carve-out being
-// reworded out of one copy (an agent then reads a weakened rule and acts on
-// it). This pins the invariant phrases: if a brief that must carry one stops
-// containing it, FAIL with the exact (file, phrase) miss. Inspired by
-// ponytail's check-rule-copies.js — a canary, not full equality.
+// The 8+1 hard rules now have ONE source — agent-files/rules.json — and the
+// rule sections of every brief (worker CLAUDE.md, full MADDU.md, compact
+// CLAUDE/AGENTS section files) are GENERATED from it (v1.20.x). So this is no
+// longer a duplication-policing check; it's a SUBSTANCE canary over the
+// generated output: it asserts each load-bearing phrase actually reaches the
+// briefs, catching a rule or scope carve-out DELETED from the registry (the
+// briefs would regenerate without it) or a non-registry routing phrase reworded
+// out of a still-hand-authored section. FAIL with the exact (file, phrase) miss.
+// Inspired by ponytail's check-rule-copies.js — a canary, not full equality.
 const RULE_FILES = {
   worker:  'template/maddu/CLAUDE.md',
   brief:   'template/maddu/agent-files/MADDU.md',
@@ -452,7 +449,7 @@ async function checkCapabilityDocs() {
   return { level: 'PASS', label: 'capability-docs', detail: `${keys.length} verb(s) mapped; ${withDoc} with an in-depth doc, all present` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'capability-docs', 'generated']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'capability-docs', 'generated']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -477,7 +474,6 @@ export default async function audit(argv) {
   if (!sub || sub === 'docs') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docs));
   if (!sub || sub === 'defaults') checks.push(...await runGateChecks(repoRoot, GATE_IDS.defaults));
   if (!sub || sub === 'brief') checks.push(...await runGateChecks(repoRoot, GATE_IDS.brief));
-  if (!sub || sub === 'docs-sync') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docsSync));
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
   if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
 

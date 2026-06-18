@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.22.0] · 2026-06-18 · Architecture refactor (4) — retire the policing gate (the proof)
+
+Phase 6 (plan `pln_20260618130134_3ce2`), the payoff: a drift-policing gate that existed **only** to catch hand-maintained duplication is now **deleted**, because the duplication is gone. This is the proof the single-sourcing worked.
+
+- **`docs-in-sync` retired.** With the doc tree generated from `docs/` (v1.21.0), `docs-in-sync` was redundant — `generated-artifacts-current` already asserts the payload matches a fresh render (byte-exact, *stronger* than the old LF-normalized compare). The one thing it did that wasn't redundant — flagging **orphan** payload files (a doc with no source) — is now done by the mirror generator, which emits an orphan unit the gate fails on (never auto-deleting it). The gate, its `docs-sync-exceptions` self-test, and all `maddu audit docs-sync` wiring are removed. `maddu audit` goes **14 → 13**.
+- **`rule-invariant` repurposed, not deleted.** It turned out to guard rule *substance* (the 13 load-bearing phrases must reach the briefs), not duplication — so deleting it would lose a real invariant. With the briefs now generated from `rules.json`, it's reframed as a **substance canary** over the generated output: it still catches a rule deleted from the registry (the briefs would regenerate without it) or a non-registry routing phrase reworded away.
+- The `generation-engine` fixture grew **25 → 29** (orphan detect / never-written / surfaced-as-drift). The smoke profile's third check moved from `audit docs-sync` to `audit generated`.
+
+Net for the refactor's "delete the policing gates" thesis: the genuinely-redundant gate is gone; the one that guards substance was kept and re-pointed. Honest proof, not a blunt delete.
+
+Verified: `maddu audit` **13/0**, `maddu self-test` **45/0**, `maddu architecture` **0 drift**, `generated-artifacts-current` covers 52 artifacts + orphan detection.
+
 ## [v1.21.0] · 2026-06-18 · Architecture refactor (3) — the doc tree is generated, not hand-mirrored
 
 Phase 5 (plan `pln_20260618130134_3ce2`): the bundled docs payload is now **generated** from the authored source. The user-facing docs are authored at the repo root (`docs/`) and shipped to consumers as `template/maddu/docs/`; the two trees were kept byte-equal by hand and policed by `docs-in-sync`. Now the payload tree is derived from the source.
