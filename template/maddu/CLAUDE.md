@@ -111,6 +111,7 @@ Exceptions:
 - Pure conversational answer with no repo/Máddu change.
 - Operator explicitly says "do not write files".
 
+<!-- GENERATED:hard-rules (source: template/maddu/agent-files/rules.json — edit there, run npm run generate) -->
 ## The 8+1 hard rules (do not violate)
 
 > **⚠️ SCOPE — read this first.** These invariants govern **how Máddu itself
@@ -148,6 +149,7 @@ rule is about the **Máddu framework layer**):
    spine/state/workspace-mutating command auto-fires without a `tier:'mutating'`
    entry, an allowlist entry in `.maddu/config/triggers.json`, a respected
    cooldown, and a `TRIGGER_FIRED` event carrying `triggered_by` provenance.
+<!-- /GENERATED:hard-rules -->
 
 ## Prefer a pipeline (the default execution path)
 

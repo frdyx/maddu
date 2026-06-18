@@ -11,6 +11,31 @@ narrative summary.
 
 ---
 
+## [v1.20.1] · 2026-06-18 · Architecture refactor (2b) — the compact rule stanza joins the registry
+
+Completes the rule single-sourcing: the third brief surface — the compact `.section.md` stanza (read by both Claude Code and Codex) — is now generated from the same `rules.json` registry, so **all four** agent briefs derive their hard-rules text from one source.
+
+- **A `compact` style** added to `rules.json` (prose scope intro + grouped bullets + closing line — no heading or blockquote, unlike the worker/brief styles) plus a `renderHardRulesCompact` renderer.
+- **`CLAUDE.section.md`** carries the `hard-rules` markers and its rule block is generated; **`AGENTS.section.md`** inherits it through the existing identity copy (the `hard-rules-section` generator is ordered before `agents-section`). Byte-exact: the only change to either file is the two marker lines; the two section files stay identical.
+- The `generation-engine` fixture grew **17 → 18** assertions (compact render).
+
+With all four briefs generated, the `rule-invariant` drift gate is now fully **retireable** — its content can no longer drift by hand. The actual deletion lands in the retire-gates phase (once `docs-in-sync` is likewise superseded by the doc-tree generator).
+
+Verified: `maddu audit` **14/0** (`rule-invariant` green over 4 briefs), `maddu self-test` **46/0**, `generated-artifacts-current` covers **4** artifacts, `maddu architecture` **0 drift**.
+
+## [v1.20.0] · 2026-06-18 · Architecture refactor (2) — rule-registry single-sourcing
+
+Phase 4 of the refactor (plan `pln_20260618130134_3ce2`): the first real use of the v1.19.0 generated-artifact discipline to **delete hand-maintained duplication**. The 8+1 hard rules were spelled out, by hand, in two verbose briefs — the worker `CLAUDE.md` and the full `MADDU.md` — which is exactly the "policed duplication" the `rule-invariant` gate exists to catch. Now they're authored once and generated into both.
+
+- **`template/maddu/agent-files/rules.json`** — the canonical rule registry: heading + scope banner + intro + the nine rules, in two render styles (`worker` for `CLAUDE.md`, `brief` for `MADDU.md`). Authored as line-arrays so multi-line rules reproduce exactly.
+- **Engine gains marker-injection.** A `section` generator splices a rendered block between `<!-- GENERATED:hard-rules -->` markers, preserving each brief's authored prose around it. `spliceMarker` is **EOL-aware** — the briefs are CRLF and the registry is LF, so the block is re-emitted in the target's newline style and the file stays byte-stable.
+- **Byte-exact migration.** The only change to either brief is the two marker lines — every rule character is identical, so `rule-invariant` still passes (13 phrases across 4 briefs). Editing `rules.json` + `npm run generate` now drives both copies; the `generated-artifacts-current` gate fails if either drifts.
+- The `generation-engine` self-test fixture grew **8 → 17** assertions (LF/CRLF splice, marker-absent throw, section write/check/drift/skip, `renderHardRules`).
+
+This is the path to retiring the drift-policing gates: once the doc tree (a later phase) and the compact `.section.md` rule summary also move behind generators, `rule-invariant` and `docs-in-sync` can be deleted.
+
+Verified: `maddu audit` **14/0** (`rule-invariant` green), `maddu self-test` **46/0**, `maddu architecture` **0 drift**, spine 0/0.
+
 ## [v1.19.0] · 2026-06-18 · Architecture refactor (1/3) — guardrail · loader-dedup · gen-discipline
 
 The first three slices of an **incremental, dogfooded** architecture refactor — using Máddu's own `architecture` + `plan` + gate tooling to clean up organizational cruft without a rewrite (plan `pln_20260618130134_3ce2`). Dogfooding `maddu architecture` on Máddu's own tree proved the **import layering is already clean** (0 forbidden / 0 cycles / 0 undeclared under a 10-module contract); the real cruft is in three axes the import graph can't see — duplication, monoliths, and scaffolding repetition. These three phases lock in the clean layering and attack the duplication foundation.
