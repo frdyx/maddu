@@ -4,7 +4,7 @@
 // Pure leaf utilities (DOM builder + formatters) live in a sibling module —
 // the first slice of decomposing this file. Browser ES module import; the
 // bridge serves cockpit-util.js as application/javascript.
-import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, formatAge, ageTone, formatTs, showToast } from './cockpit-util.js';
+import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, formatAge, ageTone, formatTs, loading, loadingFor, showToast } from './cockpit-util.js';
 import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './cockpit-widgets.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 
@@ -2986,86 +2986,7 @@ async function fetchLanes() {
 // Phase 5 — Skeleton shimmer in place of static "Loading…" text.
 // loading() — default 3-line skeleton. Use for narrative/prose blocks
 // (slice ledger entries, wiki body, learning facts).
-function loading(text) {
-  return el('div', { class: 'skel-state' }, [
-    el('div', { class: 'skel-line skel-line-lg' }),
-    el('div', { class: 'skel-line skel-line-md' }),
-    el('div', { class: 'skel-line skel-line-sm' }),
-    el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…')
-  ]);
-}
-// loadingFor(kind, text) — shape-aware variants. Falls back to default
-// for unknown kinds. Each returns the same outer .skel-state container
-// so existing CSS that targets the parent still applies.
-//   'kpi'     — horizontal strip of 4 tiles (Conductor/Roadmap KPIs)
-//   'grid'    — 6-card responsive grid (Agents, Teams, MCP, Runtimes)
-//   'table'   — 5 ledger-row stripes (Events, Approvals, Slice index)
-//   'donut'   — donut + 4 meters (Mailbox/Imports/Auth summary)
-//   'card'    — single card with title+lines (Inspector body, single-pane fetches)
-//   'default' / unknown — same as loading(text)
-function loadingFor(kind, text) {
-  const caption = el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…');
-  const wrap = (children) => el('div', { class: 'skel-state' }, [...children, caption]);
-  switch (kind) {
-    case 'kpi': {
-      const strip = el('div', { class: 'skel-kpi-strip' });
-      for (let i = 0; i < 4; i++) {
-        strip.appendChild(el('div', { class: 'skel-kpi-tile' }, [
-          el('div', { class: 'skel-line skel-line-num' }),
-          el('div', { class: 'skel-line skel-line-tag' })
-        ]));
-      }
-      return wrap([strip]);
-    }
-    case 'grid': {
-      const grid = el('div', { class: 'skel-grid' });
-      for (let i = 0; i < 6; i++) {
-        grid.appendChild(el('div', { class: 'skel-card' }, [
-          el('div', { class: 'skel-line skel-line-md' }),
-          el('div', { class: 'skel-line skel-line-sm' }),
-          el('div', { class: 'skel-line skel-line-lg' })
-        ]));
-      }
-      return wrap([grid]);
-    }
-    case 'table': {
-      const rows = el('div', { class: 'skel-table' });
-      for (let i = 0; i < 5; i++) {
-        rows.appendChild(el('div', { class: 'skel-row' }, [
-          el('div', { class: 'skel-line skel-line-cell-sm' }),
-          el('div', { class: 'skel-line skel-line-cell-md' }),
-          el('div', { class: 'skel-line skel-line-cell-lg' }),
-          el('div', { class: 'skel-line skel-line-cell-sm' })
-        ]));
-      }
-      return wrap([rows]);
-    }
-    case 'donut': {
-      const layout = el('div', { class: 'skel-donut-layout' }, [
-        el('div', { class: 'skel-donut' }),
-        el('div', { class: 'skel-meters' }, [
-          el('div', { class: 'skel-line skel-line-lg' }),
-          el('div', { class: 'skel-line skel-line-md' }),
-          el('div', { class: 'skel-line skel-line-md' }),
-          el('div', { class: 'skel-line skel-line-sm' })
-        ])
-      ]);
-      return wrap([layout]);
-    }
-    case 'card': {
-      return wrap([
-        el('div', { class: 'skel-card' }, [
-          el('div', { class: 'skel-line skel-line-lg' }),
-          el('div', { class: 'skel-line skel-line-md' }),
-          el('div', { class: 'skel-line skel-line-md' }),
-          el('div', { class: 'skel-line skel-line-sm' })
-        ])
-      ]);
-    }
-    default:
-      return loading(text);
-  }
-}
+// loading / loadingFor → moved to cockpit-util.js (v1.39.0).
 
 function renderOperations() {
   const root = el('div', { class: 'view' });

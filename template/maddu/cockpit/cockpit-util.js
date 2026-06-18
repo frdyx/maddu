@@ -111,6 +111,89 @@ export function formatTs(iso) {
   catch { return iso; }
 }
 
+// loading(text) — the default skeleton placeholder (3 shimmer lines + caption).
+export function loading(text) {
+  return el('div', { class: 'skel-state' }, [
+    el('div', { class: 'skel-line skel-line-lg' }),
+    el('div', { class: 'skel-line skel-line-md' }),
+    el('div', { class: 'skel-line skel-line-sm' }),
+    el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…')
+  ]);
+}
+
+// loadingFor(kind, text) — shape-aware skeleton variants. Falls back to the
+// default loading() for unknown kinds. Each returns the same outer .skel-state
+// container so existing CSS that targets the parent still applies.
+//   'kpi'     — horizontal strip of 4 tiles (Conductor/Roadmap KPIs)
+//   'grid'    — 6-card responsive grid (Agents, Teams, MCP, Runtimes)
+//   'table'   — 5 ledger-row stripes (Events, Approvals, Slice index)
+//   'donut'   — donut + 4 meters (Mailbox/Imports/Auth summary)
+//   'card'    — single card with title+lines (Inspector body, single-pane fetches)
+//   'default' / unknown — same as loading(text)
+export function loadingFor(kind, text) {
+  const caption = el('div', { class: 'skel-text', 'aria-live': 'polite' }, text || 'Loading…');
+  const wrap = (children) => el('div', { class: 'skel-state' }, [...children, caption]);
+  switch (kind) {
+    case 'kpi': {
+      const strip = el('div', { class: 'skel-kpi-strip' });
+      for (let i = 0; i < 4; i++) {
+        strip.appendChild(el('div', { class: 'skel-kpi-tile' }, [
+          el('div', { class: 'skel-line skel-line-num' }),
+          el('div', { class: 'skel-line skel-line-tag' })
+        ]));
+      }
+      return wrap([strip]);
+    }
+    case 'grid': {
+      const grid = el('div', { class: 'skel-grid' });
+      for (let i = 0; i < 6; i++) {
+        grid.appendChild(el('div', { class: 'skel-card' }, [
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-sm' }),
+          el('div', { class: 'skel-line skel-line-lg' })
+        ]));
+      }
+      return wrap([grid]);
+    }
+    case 'table': {
+      const rows = el('div', { class: 'skel-table' });
+      for (let i = 0; i < 5; i++) {
+        rows.appendChild(el('div', { class: 'skel-row' }, [
+          el('div', { class: 'skel-line skel-line-cell-sm' }),
+          el('div', { class: 'skel-line skel-line-cell-md' }),
+          el('div', { class: 'skel-line skel-line-cell-lg' }),
+          el('div', { class: 'skel-line skel-line-cell-sm' })
+        ]));
+      }
+      return wrap([rows]);
+    }
+    case 'donut': {
+      const layout = el('div', { class: 'skel-donut-layout' }, [
+        el('div', { class: 'skel-donut' }),
+        el('div', { class: 'skel-meters' }, [
+          el('div', { class: 'skel-line skel-line-lg' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-sm' })
+        ])
+      ]);
+      return wrap([layout]);
+    }
+    case 'card': {
+      return wrap([
+        el('div', { class: 'skel-card' }, [
+          el('div', { class: 'skel-line skel-line-lg' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-md' }),
+          el('div', { class: 'skel-line skel-line-sm' })
+        ])
+      ]);
+    }
+    default:
+      return loading(text);
+  }
+}
+
 // Transient toast into #toast-region. A leaf UI helper (DOM + setTimeout only,
 // no cockpit state), shared by cockpit.js and the route/panel modules. No-ops
 // if the region isn't mounted. Duration scales with content (3 s base + 35 ms

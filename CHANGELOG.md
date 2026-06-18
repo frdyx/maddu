@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.39.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — loading-skeleton leaf
+
+Second decomposition slice. The skeleton-placeholder helpers move to the leaf.
+
+- **`cockpit/cockpit-util.js`** gains `loading` (the default 3-line shimmer + caption, 83 call sites) and `loadingFor` (the shape-aware skeleton variants: kpi/grid/table/donut/card, 10 call sites) — moved verbatim from `cockpit.js`, pure `el`-only leaves. `cockpit.js` imports them back and drops the ~80-line block.
+- **`scripts/test/cockpit-util.mjs`** — +6 assertions (default + custom caption, grid/kpi variants, unknown-kind fallback to `loading`).
+- Re-baselined the cockpit mass floor `8535 → 8456`.
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens** (no golden update); **Gate A** boots + renders all 42 routes.
+
+Verified: `maddu self-test` **61/0**, `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.38.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — formatter leaf
 
 First decomposition slice riding the new harness — and the first cockpit slice in the project's history verified **without an operator browser refresh**.
