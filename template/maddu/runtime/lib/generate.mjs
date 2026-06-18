@@ -28,7 +28,7 @@
 //       install, which ships neither the framework briefs nor their sources at
 //       these paths, is never failed.
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 
 // Render the 8+1 hard-rules section for a brief style ('worker' | 'brief') from
@@ -88,12 +88,28 @@ export const GENERATORS = [
     // hard-rules-section so the copy carries the freshly-generated block.
     transform: (src) => src,
   },
+  {
+    id: 'docs-tree',
+    kind: 'mirror',
+    // The user-facing docs are AUTHORED at the repo root (docs/) and shipped to
+    // consumers as the bundled payload (template/maddu/docs/). The two were kept
+    // byte-equal by hand and policed by docs-in-sync; now the payload tree is
+    // GENERATED from the source. Top-level *.md only (docs/ also holds repo-only
+    // subdirs — audit/, research/, sessions/, … — that never ship).
+    sourceDir: 'docs',
+    targetDir: 'template/maddu/docs',
+  },
 ];
 
 async function readIfPresent(path) {
   try { return await readFile(path, 'utf8'); }
   catch { return null; }
 }
+
+const detectEol = (text) => (/\r\n/.test(text) ? '\r\n' : '\n');
+// Re-encode `text` to a single newline style (normalize then apply), so a
+// generated copy can match its target's existing EOL and stay byte-stable.
+const applyEol = (text, eol) => text.replace(/\r\n/g, '\n').replace(/\n/g, eol);
 
 // Replace the region between a generator's marker comments with `block`,
 // preserving the marker lines and everything outside them. EOL-aware: matches
@@ -136,24 +152,59 @@ async function plan(repoRoot, gen) {
   return { skipped: false, expected: gen.transform(sources[gen.source]), current, targetPath };
 }
 
+// Expand a `mirror` generator into one unit per source file. Mirrors top-level
+// files (default: *.md) from sourceDir to targetDir, preserving each target's
+// existing EOL so content-equal files stay byte-stable. Returns null when the
+// source dir is absent (skip the whole generator — e.g. a consumer install).
+async function mirrorUnits(repoRoot, gen) {
+  let entries;
+  try { entries = await readdir(join(repoRoot, gen.sourceDir), { withFileTypes: true }); }
+  catch { return null; }
+  const accept = gen.filter || ((name) => name.endsWith('.md'));
+  const names = entries.filter((e) => e.isFile() && accept(e.name)).map((e) => e.name).sort();
+  const units = [];
+  for (const name of names) {
+    const src = await readIfPresent(join(repoRoot, gen.sourceDir, name));
+    const targetPath = join(repoRoot, gen.targetDir, name);
+    const current = await readIfPresent(targetPath);
+    const eol = current !== null ? detectEol(current) : detectEol(src);
+    units.push({ id: `${gen.id}:${name}`, target: `${gen.targetDir}/${name}`, targetPath, expected: applyEol(src, eol), current });
+  }
+  return units;
+}
+
+// Normalize any generator to a list of { id, target, targetPath, expected,
+// current } units, or { skipped:true }. Single-target generators yield one unit.
+async function planUnits(repoRoot, gen) {
+  if (gen.kind === 'mirror') {
+    const units = await mirrorUnits(repoRoot, gen);
+    return units === null ? { skipped: true } : { units };
+  }
+  const p = await plan(repoRoot, gen);
+  if (p.skipped) return { skipped: true };
+  return { units: [{ id: gen.id, target: gen.target, targetPath: p.targetPath, expected: p.expected, current: p.current }] };
+}
+
 // Run all generators. mode 'write' writes drifted targets; mode 'check' only
 // compares. Skipped generators are neither drift nor failure.
 export async function runGenerators(repoRoot, { mode = 'check', generators = GENERATORS } = {}) {
   const results = [];
   for (const gen of generators) {
-    const p = await plan(repoRoot, gen);
-    if (p.skipped) {
+    const pu = await planUnits(repoRoot, gen);
+    if (pu.skipped) {
       results.push({ id: gen.id, target: gen.target, skipped: true, drift: false, wrote: false });
       continue;
     }
-    const drift = p.current !== p.expected;
-    let wrote = false;
-    if (mode === 'write' && drift) {
-      await mkdir(dirname(p.targetPath), { recursive: true });
-      await writeFile(p.targetPath, p.expected);
-      wrote = true;
+    for (const u of pu.units) {
+      const drift = u.current !== u.expected;
+      let wrote = false;
+      if (mode === 'write' && drift) {
+        await mkdir(dirname(u.targetPath), { recursive: true });
+        await writeFile(u.targetPath, u.expected);
+        wrote = true;
+      }
+      results.push({ id: u.id, target: u.target, skipped: false, drift, wrote });
     }
-    results.push({ id: gen.id, target: gen.target, skipped: false, drift, wrote });
   }
   return results;
 }

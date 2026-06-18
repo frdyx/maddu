@@ -97,6 +97,30 @@ async function main() {
     const creg = { compact: { intro: ['p1', 'p2'], bullets: ['b1', 'b2'], outro: ['o1'] } };
     ok('renderHardRulesCompact bullets the rules, no heading',
       renderHardRulesCompact(creg) === 'p1\np2\n\n- b1\n- b2\n\no1');
+
+    // ── mirror generators (the doc-tree single-source) ──────────────────────
+    const mir = { id: 'm', kind: 'mirror', sourceDir: 'src', targetDir: 'out' };
+    await write(root, 'src/a.md', 'A\nB\n');
+    await write(root, 'src/b.md', 'C\n');
+    await write(root, 'src/skip.txt', 'not markdown\n');
+    const mw = await runGenerators(root, { mode: 'write', generators: [mir] });
+    ok('mirror writes one unit per source .md', mw.filter((r) => !r.skipped).length === 2);
+    ok('mirror ids are namespaced per file', mw.some((r) => r.id === 'm:a.md'));
+    ok('mirror only takes .md (skip.txt ignored)', !mw.some((r) => r.id === 'm:skip.txt'));
+    ok('mirror copies content', (await readFile(join(root, 'out/a.md'), 'utf8')) === 'A\nB\n');
+    // EOL preservation: a CRLF target stays CRLF when content is unchanged.
+    await write(root, 'out/a.md', 'A\r\nB\r\n');           // same content, CRLF
+    const noDrift = await checkGenerators(root, { generators: [mir] });
+    ok('mirror preserves target CRLF (no spurious drift)', !noDrift.some((r) => r.id === 'm:a.md'));
+    // a genuine content change does drift, and writes in the target's EOL.
+    await write(root, 'src/a.md', 'A\nB\nC\n');
+    await runGenerators(root, { mode: 'write', generators: [mir] });
+    ok('mirror propagates content change in target EOL',
+      (await readFile(join(root, 'out/a.md'), 'utf8')) === 'A\r\nB\r\nC\r\n');
+    // absent source dir → whole generator skips.
+    const mir2 = { id: 'm2', kind: 'mirror', sourceDir: 'nope', targetDir: 'out' };
+    const ms = await runGenerators(root, { mode: 'check', generators: [mir2] });
+    ok('mirror skips when sourceDir absent', ms.length === 1 && ms[0].skipped === true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
