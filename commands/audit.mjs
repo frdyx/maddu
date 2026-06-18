@@ -97,6 +97,10 @@ const GATE_IDS = {
   // is the framework-coherence command that DOES run here, so surface the
   // two-tree divergence where it's visible.
   docsSync: 'docs-in-sync',
+  // v1.18.0 — architecture-drift: declared contract vs real import graph.
+  // Skips gracefully when a repo declares no contract (the framework source
+  // itself declares none), so it's a PASS here until a product opts in.
+  architecture: 'architecture-drift',
 };
 
 function gateRunToCheck(run) {
@@ -403,7 +407,7 @@ export async function checkRuleInvariants(rootDir = frameworkRoot()) {
   };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'docs-sync', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -429,6 +433,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'defaults') checks.push(...await runGateChecks(repoRoot, GATE_IDS.defaults));
   if (!sub || sub === 'brief') checks.push(...await runGateChecks(repoRoot, GATE_IDS.brief));
   if (!sub || sub === 'docs-sync') checks.push(...await runGateChecks(repoRoot, GATE_IDS.docsSync));
+  if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());

@@ -259,7 +259,14 @@ export const EVENT_TYPES = {
   // wrote the derived ledger to .maddu/state/debt-ledger.json. Read-only over
   // the source tree (not spine-derived); this event is the spine record of the
   // scan. data: { markers, noTrigger, files, ledgerPath }
-  DEBT_SCANNED:               'DEBT_SCANNED'
+  DEBT_SCANNED:               'DEBT_SCANNED',
+  // v1.18.0 — `maddu architecture scan` compared the declared architecture
+  // contract (.maddu/config/architecture.json) against the observed code import
+  // graph and recorded the drift. Read-only over the source tree; this event is
+  // the spine record + the trend signal. data:
+  //   { modules, edges, forbidden, cycles, undeclared, uncovered, driftScore,
+  //     failOn, newViolations, blocking }
+  ARCHITECTURE_SCANNED:       'ARCHITECTURE_SCANNED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

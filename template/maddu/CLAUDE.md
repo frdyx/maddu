@@ -233,7 +233,7 @@ is a real verb you can call directly. Run `maddu help` for flags.
 - **Do the work:** `maddu slice` · `maddu slice-stop` · `maddu review` · `maddu advise` · `maddu suggest` · `maddu search` · `maddu task`
 - **Memory & learning:** `maddu memory` · `maddu learn` · `maddu skill` · `maddu blueprint` · `maddu debt`
 - **Tools (audited subprocess wrappers):** `maddu git` · `maddu test` · `maddu self-test` · `maddu format` · `maddu lint` · `maddu install`
-- **Capabilities & governance:** `maddu mcp` · `maddu plugin` · `maddu governance` · `maddu trust` · `maddu audit`
+- **Capabilities & governance:** `maddu mcp` · `maddu plugin` · `maddu governance` · `maddu trust` · `maddu audit` · `maddu architecture`
 - **Accounting:** `maddu cost` · `maddu log` · `maddu help`
 
 ## When you're stuck

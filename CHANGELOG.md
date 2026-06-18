@@ -11,6 +11,21 @@ narrative summary.
 
 ---
 
+## [v1.18.0] · 2026-06-18 · Architecture drift — `maddu architecture` (MVP)
+
+Structural/architectural drift is the dominant failure mode when many agents build a large system over time: the real import graph silently diverges from the intended structure. This makes intended architecture explicit, extracts the real graph, compares them, records the drift on the spine, visualizes it, and gates **new** drift with a baseline ratchet — the same observe → record → compare → gate → ratchet model as the rest of the framework.
+
+- **Declared architecture *contract*** (`.maddu/config/architecture.json`) — modules as path globs + `allow`/`forbid` dependency rules + an `options.failOn` ladder. `maddu architecture init` scaffolds it from the detected source dirs.
+- **Observed reality** — the real code import graph, extracted by stdlib regex (no parser dependency, rule #4): relative JS/TS + Python imports (the layering-relevant case), best-effort beyond. Recorded as a `maddu-debt:` marker naming its own ceiling + upgrade trigger.
+- **Drift detection** — `forbidden-edge` (with `file:line` evidence), `cycle` (SCC), `undeclared-area` (a code dir matching no module — the new area nobody declared), `uncovered-file`. A single **`driftScore`** is stamped on every scan.
+- **The `failOn` ladder + baseline ratchet** — `none` warns + ratchets (default, adoptable on a messy repo day one), `new` fails only on violations not in `.maddu/state/architecture/baseline.json` (the standard adoption path), `any` fails on all. The `architecture-drift` gate (run by `doctor` + `audit`) and the `scan` exit code both honor it.
+- **Visualization** — `maddu architecture diagram` writes a mermaid graph (`.maddu/state/architecture/diagram.mmd`), violations as red dashed edges. Files-only, no dependency.
+- **Surface** — `maddu architecture {init,scan,diagram,baseline}`, `/maddu-architecture`, routing row, `ARCHITECTURE_SCANNED` spine event (the trend signal), doc [40-architecture-drift.md](docs/40-architecture-drift.md) with the adoption path. `maddu audit` grows **11 → 12** checks.
+
+Out of MVP (Phase 2): slice-stop incremental architecture check, review escalation on new drift, cockpit panel, drift-trend chart, per-rule severity. Runtime/service topology is intentionally separate (a future `maddu topology`).
+
+Verified: 2 new fixtures (`architecture-extract` 22/0, `architecture-drift-gate` 19/0); `maddu self-test` quick **45/0**; `maddu audit` **12/0**; spine 0 fails / 0 warns; dogfooded `init`+`scan` on Máddu's own tree.
+
 ## [v1.17.0] · 2026-06-18 · Robustness bundle — drift gate, debt ledger, risk + deliverable checks
 
 Five self-contained safeguards, drawn from an audit of two external Claude-Code projects (oh-my-claudecode, ponytail) and filtered to what's additive and hard-rule-clean (files-only, Node stdlib, no SDKs). Each landed as its own dogfooded slice with a fixture test.
