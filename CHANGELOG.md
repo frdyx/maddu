@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.26.0] · 2026-06-18 · Architecture refactor (8) — server split, slice 2 (projection builders)
+
+Phase 9, second slice. The four cockpit **projection builders** move out of `server.js`.
+
+- **`runtime/lib/bridge-builders.mjs`** — `buildConductor`, `buildQueueBoard`, `buildClaimMap`, `buildBacklinks` (plus their `listDocs` / `readDoc` doc helpers) extracted. They build a cockpit projection from a repo root through the projection/schedule/mailbox libs, touching no bridge state, so they belong in `runtime-libs`. `server.js` **2 630 → 2 237** (−393; cumulative **2 705 → 2 237**, ~17% off the bridge monolith).
+- The extraction block turned out to carry interspersed shared helpers (a `DOCS_CANDIDATES` const referencing the bridge's `runtimeRoot`, and `listDocs`/`readDoc` that the docs *route handlers* also call) — not four clean functions. Booting the live bridge **caught both** as `ReferenceError`s immediately; the fix recomputes `runtimeRoot` from the module's own location and exports the two shared helpers back. Re-verified: `/bridge/conductor|queue|claims|docs`, both `/_all/*` fan-outs, and a doc slug all return **200**.
+- New `bridge-builders` self-test (10 assertions: the export surface + `listDocs`/`buildBacklinks` running over the shipped docs tree).
+
+This is the dividend of splitting the *verifiable* monolith first: two extraction bugs that would have been silent in a browser-only component surfaced instantly on a spare-port bridge.
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **49/0**, `maddu architecture` **0 drift**, live-bridge smoke (all builder endpoints 200).
+
 ## [v1.25.0] · 2026-06-18 · Architecture refactor (7) — server split, slice 1 (HTTP transport)
 
 Phase 9 (plan `pln_20260618130134_3ce2`), first slice. `server.js` is a 2 705-line bridge monolith; this begins decomposing it along HTTP boundaries, pure helpers first (Codex's order).
