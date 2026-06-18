@@ -1,5 +1,5 @@
 {
-  "version": "1.24.0",
-  "phase": "architecture-refactor-6-cockpit-split-1",
+  "version": "1.25.0",
+  "phase": "architecture-refactor-7-server-split-1",
   "released": "2026-06-18"
 }
