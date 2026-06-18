@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.35.0] · 2026-06-18 · Architecture refactor (17) — cockpit split, slice 2 (widget kit)
+
+Phase 8 resumes (the server monolith is done; this turns to the other one, `cockpit.js`). The **widget kit** — the pure data→DOM chart/stat builders — moves out.
+
+- **`cockpit/cockpit-widgets.js`** — `statusGrid`, `bar`, `segBar`, `donut`, `sparkline`, `meter`, `binByTime` (plus internal `toneColor`/`svg`/`bigStat`). All pure inline SVG/DOM (rule #4: no chart lib), depending only on `el` (from `cockpit-util.js`) and the DOM — a true leaf with **no back-reference to cockpit state**, so no circular-import risk. `cockpit.js` imports the seven from `./cockpit-widgets.js`.
+- `cockpit.js` **9 202 → 8 942** (−260).
+- Browser-only module — verified statically (`node --check` both files; the bridge serves `cockpit-widgets.js` as `application/javascript` so the ES `import` resolves) and by a new 19-assertion `cockpit-widgets` self-test that imports the kit under a `document` stub (`createElement`/`createElementNS`/`createTextNode`) and asserts each widget's node shape (`.widget-grid`/`.widget-bar`/`.widget-segbar`/`.widget-donut` + the `<svg>` children) plus `binByTime`'s pure bucketing. **Final render confirmed by the operator in the browser at `127.0.0.1:4177`.**
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **57/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (cockpit.js ratcheted 9 202 → 8 942; still the sole monolith).
+
 ## [v1.34.0] · 2026-06-18 · Architecture refactor (16) — server split, slice 10 (collaboration routes)
 
 Phase 9, tenth slice — the BOSS / proposal collaboration subsystem (the last large cohesive route group with real logic).
