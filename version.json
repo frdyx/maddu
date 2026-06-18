@@ -1,5 +1,5 @@
 {
-  "version": "1.17.0",
-  "phase": "robustness-bundle",
+  "version": "1.18.0",
+  "phase": "architecture-drift",
   "released": "2026-06-18"
 }

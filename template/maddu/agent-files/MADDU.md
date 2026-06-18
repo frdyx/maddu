@@ -134,6 +134,7 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "what corrections do we have", "learned project facts" | `/maddu-memory` (then `--kind correction`) |
 | "blueprint this project", "export how we built X", "make a reusable handoff/recipe", "reproduce this as a system" | `/maddu-blueprint` |
 | "what shortcuts did we take", "technical debt", "deferred work", "what needs upgrading" | `/maddu-debt` |
+| "architecture drift", "did we break the layering", "diagram the architecture", "import boundaries", "module dependencies" | `/maddu-architecture` |
 | "I need a tool for …", "connect to <service>", "use the <X> MCP", "the runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
 
 **When a task needs a capability the runtime lacks** (calling an external

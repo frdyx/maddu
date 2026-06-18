@@ -119,4 +119,8 @@ export default {
   // writes a derived .maddu/state cache + one best-effort DEBT_SCANNED event);
   // safe to auto-trigger so the ledger can refresh on a schedule.
   debt:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  // v1.18.0 — architecture-drift. `init`/`baseline` write the contract/baseline,
+  // so the verb is mutating + auto-trigger forbidden (operator-explicit). The
+  // AUTO path is the read-only `architecture-drift` gate (doctor/audit).
+  architecture: { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
 };

@@ -210,6 +210,20 @@ $ maddu debt [list] [--json] [--no-write] [--repo <dir>]
 
 Scans for markers of the shape `maddu-debt: <what>. ceiling: <limit>. upgrade: <trigger>.` and renders them grouped by file. A marker with **no `upgrade:` trigger** is flagged `[no-trigger]` — the shortcut nobody recorded a reason to revisit. Writes a derived cache to `.maddu/state/debt-ledger.json` (suppress with `--no-write`) and appends one `DEBT_SCANNED` event. The number to drive toward zero is the no-trigger count. *(v1.17.0)*
 
+## `maddu architecture`
+
+Declared architecture **contract** vs the real code import graph → **drift**. See [40-architecture-drift.md](40-architecture-drift.md).
+
+```bash
+$ maddu architecture init        # scaffold .maddu/config/architecture.json from detected dirs
+$ maddu architecture [scan]      # report drift (forbidden edges, cycles, undeclared areas) + write graph.json
+$ maddu architecture diagram     # write the mermaid diagram (.maddu/state/architecture/diagram.mmd)
+$ maddu architecture baseline    # accept current violations (the ratchet)
+  [--repo <dir>] [--fail-on none|new|any] [--json] [--force]
+```
+
+`scan` records an `ARCHITECTURE_SCANNED` event with a `driftScore`. The `architecture-drift` gate (run by `doctor`/`audit`) and the `scan` exit code honor `options.failOn`: `none` warns + ratchets (default), `new` fails only on violations not in the baseline, `any` fails on all. Adoption: `init → edit → scan → baseline → failOn:"new"`. *(v1.18.0)*
+
 ## `maddu approval`
 
 Manage the approvals ledger.

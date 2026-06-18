@@ -77,6 +77,7 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 | 37 | [37-failure-learning.md](37-failure-learning.md) | `maddu learn` — mine sessions for failed→succeeded tool-call pairs; spawned-worker judgment; corrections to the project brief + memory; supersession chains; reversible briefings. *(v1.9.0)* |
 | 38 | [38-blueprint.md](38-blueprint.md) | `maddu blueprint` — export a portable, variable-driven handoff of how a whole project was built (genesis + procedure + problems + intake schema + real-product pointer) to reproduce it elsewhere. *(v1.12.0)* |
 | 39 | [39-rule-gate-traceability.md](39-rule-gate-traceability.md) | Hard-rule ↔ gate traceability matrix — every rule maps to an enforcing gate (or documented construction); every gate traces to a rule or coherence concern. Kept honest by `maddu audit`. *(v1.13.0)* |
+| 40 | [40-architecture-drift.md](40-architecture-drift.md) | `maddu architecture` — declared architecture contract vs the real import graph → drift (forbidden edges, cycles, undeclared areas); mermaid diagram; `architecture-drift` gate with the `failOn` baseline ratchet. *(v1.18.0)* |
 
 Reference docs that are not in the numbered series:
 
