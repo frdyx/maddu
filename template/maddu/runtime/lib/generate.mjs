@@ -42,6 +42,18 @@ export function renderHardRules(registry, style) {
   return `${s.heading}\n\n${banner}\n\n${intro}\n\n${rules}`;
 }
 
+// The compact section rendering (the CLAUDE/AGENTS .section.md stanza): a prose
+// scope intro, the rules condensed into grouped bullets, and a closing line —
+// no heading or blockquote, unlike the full worker/brief styles.
+export function renderHardRulesCompact(registry) {
+  const c = registry.compact;
+  if (!c) throw new Error('renderHardRulesCompact: registry has no "compact" style');
+  const intro = c.intro.join('\n');
+  const bullets = c.bullets.map((b) => `- ${b}`).join('\n');
+  const outro = c.outro.join('\n');
+  return `${intro}\n\n${bullets}\n\n${outro}`;
+}
+
 const RULES_REGISTRY = 'template/maddu/agent-files/rules.json';
 
 export const GENERATORS = [
@@ -60,11 +72,20 @@ export const GENERATORS = [
     render: (ctx) => renderHardRules(JSON.parse(ctx.read(RULES_REGISTRY)), 'brief'),
   },
   {
+    id: 'hard-rules-section',
+    target: 'template/maddu/agent-files/CLAUDE.section.md',
+    marker: 'hard-rules',
+    sources: [RULES_REGISTRY],
+    render: (ctx) => renderHardRulesCompact(JSON.parse(ctx.read(RULES_REGISTRY))),
+  },
+  {
     id: 'agents-section',
     source: 'template/maddu/agent-files/CLAUDE.section.md',
     target: 'template/maddu/agent-files/AGENTS.section.md',
-    // The Codex/AGENTS stanza is identical to the Claude one today; author it
-    // once (CLAUDE.section.md) and derive the AGENTS copy. Identity transform.
+    // The Codex/AGENTS stanza is identical to the Claude one; author it once
+    // (CLAUDE.section.md — whose rule block is itself generated above) and
+    // derive the AGENTS copy. Identity transform. MUST run AFTER
+    // hard-rules-section so the copy carries the freshly-generated block.
     transform: (src) => src,
   },
 ];

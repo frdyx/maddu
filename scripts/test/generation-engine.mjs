@@ -12,7 +12,7 @@
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { runGenerators, checkGenerators, spliceMarker, renderHardRules } from '../../template/maddu/runtime/lib/generate.mjs';
+import { runGenerators, checkGenerators, spliceMarker, renderHardRules, renderHardRulesCompact } from '../../template/maddu/runtime/lib/generate.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -92,6 +92,11 @@ async function main() {
     const reg = { worker: { heading: '## H', banner: ['> b1', '> b2'], intro: ['i1'], rules: [['r1'], ['r2a', '   r2b']] } };
     ok('renderHardRules numbers rules + joins multi-line',
       renderHardRules(reg, 'worker') === '## H\n\n> b1\n> b2\n\ni1\n\n1. r1\n2. r2a\n   r2b');
+
+    // renderHardRulesCompact: prose intro + bulleted rules + outro (no heading).
+    const creg = { compact: { intro: ['p1', 'p2'], bullets: ['b1', 'b2'], outro: ['o1'] } };
+    ok('renderHardRulesCompact bullets the rules, no heading',
+      renderHardRulesCompact(creg) === 'p1\np2\n\n- b1\n- b2\n\no1');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -17,6 +17,7 @@ unlike headless `team spawn`, which is for API-keyed runtimes.)
 
 Full agent brief: [`MADDU.md`](./MADDU.md). Operator docs: `./maddu/run --help` or open the cockpit (`./maddu/run start`).
 
+<!-- GENERATED:hard-rules (source: template/maddu/agent-files/rules.json — edit there, run npm run generate) -->
 Hard rules (full text in `MADDU.md`) — **these govern the Máddu framework
 layer (`.maddu/` + `maddu/`), NOT the product you're building.** Your app may
 use any SDK / hosted backend / DB / token storage it needs (the repo-root
@@ -28,6 +29,7 @@ use any SDK / hosted backend / DB / token storage it needs (the repo-root
 - #9: every auto-trigger crosses the gauntlet (permanent)
 
 `maddu doctor` verifies all of these against Máddu's own files only.
+<!-- /GENERATED:hard-rules -->
 
 ### Intent routing (operator natural language → slash command)
 
