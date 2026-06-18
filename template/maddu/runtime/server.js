@@ -26,11 +26,11 @@ import { listMcp, mcpHealth } from './lib/mcp.mjs';
 import { readTrustConfig, auditRepo, renderReportMarkdown } from './lib/trust.mjs';
 import { readWorkerEnvConfig } from './lib/worker-env.mjs';
 import { registerBridge, unregisterBridge } from './lib/bridges-registry.mjs';
-import { listSchedules, readSchedule, saveSchedule, removeSchedule, setEnabled as scheduleSetEnabled, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
+import { listSchedules, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
 import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy } from './lib/global.mjs';
-import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree, rollback as checkpointRollback, removeCheckpoint, gitAvailable } from './lib/checkpoints.mjs';
-import { listProviders, listKeys, addKey, removeKey, markRateLimited, activeMasked, authDirInfo } from './lib/auth.mjs';
-import { safeImport, listAccepted as listImportsAccepted, listRejected as listImportsRejected, counts as importsCounts, scanForSecrets, IMPORT_KINDS } from './lib/imports.mjs';
+import { listCheckpoints } from './lib/checkpoints.mjs';
+import { listProviders } from './lib/auth.mjs';
+import { counts as importsCounts } from './lib/imports.mjs';
 import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
 import { discoverPlugins } from './lib/plugins.mjs';
@@ -47,6 +47,7 @@ import { resolveRepoRoot, detectFrameworkLayout, readVersion, pickPort, probePor
 import { routeMcp, routeRuntimes } from './lib/bridge-routes-registries.mjs';
 import { routeSessions, routeLanes } from './lib/bridge-routes-lanes.mjs';
 import { routeApprovals } from './lib/bridge-routes-approvals.mjs';
+import { routeImports, routeAuth, routeCheckpoints, routeSchedules } from './lib/bridge-routes-capabilities.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -433,154 +434,11 @@ async function handleBridge(req, res, url, ctx) {
   // ── approvals (Phase A1) → routeApprovals in ./lib/bridge-routes-approvals.mjs
   { if (await routeApprovals({ req, res, path, repoRoot })) return; }
 
-  // ── imports (Phase D2) — secret-rejection gateway ─────────────────────
-  if (path === '/bridge/imports' && req.method === 'GET') {
-    const accepted = await listImportsAccepted(repoRoot, 50);
-    const rejected = await listImportsRejected(repoRoot, 50);
-    return sendJson(res, 200, { accepted, rejected, kinds: IMPORT_KINDS });
-  }
-  if (path === '/bridge/imports' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!body.kind) return sendJson(res, 400, { error: 'kind required' });
-    if (body.payload === undefined) return sendJson(res, 400, { error: 'payload required' });
-    try {
-      const out = await safeImport(repoRoot, { kind: body.kind, payload: body.payload, by: body.by || null });
-      return sendJson(res, 200, out);
-    } catch (err) { return sendJson(res, 400, { error: err.message }); }
-  }
-  if (path === '/bridge/imports/scan' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    const hits = scanForSecrets(body.payload || {});
-    return sendJson(res, 200, { ok: hits.length === 0, hitCount: hits.length, hits });
-  }
-  if (path === '/bridge/imports/rejections' && req.method === 'GET') {
-    const limit = parseInt(url.searchParams.get('limit') || '100', 10) || 100;
-    return sendJson(res, 200, { rejections: await listImportsRejected(repoRoot, limit) });
-  }
-
-  // ── auth (Phase C5) — keys NEVER served raw over HTTP ─────────────────
-  if (path === '/bridge/auth' && req.method === 'GET') {
-    return sendJson(res, 200, { providers: await listProviders(), storage: authDirInfo() });
-  }
-  if (path.startsWith('/bridge/auth/')) {
-    const rest = path.slice('/bridge/auth/'.length);
-    const m = rest.match(/^([^/]+)(?:\/(keys|active|rate-limit|keys\/[^/]+))?$/);
-    if (m) {
-      const provider = decodeURIComponent(m[1]);
-      const sub = m[2];
-      if (!sub && req.method === 'GET') {
-        return sendJson(res, 200, { provider, keys: await listKeys(provider), active: await activeMasked(provider) });
-      }
-      if (sub === 'keys' && req.method === 'POST') {
-        const body = (await readBody(req)) || {};
-        if (!body.value) return sendJson(res, 400, { error: 'value required' });
-        try {
-          const rec = await addKey(repoRoot, { provider, value: body.value, label: body.label || null }, body.by || null);
-          return sendJson(res, 200, { ok: true, key: rec });
-        } catch (err) { return sendJson(res, 400, { error: err.message }); }
-      }
-      if (sub && sub.startsWith('keys/') && req.method === 'DELETE') {
-        const keyId = decodeURIComponent(sub.slice('keys/'.length));
-        const body = (await readBody(req)) || {};
-        const ok = await removeKey(repoRoot, provider, keyId, body.by || null);
-        return sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'key not found' });
-      }
-      if (sub === 'rate-limit' && req.method === 'POST') {
-        const body = (await readBody(req)) || {};
-        if (!body.keyId) return sendJson(res, 400, { error: 'keyId required' });
-        try {
-          const rec = await markRateLimited(repoRoot, provider, body.keyId, body.until || null, body.by || null);
-          return sendJson(res, 200, { ok: true, key: rec });
-        } catch (err) { return sendJson(res, 404, { error: err.message }); }
-      }
-      if (sub === 'active' && req.method === 'GET') {
-        return sendJson(res, 200, { provider, active: await activeMasked(provider) });
-      }
-    }
-  }
-
-  // ── checkpoints (Phase C4) ────────────────────────────────────────────
-  if (path === '/bridge/checkpoints' && req.method === 'GET') {
-    const lane = url.searchParams.get('lane');
-    let all = await listCheckpoints(repoRoot);
-    if (lane) all = all.filter((c) => c.lane === lane);
-    return sendJson(res, 200, { checkpoints: all, gitAvailable: await gitAvailable(repoRoot) });
-  }
-  if (path === '/bridge/checkpoints' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const cp = await createCheckpoint(repoRoot, { lane: body.lane || null, title: body.title || null, by: body.by || null });
-      return sendJson(res, 200, { ok: true, checkpoint: cp });
-    } catch (err) { return sendJson(res, 400, { error: err.message }); }
-  }
-  if (path.startsWith('/bridge/checkpoints/')) {
-    const rest = path.slice('/bridge/checkpoints/'.length);
-    if (rest.endsWith('/worktree') && req.method === 'POST') {
-      const id = rest.slice(0, -'/worktree'.length);
-      const body = (await readBody(req)) || {};
-      try { return sendJson(res, 200, await createWorktree(repoRoot, id, body.by || null)); }
-      catch (err) { return sendJson(res, 400, { error: err.message }); }
-    }
-    if (rest.endsWith('/rollback') && req.method === 'POST') {
-      const id = rest.slice(0, -'/rollback'.length);
-      const body = (await readBody(req)) || {};
-      try { return sendJson(res, 200, await checkpointRollback(repoRoot, id, { apply: !!body.apply, mode: body.mode || 'inspect', by: body.by || null })); }
-      catch (err) { return sendJson(res, 400, { error: err.message }); }
-    }
-    if (req.method === 'GET' && !rest.includes('/')) {
-      const c = await readCheckpoint(repoRoot, rest);
-      if (!c) return sendJson(res, 404, { error: 'checkpoint not found', id: rest });
-      return sendJson(res, 200, c);
-    }
-    if (req.method === 'DELETE' && !rest.includes('/')) {
-      const body = (await readBody(req)) || {};
-      await removeCheckpoint(repoRoot, rest, body.by || null);
-      return sendJson(res, 200, { ok: true });
-    }
-  }
-
-  // ── schedule (Phase C3) ───────────────────────────────────────────────
-  if (path === '/bridge/schedules' && req.method === 'GET') {
-    return sendJson(res, 200, { schedules: await listSchedules(repoRoot) });
-  }
-  if (path === '/bridge/schedules' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    try {
-      const saved = await saveSchedule(repoRoot, body, body.by || null);
-      return sendJson(res, 200, { ok: true, schedule: saved });
-    } catch (err) { return sendJson(res, 400, { error: err.message }); }
-  }
-  if (path === '/bridge/schedules/parse' && req.method === 'POST') {
-    const body = (await readBody(req)) || {};
-    if (!body.natural) return sendJson(res, 400, { error: 'natural required' });
-    const cron = parseNatural(body.natural);
-    return sendJson(res, 200, { natural: body.natural, cron, ok: !!cron });
-  }
-  if (path.startsWith('/bridge/schedules/')) {
-    const rest = path.slice('/bridge/schedules/'.length);
-    if (rest.endsWith('/enable') && req.method === 'POST') {
-      const id = rest.slice(0, -'/enable'.length);
-      const body = (await readBody(req)) || {};
-      try { return sendJson(res, 200, { ok: true, schedule: await scheduleSetEnabled(repoRoot, id, true, body.by || null) }); }
-      catch (err) { return sendJson(res, 404, { error: err.message }); }
-    }
-    if (rest.endsWith('/disable') && req.method === 'POST') {
-      const id = rest.slice(0, -'/disable'.length);
-      const body = (await readBody(req)) || {};
-      try { return sendJson(res, 200, { ok: true, schedule: await scheduleSetEnabled(repoRoot, id, false, body.by || null) }); }
-      catch (err) { return sendJson(res, 404, { error: err.message }); }
-    }
-    if (req.method === 'GET' && !rest.includes('/')) {
-      const s = await readSchedule(repoRoot, rest);
-      if (!s) return sendJson(res, 404, { error: 'schedule not found', id: rest });
-      return sendJson(res, 200, s);
-    }
-    if (req.method === 'DELETE' && !rest.includes('/')) {
-      const body = (await readBody(req)) || {};
-      await removeSchedule(repoRoot, rest, body.by || null);
-      return sendJson(res, 200, { ok: true });
-    }
-  }
+  // ── imports / auth / checkpoints / schedules → routes in ./lib/bridge-routes-capabilities.mjs
+  { if (await routeImports({ req, res, path, url, repoRoot })) return; }
+  { if (await routeAuth({ req, res, path, url, repoRoot })) return; }
+  { if (await routeCheckpoints({ req, res, path, url, repoRoot })) return; }
+  { if (await routeSchedules({ req, res, path, url, repoRoot })) return; }
 
   // ── governance (v1.1.0 Phase 3) ───────────────────────────────────────
   if (path === '/bridge/governance' && req.method === 'GET') {
