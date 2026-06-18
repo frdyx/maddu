@@ -80,3 +80,27 @@ export function formatUptime(ms) {
   const d = Math.floor(h / 24);
   return d + 'd ' + (h % 24) + 'h';
 }
+
+// Transient toast into #toast-region. A leaf UI helper (DOM + setTimeout only,
+// no cockpit state), shared by cockpit.js and the route/panel modules. No-ops
+// if the region isn't mounted. Duration scales with content (3 s base + 35 ms
+// per char, capped at 9 s); the stack is bounded to 5.
+export function showToast(text, level = 'ok') {
+  const region = document.getElementById('toast-region');
+  if (!region) return;
+  const t = document.createElement('div');
+  t.className = 'toast';
+  if (level === 'err' || level === 'warn' || level === 'ok') t.classList.add(level);
+  t.textContent = text;
+  const ms = Math.min(3000 + (text || '').length * 35, 9000);
+  const dismiss = () => {
+    if (t._dismissing) return;
+    t._dismissing = true;
+    t.classList.add('dismissing');
+    setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 240);
+  };
+  t.addEventListener('click', dismiss);
+  region.appendChild(t);
+  while (region.children.length > 5) region.removeChild(region.firstChild);
+  setTimeout(dismiss, ms);
+}

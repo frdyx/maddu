@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.36.0] · 2026-06-18 · Architecture refactor (18) — cockpit split, slice 3 (comms panels + shared toast)
+
+Phase 8, third slice. The three comms-plugin **settings panels** move out, and the shared **toast helper** becomes a proper leaf so view modules can reuse it.
+
+- **`cockpit/cockpit-util.js`** gains `showToast` (moved from `cockpit.js`) — a leaf UI helper (DOM + `setTimeout` only, no cockpit state). `cockpit.js`'s ~130 internal toast calls now resolve to the imported binding.
+- **`cockpit/cockpit-comms.js`** (new) — `renderTelegramPanel` (slice ζ), `renderDiscordPanel` + `renderEmailPanel` (slice η). Each reads `/bridge/<provider>/status` and wires the token / allowlist / enable / test-send controls, depending only on `el`/`placeholder`/`showToast` (cockpit-util) + browser `fetch`/`document` — no back-reference to cockpit state, so no circular import. `cockpit.js` imports the three and calls them from the comms settings view.
+- `cockpit.js` **8 942 → 8 555** (−387).
+- Browser-only modules — verified statically (`node --check` all three files; the bridge serves `cockpit-comms.js` as `application/javascript`) plus two self-tests: a new 10-assertion `cockpit-comms` fixture that renders each panel into a mount under stubbed `fetch`/`document` and asserts the trust-note + status grid populate, and three new `cockpit-util` assertions that `showToast` appends a tagged `.toast` node. **Toasts (the ~130-call-site shared-helper move) confirmed live by the operator at `127.0.0.1:4177`;** the comms panels themselves are gated behind `maddu plugin enable comms` (disabled on the verifying install), so their render is covered by the fixture rather than live.
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **58/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (cockpit.js ratcheted 8 942 → 8 555; still the sole monolith).
+
 ## [v1.35.0] · 2026-06-18 · Architecture refactor (17) — cockpit split, slice 2 (widget kit)
 
 Phase 8 resumes (the server monolith is done; this turns to the other one, `cockpit.js`). The **widget kit** — the pure data→DOM chart/stat builders — moves out.
