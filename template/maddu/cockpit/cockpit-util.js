@@ -81,6 +81,36 @@ export function formatUptime(ms) {
   return d + 'd ' + (h % 24) + 'h';
 }
 
+// formatAge — humanize a millisecond age as the largest single unit (s/m/h/d).
+// Companion to formatUptime; used by heartbeat/recency labels across views.
+export function formatAge(ms) {
+  if (ms == null) return '—';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+// ageTone — map a millisecond age to a semantic tone token (fresh→stale).
+export function ageTone(ms) {
+  if (ms == null) return 'neutral';
+  if (ms < 60 * 60 * 1000) return 'ok';
+  if (ms < 4 * 60 * 60 * 1000) return 'accent';
+  if (ms < 24 * 60 * 60 * 1000) return 'warn';
+  return 'danger';
+}
+
+// formatTs — render an ISO timestamp as "YYYY-MM-DD HH:MM:SSZ" (space instead of
+// T, fractional seconds dropped). Returns the input unchanged if unparseable.
+export function formatTs(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z'); }
+  catch { return iso; }
+}
+
 // Transient toast into #toast-region. A leaf UI helper (DOM + setTimeout only,
 // no cockpit state), shared by cockpit.js and the route/panel modules. No-ops
 // if the region isn't mounted. Duration scales with content (3 s base + 35 ms

@@ -1,5 +1,5 @@
 {
-  "version": "1.37.0",
-  "phase": "cockpit-verification-harness",
+  "version": "1.38.0",
+  "phase": "cockpit-decomposition-formatters",
   "released": "2026-06-19"
 }

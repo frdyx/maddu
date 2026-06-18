@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.38.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — formatter leaf
+
+First decomposition slice riding the new harness — and the first cockpit slice in the project's history verified **without an operator browser refresh**.
+
+- **`cockpit/cockpit-util.js`** gains `formatAge`, `ageTone`, and `formatTs` (moved verbatim from `cockpit.js`) — pure formatters in the same leaf class as the existing `formatUptime`. `cockpit.js` imports them back and drops its ~24-line local block.
+- **`scripts/test/cockpit-util.mjs`** grows 13 assertions covering the three moved formatters (unit boundaries, tone thresholds, ISO normalization).
+- Re-baselined the cockpit mass floor `8556 → 8535` (the move is a net shrink).
+
+The proof this changed nothing: **Gate B (`cockpit-snapshot`) stayed byte-identical across all 43 goldens** — no golden update needed — and **Gate A (`cockpit-boot`)** still boots + renders all 42 routes. This is the headless self-verification loop the Phase 0 harness was built for.
+
+Verified: `maddu self-test` **61/0**, `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.37.0] · 2026-06-19 · Cockpit verification harness (Phase 0)
 
 Re-opens the architecture refactor's cockpit decomposition by removing its blocker: every prior cockpit slice could only be verified by an operator hard-refreshing `127.0.0.1:4177`. This release makes the cockpit SPA **verifiable headlessly** — no browser binary, no operator — so future slices self-verify like the server slices did (`move code → maddu self-test → green → ship`).
