@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.18.2] · 2026-06-18 · Capability docs — debt deep-dive, slice-stop guards, verb→doc map
+
+Doc completeness pass so the in-depth docs match the post-v1.16 capability surface (surfaced while building per-capability subpages for the marketing site).
+
+- **`docs/41-debt.md`** — a deep-dive for `maddu debt` (the deliberate-shortcut ledger), the doc the site flagged as missing. Mirrors the blueprint/architecture doc shape; positions `debt` alongside `learn` and `blueprint` in the Memory & accounting domain.
+- **Slice-stop guards documented** (`08-slice-stop-ritual.md`) — the v1.17.0 change-risk and declared-deliverable checks were only in the CLI reference; they're now in the canonical slice-stop doc.
+- **`docs/capability-docs.json`** — a machine-readable verb → in-depth-doc map for all **62** capability verbs (51 with a deep-dive doc; 11 `null` where the charter row + CLI reference is the depth). The marketing site consumes it to build complete per-verb subpages without hardcoding the mapping.
+- **`capability-docs` audit check** (`maddu audit capability-docs`) — keeps the map honest: its keys must equal the `COMMANDS` set and every referenced doc must exist, so it can't silently drift when a verb is added. `maddu audit` grows **12 → 13** checks.
+
+Verified: `maddu audit` **13/0** (capability-docs: 62 mapped, 51 with-doc, all present), `maddu self-test` quick **45/0**, docs in sync (48 files), spine 0/0.
+
 ## [v1.18.1] · 2026-06-18 · Charter coherence — `architecture` is a capability verb
 
 A patch surfaced while mirroring the charter into the marketing site. `maddu architecture` shipped in v1.18.0 but was never added to the charter's capability-verb table — and `maddu audit`'s `charter-drift` check passed it anyway, because the bare word "architecture" appears in charter prose ("*architecture, not omission*"). The check was matching incidental words, not table membership.
