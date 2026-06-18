@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.31.0] · 2026-06-18 · Architecture refactor (13) — server split, slice 7 (approval-gateway routes)
+
+Phase 9, seventh slice — third route-group extraction, applying the dispatch contract to the **approval gateway** (Phase A1).
+
+- **`runtime/lib/bridge-routes-approvals.mjs`** — `routeApprovals` (the `/bridge/approvals/*` group: list, request with the per-repo → global auto-decide cascade, respond, policy-set, and status-by-id). Reads only the request (`req`, `res`, `path`) + the resolved `repoRoot`. The now-block-only `maybeAutoDecide` import leaves `server.js`.
+- `server.js` **1 657 → 1 576** (−81; cumulative **2 705 → 1 576**, ~42% off the bridge monolith).
+- Verified on a live bridge: `/bridge/approvals` GET **200** (`{open, ledger, policies}`); an unknown approval id **404**s *within* the group; `approvals/request` (no tool) and `approvals/respond` (no id) both **400**; and the fall-through guard — `/bridge/imports` GET (defined *after* the block) still **200**s.
+- New `bridge-routes-approvals` self-test (7 assertions: dispatch contract + status-by-id 404 + two read-only 400-validation branches via empty async-iterable `req` stubs, so it never mutates the spine).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **54/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (baseline ratcheted to server.js 1 576), live-bridge smoke (approval endpoints + fall-through).
+
 ## [v1.30.0] · 2026-06-18 · Architecture refactor (12) — server split, slice 6 (lane-ownership route groups)
 
 Phase 9, sixth slice — the second route-group extraction, applying the v1.29.0 dispatch contract to the **lane-ownership subsystem** (the substrate behind rule #8).
