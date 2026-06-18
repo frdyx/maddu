@@ -152,16 +152,24 @@ async function plan(repoRoot, gen) {
   return { skipped: false, expected: gen.transform(sources[gen.source]), current, targetPath };
 }
 
+async function listFiles(dir, accept) {
+  let entries;
+  try { entries = await readdir(dir, { withFileTypes: true }); }
+  catch { return null; }
+  return entries.filter((e) => e.isFile() && accept(e.name)).map((e) => e.name).sort();
+}
+
 // Expand a `mirror` generator into one unit per source file. Mirrors top-level
 // files (default: *.md) from sourceDir to targetDir, preserving each target's
-// existing EOL so content-equal files stay byte-stable. Returns null when the
-// source dir is absent (skip the whole generator — e.g. a consumer install).
+// existing EOL so content-equal files stay byte-stable. ALSO emits an `orphan`
+// unit for any target-dir file matching the filter that has no source — so the
+// gate flags a payload doc nobody authored (the coverage docs-in-sync gave
+// beyond byte-equality). Returns null when the source dir is absent (skip the
+// whole generator — e.g. a consumer install).
 async function mirrorUnits(repoRoot, gen) {
-  let entries;
-  try { entries = await readdir(join(repoRoot, gen.sourceDir), { withFileTypes: true }); }
-  catch { return null; }
   const accept = gen.filter || ((name) => name.endsWith('.md'));
-  const names = entries.filter((e) => e.isFile() && accept(e.name)).map((e) => e.name).sort();
+  const names = await listFiles(join(repoRoot, gen.sourceDir), accept);
+  if (names === null) return null;
   const units = [];
   for (const name of names) {
     const src = await readIfPresent(join(repoRoot, gen.sourceDir, name));
@@ -169,6 +177,12 @@ async function mirrorUnits(repoRoot, gen) {
     const current = await readIfPresent(targetPath);
     const eol = current !== null ? detectEol(current) : detectEol(src);
     units.push({ id: `${gen.id}:${name}`, target: `${gen.targetDir}/${name}`, targetPath, expected: applyEol(src, eol), current });
+  }
+  const sourceSet = new Set(names);
+  const targetNames = (await listFiles(join(repoRoot, gen.targetDir), accept)) || [];
+  for (const name of targetNames) {
+    if (sourceSet.has(name)) continue;
+    units.push({ id: `${gen.id}:orphan:${name}`, target: `${gen.targetDir}/${name}`, targetPath: join(repoRoot, gen.targetDir, name), orphan: true });
   }
   return units;
 }
@@ -196,6 +210,13 @@ export async function runGenerators(repoRoot, { mode = 'check', generators = GEN
       continue;
     }
     for (const u of pu.units) {
+      // An orphan target (no source) is always drift but is never written or
+      // deleted — automatic deletion is too dangerous, so the operator removes
+      // it or adds the missing source. Surfaced so the gate fails on it.
+      if (u.orphan) {
+        results.push({ id: u.id, target: u.target, skipped: false, drift: true, wrote: false, orphan: true });
+        continue;
+      }
       const drift = u.current !== u.expected;
       let wrote = false;
       if (mode === 'write' && drift) {

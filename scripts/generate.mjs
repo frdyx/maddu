@@ -23,17 +23,27 @@ const { runGenerators } = await import(pathToFileURL(enginePath).href);
 
 const results = await runGenerators(REPO_ROOT, { mode: check ? 'check' : 'write' });
 
-const drifted = results.filter((r) => !r.skipped && r.drift);
+const drifted = results.filter((r) => !r.skipped && r.drift && !r.orphan);
+const orphans = results.filter((r) => r.orphan);
 const wrote = results.filter((r) => r.wrote);
 const skipped = results.filter((r) => r.skipped);
 
+function reportOrphans() {
+  if (!orphans.length) return;
+  console.error(`generate: ${orphans.length} orphan target(s) with no source — remove the file or add its source:`);
+  for (const r of orphans) console.error(`  - ${r.target}`);
+}
+
 if (check) {
-  if (drifted.length) {
-    console.error(`generate --check: ${drifted.length} generated artifact(s) out of date:`);
-    for (const r of drifted) console.error(`  - ${r.target} (${r.id}) — run \`node scripts/generate.mjs\``);
+  if (drifted.length || orphans.length) {
+    if (drifted.length) {
+      console.error(`generate --check: ${drifted.length} generated artifact(s) out of date:`);
+      for (const r of drifted) console.error(`  - ${r.target} (${r.id}) — run \`node scripts/generate.mjs\``);
+    }
+    reportOrphans();
     process.exit(1);
   }
-  console.log(`generate --check: ${results.length - skipped.length} artifact(s) current${skipped.length ? `, ${skipped.length} skipped` : ''}`);
+  console.log(`generate --check: ${results.length - skipped.length - orphans.length} artifact(s) current${skipped.length ? `, ${skipped.length} skipped` : ''}`);
   process.exit(0);
 }
 
@@ -41,6 +51,7 @@ if (wrote.length) {
   console.log(`generate: wrote ${wrote.length} artifact(s):`);
   for (const r of wrote) console.log(`  - ${r.target} (${r.id})`);
 } else {
-  console.log(`generate: all ${results.length - skipped.length} artifact(s) already current`);
+  console.log(`generate: all ${results.length - skipped.length - orphans.length} artifact(s) already current`);
 }
-process.exit(0);
+reportOrphans();
+process.exit(orphans.length ? 1 : 0);

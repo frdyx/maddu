@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // rule-invariant-drift (v1.17.0) — the `maddu audit invariants` check.
 //
-// The 8+1 hard rules + scope banner are duplicated across four agent briefs
-// that are deliberately NOT byte-equal, so docs-in-sync can't guard them. This
-// check pins load-bearing phrases per brief and FAILs if one is reworded away.
+// The 8+1 hard rules + scope banner now have one source (rules.json) and are
+// generated into the four agent briefs. This check is the substance canary over
+// that output: it pins load-bearing phrases per brief and FAILs if one is
+// dropped from the registry (the briefs regenerate without it) or reworded away.
 // Here we verify: intact tree → PASS, a dropped phrase → FAIL naming the exact
 // (file, phrase), a phrase that line-wraps still matches, missing briefs → WARN.
 //

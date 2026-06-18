@@ -79,7 +79,7 @@ async function assertSourceLayout(frameworkRoot, testDir) {
 function smokeTasks(frameworkRoot) {
   const bin = join(frameworkRoot, 'bin', 'maddu.mjs');
   return [
-    { id: 'audit-docs-sync', kind: 'smoke', args: [bin, 'audit', 'docs-sync'], label: 'maddu audit docs-sync' },
+    { id: 'audit-generated', kind: 'smoke', args: [bin, 'audit', 'generated'], label: 'maddu audit generated' },
     { id: 'audit', kind: 'smoke', args: [bin, 'audit'], label: 'maddu audit' },
     { id: 'spine-verify', kind: 'smoke', args: [bin, 'spine', 'verify'], label: 'maddu spine verify' },
   ];

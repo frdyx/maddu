@@ -121,6 +121,16 @@ async function main() {
     const mir2 = { id: 'm2', kind: 'mirror', sourceDir: 'nope', targetDir: 'out' };
     const ms = await runGenerators(root, { mode: 'check', generators: [mir2] });
     ok('mirror skips when sourceDir absent', ms.length === 1 && ms[0].skipped === true);
+
+    // orphan detection: a target-dir file with no source is flagged as drift,
+    // never written or deleted (the coverage that let docs-in-sync retire).
+    await write(root, 'out/orphan.md', 'i have no source\n');
+    const withOrphan = await runGenerators(root, { mode: 'write', generators: [mir] });
+    const orphan = withOrphan.find((r) => r.id === 'm:orphan:orphan.md');
+    ok('orphan target is detected', !!orphan && orphan.orphan === true && orphan.drift === true);
+    ok('orphan is never written/deleted', orphan.wrote === false);
+    ok('orphan still present after write (not auto-deleted)', !!(await readFile(join(root, 'out/orphan.md'), 'utf8')));
+    ok('checkGenerators surfaces the orphan as drift', (await checkGenerators(root, { generators: [mir] })).some((r) => r.orphan));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
