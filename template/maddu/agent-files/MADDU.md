@@ -127,6 +127,8 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "search …", "find …", "look up …" (across events/memory/skills/inbox) | `/maddu-search` |
 | "what do we know about …", "recall …", "memory" | `/maddu-memory` |
 | "tasks", "to-do", "what's on the board", "open work items" | `/maddu-task` |
+| "run tests", "test the project", "verify project tests", "adaptive tests" | `/maddu-test` |
+| "test Máddu itself", "run the framework test suite", "self-test" | `/maddu-self-test` |
 | "audit the framework", "coherence check", "drift", "dead events" | `/maddu-audit` |
 | "learn from my mistakes", "what went wrong", "review past failures", "mine my sessions" | `/maddu-learn` |
 | "what corrections do we have", "learned project facts" | `/maddu-memory` (then `--kind correction`) |

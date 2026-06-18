@@ -192,6 +192,7 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   const tagLabel = label ? `[${label}] ` : '';
 
   const madduJson = await readMadduJson(repoRoot);
+  let sourceGateOnly = false;
   if (!madduJson) {
     // A1: in the framework *source* repo the install marker is intentionally
     // absent — this repo IS Máddu, it was never installed into anything.
@@ -205,14 +206,18 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
         label: `${tagLabel}install marker`,
         detail: 'framework source repo — install marker (maddu.json) intentionally absent; run inside a consumer install to verify install integrity.',
       });
+      if (!gateOpts.onlyId && !gateOpts.severity) return checks;
+      sourceGateOnly = true;
+    } else {
+      checks.push({ level: 'FAIL', label: `${tagLabel}maddu.json`, detail: `missing at ${repoRoot}` });
       return checks;
     }
-    checks.push({ level: 'FAIL', label: `${tagLabel}maddu.json`, detail: `missing at ${repoRoot}` });
-    return checks;
   }
-  const cliVersion = await frameworkVersion();
-  if (cliVersion !== madduJson.framework_version) {
-    checks.push({ level: 'WARN', label: `${tagLabel}framework version`, detail: `CLI v${cliVersion} but install is v${madduJson.framework_version} — run \`maddu upgrade\`` });
+  if (madduJson) {
+    const cliVersion = await frameworkVersion();
+    if (cliVersion !== madduJson.framework_version) {
+      checks.push({ level: 'WARN', label: `${tagLabel}framework version`, detail: `CLI v${cliVersion} but install is v${madduJson.framework_version} — run \`maddu upgrade\`` });
+    }
   }
 
   // ── Gate runner — built-in gates + operator gates ──
@@ -231,6 +236,8 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   }
 
   // ── State containment (not a gate; layout hygiene only) ──
+  if (sourceGateOnly) return checks;
+
   const FORBIDDEN_AT_ROOT = ['skills', 'mcp', 'runtimes', 'checkpoints'];
   const leaks = [];
   for (const name of FORBIDDEN_AT_ROOT) {

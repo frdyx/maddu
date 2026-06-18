@@ -54,6 +54,8 @@ Files NOT prefixed `maddu-` are operator-owned and never touched.
 | `/maddu-cost [axis]` | Token / call rollup per session, day, runtime, model. | `cost` |
 | `/maddu-cancel [reason]` | Stop the current slice cleanly — heartbeat-close + slice-stop. | `session close`, `slice-stop` |
 | `/maddu-note <text>` | Append a one-liner to the operator inbox. | `mailbox send` |
+| `/maddu-self-test [opts]` | Run the Máddu framework source test suite; quick by default. | `self-test` |
+| `/maddu-test [opts]` | Run project tests; adaptive profiles are available with `--profile`. | `test` |
 | `/maddu-audit [scope]` | Framework-coherence self-audit: events, commands, cockpit, slash, docs, charter. | `audit` |
 | `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined (load-bearing / dormant / dead). | `insights` |
 | `/maddu-plugin <verb>` | List / inspect / enable / disable capabilities that live outside the core (e.g. comms). | `plugin` |
@@ -67,7 +69,7 @@ above) under `.claude/commands/maddu-*.md` and `.codex/commands/maddu-*.md`.
 ## Display discipline (re-print pattern)
 
 The display-oriented slash commands (`/maddu-help`, `/maddu-doctor`,
-`/maddu-status`, `/maddu-cost`, `/maddu-skill`) all instruct the agent
+`/maddu-self-test`, `/maddu-status`, `/maddu-cost`, `/maddu-skill`) all instruct the agent
 to **re-print** the underlying `maddu <cmd>` output inside a fenced
 markdown code block in its reply. This is non-obvious but load-bearing:
 Claude Code's bash-output view collapses long output behind a
@@ -78,8 +80,8 @@ inside a code fence is the only way the roster, doctor verdicts, status
 brief, cost ledger, or skill list end up visible.
 
 The `slash-command-display-pattern` doctor gate (added v0.19.2)
-asserts the canonical phrase "re-print" is present in each of the five
-display-oriented templates so a future regression fails CI instead of
+asserts the canonical phrase "re-print" is present in each
+display-oriented template so a future regression fails CI instead of
 silently shipping broken UX.
 
 The display-oriented bodies also drop the unconditional "what are you
@@ -154,7 +156,8 @@ The Autonomy + Planning + Tool Gateway release ships 14 new slash commands:
 | Command | What it does |
 |---|---|
 | `/maddu-git <argv>` | Audited git wrapper; refuses empty `-m` and `push -f`. |
-| `/maddu-test [argv]` | Auto-detect test runner. |
+| `/maddu-test [opts]` | Run project tests; adaptive profiles are available with `--profile`. |
+| `/maddu-self-test [opts]` | Run the Máddu source self-test suite. |
 | `/maddu-format [argv]` | Auto-detect formatter. |
 | `/maddu-lint [argv]` | Auto-detect linter. |
 | `/maddu-install <pkgs>` | Audited dep install (npm/pnpm/yarn). |

@@ -8,7 +8,7 @@
 
 Built for developers running Claude Code, Codex, or other AI agent CLIs from the terminal — anyone who wants their orchestrator to outlive every agent that touches it. No SQLite. No cloud relay. No provider SDKs in your code. The spine replays deterministically on any machine, so every state question reduces to `tail` on a file.
 
-[![Version 1.15.0](https://img.shields.io/badge/version-1.15.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.16.0](https://img.shields.io/badge/version-1.16.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 
@@ -51,6 +51,8 @@ Inside Claude Code or Codex CLI, type a slash command — or just natural langua
 | `/maddu-help` | Discovery guide for every slash command. |
 | `/maddu-suggest <task>` | Recommend a slash command + lane for a vague task. |
 | `/maddu-doctor` | Run hard-rule gates and surface findings. |
+| `/maddu-test [opts]` | Run project tests; adaptive profiles are available with `--profile`. |
+| `/maddu-self-test [opts]` | Run the Máddu source self-test suite; quick by default. |
 | `/maddu-cancel` | Stop the current slice cleanly. |
 | `/maddu-note <text>` | One-liner into the operator inbox. |
 | `/maddu-insights [scope]` | Cross-project usage — what's actually utilized vs defined. |
@@ -66,7 +68,7 @@ Or just type *"ship the login form"*, *"status"*, *"tokens"*. The agent classifi
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.15.0 installed.
+Máddu v1.16.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -83,7 +85,7 @@ The verbose CLI is always available — it's what the slash commands themselves 
 
 ```bash
 $ ./maddu/run start &
-Máddu  v1.15.0  ·  http://127.0.0.1:4177  ·  ready
+Máddu  v1.16.0  ·  http://127.0.0.1:4177  ·  ready
 
 $ ./maddu/run register
 ses_20260518081409_b7f312
@@ -135,7 +137,7 @@ Six benefits (next section) explain *why* the spine is shaped the way it is. Thi
 
 **Govern it.** `maddu doctor` is a fan-out gate runner over framework built-ins plus operator gates you drop at `.maddu/gates/*.mjs`; each gate emits a `GATE_RAN` event. An optional **scope-lock** (`maddu slice scope-declare`) refuses out-of-scope edits before a slice can stop, with a bounded `scope-expand`. And the **trigger gauntlet** (permanent hard rule #9) means no mutating command auto-fires without a declared tier, an allowlist entry, a respected cooldown, and a `TRIGGER_FIRED` event carrying its provenance — automation never happens off the record.
 
-**Trust and audit it.** `maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, torn-trailing-line detection, referential integrity across the event-type relationships (including the orchestration families — teams, pipelines, plans, loops, coordinators, advisors), and — since v1.14.0 — a forward `prev_hash` **tamper-evidence chain** that pinpoints the first altered line if interior history is consistently rewritten. `maddu doctor` runs the same check on every invocation and surfaces warn-only findings as WARN rows. There is no auto-repair: the verifier reports, the operator decides.
+**Trust and audit it.** `maddu spine verify` walks every NDJSON segment and checks parseability, event-id uniqueness, segment continuity, timestamp monotonicity, torn-trailing-line detection, referential integrity across the event-type relationships (including the orchestration families — teams, pipelines, plans, loops, coordinators, advisors), and — since v1.14.0 — a forward `prev_hash` **tamper-evidence chain** that pinpoints the first altered line if interior history is consistently rewritten. `maddu doctor` runs the same check on every invocation and surfaces warn-only findings as WARN rows. In product repos, `maddu test` keeps its legacy detected-runner behavior by default and adds opt-in adaptive profiles with `--profile`; in the framework source checkout, `maddu self-test` runs the unified source suite. There is no auto-repair: the verifier reports, the operator decides.
 
 **Work across every repo.** `maddu workspace add` registers a repo; optional workspace roles separate projects, fixtures, and archives in reports. One bridge mounts every workspace at boot, the `X-Maddu-Workspace` header (or the registry's `active` field) routes per request, and `/bridge/_all/*` fans out reads across all mounts. Each repo's spine stays its own source of truth.
 

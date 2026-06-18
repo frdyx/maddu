@@ -1,7 +1,7 @@
 // slash-command-display-pattern — v0.19.2 PR-A.
 //
 // The display-oriented slash commands (`/maddu-help`, `/maddu-doctor`,
-// `/maddu-status`, `/maddu-cost`, `/maddu-skill`) must instruct the agent
+// `/maddu-self-test`, `/maddu-status`, `/maddu-cost`, `/maddu-skill`) must instruct the agent
 // to re-print the underlying CLI output inside a markdown code fence.
 //
 // Why this gate exists: Claude Code's bash-output view collapses long
@@ -10,7 +10,7 @@
 // display as compliant and the operator never sees the actual content.
 // The v0.19.2 fix is to make every display-oriented slash body include
 // an explicit re-print instruction. This gate enforces that the
-// canonical phrase "re-print" appears in each of the five files so a
+// canonical phrase "re-print" appears in each display-oriented file so a
 // future regression (e.g. an upgrade refresh that drops the instruction)
 // fails CI instead of silently shipping broken UX.
 //
@@ -24,6 +24,7 @@ const CANONICAL_PHRASE = 're-print';
 const DISPLAY_COMMANDS = [
   'maddu-help.md',
   'maddu-doctor.md',
+  'maddu-self-test.md',
   'maddu-status.md',
   'maddu-cost.md',
   'maddu-skill.md',

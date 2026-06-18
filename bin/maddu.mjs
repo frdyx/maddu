@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin', 'orient', 'handoff', 'learn', 'blueprint'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'self-test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin', 'orient', 'handoff', 'learn', 'blueprint'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -66,7 +66,8 @@ Commands:
   cost           Token / call rollup per session, day, runtime, model. (v0.18 Phase 4)
   usage          Subcommands: import --from claude-code. Backfill the ledger from transcripts. (v0.19.1)
   git            Audited git wrapper. Refuses empty commit messages + git push -f. (v1.1.0)
-  test           Auto-detects test runner (npm test / vitest / jest / mocha). (v1.1.0)
+  test           Project tests. Legacy auto-detect by default; opt-in profiles with --profile quick|full.
+  self-test      Source-only Máddu framework test suite runner. quick by default; use --profile full for release validation.
   format         Auto-detects formatter (prettier / npm run format). (v1.1.0)
   lint           Auto-detects linter (eslint / npm run lint). (v1.1.0)
   install        Audited dep installer (npm/pnpm/yarn). Refuses empty package list. (v1.1.0)
@@ -120,7 +121,7 @@ async function main() {
   // through them so the operator sees the more specific text. Everything
   // else falls back to the global discovery surface (`maddu help`).
   if (rest.includes('--help') || rest.includes('-h')) {
-    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install', 'task', 'review']);
+    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install', 'task', 'review', 'self-test']);
     if (VERBS_WITH_OWN_HELP.has(raw)) {
       const mod = await import(pathToFileURL(join(repoRoot, 'commands', `${raw}.mjs`)).href);
       await mod.default(rest);

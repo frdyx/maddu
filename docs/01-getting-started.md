@@ -174,7 +174,7 @@ $ maddu blast "add a /healthz endpoint"
 **Persistent until done:**
 
 ```bash
-$ maddu loop ralph --goal "get all tests passing" --verify "npm test"
+$ maddu loop ralph --goal "get all tests passing" --verify "maddu test --profile quick --bail"
 ```
 
 Ralph loop iterates: claim → work → verify (`maddu test`) → if green, complete; if red, next iteration. Caps at the governance tier's max-iter (3/5/10) and halts on stuck-detection if two consecutive failures produce identical signatures. Every iteration is a real slice with its own slice-stop in the spine.

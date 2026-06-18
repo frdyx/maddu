@@ -622,7 +622,9 @@ verbs:
 ```bash
 # Default tools (Phase 1)
 $ maddu git <argv...>          # audited git wrapper; refuses empty -m, push -f
-$ maddu test [argv...]         # auto-detect runner (npm/vitest/jest/mocha)
+$ maddu test [argv...]         # legacy auto-detect runner (npm/vitest/jest/mocha)
+$ maddu test --profile quick   # adaptive project-test profile (opt-in)
+$ maddu self-test [--profile quick|full]  # source-only Máddu framework test suite
 $ maddu format [argv...]       # auto-detect prettier / `npm run format`
 $ maddu lint [argv...]         # auto-detect eslint / `npm run lint`
 $ maddu install <packages...>  # audited npm/pnpm/yarn install; refuses empty list
@@ -665,6 +667,9 @@ $ maddu plan kanban
 $ maddu loop ralph --goal "..." --verify "<cmd>" [--iterate "<cmd>"]
 $ maddu loop plan  --plan <id> [--max-iter N]
 $ maddu loop status / cancel
+
+# Ralph + adaptive project tests
+$ maddu loop ralph --goal "fix tests until green" --verify "maddu test --profile quick --bail"
 
 # Coordinator (Phase 7)
 $ maddu coordinator <plan-id> [--dry-run | --synthetic-cmd "..." | --runtime <n>]

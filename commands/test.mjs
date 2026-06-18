@@ -1,12 +1,100 @@
-// `maddu test [argv…]` — audited test runner (v1.1.0 Phase 1).
+// `maddu test [argv...]` - audited project test runner.
 //
-// Auto-detects the test runner from package.json (npm script `test`,
-// vitest, jest, mocha). Operator can override with `--command <runner>
-// --runner-arg=<a> --runner-arg=<b>`. Emits the standard tool events.
-// v1.3.0 — shares the wrapper body via _tools.mjs#runWrapper.
+// No adaptive flags: keep the v1.1 wrapper behavior exactly. It auto-detects
+// npm test, vitest, jest, mocha, or pytest and accepts --command/--runner-arg.
+//
+// Adaptive flags: switch to the project-test harness. This is opt-in through
+// --profile, --list, --only, --skip, --bail, --json, --no-report, or --changed.
 
 import { runWrapper } from './_tools.mjs';
+import { loadSecretScan, loadTools } from './_tools.mjs';
+import { loadSpineLib } from './_spine.mjs';
+import { isAdaptiveProjectTestArgs, runProjectTestCli } from './_project-test-runner.mjs';
+
+async function resolveAdaptiveContext() {
+  try {
+    const spineLib = await loadSpineLib();
+    const repoRoot = (await spineLib.paths.findRepoRoot(process.cwd())) || process.cwd();
+    return { repoRoot, spine: spineLib.spine };
+  } catch {
+    return { repoRoot: process.cwd(), spine: null };
+  }
+}
+
+async function appendToolEvent(spine, repoRoot, type, data, lane, sessionId) {
+  if (!spine?.append) return;
+  try {
+    await spine.append(repoRoot, { type, actor: sessionId, lane, data });
+  } catch {}
+}
+
+async function preflightAdaptiveTest(repoRoot, spine, argv, lane, sessionId) {
+  const tools = await loadTools();
+  const allowance = await tools.resolveToolAllowance(repoRoot, 'test', lane);
+  if (!allowance.allowed) {
+    await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_REFUSED || 'TOOL_REFUSED', {
+      tool: 'test',
+      argv,
+      lane,
+      sessionId,
+      reason: allowance.reason,
+      detail: allowance.detail,
+      source: allowance.source,
+    }, lane, sessionId);
+    console.error(tools.summarize({ refused: true, reason: allowance.reason, detail: allowance.detail }));
+    return 2;
+  }
+  const secretScan = await loadSecretScan();
+  const scan = secretScan.scanArgv(argv);
+  if (scan) {
+    await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.SECRET_DETECTED_IN_ARGV || 'SECRET_DETECTED_IN_ARGV', {
+      tool: 'test',
+      pattern_type: scan.patternType,
+      argv_index: scan.argvIndex,
+      lane,
+      sessionId,
+      override: null,
+    }, lane, sessionId);
+    await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_REFUSED || 'TOOL_REFUSED', {
+      tool: 'test',
+      lane,
+      sessionId,
+      reason: 'secret-detected',
+      detail: `argv contains a value matching pattern "${scan.patternType}" at index ${scan.argvIndex}. Refused before adaptive test spawn (rule #6).`,
+      pattern_type: scan.patternType,
+      argv_index: scan.argvIndex,
+    }, lane, sessionId);
+    console.error(`refused  secret-detected  pattern "${scan.patternType}" matched at argv index ${scan.argvIndex}`);
+    return 2;
+  }
+  return 0;
+}
 
 export default async function testCmd(argv) {
+  if (isAdaptiveProjectTestArgs(argv)) {
+    const { repoRoot, spine } = await resolveAdaptiveContext();
+    const lane = process.env.MADDU_LANE || null;
+    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const refused = await preflightAdaptiveTest(repoRoot, spine, argv, lane, sessionId);
+    if (refused) process.exit(refused);
+    await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_INVOKED || 'TOOL_INVOKED', {
+      tool: 'test',
+      argv,
+      lane,
+      sessionId,
+      mode: 'adaptive project-test',
+    }, lane, sessionId);
+    const started = Date.now();
+    const code = await runProjectTestCli(argv, { repoRoot });
+    await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_COMPLETED || 'TOOL_COMPLETED', {
+      tool: 'test',
+      argv,
+      lane,
+      sessionId,
+      exitCode: code,
+      durationMs: Date.now() - started,
+    }, lane, sessionId);
+    process.exit(code);
+  }
   await runWrapper('test', argv, { parseRunner: true });
 }

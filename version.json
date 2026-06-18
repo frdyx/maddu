@@ -1,5 +1,5 @@
 {
-  "version": "1.15.0",
-  "phase": "blueprint-robustness",
-  "released": "2026-06-11"
+  "version": "1.16.0",
+  "phase": "test-harness-split",
+  "released": "2026-06-18"
 }
