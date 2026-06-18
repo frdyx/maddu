@@ -1,5 +1,5 @@
 {
-  "version": "1.31.0",
-  "phase": "architecture-refactor-13-server-split-7-approval-routes",
+  "version": "1.32.0",
+  "phase": "architecture-refactor-14-server-split-8-capability-routes",
   "released": "2026-06-18"
 }

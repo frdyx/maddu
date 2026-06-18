@@ -11,6 +11,22 @@ narrative summary.
 
 ---
 
+## [v1.32.0] · 2026-06-18 · Architecture refactor (14) — server split, slice 8 (capability routes) · **server.js is no longer a monolith**
+
+Phase 9, eighth slice — a **batched** route-group extraction (four groups in one release, since each is the same proven dispatch-contract shape). **With this slice `server.js` (1 434 lines) drops below the 1 500-line monolith threshold — the mass ratchet now tracks only `cockpit.js`.**
+
+- **`runtime/lib/bridge-routes-capabilities.mjs`** — four `route<Group>` functions:
+  - `routeImports` — `/bridge/imports/*` (Phase D2, secret-rejection gateway)
+  - `routeAuth` — `/bridge/auth/*` (Phase C5, keys never served raw)
+  - `routeCheckpoints` — `/bridge/checkpoints/*` (Phase C4)
+  - `routeSchedules` — `/bridge/schedules/*` (Phase C3)
+- Each reads only the request (`req`, `res`, `path`, `url`) + the resolved `repoRoot`. Four now-block-only import sets are trimmed from `server.js` (it keeps `listSchedules`/`parseNatural`/the scheduler `tick`s, `listCheckpoints`, `listProviders`, `importsCounts` — all still used by surviving routes).
+- `server.js` **1 576 → 1 434** (−142; cumulative **2 705 → 1 434**, ~47% off the original bridge monolith).
+- Verified on a live bridge: every group's GET **200** (`imports`, `imports/rejections`, `auth`, `auth/<provider>`, `checkpoints`, `checkpoints?lane=`, `schedules`); `imports/scan` correctly **flags a planted secret** (`hitCount ≥ 1`); validation 400s (`imports` no kind, `schedules/parse` no natural); an unknown checkpoint id **404**s *within* the group; and the fall-through guard — `/bridge/governance` (defined *after* the span) still **200**s.
+- New `bridge-routes-capabilities` self-test (11 assertions across all four groups: dispatch contract, GET shapes, scan secret-detection, validation 400s, in-group 404 — via a capturing `res` stub + async-iterable `req` stubs, no spine mutation).
+
+Verified: `maddu audit` **14/0**, `maddu self-test` **55/0**, `maddu architecture` **0 drift**, `maddu architecture mass` **0 new/grown** (now 1 monolith: cockpit.js).
+
 ## [v1.31.0] · 2026-06-18 · Architecture refactor (13) — server split, slice 7 (approval-gateway routes)
 
 Phase 9, seventh slice — third route-group extraction, applying the dispatch contract to the **approval gateway** (Phase A1).
