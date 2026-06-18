@@ -1,21 +1,9 @@
 // v1.1.0 Phase 3 — verifies .maddu/config/governance.json has a valid
 // mode and that every override key references a known behavior.
 
-import { readFile, stat } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
-
-async function loadLib(repoRoot) {
-  const consumer = join(repoRoot, 'maddu', 'runtime', 'lib', 'governance.mjs');
-  if (await exists(consumer)) return await import(pathToFileURL(consumer).href);
-  const source = join(__dirname, '..', '..', 'lib', 'governance.mjs');
-  if (await exists(source)) return await import(pathToFileURL(source).href);
-  return null;
-}
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { loadGateLib, exists } from '../../lib/gate-libroot.mjs';
 
 export default {
   id: 'governance-mode-coherent',
@@ -23,7 +11,7 @@ export default {
   severity: 'safety',
   description: 'governance.json declares a valid mode + overrides reference real behaviors.',
   run: async (ctx) => {
-    const lib = await loadLib(ctx.repoRoot);
+    const lib = await loadGateLib(ctx.repoRoot, 'governance.mjs');
     if (!lib) return { ok: true, message: 'governance lib not present (skipped)' };
     const cfgPath = join(ctx.repoRoot, '.maddu', 'config', 'governance.json');
     if (!(await exists(cfgPath))) {

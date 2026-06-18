@@ -15,12 +15,12 @@
 //     as the summary (forgiving for natural agent invocations like
 //     `slice-stop --session X "SLICE STOP: ..."`).
 
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { stat, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLibOptional } from './_libroot.mjs';
 
 function csv(s) {
   if (!s || s === true) return [];
@@ -31,31 +31,8 @@ function ssv(s) {
   return String(s).split(';').map((x) => x.trim()).filter(Boolean);
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-async function loadGatesLib() {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', 'gates.mjs'),
-    join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'gates.mjs'),
-  ];
-  for (const p of candidates) {
-    try { await stat(p); return await import(pathToFileURL(p).href); } catch {}
-  }
-  return null;
-}
-
-// v1.17.0 — load a runtime lib (risk classifier / deliverable verifier) from
-// the source tree or an installed runtime layout.
-async function loadRuntimeLib(name) {
-  const candidates = [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', name),
-    join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', name),
-  ];
-  for (const p of candidates) {
-    try { await stat(p); return await import(pathToFileURL(p).href); } catch {}
-  }
-  return null;
-}
+// Runtime-lib resolution (cwd-installed → dev-template fallback) is shared via
+// _libroot's loadLibOptional, which returns null when the module is absent.
 
 // D2 (v1.13.0): derive the ACTUAL changed files from git so the slice-scope
 // gate isn't limited to what the agent self-reported via --targets/--paths.
@@ -120,7 +97,7 @@ export default async function sliceStop(argv) {
         }
       }
     }
-    const gatesLib = await loadGatesLib();
+    const gatesLib = await loadLibOptional('gates.mjs');
     if (gatesLib?.runGates) {
       // Build ctx with extra slice-scope-specific fields.
       const baseCtx = {
@@ -168,12 +145,12 @@ export default async function sliceStop(argv) {
   let deliverables = null;
   try {
     const gitTouched = (flags['no-git-diff'] === true) ? null : await gitTouchedPaths(repoRoot);
-    const riskLib = await loadRuntimeLib('risk-assess.mjs');
+    const riskLib = await loadLibOptional('risk-assess.mjs');
     if (riskLib?.assessRisk) {
       const basis = touchedPaths.length ? touchedPaths : (gitTouched || []);
       risk = riskLib.assessRisk(basis);
     }
-    const delivLib = await loadRuntimeLib('deliverables.mjs');
+    const delivLib = await loadLibOptional('deliverables.mjs');
     if (delivLib?.verifyDeliverables) {
       deliverables = await delivLib.verifyDeliverables({ repoRoot, targets: csv(flags.targets), gitTouched });
     }
@@ -210,13 +187,8 @@ export default async function sliceStop(argv) {
   // Auto-revise the named plan if triggered_by carries a planId.
   if (triggered_by && triggered_by.planId) {
     try {
-      const candidates = [
-        join(process.cwd(), 'maddu', 'runtime', 'lib', 'plans.mjs'),
-        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'plans.mjs'),
-      ];
-      for (const c of candidates) {
-        try { await stat(c); const plans = await import(pathToFileURL(c).href); await plans.maybeAutoReviseFromSliceStop(repoRoot, ev); break; } catch {}
-      }
+      const plans = await loadLibOptional('plans.mjs');
+      if (plans) await plans.maybeAutoReviseFromSliceStop(repoRoot, ev);
     } catch (err) {
       console.error(`  plan auto-revise failed (non-fatal): ${err.message}`);
     }
@@ -248,20 +220,12 @@ export default async function sliceStop(argv) {
     let allowed = [];
     try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
     if (allowed.includes('slice-stop:skill-candidate')) {
-      const candPaths = [
-        join(process.cwd(), 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'),
-        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'skill-candidates.mjs'),
-      ];
-      for (const c of candPaths) {
-        try {
-          await stat(c);
-          const sc = await import(pathToFileURL(c).href);
-          const emitted = await sc.emitFreshCandidates(repoRoot, sessionId, {
-            kind: 'slice-stop', id: 'skill-candidate', fired_at: ev.ts,
-          });
-          if (emitted.length) console.log(`  skill candidate(s): ${emitted.length} detected → review with \`maddu skill candidates\``);
-          break;
-        } catch {}
+      const sc = await loadLibOptional('skill-candidates.mjs');
+      if (sc) {
+        const emitted = await sc.emitFreshCandidates(repoRoot, sessionId, {
+          kind: 'slice-stop', id: 'skill-candidate', fired_at: ev.ts,
+        });
+        if (emitted.length) console.log(`  skill candidate(s): ${emitted.length} detected → review with \`maddu skill candidates\``);
       }
     }
   } catch (err) {
@@ -281,23 +245,15 @@ export default async function sliceStop(argv) {
     let allowed = [];
     try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
     if (allowed.includes('slice-stop:trust-audit')) {
-      const candPaths = [
-        join(process.cwd(), 'maddu', 'runtime', 'lib', 'trust-trigger.mjs'),
-        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'trust-trigger.mjs'),
-      ];
-      for (const c of candPaths) {
-        try {
-          await stat(c);
-          const tt = await import(pathToFileURL(c).href);
-          const res = await tt.auditIfDepsChanged(repoRoot, sessionId, {
-            kind: 'slice-stop', id: 'trust-audit', fired_at: ev.ts,
-          });
-          if (res.ran) {
-            const v = res.violations;
-            console.log(`  trust audit (deps changed): ${res.audited} dep(s) audited${v ? `, ${v} violation(s) → \`maddu trust report\`` : ', clean'}`);
-          }
-          break;
-        } catch {}
+      const tt = await loadLibOptional('trust-trigger.mjs');
+      if (tt) {
+        const res = await tt.auditIfDepsChanged(repoRoot, sessionId, {
+          kind: 'slice-stop', id: 'trust-audit', fired_at: ev.ts,
+        });
+        if (res.ran) {
+          const v = res.violations;
+          console.log(`  trust audit (deps changed): ${res.audited} dep(s) audited${v ? `, ${v} violation(s) → \`maddu trust report\`` : ', clean'}`);
+        }
       }
     }
   } catch (err) {
@@ -314,20 +270,12 @@ export default async function sliceStop(argv) {
     let allowed = [];
     try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
     if (allowed.includes('slice-stop:auto-handoff')) {
-      const candPaths = [
-        join(process.cwd(), 'maddu', 'runtime', 'lib', 'handoff-trigger.mjs'),
-        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'handoff-trigger.mjs'),
-      ];
-      for (const c of candPaths) {
-        try {
-          await stat(c);
-          const ht = await import(pathToFileURL(c).href);
-          const res = await ht.maybeSetHandoff(repoRoot, ev, sessionId, {
-            kind: 'slice-stop', id: 'auto-handoff', fired_at: ev.ts,
-          });
-          if (res.ran) console.log(`  handoff: updated → \`maddu orient\``);
-          break;
-        } catch {}
+      const ht = await loadLibOptional('handoff-trigger.mjs');
+      if (ht) {
+        const res = await ht.maybeSetHandoff(repoRoot, ev, sessionId, {
+          kind: 'slice-stop', id: 'auto-handoff', fired_at: ev.ts,
+        });
+        if (res.ran) console.log(`  handoff: updated → \`maddu orient\``);
       }
     }
   } catch (err) {
@@ -344,20 +292,12 @@ export default async function sliceStop(argv) {
     let allowed = [];
     try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
     if (allowed.includes('slice-stop:auto-review')) {
-      const candPaths = [
-        join(process.cwd(), 'maddu', 'runtime', 'lib', 'review-trigger.mjs'),
-        join(__dirname, '..', 'template', 'maddu', 'runtime', 'lib', 'review-trigger.mjs'),
-      ];
-      for (const c of candPaths) {
-        try {
-          await stat(c);
-          const rt = await import(pathToFileURL(c).href);
-          const res = await rt.maybeReviewSliceStop(repoRoot, ev, sessionId, {
-            kind: 'slice-stop', id: 'auto-review', fired_at: ev.ts,
-          });
-          if (res.ran) console.log(`  auto-review: ${res.verdict}${res.findingsCount ? `, ${res.findingsCount} finding(s)` : ''} → \`maddu review status\``);
-          break;
-        } catch {}
+      const rt = await loadLibOptional('review-trigger.mjs');
+      if (rt) {
+        const res = await rt.maybeReviewSliceStop(repoRoot, ev, sessionId, {
+          kind: 'slice-stop', id: 'auto-review', fired_at: ev.ts,
+        });
+        if (res.ran) console.log(`  auto-review: ${res.verdict}${res.findingsCount ? `, ${res.findingsCount} finding(s)` : ''} → \`maddu review status\``);
       }
     }
   } catch (err) {

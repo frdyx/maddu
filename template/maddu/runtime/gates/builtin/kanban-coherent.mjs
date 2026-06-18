@@ -2,21 +2,7 @@
 // appear in both 'done' and 'now', or be missing entirely when it has
 // open phases.
 
-import { stat } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
-
-async function loadLib(repoRoot) {
-  const consumer = join(repoRoot, 'maddu', 'runtime', 'lib', 'plans.mjs');
-  if (await exists(consumer)) return await import(pathToFileURL(consumer).href);
-  const source = join(__dirname, '..', '..', 'lib', 'plans.mjs');
-  if (await exists(source)) return await import(pathToFileURL(source).href);
-  return null;
-}
+import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
 export default {
   id: 'kanban-coherent',
@@ -24,7 +10,7 @@ export default {
   severity: 'safety',
   description: 'Kanban projection: no plan in both Now and Done; open plans appear in at least one column.',
   run: async (ctx) => {
-    const lib = await loadLib(ctx.repoRoot);
+    const lib = await loadGateLib(ctx.repoRoot, 'plans.mjs');
     if (!lib) return { ok: true, message: 'plans lib not present (skipped)' };
     const board = await lib.kanban(ctx.repoRoot);
     const problems = [];

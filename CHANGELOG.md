@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.19.0] · 2026-06-18 · Architecture refactor (1/3) — guardrail · loader-dedup · gen-discipline
+
+The first three slices of an **incremental, dogfooded** architecture refactor — using Máddu's own `architecture` + `plan` + gate tooling to clean up organizational cruft without a rewrite (plan `pln_20260618130134_3ce2`). Dogfooding `maddu architecture` on Máddu's own tree proved the **import layering is already clean** (0 forbidden / 0 cycles / 0 undeclared under a 10-module contract); the real cruft is in three axes the import graph can't see — duplication, monoliths, and scaffolding repetition. These three phases lock in the clean layering and attack the duplication foundation.
+
+- **Phase 1 — guardrail.** A 10-module target *contract* (`bin`, `commands`, `scripts`, `runtime-libs`, `gates`, `bridge`, `cockpit`, `plugins`, `agent-briefs`, `docs`) that matches reality (0 drift), with `options.failOn:"new"` against an empty baseline so any **newly-introduced** forbidden edge or cycle fails. The contract is now a tracked team artifact (a scoped `.gitignore` negation ships `.maddu/config/architecture.json` while local state stays ignored), enforced by `maddu audit`.
+- **Phase 2 — loader-dedup.** The cwd-installed → dev-template lib loader was hand-rolled in 6 places. Converged onto **two single sources, one per layer**: `commands/_libroot.loadLibOptional` (command side — `architecture.mjs` + `slice-stop.mjs`'s 7 inline loads) and a new `runtime/lib/gate-libroot.loadGateLib` (gate side — 4 builtin gates; gates can't import `commands`, that edge is forbidden). Net **−91 lines**.
+- **Phase 3 — gen-discipline.** An explicit **authored-source → generated-output** boundary (Codex's prerequisite before any single-sourcing): a deterministic generation engine (`runtime/lib/generate.mjs`), one regen command (`scripts/generate.mjs` / `npm run generate` + `generate:check`), and a **`generated-artifacts-current`** gate that fails on drift — wired into `maddu audit`. Generation is build tooling, not a verb, so it adds **zero** charter/capability-docs/tiers tax. First real generator: `AGENTS.section.md` is now **generated** from the byte-identical `CLAUDE.section.md`. This gate is the mechanism that will let the hand-mirror drift gates be *deleted* once the rule text and doc tree move behind generators (phases 4–6).
+
+Verified: `maddu audit` **14/0** (adds `generated-artifacts-current`), `maddu self-test` **46/0** (adds the `generation-engine` fixture), `maddu architecture` **0 drift** (`failOn:new`), spine 0/0.
+
 ## [v1.18.2] · 2026-06-18 · Capability docs — debt deep-dive, slice-stop guards, verb→doc map
 
 Doc completeness pass so the in-depth docs match the post-v1.16 capability surface (surfaced while building per-capability subpages for the marketing site).

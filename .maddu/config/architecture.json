@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    { "name": "bin", "paths": ["bin/**"] },
+    { "name": "commands", "paths": ["commands/**"] },
+    { "name": "scripts", "paths": ["scripts/**"] },
+    { "name": "runtime-libs", "paths": ["template/maddu/runtime/lib/**"] },
+    { "name": "gates", "paths": ["template/maddu/runtime/gates/**"] },
+    { "name": "bridge", "paths": ["template/maddu/runtime/server.js", "template/maddu/runtime/*.js", "template/maddu/runtime/*.mjs"] },
+    { "name": "cockpit", "paths": ["template/maddu/cockpit/**"] },
+    { "name": "plugins", "paths": ["template/maddu/plugins/**"] },
+    { "name": "agent-briefs", "paths": ["template/maddu/agent-files/**"] },
+    { "name": "docs", "paths": ["docs/**", "template/maddu/docs/**"] }
+  ],
+  "rules": [
+    { "from": "bin", "allow": ["commands", "runtime-libs"] },
+    { "from": "commands", "allow": ["runtime-libs"] },
+    { "from": "gates", "allow": ["runtime-libs"] },
+    { "from": "bridge", "allow": ["runtime-libs"] },
+    { "from": "plugins", "allow": ["runtime-libs"] },
+    { "from": "cockpit", "allow": [] },
+    { "from": "runtime-libs", "allow": [] },
+    { "from": "scripts", "allow": ["commands", "runtime-libs", "gates", "bridge"] },
+    { "from": "agent-briefs", "allow": [] },
+    { "from": "docs", "allow": [] }
+  ],
+  "options": {
+    "failOn": "new",
+    "allowCycles": false,
+    "onUndeclared": "warn"
+  }
+}
