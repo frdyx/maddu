@@ -30,7 +30,7 @@ globalThis.document = {
   getElementById(id) { return id === 'toast-region' ? toastRegion : null; },
 };
 
-const { el, panel, placeholder, formatUptime, compactPath, truncatePathFromLeft, showToast } =
+const { el, panel, placeholder, formatUptime, formatAge, ageTone, formatTs, compactPath, truncatePathFromLeft, showToast } =
   await import('../../template/maddu/cockpit/cockpit-util.mjs').catch(() =>
     import('../../template/maddu/cockpit/cockpit-util.js'));
 
@@ -47,6 +47,25 @@ ok('formatUptime seconds', formatUptime(5000) === '5s');
 ok('formatUptime minutes', formatUptime(5 * 60 * 1000) === '5m');
 ok('formatUptime hours+min', formatUptime((2 * 60 + 3) * 60 * 1000) === '2h 3m');
 ok('formatUptime days+hours', formatUptime((26) * 60 * 60 * 1000) === '1d 2h');
+
+// formatAge — largest single unit
+ok('formatAge null → dash', formatAge(null) === '—');
+ok('formatAge seconds', formatAge(5000) === '5s');
+ok('formatAge minutes', formatAge(5 * 60 * 1000) === '5m');
+ok('formatAge hours', formatAge(3 * 60 * 60 * 1000) === '3h');
+ok('formatAge days', formatAge(2 * 24 * 60 * 60 * 1000) === '2d');
+
+// ageTone — semantic tone by recency
+ok('ageTone null → neutral', ageTone(null) === 'neutral');
+ok('ageTone fresh → ok', ageTone(30 * 60 * 1000) === 'ok');
+ok('ageTone few hours → accent', ageTone(2 * 60 * 60 * 1000) === 'accent');
+ok('ageTone same day → warn', ageTone(12 * 60 * 60 * 1000) === 'warn');
+ok('ageTone stale → danger', ageTone(48 * 60 * 60 * 1000) === 'danger');
+
+// formatTs — ISO → "YYYY-MM-DD HH:MM:SSZ"
+ok('formatTs empty → dash', formatTs('') === '—');
+ok('formatTs normalizes ISO', formatTs('2026-06-19T12:00:00.000Z') === '2026-06-19 12:00:00Z');
+ok('formatTs unparseable → unchanged', formatTs('not-a-date') === 'not-a-date');
 
 // truncatePathFromLeft
 ok('truncate short path unchanged', truncatePathFromLeft('abc', 40) === 'abc');

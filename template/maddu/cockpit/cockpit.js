@@ -4,7 +4,7 @@
 // Pure leaf utilities (DOM builder + formatters) live in a sibling module —
 // the first slice of decomposing this file. Browser ES module import; the
 // bridge serves cockpit-util.js as application/javascript.
-import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, showToast } from './cockpit-util.js';
+import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, formatAge, ageTone, formatTs, showToast } from './cockpit-util.js';
 import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './cockpit-widgets.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 
@@ -2105,28 +2105,7 @@ function renderScoreMatrix(rows) {
   return wrap;
 }
 
-function formatAge(ms) {
-  if (ms == null) return '—';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
-function ageTone(ms) {
-  if (ms == null) return 'neutral';
-  if (ms < 60 * 60 * 1000) return 'ok';
-  if (ms < 4 * 60 * 60 * 1000) return 'accent';
-  if (ms < 24 * 60 * 60 * 1000) return 'warn';
-  return 'danger';
-}
-function formatTs(iso) {
-  if (!iso) return '—';
-  try { return new Date(iso).toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z'); }
-  catch { return iso; }
-}
+// formatAge / ageTone / formatTs → moved to cockpit-util.js (v1.38.0).
 
 // ─── Queue Board (Slice β) ──────────────────────────────────────────────
 //
