@@ -1,31 +1,64 @@
-// Generation engine (v1.19.0) — the authored-source -> generated-output
-// boundary for the framework's own single-sourced artifacts.
+// Generation engine (v1.19.0, extended v1.20.0) — the authored-source ->
+// generated-output boundary for the framework's own single-sourced artifacts.
 //
 // Máddu carries duplicated authored content (identical agent-brief sections,
 // a hand-mirrored doc tree, rule text repeated across briefs). The endgame is
 // to author each once and GENERATE the copies, then delete the drift-policing
 // gates that exist only to catch hand-maintained divergence. This module is
-// the shared engine for that: a registry of generators, each declaring a
-// source, a target, and a pure transform; plus write + check modes.
+// the shared engine for that: a registry of generators + write/check modes.
 //
 // Discipline (per the refactor's generated-artifact principle):
 //   - Authored source is the single point of truth; targets are derived.
-//   - Output is DETERMINISTIC — render() is a pure function of the source
-//     bytes, so check-mode can regenerate and assert byte-equality.
+//   - Output is DETERMINISTIC — render is a pure function of source bytes, so
+//     check-mode can regenerate and assert byte-equality.
 //   - check-mode never writes; it reports drift so a gate can fail on it.
 // Lives in runtime-libs so BOTH the dev script (scripts/generate.mjs) and the
 // `generated-artifacts-current` gate can share one engine (a gate may import
 // runtime-libs but not commands).
 //
-// A generator is { id, source, target, transform } where source/target are
-// repo-root-relative paths and transform maps source text -> target text. The
-// first generator is an identity copy (CLAUDE.section.md -> AGENTS.section.md);
-// later phases register the rule registry -> briefs and docs/ -> payload tree.
+// A generator is one of two shapes (both source/target paths are repo-relative):
+//   whole-file: { id, source, target, transform }
+//       expected target = transform(sourceText). Skipped if source is absent.
+//   section:    { id, target, marker, sources?, render }
+//       expected target = the current target with the region between its
+//       `<!-- GENERATED:<marker> ... -->` and `<!-- /GENERATED:<marker> -->`
+//       lines replaced by render(ctx). The authored content AROUND the markers
+//       is preserved. Skipped if any declared source is absent OR the target
+//       (which must already carry the markers) is absent — so a consumer
+//       install, which ships neither the framework briefs nor their sources at
+//       these paths, is never failed.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 
+// Render the 8+1 hard-rules section for a brief style ('worker' | 'brief') from
+// the canonical rules.json registry. Pure function of the parsed registry.
+export function renderHardRules(registry, style) {
+  const s = registry[style];
+  if (!s) throw new Error(`renderHardRules: unknown style "${style}"`);
+  const banner = s.banner.join('\n');
+  const intro = s.intro.join('\n');
+  const rules = s.rules.map((lines, i) => `${i + 1}. ${lines.join('\n')}`).join('\n');
+  return `${s.heading}\n\n${banner}\n\n${intro}\n\n${rules}`;
+}
+
+const RULES_REGISTRY = 'template/maddu/agent-files/rules.json';
+
 export const GENERATORS = [
+  {
+    id: 'hard-rules-claude',
+    target: 'template/maddu/CLAUDE.md',
+    marker: 'hard-rules',
+    sources: [RULES_REGISTRY],
+    render: (ctx) => renderHardRules(JSON.parse(ctx.read(RULES_REGISTRY)), 'worker'),
+  },
+  {
+    id: 'hard-rules-maddu',
+    target: 'template/maddu/agent-files/MADDU.md',
+    marker: 'hard-rules',
+    sources: [RULES_REGISTRY],
+    render: (ctx) => renderHardRules(JSON.parse(ctx.read(RULES_REGISTRY)), 'brief'),
+  },
   {
     id: 'agents-section',
     source: 'template/maddu/agent-files/CLAUDE.section.md',
@@ -41,42 +74,65 @@ async function readIfPresent(path) {
   catch { return null; }
 }
 
-// Render one generator: read its source, apply the transform. Returns
-// { id, target, sourcePath, targetPath, sourceMissing, expected }.
-async function render(repoRoot, gen) {
-  const sourcePath = join(repoRoot, gen.source);
+// Replace the region between a generator's marker comments with `block`,
+// preserving the marker lines and everything outside them. EOL-aware: matches
+// CRLF or LF markers and re-emits the block in the TARGET's newline style, so a
+// CRLF brief stays byte-stable (the render registry is authored in LF). Throws
+// if the target does not carry the markers (a wiring error worth surfacing).
+export function spliceMarker(targetText, marker, block) {
+  const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(<!-- GENERATED:${esc}\\b[^\\n]*-->\\r?\\n)[\\s\\S]*?(\\r?\\n<!-- /GENERATED:${esc} -->)`);
+  if (!re.test(targetText)) {
+    throw new Error(`generator markers for "${marker}" not found in target`);
+  }
+  const eol = targetText.includes('\r\n') ? '\r\n' : '\n';
+  const blockEol = block.replace(/\r?\n/g, eol);
+  return targetText.replace(re, (_m, open, close) => `${open}${blockEol}${close}`);
+}
+
+// Compute { skipped, expected, current, targetPath } for one generator.
+async function plan(repoRoot, gen) {
   const targetPath = join(repoRoot, gen.target);
-  const src = await readIfPresent(sourcePath);
-  return {
-    id: gen.id,
-    target: gen.target,
-    sourcePath,
-    targetPath,
-    sourceMissing: src === null,
-    expected: src === null ? null : gen.transform(src),
-  };
+  const sourceRels = gen.marker ? (gen.sources || []) : [gen.source];
+  const sources = {};
+  let sourceMissing = false;
+  for (const rel of sourceRels) {
+    const text = await readIfPresent(join(repoRoot, rel));
+    if (text === null) sourceMissing = true;
+    sources[rel] = text;
+  }
+  const current = await readIfPresent(targetPath);
+
+  if (gen.marker) {
+    // Section generators need both their sources AND an existing target (the
+    // marker host) — a consumer install has neither at these framework paths.
+    if (sourceMissing || current === null) return { skipped: true, targetPath };
+    const block = gen.render({ repoRoot, read: (rel) => sources[rel] });
+    return { skipped: false, expected: spliceMarker(current, gen.marker, block), current, targetPath };
+  }
+
+  if (sourceMissing) return { skipped: true, targetPath };
+  return { skipped: false, expected: gen.transform(sources[gen.source]), current, targetPath };
 }
 
 // Run all generators. mode 'write' writes drifted targets; mode 'check' only
-// compares. Generators whose source is absent (e.g. a consumer install that
-// never ships the authored source) are skipped, not failed.
+// compares. Skipped generators are neither drift nor failure.
 export async function runGenerators(repoRoot, { mode = 'check', generators = GENERATORS } = {}) {
   const results = [];
   for (const gen of generators) {
-    const r = await render(repoRoot, gen);
-    if (r.sourceMissing) {
-      results.push({ id: r.id, target: r.target, skipped: true, drift: false, wrote: false });
+    const p = await plan(repoRoot, gen);
+    if (p.skipped) {
+      results.push({ id: gen.id, target: gen.target, skipped: true, drift: false, wrote: false });
       continue;
     }
-    const current = await readIfPresent(r.targetPath);
-    const drift = current !== r.expected;
+    const drift = p.current !== p.expected;
     let wrote = false;
     if (mode === 'write' && drift) {
-      await mkdir(dirname(r.targetPath), { recursive: true });
-      await writeFile(r.targetPath, r.expected);
+      await mkdir(dirname(p.targetPath), { recursive: true });
+      await writeFile(p.targetPath, p.expected);
       wrote = true;
     }
-    results.push({ id: r.id, target: r.target, skipped: false, drift, wrote });
+    results.push({ id: gen.id, target: gen.target, skipped: false, drift, wrote });
   }
   return results;
 }

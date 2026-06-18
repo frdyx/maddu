@@ -12,7 +12,7 @@
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { runGenerators, checkGenerators } from '../../template/maddu/runtime/lib/generate.mjs';
+import { runGenerators, checkGenerators, spliceMarker, renderHardRules } from '../../template/maddu/runtime/lib/generate.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -57,6 +57,41 @@ async function main() {
     // write mode heals the tampered target.
     await runGenerators(root, { mode: 'write', generators: [idGen] });
     ok('write heals drift', (await readFile(join(root, 'out/a.md'), 'utf8')) === 'hello\nworld\n');
+
+    // ── section (marker-injection) generators ───────────────────────────────
+    // spliceMarker replaces between markers, preserves the authored surround.
+    const lf = 'before\n<!-- GENERATED:x -->\nOLD\n<!-- /GENERATED:x -->\nafter\n';
+    ok('splice replaces LF block + preserves surround',
+      spliceMarker(lf, 'x', 'NEW') === 'before\n<!-- GENERATED:x -->\nNEW\n<!-- /GENERATED:x -->\nafter\n');
+    // CRLF target: block must be re-emitted CRLF so a CRLF brief stays byte-stable.
+    const crlf = 'before\r\n<!-- GENERATED:x -->\r\nOLD\r\n<!-- /GENERATED:x -->\r\nafter\r\n';
+    ok('splice re-emits block in target CRLF',
+      spliceMarker(crlf, 'x', 'NEW\nNEW2') === 'before\r\n<!-- GENERATED:x -->\r\nNEW\r\nNEW2\r\n<!-- /GENERATED:x -->\r\nafter\r\n');
+    ok('splice tolerates marker attributes', /INNER/.test(spliceMarker('<!-- GENERATED:x (note) -->\nq\n<!-- /GENERATED:x -->', 'x', 'INNER')));
+    let threw = false;
+    try { spliceMarker('no markers here', 'x', 'B'); } catch { threw = true; }
+    ok('splice throws when markers absent', threw);
+
+    // a section generator: write injects, check detects drift, heals.
+    const secGen = { id: 'sec', target: 'doc.md', marker: 'blk', sources: ['data.txt'],
+      render: (ctx) => `RENDERED:${ctx.read('data.txt').trim()}` };
+    await write(root, 'data.txt', 'v1');
+    await write(root, 'doc.md', 'top\n<!-- GENERATED:blk -->\nstale\n<!-- /GENERATED:blk -->\nbottom\n');
+    await runGenerators(root, { mode: 'write', generators: [secGen] });
+    ok('section write injects rendered block', (await readFile(join(root, 'doc.md'), 'utf8')).includes('RENDERED:v1'));
+    ok('section write preserves surround', /top\n[\s\S]*bottom\n$/.test(await readFile(join(root, 'doc.md'), 'utf8')));
+    await write(root, 'data.txt', 'v2');
+    const secDrift = await checkGenerators(root, { generators: [secGen] });
+    ok('section drift detected when source changes', secDrift.length === 1 && secDrift[0].id === 'sec');
+    // section generator skips when the marker-host target is absent (consumer install).
+    const noTarget = { id: 'sec2', target: 'missing.md', marker: 'blk', sources: ['data.txt'], render: () => 'x' };
+    const r2 = await runGenerators(root, { mode: 'check', generators: [noTarget] });
+    ok('section skips when target absent', r2[0].skipped === true);
+
+    // renderHardRules assembles heading + banner + numbered list from a registry.
+    const reg = { worker: { heading: '## H', banner: ['> b1', '> b2'], intro: ['i1'], rules: [['r1'], ['r2a', '   r2b']] } };
+    ok('renderHardRules numbers rules + joins multi-line',
+      renderHardRules(reg, 'worker') === '## H\n\n> b1\n> b2\n\ni1\n\n1. r1\n2. r2a\n   r2b');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

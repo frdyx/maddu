@@ -45,6 +45,7 @@ without polluting the spine.
 Never write outside `.maddu/`, `maddu/`, or `maddu.json` unless the
 operator explicitly tells you to.
 
+<!-- GENERATED:hard-rules (source: template/maddu/agent-files/rules.json — edit there, run npm run generate) -->
 ## The 8+1 hard rules
 
 > **⚠️ SCOPE.** These rules govern **how Máddu itself is built** (Máddu's own
@@ -69,6 +70,7 @@ every run. Full rationale in `maddu/docs/hard-rules.md`; the stable charter is
 7. **Three-layer brand boundary.** Framework shell brand / app brand / content brand never mix.
 8. **Lane ownership.** No two agents may hold the same lane concurrently.
 9. **Every auto-trigger crosses the gauntlet** (permanent since v0.19.0) — scope-lock, gates, allowlist, cooldown.
+<!-- /GENERATED:hard-rules -->
 
 ## How to work here
 
