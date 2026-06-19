@@ -1,5 +1,5 @@
 {
-  "version": "1.53.0",
-  "phase": "cockpit-views-inspect-agents-extraction",
+  "version": "1.54.0",
+  "phase": "cockpit-views-inspect-plans-extraction",
   "released": "2026-06-19"
 }
