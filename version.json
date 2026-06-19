@@ -1,5 +1,5 @@
 {
-  "version": "1.56.0",
-  "phase": "cockpit-stream-seam-auth-extraction",
+  "version": "1.57.0",
+  "phase": "cockpit-views-connect-imports-extraction",
   "released": "2026-06-19"
 }

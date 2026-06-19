@@ -10,7 +10,7 @@
 // only leaves + route metadata + the already-extracted comms panels.
 
 import { el, panel, placeholder, loading, formatUptime, showToast } from './cockpit-util.js';
-import { statusGrid, meter } from './cockpit-widgets.js';
+import { statusGrid, meter, donut } from './cockpit-widgets.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 
@@ -698,5 +698,147 @@ export function renderAuth(ctx) {
 
   refresh();
   ctx.onSpineEvent((e) => { if (e.detail.type && e.detail.type.startsWith('AUTH_KEY_')) refresh(); });
+  return root;
+}
+
+//     Imports route (guarded payload intake  skill/memory/lane/brief/inbox)   
+// Stream-coupled connect view: re-runs on IMPORT_* spine events via
+// ctx.onSpineEvent. Submit stamps `by: ctx.currentSession()`. fetchImports is
+// module-private (renderImports is its only caller).
+async function fetchImports() {
+  try { const r = await fetch('/bridge/imports', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+export function renderImports(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Imports'));
+  root.appendChild(el('p', {}, ROUTE_META.imports.description));
+
+  root.appendChild(el('div', { class: 'panel', style: 'border-left:3px solid var(--m-accent-warm);' }, [
+    el('div', { class: 'panel-title', style: 'color:var(--m-accent-warm);' }, 'TOKEN BOUNDARY'),
+    el('div', { class: 'event-actor', style: 'margin-top:6px;color:var(--m-fg-2);' },
+      'Any payload containing a key-shaped string is rejected entirely. The rejection log records the JSON path and pattern name only — never the value.'
+    )
+  ]));
+
+  // Compose form
+  const kindSel = el('select', { style: 'background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  for (const k of ['skill', 'memory-note', 'lane', 'brief', 'inbox-note']) kindSel.appendChild(el('option', { value: k }, k));
+  const ta = el('textarea', {
+    rows: '10',
+    placeholder: '{\n  "title": "…",\n  "body": "# …\\n…"\n}',
+    style: 'width:100%;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:10px;font-family:var(--m-font-mono);font-size:12px;'
+  });
+  const scanBtn = el('button', {}, 'Scan only');
+  const subBtn = el('button', { class: 'btn-allow' }, 'Submit');
+  const ctl = el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;' }, [
+    el('span', { style: 'font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-3);' }, 'kind:'),
+    kindSel, scanBtn, subBtn
+  ]);
+  root.appendChild(el('div', { class: 'panel' }, [
+    el('div', { class: 'panel-head' }, [
+      el('span', { class: 'panel-title' }, 'Compose'),
+      el('span', { class: 'panel-aside' }, 'POST /bridge/imports')
+    ]),
+    ta,
+    ctl
+  ]));
+
+  scanBtn.addEventListener('click', async () => {
+    let payload;
+    try { payload = JSON.parse(ta.value); } catch (e) { showToast(`JSON parse error: ${e.message}`, 'err'); return; }
+    const r = await fetch('/bridge/imports/scan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ payload }) });
+    const d = await r.json();
+    if (d.ok) showToast('✓ clean — safe to submit', 'ok');
+    else      showToast(`✗ ${d.hitCount} hit${d.hitCount === 1 ? '' : 's'}\n` + d.hits.map((h) => `  ${h.path}  (${h.pattern})`).join('\n'), 'err');
+  });
+  subBtn.addEventListener('click', async () => {
+    let payload;
+    try { payload = JSON.parse(ta.value); } catch (e) { showToast(`JSON parse error: ${e.message}`, 'err'); return; }
+    subBtn.disabled = true;
+    try {
+      const r = await fetch('/bridge/imports', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: kindSel.value, payload, by: ctx.currentSession() || null })
+      });
+      const d = await r.json();
+      if (d.rejected) {
+        showToast(`REJECTED  ${d.id}\n` + d.hits.map((h) => `  ${h.path}  (${h.pattern})`).join('\n'), 'err');
+      } else if (d.ok) {
+        showToast(`accepted  ${d.id}  ref:${d.refId || '—'}`, 'ok');
+        ta.value = '';
+      } else {
+        showToast(`failed: ${d.error || d.reason}`, 'err');
+      }
+      refresh();
+    } finally { subBtn.disabled = false; }
+  });
+
+  const summaryMount = el('div', {}); summaryMount.appendChild(loading('Reading import ledger…'));
+  root.appendChild(panel('Summary', 'accepted vs rejected · breakdown by kind', summaryMount));
+
+  const accMount = el('div', {}); accMount.appendChild(loading('Loading…'));
+  const rejMount = el('div', {});
+  root.appendChild(panel('Accepted', '.maddu/imports/accepted.ndjson', accMount));
+  root.appendChild(panel('Rejected (secrets detected)', '.maddu/imports/rejected-secrets.ndjson', rejMount));
+
+  function refresh() {
+    fetchImports().then((d) => {
+      summaryMount.innerHTML = '';
+      accMount.innerHTML = '';
+      rejMount.innerHTML = '';
+      if (!d) {
+        summaryMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+        accMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
+        return;
+      }
+      const acc = d.accepted || [];
+      const rej = d.rejected || [];
+      const byKind = {};
+      for (const a of acc) byKind[a.kind] = (byKind[a.kind] || 0) + 1;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'accepted', value: acc.length, tone: 'ok' },
+        { label: 'rejected', value: rej.length, tone: 'danger' }
+      ], { centerLabel: 'imports' }));
+      const bars = el('div', {});
+      const total = acc.length + rej.length;
+      bars.appendChild(meter(acc.length, total, 'Accepted', { tone: 'ok' }));
+      bars.appendChild(meter(rej.length, total, 'Rejected (secrets)', { tone: 'danger' }));
+      for (const [kind, n] of Object.entries(byKind)) {
+        bars.appendChild(meter(n, acc.length, `Accepted: ${kind}`, { tone: 'blue' }));
+      }
+      summary.appendChild(bars);
+      summaryMount.appendChild(summary);
+
+      if (d.accepted.length === 0) accMount.appendChild(placeholder('No imports yet', 'Compose a payload above and click Submit.'));
+      else {
+        for (const a of d.accepted) accMount.appendChild(el('div', { class: 'ledger-row' }, [
+          el('span', {}, a.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+          el('span', { class: 'event-type t-lane' }, a.kind),
+          el('span', {}, [
+            el('div', { style: 'color:var(--m-fg-0);' }, a.id),
+            el('div', { class: 'event-actor' }, `ref: ${a.refId || '—'}`)
+          ]),
+          el('span', { class: 'event-actor' }, a.by || '')
+        ]));
+      }
+      if (d.rejected.length === 0) rejMount.appendChild(placeholder('No rejections', 'Good. No secret-shaped payloads attempted.'));
+      else {
+        for (const r of d.rejected) rejMount.appendChild(el('div', { class: 'ledger-row' }, [
+          el('span', {}, r.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
+          el('span', { class: 'event-type t-approval' }, r.reason),
+          el('span', {}, [
+            el('div', { style: 'color:var(--m-fg-0);' }, `${r.kind}  ${r.id}`),
+            el('div', { class: 'event-actor' }, (r.hits || []).slice(0, 3).map((h) => `${h.path} (${h.pattern})`).join('  ·  ') + (r.hits && r.hits.length > 3 ? `  +${r.hits.length - 3} more` : ''))
+          ]),
+          el('span', { class: 'event-actor' }, r.hits ? `${r.hits.length} hit${r.hits.length === 1 ? '' : 's'}` : '')
+        ]));
+      }
+    });
+  }
+
+  refresh();
+  ctx.onSpineEvent((e) => { if (e.detail.type && e.detail.type.startsWith('IMPORT_')) refresh(); });
   return root;
 }
