@@ -1,9 +1,10 @@
 // cockpit-routes-reachable — v1.3.0 (framework-coherence audit).
 //
-// Parses the ROUTES map in template/maddu/cockpit/cockpit.js and flags any
-// route whose backing event type(s) are strictly dead — defined in
-// EVENT_TYPES but never emitted/consumed anywhere in the framework source.
-// Such a route can never populate in any run (normal or explicit).
+// Reads the route ids from template/maddu/cockpit/cockpit-route-meta.js (the
+// ROUTE_META registry, split out of cockpit.js in v1.44.0) and flags any route
+// whose backing event type(s) are strictly dead — defined in EVENT_TYPES but
+// never emitted/consumed anywhere in the framework source. Such a route can
+// never populate in any run (normal or explicit).
 //
 // We deliberately do NOT flag routes that are merely "opt-in" (plans,
 // pipelines, loops, skillinjections, learning, wiki). Those populate once
@@ -50,23 +51,6 @@ async function walkSource(dir, out) {
   return out;
 }
 
-// Extract the route ids declared in the ROUTES object literal.
-function extractRouteIds(cockpitSrc) {
-  const start = cockpitSrc.indexOf('const ROUTES = {');
-  if (start < 0) return [];
-  // Find the matching close brace for the object literal.
-  let depth = 0, i = cockpitSrc.indexOf('{', start), end = -1;
-  for (; i < cockpitSrc.length; i++) {
-    const ch = cockpitSrc[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
-  }
-  if (end < 0) return [];
-  const body = cockpitSrc.slice(start, end);
-  // Each route is `id: { ... }` at the top level — match `\n  id:`.
-  return [...body.matchAll(/(?:^|\n)\s{2}([a-zA-Z][a-zA-Z0-9]*)\s*:\s*\{/g)].map((m) => m[1]);
-}
-
 // Map a route id to the EVENT_TYPE prefixes that are its sole backing source.
 // Only routes whose data comes EXCLUSIVELY from one event family are listed;
 // routes that read multiple families or projection JSON are reachable by
@@ -89,12 +73,15 @@ export default {
     const root = await findFrameworkRoot();
     if (!root) return { ok: true, message: 'cockpit.js not adjacent — consumer install (skipped)' };
 
-    const cockpitPath = join(root, 'template', 'maddu', 'cockpit', 'cockpit.js');
+    const routeMetaPath = join(root, 'template', 'maddu', 'cockpit', 'cockpit-route-meta.js');
     const spinePath = join(root, 'template', 'maddu', 'runtime', 'lib', 'spine.mjs');
-    const cockpitSrc = await readFile(cockpitPath, 'utf8');
-    const routeIds = extractRouteIds(cockpitSrc);
+    let routeIds = [];
+    try {
+      const ROUTE_META = (await import(pathToFileURL(routeMetaPath).href)).ROUTE_META || {};
+      routeIds = Object.keys(ROUTE_META);
+    } catch {}
     if (routeIds.length === 0) {
-      return { ok: false, message: 'could not parse ROUTES from cockpit.js', evidence: { cockpitPath } };
+      return { ok: false, message: 'could not load ROUTE_META from cockpit-route-meta.js', evidence: { routeMetaPath } };
     }
 
     let EVENT_TYPES = {};

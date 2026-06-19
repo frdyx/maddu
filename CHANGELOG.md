@@ -11,6 +11,20 @@ narrative summary.
 
 ---
 
+## [v1.44.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — route-metadata split
+
+Seventh slice, and the first **structural** one: it splits the route table so view modules can import route metadata without dragging in the whole render graph (the circular-import trap that blocks view extraction).
+
+- **`cockpit/cockpit-route-meta.js`** (new pure-data leaf) — `ROUTE_META`, the plain metadata half of the route table (title / nav group / rank / anchor / description / search keywords / framework-only flag) for all 42 routes. Imports nothing; pulls in no render functions.
+- **`cockpit/cockpit.js`** — now the composition root for routing: it owns a `RENDERERS` map of the (hoisted) render functions and rebuilds the full `ROUTES` registry by merging each render fn onto `ROUTE_META[id]`. `ROUTES[id]` keeps its exact shape and key order, so the router/rail/dock/palette are unchanged.
+- **`runtime/gates/builtin/cockpit-routes-reachable.mjs`** — updated to read route ids by importing `ROUTE_META` (more robust than the previous regex-parse of the `ROUTES` literal, which the split necessarily broke).
+- **`scripts/test/cockpit-route-meta.mjs`** (new fixture) — 8 assertions: 42 routes, every entry shaped, no `render` binding leaked into the data module, known invariants (anchors, frameworkOnly, keywords, descriptions).
+- Re-baselined the cockpit mass floor `7968 → 7918`.
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens** (every route's description still renders identically, proving the metadata transcription is exact), and **Gate A** boots + renders all 42 routes (proving every render binding still resolves).
+
+Verified: `maddu self-test` **65/65** (`token-wrapper-emission` green in isolation), `maddu audit` **14/0** (incl. the updated `cockpit-routes-reachable`), `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.43.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — small util leaves
 
 Sixth decomposition slice. A batch of small standalone helpers join the leaf.
