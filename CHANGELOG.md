@@ -11,6 +11,20 @@ narrative summary.
 
 ---
 
+## [v1.45.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — ctx seam + first view module
+
+Eighth slice. Introduces the **dependency-injection seam** and extracts the first **view module** through it — the mechanism that lets route renderers leave `cockpit.js` without circular imports.
+
+- **`cockpit/cockpit.js`** now builds a `ctx` object and threads it through the router: `renderRoute` calls `route.render(ctx)`. `ctx` carries the stateful shell helpers a view needs (currently `bindRefresh`, the spine-event refresh binder); it grows as more clusters are extracted. Inline views simply ignore the argument.
+- **`cockpit/cockpit-views-backbone.js`** (new view module) — the six v0.18 single-panel route renderers (`renderPipelinesRoute`, `renderCostRoute`, `renderAdvisorsRoute`, `renderSkillInjectionsRoute`, `renderModelRoutingRoute`, `renderTestStatusRoute`). Each imports only leaves (`cockpit-util`), route metadata (`cockpit-route-meta`), and card builders (`cockpit-backbone-cards`), and receives `bindRefresh` via `ctx` — it never reaches back into `cockpit.js`.
+- Trimmed five now-unused backbone-card imports from `cockpit.js` (the view module owns them now).
+- **`scripts/test/cockpit-views-backbone.mjs`** (new fixture) — 30 assertions: every view exported, returns a `.view` root with the right `<h2>`, mounts ≥1 panel, and registers its refresh via `ctx.bindRefresh`.
+- Re-baselined the cockpit mass floor `7918 → 7775`.
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens** (the views render the same DOM whether inline or extracted-with-ctx); **Gate A** boots + renders all 42 routes.
+
+Verified: `maddu self-test` **66/66** (`token-wrapper-emission` green in isolation), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.44.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — route-metadata split
 
 Seventh slice, and the first **structural** one: it splits the route table so view modules can import route metadata without dragging in the whole render graph (the circular-import trap that blocks view extraction).
