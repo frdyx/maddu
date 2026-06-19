@@ -69,6 +69,7 @@ function ok(name, cond, extra = '') {
 }
 
 ok('exports renderLearning', typeof m.renderLearning === 'function');
+ok('exports renderTeams', typeof m.renderTeams === 'function');
 
 let inspected = null;
 const ctx = { openInspector: (entity) => { inspected = entity; } };
@@ -91,6 +92,40 @@ if (rows.length) {
       inspected ? `kind=${inspected.kind} id=${inspected.id}` : 'not called');
   }
 }
+
+// ── renderTeams — lane card opens the Inspector via ctx.openInspector ──────
+let teamInspected = null;
+let focusCalled = false;
+const teamCtx = {
+  fetchLanes: async () => ({ catalog: { lanes: [{ id: 'harness', scope: 'maddu/', policy: { zones: ['a'], leaseSeconds: 60, handoffRule: 'auto' } }] } }),
+  fetchProjection: async () => ({
+    claims: [{ lane: 'harness', sessionId: 's1', focus: 'refactor' }],
+    sliceStops: [{ lane: 'harness', ts: '2026-01-01T00:00:00Z', summary: 'extracted teams' }],
+    activeSessions: [{ id: 's1', label: 'Claude' }],
+  }),
+  openInspector: (entity) => { teamInspected = entity; },
+  paletteFocus: () => null,
+  focusPanelByKeyword: () => { focusCalled = true; },
+};
+const teamRoot = m.renderTeams(teamCtx);
+ok('renderTeams → .view root', teamRoot.className === 'view');
+ok('renderTeams → <h2> "Teams"', teamRoot.children[0].tag === 'h2' && teamRoot.children[0].children[0].text === 'Teams');
+
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+
+const cards = findByClass(teamRoot, 'team-lane-card');
+ok('renders one lane card from canned data', cards.length === 1, `${cards.length} card(s)`);
+if (cards.length) {
+  const clicks = cards[0]._l.click || [];
+  ok('lane card has a click handler', clicks.length === 1);
+  if (clicks.length) {
+    clicks[0]();
+    ok('lane click invokes ctx.openInspector', teamInspected && teamInspected.kind === 'lane' && teamInspected.id === 'harness',
+      teamInspected ? `kind=${teamInspected.kind} id=${teamInspected.id}` : 'not called');
+  }
+}
+ok('no palette focus when paletteFocus() is null', focusCalled === false);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -14,7 +14,7 @@ import { ROUTE_META } from './cockpit-route-meta.js';
 import { renderPipelinesRoute, renderCostRoute, renderAdvisorsRoute, renderSkillInjectionsRoute, renderModelRoutingRoute, renderTestStatusRoute } from './cockpit-views-backbone.js';
 import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from './cockpit-views-reference.js';
 import { renderDocs } from './cockpit-views-docs.js';
-import { renderLearning } from './cockpit-views-inspect.js';
+import { renderLearning, renderTeams } from './cockpit-views-inspect.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1100,6 +1100,10 @@ const ctx = {
   bindRefresh: bindRouteRefresh,
   panelFocus,
   openInspector,
+  fetchLanes,
+  fetchProjection,
+  paletteFocus,
+  focusPanelByKeyword,
 };
 
 function renderRoute() {
@@ -6106,7 +6110,7 @@ function initComposer() {
 // ─── Slice δ — Learning route ───────────────────────────────────────────
 // laneFromFact → moved to cockpit-util.js (v1.43.0).
 
-// renderLearning � moved to cockpit-views-inspect.js (v1.49.0)  first
+// renderLearning � moved to cockpit-views-inspect.js (v1.49.0)  first
 // inspect-heavy slice; its row-click opens the Inspector via ctx.openInspector
 // (LEARNING_KIND_TONE moved with it as a private const).
 
@@ -6334,96 +6338,9 @@ function renderAgents() {
 }
 
 // ─── Slice ε — Teams (lane ownership map) ───────────────────────────────
-function renderTeams() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Teams'));
-  root.appendChild(el('p', {}, ROUTES.teams.description));
-
-  const mapBody = el('div', {});
-  mapBody.appendChild(loadingFor('grid', 'Building ownership map…'));
-  root.appendChild(panel('Lane ownership', 'lanes catalog × active claims × slice-stop frequency', mapBody));
-
-  (async () => {
-    const [lanes, proj] = await Promise.all([fetchLanes(), fetchProjection()]);
-    if (!lanes || !proj) {
-      mapBody.innerHTML = '';
-      mapBody.appendChild(placeholder('Error', 'Could not fetch lanes or projection.'));
-      return;
-    }
-    const catalog = (lanes.catalog && lanes.catalog.lanes) || [];
-    const claims = proj.claims || [];
-    const slices = proj.sliceStops || [];
-    const sessions = proj.activeSessions || [];
-    const sessById = Object.fromEntries(sessions.map((s) => [s.id, s]));
-
-    // Stats per lane
-    const sliceCountByLane = {};
-    const lastSliceByLane = {};
-    for (const s of slices) {
-      const l = s.lane || '(none)';
-      sliceCountByLane[l] = (sliceCountByLane[l] || 0) + 1;
-      const prev = lastSliceByLane[l];
-      if (!prev || prev.ts < s.ts) lastSliceByLane[l] = s;
-    }
-    const claimByLane = Object.fromEntries(claims.map((c) => [c.lane, c]));
-
-    mapBody.innerHTML = '';
-    if (!catalog.length) {
-      mapBody.appendChild(placeholder('No lanes', 'Add lanes via Settings or .maddu/lanes/catalog.json.'));
-      return;
-    }
-    const list = el('div', { class: 'team-map' });
-    for (const lane of catalog) {
-      const claim = claimByLane[lane.id];
-      const lastSlice = lastSliceByLane[lane.id];
-      const claimSess = claim ? sessById[claim.sessionId] : null;
-      const card = el('div', { class: 'team-lane-card' + (claim ? ' active' : ''), 'data-focus': lane.id }, [
-        el('div', { class: 'team-lane-head' }, [
-          el('span', { class: 'pill tone-accent' }, lane.id),
-          claim ? el('span', { class: 'pill tone-ok' }, 'held') : el('span', { class: 'pill tone-fg-3' }, 'free'),
-          el('span', { class: 'panel-aside' }, `${sliceCountByLane[lane.id] || 0} slice${(sliceCountByLane[lane.id] || 0) === 1 ? '' : 's'}`)
-        ]),
-        el('div', { class: 'team-lane-scope' }, lane.scope || '(no scope)'),
-        claim ? el('div', { class: 'team-lane-holder' }, [
-          el('span', { class: 'panel-aside' }, 'held by: '),
-          el('span', { class: 'mono' }, claimSess ? (claimSess.label || claim.sessionId) : claim.sessionId),
-          el('span', { class: 'panel-aside mono' }, `· ${claim.focus || '(no focus)'}`)
-        ]) : null,
-        lastSlice ? el('div', { class: 'team-lane-last panel-aside' }, [
-          el('span', {}, 'last slice: '),
-          el('span', { class: 'mono' }, formatTs ? formatTs(lastSlice.ts) : lastSlice.ts),
-          document.createTextNode(' · '),
-          document.createTextNode(lastSlice.summary || '')
-        ]) : null,
-        lane.policy ? el('div', { class: 'team-lane-policy panel-aside mono' },
-          `zones: ${(lane.policy.zones || []).join(', ') || 'n/a'} · lease ${lane.policy.leaseSeconds || 0}s · handoff ${lane.policy.handoffRule || 'n/a'}`
-        ) : null
-      ]);
-      card.addEventListener('click', () => {
-        if (typeof openInspector === 'function') {
-          openInspector({
-            kind: 'lane',
-            label: lane.id,
-            id: lane.id,
-            raw: { lane, claim, lastSlice },
-            evidence: [
-              { label: 'Scope', value: lane.scope },
-              { label: 'Held by', value: claim ? claim.sessionId : '(free)' },
-              { label: 'Last slice', value: lastSlice ? lastSlice.summary : '(none)' }
-            ],
-            related: []
-          });
-        }
-      });
-      list.appendChild(card);
-    }
-    mapBody.appendChild(list);
-    const f = paletteFocus();
-    if (f) focusPanelByKeyword(root, f);
-  })();
-
-  return root;
-}
+// renderTeams � moved to cockpit-views-inspect.js (v1.50.0)  inspect-heavy;
+// lane cards open the Inspector. Shell deps via ctx: fetchLanes/fetchProjection/
+// openInspector + paletteFocus/focusPanelByKeyword (deep-link focus).
 
 // ─── Comms settings panels (Telegram/Discord/Email) → moved to
 // ./cockpit-comms.js (v1.36.0). render*Panel are imported above.
