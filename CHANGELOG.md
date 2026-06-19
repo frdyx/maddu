@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.60.0] · 2026-06-19 · Cockpit decomposition — live cluster (operations + swarm)
+
+Fifteenth view-module slice — appends the next two read-mostly live views to `cockpit-views-live.js`.
+
+- **One new shared-read seam: `ctx.fetchMemory`.** `renderOperations` reads the hindsight-memory feed, a helper also called by the still-inline `renderWorkbench` — so, like `fetchProjection`/`fetchLanes` before it, it joins ctx (the helper stays defined in cockpit.js; both callers reach it through the seam).
+- **`renderOperations`** (receipt log, 7-day slice sparkline, hindsight memory, checkpoints) → `cockpit-views-live.js`. Stream-coupled (`SLICE_STOP` via `ctx.onSpineEvent`), registers palette panels via `ctx.panelFocus`, reads `ctx.fetchProjection`/`ctx.fetchMemory`, checkpoint create stamps `by: ctx.currentSession()`.
+- **`renderSwarm`** (worker/session distribution, lane roster) → same module. The cleanest move yet: a single static `Promise.all([ctx.fetchLanes(), ctx.fetchProjection()])` with no stream subscription, no composer.
+- The module's imports widened to pull `loadingFor`/`showToast` (util) and `sparkline`/`binByTime` (widgets) — all already-extracted leaves.
+- **`cockpit.js` 4742 → 4482** (−260 lines); still **14 modules** (`cockpit-views-live.js` now 726 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **38/0** — operations asserts the `ctx.panelFocus` panel registration, the `ctx.onSpineEvent` subscription with `SLICE_STOP` filtering, and the render-time `ctx.fetchProjection`/`ctx.fetchMemory` reads; swarm asserts its static `ctx.fetchLanes`/`ctx.fetchProjection` reads. Self-test full 73/73, audit 14/0.
+- **Still inline (live):** workbench, conductor, boss, queue, claims, dashboard, chats, approvals, events, orientation, gates, reviews. The composer-deep trio (workbench/conductor/boss) is last and needs a Codex consult.
+
 ## [v1.59.0] · 2026-06-19 · Cockpit decomposition — live cluster begins (mailbox + tasks + skills)
 
 Fourteenth view-module slice and the **first of the live cluster** — opens a new module, `cockpit-views-live.js`, with the three action-list views whose only shell couplings are already-proven ctx seams.

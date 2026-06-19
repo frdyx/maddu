@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1104,6 +1104,7 @@ const ctx = {
   openInspector,
   fetchLanes,
   fetchProjection,
+  fetchMemory,
   paletteFocus,
   focusPanelByKeyword,
   scopePill,
@@ -2964,272 +2965,11 @@ async function fetchLanes() {
 // (slice ledger entries, wiki body, learning facts).
 // loading / loadingFor → moved to cockpit-util.js (v1.39.0).
 
-function renderOperations() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Operations'));
-  root.appendChild(el('p', {}, ROUTES.operations.description));
+// renderOperations + renderSwarm � moved to cockpit-views-live.js (v1.60.0).
+// Operations: stream-coupled (SLICE_STOP via ctx.onSpineEvent), ctx.panelFocus
+// panels, ctx.fetchProjection/fetchMemory, checkpoint stamps ctx.currentSession().
+// Swarm: static read over ctx.fetchLanes + ctx.fetchProjection (no stream sub).
 
-  // v1.1.0 Phase 4 — receipt log feed (newest 50, all event types).
-  const receiptsMount = el('div', {});
-  receiptsMount.appendChild(loading('Reading receipt log…'));
-  root.appendChild(panel('Receipt log', 'GET /bridge/operations · derived from spine · last 50', receiptsMount));
-  fetch('/bridge/operations').then((r) => r.json()).then((d) => {
-    receiptsMount.innerHTML = '';
-    const receipts = (d && d.receipts) || [];
-    if (receipts.length === 0) {
-      receiptsMount.appendChild(placeholder('No receipts yet', 'Run any operational command (e.g. `maddu git status`) to populate.'));
-      return;
-    }
-    const table = el('table', { style: 'width:100%;border-collapse:collapse;font-family:var(--m-font-mono);font-size:12px;' });
-    const head = el('tr', {});
-    for (const h of ['ts', 'type', 'lane', 'summary']) {
-      head.appendChild(el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);font-weight:normal;' }, h));
-    }
-    table.appendChild(head);
-    for (const r of receipts.slice(0, 50)) {
-      const row = el('tr', {});
-      const ts = (r.ts || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z');
-      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, ts));
-      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:#6cf;' }, r.type));
-      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, r.lane || '—'));
-      row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, (r.summary || '').slice(0, 110)));
-      table.appendChild(row);
-    }
-    receiptsMount.appendChild(table);
-  }).catch((err) => { receiptsMount.innerHTML = ''; receiptsMount.appendChild(placeholder('Bridge unreachable', err.message)); });
-
-  const summaryMount = el('div', {});
-  summaryMount.appendChild(loading('Reading slice timeline…'));
-  root.appendChild(panelFocus('Activity', 'slice-stops + memory facts · last 7 days', summaryMount,
-    { id: 'activity', keywords: 'activity slice-stops memory facts 7-day timeline' }));
-
-  const slicesMount = el('div', {});
-  slicesMount.appendChild(loadingFor('table', 'Fetching slice-stop ledger…'));
-  root.appendChild(panelFocus('Slice ledger', 'GET /bridge/projection · SLICE_STOP events', slicesMount,
-    { id: 'slice-ledger', keywords: 'slice ledger SLICE_STOP events history' }));
-
-  const memMount = el('div', {});
-  memMount.appendChild(loadingFor('table', 'Fetching hindsight facts…'));
-  root.appendChild(panelFocus('Hindsight memory', 'GET /bridge/memory · facts derived from slice-stops', memMount,
-    { id: 'hindsight', keywords: 'hindsight memory facts learnings extraction' }));
-
-  const cpMount = el('div', {});
-  cpMount.appendChild(loading('Fetching checkpoints…'));
-  root.appendChild(panelFocus('Checkpoints', 'GET /bridge/checkpoints · git tags at maddu/checkpoint/<id>', cpMount,
-    { id: 'checkpoints', keywords: 'checkpoints git tags rollback restore' }));
-
-  function refresh() {
-    fetchProjection().then((proj) => {
-      slicesMount.innerHTML = '';
-      summaryMount.innerHTML = '';
-      if (!proj || !proj.sliceStops || proj.sliceStops.length === 0) {
-        slicesMount.appendChild(placeholder('Empty', 'Run `maddu slice-stop` to append the first entry.'));
-        summaryMount.appendChild(placeholder('No activity', 'Slice-stops will appear here as they happen.'));
-        return;
-      }
-
-      // ── Activity summary: 7-day sparkline + tile grid ─────────────
-      const slices = proj.sliceStops || [];
-      const bins = binByTime(slices, 28, 'ts', 7 * 24 * 60 * 60 * 1000); // 7 days, 6h buckets
-      const last24h = bins.slice(-4).reduce((s, x) => s + x, 0);
-      const wrap = el('div', { class: 'widget-stat' });
-      const numLine = el('div', { class: 'widget-stat-num' });
-      numLine.appendChild(el('span', { class: 'widget-stat-value' }, String(slices.length)));
-      numLine.appendChild(el('span', { class: 'widget-stat-trend' + (last24h > 0 ? ' up' : '') }, `+${last24h} in 24h`));
-      wrap.appendChild(numLine);
-      wrap.appendChild(el('div', { class: 'widget-stat-label' }, 'slice-stops over the last 7 days'));
-      wrap.appendChild(sparkline(bins, { tone: 'accent', width: 480, height: 56 }));
-      summaryMount.appendChild(wrap);
-
-      const list = el('div', {});
-      for (const s of proj.sliceStops.slice().reverse()) {
-        const row = el('div', { class: 'panel' }, [
-          el('div', { class: 'panel-head' }, [
-            el('span', { class: 'panel-title' }, `[${s.lane || '—'}]  ${s.summary}`),
-            el('span', { class: 'panel-aside' }, s.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
-          ]),
-          s.next && s.next.length
-            ? el('div', { class: 'view' }, [
-                el('div', { class: 'panel-title' }, 'NEXT'),
-                el('ul', { class: 'hard-rules' }, s.next.map((n) => el('li', {}, n)))
-              ])
-            : null
-        ]);
-        list.appendChild(row);
-      }
-      slicesMount.appendChild(list);
-    });
-
-    fetchMemory(50).then((m) => {
-      memMount.innerHTML = '';
-      if (!m || m.facts.length === 0) {
-        memMount.appendChild(placeholder('No facts yet', 'Slice-stops auto-populate this. Try `maddu slice-stop --learnings "A; B" --next "C"`.'));
-        return;
-      }
-      const list = el('div', {});
-      for (const f of m.facts.slice().reverse()) {
-        list.appendChild(el('div', { class: 'ledger-row' }, [
-          el('span', {}, f.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
-          el('span', { class: 'event-type t-' + (f.kind === 'rule' ? 'framework' : f.kind === 'constraint' ? 'approval' : f.kind === 'discovery' ? 'session' : f.kind === 'followup' ? 'approval' : f.kind === 'summary' ? 'slice' : '') }, f.kind),
-          el('span', {}, f.text),
-          el('span', { class: 'event-actor' }, f.tags.join(' '))
-        ]));
-      }
-      memMount.appendChild(list);
-    });
-
-    fetch('/bridge/checkpoints', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((d) => {
-      cpMount.innerHTML = '';
-      if (!d) { cpMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
-      if (!d.gitAvailable) { cpMount.appendChild(placeholder('No git work tree', 'Checkpoints require a git repo in the install root.')); return; }
-      const newBtn = el('button', { class: 'btn-allow' }, '+ checkpoint');
-      newBtn.addEventListener('click', async () => {
-        const title = prompt('Checkpoint title (optional):');
-        if (title === null) return;
-        await fetch('/bridge/checkpoints', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: title || null, by: composer.currentSession || null }) });
-        refresh();
-      });
-      cpMount.appendChild(el('div', { style: 'margin-bottom:8px;' }, [newBtn]));
-      if (d.checkpoints.length === 0) {
-        cpMount.appendChild(placeholder('No checkpoints', 'Click + to tag the current HEAD.'));
-        return;
-      }
-      const list = el('div', {});
-      for (const c of d.checkpoints) {
-        const row = el('div', { class: 'ledger-row' }, [
-          el('span', {}, c.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
-          el('span', { class: 'event-type t-slice' }, c.commit.slice(0, 8)),
-          el('span', {}, [
-            el('div', { style: 'color:var(--m-fg-0);' }, c.title),
-            el('div', { class: 'event-actor' }, `${c.lane ? 'lane:' + c.lane + '  ·  ' : ''}${c.branch ? 'branch:' + c.branch : ''}`)
-          ]),
-          (() => {
-            const wrap = el('span', { style: 'display:flex;gap:4px;' });
-            const rb = el('button', {}, 'Rollback');
-            rb.addEventListener('click', async () => {
-              const r = await fetch(`/bridge/checkpoints/${encodeURIComponent(c.id)}/rollback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-              const out = await r.json();
-              const lines = Object.entries(out.recovery || {}).map(([k, v]) => `${k}:\n  ${v.join('\n  ')}`).join('\n');
-              showToast(lines || 'no recovery commands', 'warn');
-            });
-            const rm = el('button', { class: 'btn-deny-hard' }, '×');
-            rm.addEventListener('click', async () => {
-              if (!confirm(`Remove checkpoint "${c.title}"?`)) return;
-              await fetch(`/bridge/checkpoints/${encodeURIComponent(c.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
-              refresh();
-            });
-            wrap.appendChild(rb); wrap.appendChild(rm);
-            return wrap;
-          })()
-        ]);
-        list.appendChild(row);
-      }
-      cpMount.appendChild(list);
-    });
-  }
-
-  refresh();
-  const handler = (e) => {
-    if (e.detail.type === 'SLICE_STOP') refresh();
-  };
-  stream.bus.addEventListener('event', handler);
-  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
-
-  return root;
-}
-
-function renderSwarm() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Swarm'));
-  root.appendChild(el('p', {}, ROUTES.swarm.description));
-
-  const summaryMount = el('div', {});
-  summaryMount.appendChild(loading('Reading projection…'));
-  root.appendChild(panel('Summary', 'workers + sessions distribution', summaryMount));
-
-  const lanesMount = el('div', {});
-  lanesMount.appendChild(loading('Fetching lane catalog…'));
-  root.appendChild(panel('Lane roster', 'GET /bridge/lanes', lanesMount));
-
-  Promise.all([fetchLanes(), fetchProjection()]).then(([lanes, proj]) => {
-    // ── Summary panel (donut + grid) ─────────────────────────────────
-    summaryMount.innerHTML = '';
-    if (proj) {
-      const ws = proj.workers || [];
-      const wCounts = { running: 0, stuck: 0, exited: 0, killed: 0 };
-      for (const w of ws) wCounts[w.status] = (wCounts[w.status] || 0) + 1;
-      const claimedLanes = (lanes?.claims || []).length;
-      const totalLanes = (lanes?.catalog?.lanes || []).length;
-      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
-      summary.appendChild(donut([
-        { label: 'running', value: wCounts.running, tone: 'ok' },
-        { label: 'stuck',   value: wCounts.stuck,   tone: 'danger' },
-        { label: 'exited',  value: wCounts.exited,  tone: 'neutral' },
-        { label: 'killed',  value: wCounts.killed,  tone: 'warn' }
-      ], { centerLabel: ws.length === 1 ? 'worker' : 'workers' }));
-      summary.appendChild(statusGrid([
-        { value: (proj.activeSessions || []).length, label: 'Active sessions', tone: 'accent' },
-        { value: wCounts.running,                    label: 'Running workers', tone: 'ok' },
-        { value: wCounts.stuck,                      label: 'Stuck workers',   tone: wCounts.stuck > 0 ? 'danger' : 'ok' },
-        { value: `${claimedLanes}/${totalLanes}`,    label: 'Lanes claimed',   tone: 'blue' }
-      ]));
-      summaryMount.appendChild(summary);
-    } else {
-      summaryMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
-    }
-
-    lanesMount.innerHTML = '';
-    if (!lanes) { lanesMount.appendChild(placeholder('Offline', 'Bridge not reachable.')); return; }
-    const claimed = new Map((lanes.claims || []).map((c) => [c.lane, c]));
-    const tbl = el('dl', { class: 'kv' });
-    for (const l of lanes.catalog.lanes) {
-      const c = claimed.get(l.id);
-      tbl.appendChild(el('dt', {}, l.id));
-      tbl.appendChild(el('dd', {}, c
-        ? `claimed by ${c.sessionId} · ${c.focus || l.scope}`
-        : l.scope));
-    }
-    lanesMount.appendChild(tbl);
-
-    if (proj && proj.activeSessions && proj.activeSessions.length) {
-      const sess = el('div', {});
-      for (const s of proj.activeSessions) {
-        const k = el('dl', { class: 'kv' }, [
-          el('dt', {}, 'role'),  el('dd', {}, s.role || '—'),
-          el('dt', {}, 'label'), el('dd', {}, s.label || '—'),
-          el('dt', {}, 'focus'), el('dd', {}, s.focus || '—'),
-          el('dt', {}, 'since'), el('dd', {}, s.registeredAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
-        ]);
-        sess.appendChild(panel(s.id, 'active session', k));
-      }
-      root.appendChild(panel('Active sessions', `${proj.activeSessions.length} live`, sess));
-    }
-
-    // Workers panel (Phase B5) — surface stuck workers prominently.
-    if (proj && proj.workers && proj.workers.length) {
-      const ws = proj.workers;
-      const wrap = el('div', {});
-      const order = ['stuck', 'running', 'exited', 'killed'];
-      for (const status of order) {
-        const list = ws.filter((w) => w.status === status);
-        if (!list.length) continue;
-        const ccls = { stuck: 't-approval', running: 't-lane', exited: 't-inbox', killed: 't-approval' }[status] || '';
-        for (const w of list) {
-          const ageStr = w.ageMs != null ? (w.ageMs < 1000 ? `${w.ageMs}ms` : w.ageMs < 60000 ? `${Math.floor(w.ageMs / 1000)}s` : `${Math.floor(w.ageMs / 60000)}m`) : '—';
-          wrap.appendChild(el('div', { class: 'ledger-row' }, [
-            el('span', { class: `event-type ${ccls}` }, status),
-            el('span', {}, w.id),
-            el('span', {}, w.command ? w.command.slice(0, 60) : '—'),
-            el('span', { class: 'event-actor' }, `age ${ageStr}  ${w.lane ? '· ' + w.lane : ''}  ${w.pid ? '· pid ' + w.pid : ''}`)
-          ]));
-        }
-      }
-      root.appendChild(panel(`Workers  (${ws.length})`, 'GET /bridge/workers · heartbeat threshold 15 s', wrap));
-    }
-  });
-
-  return root;
-}
 
 function renderChats() {
   const root = el('div', { class: 'view' });
@@ -3569,7 +3309,7 @@ function renderEvents() {
 // prepend / makeDecisionButton → moved to cockpit-event-rows.js (v1.41.0).
 
 // renderMailbox/renderTasks/renderSkills (+ private fetchMailbox/fetchMailboxCounts/
-// fetchTasks/fetchSkills/fetchSkill + taskCard) � moved to cockpit-views-live.js
+// fetchTasks/fetchSkills/fetchSkill + taskCard) � moved to cockpit-views-live.js
 // (v1.59.0)  first live-cluster slice. Stream-coupled (ctx.onSpineEvent:
 // MAILBOX_/TASK_/SKILL_), stamp by:/createdBy:/sessionId: via ctx.currentSession(),
 // honor ?focus= via ctx.paletteFocus/focusPanelByKeyword.
@@ -3593,7 +3333,7 @@ async function fetchSchedules() {
   try { const r = await fetch('/bridge/schedules', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
 }
 
-// renderSchedule + fetchMcp/renderMcp + fetchRuntimes/renderRuntimes � moved to
+// renderSchedule + fetchMcp/renderMcp + fetchRuntimes/renderRuntimes � moved to
 // cockpit-views-connect.js (v1.58.0)  the remaining connect infra views.
 // schedule is scope-aware (ctx.scopePill/scopeIsGlobal/rerender); all three are
 // stream-coupled (ctx.onSpineEvent) and stamp by:/sessionId: via ctx.currentSession().

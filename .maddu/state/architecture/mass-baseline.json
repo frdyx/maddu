@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "ts": "2026-06-19T11:24:42.178Z",
+  "ts": "2026-06-19T11:45:38.743Z",
   "maxLines": 1500,
   "files": {
-    "template/maddu/cockpit/cockpit.js": 4742
+    "template/maddu/cockpit/cockpit.js": 4482
   }
 }
