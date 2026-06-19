@@ -1,13 +1,14 @@
 // M�ddu cockpit  connect-cluster route views (settings + trust posture).
 //
-// Extracted from cockpit.js (v1.55.0) as the first slice of the "connect"
-// cluster. These two are the clean, stream-free connect views: renderTrust is a
-// pure-leaf read-only posture page (it keeps its own 15s setInterval refresh,
-// verbatim), and renderSettings registers command-palette sub-targets via
-// ctx.panelFocus and honors ?focus= via ctx.paletteFocus/ctx.focusPanelByKeyword.
-// The remaining connect views (auth/imports/schedule/mcp/runtimes) couple to the
-// event stream + composer and move with the live-cluster seam. The module imports
-// only leaves + route metadata + the already-extracted comms panels.
+// Extracted from cockpit.js across v1.55.0–v1.58.0 — the complete "connect"
+// cluster (settings, trust, auth, imports, schedule, mcp, runtimes). renderTrust
+// is a pure-leaf posture page (its own 15s setInterval, verbatim); renderSettings
+// registers command-palette sub-targets via ctx.panelFocus. The rest are stream-
+// coupled (AUTH_KEY_/IMPORT_/SCHEDULE_/MCP_/RUNTIME_+WORKER_) and subscribe through
+// ctx.onSpineEvent (route-local teardown); write actions stamp by:/sessionId: via
+// ctx.currentSession(); ?focus= is honored via ctx.paletteFocus/focusPanelByKeyword;
+// renderSchedule is scope-aware (ctx.scopePill/scopeIsGlobal/rerender). The module
+// imports only leaves + route metadata + the already-extracted comms panels.
 
 import { el, panel, placeholder, loading, formatUptime, showToast } from './cockpit-util.js';
 import { statusGrid, meter, donut } from './cockpit-widgets.js';
@@ -840,5 +841,482 @@ export function renderImports(ctx) {
 
   refresh();
   ctx.onSpineEvent((e) => { if (e.detail.type && e.detail.type.startsWith('IMPORT_')) refresh(); });
+  return root;
+}
+
+//    connect-cluster infra views (v1.58.0): schedule + mcp + runtimes   
+// The remaining three connect route views, extracted as mechanical ctx-swap
+// moves now that every seam they need exists. All three are stream-coupled
+// (SCHEDULE_/MCP_/RUNTIME_+WORKER_) via ctx.onSpineEvent and stamp `by:` /
+// `sessionId:` through ctx.currentSession(). renderSchedule is scope-aware
+// (ctx.scopePill + ctx.scopeIsGlobal + ctx.rerender); renderMcp/renderRuntimes
+// honor ?focus= via ctx.paletteFocus/ctx.focusPanelByKeyword. fetchMcp and
+// fetchRuntimes ride along as module-private fetch helpers.
+
+export function renderSchedule(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Schedule'));
+  root.appendChild(el('p', {}, ROUTE_META.schedule.description));
+
+  // Slice 4: scope pill (this workspace vs global). Hidden in legacy
+  // single-workspace mode. Global schedules live in
+  // ~/.config/maddu/global/schedules.ndjson and fan out to N workspaces.
+  const pill = ctx.scopePill('schedule', () => ctx.rerender());
+  if (pill) root.appendChild(pill);
+  const isGlobal = ctx.scopeIsGlobal('schedule');
+  const baseUrl = isGlobal ? '/bridge/_global/schedules' : '/bridge/schedules';
+
+  const inpTitle = el('input', { type: 'text', placeholder: 'title (e.g. Daily summary)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const inpNL = el('input', { type: 'text', placeholder: 'natural (e.g. every evening at 6pm)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const inpTargets = isGlobal
+    ? el('input', { type: 'text', placeholder: 'targets (comma; blank = all)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' })
+    : null;
+  const preview = el('span', { style: 'font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);min-width:160px;' }, '');
+  const createBtn = el('button', {}, isGlobal ? 'Create (global)' : 'Create');
+  const formChildren = [inpTitle, inpNL];
+  if (inpTargets) formChildren.push(inpTargets);
+  formChildren.push(preview, createBtn);
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;align-items:center;' }, formChildren);
+  root.appendChild(form);
+
+  // Live preview of NL→cron
+  let previewTimer = null;
+  inpNL.addEventListener('input', () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const text = inpNL.value.trim();
+      if (!text) { preview.textContent = ''; preview.style.color = 'var(--m-fg-3)'; return; }
+      try {
+        const r = await fetch(isGlobal ? '/bridge/_global/schedules/parse' : '/bridge/schedules/parse', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ natural: text, text })
+        });
+        const d = await r.json();
+        if (d.cron) { preview.textContent = `→ ${d.cron}`; preview.style.color = 'var(--m-signal)'; }
+        else        { preview.textContent = '↪ unparseable'; preview.style.color = 'var(--m-accent-warm)'; }
+      } catch { preview.textContent = ''; }
+    }, 200);
+  });
+
+  createBtn.addEventListener('click', async () => {
+    const title = inpTitle.value.trim();
+    const nat = inpNL.value.trim();
+    if (!title || !nat) return;
+    createBtn.disabled = true;
+    try {
+      const body = { title, natural: nat, by: ctx.currentSession() || null };
+      if (isGlobal && inpTargets) {
+        body.targets = inpTargets.value.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      const r = await fetch(baseUrl, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (r.ok) {
+        inpTitle.value = ''; inpNL.value = '';
+        if (inpTargets) inpTargets.value = '';
+        preview.textContent = ''; refresh();
+      } else { const d = await r.json().catch(() => ({})); showToast(`create failed: ${d.error || 'unknown'}`, 'err'); }
+    } finally { createBtn.disabled = false; }
+  });
+
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading schedules…'));
+  root.appendChild(panel('Summary', 'enabled · disabled · fire totals', summaryMount));
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  function refresh() {
+    mount.innerHTML = '';
+    summaryMount.innerHTML = '';
+    mount.appendChild(loading('Fetching schedules…'));
+    fetch(baseUrl, { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((d) => {
+      mount.innerHTML = '';
+      summaryMount.innerHTML = '';
+      if (!d || d.schedules.length === 0) {
+        mount.appendChild(placeholder('No schedules yet', 'Create one above, or via `maddu schedule create --natural "every hour" --title "ping"`.'));
+        summaryMount.appendChild(placeholder('No schedules', 'Create one to populate this summary.'));
+        return;
+      }
+
+      // Summary
+      const sch = d.schedules || [];
+      const enabled = sch.filter((s) => s.enabled).length;
+      const fired = sch.reduce((t, s) => t + (s.fireCount || 0), 0);
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'enabled',  value: enabled,            tone: 'ok' },
+        { label: 'disabled', value: sch.length - enabled, tone: 'neutral' }
+      ], { centerLabel: 'schedules' }));
+      summary.appendChild(statusGrid([
+        { value: sch.length, label: 'Schedules',        tone: 'accent' },
+        { value: enabled,    label: 'Enabled',          tone: 'ok' },
+        { value: fired,      label: 'Total fires',      tone: 'blue' },
+        { value: sch.reduce((m, s) => Math.max(m, s.fireCount || 0), 0), label: 'Top fire count', tone: 'blue' }
+      ]));
+      summaryMount.appendChild(summary);
+
+      for (const s of d.schedules) {
+        const enabled = s.enabled;
+        const card = el('div', { class: 'panel', style: enabled ? '' : 'opacity:0.55;' }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, s.title),
+            el('span', { class: 'panel-aside' }, `fired ${s.fireCount} time${s.fireCount === 1 ? '' : 's'}`)
+          ]),
+          el('dl', { class: 'kv' }, [
+            el('dt', {}, 'cron'),    el('dd', {}, s.cron),
+            s.natural ? el('dt', {}, 'natural') : null,
+            s.natural ? el('dd', {}, s.natural) : null,
+            el('dt', {}, 'action'),  el('dd', {}, `${s.action?.kind}: ${s.action?.value || '—'}`),
+            isGlobal ? el('dt', {}, 'targets') : null,
+            isGlobal ? el('dd', {}, (() => {
+              const wrap = el('span', {});
+              const ts = (s.targets && s.targets.length) ? s.targets : [];
+              if (!ts.length) {
+                wrap.appendChild(el('span', { class: 'workspace-badge mono' }, '(all workspaces)'));
+              } else {
+                for (const t of ts) wrap.appendChild(el('span', { class: 'workspace-badge mono', style: 'margin-right:4px;' }, t));
+              }
+              return wrap;
+            })()) : null,
+            el('dt', {}, 'last'),    el('dd', {}, s.lastRun ? s.lastRun.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'),
+            el('dt', {}, 'id'),      el('dd', {}, s.id)
+          ]),
+          (() => {
+            const actions = el('div', { style: 'display:flex;gap:6px;margin-top:8px;' });
+            const tog = el('button', {}, enabled ? 'Disable' : 'Enable');
+            tog.addEventListener('click', async () => {
+              tog.disabled = true;
+              await fetch(`${baseUrl}/${encodeURIComponent(s.id)}/${enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
+            rem.addEventListener('click', async () => {
+              if (!confirm(`Remove schedule "${s.title}"?`)) return;
+              await fetch(`${baseUrl}/${encodeURIComponent(s.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            actions.appendChild(tog); actions.appendChild(rem);
+            return actions;
+          })()
+        ]);
+        mount.appendChild(card);
+      }
+    });
+  }
+
+  refresh();
+  ctx.onSpineEvent((e) => { if (e.detail.type && e.detail.type.startsWith('SCHEDULE_')) refresh(); });
+  setTimeout(() => inpTitle.focus(), 0);
+  return root;
+}
+
+async function fetchMcp() {
+  try { const r = await fetch('/bridge/mcp', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+export function renderMcp(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'MCP Registry'));
+  root.appendChild(el('p', {}, ROUTE_META.mcp.description));
+
+  // Compact register form
+  const nname = el('input', { type: 'text', placeholder: 'name', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const ntr = el('select', { style: 'background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  for (const t of ['stdio', 'sse', 'http']) ntr.appendChild(el('option', { value: t }, t));
+  const ncmd = el('input', { type: 'text', placeholder: 'command (stdio) or url (sse/http)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nargs = el('input', { type: 'text', placeholder: 'args (comma, stdio only)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nlanes = el('input', { type: 'text', placeholder: 'lanes (comma, * = any)', style: 'width:140px;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nbtn = el('button', {}, 'Register');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;' }, [nname, ntr, ncmd, nargs, nlanes, nbtn]);
+  const allBtn = el('button', {}, 'Test all');
+  const tools = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;' }, [allBtn]);
+  root.appendChild(form);
+  root.appendChild(tools);
+
+  nbtn.addEventListener('click', async () => {
+    const name = nname.value.trim();
+    if (!name) return;
+    const transport = ntr.value;
+    const body = {
+      name,
+      transport,
+      enabled: true,
+      lanes: nlanes.value.split(',').map((x) => x.trim()).filter(Boolean).length
+        ? nlanes.value.split(',').map((x) => x.trim()).filter(Boolean)
+        : ['*'],
+      by: ctx.currentSession() || null
+    };
+    if (transport === 'stdio') {
+      body.stdio = {
+        command: ncmd.value.trim() || null,
+        args: nargs.value.split(',').map((x) => x.trim()).filter(Boolean),
+        env: []
+      };
+    } else if (transport === 'sse') {
+      body.sse = { url: ncmd.value.trim() || null };
+    } else if (transport === 'http') {
+      body.http = { url: ncmd.value.trim() || null };
+    }
+    nbtn.disabled = true;
+    try {
+      await fetch('/bridge/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      nname.value = ''; ncmd.value = ''; nargs.value = ''; nlanes.value = '';
+      refresh();
+    } finally { nbtn.disabled = false; }
+  });
+  allBtn.addEventListener('click', async () => {
+    allBtn.disabled = true; allBtn.textContent = 'Testing…';
+    try { await fetch('/bridge/mcp/test-all', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); refresh(); }
+    finally { allBtn.disabled = false; allBtn.textContent = 'Test all'; }
+  });
+
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading MCP registry…'));
+  root.appendChild(panel('Summary', 'transports · enabled · health', summaryMount));
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  function refresh() {
+    mount.innerHTML = '';
+    summaryMount.innerHTML = '';
+    mount.appendChild(loading('Fetching MCP registry…'));
+    fetchMcp().then((d) => {
+      mount.innerHTML = '';
+      summaryMount.innerHTML = '';
+      if (!d || d.mcp.length === 0) {
+        mount.appendChild(placeholder('No MCP servers registered', 'Register one above, or via `maddu mcp register`.'));
+        summaryMount.appendChild(placeholder('No MCP servers', 'Register one to populate this summary.'));
+        return;
+      }
+
+      // Summary
+      const mcp = d.mcp || [];
+      const enabled = mcp.filter((s) => s.enabled).length;
+      const transports = { stdio: 0, sse: 0, http: 0, other: 0 };
+      for (const s of mcp) (transports[s.transport] != null ? transports[s.transport]++ : transports.other++);
+      const health = d.health || {};
+      const ok = Object.values(health).filter((h) => h && h.ok).length;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'stdio', value: transports.stdio, tone: 'accent' },
+        { label: 'sse',   value: transports.sse,   tone: 'blue' },
+        { label: 'http',  value: transports.http,  tone: 'ok' },
+        { label: 'other', value: transports.other, tone: 'neutral' }
+      ], { centerLabel: 'servers' }));
+      summary.appendChild(statusGrid([
+        { value: mcp.length,           label: 'Registered',    tone: 'accent' },
+        { value: enabled,              label: 'Enabled',       tone: 'ok' },
+        { value: ok,                   label: 'Healthy',       tone: ok > 0 ? 'ok' : 'neutral' },
+        { value: mcp.length - enabled, label: 'Disabled',      tone: 'neutral' }
+      ]));
+      summaryMount.appendChild(summary);
+
+      for (const r of d.mcp) {
+        const h = (d.health || {})[r.name];
+        const enabled = r.enabled;
+        const status = h?.ok ? `<span class="signal live"></span>${h.status || h.note || 'ok'}` :
+                       h ? `<span class="signal"></span>${h.error || ('status ' + h.status)}` :
+                       `<span class="signal"></span>${enabled ? 'untested' : 'disabled'}`;
+        const detailLine = r.transport === 'stdio'
+          ? `${r.stdio?.command || '—'}  ${(r.stdio?.args || []).join(' ')}`
+          : `${r[r.transport]?.url || '—'}`;
+        const card = el('div', { class: 'panel', 'data-focus': r.name, style: enabled ? '' : 'opacity:0.55;' }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, r.displayName || r.name),
+            el('span', { class: 'panel-aside', html: status })
+          ]),
+          el('dl', { class: 'kv' }, [
+            el('dt', {}, 'name'),      el('dd', {}, r.name),
+            el('dt', {}, 'transport'), el('dd', {}, r.transport),
+            el('dt', {}, 'lanes'),     el('dd', {}, (r.lanes || ['*']).join(', ')),
+            el('dt', {}, r.transport === 'stdio' ? 'command' : 'url'), el('dd', {}, detailLine),
+            r.notes ? el('dt', {}, 'notes') : null,
+            r.notes ? el('dd', {}, r.notes) : null
+          ]),
+          (() => {
+            const actions = el('div', { style: 'display:flex;gap:6px;margin-top:8px;' });
+            const tog = el('button', {}, enabled ? 'Disable' : 'Enable');
+            tog.addEventListener('click', async () => {
+              tog.disabled = true;
+              await fetch(`/bridge/mcp/${encodeURIComponent(r.name)}/${enabled ? 'disable' : 'enable'}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const tst = el('button', { class: 'btn-allow' }, 'Test');
+            tst.addEventListener('click', async () => {
+              tst.disabled = true; tst.textContent = '…';
+              await fetch(`/bridge/mcp/${encodeURIComponent(r.name)}/test`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
+            rem.addEventListener('click', async () => {
+              if (!confirm(`Remove MCP server "${r.name}"?`)) return;
+              await fetch(`/bridge/mcp/${encodeURIComponent(r.name)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            actions.appendChild(tog); actions.appendChild(tst); actions.appendChild(rem);
+            return actions;
+          })()
+        ]);
+        mount.appendChild(card);
+      }
+      const f = ctx.paletteFocus();
+      if (f) ctx.focusPanelByKeyword(root, f);
+    });
+  }
+
+  refresh();
+  ctx.onSpineEvent((e) => { if (e.detail.type && e.detail.type.startsWith('MCP_')) refresh(); });
+  return root;
+}
+
+async function fetchRuntimes() {
+  try { const r = await fetch('/bridge/runtimes', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+export function renderRuntimes(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Runtimes'));
+  root.appendChild(el('p', {}, ROUTE_META.runtimes.description));
+
+  // Register form
+  const nname = el('input', { type: 'text', placeholder: 'name (e.g. claude-code)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nbin = el('input', { type: 'text', placeholder: 'binary', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nargs = el('input', { type: 'text', placeholder: 'args (comma)', style: 'flex:1;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const ndet = el('input', { type: 'text', placeholder: 'detect command (e.g. claude --version)', style: 'flex:2;background:var(--m-bg-2);color:var(--m-fg-0);border:1px solid var(--m-line);padding:6px 10px;font-family:var(--m-font-mono);font-size:12px;' });
+  const nbtn = el('button', {}, 'Register');
+  const form = el('div', { style: 'display:flex;gap:6px;margin-bottom:8px;' }, [nname, nbin, nargs, ndet, nbtn]);
+  const allBtn = el('button', {}, 'Detect all');
+  const tools = el('div', { style: 'display:flex;gap:6px;margin-bottom:12px;' }, [allBtn]);
+  root.appendChild(form);
+  root.appendChild(tools);
+
+  nbtn.addEventListener('click', async () => {
+    const name = nname.value.trim();
+    if (!name) return;
+    nbtn.disabled = true;
+    try {
+      await fetch('/bridge/runtimes', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          binary: nbin.value.trim() || null,
+          args: nargs.value.split(',').map((x) => x.trim()).filter(Boolean),
+          detect: { command: ndet.value.trim() || null, expectExit: 0 },
+          by: ctx.currentSession() || null
+        })
+      });
+      nname.value = ''; nbin.value = ''; nargs.value = ''; ndet.value = '';
+      refresh();
+    } finally { nbtn.disabled = false; }
+  });
+  allBtn.addEventListener('click', async () => {
+    allBtn.disabled = true; allBtn.textContent = 'Detecting…';
+    try { await fetch('/bridge/runtimes/detect-all', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); refresh(); }
+    finally { allBtn.disabled = false; allBtn.textContent = 'Detect all'; }
+  });
+
+  const summaryMount = el('div', {});
+  summaryMount.appendChild(loading('Reading runtime adapters…'));
+  root.appendChild(panel('Summary', 'detected · capabilities · spawn surface', summaryMount));
+
+  const mount = el('div', {});
+  root.appendChild(mount);
+
+  function refresh() {
+    mount.innerHTML = '';
+    summaryMount.innerHTML = '';
+    mount.appendChild(loading('Fetching runtimes…'));
+    fetchRuntimes().then((d) => {
+      mount.innerHTML = '';
+      summaryMount.innerHTML = '';
+      if (!d || d.runtimes.length === 0) {
+        mount.appendChild(placeholder('No runtimes registered', 'Register one above, or via `maddu runtime register --name … --binary …`.'));
+        summaryMount.appendChild(placeholder('No runtimes', 'Register one to populate this summary.'));
+        return;
+      }
+
+      // Summary
+      const rts = d.runtimes || [];
+      const health = d.health || {};
+      const detected = rts.filter((r) => health[r.name]?.ok).length;
+      const capMcp = rts.filter((r) => r.capabilities?.mcp).length;
+      const capTools = rts.filter((r) => r.capabilities?.tools).length;
+      const capStreaming = rts.filter((r) => r.capabilities?.streaming).length;
+      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
+      summary.appendChild(donut([
+        { label: 'detected',     value: detected,           tone: 'ok' },
+        { label: 'not detected', value: rts.length - detected, tone: 'neutral' }
+      ], { centerLabel: 'runtimes' }));
+      const bars = el('div', {});
+      bars.appendChild(meter(detected, rts.length, 'Detected on host', { tone: 'ok' }));
+      bars.appendChild(meter(capMcp, rts.length, 'MCP capable', { tone: 'blue' }));
+      bars.appendChild(meter(capTools, rts.length, 'Tools capable', { tone: 'accent' }));
+      bars.appendChild(meter(capStreaming, rts.length, 'Streaming capable', { tone: 'blue' }));
+      summary.appendChild(bars);
+      summaryMount.appendChild(summary);
+
+      for (const r of d.runtimes) {
+        const h = (d.health || {})[r.name];
+        const status = h?.ok ? `<span class="signal live"></span>${h.version || 'detected'}` :
+                       h ? `<span class="signal"></span>${h.error || 'exit ' + h.exitCode}` :
+                       `<span class="signal"></span>not detected`;
+        const card = el('div', { class: 'panel', 'data-focus': r.name }, [
+          el('div', { class: 'panel-head' }, [
+            el('span', { class: 'panel-title' }, r.displayName || r.name),
+            el('span', { class: 'panel-aside', html: status })
+          ]),
+          el('dl', { class: 'kv' }, [
+            el('dt', {}, 'name'),         el('dd', {}, r.name),
+            el('dt', {}, 'binary'),       el('dd', {}, r.binary || '—'),
+            el('dt', {}, 'args'),         el('dd', {}, (r.args || []).join(' ') || '—'),
+            el('dt', {}, 'protocol'),     el('dd', {}, r.protocol || '—'),
+            el('dt', {}, 'capabilities'), el('dd', {}, `mcp:${r.capabilities?.mcp ? 'yes' : 'no'}  tools:${r.capabilities?.tools ? 'yes' : 'no'}  streaming:${r.capabilities?.streaming ? 'yes' : 'no'}  approval:${r.capabilities?.approval || '—'}`),
+            el('dt', {}, 'detect'),       el('dd', {}, r.detect?.command || '—'),
+            r.notes ? el('dt', {}, 'notes') : null,
+            r.notes ? el('dd', {}, r.notes) : null
+          ]),
+          (() => {
+            const actions = el('div', { style: 'display:flex;gap:6px;margin-top:8px;' });
+            const det = el('button', {}, 'Detect');
+            det.addEventListener('click', async () => {
+              det.disabled = true; det.textContent = '…';
+              await fetch(`/bridge/runtimes/${encodeURIComponent(r.name)}/detect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            const spw = el('button', { class: 'btn-allow' }, 'Spawn');
+            spw.addEventListener('click', async () => {
+              spw.disabled = true; spw.textContent = '…';
+              try {
+                const rr = await fetch(`/bridge/runtimes/${encodeURIComponent(r.name)}/spawn`, {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ sessionId: ctx.currentSession() || null })
+                });
+                const o = await rr.json();
+                spw.textContent = o.ok ? `✓ ${o.workerId.slice(-12)}` : '✗';
+              } catch { spw.textContent = '✗'; }
+              setTimeout(() => { spw.disabled = false; spw.textContent = 'Spawn'; }, 2000);
+            });
+            const rem = el('button', { class: 'btn-deny-hard' }, 'Remove');
+            rem.addEventListener('click', async () => {
+              if (!confirm(`Remove runtime "${r.name}"?`)) return;
+              await fetch(`/bridge/runtimes/${encodeURIComponent(r.name)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+              refresh();
+            });
+            actions.appendChild(det); actions.appendChild(spw); actions.appendChild(rem);
+            return actions;
+          })()
+        ]);
+        mount.appendChild(card);
+      }
+      const f = ctx.paletteFocus();
+      if (f) ctx.focusPanelByKeyword(root, f);
+    });
+  }
+
+  refresh();
+  ctx.onSpineEvent((e) => { if (e.detail.type && (e.detail.type.startsWith('RUNTIME_') || e.detail.type.startsWith('WORKER_'))) refresh(); });
   return root;
 }
