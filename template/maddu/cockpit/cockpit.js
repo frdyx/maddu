@@ -14,7 +14,7 @@ import { ROUTE_META } from './cockpit-route-meta.js';
 import { renderPipelinesRoute, renderCostRoute, renderAdvisorsRoute, renderSkillInjectionsRoute, renderModelRoutingRoute, renderTestStatusRoute } from './cockpit-views-backbone.js';
 import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from './cockpit-views-reference.js';
 import { renderDocs } from './cockpit-views-docs.js';
-import { renderLearning, renderTeams, renderWorkflows, renderRoadmap } from './cockpit-views-inspect.js';
+import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents } from './cockpit-views-inspect.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1104,6 +1104,12 @@ const ctx = {
   fetchProjection,
   paletteFocus,
   focusPanelByKeyword,
+  scopePill,
+  scopedUrl,
+  // Narrow "re-render the current route" alias — scope-toggling views call this
+  // instead of holding a handle to the whole router. Wrapper form late-binds
+  // through the closure so it's safe even if renderRoute is ever reassigned.
+  rerender: () => renderRoute(),
 };
 
 function renderRoute() {
@@ -3241,7 +3247,7 @@ function renderChats() {
 // renderGoal → moved to cockpit-views-reference.js (v1.47.0); receives the
 // shell's panelFocus via ctx (self-registers a command-palette sub-target).
 
-// renderRoadmap � moved to cockpit-views-inspect.js (v1.52.0)  KPIs/cadence/
+// renderRoadmap � moved to cockpit-views-inspect.js (v1.52.0)  KPIs/cadence/
 // lane-mix charts (inline) + a slice index whose rows open the Inspector. Shell
 // deps via ctx: panelFocus, fetchProjection, openInspector (no ctx growth).
 
@@ -5965,98 +5971,10 @@ function initComposer() {
 // Inspector via ctx.openInspector (with an Open-route action).
 
 // ─── Slice ε — Agents (coworker profile grid) ───────────────────────────
-function renderAgents() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Agents'));
-  root.appendChild(el('p', {}, ROUTES.agents.description));
-
-  const pill = scopePill('agents', () => renderRoute());
-  if (pill) root.appendChild(pill);
-
-  const gridBody = el('div', {});
-  gridBody.appendChild(loadingFor('grid', 'Fetching active sessions…'));
-  root.appendChild(panel('Coworker grid', 'GET /bridge/projection · activeSessions × claims × slice-stops', gridBody));
-
-  (async () => {
-    const projResp = await fetch(scopedUrl('agents', '/bridge/projection'), { cache: 'no-store' });
-    const proj = projResp.ok ? await projResp.json() : null;
-    if (!proj) {
-      gridBody.innerHTML = '';
-      gridBody.appendChild(placeholder('Error', 'Could not fetch projection.'));
-      return;
-    }
-    const sessions = proj.activeSessions || [];
-    const claims = proj.claims || [];
-    const slices = proj.sliceStops || [];
-
-    // Build per-session score: 1 point per slice-stop, +1 per learning, +1 per held claim.
-    const score = new Map();
-    const lastSliceBy = new Map();
-    for (const s of slices) {
-      const sid = s.actor;
-      score.set(sid, (score.get(sid) || 0) + 1 + (s.learnings || []).length);
-      const prev = lastSliceBy.get(sid);
-      if (!prev || prev.ts < s.ts) lastSliceBy.set(sid, s);
-    }
-    for (const c of claims) score.set(c.sessionId, (score.get(c.sessionId) || 0) + 1);
-
-    gridBody.innerHTML = '';
-    if (!sessions.length) {
-      gridBody.appendChild(placeholder('No active sessions', 'Register a session with `maddu session register`.'));
-      return;
-    }
-
-    const grid = el('div', { class: 'agent-grid' });
-    for (const s of sessions) {
-      const held = claims.filter((c) => c.sessionId === s.id);
-      const lastSlice = lastSliceBy.get(s.id) || null;
-      const card = el('div', { class: 'agent-card', 'data-focus': s.id, tabindex: '0', role: 'button' }, [
-        el('div', { class: 'agent-card-head' }, [
-          el('span', { class: 'pill tone-ok' }, s.status || 'active'),
-          el('span', { class: 'agent-card-label' }, s.label || '(unlabeled)'),
-          el('span', { class: 'panel-aside mono' }, s.role || 'agent')
-        ]),
-        el('div', { class: 'agent-card-id mono' }, s.id),
-        el('div', { class: 'agent-card-focus' }, s.focus || '(no current focus)'),
-        el('div', { class: 'agent-card-stats' }, [
-          workspaceBadge(s),
-          el('span', { class: 'pill tone-accent' }, `score ${score.get(s.id) || 0}`),
-          el('span', { class: 'pill tone-blue' }, `${held.length} claim${held.length === 1 ? '' : 's'}`),
-          el('span', { class: 'panel-aside mono' }, `hb ${formatAge ? formatAge(s.lastHeartbeatAt) : (s.lastHeartbeatAt || 'n/a')}`)
-        ]),
-        held.length ? el('div', { class: 'agent-card-claims mono' }, held.map((c) => c.lane).join(' · ')) : null,
-        lastSlice ? el('div', { class: 'agent-card-last panel-aside' }, [
-          el('span', { class: 'mono' }, formatTs ? formatTs(lastSlice.ts) : lastSlice.ts),
-          document.createTextNode(' · '),
-          document.createTextNode(lastSlice.summary || '(no summary)')
-        ]) : null
-      ]);
-      card.addEventListener('click', () => {
-        if (typeof openInspector === 'function') {
-          openInspector({
-            kind: 'session',
-            label: s.label || s.id,
-            id: s.id,
-            raw: s,
-            evidence: [
-              { label: 'Role', value: s.role },
-              { label: 'Registered', value: s.registeredAt },
-              { label: 'Last heartbeat', value: s.lastHeartbeatAt },
-              { label: 'Claims held', value: held.map((c) => c.lane).join(', ') || '(none)' }
-            ],
-            related: held.map((c) => ({ kind: 'lane', id: c.lane, label: c.lane }))
-          });
-        }
-      });
-      grid.appendChild(card);
-    }
-    gridBody.appendChild(grid);
-    const f = paletteFocus();
-    if (f) focusPanelByKeyword(root, f);
-  })();
-
-  return root;
-}
+// renderAgents � moved to cockpit-views-inspect.js (v1.53.0)  coworker grid;
+// cards open the Inspector. Shell deps via ctx: scopePill/scopedUrl + rerender
+// (narrow router alias for scope-toggle re-render) + openInspector/paletteFocus/
+// focusPanelByKeyword.
 
 // ─── Slice ε — Teams (lane ownership map) ───────────────────────────────
 // renderTeams � moved to cockpit-views-inspect.js (v1.50.0)  inspect-heavy;

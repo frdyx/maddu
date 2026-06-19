@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.53.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Agents view (+ a narrow router-rerender seam)
+
+Eighth view-module slice; the fifth inspect-heavy view joins `cockpit-views-inspect.js`. This is the first scope-aware view extracted, so it introduces the seam for "scope toggle → re-render the route".
+
+- **`renderAgents`** (the coworker/session grid: activeSessions × claims × slice-stops, scored, each card opening in the Inspector) → `cockpit-views-inspect.js`.
+- **ctx seam grows to add `scopePill`, `scopedUrl`, and `rerender`.** Rather than handing the view module a handle to the whole router, the multi-workspace scope toggle re-renders the route through a **narrow `ctx.rerender = () => renderRoute()` alias** (a Codex-reviewed decision: a view should not hold the router; the wrapper form also late-binds so it can't go stale). `scopePill`/`scopedUrl` carry the workspace-scope state. The move is otherwise verbatim.
+- **`cockpit.js` 6651 → 6569** (−82 lines); still **12 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0 — the scope pill is null in the single-workspace harness and the rerender swap is DOM-inert), Playwright real-browser smoke (45/0). The interaction fixture `scripts/test/cockpit-views-inspect.mjs` now covers all five inspect views (32/0): it feeds a canned projection, builds the agent grid, **fires a card's click and asserts `ctx.openInspector` was invoked** with the `kind:'session'` descriptor, and asserts `ctx.rerender` is *not* called on initial render.
+
 ## [v1.52.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Roadmap view
 
 Seventh view-module slice; the fourth inspect-heavy view joins `cockpit-views-inspect.js`.

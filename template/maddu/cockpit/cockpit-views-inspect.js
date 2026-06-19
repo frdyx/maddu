@@ -10,7 +10,7 @@
 // ctx.openInspector(entity) — opens the shell's Inspector drawer for an entity
 // descriptor ({ kind, label, id, raw, evidence, related }). Owned by cockpit.js.
 
-import { el, panel, placeholder, loading, loadingFor, laneFromFact, formatTs, formatAge, showToast } from './cockpit-util.js';
+import { el, panel, placeholder, loading, loadingFor, laneFromFact, formatTs, formatAge, workspaceBadge, showToast } from './cockpit-util.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
 
 const LEARNING_KIND_TONE = {
@@ -539,6 +539,103 @@ export function renderRoadmap(ctx) {
       }
       indexMount.appendChild(list);
     }
+  })();
+
+  return root;
+}
+
+// renderAgents — coworker/session grid (activeSessions × claims × slice-stops);
+// each card opens in the Inspector. Multi-workspace scope toggle via ctx.scopePill
+// + ctx.scopedUrl, and a scope change re-renders the route through ctx.rerender()
+// (a narrow alias for the shell router — the view never holds the router itself).
+export function renderAgents(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Agents'));
+  root.appendChild(el('p', {}, ROUTE_META.agents.description));
+
+  const pill = ctx.scopePill('agents', () => ctx.rerender());
+  if (pill) root.appendChild(pill);
+
+  const gridBody = el('div', {});
+  gridBody.appendChild(loadingFor('grid', 'Fetching active sessions…'));
+  root.appendChild(panel('Coworker grid', 'GET /bridge/projection · activeSessions × claims × slice-stops', gridBody));
+
+  (async () => {
+    const projResp = await fetch(ctx.scopedUrl('agents', '/bridge/projection'), { cache: 'no-store' });
+    const proj = projResp.ok ? await projResp.json() : null;
+    if (!proj) {
+      gridBody.innerHTML = '';
+      gridBody.appendChild(placeholder('Error', 'Could not fetch projection.'));
+      return;
+    }
+    const sessions = proj.activeSessions || [];
+    const claims = proj.claims || [];
+    const slices = proj.sliceStops || [];
+
+    // Build per-session score: 1 point per slice-stop, +1 per learning, +1 per held claim.
+    const score = new Map();
+    const lastSliceBy = new Map();
+    for (const s of slices) {
+      const sid = s.actor;
+      score.set(sid, (score.get(sid) || 0) + 1 + (s.learnings || []).length);
+      const prev = lastSliceBy.get(sid);
+      if (!prev || prev.ts < s.ts) lastSliceBy.set(sid, s);
+    }
+    for (const c of claims) score.set(c.sessionId, (score.get(c.sessionId) || 0) + 1);
+
+    gridBody.innerHTML = '';
+    if (!sessions.length) {
+      gridBody.appendChild(placeholder('No active sessions', 'Register a session with `maddu session register`.'));
+      return;
+    }
+
+    const grid = el('div', { class: 'agent-grid' });
+    for (const s of sessions) {
+      const held = claims.filter((c) => c.sessionId === s.id);
+      const lastSlice = lastSliceBy.get(s.id) || null;
+      const card = el('div', { class: 'agent-card', 'data-focus': s.id, tabindex: '0', role: 'button' }, [
+        el('div', { class: 'agent-card-head' }, [
+          el('span', { class: 'pill tone-ok' }, s.status || 'active'),
+          el('span', { class: 'agent-card-label' }, s.label || '(unlabeled)'),
+          el('span', { class: 'panel-aside mono' }, s.role || 'agent')
+        ]),
+        el('div', { class: 'agent-card-id mono' }, s.id),
+        el('div', { class: 'agent-card-focus' }, s.focus || '(no current focus)'),
+        el('div', { class: 'agent-card-stats' }, [
+          workspaceBadge(s),
+          el('span', { class: 'pill tone-accent' }, `score ${score.get(s.id) || 0}`),
+          el('span', { class: 'pill tone-blue' }, `${held.length} claim${held.length === 1 ? '' : 's'}`),
+          el('span', { class: 'panel-aside mono' }, `hb ${formatAge ? formatAge(s.lastHeartbeatAt) : (s.lastHeartbeatAt || 'n/a')}`)
+        ]),
+        held.length ? el('div', { class: 'agent-card-claims mono' }, held.map((c) => c.lane).join(' · ')) : null,
+        lastSlice ? el('div', { class: 'agent-card-last panel-aside' }, [
+          el('span', { class: 'mono' }, formatTs ? formatTs(lastSlice.ts) : lastSlice.ts),
+          document.createTextNode(' · '),
+          document.createTextNode(lastSlice.summary || '(no summary)')
+        ]) : null
+      ]);
+      card.addEventListener('click', () => {
+        if (typeof ctx.openInspector === 'function') {
+          ctx.openInspector({
+            kind: 'session',
+            label: s.label || s.id,
+            id: s.id,
+            raw: s,
+            evidence: [
+              { label: 'Role', value: s.role },
+              { label: 'Registered', value: s.registeredAt },
+              { label: 'Last heartbeat', value: s.lastHeartbeatAt },
+              { label: 'Claims held', value: held.map((c) => c.lane).join(', ') || '(none)' }
+            ],
+            related: held.map((c) => ({ kind: 'lane', id: c.lane, label: c.lane }))
+          });
+        }
+      });
+      grid.appendChild(card);
+    }
+    gridBody.appendChild(grid);
+    const f = ctx.paletteFocus();
+    if (f) ctx.focusPanelByKeyword(root, f);
   })();
 
   return root;

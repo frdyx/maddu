@@ -58,9 +58,17 @@ const CANNED_LEARNING = {
   count: 1, byKind: { rule: 1 }, byLane: { harness: 1 },
   facts: [{ id: 'f1', kind: 'rule', text: 'always branch first', ts: '2026-01-01T00:00:00Z', tags: ['a', 'b'], source: { event: 'evt-1' } }],
 };
+const CANNED_PROJECTION = {
+  activeSessions: [{ id: 'sess-1', label: 'Claude', role: 'implementer', status: 'active', focus: 'refactor', lastHeartbeatAt: '2026-01-01T00:00:00Z', workspaceId: 'maddu' }],
+  claims: [{ sessionId: 'sess-1', lane: 'harness' }],
+  sliceStops: [{ actor: 'sess-1', ts: '2026-01-01T00:00:00Z', learnings: [], summary: 'extracted agents' }],
+};
 globalThis.fetch = (url) => {
   if (String(url).includes('/bridge/learning')) {
     return Promise.resolve({ ok: true, status: 200, json: async () => CANNED_LEARNING });
+  }
+  if (String(url).includes('/bridge/projection')) {
+    return Promise.resolve({ ok: true, status: 200, json: async () => CANNED_PROJECTION });
   }
   return new Promise(() => {});
 };
@@ -77,6 +85,7 @@ ok('exports renderLearning', typeof m.renderLearning === 'function');
 ok('exports renderTeams', typeof m.renderTeams === 'function');
 ok('exports renderWorkflows', typeof m.renderWorkflows === 'function');
 ok('exports renderRoadmap', typeof m.renderRoadmap === 'function');
+ok('exports renderAgents', typeof m.renderAgents === 'function');
 
 let inspected = null;
 const ctx = { openInspector: (entity) => { inspected = entity; } };
@@ -180,6 +189,37 @@ if (sliceRows.length) {
       rmInspected ? `kind=${rmInspected.kind} id=${rmInspected.id}` : 'not called');
   }
 }
+
+// ── renderAgents — coworker card opens Inspector; scope toggle → ctx.rerender ─
+let agInspected = null;
+let rerendered = false;
+const agCtx = {
+  scopePill: () => null, // single-workspace harness: pill is null
+  scopedUrl: (route, base) => base,
+  rerender: () => { rerendered = true; },
+  openInspector: (entity) => { agInspected = entity; },
+  paletteFocus: () => null,
+  focusPanelByKeyword: () => {},
+};
+const agRoot = m.renderAgents(agCtx);
+ok('renderAgents → .view root', agRoot.className === 'view');
+ok('renderAgents → <h2> "Agents"', agRoot.children[0].tag === 'h2' && agRoot.children[0].children[0].text === 'Agents');
+
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+
+const agCards = findByClass(agRoot, 'agent-card');
+ok('renders one agent card from canned projection', agCards.length === 1, `${agCards.length} card(s)`);
+if (agCards.length) {
+  const clicks = agCards[0]._l.click || [];
+  ok('agent card has a click handler', clicks.length === 1);
+  if (clicks.length) {
+    clicks[0]();
+    ok('agent card click invokes ctx.openInspector', agInspected && agInspected.kind === 'session' && agInspected.id === 'sess-1',
+      agInspected ? `kind=${agInspected.kind} id=${agInspected.id}` : 'not called');
+  }
+}
+ok('ctx.rerender not called on initial render', rerendered === false);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
