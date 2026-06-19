@@ -5,7 +5,7 @@ import { dirname, join, relative } from 'node:path';
 export const PROFILES = new Set(['smoke', 'quick', 'full']);
 export const SOURCE_ONLY_MESSAGE = 'maddu self-test is only available in the Maddu framework source checkout; use `maddu test` for project tests.';
 
-const QUICK_EXCLUDED = new Set(['run-all.mjs', 'stress-harness.mjs', 'upgrade-matrix.mjs']);
+const QUICK_EXCLUDED = new Set(['run-all.mjs', 'stress-harness.mjs', 'upgrade-matrix.mjs', 'cockpit-playwright.mjs']);
 const INTERNAL_SCRIPT_RE = /^_/;
 const MAX_OUTPUT_TAIL = 8000;
 
@@ -117,7 +117,7 @@ export async function buildSelfTestPlan(options = {}) {
   const scripts = await discoverScriptTasks(testDir);
   const smoke = smokeTasks(frameworkRoot);
   const focused = scripts.filter((t) => !QUICK_EXCLUDED.has(t.fileName));
-  const special = scripts.filter((t) => t.fileName === 'stress-harness.mjs' || t.fileName === 'upgrade-matrix.mjs');
+  const special = scripts.filter((t) => t.fileName === 'stress-harness.mjs' || t.fileName === 'upgrade-matrix.mjs' || t.fileName === 'cockpit-playwright.mjs');
   const base = profile === 'smoke' ? smoke
     : profile === 'quick' ? [...smoke, ...focused]
     : [...smoke, ...focused, ...special];
