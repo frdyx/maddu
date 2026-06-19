@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.52.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Roadmap view
+
+Seventh view-module slice; the fourth inspect-heavy view joins `cockpit-views-inspect.js`.
+
+- **`renderRoadmap`** (slice-stop KPIs, a 28-day closure-cadence bar, a lane-mix table, the approved slice-plan, and a slice index whose rows open in the Inspector) → `cockpit-views-inspect.js`. Its charts are built inline — no widget imports.
+- **No ctx growth** — all three shell deps (`panelFocus`, `fetchProjection`, `openInspector`) are already on the seam. Verbatim move (each shell ref → `ctx.<dep>`).
+- **`cockpit.js` 6810 → 6651** (−159 lines); still **12 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The interaction fixture `scripts/test/cockpit-views-inspect.mjs` now covers all four inspect views (25/0): it feeds a canned projection, builds the slice index, **fires a slice-index row's click and asserts `ctx.openInspector` was invoked** with the `kind:'slice-stop'` descriptor.
+
 ## [v1.51.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Workflows view
 
 Sixth view-module slice; the third inspect-heavy view joins `cockpit-views-inspect.js`.

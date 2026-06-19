@@ -10,7 +10,7 @@
 // ctx.openInspector(entity) — opens the shell's Inspector drawer for an entity
 // descriptor ({ kind, label, id, raw, evidence, related }). Owned by cockpit.js.
 
-import { el, panel, placeholder, loading, loadingFor, laneFromFact, formatTs, showToast } from './cockpit-util.js';
+import { el, panel, placeholder, loading, loadingFor, laneFromFact, formatTs, formatAge, showToast } from './cockpit-util.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
 
 const LEARNING_KIND_TONE = {
@@ -373,6 +373,173 @@ export function renderWorkflows(ctx) {
     ]));
   }
   root.appendChild(panel('Legend', 'every node maps to a route', legend));
+
+  return root;
+}
+
+// renderRoadmap — slice-stop KPIs, 28-day closure cadence, lane mix, and a
+// slice index whose rows open in the Inspector. Charts are built inline (no
+// widget deps). Shell deps via ctx: panelFocus (palette sub-targets),
+// fetchProjection (spine projection), openInspector (slice-index row click).
+export function renderRoadmap(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Roadmap'));
+  root.appendChild(el('p', {}, ROUTE_META.roadmap.description));
+
+  const kpiMount = el('div', {});
+  kpiMount.appendChild(loadingFor('kpi', 'Reading slice timeline…'));
+  root.appendChild(ctx.panelFocus('Roadmap KPIs', 'derived from spine SLICE_STOPs', kpiMount,
+    { id: 'kpis', keywords: 'kpi roadmap total last lanes age metric' }));
+
+  const cadenceMount = el('div', {});
+  cadenceMount.appendChild(loading('Charting closure cadence…'));
+  root.appendChild(ctx.panelFocus('Slice closure cadence', 'last 28 days · 1 bar = 1 day', cadenceMount,
+    { id: 'cadence', keywords: 'cadence closure 28-day bar chart frequency' }));
+
+  const mixMount = el('div', {});
+  mixMount.appendChild(loading('Computing lane mix…'));
+  root.appendChild(ctx.panelFocus('Status & lane mix', 'sessions × lanes', mixMount,
+    { id: 'mix', keywords: 'mix lanes status distribution sessions' }));
+
+  const indexMount = el('div', {});
+  indexMount.appendChild(loadingFor('table', 'Reading slice index…'));
+  root.appendChild(ctx.panelFocus('Slice index', 'every slice-stop · click to open in Inspector', indexMount,
+    { id: 'slice-index', keywords: 'slice index history list ledger every-stop' }));
+
+  const slicesPlan = [
+    ['v0.4.0 · Slice α', 'Conductor + Inspector'],
+    ['v0.5.0 · Slice β', 'Queue Board + Claim Map'],
+    ['v0.6.0 · Slice γ', 'BOSS/Enforcer duality'],
+    ['v0.7.0 · Slice δ', 'Learning Memory + Wiki Updater'],
+    ['v0.8.0 · Slice ε', 'Workflows + Roadmap depth + Agents/Teams']
+  ];
+  const planList = el('div', { class: 'roadmap-plan' });
+  for (const [tag, body] of slicesPlan) {
+    planList.appendChild(el('div', { class: 'roadmap-plan-row' }, [
+      el('span', { class: 'pill tone-accent' }, tag),
+      el('span', {}, body)
+    ]));
+  }
+  root.appendChild(ctx.panelFocus('Slice plan', 'approved depth-upgrade plan', planList,
+    { id: 'plan', keywords: 'plan slices alpha beta gamma delta epsilon zeta eta versions' }));
+
+  (async () => {
+    const proj = await ctx.fetchProjection();
+    if (!proj) {
+      kpiMount.innerHTML = '';
+      kpiMount.appendChild(placeholder('Error', 'Could not fetch projection.'));
+      return;
+    }
+    const slices = proj.sliceStops || [];
+    const total = slices.length;
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const last7 = slices.filter((s) => now - new Date(s.ts).getTime() < 7 * day).length;
+    const last24 = slices.filter((s) => now - new Date(s.ts).getTime() < day).length;
+    const lanes = new Set(slices.map((s) => s.lane).filter(Boolean));
+    const lastSlice = slices.length ? slices[slices.length - 1] : null;
+
+    kpiMount.innerHTML = '';
+    const tiles = el('div', { class: 'kpi-strip' });
+    tiles.appendChild(el('div', { class: 'kpi-tile' }, [
+      el('div', { class: 'kpi-num' }, String(total)),
+      el('div', { class: 'kpi-lbl' }, 'slice-stops total')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile tone-accent' }, [
+      el('div', { class: 'kpi-num' }, String(last7)),
+      el('div', { class: 'kpi-lbl' }, 'last 7 days')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile tone-ok' }, [
+      el('div', { class: 'kpi-num' }, String(last24)),
+      el('div', { class: 'kpi-lbl' }, 'last 24h')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile tone-blue' }, [
+      el('div', { class: 'kpi-num' }, String(lanes.size)),
+      el('div', { class: 'kpi-lbl' }, 'lanes touched')
+    ]));
+    tiles.appendChild(el('div', { class: 'kpi-tile' }, [
+      el('div', { class: 'kpi-num mono' }, lastSlice ? (formatAge ? formatAge(lastSlice.ts) : lastSlice.ts) : 'n/a'),
+      el('div', { class: 'kpi-lbl' }, 'since last slice')
+    ]));
+    kpiMount.appendChild(tiles);
+
+    // Cadence: 28-day bar
+    cadenceMount.innerHTML = '';
+    const bins = new Array(28).fill(0);
+    for (const s of slices) {
+      const age = Math.floor((now - new Date(s.ts).getTime()) / day);
+      if (age >= 0 && age < 28) bins[27 - age]++;
+    }
+    const max = Math.max(1, ...bins);
+    const bar = el('div', { class: 'cadence-bar' });
+    for (const v of bins) {
+      const h = Math.round((v / max) * 100);
+      bar.appendChild(el('div', { class: 'cadence-cell', style: `height:${h}%` }, [
+        el('span', { class: 'cadence-cell-fill', style: `height:${h}%` })
+      ]));
+    }
+    cadenceMount.appendChild(bar);
+
+    // Lane mix table
+    mixMount.innerHTML = '';
+    const byLane = {};
+    for (const s of slices) {
+      const l = s.lane || '(none)';
+      byLane[l] = (byLane[l] || 0) + 1;
+    }
+    const mixTable = el('div', { class: 'lane-mix' });
+    const sortedLanes = Object.entries(byLane).sort((a, b) => b[1] - a[1]);
+    if (!sortedLanes.length) {
+      mixMount.appendChild(placeholder('No data', 'No slice-stops yet.'));
+    } else {
+      const maxN = sortedLanes[0][1];
+      for (const [lane, n] of sortedLanes) {
+        mixTable.appendChild(el('div', { class: 'lane-mix-row' }, [
+          el('span', { class: 'lane-mix-name mono' }, lane),
+          el('span', { class: 'lane-mix-bar' }, [
+            el('span', { class: 'lane-mix-fill', style: `width:${Math.round((n / maxN) * 100)}%` })
+          ]),
+          el('span', { class: 'lane-mix-num mono' }, String(n))
+        ]));
+      }
+      mixMount.appendChild(mixTable);
+    }
+
+    // Slice index
+    indexMount.innerHTML = '';
+    if (!slices.length) {
+      indexMount.appendChild(placeholder('Empty', 'No slice-stops yet.'));
+    } else {
+      const list = el('div', { class: 'slice-index' });
+      const sorted = [...slices].sort((a, b) => (a.ts < b.ts ? 1 : -1));
+      for (const s of sorted) {
+        const row = el('div', { class: 'slice-index-row', tabindex: '0', role: 'button' }, [
+          el('span', { class: 'mono panel-aside' }, formatTs ? formatTs(s.ts) : s.ts),
+          el('span', { class: 'pill tone-accent' }, s.lane || '(no lane)'),
+          el('span', {}, s.summary || s.id),
+          el('span', { class: 'panel-aside mono' }, `${(s.learnings || []).length}L · ${(s.gates || []).length}G`)
+        ]);
+        row.addEventListener('click', () => {
+          if (typeof ctx.openInspector === 'function') {
+            ctx.openInspector({
+              kind: 'slice-stop',
+              label: s.summary || s.id,
+              id: s.id,
+              raw: s,
+              evidence: [
+                { label: 'Event id', value: s.id },
+                { label: 'Lane', value: s.lane || '(none)' },
+                { label: 'Actor', value: s.actor }
+              ],
+              related: []
+            });
+          }
+        });
+        list.appendChild(row);
+      }
+      indexMount.appendChild(list);
+    }
+  })();
 
   return root;
 }
