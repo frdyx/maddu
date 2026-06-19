@@ -81,6 +81,28 @@ export function formatUptime(ms) {
   return d + 'd ' + (h % 24) + 'h';
 }
 
+// errorState(title, detail) — placeholder's error variant (⨯ glyph). Currently
+// unreferenced by cockpit.js but kept beside placeholder for reuse.
+export function errorState(title, detail) {
+  return el('div', { class: 'empty-state error' }, [
+    el('div', { class: 'empty-state-glyph', 'aria-hidden': 'true' }, '⨯'),
+    el('div', { class: 'empty-state-title' }, title),
+    el('div', { class: 'empty-state-hint' }, detail || '')
+  ]);
+}
+
+// workspaceBadge(row) — a small mono badge naming a row's origin workspace
+// (used in "all workspaces" mode). null when the row carries no workspace_id.
+export function workspaceBadge(row) {
+  if (!row || !row.workspace_id) return null;
+  return el('span', { class: 'workspace-badge mono', title: row.workspace_id }, row.workspace_label || row.workspace_id);
+}
+
+// laneFromFact(f) — read a memory fact's source lane, or null.
+export function laneFromFact(f) {
+  return (f && f.source && f.source.lane) || null;
+}
+
 // formatAge — humanize a millisecond age as the largest single unit (s/m/h/d).
 // Companion to formatUptime; used by heartbeat/recency labels across views.
 export function formatAge(ms) {
@@ -191,6 +213,31 @@ export function loadingFor(kind, text) {
     }
     default:
       return loading(text);
+  }
+}
+
+// copyToClipboardWithToast — copy any string to the clipboard with a single-shot
+// toast. Falls back to a hidden textarea for environments without the Clipboard
+// API (older browsers, file://-hosted contexts). Returns a Promise.
+export async function copyToClipboardWithToast(text, kind = 'path') {
+  if (!text) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    showToast(`${kind} copied`, 'ok');
+  } catch (err) {
+    showToast(`copy failed: ${err.message}`, 'err');
   }
 }
 

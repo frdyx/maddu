@@ -4,7 +4,7 @@
 // Pure leaf utilities (DOM builder + formatters) live in a sibling module —
 // the first slice of decomposing this file. Browser ES module import; the
 // bridge serves cockpit-util.js as application/javascript.
-import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, formatAge, ageTone, formatTs, loading, loadingFor, showToast } from './cockpit-util.js';
+import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, formatAge, ageTone, formatTs, loading, loadingFor, showToast, copyToClipboardWithToast, workspaceBadge, laneFromFact } from './cockpit-util.js';
 import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './cockpit-widgets.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 import { renderAdvisorsCard, renderSkillInjectionsCard, renderModelRoutingRuntimes, renderModelRoutingLanes, renderModelRoutingPipelines, renderTestStatusCard, renderPipelinesCard, renderCostCard, renderSlashCheatsheet } from './cockpit-backbone-cards.js';
@@ -250,30 +250,7 @@ async function fetchBridgeStatus() {
 // shows. Operator cue: an ellipsis on the left means "more path above this".
 // truncatePathFromLeft / compactPath → moved to cockpit-util.js (v1.24.0).
 
-// v1.2.2 — copy any string to the clipboard with a single-shot toast.
-// Falls back to a hidden textarea for environments without the Clipboard API
-// (older browsers, file://-hosted contexts). Returns a Promise.
-async function copyToClipboardWithToast(text, kind = 'path') {
-  if (!text) return;
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-    if (typeof showToast === 'function') showToast(`${kind} copied`, 'ok');
-  } catch (err) {
-    if (typeof showToast === 'function') showToast(`copy failed: ${err.message}`, 'err');
-  }
-}
+// copyToClipboardWithToast → moved to cockpit-util.js (v1.43.0).
 
 // ─── v1.2.3 — Entity drawer (reusable right-side detail panel) ─────────
 //
@@ -905,10 +882,7 @@ function scopePill(route, onChange) {
   pill.appendChild(mkBtn('all', 'All workspaces'));
   return pill;
 }
-function workspaceBadge(row) {
-  if (!row || !row.workspace_id) return null;
-  return el('span', { class: 'workspace-badge mono', title: row.workspace_id }, row.workspace_label || row.workspace_id);
-}
+// workspaceBadge → moved to cockpit-util.js (v1.43.0).
 
 async function renderWorkspaceSwitcher() {
   const host = document.getElementById('rail-workspace');
@@ -1573,13 +1547,7 @@ function loadManifest() {
 function allSubTargets() {
   return Array.from(SUB_REGISTRY.values());
 }
-function errorState(title, detail) {
-  return el('div', { class: 'empty-state error' }, [
-    el('div', { class: 'empty-state-glyph', 'aria-hidden': 'true' }, '⨯'),
-    el('div', { class: 'empty-state-title' }, title),
-    el('div', { class: 'empty-state-hint' }, detail || '')
-  ]);
-}
+// errorState → moved to cockpit-util.js (v1.43.0).
 
 // ─── Widget kit → moved to ./cockpit-widgets.js (v1.35.0). statusGrid / bar /
 // segBar / donut / sparkline / meter / binByTime are imported above.
@@ -6700,9 +6668,7 @@ const LEARNING_KIND_TONE = {
   summary:    'accent'
 };
 
-function laneFromFact(f) {
-  return (f && f.source && f.source.lane) || null;
-}
+// laneFromFact → moved to cockpit-util.js (v1.43.0).
 
 function renderLearning() {
   const root = el('div', { class: 'view' });

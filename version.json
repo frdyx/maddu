@@ -1,5 +1,5 @@
 {
-  "version": "1.42.0",
-  "phase": "cockpit-decomposition-markdown",
+  "version": "1.43.0",
+  "phase": "cockpit-decomposition-util-helpers",
   "released": "2026-06-19"
 }
