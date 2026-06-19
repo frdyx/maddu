@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.56.0] · 2026-06-19 · Cockpit decomposition — the stream-subscription seam (+ Auth view)
+
+Eleventh view-module slice, and the structural one that unblocks every remaining view: it introduces the **event-stream subscription seam** and proves it by extracting `renderAuth`.
+
+- **New `ctx.onSpineEvent(handler)` seam.** Every view that reacts to live spine events did so by reaching into the shell's `stream.bus` (an `EventTarget`) and hand-wiring a `routechange` teardown on `els.view`. `ctx.onSpineEvent` is the single injected primitive: it subscribes the handler to the stream and auto-removes it on route change — filtering stays the caller's job (`if (!e.detail.type?.startsWith('X_')) return;`). It includes a `torn`-flag guard (Codex-reviewed) that closes the race where a handler subscribed from an async callback resolving *after* the route already changed would otherwise leak until the next navigation. `bindRefresh` is left untouched.
+- **`renderAuth`** (provider keys, rate-limit state, per-provider summary) → `cockpit-views-connect.js`, with its private `fetchAuth`/`fetchAuthProvider`. Its `AUTH_KEY_*`-filtered subscription now goes through `ctx.onSpineEvent`; the move is otherwise verbatim.
+- **`cockpit.js` 5887 → 5759** (−128 lines); the cockpit remains **13 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0 — the subscription isn't rendered), Playwright real-browser smoke (45/0). The connect fixture `scripts/test/cockpit-views-connect.mjs` (16/0) now drives the seam end-to-end: it captures the handler renderAuth registers via `ctx.onSpineEvent`, fires a non-`AUTH_KEY_` event (asserts **no** refetch — the filter holds) and an `AUTH_KEY_ADDED` event (asserts a refetch — refresh re-ran). Quick self-test 69/69.
+- **Why it matters:** the remaining connect views (imports/schedule/mcp/runtimes) and the entire live cluster all subscribe to the stream; they can now move as mechanical `ctx.onSpineEvent` swaps. (The composer seam is the one remaining structural piece, for the views that also drive the slash-command bar.)
+
 ## [v1.55.0] · 2026-06-19 · Cockpit decomposition — connect cluster begins (Settings + Trust)
 
 Tenth view-module slice; opens the **connect** cluster with its two stream-free views in a new `cockpit-views-connect.js`. (The remaining connect views — auth/imports/schedule/mcp/runtimes — couple to the event stream + composer and will move with the live-cluster seam.)
