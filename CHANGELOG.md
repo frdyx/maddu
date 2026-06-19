@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.43.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — small util leaves
+
+Sixth decomposition slice. A batch of small standalone helpers join the leaf.
+
+- **`cockpit/cockpit-util.js`** gains `copyToClipboardWithToast` (clipboard copy + toast, with textarea fallback), `workspaceBadge` (origin-workspace badge), `laneFromFact` (memory-fact lane accessor), and `errorState` (placeholder's error variant). All pure leaves; `cockpit.js` imports the three referenced ones back. `errorState` was unreferenced — relocated beside `placeholder` and not imported back.
+- **`scripts/test/cockpit-util.mjs`** — +8 assertions (errorState class, workspaceBadge null/label, laneFromFact, clipboard write + success toast).
+- Re-baselined the cockpit mass floor `8002 → 7968`.
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens**; **Gate A** boots + renders all 42 routes.
+
+Verified: `maddu self-test` **64/64** (`token-wrapper-emission` green in isolation), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.42.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — markdown leaf
 
 Fifth decomposition slice. The Docs route's markdown renderer moves out.

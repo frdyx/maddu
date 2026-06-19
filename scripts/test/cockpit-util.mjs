@@ -29,8 +29,15 @@ globalThis.document = {
   createTextNode(text) { return { text }; },
   getElementById(id) { return id === 'toast-region' ? toastRegion : null; },
 };
+// navigator stub for copyToClipboardWithToast's preferred (Clipboard API) path.
+// (navigator is getter-only on globalThis in Node, so define it.)
+let _clipboardWrites = [];
+Object.defineProperty(globalThis, 'navigator', {
+  value: { clipboard: { writeText: async (t) => { _clipboardWrites.push(t); } } },
+  configurable: true, writable: true,
+});
 
-const { el, panel, placeholder, formatUptime, formatAge, ageTone, formatTs, compactPath, truncatePathFromLeft, loading, loadingFor, showToast } =
+const { el, panel, placeholder, formatUptime, formatAge, ageTone, formatTs, compactPath, truncatePathFromLeft, loading, loadingFor, showToast, errorState, workspaceBadge, laneFromFact, copyToClipboardWithToast } =
   await import('../../template/maddu/cockpit/cockpit-util.mjs').catch(() =>
     import('../../template/maddu/cockpit/cockpit-util.js'));
 
@@ -93,6 +100,26 @@ ok('panel head holds title', p.children[0].children[0].children[0].text === 'Tit
 
 const empty = placeholder('Nothing', 'soon');
 ok('placeholder is an empty-state', empty.className === 'empty-state');
+
+// errorState — placeholder's error variant
+ok('errorState → .empty-state.error', errorState('Boom', 'why').className === 'empty-state error');
+
+// workspaceBadge — null without workspace_id, badge span otherwise
+ok('workspaceBadge null without workspace_id', workspaceBadge({}) === null);
+const wb = workspaceBadge({ workspace_id: 'ws1', workspace_label: 'WS One' });
+ok('workspaceBadge → .workspace-badge span', wb.tag === 'span' && wb.className === 'workspace-badge mono');
+ok('workspaceBadge uses label text', wb.children[0].text === 'WS One');
+
+// laneFromFact — reads source.lane
+ok('laneFromFact reads source.lane', laneFromFact({ source: { lane: 'harness' } }) === 'harness');
+ok('laneFromFact null when absent', laneFromFact({}) === null);
+
+// copyToClipboardWithToast — Clipboard API path + success toast
+toastRegion.children = [];
+_clipboardWrites = [];
+await copyToClipboardWithToast('/the/path', 'Path');
+ok('copyToClipboard writes via Clipboard API', _clipboardWrites.length === 1 && _clipboardWrites[0] === '/the/path');
+ok('copyToClipboard shows a success toast', toastRegion.children.length === 1 && toastRegion.children[0].textContent === 'Path copied');
 
 // loading / loadingFor (skeleton placeholders, el-only leaves)
 const ld = loading('Fetching…');
