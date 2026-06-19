@@ -1,5 +1,5 @@
 {
-  "version": "1.47.0",
-  "phase": "cockpit-views-reference-extraction",
+  "version": "1.48.0",
+  "phase": "cockpit-views-docs-extraction",
   "released": "2026-06-19"
 }

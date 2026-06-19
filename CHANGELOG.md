@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.48.0] · 2026-06-19 · Cockpit decomposition — Docs view extracted
+
+Third view-module slice of the cockpit decomposition. Pulls the substantial **Docs** route renderer — the in-cockpit manual reader — out of `cockpit.js`.
+
+- **`template/maddu/cockpit/cockpit-views-docs.js`** (new) — `renderDocs`: fetches the docs index, renders markdown pages, builds an auto table-of-contents + backlinks footer, intercepts in-article links (cross-doc, in-doc anchors), and keeps a route-local `hashchange` listener that self-removes the moment the operator leaves `#/docs`.
+- **Pure move:** imports only leaves (`cockpit-util`), the chart widgets (`donut`/`statusGrid` from `cockpit-widgets`), the markdown renderer (`cockpit-markdown`), and route metadata (`cockpit-route-meta`) — no shell-only helpers, so no ctx and no import back into `cockpit.js` (no circular dependency).
+- **`cockpit.js` 7398 → 7148** (−250 lines); the cockpit is now **11 modules**. Mass ratchet re-baselined.
+- **Verification (all three layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). New fixture `scripts/test/cockpit-views-docs.mjs` (5/0) asserts the export, the page scaffold (Manual panel + docs-layout), and the hashchange registration.
+
 ## [v1.47.0] · 2026-06-19 · Cockpit decomposition — reference view cluster extracted
 
 Second view-module slice of the cockpit decomposition (after v1.45.0's backbone cluster). Pulls the five "reference" route renderers — pages the operator reads rather than drives — out of the `cockpit.js` monolith.
