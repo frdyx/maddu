@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.50.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Teams view
+
+Fifth view-module slice; the second inspect-heavy view joins `cockpit-views-inspect.js`.
+
+- **`renderTeams`** (the lane-ownership map: catalog × active claims × slice-stop frequency; each lane card opens in the Inspector) → `cockpit-views-inspect.js`.
+- **ctx seam grows to `{ bindRefresh, panelFocus, openInspector, fetchLanes, fetchProjection, paletteFocus, focusPanelByKeyword }`.** renderTeams needs four more shell helpers than Learning: the two bridge fetch helpers (`fetchLanes`/`fetchProjection`) and the command-palette focus pair (`paletteFocus`/`focusPanelByKeyword`, so a `#/teams?focus=<lane>` deep link scrolls + flashes the matching card). All injected via ctx; the move is otherwise verbatim.
+- **`cockpit.js` 7013 → 6930** (−83 lines); the cockpit is now **12 modules** (renderTeams joined the existing inspect module). Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The interaction fixture `scripts/test/cockpit-views-inspect.mjs` now covers both views (13/0): it feeds canned `fetchLanes`/`fetchProjection`, builds the lane cards, **fires a lane card's click and asserts `ctx.openInspector` was invoked** with the `kind:'lane'` descriptor.
+
 ## [v1.49.0] · 2026-06-19 · Cockpit decomposition — first inspect-heavy view (Learning)
 
 Fourth view-module slice, and the first of the **inspect-heavy** cluster — views whose rows are clickable triggers that open the shared Inspector drawer.
