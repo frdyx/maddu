@@ -27,7 +27,12 @@ globalThis.document = {
   createElement(tag) { return mkNode(tag); },
   createTextNode(text) { return { text, nodeType: 3 }; },
 };
-globalThis.fetch = () => new Promise(() => {});
+let authFetches = 0; // count of GET /bridge/auth (fetchAuth), used by the renderAuth test
+globalThis.fetch = (url) => {
+  const path = String(url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+  if (path === '/bridge/auth') authFetches++;
+  return new Promise(() => {});
+};
 if (typeof globalThis.location === 'undefined') {
   Object.defineProperty(globalThis, 'location', { value: { hash: '#/settings' }, configurable: true, writable: true });
 }
@@ -42,6 +47,7 @@ function ok(name, cond, extra = '') {
 
 ok('exports renderTrust', typeof m.renderTrust === 'function');
 ok('exports renderSettings', typeof m.renderSettings === 'function');
+ok('exports renderAuth', typeof m.renderAuth === 'function');
 
 // renderTrust — pure, no ctx.
 const trustRoot = m.renderTrust();
@@ -62,6 +68,26 @@ ok('renderSettings → .view root', setRoot.className === 'view');
 ok('renderSettings → <h2> "Settings"', setRoot.children[0].tag === 'h2' && setRoot.children[0].children[0].text === 'Settings');
 ok('renderSettings registers ≥6 panels via ctx.panelFocus', panelFocusCalls >= 6, `${panelFocusCalls} call(s)`);
 ok('renderSettings checks ?focus via ctx.paletteFocus', paletteFocusCalled === true);
+
+// ── renderAuth — stream-coupled view: subscribes via ctx.onSpineEvent, filters
+// to AUTH_KEY_* events, re-runs its refresh (a GET /bridge/auth) on match only ──
+let spineHandler = null;
+const authCtx = {
+  paletteFocus: () => null,
+  focusPanelByKeyword: () => {},
+  onSpineEvent: (h) => { spineHandler = h; },
+};
+const authRoot = m.renderAuth(authCtx);
+ok('renderAuth → .view root', authRoot.className === 'view');
+ok('renderAuth → <h2> "Auth"', authRoot.children[0].tag === 'h2' && authRoot.children[0].children[0].text === 'Auth');
+ok('renderAuth subscribes via ctx.onSpineEvent', typeof spineHandler === 'function');
+ok('renderAuth refreshes once on render (GET /bridge/auth)', authFetches === 1, `${authFetches} fetch(es)`);
+if (typeof spineHandler === 'function') {
+  spineHandler({ detail: { type: 'PLAN_UPDATED' } });
+  ok('non-AUTH_KEY_ event is filtered out (no refetch)', authFetches === 1, `${authFetches} fetch(es)`);
+  spineHandler({ detail: { type: 'AUTH_KEY_ADDED' } });
+  ok('AUTH_KEY_ event triggers a refresh (refetch)', authFetches === 2, `${authFetches} fetch(es)`);
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
