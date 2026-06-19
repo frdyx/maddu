@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.54.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Plans view (cluster complete)
+
+Ninth view-module slice; the sixth and final inspect-heavy view joins `cockpit-views-inspect.js`, **completing the inspect-heavy cluster**.
+
+- **`renderPlans`** (the kanban board — Now/Next/Blocked/Done — plus a table of every plan; kanban cards and table rows both open the plan's entity drawer) and its paired **`openPlanDrawer`** → `cockpit-views-inspect.js` (openPlanDrawer is module-private and receives ctx).
+- **ctx seam grows to add `openEntityDrawer`** — the entity-drawer singleton (distinct from the Inspector), reached through openPlanDrawer. `copyToClipboardWithToast` is a leaf (imported directly). The move is otherwise verbatim.
+- **`cockpit.js` 6569 → 6417** (−152 lines); still **12 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The interaction fixture `scripts/test/cockpit-views-inspect.mjs` now covers all six inspect views (38/0): it feeds canned plans, builds the kanban, **fires a kanban card's click and asserts `ctx.openEntityDrawer` was invoked** with the plan's `title` + an async `body` builder.
+- **Cluster milestone:** `cockpit-views-inspect.js` now hosts Learning, Teams, Workflows, Roadmap, Agents, and Plans. Across the session `cockpit.js` is down from 9202 (pre-decomposition) → **6417**.
+
 ## [v1.53.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Agents view (+ a narrow router-rerender seam)
 
 Eighth view-module slice; the fifth inspect-heavy view joins `cockpit-views-inspect.js`. This is the first scope-aware view extracted, so it introduces the seam for "scope toggle → re-render the route".

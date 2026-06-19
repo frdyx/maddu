@@ -14,7 +14,7 @@ import { ROUTE_META } from './cockpit-route-meta.js';
 import { renderPipelinesRoute, renderCostRoute, renderAdvisorsRoute, renderSkillInjectionsRoute, renderModelRoutingRoute, renderTestStatusRoute } from './cockpit-views-backbone.js';
 import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from './cockpit-views-reference.js';
 import { renderDocs } from './cockpit-views-docs.js';
-import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents } from './cockpit-views-inspect.js';
+import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1106,6 +1106,7 @@ const ctx = {
   focusPanelByKeyword,
   scopePill,
   scopedUrl,
+  openEntityDrawer,
   // Narrow "re-render the current route" alias — scope-toggling views call this
   // instead of holding a handle to the whole router. Wrapper form late-binds
   // through the closure so it's safe even if renderRoute is ever reassigned.
@@ -4530,162 +4531,9 @@ function renderTrust() {
 // (pure-leaf views — leaves + route metadata + global fetch, no ctx needed).
 
 // v1.1.0 Phase 5 — Plans + Kanban cockpit route.
-function renderPlans() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Plans'));
-  root.appendChild(el('p', {}, ROUTES.plans.description));
-
-  const kanbanMount = el('div', {});
-  kanbanMount.appendChild(loading('Loading plans + kanban…'));
-  root.appendChild(panel('Kanban', 'Now · Next · Blocked · Done (derived from PLAN_* events)', kanbanMount));
-
-  const listMount = el('div', {});
-  listMount.appendChild(loading('Loading plan list…'));
-  root.appendChild(panel('All plans', 'Open + completed + cancelled (newest first)', listMount));
-
-  fetch('/bridge/plans').then((r) => r.json()).then((d) => {
-    kanbanMount.innerHTML = '';
-    const k = d.kanban || { now: [], next: [], blocked: [], done: [] };
-    const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;' });
-    for (const [label, items, color] of [['Now', k.now, '#6cf'], ['Next', k.next, '#cb6'], ['Blocked', k.blocked, '#e77'], ['Done', k.done, '#7c7']]) {
-      const col = el('div', { style: 'border:1px solid var(--m-line);padding:8px;background:var(--m-bg-2);min-height:120px;' });
-      col.appendChild(el('div', { style: `font-family:var(--m-font-mono);font-size:12px;color:${color};margin-bottom:6px;` }, `${label}  (${items.length})`));
-      for (const it of items) {
-        // v1.2.3 — kanban cards become clickable entity-drawer triggers.
-        const card = el('div', {
-          class: 'entity-card',
-          style: 'background:var(--m-bg-1);padding:5px 7px;margin-bottom:4px;font-size:11px;cursor:pointer;',
-          tabindex: '0',
-          role: 'button',
-          'aria-label': `Open plan ${it.planId || ''}`,
-        });
-        card.appendChild(el('div', { style: 'font-weight:bold;' }, it.title || '(untitled)'));
-        if (it.phase) card.appendChild(el('div', { style: 'color:var(--m-fg-2);' }, '→ ' + it.phase));
-        if (it.status) card.appendChild(el('div', { style: 'color:var(--m-fg-2);' }, it.status));
-        const openDrawer = () => openPlanDrawer(it.planId);
-        card.addEventListener('click', openDrawer);
-        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawer(); } });
-        col.appendChild(card);
-      }
-      grid.appendChild(col);
-    }
-    kanbanMount.appendChild(grid);
-
-    listMount.innerHTML = '';
-    const plans = d.plans || [];
-    if (plans.length === 0) {
-      listMount.appendChild(placeholder('No plans yet', 'Create one with `maddu plan new "<title>" --phases "a,b,c"`.'));
-    } else {
-      const table = el('table', { style: 'width:100%;border-collapse:collapse;font-family:var(--m-font-mono);font-size:12px;' });
-      const head = el('tr', {});
-      for (const h of ['planId', 'status', 'title', 'phases', 'revs']) {
-        head.appendChild(el('th', { style: 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);font-weight:normal;' }, h));
-      }
-      table.appendChild(head);
-      for (const p of plans) {
-        // v1.2.3 — plans table rows also open the entity drawer on click/Enter.
-        const row = el('tr', {
-          class: 'entity-row',
-          style: 'cursor:pointer;',
-          tabindex: '0',
-          role: 'button',
-          'aria-label': `Open plan ${p.planId}`,
-        });
-        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, p.planId));
-        const done = (p.phases || []).filter((x) => x.status === 'completed').length;
-        const total = (p.phases || []).length;
-        const sColor = p.status === 'completed' ? '#7c7' : (p.status === 'cancelled' ? '#cc8' : '#6cf');
-        row.appendChild(el('td', { style: `padding:4px 6px;border-bottom:1px solid var(--m-line);color:${sColor};` }, p.status || 'open'));
-        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);' }, p.title || '(untitled)'));
-        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, `${done}/${total}`));
-        row.appendChild(el('td', { style: 'padding:4px 6px;border-bottom:1px solid var(--m-line);color:var(--m-fg-2);' }, String(p.revisionCount || 0)));
-        const openDrawer = () => openPlanDrawer(p.planId);
-        row.addEventListener('click', openDrawer);
-        row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawer(); } });
-        table.appendChild(row);
-      }
-      listMount.appendChild(table);
-    }
-  }).catch((err) => {
-    kanbanMount.innerHTML = '';
-    kanbanMount.appendChild(placeholder('Bridge unreachable', err.message));
-  });
-
-  return root;
-}
-
-// v1.2.3 — fetch single plan and open the entity drawer with structured details.
-function openPlanDrawer(planId) {
-  if (!planId) return;
-  openEntityDrawer({
-    title: planId,
-    subtitle: 'plan detail',
-    body: async () => {
-      const r = await fetch(`/bridge/plans/${encodeURIComponent(planId)}`, { cache: 'no-store' });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({ error: r.statusText }));
-        throw new Error(err.error || `bridge ${r.status}`);
-      }
-      const state = await r.json();
-      const wrap = el('div', { class: 'plan-detail' });
-
-      // Summary line: title + status pill + revision count.
-      const sumColor = state.status === 'completed' ? '#7c7' : (state.status === 'cancelled' ? '#cc8' : (state.status === 'blocked' ? '#e77' : '#6cf'));
-      const sumRow = el('div', { style: 'display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px;' });
-      sumRow.appendChild(el('div', { style: 'font-size:15px;font-weight:600;color:var(--m-fg-0);' }, state.title || '(untitled)'));
-      sumRow.appendChild(el('div', { style: `font-family:var(--m-font-mono);font-size:11px;padding:2px 8px;border:1px solid ${sumColor};color:${sumColor};border-radius:3px;` }, state.status || 'open'));
-      sumRow.appendChild(el('div', { style: 'font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);' }, `${state.revisionCount || 0} revision(s)`));
-      wrap.appendChild(sumRow);
-
-      if (state.goal) {
-        wrap.appendChild(el('h4', { style: 'margin:14px 0 4px;color:var(--m-fg-2);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;' }, 'Goal'));
-        wrap.appendChild(el('div', { style: 'color:var(--m-fg-1);font-size:13px;margin-bottom:10px;' }, state.goal));
-      }
-
-      // Phases — checkboxes-as-glyphs + colored status.
-      wrap.appendChild(el('h4', { style: 'margin:14px 0 4px;color:var(--m-fg-2);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;' }, `Phases (${state.phases?.length || 0})`));
-      const phases = state.phases || [];
-      if (phases.length === 0) {
-        wrap.appendChild(el('div', { style: 'color:var(--m-fg-3);font-size:12px;' }, '(no phases — add with `maddu plan add-phase`)'));
-      } else {
-        const list = el('div', { style: 'display:flex;flex-direction:column;gap:4px;' });
-        for (const p of phases) {
-          const glyph = p.status === 'completed' ? '✓' : (p.status === 'blocked' ? '◯' : '○');
-          const gColor = p.status === 'completed' ? '#7c7' : (p.status === 'blocked' ? '#e77' : 'var(--m-fg-3)');
-          const row = el('div', { style: 'display:flex;gap:8px;font-family:var(--m-font-mono);font-size:12px;align-items:baseline;padding:4px 6px;background:var(--m-bg-1);' });
-          row.appendChild(el('span', { style: `color:${gColor};` }, glyph));
-          row.appendChild(el('span', { style: 'color:var(--m-fg-0);min-width:120px;' }, p.name));
-          row.appendChild(el('span', { style: 'color:var(--m-fg-3);flex:1;' }, p.intent || ''));
-          if (p.summary) row.appendChild(el('span', { style: 'color:var(--m-fg-2);' }, p.summary));
-          if (p.reason && p.status === 'blocked') row.appendChild(el('span', { style: 'color:#e77;' }, `blocked: ${p.reason}`));
-          list.appendChild(row);
-        }
-        wrap.appendChild(list);
-      }
-
-      // Revisions — newest first.
-      const revs = state.revisions || [];
-      if (revs.length) {
-        wrap.appendChild(el('h4', { style: 'margin:14px 0 4px;color:var(--m-fg-2);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;' }, `Revisions (${revs.length})`));
-        const rlist = el('div', { style: 'display:flex;flex-direction:column;gap:4px;' });
-        for (const rev of revs.slice().reverse().slice(0, 20)) {
-          const item = el('div', { style: 'font-family:var(--m-font-mono);font-size:11px;padding:4px 6px;background:var(--m-bg-1);' });
-          item.appendChild(el('div', { style: 'color:var(--m-fg-3);' }, rev.ts || ''));
-          item.appendChild(el('div', { style: 'color:var(--m-fg-1);' }, rev.diff || rev.note || '(no description)'));
-          rlist.appendChild(item);
-        }
-        wrap.appendChild(rlist);
-      }
-
-      // Copy plan id button.
-      const cpy = el('button', { class: 'entity-drawer-action', type: 'button' }, 'Copy plan id');
-      cpy.addEventListener('click', () => copyToClipboardWithToast(state.planId, 'Plan id'));
-      const actions = el('div', { style: 'margin-top:14px;display:flex;gap:8px;' }, [cpy]);
-      wrap.appendChild(actions);
-      return wrap;
-    },
-  });
-}
+// renderPlans + openPlanDrawer � moved to cockpit-views-inspect.js (v1.54.0)
+//  kanban + plan table; cards/rows open the plan entity drawer via
+// ctx.openEntityDrawer (the drawer singleton). Completes the inspect-heavy cluster.
 
 function renderMcp() {
   const root = el('div', { class: 'view' });
@@ -5971,7 +5819,7 @@ function initComposer() {
 // Inspector via ctx.openInspector (with an Open-route action).
 
 // ─── Slice ε — Agents (coworker profile grid) ───────────────────────────
-// renderAgents � moved to cockpit-views-inspect.js (v1.53.0)  coworker grid;
+// renderAgents � moved to cockpit-views-inspect.js (v1.53.0)  coworker grid;
 // cards open the Inspector. Shell deps via ctx: scopePill/scopedUrl + rerender
 // (narrow router alias for scope-toggle re-render) + openInspector/paletteFocus/
 // focusPanelByKeyword.

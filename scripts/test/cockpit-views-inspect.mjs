@@ -58,6 +58,10 @@ const CANNED_LEARNING = {
   count: 1, byKind: { rule: 1 }, byLane: { harness: 1 },
   facts: [{ id: 'f1', kind: 'rule', text: 'always branch first', ts: '2026-01-01T00:00:00Z', tags: ['a', 'b'], source: { event: 'evt-1' } }],
 };
+const CANNED_PLANS = {
+  kanban: { now: [{ planId: 'p1', title: 'Plan One', phase: 'design', status: 'open' }], next: [], blocked: [], done: [] },
+  plans: [{ planId: 'p1', status: 'open', title: 'Plan One', phases: [], revisionCount: 0 }],
+};
 const CANNED_PROJECTION = {
   activeSessions: [{ id: 'sess-1', label: 'Claude', role: 'implementer', status: 'active', focus: 'refactor', lastHeartbeatAt: '2026-01-01T00:00:00Z', workspaceId: 'maddu' }],
   claims: [{ sessionId: 'sess-1', lane: 'harness' }],
@@ -69,6 +73,9 @@ globalThis.fetch = (url) => {
   }
   if (String(url).includes('/bridge/projection')) {
     return Promise.resolve({ ok: true, status: 200, json: async () => CANNED_PROJECTION });
+  }
+  if (String(url).includes('/bridge/plans')) {
+    return Promise.resolve({ ok: true, status: 200, json: async () => CANNED_PLANS });
   }
   return new Promise(() => {});
 };
@@ -86,6 +93,7 @@ ok('exports renderTeams', typeof m.renderTeams === 'function');
 ok('exports renderWorkflows', typeof m.renderWorkflows === 'function');
 ok('exports renderRoadmap', typeof m.renderRoadmap === 'function');
 ok('exports renderAgents', typeof m.renderAgents === 'function');
+ok('exports renderPlans', typeof m.renderPlans === 'function');
 
 let inspected = null;
 const ctx = { openInspector: (entity) => { inspected = entity; } };
@@ -220,6 +228,28 @@ if (agCards.length) {
   }
 }
 ok('ctx.rerender not called on initial render', rerendered === false);
+
+// ── renderPlans — kanban card opens the plan entity drawer via ctx.openEntityDrawer ─
+let drawerArg = null;
+const plCtx = { openEntityDrawer: (arg) => { drawerArg = arg; } };
+const plRoot = m.renderPlans(plCtx);
+ok('renderPlans → .view root', plRoot.className === 'view');
+ok('renderPlans → <h2> "Plans"', plRoot.children[0].tag === 'h2' && plRoot.children[0].children[0].text === 'Plans');
+
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+
+const planCards = findByClass(plRoot, 'entity-card');
+ok('renders one kanban entity-card from canned plans', planCards.length === 1, `${planCards.length} card(s)`);
+if (planCards.length) {
+  const clicks = planCards[0]._l.click || [];
+  ok('plan card has a click handler', clicks.length === 1);
+  if (clicks.length) {
+    clicks[0]();
+    ok('plan card click invokes ctx.openEntityDrawer', drawerArg && drawerArg.title === 'p1' && typeof drawerArg.body === 'function',
+      drawerArg ? `title=${drawerArg.title}` : 'not called');
+  }
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
