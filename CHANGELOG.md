@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.49.0] · 2026-06-19 · Cockpit decomposition — first inspect-heavy view (Learning)
+
+Fourth view-module slice, and the first of the **inspect-heavy** cluster — views whose rows are clickable triggers that open the shared Inspector drawer.
+
+- **`template/maddu/cockpit/cockpit-views-inspect.js`** (new) — `renderLearning` (the hindsight-memory findings browser: kind/lane/query filters, summary tiles, re-extract action, and a findings list whose rows open in the Inspector). Its private `LEARNING_KIND_TONE` palette moves with it.
+- **ctx seam grows to `{ bindRefresh, panelFocus, openInspector }`.** The Inspector is a shell singleton; the row-click handler now calls `ctx.openInspector(...)` instead of the bare shell reference — the first inspect-heavy dependency injected. The move is otherwise verbatim.
+- **`cockpit.js` 7148 → 7013** (−135 lines); the cockpit is now **12 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The new fixture `scripts/test/cockpit-views-inspect.mjs` (6/0) goes further than the render-only fixtures: it feeds a canned `/bridge/learning` response, lets the async refresh build the findings list, **fires the row's click handler, and asserts `ctx.openInspector` was invoked** with the finding descriptor — verifying the interaction seam headlessly.
+
 ## [v1.48.0] · 2026-06-19 · Cockpit decomposition — Docs view extracted
 
 Third view-module slice of the cockpit decomposition. Pulls the substantial **Docs** route renderer — the in-cockpit manual reader — out of `cockpit.js`.
