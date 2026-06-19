@@ -1,5 +1,5 @@
 {
-  "version": "1.43.0",
-  "phase": "cockpit-decomposition-util-helpers",
+  "version": "1.44.0",
+  "phase": "cockpit-decomposition-route-meta",
   "released": "2026-06-19"
 }
