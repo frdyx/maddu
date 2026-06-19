@@ -28,7 +28,7 @@ globalThis.document = {
   createElement(tag) { return mkNode(tag); },
   createTextNode(text) { return { text, nodeType: 3 }; },
 };
-const fetchCount = { '/bridge/mailbox-counts': 0, '/bridge/tasks': 0, '/bridge/skills': 0 };
+const fetchCount = { '/bridge/mailbox-counts': 0, '/bridge/tasks': 0, '/bridge/skills': 0, '/bridge/operations': 0 };
 globalThis.fetch = (url, init) => {
   const path = String(url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
   if (path in fetchCount && (!init || !init.method)) fetchCount[path]++;
@@ -60,6 +60,8 @@ function findByTag(node, tag, out = []) {
 ok('exports renderMailbox', typeof m.renderMailbox === 'function');
 ok('exports renderTasks', typeof m.renderTasks === 'function');
 ok('exports renderSkills', typeof m.renderSkills === 'function');
+ok('exports renderOperations', typeof m.renderOperations === 'function');
+ok('exports renderSwarm', typeof m.renderSwarm === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -138,6 +140,47 @@ ok('exports renderSkills', typeof m.renderSkills === 'function');
     (createBtn[0]._l.click || []).forEach((fn) => fn());
     ok('skills Create stamps by: ctx.currentSession()', sessReads === before + 1, `${sessReads} read(s)`);
   }
+}
+
+// ── renderOperations — SLICE_STOP via ctx.onSpineEvent; registers palette panels
+// via ctx.panelFocus; reads ctx.fetchProjection + ctx.fetchMemory on render ──
+{
+  let spine = null, panelCalls = 0, projReads = 0, memReads = 0;
+  const ctx = {
+    onSpineEvent: (h) => { spine = h; },
+    panelFocus(title, aside, body, opts) { panelCalls++; const n = mkNode('div'); n.className = 'panel'; if (body) n.appendChild(body); return n; },
+    fetchProjection: () => { projReads++; return new Promise(() => {}); },
+    fetchMemory: () => { memReads++; return new Promise(() => {}); },
+    currentSession: () => 's',
+  };
+  const root = m.renderOperations(ctx);
+  ok('renderOperations → .view root', root.className === 'view');
+  ok('renderOperations → <h2> "Operations"', root.children[0].children[0].text === 'Operations');
+  ok('renderOperations registers panels via ctx.panelFocus (≥4)', panelCalls >= 4, `${panelCalls} call(s)`);
+  ok('renderOperations subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  ok('renderOperations reads ctx.fetchProjection on render', projReads === 1, `${projReads}`);
+  ok('renderOperations reads ctx.fetchMemory on render', memReads === 1, `${memReads}`);
+  if (typeof spine === 'function') {
+    spine({ detail: { type: 'TASK_CREATED' } });
+    ok('operations: non-SLICE_STOP filtered (no re-read)', projReads === 1, `${projReads}`);
+    spine({ detail: { type: 'SLICE_STOP' } });
+    ok('operations: SLICE_STOP triggers refresh (re-read)', projReads === 2, `${projReads}`);
+  }
+}
+
+// ── renderSwarm — static read; one Promise.all over ctx.fetchLanes +
+// ctx.fetchProjection; NO stream subscription (ctx has no onSpineEvent) ──
+{
+  let laneReads = 0, projReads = 0;
+  const ctx = {
+    fetchLanes: () => { laneReads++; return new Promise(() => {}); },
+    fetchProjection: () => { projReads++; return new Promise(() => {}); },
+  };
+  const root = m.renderSwarm(ctx);
+  ok('renderSwarm → .view root', root.className === 'view');
+  ok('renderSwarm → <h2> "Swarm"', root.children[0].children[0].text === 'Swarm');
+  ok('renderSwarm reads ctx.fetchLanes on render', laneReads === 1, `${laneReads}`);
+  ok('renderSwarm reads ctx.fetchProjection on render', projReads === 1, `${projReads}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
