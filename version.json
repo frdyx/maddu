@@ -1,5 +1,5 @@
 {
-  "version": "1.58.0",
-  "phase": "cockpit-views-connect-infra-extraction",
+  "version": "1.59.0",
+  "phase": "cockpit-views-live-mailbox-tasks-skills-extraction",
   "released": "2026-06-19"
 }
