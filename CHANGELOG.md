@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.42.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — markdown leaf
+
+Fifth decomposition slice. The Docs route's markdown renderer moves out.
+
+- **`cockpit/cockpit-markdown.js`** (new leaf) — `renderMarkdown`, the tiny CommonMark-ish string→HTML renderer (headings, bold/italic, inline + fenced code, lists, links, blockquotes, rules, pipe tables; HTML-escaped). A self-contained string transform with NO DOM and NO cockpit state; the Docs route imports it back and assigns the result to `innerHTML`.
+- **`scripts/test/cockpit-markdown.mjs`** (new fixture) — 15 assertions across every markdown construct (no DOM stub needed — pure string assertions).
+- Re-baselined the cockpit mass floor `8101 → 8002`.
+
+Proof it changed nothing: **Gate B stayed byte-identical across all 43 goldens**; **Gate A** boots + renders all 42 routes.
+
+Verified: `maddu self-test` **64/64** (`token-wrapper-emission` green in isolation), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**.
+
 ## [v1.41.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — event-row leaf
 
 Fourth decomposition slice. The spine-event rendering + approval-decision-button helpers move to a leaf.
