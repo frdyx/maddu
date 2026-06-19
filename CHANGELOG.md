@@ -11,6 +11,19 @@ narrative summary.
 
 ---
 
+## [v1.59.0] · 2026-06-19 · Cockpit decomposition — live cluster begins (mailbox + tasks + skills)
+
+Fourteenth view-module slice and the **first of the live cluster** — opens a new module, `cockpit-views-live.js`, with the three action-list views whose only shell couplings are already-proven ctx seams.
+
+- **New module `cockpit-views-live.js`** (454 lines) importing only leaves + widgets + route metadata (no back-edge into cockpit.js).
+- **`renderMailbox`** (+ private `fetchMailbox`/`fetchMailboxCounts`) — `MAILBOX_*` via `ctx.onSpineEvent`, mark-read stamps `by: ctx.currentSession()`, `?focus=` via `ctx.paletteFocus`/`focusPanelByKeyword`.
+- **`renderTasks`** (+ private `fetchTasks` + the private `taskCard`, now threaded `ctx`) — `TASK_*` via `ctx.onSpineEvent`, Create/Start/Done stamp `createdBy:`/`by: ctx.currentSession()`.
+- **`renderSkills`** (+ private `fetchSkills`/`fetchSkill`) — `SKILL_*` via `ctx.onSpineEvent`, Create/Apply stamp `by:`/`sessionId: ctx.currentSession()`.
+- The extraction transform now handles **multi-line** stream handlers (mailbox/tasks) as well as single-line (skills) via a non-greedy body match.
+- **`cockpit.js` 5166 → 4742** (−424 lines); now **14 modules**. Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). New fixture `scripts/test/cockpit-views-live.mjs` (24/0, auto-discovered by the self-test runner) asserts each view's `ctx.onSpineEvent` subscription + event-type filtering (unrelated event → no refetch, matching event → refetch) and that Create reads `ctx.currentSession()`. Self-test full 73/73, audit 14/0.
+- **Deferred (entangled):** `renderApprovals` shares `fetchApprovals` with the still-inline `renderWorkbench`; `renderChats` uses `openInspector`/`panelFocus`; `renderEvents` has a custom multi-line teardown. The composer-deep views (conductor/boss/workbench) stay pending a heavier composer seam (Codex consult).
+
 ## [v1.58.0] · 2026-06-19 · Cockpit decomposition — connect cluster complete (schedule + mcp + runtimes)
 
 Thirteenth view-module slice. Extracts the **last three connect views** — the predicted mechanical ctx-swap moves now that every seam they need exists — and finishes the entire **connect** cluster.
