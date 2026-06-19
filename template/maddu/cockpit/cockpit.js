@@ -7,10 +7,11 @@
 import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime, formatAge, ageTone, formatTs, loading, loadingFor, showToast, copyToClipboardWithToast, workspaceBadge, laneFromFact } from './cockpit-util.js';
 import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './cockpit-widgets.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
-import { renderAdvisorsCard, renderSkillInjectionsCard, renderModelRoutingRuntimes, renderModelRoutingLanes, renderModelRoutingPipelines, renderTestStatusCard, renderPipelinesCard, renderCostCard, renderSlashCheatsheet } from './cockpit-backbone-cards.js';
+import { renderSlashCheatsheet } from './cockpit-backbone-cards.js';
 import { classifyEvent, eventRow, prepend, makeDecisionButton } from './cockpit-event-rows.js';
 import { renderMarkdown } from './cockpit-markdown.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
+import { renderPipelinesRoute, renderCostRoute, renderAdvisorsRoute, renderSkillInjectionsRoute, renderModelRoutingRoute, renderTestStatusRoute } from './cockpit-views-backbone.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1087,6 +1088,15 @@ function highlightActiveGroup(routeId) {
   });
 }
 
+// Dependency-injection seam for extracted view modules. cockpit.js is the
+// composition root: it owns the stateful shell helpers and hands them to view
+// renderers via this ctx so views import only leaves + receive ctx, never
+// reaching back into cockpit.js (which would be a circular import). Grows as
+// more view clusters are extracted. (bindRouteRefresh is a hoisted declaration.)
+const ctx = {
+  bindRefresh: bindRouteRefresh,
+};
+
 function renderRoute() {
   const id = currentRoute();
   const route = ROUTES[id];
@@ -1113,7 +1123,7 @@ function renderRoute() {
   els.meta.textContent = id.toUpperCase();
   els.view.innerHTML = '';
   els.view.classList.remove('fade-in');
-  els.view.appendChild(route.render());
+  els.view.appendChild(route.render(ctx));
   // Re-trigger entrance animation on every route change.
   void els.view.offsetWidth;
   els.view.classList.add('fade-in');
@@ -7751,163 +7761,10 @@ function bindRouteRefresh(load) {
   els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
 }
 
-function renderPipelinesRoute() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Pipelines'));
-  root.appendChild(el('p', {}, ROUTES.pipelines.description));
-
-  const host = el('div', {});
-  host.appendChild(loading('Loading pipelines…'));
-  root.appendChild(panel('Pipeline runs', 'GET /bridge/pipelines', host));
-
-  bindRouteRefresh(async () => {
-    let data;
-    try {
-      const r = await fetch('/bridge/pipelines', { cache: 'no-store' });
-      data = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    host.replaceChildren(renderPipelinesCard(data.pipelines || []));
-  });
-  return root;
-}
-
-function renderCostRoute() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Cost'));
-  root.appendChild(el('p', {}, ROUTES.cost.description));
-
-  const host = el('div', {});
-  host.appendChild(loading('Loading token ledger…'));
-  root.appendChild(panel('Token + call rollup', 'GET /bridge/cost', host));
-
-  bindRouteRefresh(async () => {
-    let data;
-    try {
-      const r = await fetch('/bridge/cost', { cache: 'no-store' });
-      data = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    host.replaceChildren(renderCostCard(data.tokenLedger || []));
-  });
-  return root;
-}
-
-function renderAdvisorsRoute() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Advisors'));
-  root.appendChild(el('p', {}, ROUTES.advisors.description));
-
-  const host = el('div', {});
-  host.appendChild(loading('Loading advisor artifacts…'));
-  root.appendChild(panel('Advisor artifacts', 'GET /bridge/advisors', host));
-
-  bindRouteRefresh(async () => {
-    let data;
-    try {
-      const r = await fetch('/bridge/advisors', { cache: 'no-store' });
-      data = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    host.replaceChildren(renderAdvisorsCard(data.advisors || []));
-  });
-  return root;
-}
-
-// renderAdvisorsCard → moved to cockpit-backbone-cards.js (v1.40.0).
-
-function renderSkillInjectionsRoute() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Skill Injections'));
-  root.appendChild(el('p', {}, ROUTES.skillinjections.description));
-
-  const host = el('div', {});
-  host.appendChild(loading('Loading injection log…'));
-  root.appendChild(panel('SKILL_INJECTED events', 'GET /bridge/skill-injections', host));
-
-  bindRouteRefresh(async () => {
-    let data;
-    try {
-      const r = await fetch('/bridge/skill-injections', { cache: 'no-store' });
-      data = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    host.replaceChildren(renderSkillInjectionsCard(data.skillInjections || []));
-  });
-  return root;
-}
-
-// renderSkillInjectionsCard → moved to cockpit-backbone-cards.js (v1.40.0).
-
-function renderModelRoutingRoute() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Model Routing'));
-  root.appendChild(el('p', {}, ROUTES.modelrouting.description));
-
-  const runtimesHost = el('div', {});
-  runtimesHost.appendChild(loading('Loading runtime descriptors…'));
-  root.appendChild(panel('Per-runtime modelPreference', 'GET /bridge/runtimes', runtimesHost));
-
-  const lanesHost = el('div', {});
-  lanesHost.appendChild(loading('Loading lane defaults…'));
-  root.appendChild(panel('Per-lane defaults', 'GET /bridge/lanes', lanesHost));
-
-  const pipelinesHost = el('div', {});
-  pipelinesHost.appendChild(loading('Loading pipeline stage hints…'));
-  root.appendChild(panel('Per-pipeline stage hints', 'GET /bridge/pipelines', pipelinesHost));
-
-  bindRouteRefresh(async () => {
-    let runtimesData, lanesData, pipelinesData;
-    try {
-      [runtimesData, lanesData, pipelinesData] = await Promise.all([
-        fetch('/bridge/runtimes', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
-        fetch('/bridge/lanes', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
-        fetch('/bridge/pipelines', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
-      ]);
-    } catch {
-      runtimesHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    runtimesHost.replaceChildren(renderModelRoutingRuntimes((runtimesData && runtimesData.runtimes) || []));
-    lanesHost.replaceChildren(renderModelRoutingLanes(((lanesData && lanesData.catalog && lanesData.catalog.lanes) || lanesData && lanesData.lanes) || []));
-    pipelinesHost.replaceChildren(renderModelRoutingPipelines((pipelinesData && pipelinesData.pipelines) || []));
-  });
-  return root;
-}
-
-// formatModelPref / renderModelRoutingRuntimes / renderModelRoutingLanes /
-// renderModelRoutingPipelines → moved to cockpit-backbone-cards.js (v1.40.0).
-
-function renderTestStatusRoute() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Test Status'));
-  root.appendChild(el('p', {}, ROUTES.teststatus.description));
-
-  const host = el('div', {});
-  host.appendChild(loading('Loading test status…'));
-  root.appendChild(panel('Latest test runs', 'GET /bridge/test-status', host));
-
-  bindRouteRefresh(async () => {
-    let data;
-    try {
-      const r = await fetch('/bridge/test-status', { cache: 'no-store' });
-      data = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    host.replaceChildren(renderTestStatusCard(data || {}));
-  });
-  return root;
-}
+// renderPipelinesRoute / renderCostRoute / renderAdvisorsRoute /
+// renderSkillInjectionsRoute / renderModelRoutingRoute / renderTestStatusRoute
+// → moved to cockpit-views-backbone.js (v1.45.0); they receive the shell's
+// bindRouteRefresh via ctx.bindRefresh.
 
 // ageMs / ageDays / renderTestStatusCard / renderTeamsCard / renderPipelinesCard /
 // renderCostCard / SLASH_CHEATSHEET / renderSlashCheatsheet → moved to

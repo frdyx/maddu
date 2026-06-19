@@ -1,5 +1,5 @@
 {
-  "version": "1.44.0",
-  "phase": "cockpit-decomposition-route-meta",
+  "version": "1.45.0",
+  "phase": "cockpit-decomposition-views-backbone",
   "released": "2026-06-19"
 }
