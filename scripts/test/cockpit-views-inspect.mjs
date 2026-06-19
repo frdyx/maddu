@@ -76,6 +76,7 @@ function ok(name, cond, extra = '') {
 ok('exports renderLearning', typeof m.renderLearning === 'function');
 ok('exports renderTeams', typeof m.renderTeams === 'function');
 ok('exports renderWorkflows', typeof m.renderWorkflows === 'function');
+ok('exports renderRoadmap', typeof m.renderRoadmap === 'function');
 
 let inspected = null;
 const ctx = { openInspector: (entity) => { inspected = entity; } };
@@ -149,6 +150,34 @@ if (nodes.length) {
     clicks[0]();
     ok('node click invokes ctx.openInspector', wfInspected && wfInspected.kind === 'workflow-node' && wfInspected.id === 'operator',
       wfInspected ? `kind=${wfInspected.kind} id=${wfInspected.id}` : 'not called');
+  }
+}
+
+// ── renderRoadmap — slice-index row opens the Inspector via ctx.openInspector ─
+let rmInspected = null;
+const rmCtx = {
+  panelFocus(title, aside, body) { const n = mkNode('div'); n.className = 'panel'; n.appendChild(body); return n; },
+  fetchProjection: async () => ({
+    sliceStops: [{ id: 's1', ts: '2026-01-01T00:00:00Z', lane: 'harness', summary: 'did x', actor: 'claude', learnings: [], gates: [] }],
+  }),
+  openInspector: (entity) => { rmInspected = entity; },
+};
+const rmRoot = m.renderRoadmap(rmCtx);
+ok('renderRoadmap → .view root', rmRoot.className === 'view');
+ok('renderRoadmap → <h2> "Roadmap"', rmRoot.children[0].tag === 'h2' && rmRoot.children[0].children[0].text === 'Roadmap');
+
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+
+const sliceRows = findByClass(rmRoot, 'slice-index-row');
+ok('renders one slice-index row from canned data', sliceRows.length === 1, `${sliceRows.length} row(s)`);
+if (sliceRows.length) {
+  const clicks = sliceRows[0]._l.click || [];
+  ok('slice-index row has a click handler', clicks.length === 1);
+  if (clicks.length) {
+    clicks[0]();
+    ok('slice row click invokes ctx.openInspector', rmInspected && rmInspected.kind === 'slice-stop' && rmInspected.id === 's1',
+      rmInspected ? `kind=${rmInspected.kind} id=${rmInspected.id}` : 'not called');
   }
 }
 
