@@ -28,9 +28,12 @@ globalThis.document = {
   createTextNode(text) { return { text, nodeType: 3 }; },
 };
 let authFetches = 0; // count of GET /bridge/auth (fetchAuth), used by the renderAuth test
-globalThis.fetch = (url) => {
+const fetchCount = { '/bridge/schedules': 0, '/bridge/mcp': 0, '/bridge/runtimes': 0 };
+globalThis.fetch = (url, init) => {
   const path = String(url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
   if (path === '/bridge/auth') authFetches++;
+  // The infra views (schedule/mcp/runtimes) refetch via a GET (no init.method).
+  if (path in fetchCount && (!init || !init.method)) fetchCount[path]++;
   return new Promise(() => {});
 };
 if (typeof globalThis.location === 'undefined') {
@@ -49,6 +52,9 @@ ok('exports renderTrust', typeof m.renderTrust === 'function');
 ok('exports renderSettings', typeof m.renderSettings === 'function');
 ok('exports renderAuth', typeof m.renderAuth === 'function');
 ok('exports renderImports', typeof m.renderImports === 'function');
+ok('exports renderSchedule', typeof m.renderSchedule === 'function');
+ok('exports renderMcp', typeof m.renderMcp === 'function');
+ok('exports renderRuntimes', typeof m.renderRuntimes === 'function');
 
 // renderTrust — pure, no ctx.
 const trustRoot = m.renderTrust();
@@ -125,6 +131,100 @@ if (submitBtns.length && tas.length) {
   const before = currentSessionReads;
   (submitBtns[0]._l.click || []).forEach((fn) => fn());
   ok('Submit stamps by: ctx.currentSession()', currentSessionReads === before + 1, `${currentSessionReads} read(s)`);
+}
+
+// ── renderSchedule — scope-aware (ctx.scopePill/scopeIsGlobal/rerender), stream-
+// coupled (SCHEDULE_* via ctx.onSpineEvent), Create stamps by: ctx.currentSession() ──
+{
+  let spine = null, sessReads = 0, rerendered = 0;
+  const sctx = {
+    scopePill: () => null,            // single-workspace: no pill
+    scopeIsGlobal: () => false,
+    rerender: () => { rerendered++; },
+    currentSession: () => { sessReads++; return 'sess-7'; },
+    onSpineEvent: (h) => { spine = h; },
+  };
+  const root = m.renderSchedule(sctx);
+  ok('renderSchedule → .view root', root.className === 'view');
+  ok('renderSchedule → <h2> "Schedule"', root.children[0].children[0].text === 'Schedule');
+  ok('renderSchedule subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  ok('renderSchedule refreshes once on render (GET /bridge/schedules)', fetchCount['/bridge/schedules'] === 1, `${fetchCount['/bridge/schedules']}`);
+  if (typeof spine === 'function') {
+    spine({ detail: { type: 'PLAN_UPDATED' } });
+    ok('schedule: non-SCHEDULE_ event filtered (no refetch)', fetchCount['/bridge/schedules'] === 1);
+    spine({ detail: { type: 'SCHEDULE_CREATED' } });
+    ok('schedule: SCHEDULE_ event triggers refetch', fetchCount['/bridge/schedules'] === 2);
+  }
+  const inputs = findByTag(root, 'input');
+  const createBtn = findButton(root, 'Create');
+  if (inputs.length >= 2 && createBtn.length) {
+    inputs[0].value = 'Daily summary'; inputs[1].value = 'every evening at 6pm';
+    const before = sessReads;
+    (createBtn[0]._l.click || []).forEach((fn) => fn());
+    ok('schedule Create stamps by: ctx.currentSession()', sessReads === before + 1, `${sessReads} read(s)`);
+  }
+}
+
+// ── renderMcp — stream-coupled (MCP_* via ctx.onSpineEvent), Register stamps
+// by: ctx.currentSession(); ?focus honored via ctx.paletteFocus ──
+{
+  let spine = null, sessReads = 0, paletteAsked = false;
+  const mctx = {
+    paletteFocus: () => { paletteAsked = true; return null; },
+    focusPanelByKeyword: () => {},
+    currentSession: () => { sessReads++; return 'sess-9'; },
+    onSpineEvent: (h) => { spine = h; },
+  };
+  const root = m.renderMcp(mctx);
+  ok('renderMcp → .view root', root.className === 'view');
+  ok('renderMcp → <h2> "MCP Registry"', root.children[0].children[0].text === 'MCP Registry');
+  ok('renderMcp subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  ok('renderMcp refreshes once on render (GET /bridge/mcp)', fetchCount['/bridge/mcp'] === 1, `${fetchCount['/bridge/mcp']}`);
+  if (typeof spine === 'function') {
+    spine({ detail: { type: 'AUTH_KEY_ADDED' } });
+    ok('mcp: non-MCP_ event filtered (no refetch)', fetchCount['/bridge/mcp'] === 1);
+    spine({ detail: { type: 'MCP_REGISTERED' } });
+    ok('mcp: MCP_ event triggers refetch', fetchCount['/bridge/mcp'] === 2);
+  }
+  const inputs = findByTag(root, 'input');
+  const regBtn = findButton(root, 'Register');
+  if (inputs.length && regBtn.length) {
+    inputs[0].value = 'my-server';
+    const before = sessReads;
+    (regBtn[0]._l.click || []).forEach((fn) => fn());
+    ok('mcp Register stamps by: ctx.currentSession()', sessReads === before + 1, `${sessReads} read(s)`);
+  }
+}
+
+// ── renderRuntimes — stream-coupled (RUNTIME_/WORKER_* via ctx.onSpineEvent),
+// Register stamps by: ctx.currentSession() ──
+{
+  let spine = null, sessReads = 0;
+  const rctx = {
+    paletteFocus: () => null,
+    focusPanelByKeyword: () => {},
+    currentSession: () => { sessReads++; return 'sess-11'; },
+    onSpineEvent: (h) => { spine = h; },
+  };
+  const root = m.renderRuntimes(rctx);
+  ok('renderRuntimes → .view root', root.className === 'view');
+  ok('renderRuntimes → <h2> "Runtimes"', root.children[0].children[0].text === 'Runtimes');
+  ok('renderRuntimes subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  ok('renderRuntimes refreshes once on render (GET /bridge/runtimes)', fetchCount['/bridge/runtimes'] === 1, `${fetchCount['/bridge/runtimes']}`);
+  if (typeof spine === 'function') {
+    spine({ detail: { type: 'MCP_REGISTERED' } });
+    ok('runtimes: unrelated event filtered (no refetch)', fetchCount['/bridge/runtimes'] === 1);
+    spine({ detail: { type: 'WORKER_SPAWNED' } });
+    ok('runtimes: WORKER_ event triggers refetch', fetchCount['/bridge/runtimes'] === 2);
+  }
+  const inputs = findByTag(root, 'input');
+  const regBtn = findButton(root, 'Register');
+  if (inputs.length && regBtn.length) {
+    inputs[0].value = 'claude-code';
+    const before = sessReads;
+    (regBtn[0]._l.click || []).forEach((fn) => fn());
+    ok('runtimes Register stamps by: ctx.currentSession()', sessReads === before + 1, `${sessReads} read(s)`);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

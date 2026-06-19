@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.58.0] · 2026-06-19 · Cockpit decomposition — connect cluster complete (schedule + mcp + runtimes)
+
+Thirteenth view-module slice. Extracts the **last three connect views** — the predicted mechanical ctx-swap moves now that every seam they need exists — and finishes the entire **connect** cluster.
+
+- **One new narrow accessor: `ctx.scopeIsGlobal(route)`.** `renderSchedule` is the only scope-aware connect view; it decides its global-vs-local base URL from `scopeShouldShow() && getScope(route) === 'all'`. Rather than leak the raw scope pair, this is a single boolean accessor next to the existing `ctx.scopePill`/`ctx.scopedUrl`.
+- **`renderSchedule`** (scope pill, NL→cron live preview, enable/disable/remove, global-fanout targets) → `cockpit-views-connect.js`. Scope-aware via `ctx.scopePill`/`ctx.scopeIsGlobal`/`ctx.rerender`; `SCHEDULE_*` subscription via `ctx.onSpineEvent`; Create stamps `by: ctx.currentSession()`.
+- **`renderMcp`** (register form, per-server test/enable/remove, transport donut, `?focus=` deep-link) → same module, with private `fetchMcp`. `MCP_*` via `ctx.onSpineEvent`; Register stamps `by: ctx.currentSession()`; focus via `ctx.paletteFocus`/`focusPanelByKeyword`.
+- **`renderRuntimes`** (register/detect/spawn adapters, capability meters) → same module, with private `fetchRuntimes`. `RUNTIME_*`/`WORKER_*` via `ctx.onSpineEvent`; Register + Spawn stamp `ctx.currentSession()`. Verbatim otherwise.
+- **`cockpit.js` 5627 → 5166** (−461 lines); the cockpit remains **13 modules** (`cockpit-views-connect.js` now 1322 lines). Mass ratchet re-baselined. The **connect** cluster (settings/trust/auth/imports/schedule/mcp/runtimes) is now fully extracted.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The connect fixture `scripts/test/cockpit-views-connect.mjs` grew to **46/0** — for each of the three new views it asserts the `ctx.onSpineEvent` subscription, that an **unrelated** spine event is filtered out (no refetch) while a matching one **does** refetch, and that clicking Create/Register reads `ctx.currentSession()`. Self-test full 72/72, audit 14/0.
+- **What's left:** only the **live cluster** remains (workbench/conductor/boss/queue/claims/dashboard/operations/events/mailbox/tasks/approvals/…). Several move mechanically; the conductor/boss views drive the composer deeply (`renderBossComposer`) and need one more structural seam (composer injection) — a Codex consult when reached.
+
 ## [v1.57.0] · 2026-06-19 · Cockpit decomposition — Imports view (+ the narrow currentSession accessor)
 
 Twelfth view-module slice. Extracts `renderImports` and introduces the last small seam the remaining connect/live views need.
