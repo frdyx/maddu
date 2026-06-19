@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+// cockpit-views-inspect (v1.49.0) — the first "inspect-heavy" view module. Its
+// rows are clickable triggers that open the shell Inspector via ctx.openInspector.
+// Unlike the pure render-only fixtures, this one verifies the INTERACTION seam:
+// it feeds a canned /bridge/learning response, lets the async refresh build the
+// findings list, then fires the row's click handler and asserts the injected
+// ctx.openInspector was invoked with the finding descriptor. A node stub records
+// event listeners so the click can be replayed headlessly.
+//
+// Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
+
+function mkNode(tag) {
+  return {
+    tag, className: '', innerHTML: '', textContent: '',
+    value: '', checked: false, disabled: false,
+    attrs: {}, children: [], style: {}, dataset: {}, _l: {},
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    setAttribute(k, v) { this.attrs[k] = v; },
+    appendChild(c) { this.children.push(c); return c; },
+    replaceChildren() { this.children = []; },
+    addEventListener(type, fn) { (this._l[type] || (this._l[type] = [])).push(fn); },
+    querySelector(sel) { return queryOne(this, sel); },
+    querySelectorAll() { return []; },
+  };
+}
+// Minimal `.class` / tag matcher over the stub tree (depth-first).
+function matches(node, sel) {
+  if (!node || typeof node !== 'object') return false;
+  if (sel.startsWith('.')) return String(node.className || '').split(/\s+/).includes(sel.slice(1));
+  return node.tag === sel;
+}
+function queryOne(node, sel) {
+  for (const c of node.children || []) {
+    if (matches(c, sel)) return c;
+    const deep = queryOne(c, sel);
+    if (deep) return deep;
+  }
+  return null;
+}
+function findByClass(node, cls, out = []) {
+  for (const c of node.children || []) {
+    if (String(c.className || '').split(/\s+/).includes(cls)) out.push(c);
+    findByClass(c, cls, out);
+  }
+  return out;
+}
+
+globalThis.document = {
+  createElement(tag) { return mkNode(tag); },
+  createTextNode(text) { return { text, nodeType: 3 }; },
+};
+const CANNED_LEARNING = {
+  count: 1, byKind: { rule: 1 }, byLane: { harness: 1 },
+  facts: [{ id: 'f1', kind: 'rule', text: 'always branch first', ts: '2026-01-01T00:00:00Z', tags: ['a', 'b'], source: { event: 'evt-1' } }],
+};
+globalThis.fetch = (url) => {
+  if (String(url).includes('/bridge/learning')) {
+    return Promise.resolve({ ok: true, status: 200, json: async () => CANNED_LEARNING });
+  }
+  return new Promise(() => {});
+};
+
+const m = await import('../../template/maddu/cockpit/cockpit-views-inspect.js');
+
+let passed = 0, failed = 0;
+function ok(name, cond, extra = '') {
+  console.log(`  ${cond ? '[PASS]' : '[FAIL]'} ${name}${extra ? ` - ${extra}` : ''}`);
+  if (cond) passed++; else failed++;
+}
+
+ok('exports renderLearning', typeof m.renderLearning === 'function');
+
+let inspected = null;
+const ctx = { openInspector: (entity) => { inspected = entity; } };
+const root = m.renderLearning(ctx);
+ok('renderLearning → .view root', root.className === 'view');
+ok('renderLearning → <h2> "Learning"', root.children[0].tag === 'h2' && root.children[0].children[0].text === 'Learning');
+
+// Let the async refresh (canned fetch) settle, then click the first finding row.
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+
+const rows = findByClass(root, 'learning-row');
+ok('renders one finding row from canned data', rows.length === 1, `${rows.length} row(s)`);
+if (rows.length) {
+  const clicks = rows[0]._l.click || [];
+  ok('finding row has a click handler', clicks.length === 1);
+  if (clicks.length) {
+    clicks[0]();
+    ok('row click invokes ctx.openInspector', inspected && inspected.kind === 'finding' && inspected.id === 'f1',
+      inspected ? `kind=${inspected.kind} id=${inspected.id}` : 'not called');
+  }
+}
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
