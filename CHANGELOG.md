@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.47.0] · 2026-06-19 · Cockpit decomposition — reference view cluster extracted
+
+Second view-module slice of the cockpit decomposition (after v1.45.0's backbone cluster). Pulls the five "reference" route renderers — pages the operator reads rather than drives — out of the `cockpit.js` monolith.
+
+- **`template/maddu/cockpit/cockpit-views-reference.js`** (new) — `renderGoal`, `renderTools`, `renderLoops`, `renderSearch`, `renderWiki`. The module imports only leaves (`cockpit-util`) + route metadata (`cockpit-route-meta`); there is no import back into `cockpit.js`, so no circular dependency.
+- **One new ctx seam dep:** four of the five are pure-leaf moves (leaves + `ROUTE_META.<id>.description` + global `fetch`). `renderGoal` alone needs a shell helper — `panelFocus`, which self-registers a command-palette sub-target against the shell-owned `SUB_REGISTRY` — now injected via `ctx.panelFocus` (the dependency-injection seam grows from `{ bindRefresh }` to `{ bindRefresh, panelFocus }`).
+- **`cockpit.js` 7779 → 7398** (−381 lines); the cockpit is now **10 modules**. Mass ratchet re-baselined.
+- **Verification (all three layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0 — the DOM is provably unchanged), and the real-browser **Playwright** smoke gate (45/0 — exercises the wiki/search/goal click + input wiring Gate B can't snapshot). New self-test fixture `scripts/test/cockpit-views-reference.mjs` (21/0) asserts the exports, each view's scaffold, and that `renderGoal` routes through `ctx.panelFocus`.
+
 ## [v1.46.0] · 2026-06-19 · Real-browser smoke gate (Playwright) + workbench first-paint fix
 
 Adds a real-browser verification layer on top of the happy-dom gates — and it immediately caught and fixed a latent bug.
