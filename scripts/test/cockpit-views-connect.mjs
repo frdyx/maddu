@@ -48,6 +48,7 @@ function ok(name, cond, extra = '') {
 ok('exports renderTrust', typeof m.renderTrust === 'function');
 ok('exports renderSettings', typeof m.renderSettings === 'function');
 ok('exports renderAuth', typeof m.renderAuth === 'function');
+ok('exports renderImports', typeof m.renderImports === 'function');
 
 // renderTrust — pure, no ctx.
 const trustRoot = m.renderTrust();
@@ -87,6 +88,43 @@ if (typeof spineHandler === 'function') {
   ok('non-AUTH_KEY_ event is filtered out (no refetch)', authFetches === 1, `${authFetches} fetch(es)`);
   spineHandler({ detail: { type: 'AUTH_KEY_ADDED' } });
   ok('AUTH_KEY_ event triggers a refresh (refetch)', authFetches === 2, `${authFetches} fetch(es)`);
+}
+
+// ── renderImports — stream-coupled (IMPORT_* via ctx.onSpineEvent); the submit
+// action stamps `by: ctx.currentSession()` (narrow composer-pointer accessor) ──
+let impHandler = null;
+let currentSessionReads = 0;
+const impCtx = {
+  onSpineEvent: (h) => { impHandler = h; },
+  currentSession: () => { currentSessionReads++; return 'sess-42'; },
+};
+const impRoot = m.renderImports(impCtx);
+ok('renderImports → .view root', impRoot.className === 'view');
+ok('renderImports → <h2> "Imports"', impRoot.children[0].tag === 'h2' && impRoot.children[0].children[0].text === 'Imports');
+ok('renderImports subscribes via ctx.onSpineEvent', typeof impHandler === 'function');
+// The submit button is the 4th compose control; find it by label and click it.
+function findButton(node, label, out = []) {
+  for (const c of node.children || []) {
+    if (c.tag === 'button' && (c.children?.[0]?.text === label)) out.push(c);
+    findButton(c, label, out);
+  }
+  return out;
+}
+function findByTag(node, tag, out = []) {
+  for (const c of node.children || []) {
+    if (c.tag === tag) out.push(c);
+    findByTag(c, tag, out);
+  }
+  return out;
+}
+const submitBtns = findButton(impRoot, 'Submit');
+ok('renderImports has a Submit button', submitBtns.length === 1, `${submitBtns.length} found`);
+const tas = findByTag(impRoot, 'textarea');
+if (submitBtns.length && tas.length) {
+  tas[0].value = '{"title":"t","body":"b"}'; // valid JSON so the submit handler reaches the POST body
+  const before = currentSessionReads;
+  (submitBtns[0]._l.click || []).forEach((fn) => fn());
+  ok('Submit stamps by: ctx.currentSession()', currentSessionReads === before + 1, `${currentSessionReads} read(s)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.57.0] · 2026-06-19 · Cockpit decomposition — Imports view (+ the narrow currentSession accessor)
+
+Twelfth view-module slice. Extracts `renderImports` and introduces the last small seam the remaining connect/live views need.
+
+- **New `ctx.currentSession()` accessor.** The connect views that POST actions stamp them with the composer's sticky session pointer (`by: composer.currentSession || null`). Rather than inject the whole composer (a heavy slash-command singleton), this is a **narrow read-only accessor** — `ctx.currentSession = () => composer.currentSession` — the same narrow-alias discipline as `rerender`. It late-binds through the closure (composer is defined later in the module).
+- **`renderImports`** (guarded payload intake — skill/memory/lane/brief/inbox, with scan + submit and the secret-rejection ledger) → `cockpit-views-connect.js`, with its private `fetchImports`. Its `IMPORT_*` subscription now goes through `ctx.onSpineEvent`; the submit stamps `by: ctx.currentSession()`. Verbatim otherwise.
+- **`cockpit.js` 5759 → 5627** (−132 lines); the cockpit remains **13 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The connect fixture `scripts/test/cockpit-views-connect.mjs` (22/0) now drives renderImports: confirms it subscribes via `ctx.onSpineEvent`, and **clicks the Submit button and asserts `ctx.currentSession()` was read** to stamp the POST. Quick self-test 69/69.
+- **Unblocks the rest:** with `ctx.onSpineEvent` + `ctx.currentSession` both proven, the last three connect views (schedule/mcp/runtimes) are now mechanical ctx-swap moves.
+
 ## [v1.56.0] · 2026-06-19 · Cockpit decomposition — the stream-subscription seam (+ Auth view)
 
 Eleventh view-module slice, and the structural one that unblocks every remaining view: it introduces the **event-stream subscription seam** and proves it by extracting `renderAuth`.
