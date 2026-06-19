@@ -1,5 +1,5 @@
 {
-  "version": "1.46.0",
-  "phase": "cockpit-playwright-smoke-gate",
+  "version": "1.47.0",
+  "phase": "cockpit-views-reference-extraction",
   "released": "2026-06-19"
 }
