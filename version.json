@@ -1,5 +1,5 @@
 {
-  "version": "1.54.0",
-  "phase": "cockpit-views-inspect-plans-extraction",
+  "version": "1.55.0",
+  "phase": "cockpit-views-connect-settings-trust-extraction",
   "released": "2026-06-19"
 }

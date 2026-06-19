@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.55.0] · 2026-06-19 · Cockpit decomposition — connect cluster begins (Settings + Trust)
+
+Tenth view-module slice; opens the **connect** cluster with its two stream-free views in a new `cockpit-views-connect.js`. (The remaining connect views — auth/imports/schedule/mcp/runtimes — couple to the event stream + composer and will move with the live-cluster seam.)
+
+- **`renderSettings`** (bridge/lanes/providers/MCP/runtimes/storage/hard-rules panels + the comms integrations slot) and **`renderTrust`** (the security posture page: pins, violations, secret refusals, worker-env policy, provenance) → `cockpit-views-connect.js`.
+- **No ctx growth.** renderSettings uses `ctx.panelFocus` + `ctx.paletteFocus`/`ctx.focusPanelByKeyword` (all already on the seam) and imports the comms panels directly from the already-extracted `cockpit-comms.js`. renderTrust is a **pure-leaf** move (leaves + route metadata + globals; it keeps its own 15s `setInterval` refresh, verbatim). To avoid transcription error on a ~530-line move, both functions were extracted programmatically and the shell→ctx swaps applied mechanically.
+- **`cockpit.js` 6417 → 5887** (−530 lines — the largest single slice so far); the cockpit is now **13 modules**.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). New fixture `scripts/test/cockpit-views-connect.mjs` (9/0) asserts both exports, both page scaffolds, that renderSettings registers ≥6 panels through `ctx.panelFocus`, and that it consults `ctx.paletteFocus` for `?focus=`. Quick self-test 69/69.
+
 ## [v1.54.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Plans view (cluster complete)
 
 Ninth view-module slice; the sixth and final inspect-heavy view joins `cockpit-views-inspect.js`, **completing the inspect-heavy cluster**.
