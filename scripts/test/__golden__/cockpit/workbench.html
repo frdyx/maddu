@@ -16,13 +16,13 @@
           </span>
         </div>
         <div class="wb-pane-body">
-          <div class="skel-state">
-            <div class="skel-line skel-line-lg">
-            <div class="skel-line skel-line-md">
-            <div class="skel-line skel-line-sm">
-            <div aria-live="polite" class="skel-text">
-              "Fetching lanes…"
-            </div>
+          <div class="wb-list-row active">
+            <span class="wb-list-name">
+              "— all lanes —"
+            </span>
+            <span class="wb-list-count">
+              "*"
+            </span>
           </div>
         </div>
         <div class="wb-pane-head" style="border-top:1px solid var(--m-line);">
@@ -34,13 +34,8 @@
           </span>
         </div>
         <div class="wb-pane-body" style="max-height:200px;flex:none;">
-          <div class="skel-state">
-            <div class="skel-line skel-line-lg">
-            <div class="skel-line skel-line-md">
-            <div class="skel-line skel-line-sm">
-            <div aria-live="polite" class="skel-text">
-              "Fetching sessions…"
-            </div>
+          <div class="wb-empty">
+            "(none)"
           </div>
         </div>
       </div>
@@ -72,6 +67,10 @@
           </div>
         </div>
         <div class="wb-center-body">
+          <div class="wb-empty">
+            "(no events yet)"
+          </div>
+        </div>
       </div>
       <div class="wb-pane">
         <div class="wb-pane-head">
@@ -79,15 +78,17 @@
             "Status"
           </span>
           <span id="wb-status-version">
+            "v1.37.0-harness 1h 0m"
+          </span>
         </div>
         <div style="overflow:auto;flex:1;">
-          <div class="skel-state">
-            <div class="skel-line skel-line-lg">
-            <div class="skel-line skel-line-md">
-            <div class="skel-line skel-line-sm">
-            <div aria-live="polite" class="skel-text">
-              "Fetching status…"
-            </div>
+          <div class="wb-stat-row">
+            <span class="wb-stat-label">
+              "MCP servers"
+            </span>
+            <span class="wb-stat-value">
+              "—"
+            </span>
           </div>
         </div>
       </div>

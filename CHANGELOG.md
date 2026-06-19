@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.46.0] · 2026-06-19 · Real-browser smoke gate (Playwright) + workbench first-paint fix
+
+Adds a real-browser verification layer on top of the happy-dom gates — and it immediately caught and fixed a latent bug.
+
+- **`scripts/test/cockpit-playwright.mjs`** (new gate, full profile only) — loads the SHIPPED cockpit in real headless Chromium via **Playwright** (a dev-only `devDependency`), serves the cockpit over a stdlib static server, installs the same deterministic in-page fake bridge as the happy-dom harness, then drives **real hashchange navigation across all 42 routes**, a **real rail-nav click**, and fails on any uncaught page error. It is a SMOKE check (real-browser paint is non-deterministic), so it complements — never replaces — the byte-diff golden gates. It **graceful-skips** when `playwright`/Chromium is absent (zero-install `maddu self-test` stays green), and runs in the `full` profile (like the stress + upgrade matrices) so the quick loop stays fast.
+- **Why it earned its keep on day one:** happy-dom's Gate B only snapshots render output and never clicks; the new gate exercises the real engine and surfaced an uncaught `TypeError` on the **workbench** route. `renderWorkbench → refreshAll → updateTabs` called `getElementById('wb-tab-count-*').textContent` before the view was attached to `#route-view` — a throw that aborted workbench first-paint (the lanes/sessions panes were stuck on skeleton loaders until the first spine event). happy-dom had masked it as a tolerated unhandled rejection.
+- **Fix:** `updateTabs` now null-guards the count span (it's populated on the post-attach refresh). Workbench first-paint now completes — its golden snapshot was updated accordingly (the lanes pane renders its list instead of a perpetual skeleton).
+- **`scripts/test/_self-test-runner.mjs`** — `cockpit-playwright` registered as a full-profile-only task.
+- Re-baselined the cockpit mass floor `7775 → 7779`.
+
+Verified: `maddu self-test` (quick) **66/66** (`token-wrapper-emission` green in isolation) + `cockpit-playwright` **45/0** in real Chromium (stable across repeated runs), `maddu audit` **14/0**, `maddu architecture` **0 drift**, `maddu spine verify` **PASS**. Gate A + Gate B remain green (workbench golden intentionally updated).
+
 ## [v1.45.0] · 2026-06-19 · Cockpit decomposition (Phase 1) — ctx seam + first view module
 
 Eighth slice. Introduces the **dependency-injection seam** and extracts the first **view module** through it — the mechanism that lets route renderers leave `cockpit.js` without circular imports.

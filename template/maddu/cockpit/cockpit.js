@@ -1619,7 +1619,11 @@ function renderWorkbench() {
   function updateTabs() {
     for (const t of tabIds) {
       tabEls[t.id].classList.toggle('active', t.id === activeTab);
-      document.getElementById(`wb-tab-count-${t.id}`).textContent = String(tabCounts[t.id] || 0);
+      // The first refreshAll() runs before this view is attached to #route-view,
+      // so the count span isn't reachable by id yet — guard it (counts get set on
+      // the post-attach refresh). Was an uncaught throw that aborted first-paint.
+      const countEl = document.getElementById(`wb-tab-count-${t.id}`);
+      if (countEl) countEl.textContent = String(tabCounts[t.id] || 0);
     }
   }
   const centerBody = el('div', { class: 'wb-center-body' });
