@@ -15,10 +15,11 @@ function mkNode(tag) {
     value: '', checked: false, disabled: false,
     attrs: {}, children: [], style: {}, dataset: {}, _l: {},
     classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-    setAttribute(k, v) { this.attrs[k] = v; },
+    setAttribute(k, v) { this.attrs[k] = v; if (k === 'class') this.className = v; },
     appendChild(c) { this.children.push(c); return c; },
     replaceChildren() { this.children = []; },
     addEventListener(type, fn) { (this._l[type] || (this._l[type] = [])).push(fn); },
+    dispatchEvent(evt) { (this._l[evt && evt.type] || []).forEach((fn) => fn(evt)); return true; },
     querySelector(sel) { return queryOne(this, sel); },
     querySelectorAll() { return []; },
   };
@@ -47,8 +48,12 @@ function findByClass(node, cls, out = []) {
 
 globalThis.document = {
   createElement(tag) { return mkNode(tag); },
+  createElementNS(ns, tag) { return mkNode(tag); },
   createTextNode(text) { return { text, nodeType: 3 }; },
 };
+if (typeof globalThis.location === 'undefined') {
+  Object.defineProperty(globalThis, 'location', { value: { hash: '#/workflows' }, configurable: true, writable: true });
+}
 const CANNED_LEARNING = {
   count: 1, byKind: { rule: 1 }, byLane: { harness: 1 },
   facts: [{ id: 'f1', kind: 'rule', text: 'always branch first', ts: '2026-01-01T00:00:00Z', tags: ['a', 'b'], source: { event: 'evt-1' } }],
@@ -70,6 +75,7 @@ function ok(name, cond, extra = '') {
 
 ok('exports renderLearning', typeof m.renderLearning === 'function');
 ok('exports renderTeams', typeof m.renderTeams === 'function');
+ok('exports renderWorkflows', typeof m.renderWorkflows === 'function');
 
 let inspected = null;
 const ctx = { openInspector: (entity) => { inspected = entity; } };
@@ -126,6 +132,25 @@ if (cards.length) {
   }
 }
 ok('no palette focus when paletteFocus() is null', focusCalled === false);
+
+// ── renderWorkflows — SVG node opens the Inspector via ctx.openInspector ────
+let wfInspected = null;
+const wfCtx = { openInspector: (entity) => { wfInspected = entity; } };
+const wfRoot = m.renderWorkflows(wfCtx);
+ok('renderWorkflows → .view root', wfRoot.className === 'view');
+ok('renderWorkflows → <h2> "Workflows"', wfRoot.children[0].tag === 'h2' && wfRoot.children[0].children[0].text === 'Workflows');
+
+const nodes = findByClass(wfRoot, 'workflow-node');
+ok('renders all 10 workflow nodes', nodes.length === 10, `${nodes.length} node(s)`);
+if (nodes.length) {
+  const clicks = nodes[0]._l.click || [];
+  ok('workflow node has a click handler', clicks.length === 1);
+  if (clicks.length) {
+    clicks[0]();
+    ok('node click invokes ctx.openInspector', wfInspected && wfInspected.kind === 'workflow-node' && wfInspected.id === 'operator',
+      wfInspected ? `kind=${wfInspected.kind} id=${wfInspected.id}` : 'not called');
+  }
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

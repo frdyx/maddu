@@ -249,3 +249,130 @@ export function renderTeams(ctx) {
 
   return root;
 }
+
+// ─── Workflows blueprint — SVG node/edge graph; each node opens the Inspector
+// (and offers an "Open <route>" action) on click. Pure but for ctx.openInspector;
+// the graph topology constants are private to this view.
+const WORKFLOW_NODES = [
+  { id: 'operator', x:  60, y: 120, label: 'Operator',  desc: 'Drives every slice via Conductor + composer.' },
+  { id: 'boss',     x: 240, y:  60, label: 'BOSS',      desc: 'Proposes low-risk handoffs and slices (LLM voice).' },
+  { id: 'enforcer', x: 240, y: 180, label: 'Enforcer',  desc: 'Deterministic — cites state, refuses unsafe actions.' },
+  { id: 'queue',    x: 440, y:  60, label: 'Queue',     desc: 'Scheduler / Queue / Dispatch / Preflights — every parked card has a reason code.' },
+  { id: 'claims',   x: 440, y: 180, label: 'Claims',    desc: 'Active lane claims by session — write-lock + handoff.' },
+  { id: 'fleet',    x: 640, y: 120, label: 'Fleet',     desc: 'Sessions on lanes — claude-code, codex, hermes, future agents.' },
+  { id: 'gates',    x: 820, y:  60, label: 'Gates',     desc: 'Focused verification — scoped checks instead of full cycles.' },
+  { id: 'reports',  x: 820, y: 180, label: 'Reports',   desc: 'Slice-stop ledger, approvals ledger, verification reports.' },
+  { id: 'learning', x: 1000, y: 60, label: 'Learning',  desc: 'Hindsight memory — facts distilled from slice-stops.' },
+  { id: 'wiki',     x: 1000, y: 180, label: 'Wiki',     desc: 'Wiki Updater — auto-stamps per-lane pages on every slice-stop.' }
+];
+const WORKFLOW_EDGES = [
+  ['operator', 'boss'], ['operator', 'enforcer'],
+  ['boss', 'queue'],    ['boss', 'claims'],
+  ['enforcer', 'queue'], ['enforcer', 'claims'],
+  ['queue', 'fleet'],   ['claims', 'fleet'],
+  ['fleet', 'gates'],   ['fleet', 'reports'],
+  ['reports', 'learning'], ['reports', 'wiki'],
+  ['gates', 'reports']
+];
+const WORKFLOW_NODE_ROUTE = {
+  operator: '#/conductor', boss: '#/boss', enforcer: '#/boss',
+  queue: '#/queue', claims: '#/claims', fleet: '#/agents',
+  gates: '#/operations', reports: '#/events',
+  learning: '#/learning', wiki: '#/wiki'
+};
+
+export function renderWorkflows(ctx) {
+  const root = el('div', { class: 'view' });
+  root.appendChild(el('h2', {}, 'Workflows'));
+  root.appendChild(el('p', {}, ROUTE_META.workflows.description));
+
+  const W = 1100;
+  const H = 260;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('class', 'workflow-svg');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+  const nodeById = Object.fromEntries(WORKFLOW_NODES.map((n) => [n.id, n]));
+
+  // Edges
+  const edgeG = document.createElementNS(svgNS, 'g');
+  edgeG.setAttribute('class', 'workflow-edges');
+  for (const [a, b] of WORKFLOW_EDGES) {
+    const na = nodeById[a]; const nb = nodeById[b];
+    if (!na || !nb) continue;
+    const line = document.createElementNS(svgNS, 'path');
+    const dx = (nb.x - na.x) / 2;
+    const d = `M ${na.x + 60} ${na.y} C ${na.x + 60 + dx} ${na.y}, ${nb.x - dx} ${nb.y}, ${nb.x - 60} ${nb.y}`;
+    line.setAttribute('d', d);
+    line.setAttribute('class', 'workflow-edge');
+    edgeG.appendChild(line);
+  }
+  svg.appendChild(edgeG);
+
+  // Nodes
+  const nodeG = document.createElementNS(svgNS, 'g');
+  nodeG.setAttribute('class', 'workflow-nodes');
+  for (const n of WORKFLOW_NODES) {
+    const g = document.createElementNS(svgNS, 'g');
+    g.setAttribute('class', 'workflow-node');
+    g.setAttribute('transform', `translate(${n.x - 60}, ${n.y - 22})`);
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'button');
+    g.setAttribute('aria-label', n.label);
+    const rect = document.createElementNS(svgNS, 'rect');
+    rect.setAttribute('width', '120');
+    rect.setAttribute('height', '44');
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('class', 'workflow-node-rect');
+    g.appendChild(rect);
+    const text = document.createElementNS(svgNS, 'text');
+    text.setAttribute('x', '60');
+    text.setAttribute('y', '27');
+    text.setAttribute('class', 'workflow-node-label');
+    text.setAttribute('text-anchor', 'middle');
+    text.textContent = n.label;
+    g.appendChild(text);
+    g.addEventListener('click', () => {
+      if (typeof ctx.openInspector === 'function') {
+        ctx.openInspector({
+          kind: 'workflow-node',
+          label: n.label,
+          id: n.id,
+          raw: n,
+          evidence: [{ label: 'Route', value: WORKFLOW_NODE_ROUTE[n.id] || '(none)' }],
+          actions: [
+            { label: `Open ${n.label}`, run: () => { location.hash = WORKFLOW_NODE_ROUTE[n.id] || '#/conductor'; } }
+          ],
+          related: []
+        });
+      } else {
+        location.hash = WORKFLOW_NODE_ROUTE[n.id] || '#/conductor';
+      }
+    });
+    g.addEventListener('keydown', (e) => { if (e.key === 'Enter') g.dispatchEvent(new Event('click')); });
+    nodeG.appendChild(g);
+  }
+  svg.appendChild(nodeG);
+
+  const wrap = el('div', { class: 'workflow-wrap' });
+  wrap.appendChild(svg);
+  root.appendChild(panel('Blueprint', 'click any node to open its route', wrap));
+
+  // Legend
+  const legend = el('div', { class: 'workflow-legend' });
+  for (const n of WORKFLOW_NODES) {
+    legend.appendChild(el('div', { class: 'workflow-legend-row' }, [
+      el('span', { class: 'pill tone-accent' }, n.label),
+      el('span', {}, n.desc),
+      (() => {
+        const a = el('a', { href: WORKFLOW_NODE_ROUTE[n.id] || '#/conductor', class: 'workflow-legend-go mono' }, WORKFLOW_NODE_ROUTE[n.id] || '');
+        return a;
+      })()
+    ]));
+  }
+  root.appendChild(panel('Legend', 'every node maps to a route', legend));
+
+  return root;
+}

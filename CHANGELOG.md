@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.51.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Workflows view
+
+Sixth view-module slice; the third inspect-heavy view joins `cockpit-views-inspect.js`.
+
+- **`renderWorkflows`** (the architecture blueprint: an SVG node/edge graph where each node opens in the Inspector and offers an "Open &lt;route&gt;" action) → `cockpit-views-inspect.js`. Its private topology constants (`WORKFLOW_NODES`/`WORKFLOW_EDGES`/`WORKFLOW_NODE_ROUTE`) move with it.
+- **No ctx growth** — its only shell dependency is `openInspector`, already on the seam. Verbatim move (shell ref → `ctx.openInspector`; `location.hash` navigation in the node action stays a global).
+- **`cockpit.js` 6930 → 6810** (−120 lines); still **12 modules**. Mass ratchet re-baselined.
+- **Verification (all layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The interaction fixture `scripts/test/cockpit-views-inspect.mjs` now covers all three inspect views (19/0): it builds the SVG graph, confirms all 10 nodes render, **fires a node's click and asserts `ctx.openInspector` was invoked** with the `kind:'workflow-node'` descriptor (the stub gained `createElementNS` + `dispatchEvent` + `setAttribute('class')→className`).
+
 ## [v1.50.0] · 2026-06-19 · Cockpit decomposition — inspect-heavy: Teams view
 
 Fifth view-module slice; the second inspect-heavy view joins `cockpit-views-inspect.js`.
