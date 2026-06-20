@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.62.0] · 2026-06-20 · Cockpit decomposition — live cluster (Approvals)
+
+Seventeenth view-module slice — moves the **Approvals** view, the first to exercise the shared-fetch-helper pattern at a real entanglement.
+
+- **New shared-read seam: `ctx.fetchApprovals`.** `fetchApprovals` is also called by the still-inline `renderWorkbench`, so — exactly like `fetchMemory` in v1.60.0 — it joins ctx and stays defined in cockpit.js; both callers reach it through the seam (no duplication, no premature workbench move).
+- **`renderApprovals`** (open queue, decision ledger, standing policies workspace + global, scope pill) → `cockpit-views-live.js`. Scope-aware via `ctx.scopePill`, registers five palette panels via `ctx.panelFocus`, stream-coupled (`APPROVAL_*` via `ctx.onSpineEvent`); decision buttons via `makeDecisionButton` (event-rows), workspace tags via `workspaceBadge` (util). Verbatim otherwise.
+- The module's imports widened to pull `workspaceBadge` (util) and `makeDecisionButton` (event-rows) — already-extracted leaves.
+- **`cockpit.js` 4390 → 4236** (−154 lines); still **14 modules** (`cockpit-views-live.js` now 997 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **55/0** — approvals asserts the five `ctx.panelFocus` registrations, the render-time `ctx.fetchApprovals` read, and the `ctx.onSpineEvent` subscription with `APPROVAL_*` filtering (unrelated → no refetch, matching → refetch). Self-test full 73/73, audit 14/0.
+- **Still inline (live):** workbench, conductor, boss, queue, claims, dashboard, chats, orientation, gates, reviews. Composer-deep trio (workbench/conductor/boss) last — Codex consult.
+
 ## [v1.61.0] · 2026-06-20 · Cockpit decomposition — live cluster (Events stream view)
 
 Sixteenth view-module slice — moves the live **Events** stream view, which needed a genuinely new seam beyond the read helpers.

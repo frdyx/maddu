@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1105,6 +1105,7 @@ const ctx = {
   fetchLanes,
   fetchProjection,
   fetchMemory,
+  fetchApprovals,
   paletteFocus,
   focusPanelByKeyword,
   scopePill,
@@ -3048,169 +3049,14 @@ async function fetchApprovals(scopeRoute) {
 
 // postApprovalDecision → moved to cockpit-event-rows.js (v1.41.0).
 
-function renderApprovals() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Approvals'));
-  root.appendChild(el('p', {}, ROUTES.approvals.description));
-
-  const pill = scopePill('approvals', () => refresh());
-  if (pill) root.appendChild(pill);
-
-  const summaryMount = el('div', {});
-  summaryMount.appendChild(loading('Reading ledger…'));
-  root.appendChild(panelFocus('Summary', 'open queue + decision distribution', summaryMount,
-    { id: 'summary', keywords: 'summary open decisions distribution overview' }));
-
-  const openMount = el('div', {});
-  openMount.appendChild(loadingFor('table', 'Fetching open approvals…'));
-  root.appendChild(panelFocus('Open queue', 'GET /bridge/approvals', openMount,
-    { id: 'open-queue', keywords: 'open queue pending awaiting decision' }));
-
-  const ledgerMount = el('div', {});
-  root.appendChild(panelFocus('Decision ledger', '.maddu/events/*.ndjson · APPROVAL_DECIDED', ledgerMount,
-    { id: 'ledger', keywords: 'ledger decided audit history approval' }));
-
-  const policyMount = el('div', {});
-  root.appendChild(panelFocus('Standing policies', 'APPROVAL_POLICY_SET', policyMount,
-    { id: 'policies', keywords: 'standing policies allow-always allow-once deny rules' }));
-
-  // Slice 4: global policies — machine-scope rules at
-  // ~/.config/maddu/global/policies.json. Auto-decide hits every
-  // workspace's spine with a real APPROVAL_DECIDED event tagged
-  // triggered_by:{kind:'global_policy', id}.
-  const globalPolicyMount = el('div', {});
-  root.appendChild(panelFocus('Standing policies (global)', 'GET /bridge/_global/policies', globalPolicyMount,
-    { id: 'global-policies', keywords: 'global standing policies machine-scope allow-always deny' }));
-
-  function refresh() {
-    // Global policies — independent fetch; failure renders empty, not an error
-    // (the route 404s in legacy bridges that haven't been upgraded yet).
-    fetch('/bridge/_global/policies', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((g) => {
-      globalPolicyMount.innerHTML = '';
-      const list = (g && g.policies) || [];
-      if (!list.length) {
-        globalPolicyMount.appendChild(placeholder('No global policies', '`maddu global policy add --tool <name> --decision deny`'));
-        return;
-      }
-      for (const p of list) {
-        const cls = p.decision === 'allow-always' ? 'ledger-decision-allow' : 'ledger-decision-deny';
-        globalPolicyMount.appendChild(el('div', { class: 'ledger-row' }, [
-          el('span', { class: 'workspace-badge mono' }, 'global'),
-          el('span', {}, (p.setAt || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z') || '—'),
-          el('span', { class: cls }, p.decision),
-          el('span', {}, `${p.tool || '*'}@${p.lane || '*'}`),
-          el('span', {}, p.setBy || '')
-        ]));
-      }
-    }).catch(() => {
-      globalPolicyMount.innerHTML = '';
-      globalPolicyMount.appendChild(placeholder('Offline', 'Global endpoint unavailable.'));
-    });
-    fetchApprovals('approvals').then((a) => {
-      summaryMount.innerHTML = '';
-      openMount.innerHTML = '';
-      ledgerMount.innerHTML = '';
-      policyMount.innerHTML = '';
-      if (!a) {
-        openMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
-        summaryMount.appendChild(placeholder('Offline', 'Bridge not reachable.'));
-        return;
-      }
-      // Summary donut: decision distribution from ledger + open count
-      const ledger = a.ledger || [];
-      const dist = { 'allow-once': 0, 'allow-always': 0, deny: 0, 'deny-always': 0 };
-      for (const d of ledger) if (d.decision in dist) dist[d.decision]++;
-      const summary = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;' });
-      summary.appendChild(donut([
-        { label: 'allow-once',   value: dist['allow-once'],   tone: 'ok' },
-        { label: 'allow-always', value: dist['allow-always'], tone: 'accent' },
-        { label: 'deny',         value: dist.deny,            tone: 'warn' },
-        { label: 'deny-always',  value: dist['deny-always'],  tone: 'danger' }
-      ], { centerLabel: 'decided' }));
-      summary.appendChild(statusGrid([
-        { value: a.open.length,                                    label: 'Open queue',  tone: (a.open.length > 0 ? 'warn' : 'ok') },
-        { value: ledger.length,                                    label: 'Decided',     tone: 'blue' },
-        { value: (a.policies || []).length,                        label: 'Standing policies', tone: 'accent' },
-        { value: (dist['allow-once'] + dist['allow-always']) || 0, label: 'Allow total', tone: 'ok' }
-      ]));
-      summaryMount.appendChild(summary);
-      if (a.open.length === 0) {
-        openMount.appendChild(placeholder('No pending approvals', 'A worker can request one via POST /bridge/approvals/request.'));
-      } else {
-        for (const ap of a.open) {
-          const card = el('div', { class: 'approval' }, [
-            el('div', { class: 'approval-body' }, [
-              el('div', { class: 'approval-tool' }, [
-                workspaceBadge(ap),
-                document.createTextNode(ap.tool)
-              ]),
-              el('div', { class: 'approval-meta' }, [
-                `lane: ${ap.lane || '—'}  ·  asked by: ${ap.actor || 'anon'}  ·  ${ap.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}`
-              ]),
-              ap.action  ? el('div', { class: 'approval-action' }, ap.action) : null,
-              ap.summary ? el('div', { class: 'approval-summary' }, ap.summary) : null
-            ]),
-            el('div', { class: 'approval-actions' }, [
-              makeDecisionButton('allow-once', 'Allow once', 'btn-allow', ap.approvalId, refresh, ap.workspace_id),
-              makeDecisionButton('allow-always', 'Allow always', 'btn-allow', ap.approvalId, refresh, ap.workspace_id),
-              makeDecisionButton('deny', 'Deny', 'btn-deny', ap.approvalId, refresh, ap.workspace_id),
-              makeDecisionButton('deny-always', 'Deny always', 'btn-deny-hard', ap.approvalId, refresh, ap.workspace_id)
-            ])
-          ]);
-          openMount.appendChild(card);
-        }
-      }
-
-      if (a.ledger.length === 0) {
-        ledgerMount.appendChild(placeholder('No decisions yet', 'Decisions appended as APPROVAL_DECIDED events.'));
-      } else {
-        for (const d of a.ledger.slice().reverse()) {
-          const cls = d.decision.startsWith('allow') ? 'ledger-decision-allow' : 'ledger-decision-deny';
-          const isGlobal = d.reason && d.reason.startsWith('global-policy:');
-          const reasonChildren = [];
-          if (isGlobal) reasonChildren.push(el('span', { class: 'workspace-badge mono', style: 'background:rgba(80,113,149,0.32);' }, 'global'));
-          reasonChildren.push(document.createTextNode(d.reason || ''));
-          ledgerMount.appendChild(el('div', { class: 'ledger-row' }, [
-            workspaceBadge(d),
-            el('span', {}, d.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
-            el('span', { class: cls }, d.decision),
-            el('span', {}, `${d.tool || '—'}@${d.lane || '—'}`),
-            el('span', {}, reasonChildren)
-          ]));
-        }
-      }
-
-      if (a.policies.length === 0) {
-        policyMount.appendChild(placeholder('No standing policies', 'Choose "Allow always" or "Deny always" on a decision, or set via `maddu approval policy`.'));
-      } else {
-        for (const p of a.policies) {
-          const cls = p.decision === 'allow-always' ? 'ledger-decision-allow' : 'ledger-decision-deny';
-          policyMount.appendChild(el('div', { class: 'ledger-row' }, [
-            workspaceBadge(p),
-            el('span', {}, p.setAt.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
-            el('span', { class: cls }, p.decision),
-            el('span', {}, `${p.tool || '*'}@${p.lane || '*'}`),
-            el('span', {}, p.setBy || '')
-          ]));
-        }
-      }
-    });
-  }
-
-  refresh();
-  // Refresh on every APPROVAL_* event from the page-wide stream.
-  const handler = (e) => {
-    if (e.detail.type && e.detail.type.startsWith('APPROVAL_')) refresh();
-  };
-  stream.bus.addEventListener('event', handler);
-  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', handler), { once: true });
-
-  return root;
-}
+// renderApprovals � moved to cockpit-views-live.js (v1.62.0). Scope-aware
+// (ctx.scopePill), ctx.panelFocus palette panels, APPROVAL_* via ctx.onSpineEvent.
+// fetchApprovals STAYS here (shared with the inline renderWorkbench) and is
+// reached via ctx.fetchApprovals.
 
 // classifyEvent / summarize / eventRow → moved to cockpit-event-rows.js (v1.41.0).
 
-// renderEvents � moved to cockpit-views-live.js (v1.61.0). Live event stream:
+// renderEvents � moved to cockpit-views-live.js (v1.61.0). Live event stream:
 // subscribes via ctx.onSpineEvent (appends each matching row), Pause/Resume
 // toggles the shared long-poll flag via ctx.isStreamPaused/toggleStreamPause.
 
