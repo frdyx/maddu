@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -2613,40 +2613,8 @@ async function fetchLanes() {
 // Swarm: static read over ctx.fetchLanes + ctx.fetchProjection (no stream sub).
 
 
-function renderChats() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Chats'));
-  root.appendChild(el('p', {}, ROUTES.chats.description));
-
-  const mount = el('div', {});
-  mount.appendChild(loading('Fetching sessions…'));
-  root.appendChild(panel('Sessions', 'GET /bridge/sessions', mount));
-
-  fetchProjection().then((proj) => {
-    mount.innerHTML = '';
-    if (!proj || proj.sessions.length === 0) {
-      mount.appendChild(placeholder('No sessions yet', 'Register one with `maddu session register`.'));
-      return;
-    }
-    const list = el('div', {});
-    for (const s of proj.sessions.slice().reverse()) {
-      const dot = s.status === 'active' ? '<span class="signal live"></span>' : '<span class="signal"></span>';
-      const head = el('div', { class: 'panel-head' }, [
-        el('span', { class: 'panel-title', html: `${dot} ${s.id}` }),
-        el('span', { class: 'panel-aside' }, s.status)
-      ]);
-      const kv = el('dl', { class: 'kv' }, [
-        el('dt', {}, 'role'),  el('dd', {}, s.role || '—'),
-        el('dt', {}, 'label'), el('dd', {}, s.label || '—'),
-        el('dt', {}, 'focus'), el('dd', {}, s.focus || '—')
-      ]);
-      list.appendChild(el('div', { class: 'panel' }, [head, kv]));
-    }
-    mount.appendChild(list);
-  });
-
-  return root;
-}
+// renderChats � moved to cockpit-views-live.js (v1.66.0). The sessions roster:
+// one ctx.fetchProjection read rendered as session panels. The simplest live view.
 
 // v1.6.0 — Goal panel: objective + measurable success conditions + constraints
 // + the curated cross-session handoff. Read-only (GET /bridge/goal). Live ✓/○/?
