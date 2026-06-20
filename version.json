@@ -1,5 +1,5 @@
 {
-  "version": "1.69.0",
-  "phase": "cockpit-views-live-boss-extraction-route-views-complete",
+  "version": "1.70.0",
+  "phase": "cockpit-inspector-module-extraction",
   "released": "2026-06-20"
 }

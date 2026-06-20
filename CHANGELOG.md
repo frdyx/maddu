@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.70.0] · 2026-06-20 · Cockpit decomposition — Inspector module (optional shell polish)
+
+First of the optional post-completion polish slices (the route-view extraction finished at v1.69.0). Extracts the **Inspector** — the entity-detail drawer — out of the composition root into its own module.
+
+- **New module `cockpit-inspector.js`** (298 lines): the `inspector` singleton (open state + drawer DOM refs), `ensureInspector` (lazily builds the `<aside>` drawer with Escape/outside-click close), `openInspector`/`closeInspector`, `renderInspector`, the five-tab renderers (`INSPECTOR_RENDERERS`: overview · evidence · actions · related · raw), and the `inspectorLabel`/`inspectorPayload`/`renderInspectorTab` helpers. A genuinely self-contained subsystem — depends on nothing in the cockpit module scope, only leaves (`el`/`placeholder`/`formatTs`) + `REASON_CODE_LABEL` (event-rows) + the DOM + the entity argument.
+- **cockpit.js wires it the same way the views do:** `openInspector` is imported and assigned onto `ctx.openInspector`; `closeInspector` is imported for the command-palette "close inspector" action. No behavior change — route views still open the drawer through `ctx.openInspector` exactly as before.
+- **`cockpit.js` 2686 → 2423** (−263 lines); the cockpit is now **16 modules**. Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). A new fixture `scripts/test/cockpit-inspector.mjs` (16/0, happy-dom with graceful consumer-checkout skip) drives the real drawer: `openInspector` → asserts the `#inspector-panel` is built into `#app`, the `inspector-open` class, the title, all five tabs, the overview body; a **Raw-tab click** renders the JSON `<pre>`; `closeInspector` hides it; and a depth-upgrade entity's **Actions-tab** button **runs its author-supplied callback**. Self-test full 74/74, audit 14/0.
+
 ## [v1.69.0] · 2026-06-20 · Cockpit decomposition — BOSS (route-view extraction COMPLETE)
 
 Twenty-fourth view-module slice and the **last route view**. With BOSS extracted, **every one of the cockpit's 42 routes now renders from a sibling module** — `cockpit.js` is a pure composition root.
