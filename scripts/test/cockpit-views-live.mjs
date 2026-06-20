@@ -64,6 +64,9 @@ ok('exports renderOperations', typeof m.renderOperations === 'function');
 ok('exports renderSwarm', typeof m.renderSwarm === 'function');
 ok('exports renderEvents', typeof m.renderEvents === 'function');
 ok('exports renderApprovals', typeof m.renderApprovals === 'function');
+ok('exports renderOrientation', typeof m.renderOrientation === 'function');
+ok('exports renderGates', typeof m.renderGates === 'function');
+ok('exports renderReviews', typeof m.renderReviews === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -237,6 +240,32 @@ ok('exports renderApprovals', typeof m.renderApprovals === 'function');
     ok('approvals: non-APPROVAL_ event filtered (no refetch)', apReads === 1, `${apReads}`);
     spine({ detail: { type: 'APPROVAL_DECIDED' } });
     ok('approvals: APPROVAL_ event triggers refetch', apReads === 2, `${apReads}`);
+  }
+}
+
+// ── renderOrientation / renderGates / renderReviews — clean read-only ledger
+// views: ctx.panelFocus palette panel(s) + debounced ctx.onSpineEvent refresh
+// (no filtering). The subscription fires through onSpineEvent; the handler is
+// debounced (setTimeout) so we assert it's wired + doesn't throw on fire. ──
+for (const [name, title, minPanels] of [
+  ['renderOrientation', 'Orientation', 2],
+  ['renderGates', 'Gates', 1],
+  ['renderReviews', 'Reviews', 1],
+]) {
+  let spine = null, panelCalls = 0;
+  const ctx = {
+    panelFocus(t, aside, body, opts) { panelCalls++; const n = mkNode('div'); n.className = 'panel'; if (body) n.appendChild(body); return n; },
+    onSpineEvent: (h) => { spine = h; },
+  };
+  const root = m[name](ctx);
+  ok(`${name} → .view root`, root.className === 'view');
+  ok(`${name} → <h2> "${title}"`, root.children[0].children[0].text === title);
+  ok(`${name} registers ≥${minPanels} panel(s) via ctx.panelFocus`, panelCalls >= minPanels, `${panelCalls}`);
+  ok(`${name} subscribes via ctx.onSpineEvent`, typeof spine === 'function');
+  if (typeof spine === 'function') {
+    let threw = false;
+    try { spine({ detail: { type: 'GATE_RAN' } }); } catch { threw = true; }
+    ok(`${name} handles a spine event without throwing`, threw === false);
   }
 }
 
