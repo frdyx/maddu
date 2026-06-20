@@ -63,6 +63,7 @@ ok('exports renderSkills', typeof m.renderSkills === 'function');
 ok('exports renderOperations', typeof m.renderOperations === 'function');
 ok('exports renderSwarm', typeof m.renderSwarm === 'function');
 ok('exports renderEvents', typeof m.renderEvents === 'function');
+ok('exports renderApprovals', typeof m.renderApprovals === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -211,6 +212,31 @@ ok('exports renderEvents', typeof m.renderEvents === 'function');
     try { spine({ detail: { type: 'SESSION_REGISTERED', ts: '2026-06-20T00:00:00.000Z' } }); }
     catch { threw = true; }
     ok('renderEvents live-appends a matching event without throwing', threw === false);
+  }
+}
+
+// ── renderApprovals — scope-aware (ctx.scopePill), registers palette panels via
+// ctx.panelFocus, reads ctx.fetchApprovals on render, APPROVAL_* via
+// ctx.onSpineEvent (fetchApprovals stays in cockpit.js, shared with workbench) ──
+{
+  let spine = null, panelCalls = 0, apReads = 0;
+  const ctx = {
+    scopePill: () => null,
+    panelFocus(title, aside, body, opts) { panelCalls++; const n = mkNode('div'); n.className = 'panel'; if (body) n.appendChild(body); return n; },
+    fetchApprovals: () => { apReads++; return new Promise(() => {}); },
+    onSpineEvent: (h) => { spine = h; },
+  };
+  const root = m.renderApprovals(ctx);
+  ok('renderApprovals → .view root', root.className === 'view');
+  ok('renderApprovals → <h2> "Approvals"', root.children[0].children[0].text === 'Approvals');
+  ok('renderApprovals registers panels via ctx.panelFocus (≥5)', panelCalls >= 5, `${panelCalls} call(s)`);
+  ok('renderApprovals reads ctx.fetchApprovals on render', apReads === 1, `${apReads}`);
+  ok('renderApprovals subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  if (typeof spine === 'function') {
+    spine({ detail: { type: 'TASK_CREATED' } });
+    ok('approvals: non-APPROVAL_ event filtered (no refetch)', apReads === 1, `${apReads}`);
+    spine({ detail: { type: 'APPROVAL_DECIDED' } });
+    ok('approvals: APPROVAL_ event triggers refetch', apReads === 2, `${apReads}`);
   }
 }
 
