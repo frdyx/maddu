@@ -39,7 +39,9 @@ The crucial property: **every write goes through the spine first**. Projections 
 │   │                                # verify (v0.15)
 │   ├── cockpit/
 │   │   ├── index.html
-│   │   ├── cockpit.js
+│   │   ├── cockpit.js          # composition root: route registry, ctx, router, boot
+│   │   ├── cockpit-*.js        # sibling ES modules: per-cluster route views,
+│   │   │                       # widgets, inspector, command bar, util (17 in all)
 │   │   └── cockpit.css
 │   └── package.json
 └── .maddu/                          # project state (never touched by upgrade)

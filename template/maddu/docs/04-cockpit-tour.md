@@ -1,6 +1,6 @@
 # Cockpit tour
 
-The cockpit is a single-page app served by the bridge at <http://127.0.0.1:4177>. It is hash-routed (`#workbench`, `#approvals`, etc.) and renders into a single view container. There is no build step — `cockpit.js` is vanilla JS, no framework.
+The cockpit is a single-page app served by the bridge at <http://127.0.0.1:4177>. It is hash-routed (`#workbench`, `#approvals`, etc.) and renders into a single view container. There is no build step — it's vanilla JS using native ES modules, no framework: `cockpit.js` is the composition root (route registry, the `ctx` seam, router, boot) and each route-view cluster plus the inspector, command bar, and widget kit lives in a sibling `cockpit-*.js` module.
 
 Every route long-polls `/bridge/events/wait` for live updates and re-fetches `/bridge/status` once per wait turn so the badges, uptime, and counters stay current.
 
