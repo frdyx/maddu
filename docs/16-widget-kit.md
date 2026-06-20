@@ -2,8 +2,8 @@
 
 The cockpit ships a small pure-SVG widget library — no chart dependency
 (rule #4: no broad new dependencies). All widgets are defined in
-`maddu/cockpit/cockpit.js` near the top of the file and styled by
-`cockpit.css`. They read tone colors from the cockpit's token palette
+`maddu/cockpit/cockpit-widgets.js` (one of the cockpit's vanilla ES
+modules) and styled by `cockpit.css`. They read tone colors from the cockpit's token palette
 (`--m-ok`, `--m-warn`, `--m-danger`, `--m-accent`, `--m-accent-2`,
 `--m-fg-3`), so they automatically match the rest of the interface.
 
@@ -19,8 +19,9 @@ Three reasons:
    in 50–300 KB of code Máddu doesn't otherwise need.
 2. **Token alignment** — every widget reads CSS custom properties, so
    theme changes happen in one place (`cockpit.css` `:root`).
-3. **Auditability** — `cockpit.js` is one vanilla file. You can read
-   every line of the widget code without leaving the cockpit tree.
+3. **Auditability** — the cockpit is a set of small vanilla ES modules
+   (the widgets live in `cockpit-widgets.js`). You can read every line of
+   the widget code without leaving the cockpit tree.
 
 ## Tones
 
@@ -196,7 +197,7 @@ wrap.appendChild(sparkline(bins, { tone: 'accent', width: 480, height: 56 }));
 
 ## Adding a new widget
 
-1. Define it as a function near the existing kit in `cockpit.js`.
+1. Define it as a function near the existing kit in `cockpit-widgets.js`.
 2. Style it under the `Widget kit` section of `cockpit.css`. Use
    token vars only — never hard-code hex.
 3. Add a row to the appearance table above and a usage example to
