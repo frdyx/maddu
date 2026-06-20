@@ -62,6 +62,7 @@ ok('exports renderTasks', typeof m.renderTasks === 'function');
 ok('exports renderSkills', typeof m.renderSkills === 'function');
 ok('exports renderOperations', typeof m.renderOperations === 'function');
 ok('exports renderSwarm', typeof m.renderSwarm === 'function');
+ok('exports renderEvents', typeof m.renderEvents === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -181,6 +182,36 @@ ok('exports renderSwarm', typeof m.renderSwarm === 'function');
   ok('renderSwarm → <h2> "Swarm"', root.children[0].children[0].text === 'Swarm');
   ok('renderSwarm reads ctx.fetchLanes on render', laneReads === 1, `${laneReads}`);
   ok('renderSwarm reads ctx.fetchProjection on render', projReads === 1, `${projReads}`);
+}
+
+// ── renderEvents — live stream view: subscribes via ctx.onSpineEvent and appends
+// each matching row; Pause/Resume toggles the shared long-poll flag through
+// ctx.isStreamPaused/toggleStreamPause (never touches the stream singleton) ──
+{
+  let spine = null, pausedReads = 0, toggles = 0, paused = false;
+  const ctx = {
+    onSpineEvent: (h) => { spine = h; },
+    isStreamPaused: () => { pausedReads++; return paused; },
+    toggleStreamPause: () => { toggles++; paused = !paused; return paused; },
+  };
+  const root = m.renderEvents(ctx);
+  ok('renderEvents → .view root', root.className === 'view');
+  ok('renderEvents → <h2> "Events"', root.children[0].children[0].text === 'Events');
+  ok('renderEvents reads ctx.isStreamPaused on render (button label)', pausedReads >= 1, `${pausedReads}`);
+  ok('renderEvents subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  const pauseBtn = findButton(root, 'Pause')[0];
+  ok('renderEvents renders a Pause button', !!pauseBtn);
+  if (pauseBtn) {
+    (pauseBtn._l.click || []).forEach((fn) => fn());
+    ok('Pause click toggles via ctx.toggleStreamPause', toggles === 1, `${toggles}`);
+    ok('Pause click relabels to "Resume"', pauseBtn.textContent === 'Resume', pauseBtn.textContent);
+  }
+  if (typeof spine === 'function') {
+    let threw = false;
+    try { spine({ detail: { type: 'SESSION_REGISTERED', ts: '2026-06-20T00:00:00.000Z' } }); }
+    catch { threw = true; }
+    ok('renderEvents live-appends a matching event without throwing', threw === false);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

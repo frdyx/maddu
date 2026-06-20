@@ -1,5 +1,5 @@
 {
-  "version": "1.60.0",
-  "phase": "cockpit-views-live-operations-swarm-extraction",
-  "released": "2026-06-19"
+  "version": "1.61.0",
+  "phase": "cockpit-views-live-events-extraction",
+  "released": "2026-06-20"
 }
