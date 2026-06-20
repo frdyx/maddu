@@ -9,6 +9,7 @@ import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './c
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 import { renderSlashCheatsheet } from './cockpit-backbone-cards.js';
 import { classifyEvent, eventRow, prepend, makeDecisionButton, REASON_CODE_TONE, REASON_CODE_LABEL } from './cockpit-event-rows.js';
+import { openInspector, closeInspector } from './cockpit-inspector.js';
 import { renderMarkdown } from './cockpit-markdown.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
 import { renderPipelinesRoute, renderCostRoute, renderAdvisorsRoute, renderSkillInjectionsRoute, renderModelRoutingRoute, renderTestStatusRoute } from './cockpit-views-backbone.js';
@@ -430,123 +431,18 @@ function setBanner(text, severity = 'info') {
 // related · raw. Render is by-kind; renderers below dispatch on entity kind.
 // No modals — Inspector lives in #inspector-panel and slides in.
 
-const inspector = {
-  open: false,
-  entity: null,    // { kind, id, data }
-  tab: 'overview',
-  el: null,
-  bodyEl: null,
-  titleEl: null,
-  subEl: null,
-  tabsEl: null
-};
+// The Inspector (entity-detail drawer) � moved to cockpit-inspector.js (v1.70.0):
+// inspector singleton + ensureInspector + open/closeInspector + renderInspector +
+// INSPECTOR_TABS/RENDERERS + label/payload/renderInspectorTab. A self-contained
+// drawer (leaves + REASON_CODE_LABEL + DOM only). Route views open it via
+// ctx.openInspector; cockpit.js imports open/closeInspector (above).
 
-function ensureInspector() {
-  if (inspector.el) return inspector.el;
-  const panelEl = document.createElement('aside');
-  panelEl.id = 'inspector-panel';
-  panelEl.className = 'inspector';
-  panelEl.hidden = true;
-  panelEl.innerHTML = `
-    <div class="inspector-head">
-      <div class="inspector-titles">
-        <div class="inspector-title" id="inspector-title">—</div>
-        <div class="inspector-sub" id="inspector-sub">no selection</div>
-      </div>
-      <button type="button" class="inspector-close" id="inspector-close" aria-label="Close inspector">×</button>
-    </div>
-    <nav class="inspector-tabs" id="inspector-tabs"></nav>
-    <div class="inspector-body" id="inspector-body"></div>
-  `;
-  document.getElementById('app').appendChild(panelEl);
-  inspector.el = panelEl;
-  inspector.bodyEl = panelEl.querySelector('#inspector-body');
-  inspector.titleEl = panelEl.querySelector('#inspector-title');
-  inspector.subEl = panelEl.querySelector('#inspector-sub');
-  inspector.tabsEl = panelEl.querySelector('#inspector-tabs');
-  panelEl.querySelector('#inspector-close').addEventListener('click', closeInspector);
-  // Escape closes.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && inspector.open && !e.defaultPrevented) closeInspector();
-  });
-  // Outside-click closes. pointerdown unifies mouse/touch/pen and fires
-  // before the subsequent click, so a card-click that opens a different
-  // entity still works (close → reopen with new content in one gesture).
-  document.addEventListener('pointerdown', (e) => {
-    if (!inspector.open) return;
-    const t = e.target;
-    if (!t || !(t instanceof Node)) return;
-    // Inside the panel — keep open.
-    if (panelEl.contains(t)) return;
-    // Palette / dock-sheet / first-run banner all have their own scrim
-    // close behavior; clicking them is "outside" the inspector and should
-    // dismiss it too.
-    closeInspector();
-  });
-  return panelEl;
-}
 
-function openInspector(entity) {
-  ensureInspector();
-  inspector.entity = entity;
-  inspector.open = true;
-  inspector.tab = 'overview';
-  inspector.el.hidden = false;
-  document.getElementById('app').classList.add('inspector-open');
-  renderInspector();
-}
 
-function closeInspector() {
-  if (!inspector.el) return;
-  inspector.open = false;
-  inspector.entity = null;
-  inspector.el.hidden = true;
-  document.getElementById('app').classList.remove('inspector-open');
-}
 
-function renderInspector() {
-  const e = inspector.entity;
-  if (!e) return;
-  const label = inspectorLabel(e);
-  inspector.titleEl.textContent = label.title;
-  inspector.subEl.textContent = label.sub;
-  inspector.tabsEl.replaceChildren(...INSPECTOR_TABS.map((t) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'inspector-tab' + (t === inspector.tab ? ' active' : '');
-    b.textContent = t;
-    b.addEventListener('click', () => { inspector.tab = t; renderInspector(); });
-    return b;
-  }));
-  inspector.bodyEl.replaceChildren(renderInspectorTab(e, inspector.tab));
-}
 
-const INSPECTOR_TABS = ['overview', 'evidence', 'actions', 'related', 'raw'];
 
-function inspectorLabel(e) {
-  if (!e) return { title: '—', sub: '' };
-  // Prefer the route-supplied label when present.
-  if (e.label) return { title: e.label, sub: e.kind || '' };
-  if (e.kind === 'task')      return { title: e.data?.title || e.id || 'task', sub: `task · ${e.data?.lane || 'no lane'} · ${e.data?.status || ''}` };
-  if (e.kind === 'lane')      return { title: e.id || 'lane', sub: `lane · ${e.data?.reasonCode || ''}` };
-  if (e.kind === 'session')   return { title: e.data?.label || e.raw?.label || e.id, sub: `session · ${e.data?.role || e.raw?.role || ''}` };
-  if (e.kind === 'claim')     return { title: e.data?.lane || e.id, sub: `claim · ${e.data?.actor || ''}` };
-  if (e.kind === 'approval')  return { title: e.data?.tool || e.id, sub: `approval · ${e.data?.lane || ''}` };
-  if (e.kind === 'event')     return { title: e.data?.type || e.id, sub: `event · ${e.data?.actor || ''}` };
-  if (e.kind === 'sliceStop' || e.kind === 'slice-stop') {
-    const s = e.data || e.raw || {};
-    return { title: s.summary || e.id, sub: `slice-stop · ${s.actor || ''}` };
-  }
-  if (e.kind === 'finding')        return { title: e.id || 'finding', sub: 'learning finding' };
-  if (e.kind === 'workflow-node')  return { title: e.id || 'node', sub: 'workflow blueprint' };
-  return { title: e.id || e.kind || '—', sub: e.kind || '' };
-}
 
-function renderInspectorTab(entity, tab) {
-  const fn = INSPECTOR_RENDERERS[tab] || INSPECTOR_RENDERERS.raw;
-  try { return fn(entity); }
-  catch (err) { return placeholder('Inspector error', err.message || String(err)); }
-}
 
 // Inspector entity shape — two flavours coexist:
 //   Legacy (task/lane/approval/event/sliceStop): { kind, id, data: {...} }
@@ -556,166 +452,7 @@ function renderInspectorTab(entity, tab) {
 // Each renderer normalizes by preferring top-level explicit arrays/refs
 // when present, and falling back to the legacy e.data shape otherwise.
 
-function inspectorPayload(e) {
-  // Best-effort merged view: prefer top-level explicit slots, then raw,
-  // then data, then the entity itself.
-  return e.raw || e.data || e || {};
-}
 
-const INSPECTOR_RENDERERS = {
-  overview(e) {
-    const wrap = el('div', {});
-    const d = inspectorPayload(e);
-
-    // 1. Top-level evidence array — used by new routes (Learning, Agents,
-    //    Teams, Workflows, Roadmap slice index). This is the curated
-    //    overview the route author wanted to show.
-    if (Array.isArray(e.evidence) && e.evidence.length) {
-      const kv = [];
-      for (const it of e.evidence) {
-        kv.push(el('dt', {}, it.label || ''));
-        kv.push(el('dd', {}, it.value == null ? '—' : String(it.value)));
-      }
-      wrap.appendChild(el('dl', { class: 'kv' }, kv));
-      return wrap;
-    }
-
-    // 2. Legacy kind-specific renderers.
-    if (e.kind === 'task') {
-      wrap.appendChild(el('dl', { class: 'kv' }, [
-        el('dt', {}, 'title'),       el('dd', {}, d.title || '—'),
-        el('dt', {}, 'lane'),        el('dd', {}, d.lane || '—'),
-        el('dt', {}, 'owner'),       el('dd', {}, d.owner || '—'),
-        el('dt', {}, 'status'),      el('dd', {}, d.status || '—'),
-        el('dt', {}, 'description'), el('dd', {}, d.description || '—')
-      ]));
-      return wrap;
-    }
-    if (e.kind === 'lane') {
-      wrap.appendChild(el('dl', { class: 'kv' }, [
-        el('dt', {}, 'lane'),        el('dd', {}, e.id || '—'),
-        el('dt', {}, 'scope'),       el('dd', {}, d.scope || '—'),
-        el('dt', {}, 'progress'),    el('dd', {}, `${Math.round((d.progress || 0) * 100)}%`),
-        el('dt', {}, 'done / total'),el('dd', {}, `${d.done ?? 0} / ${d.total ?? 0}`),
-        el('dt', {}, 'open'),        el('dd', {}, String(d.open ?? 0)),
-        el('dt', {}, 'claims held'), el('dd', {}, String(d.claimsHeld ?? 0)),
-        el('dt', {}, 'reason'),      el('dd', {}, REASON_CODE_LABEL[d.reasonCode] || d.reasonCode || '—')
-      ]));
-      return wrap;
-    }
-
-    // 3. Generic — walk scalar fields of the payload.
-    const kv = [];
-    if (e.id) { kv.push(el('dt', {}, 'id')); kv.push(el('dd', {}, String(e.id))); }
-    if (e.label && e.label !== e.id) { kv.push(el('dt', {}, 'label')); kv.push(el('dd', {}, String(e.label))); }
-    for (const k of Object.keys(d)) {
-      const v = d[k];
-      if (v && typeof v === 'object') continue; // objects belong in raw
-      if (k === 'id' && String(v) === String(e.id)) continue; // dup
-      kv.push(el('dt', {}, k));
-      kv.push(el('dd', {}, v == null ? '—' : String(v)));
-    }
-    if (!kv.length) {
-      return placeholder('No overview', 'This entity exposed no scalar fields. See the Raw tab for the full payload.');
-    }
-    wrap.appendChild(el('dl', { class: 'kv' }, kv));
-    return wrap;
-  },
-
-  evidence(e) {
-    // Top-level evidence array wins. Same shape the route author passed.
-    if (Array.isArray(e.evidence) && e.evidence.length) {
-      const kv = [];
-      for (const it of e.evidence) {
-        kv.push(el('dt', {}, it.label || ''));
-        const v = it.value;
-        kv.push(el('dd', {}, v == null ? '—' : (typeof v === 'object' ? JSON.stringify(v) : String(v))));
-      }
-      return el('dl', { class: 'kv' }, kv);
-    }
-    // Legacy: pull timestamps + ids out of the payload.
-    const d = inspectorPayload(e);
-    const items = [];
-    if (d.id || e.id) items.push(['id', d.id || e.id]);
-    if (d.ts) items.push(['ts', formatTs(d.ts)]);
-    if (d.createdAt) items.push(['createdAt', formatTs(d.createdAt)]);
-    if (d.updatedAt) items.push(['updatedAt', formatTs(d.updatedAt)]);
-    if (Array.isArray(d.blockedBy) && d.blockedBy.length) items.push(['blockedBy', d.blockedBy.join(', ')]);
-    if (Array.isArray(d.activeBlockers) && d.activeBlockers.length) items.push(['activeBlockers', d.activeBlockers.join(', ')]);
-    if (!items.length) return placeholder('No evidence', 'No timestamped refs to show for this entity.');
-    const kv = [];
-    for (const [k, v] of items) { kv.push(el('dt', {}, k)); kv.push(el('dd', {}, String(v))); }
-    return el('dl', { class: 'kv' }, kv);
-  },
-
-  actions(e) {
-    const wrap = el('div', { class: 'inspector-actions' });
-    // Top-level actions array — author-supplied {label, run} pairs.
-    if (Array.isArray(e.actions) && e.actions.length) {
-      for (const a of e.actions) {
-        const btn = el('button', { class: 'm-btn', type: 'button' }, a.label || 'Run');
-        btn.addEventListener('click', () => {
-          try { Promise.resolve(a.run && a.run()).catch((err) => console.error('[inspector action]', err)); }
-          catch (err) { console.error('[inspector action]', err); }
-          if (a.closeOnRun !== false) closeInspector();
-        });
-        wrap.appendChild(btn);
-      }
-      return wrap;
-    }
-    // Legacy hardcoded jumps.
-    if (e.kind === 'task') {
-      const b = el('button', { class: 'm-btn', type: 'button' }, 'Open in Tasks');
-      b.addEventListener('click', () => { location.hash = `#/tasks?focus=${encodeURIComponent(e.id)}`; closeInspector(); });
-      wrap.appendChild(b);
-    } else if (e.kind === 'lane') {
-      const b = el('button', { class: 'm-btn', type: 'button' }, 'Open Swarm');
-      b.addEventListener('click', () => { location.hash = '#/swarm'; closeInspector(); });
-      wrap.appendChild(b);
-    } else if (e.kind === 'approval') {
-      const b = el('button', { class: 'm-btn', type: 'button' }, 'Open Approvals');
-      b.addEventListener('click', () => { location.hash = '#/approvals'; closeInspector(); });
-      wrap.appendChild(b);
-    }
-    if (!wrap.children.length) wrap.appendChild(placeholder('No actions', 'No quick actions defined for this entity yet.'));
-    return wrap;
-  },
-
-  related(e) {
-    // Top-level related array — author-supplied {kind, id, label} entries.
-    if (Array.isArray(e.related) && e.related.length) {
-      const list = el('div', { class: 'inspector-related' });
-      for (const r of e.related) {
-        const row = el('div', { class: 'inspector-related-row' }, [
-          el('span', { class: 'mono panel-aside' }, (r.kind || '').toUpperCase()),
-          el('span', {}, r.label || r.id || '—')
-        ]);
-        list.appendChild(row);
-      }
-      return list;
-    }
-    // Legacy task blocker/blocks.
-    const d = inspectorPayload(e);
-    if (e.kind === 'task') {
-      const lines = [];
-      if (Array.isArray(d.blockedBy) && d.blockedBy.length) lines.push(['blocked by', d.blockedBy.join(', ')]);
-      if (Array.isArray(d.blocks) && d.blocks.length) lines.push(['blocks', d.blocks.join(', ')]);
-      if (!lines.length) return placeholder('No relations', 'This task has no blockers or dependents.');
-      const kv = [];
-      for (const [k, v] of lines) { kv.push(el('dt', {}, k)); kv.push(el('dd', {}, v)); }
-      return el('dl', { class: 'kv' }, kv);
-    }
-    return placeholder('No relations', 'No related entities indexed for this kind yet.');
-  },
-
-  raw(e) {
-    const pre = el('pre', { class: 'inspector-raw' });
-    // Raw shows the full entity (raw + data + top-level slots) so nothing
-    // is hidden when the operator drops to this tab.
-    pre.textContent = JSON.stringify(e.raw || e.data || e, null, 2);
-    return pre;
-  }
-};
 
 function currentRoute() {
   const raw = location.hash.replace(/^#\/?/, '') || 'conductor';
