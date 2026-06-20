@@ -18,7 +18,7 @@ function mkNode(tag) {
     classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     setAttribute(k, v) { this.attrs[k] = v; if (k === 'class') this.className = v; },
     appendChild(c) { this.children.push(c); return c; },
-    replaceChildren() { this.children = []; },
+    replaceChildren(...kids) { this.children = kids; },
     addEventListener(type, fn) { (this._l[type] || (this._l[type] = [])).push(fn); },
     querySelector() { return null; },
     querySelectorAll() { return []; },
@@ -29,9 +29,17 @@ globalThis.document = {
   createTextNode(text) { return { text, nodeType: 3 }; },
 };
 const fetchCount = { '/bridge/mailbox-counts': 0, '/bridge/tasks': 0, '/bridge/skills': 0, '/bridge/operations': 0 };
+// Queue + Claim Map resolve with canned data so their card/row builders run and
+// the click → ctx.openInspector wiring (threaded into the private builders) can
+// be exercised. Everything else stays pending so other views render synchronously.
+const QUEUE_DATA = { columns: [{ id: 'queue', title: 'Queue', tone: 'accent', hint: 'ready/blocked', items: [{ id: 'q1', label: 'task one', reasonCode: 'queue_ready' }] }] };
+const CLAIMS_DATA = { claims: [{ lane: 'lane-a', sessionId: 's1', reasonCode: 'claim_healthy', claimAgeMs: 1000, heartbeatAgeMs: 500 }] };
+function resolved(body) { return Promise.resolve({ ok: true, json: () => Promise.resolve(body) }); }
 globalThis.fetch = (url, init) => {
   const path = String(url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
   if (path in fetchCount && (!init || !init.method)) fetchCount[path]++;
+  if (path === '/bridge/queue' || path === '/bridge/_all/queue') return resolved(QUEUE_DATA);
+  if (path === '/bridge/claims') return resolved(CLAIMS_DATA);
   return new Promise(() => {});
 };
 
@@ -68,6 +76,8 @@ ok('exports renderOrientation', typeof m.renderOrientation === 'function');
 ok('exports renderGates', typeof m.renderGates === 'function');
 ok('exports renderReviews', typeof m.renderReviews === 'function');
 ok('exports renderDashboard', typeof m.renderDashboard === 'function');
+ok('exports renderQueueBoard', typeof m.renderQueueBoard === 'function');
+ok('exports renderClaimMap', typeof m.renderClaimMap === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -289,6 +299,61 @@ for (const [name, title, minPanels] of [
   ok('renderDashboard reads ctx.bridgeStatus on render', statusReads >= 1, `${statusReads}`);
   ok('renderDashboard reads ctx.bridgeOk on render', okReads >= 1, `${okReads}`);
   ok('renderDashboard scopes its projection fetch via ctx.scopedUrl', scopedReads >= 1, `${scopedReads}`);
+}
+
+// Find the first node whose className contains `token` (optionally excluding one).
+function findByClassToken(node, token, exclude = null, found = []) {
+  for (const c of node.children || []) {
+    const cls = (c.className || '').split(/\s+/);
+    if (cls.includes(token) && (!exclude || !cls.includes(exclude))) found.push(c);
+    findByClassToken(c, token, exclude, found);
+  }
+  return found;
+}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+// ── renderQueueBoard — scope-aware (ctx.scopePill/scopedUrl), debounced
+// ctx.onSpineEvent, card click → ctx.openInspector (threaded into the private
+// renderQueueCard builder). Canned /bridge/queue lets a card render + be clicked. ──
+{
+  let spine = null, scopePillCalls = 0, scopedReads = 0, inspects = 0;
+  const ctx = {
+    scopePill: () => { scopePillCalls++; return null; },
+    scopedUrl: (route, base) => { scopedReads++; return base; },
+    onSpineEvent: (h) => { spine = h; },
+    openInspector: () => { inspects++; },
+  };
+  const root = m.renderQueueBoard(ctx);
+  ok('renderQueueBoard → .view root', root.className === 'view');
+  ok('renderQueueBoard → <h2> "Queue Board"', root.children[0].children[0].text === 'Queue Board');
+  ok('renderQueueBoard registers a scope pill via ctx.scopePill', scopePillCalls === 1);
+  ok('renderQueueBoard scopes its fetch via ctx.scopedUrl', scopedReads >= 1, `${scopedReads}`);
+  ok('renderQueueBoard subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  await tick(); await tick();
+  const card = findByClassToken(root, 'queue-card')[0];
+  ok('renderQueueBoard renders a queue card from canned data', !!card);
+  if (card) {
+    (card._l.click || []).forEach((fn) => fn());
+    ok('queue card click opens Inspector via ctx.openInspector', inspects === 1, `${inspects}`);
+  }
+}
+
+// ── renderClaimMap — debounced ctx.onSpineEvent, row click → ctx.openInspector
+// (threaded into the private renderClaimsTable builder). Canned /bridge/claims. ──
+{
+  let spine = null, inspects = 0;
+  const ctx = { onSpineEvent: (h) => { spine = h; }, openInspector: () => { inspects++; } };
+  const root = m.renderClaimMap(ctx);
+  ok('renderClaimMap → .view root', root.className === 'view');
+  ok('renderClaimMap → <h2> "Claim Map"', root.children[0].children[0].text === 'Claim Map');
+  ok('renderClaimMap subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  await tick(); await tick();
+  const row = findByClassToken(root, 'claims-row', 'claims-row-head')[0];
+  ok('renderClaimMap renders a claims row from canned data', !!row);
+  if (row) {
+    (row._l.click || []).forEach((fn) => fn());
+    ok('claims row click opens Inspector via ctx.openInspector', inspects === 1, `${inspects}`);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
