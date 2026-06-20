@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1149,6 +1149,13 @@ const ctx = {
   // cached value without holding the shell's mutable `bridgeStatus`/`bridgeOk`.
   bridgeStatus: () => bridgeStatus,
   bridgeOk: () => bridgeOk,
+  // Force a status poll and resolve with the freshly-cached snapshot — the
+  // Workbench's slow tick refreshes its right-pane status this way.
+  refreshStatus: () => fetchBridgeStatus().then(() => bridgeStatus),
+  // Register a one-shot route-leave cleanup (mirrors onSpineEvent's teardown but
+  // for non-stream resources — e.g. a view's setInterval). Fires once on the next
+  // routechange and self-removes.
+  onRouteLeave: (fn) => els.view.addEventListener('routechange', fn, { once: true }),
 };
 
 function renderRoute() {
@@ -1568,283 +1575,9 @@ function allSubTargets() {
 
 // ─── Workbench (Phase D1) ────────────────────────────────────────────────
 
-function renderWorkbench() {
-  const root = el('div', { class: 'view' });
-  // workbench takes the full stage body — no title chrome
-  root.style.maxWidth = 'none';
-  root.appendChild(el('p', { style: 'margin:0 0 12px;' }, ROUTES.workbench.description));
-
-  // 3-pane shell
-  const left = el('div', { class: 'wb-pane' });
-  const center = el('div', { class: 'wb-pane', style: 'min-width:0;' });
-  const right = el('div', { class: 'wb-pane' });
-  const shell = el('div', { class: 'wb' }, [left, center, right]);
-  root.appendChild(shell);
-
-  // Selection state — survives within the route's lifetime
-  let selectedLane = null;           // null = ALL
-  let activeTab = 'stream';          // 'stream' | 'slices' | 'approvals' | 'memory'
-
-  // ─── left pane: lanes + sessions ────────────────────────────────────
-  left.appendChild(el('div', { class: 'wb-pane-head' }, [
-    el('span', { class: 'wb-pane-title' }, 'Lanes'),
-    el('span', {}, [
-      (() => {
-        const all = document.createElement('span');
-        all.textContent = 'all';
-        all.style.cssText = 'cursor:pointer;color:var(--m-fg-2);font-family:var(--m-font-mono);';
-        all.addEventListener('click', () => { selectedLane = null; refreshAll(); });
-        return all;
-      })()
-    ])
-  ]));
-  const laneList = el('div', { class: 'wb-pane-body' });
-  laneList.appendChild(loading('Fetching lanes…'));
-  left.appendChild(laneList);
-
-  function renderLanes(catalog, claims, eventsByLane) {
-    laneList.innerHTML = '';
-    if (!catalog) { laneList.appendChild(el('div', { class: 'wb-empty' }, 'Loading…')); return; }
-    const claimMap = new Map((claims || []).map((c) => [c.lane, c]));
-    // "ALL" pseudo-row
-    const allRow = el('div', { class: 'wb-list-row' + (selectedLane === null ? ' active' : '') }, [
-      el('span', { class: 'wb-list-name' }, '— all lanes —'),
-      el('span', { class: 'wb-list-count' }, '*')
-    ]);
-    allRow.addEventListener('click', () => { selectedLane = null; refreshAll(); });
-    laneList.appendChild(allRow);
-    for (const l of catalog.lanes) {
-      const claimed = claimMap.has(l.id);
-      const eventCount = (eventsByLane && eventsByLane[l.id]) || 0;
-      const row = el('div', { class: 'wb-list-row' + (selectedLane === l.id ? ' active' : '') }, [
-        el('span', { class: 'wb-list-name' }, l.id),
-        el('span', { class: 'wb-list-count' + (claimed || eventCount > 0 ? ' live' : '') }, claimed ? '★' : String(eventCount))
-      ]);
-      row.addEventListener('click', () => { selectedLane = l.id; refreshAll(); });
-      laneList.appendChild(row);
-    }
-  }
-
-  // sessions section, appended below lanes
-  const sessHeader = el('div', { class: 'wb-pane-head', style: 'border-top:1px solid var(--m-line);' }, [
-    el('span', { class: 'wb-pane-title' }, 'Active sessions'),
-    el('span', { class: 'wb-list-count', id: 'wb-sess-count' }, '0')
-  ]);
-  const sessList = el('div', { class: 'wb-pane-body', style: 'max-height:200px;flex:none;' });
-  sessList.appendChild(loading('Fetching sessions…'));
-  left.appendChild(sessHeader);
-  left.appendChild(sessList);
-
-  function renderSessions(sessions) {
-    sessList.innerHTML = '';
-    const active = (sessions || []).filter((s) => s.status === 'active');
-    document.getElementById('wb-sess-count').textContent = String(active.length);
-    if (active.length === 0) { sessList.appendChild(el('div', { class: 'wb-empty' }, '(none)')); return; }
-    for (const s of active) {
-      sessList.appendChild(el('div', { class: 'wb-list-row' }, [
-        el('span', { class: 'wb-list-name' }, [
-          el('div', { style: 'color:var(--m-fg-0);' }, s.id.slice(-14)),
-          el('div', { style: 'color:var(--m-fg-3);font-size:10px;' }, `${s.role || '—'} · ${s.label || ''}`)
-        ]),
-        el('span', { class: 'wb-list-count' }, '●')
-      ]));
-    }
-  }
-
-  // ─── center pane: tabs + filtered content ───────────────────────────
-  const tabs = el('div', { class: 'wb-tabs' });
-  const tabIds = [
-    { id: 'stream',    label: 'Stream' },
-    { id: 'slices',    label: 'Slices' },
-    { id: 'approvals', label: 'Approvals' },
-    { id: 'memory',    label: 'Memory' }
-  ];
-  const tabCounts = { stream: 0, slices: 0, approvals: 0, memory: 0 };
-  const tabEls = {};
-  for (const t of tabIds) {
-    const tEl = el('div', { class: 'wb-tab' }, [
-      t.label,
-      el('span', { class: 'wb-tab-count', id: `wb-tab-count-${t.id}` }, '0')
-    ]);
-    tEl.addEventListener('click', () => { activeTab = t.id; updateTabs(); refreshCenter(); });
-    tabEls[t.id] = tEl;
-    tabs.appendChild(tEl);
-  }
-  function updateTabs() {
-    for (const t of tabIds) {
-      tabEls[t.id].classList.toggle('active', t.id === activeTab);
-      // The first refreshAll() runs before this view is attached to #route-view,
-      // so the count span isn't reachable by id yet — guard it (counts get set on
-      // the post-attach refresh). Was an uncaught throw that aborted first-paint.
-      const countEl = document.getElementById(`wb-tab-count-${t.id}`);
-      if (countEl) countEl.textContent = String(tabCounts[t.id] || 0);
-    }
-  }
-  const centerBody = el('div', { class: 'wb-center-body' });
-  center.appendChild(tabs);
-  center.appendChild(centerBody);
-
-  // ─── right pane: status panel ───────────────────────────────────────
-  right.appendChild(el('div', { class: 'wb-pane-head' }, [
-    el('span', { class: 'wb-pane-title' }, 'Status'),
-    el('span', { id: 'wb-status-version' }, '')
-  ]));
-  const statusBody = el('div', { style: 'overflow:auto;flex:1;' });
-  statusBody.appendChild(loading('Fetching status…'));
-  right.appendChild(statusBody);
-
-  function renderStatus(s) {
-    statusBody.innerHTML = '';
-    const c = (s && s.counts) || {};
-    const rows = [
-      ['Events',         c.events,         null],
-      ['Active sessions', c.activeSessions, c.activeSessions > 0 ? 'live' : null],
-      ['Lane claims',    c.claims,         c.claims > 0 ? 'live' : null],
-      ['Open approvals', c.openApprovals,  c.openApprovals > 0 ? 'warn' : null],
-      ['Mailbox unread', c.unreadMail,     c.unreadMail > 0 ? 'warn' : null],
-      ['Open tasks',     c.openTasks,      null],
-      ['Schedules',      c.enabledSchedules, null],
-      ['Workers running', c.runningWorkers, c.runningWorkers > 0 ? 'live' : null],
-      ['Stuck workers',  c.stuckWorkers,   c.stuckWorkers > 0 ? 'warn' : null],
-      ['Skills',         c.skills,         null],
-      ['Memory facts',   c.memoryFacts,    null],
-      ['Checkpoints',    c.checkpoints,    null],
-      ['Runtimes',       c.runtimes,       null],
-      ['MCP servers',    c.mcpEnabled != null ? `${c.mcpEnabled}/${c.mcp}` : '—', null],
-      ['Auth providers', c.authProviders,  null]
-    ];
-    for (const [label, value, cls] of rows) {
-      if (value == null) continue;
-      statusBody.appendChild(el('div', { class: 'wb-stat-row' }, [
-        el('span', { class: 'wb-stat-label' }, label),
-        el('span', { class: 'wb-stat-value' + (cls ? ' ' + cls : '') }, String(value))
-      ]));
-    }
-    const v = document.getElementById('wb-status-version');
-    if (v && s) v.textContent = `v${s.version || ''}  ${formatUptime(s.uptimeMs)}`;
-  }
-
-  // ─── data refresh fan-out ────────────────────────────────────────────
-  async function refreshAll() {
-    updateTabs();
-    const [lanes, proj, status] = await Promise.all([fetchLanes(), fetchProjection(), fetchBridgeStatus().then(() => bridgeStatus)]);
-    // Build eventsByLane from projection's slice-stops (a crude usage indicator)
-    const eventsByLane = {};
-    if (proj && proj.sliceStops) for (const s of proj.sliceStops) if (s.lane) eventsByLane[s.lane] = (eventsByLane[s.lane] || 0) + 1;
-    renderLanes(lanes ? lanes.catalog : null, lanes ? lanes.claims : [], eventsByLane);
-    renderSessions(proj ? proj.sessions : []);
-    renderStatus(status);
-    // tab counts come from projection
-    if (proj) {
-      tabCounts.slices = proj.sliceStops.length;
-      tabCounts.approvals = proj.approvals.open.length;
-    }
-    refreshCenter();
-  }
-
-  // ─── center renderers per tab ───────────────────────────────────────
-  async function refreshCenter() {
-    centerBody.innerHTML = '';
-    if (activeTab === 'stream') {
-      // Pull last 50 events filtered by selectedLane
-      const r = await fetchJsonSafe('/bridge/events/poll');
-      if (!r) { centerBody.appendChild(el('div', { class: 'wb-empty' }, 'Offline')); return; }
-      let events = (r.events || []).slice();
-      if (selectedLane) events = events.filter((e) => e.lane === selectedLane);
-      tabCounts.stream = events.length;
-      updateTabs();
-      if (events.length === 0) {
-        centerBody.appendChild(el('div', { class: 'wb-empty' }, selectedLane ? `(no events for lane "${selectedLane}")` : '(no events yet)'));
-        return;
-      }
-      for (const ev of events.slice(-200).reverse()) centerBody.appendChild(eventRow(ev, false));
-    } else if (activeTab === 'slices') {
-      const proj = await fetchProjection();
-      let slices = (proj && proj.sliceStops) || [];
-      if (selectedLane) slices = slices.filter((s) => s.lane === selectedLane);
-      tabCounts.slices = slices.length;
-      updateTabs();
-      if (slices.length === 0) {
-        centerBody.appendChild(el('div', { class: 'wb-empty' }, selectedLane ? `(no slice-stops for lane "${selectedLane}")` : '(no slice-stops yet)'));
-        return;
-      }
-      for (const s of slices.slice().reverse()) {
-        centerBody.appendChild(el('div', { class: 'panel', style: 'background:var(--m-bg-2);' }, [
-          el('div', { class: 'panel-head' }, [
-            el('span', { class: 'panel-title' }, `[${s.lane || '—'}]  ${s.summary}`),
-            el('span', { class: 'panel-aside' }, s.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z'))
-          ]),
-          s.next && s.next.length ? el('div', { class: 'view' }, [
-            el('div', { class: 'panel-title' }, 'NEXT'),
-            el('ul', { class: 'hard-rules' }, s.next.map((n) => el('li', {}, n)))
-          ]) : null
-        ]));
-      }
-    } else if (activeTab === 'approvals') {
-      const a = await fetchApprovals();
-      let open = (a && a.open) || [];
-      if (selectedLane) open = open.filter((x) => x.lane === selectedLane);
-      tabCounts.approvals = open.length;
-      updateTabs();
-      if (open.length === 0) {
-        centerBody.appendChild(el('div', { class: 'wb-empty' }, selectedLane ? `(no approvals for lane "${selectedLane}")` : '(no pending approvals)'));
-        return;
-      }
-      for (const ap of open) {
-        const card = el('div', { class: 'approval' }, [
-          el('div', { class: 'approval-body' }, [
-            el('div', { class: 'approval-tool' }, ap.tool),
-            el('div', { class: 'approval-meta' }, `lane:${ap.lane || '—'} · asked by:${ap.actor || 'anon'}`),
-            ap.action ? el('div', { class: 'approval-action' }, ap.action) : null,
-            ap.summary ? el('div', { class: 'approval-summary' }, ap.summary) : null
-          ]),
-          el('div', { class: 'approval-actions' }, [
-            makeDecisionButton('allow-once',   'Allow once',   'btn-allow',     ap.approvalId, refreshAll),
-            makeDecisionButton('allow-always', 'Allow always', 'btn-allow',     ap.approvalId, refreshAll),
-            makeDecisionButton('deny',         'Deny',         'btn-deny',      ap.approvalId, refreshAll),
-            makeDecisionButton('deny-always',  'Deny always',  'btn-deny-hard', ap.approvalId, refreshAll)
-          ])
-        ]);
-        centerBody.appendChild(card);
-      }
-    } else if (activeTab === 'memory') {
-      const m = await fetchMemory(100);
-      let facts = (m && m.facts) || [];
-      if (selectedLane) facts = facts.filter((f) => (f.source && f.source.lane) === selectedLane);
-      tabCounts.memory = facts.length;
-      updateTabs();
-      if (facts.length === 0) {
-        centerBody.appendChild(el('div', { class: 'wb-empty' }, selectedLane ? `(no memory facts for lane "${selectedLane}")` : '(no memory facts yet)'));
-        return;
-      }
-      for (const f of facts.slice().reverse()) {
-        centerBody.appendChild(el('div', { class: 'ledger-row' }, [
-          el('span', {}, f.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')),
-          el('span', { class: 'event-type t-' + (f.kind === 'rule' ? 'framework' : f.kind === 'constraint' ? 'approval' : f.kind === 'summary' ? 'slice' : 'session') }, f.kind),
-          el('span', {}, f.text),
-          el('span', { class: 'event-actor' }, (f.tags || []).join(' '))
-        ]));
-      }
-    }
-  }
-
-  async function fetchJsonSafe(p) { try { const r = await fetch(p, { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; } }
-
-  refreshAll();
-
-  // Subscribe to the page-wide event stream so the workbench feels live.
-  const handler = () => { refreshCenter(); /* lane counts + status will catch up on next slow refresh */ };
-  const statusHandler = () => renderStatus(bridgeStatus);
-  stream.bus.addEventListener('event', handler);
-  // Slow tick (every 8 s) refreshes lane counts + sessions + status
-  const slow = setInterval(() => refreshAll(), 8000);
-  els.view.addEventListener('routechange', () => {
-    stream.bus.removeEventListener('event', handler);
-    clearInterval(slow);
-  }, { once: true });
-
-  return root;
-}
+// renderWorkbench � moved to cockpit-views-live.js (v1.67.0). The 3-pane operator
+// cockpit (composer-free): ctx.fetch* reads + ctx.refreshStatus, live via
+// ctx.onSpineEvent, 8s slow-tick setInterval torn down via ctx.onRouteLeave.
 
 // ─── Conductor (Slice α default landing) ────────────────────────────────
 //
@@ -2103,7 +1836,7 @@ function renderScoreMatrix(rows) {
 // safe next action affordance.
 
 // renderQueueBoard + renderClaimMap (+ private renderQueueColumns/renderQueueCard/
-// renderClaimsTable + QUEUE_/CLAIM_REASON_TONE/LABEL palettes) � moved to
+// renderClaimsTable + QUEUE_/CLAIM_REASON_TONE/LABEL palettes) � moved to
 // cockpit-views-live.js (v1.65.0). Queue scope-aware (ctx.scopePill/scopedUrl);
 // both debounced ctx.onSpineEvent + open Inspector via ctx.openInspector.
 
@@ -2574,7 +2307,7 @@ function renderBossComposer(reload) {
   return wrap;
 }
 
-// renderDashboard � moved to cockpit-views-live.js (v1.64.0). Headline operator
+// renderDashboard � moved to cockpit-views-live.js (v1.64.0). Headline operator
 // overview: scope-aware (ctx.scopePill/scopedUrl/rerender), paints from the cached
 // bridge snapshot via ctx.bridgeStatus/bridgeOk. No stream sub, no inspector.
 
@@ -2613,7 +2346,7 @@ async function fetchLanes() {
 // Swarm: static read over ctx.fetchLanes + ctx.fetchProjection (no stream sub).
 
 
-// renderChats � moved to cockpit-views-live.js (v1.66.0). The sessions roster:
+// renderChats � moved to cockpit-views-live.js (v1.66.0). The sessions roster:
 // one ctx.fetchProjection read rendered as session panels. The simplest live view.
 
 // v1.6.0 — Goal panel: objective + measurable success conditions + constraints
