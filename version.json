@@ -1,5 +1,5 @@
 {
-  "version": "1.70.0",
-  "phase": "cockpit-inspector-module-extraction",
+  "version": "1.71.0",
+  "phase": "cockpit-command-bar-module-extraction",
   "released": "2026-06-20"
 }
