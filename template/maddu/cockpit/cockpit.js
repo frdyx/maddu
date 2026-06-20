@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1137,6 +1137,12 @@ const ctx = {
   // that POST actions stamp `by: ctx.currentSession()` without holding the whole
   // composer. Late-binds through the closure (composer is defined later).
   currentSession: () => composer.currentSession,
+  // Narrow accessors for the shared long-poll pause flag — the Events view owns
+  // the Pause/Resume control but must not touch the `stream` singleton (the
+  // long-poll loop and a composer control also read/write it). Read the current
+  // state for the button label; toggle returns the NEW state for the relabel.
+  isStreamPaused: () => stream.paused,
+  toggleStreamPause: () => (stream.paused = !stream.paused),
 };
 
 function renderRoute() {
@@ -2965,7 +2971,7 @@ async function fetchLanes() {
 // (slice ledger entries, wiki body, learning facts).
 // loading / loadingFor → moved to cockpit-util.js (v1.39.0).
 
-// renderOperations + renderSwarm � moved to cockpit-views-live.js (v1.60.0).
+// renderOperations + renderSwarm � moved to cockpit-views-live.js (v1.60.0).
 // Operations: stream-coupled (SLICE_STOP via ctx.onSpineEvent), ctx.panelFocus
 // panels, ctx.fetchProjection/fetchMemory, checkpoint stamps ctx.currentSession().
 // Swarm: static read over ctx.fetchLanes + ctx.fetchProjection (no stream sub).
@@ -3204,107 +3210,9 @@ function renderApprovals() {
 
 // classifyEvent / summarize / eventRow → moved to cockpit-event-rows.js (v1.41.0).
 
-function renderEvents() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Events'));
-  root.appendChild(el('p', {}, ROUTES.events.description));
-
-  // ── Summary widget: 60-min activity + type mix ──────────────────────
-  const summaryMount = el('div', {});
-  summaryMount.appendChild(loading('Reading event tail…'));
-  root.appendChild(panel('Activity', 'last 60 min · 200-event type mix', summaryMount));
-  (async () => {
-    try {
-      const r = await fetch('/bridge/events/recent?limit=500', { cache: 'no-store' });
-      const d = r.ok ? await r.json() : null;
-      summaryMount.innerHTML = '';
-      if (!d || !(d.events || []).length) { summaryMount.appendChild(placeholder('No events', 'Spine is empty.')); return; }
-      const bins = binByTime(d.events, 24, 'ts', 60 * 60 * 1000);
-      const total = bins.reduce((s, x) => s + x, 0);
-      const peak = Math.max(...bins);
-      const wrap = el('div', { class: 'widget-stat' });
-      const num = el('div', { class: 'widget-stat-num' }, [
-        el('span', { class: 'widget-stat-value' }, String(total)),
-        el('span', { class: 'widget-stat-trend' }, `peak ${peak}/bin`)
-      ]);
-      wrap.appendChild(num);
-      wrap.appendChild(el('div', { class: 'widget-stat-label' }, `${d.total} total events on spine · last 60 min sample`));
-      wrap.appendChild(sparkline(bins, { tone: 'blue', width: 560, height: 56 }));
-      summaryMount.appendChild(wrap);
-
-      const tail = (d.events || []).slice(-200);
-      const buckets = { 't-framework': 0, 't-session': 0, 't-lane': 0, 't-approval': 0, 't-slice': 0, other: 0 };
-      for (const e of tail) {
-        const cls = classifyEvent(e.type || '');
-        if (cls in buckets) buckets[cls]++; else buckets.other++;
-      }
-      summaryMount.appendChild(segBar([
-        { label: 'framework', value: buckets['t-framework'], tone: 'accent' },
-        { label: 'session',   value: buckets['t-session'],   tone: 'blue' },
-        { label: 'lane',      value: buckets['t-lane'],      tone: 'ok' },
-        { label: 'approval',  value: buckets['t-approval'],  tone: 'warn' },
-        { label: 'slice',     value: buckets['t-slice'],     tone: 'danger' },
-        { label: 'other',     value: buckets.other,          tone: 'neutral' }
-      ]));
-    } catch (e) {
-      summaryMount.innerHTML = '';
-      summaryMount.appendChild(placeholder('Error', String(e)));
-    }
-  })();
-
-  // Controls
-  const filter = el('select', { class: '' });
-  for (const t of ['(all)', 'FRAMEWORK_*', 'SESSION_*', 'LANE_*', 'SLICE_STOP', 'APPROVAL_*', 'DOCTOR_REPORT', 'INBOX_MESSAGE']) {
-    const opt = el('option', { value: t === '(all)' ? '' : t }, t);
-    filter.appendChild(opt);
-  }
-  filter.style.cssText = 'font-family:var(--m-font-mono);font-size:12px;background:var(--m-bg-2);color:var(--m-fg-1);border:1px solid var(--m-line);padding:4px 8px;';
-  const pauseBtn = el('button', {}, stream.paused ? 'Resume' : 'Pause');
-  const clearBtn = el('button', {}, 'Clear');
-  const controls = el('div', { class: 'panel-head' }, [
-    el('span', { class: 'panel-title' }, 'Stream'),
-    el('span', {}, [filter, document.createTextNode(' '), pauseBtn, document.createTextNode(' '), clearBtn])
-  ]);
-
-  const list = el('div', { style: 'max-height: 70vh; overflow: auto; border:1px solid var(--m-line); background:var(--m-bg-1);' });
-  const block = el('div', { class: 'panel' }, [controls, list]);
-  root.appendChild(block);
-
-  // Seed with most recent 30 events.
-  fetch('/bridge/events/poll', { cache: 'no-store' })
-    .then((r) => r.json())
-    .then((d) => {
-      const recent = (d.events || []).slice(-30);
-      for (const ev of recent) prepend(list, eventRow(ev, false));
-    });
-
-  function matchFilter(t) {
-    const f = filter.value;
-    if (!f) return true;
-    if (f.endsWith('*')) return t.startsWith(f.slice(0, -1));
-    return t === f;
-  }
-
-  const handler = (e) => {
-    if (!matchFilter(e.detail.type)) return;
-    prepend(list, eventRow(e.detail, true));
-    // Keep list bounded.
-    while (list.children.length > 500) list.removeChild(list.lastChild);
-  };
-  stream.bus.addEventListener('event', handler);
-
-  pauseBtn.addEventListener('click', () => {
-    stream.paused = !stream.paused;
-    pauseBtn.textContent = stream.paused ? 'Resume' : 'Pause';
-  });
-  clearBtn.addEventListener('click', () => { list.innerHTML = ''; });
-
-  els.view.addEventListener('routechange', () => {
-    stream.bus.removeEventListener('event', handler);
-  }, { once: true });
-
-  return root;
-}
+// renderEvents � moved to cockpit-views-live.js (v1.61.0). Live event stream:
+// subscribes via ctx.onSpineEvent (appends each matching row), Pause/Resume
+// toggles the shared long-poll flag via ctx.isStreamPaused/toggleStreamPause.
 
 // prepend / makeDecisionButton → moved to cockpit-event-rows.js (v1.41.0).
 

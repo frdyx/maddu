@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.61.0] · 2026-06-20 · Cockpit decomposition — live cluster (Events stream view)
+
+Sixteenth view-module slice — moves the live **Events** stream view, which needed a genuinely new seam beyond the read helpers.
+
+- **New stream-pause seam: `ctx.isStreamPaused()` + `ctx.toggleStreamPause()`.** Events owns the Pause/Resume control, but the pause flag lives on the shared `stream` singleton (also read by the long-poll loop and a composer control). Two narrow accessors give the view read + toggle without touching `stream` — read for the button label, toggle returns the new state for the relabel.
+- **`renderEvents`** (60-min activity sparkline + type-mix segBar, filtered live feed, pause, clear) → `cockpit-views-live.js`. Unlike the refetch-on-event views, its handler **appends each matching row live** (`prepend`/`eventRow` from `cockpit-event-rows.js`); the subscription + route-local teardown collapse onto `ctx.onSpineEvent` (the previously-manual `els.view` routechange teardown is now redundant and removed).
+- The module's imports widened to pull `segBar` (widgets) and `classifyEvent`/`eventRow`/`prepend` (event-rows) — all already-extracted leaves.
+- **`cockpit.js` 4482 → 4390** (−92 lines); still **14 modules** (`cockpit-views-live.js` now 832 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **47/0** — events asserts the render-time `ctx.isStreamPaused` read, the `ctx.onSpineEvent` subscription, that clicking Pause calls `ctx.toggleStreamPause` and relabels to "Resume", and that a matching spine event live-appends without throwing. Self-test full 73/73, audit 14/0.
+- **Still inline (live):** workbench, conductor, boss, queue, claims, dashboard, chats, approvals, orientation, gates, reviews. Approvals next (add `ctx.fetchApprovals`); composer-deep trio last (Codex consult).
+
 ## [v1.60.0] · 2026-06-19 · Cockpit decomposition — live cluster (operations + swarm)
 
 Fifteenth view-module slice — appends the next two read-mostly live views to `cockpit-views-live.js`.
