@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.71.0] · 2026-06-20 · Cockpit decomposition — command-bar module (composer + palette)
+
+Second optional polish slice — extracts the **slash-command bar** (composer + Ctrl-K command palette), the largest remaining shell subsystem. A second **Codex consult** confirmed this is a principled module boundary (not a composer facade): the command-bar owns DOM event handlers, slash dispatch, palette search, and hash navigation — a coherent responsibility distinct from the router/ctx composition root.
+
+- **New module `cockpit-command-bar.js`** (768 lines): the `composer` singleton + `COMMANDS` table, slash parse/dispatch (`parseCommand`/`postJson`/`fetchJson`/`runCommand`), the composer input wiring (`renderSuggestions`/`updateHint`/`initComposer`), and the full command palette (`paletteItems`/`renderPaletteResults`/`openPalette`/`closePalette`/`commitPalette`/`initPalette`) including the `?focus=` deep-link helpers `paletteFocus`/`focusPanelByKeyword`. Imports only `el`/`showToast`.
+- **Host-injection seam (not a facade):** `initCommandBar(host)` receives the shell accessors that stay in the composition root — `{ routes, isRouteHidden, allSubTargets, refreshDataSubTargets, getWorkspaces, getCurrentWorkspace, setActiveWorkspace }`. The palette's sub-target registry (`allSubTargets`/`panelFocus`) and the workspace switcher remain in cockpit.js; the command-bar reaches them through `host.*`. cockpit.js re-exposes `paletteFocus`/`focusPanelByKeyword`/`currentSession` from the module onto `ctx` — **route views are unchanged.**
+- **`cockpit.js` 2423 → 1715 — from the 9202-line pre-decomposition monolith, −81%.** The cockpit is now **17 modules**. Mass ratchet re-baselined. Architecture: no drift.
+- **Verification (all four layers green):** Gate A boot (48/0 — boot now runs `initCommandBar(host)`), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0 — drives the composer + Ctrl-K palette in real Chromium). A new fixture `scripts/test/cockpit-command-bar.mjs` (10/0, happy-dom with graceful skip) asserts `initCommandBar` wires the composer + palette without throwing against stub host accessors, the `?focus=` deep-link helpers (`paletteFocus` parses the hash, `focusPanelByKeyword` handles a matching panel), `currentSession` reads the composer pointer, and that a slash keystroke reveals the suggestion list. Self-test full 75/75, audit 14/0.
+- **cockpit.js is now the minimal composition root:** route registry + `ctx` wiring + router, the rail/dock chrome + workspace switcher + scope helpers, the long-poll stream loop, the sub-target registry, and boot. The Inspector (v1.70.0) and command-bar (v1.71.0) are its last two extracted subsystems. The decomposition is complete.
+
 ## [v1.70.0] · 2026-06-20 · Cockpit decomposition — Inspector module (optional shell polish)
 
 First of the optional post-completion polish slices (the route-view extraction finished at v1.69.0). Extracts the **Inspector** — the entity-detail drawer — out of the composition root into its own module.
