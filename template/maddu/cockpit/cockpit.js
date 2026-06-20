@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1144,6 +1144,11 @@ const ctx = {
   // state for the button label; toggle returns the NEW state for the relabel.
   isStreamPaused: () => stream.paused,
   toggleStreamPause: () => (stream.paused = !stream.paused),
+  // Narrow read accessors for the cached bridge-status snapshot (refreshed by the
+  // status poller). The Dashboard paints its headline tiles + bridge KV from the
+  // cached value without holding the shell's mutable `bridgeStatus`/`bridgeOk`.
+  bridgeStatus: () => bridgeStatus,
+  bridgeOk: () => bridgeOk,
 };
 
 function renderRoute() {
@@ -2781,167 +2786,9 @@ function renderBossComposer(reload) {
   return wrap;
 }
 
-function renderDashboard() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Dashboard'));
-  root.appendChild(el('p', {}, ROUTES.dashboard.description));
-
-  const pill = scopePill('dashboard', () => {
-    // Re-render the whole route — dashboard's data layers are too tangled
-    // to surgically swap fetches, and the projection/events endpoints both
-    // need the scoped URL.
-    renderRoute();
-  });
-  if (pill) root.appendChild(pill);
-
-  const status = bridgeStatus || {};
-  const counts = status.counts || {};
-
-  // ── Headline tiles (top-of-page status grid) ────────────────────────
-  // Populated immediately from cached bridgeStatus; sparklines fill in
-  // asynchronously once /bridge/events/recent returns.
-  const headline = statusGrid([
-    { value: counts.events ?? '—',          label: 'Events',          tone: 'blue',   onClick: () => location.hash = '#/events' },
-    { value: counts.activeSessions ?? '—',  label: 'Active sessions', tone: 'accent', onClick: () => location.hash = '#/swarm' },
-    { value: counts.openApprovals ?? '—',   label: 'Open approvals',  tone: (counts.openApprovals > 0 ? 'warn' : 'accent'), onClick: () => location.hash = '#/approvals' },
-    { value: counts.openTasks ?? '—',       label: 'Open tasks',      tone: 'accent', onClick: () => location.hash = '#/tasks' },
-    { value: counts.stuckWorkers ?? '—',    label: 'Stuck workers',   tone: (counts.stuckWorkers > 0 ? 'danger' : 'ok'), onClick: () => location.hash = '#/swarm' },
-    { value: counts.unreadMail ?? '—',      label: 'Mailbox unread',  tone: (counts.unreadMail > 0 ? 'warn' : 'accent'), onClick: () => location.hash = '#/mailbox' }
-  ]);
-  root.appendChild(headline);
-
-  // ── Distribution donuts (tasks + workers) ───────────────────────────
-  const donutRow = el('div', { class: 'widget-donut-row-pair' });
-  const tasksPanel = panel('Tasks by status', 'GET /bridge/projection', el('div', { class: 'placeholder' }, [el('strong', {}, 'Loading…'), document.createTextNode('')]));
-  const workersPanel = panel('Workers by status', 'GET /bridge/projection · 15 s stuck threshold', el('div', { class: 'placeholder' }, [el('strong', {}, 'Loading…'), document.createTextNode('')]));
-  donutRow.appendChild(tasksPanel);
-  donutRow.appendChild(workersPanel);
-  root.appendChild(donutRow);
-
-  // ── Activity sparkline panel (event rate over last 60 min) ──────────
-  const sparkBody = el('div', {});
-  sparkBody.appendChild(loading('Reading event timeline…'));
-  root.appendChild(panel('Event activity', 'last 60 min · 24 buckets · GET /bridge/events/recent', sparkBody));
-
-  // ── Capacity meters ─────────────────────────────────────────────────
-  const meters = el('div', {});
-  meters.appendChild(meter(counts.mcpEnabled ?? 0, counts.mcp ?? 0, 'MCP servers enabled', { tone: 'blue' }));
-  meters.appendChild(meter(counts.enabledSchedules ?? 0, counts.schedules ?? 0, 'Schedules enabled', { tone: 'accent' }));
-  meters.appendChild(meter(counts.importsAccepted ?? 0, (counts.importsAccepted ?? 0) + (counts.importsRejected ?? 0), 'Imports accepted vs total', { tone: 'ok' }));
-  if ((counts.runtimes ?? 0) > 0) {
-    meters.appendChild(meter(counts.runtimes ?? 0, counts.runtimes ?? 0, 'Runtimes registered', { tone: 'accent' }));
-  }
-  root.appendChild(panel('Capacity', 'enabled · accepted · registered', meters));
-
-  // ── Bridge identity (compact KV — the operator-relevant rows only) ──
-  const idKv = el('dl', { class: 'kv' }, [
-    el('dt', {}, 'bridge'),    el('dd', { html: bridgeOk ? '<span class="signal live"></span>online' : '<span class="signal"></span>offline' }),
-    el('dt', {}, 'version'),   el('dd', {}, status.version || '—'),
-    el('dt', {}, 'host'),      el('dd', {}, `${status.host || '127.0.0.1'}:${status.port || 4177}`),
-    el('dt', {}, 'uptime'),    el('dd', {}, formatUptime(status.uptimeMs)),
-    el('dt', {}, 'repo root'), el('dd', {}, status.repoRoot || '—'),
-    el('dt', {}, 'state'),     el('dd', {}, status.stateDir || '.maddu/')
-  ]);
-  root.appendChild(panel('Bridge', 'GET /bridge/status', idKv));
-
-  // ── Hard rules quick reference ──────────────────────────────────────
-  const rules = el('ul', { class: 'hard-rules' }, [
-    el('li', {}, 'Files-only state'),
-    el('li', {}, 'No SQLite / DB'),
-    el('li', {}, 'No hosted backends'),
-    el('li', {}, 'No broad new deps'),
-    el('li', {}, 'No provider SDKs in app code'),
-    el('li', {}, 'No token export'),
-    el('li', {}, 'Three-layer brand boundary'),
-    el('li', {}, 'Lane ownership')
-  ]);
-  root.appendChild(panel('Hard rules', 'docs/hard-rules.md', rules));
-
-  // ── Async: fetch projection + recent events to populate widgets ─────
-  (async () => {
-    try {
-      const projUrl = scopedUrl('dashboard', '/bridge/projection');
-      const projResp = await fetch(projUrl, { cache: 'no-store' });
-      const proj = projResp.ok ? await projResp.json() : null;
-      if (proj) {
-        // Tasks donut
-        const t = proj.tasks || [];
-        const tCounts = { todo: 0, in_progress: 0, blocked: 0, done: 0 };
-        for (const x of t) tCounts[x.status] = (tCounts[x.status] || 0) + 1;
-        const tasksDonut = donut([
-          { label: 'todo',        value: tCounts.todo,        tone: 'accent' },
-          { label: 'in_progress', value: tCounts.in_progress, tone: 'blue' },
-          { label: 'blocked',     value: tCounts.blocked,     tone: 'warn' },
-          { label: 'done',        value: tCounts.done,        tone: 'ok' }
-        ], { centerLabel: t.length === 1 ? 'task' : 'tasks' });
-        tasksPanel.replaceChild(tasksDonut, tasksPanel.lastChild);
-
-        // Workers donut
-        const w = proj.workers || [];
-        const wCounts = { running: 0, stuck: 0, exited: 0, killed: 0 };
-        for (const x of w) wCounts[x.status] = (wCounts[x.status] || 0) + 1;
-        const workersDonut = donut([
-          { label: 'running', value: wCounts.running, tone: 'ok' },
-          { label: 'stuck',   value: wCounts.stuck,   tone: 'danger' },
-          { label: 'exited',  value: wCounts.exited,  tone: 'neutral' },
-          { label: 'killed',  value: wCounts.killed,  tone: 'warn' }
-        ], { centerLabel: w.length === 1 ? 'worker' : 'workers' });
-        workersPanel.replaceChild(workersDonut, workersPanel.lastChild);
-      } else {
-        tasksPanel.replaceChild(placeholder('Offline', 'Bridge not reachable.'), tasksPanel.lastChild);
-        workersPanel.replaceChild(placeholder('Offline', 'Bridge not reachable.'), workersPanel.lastChild);
-      }
-    } catch (e) {
-      tasksPanel.replaceChild(placeholder('Error', String(e)), tasksPanel.lastChild);
-      workersPanel.replaceChild(placeholder('Error', String(e)), workersPanel.lastChild);
-    }
-
-    try {
-      const r = await fetch(scopedUrl('dashboard', '/bridge/events/recent') + '?limit=500', { cache: 'no-store' });
-      const d = r.ok ? await r.json() : null;
-      sparkBody.innerHTML = '';
-      if (!d || !d.events || d.events.length === 0) {
-        sparkBody.appendChild(placeholder('No events yet', 'Run `maddu session register` or any slice-stop.'));
-        return;
-      }
-      const bins = binByTime(d.events, 24, 'createdAt', 60 * 60 * 1000);
-      const total = bins.reduce((s, x) => s + x, 0);
-      const peak = Math.max(...bins);
-      const wrap = el('div', { class: 'widget-stat' });
-      const numLine = el('div', { class: 'widget-stat-num' });
-      numLine.appendChild(el('span', { class: 'widget-stat-value' }, String(total)));
-      numLine.appendChild(el('span', { class: 'widget-stat-trend' }, `peak ${peak}/bin`));
-      wrap.appendChild(numLine);
-      wrap.appendChild(el('div', { class: 'widget-stat-label' }, 'events in the last 60 minutes'));
-      wrap.appendChild(sparkline(bins, { tone: 'blue', width: 480, height: 56 }));
-      sparkBody.appendChild(wrap);
-
-      // Event-type segmented bar (most recent 200 grouped by classifyEvent palette)
-      const tail = d.events.slice(-200);
-      const buckets = { 't-framework': 0, 't-session': 0, 't-lane': 0, 't-approval': 0, 't-slice': 0, other: 0 };
-      for (const e of tail) {
-        const cls = classifyEvent(e.type || '');
-        if (cls in buckets) buckets[cls]++;
-        else buckets.other++;
-      }
-      const seg = segBar([
-        { label: 'framework', value: buckets['t-framework'], tone: 'accent' },
-        { label: 'session',   value: buckets['t-session'],   tone: 'blue' },
-        { label: 'lane',      value: buckets['t-lane'],      tone: 'ok' },
-        { label: 'approval',  value: buckets['t-approval'],  tone: 'warn' },
-        { label: 'slice',     value: buckets['t-slice'],     tone: 'danger' },
-        { label: 'other',     value: buckets.other,          tone: 'neutral' }
-      ]);
-      const segPanel = panel('Event type mix', 'last 200 events · classifyEvent palette', seg);
-      sparkBody.appendChild(segPanel);
-    } catch (e) {
-      sparkBody.innerHTML = '';
-      sparkBody.appendChild(placeholder('Error', String(e)));
-    }
-  })();
-
-  return root;
-}
+// renderDashboard � moved to cockpit-views-live.js (v1.64.0). Headline operator
+// overview: scope-aware (ctx.scopePill/scopedUrl/rerender), paints from the cached
+// bridge snapshot via ctx.bridgeStatus/bridgeOk. No stream sub, no inspector.
 
 async function fetchMemory(limit = 30) {
   try {
@@ -3049,7 +2896,7 @@ async function fetchApprovals(scopeRoute) {
 
 // postApprovalDecision → moved to cockpit-event-rows.js (v1.41.0).
 
-// renderApprovals � moved to cockpit-views-live.js (v1.62.0). Scope-aware
+// renderApprovals � moved to cockpit-views-live.js (v1.62.0). Scope-aware
 // (ctx.scopePill), ctx.panelFocus palette panels, APPROVAL_* via ctx.onSpineEvent.
 // fetchApprovals STAYS here (shared with the inline renderWorkbench) and is
 // reached via ctx.fetchApprovals.
@@ -3937,7 +3784,7 @@ function flashSliceLine() {
 
 // ─── Governance Phase 6 render functions ──────────────────────────────────
 
-// renderOrientation + renderGates + renderReviews � moved to cockpit-views-live.js
+// renderOrientation + renderGates + renderReviews � moved to cockpit-views-live.js
 // (v1.63.0)  three clean read-only ledger views: ctx.panelFocus palette panel +
 // debounced ctx.onSpineEvent refresh (no filtering). Leaves + ctx only.
 

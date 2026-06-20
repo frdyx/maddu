@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.64.0] · 2026-06-20 · Cockpit decomposition — live cluster (Dashboard)
+
+Nineteenth view-module slice — moves the headline **Dashboard** overview.
+
+- **New cached-snapshot seam: `ctx.bridgeStatus()` + `ctx.bridgeOk()`.** The dashboard paints its headline tiles and bridge-identity KV from the status poller's cached snapshot; two narrow read accessors give it the value without holding the shell's mutable `bridgeStatus`/`bridgeOk` vars.
+- **`renderDashboard`** (status tiles, task/worker donuts, 60-min activity sparkline + type-mix segBar, capacity meters, bridge identity, hard-rules reference) → `cockpit-views-live.js`. Scope-aware via `ctx.scopePill`/`ctx.scopedUrl` (re-renders the whole route via `ctx.rerender` on scope toggle, as the original did). No stream subscription, no inspector. Verbatim otherwise.
+- The module's util import widened to pull `formatUptime` — an already-extracted leaf.
+- **`cockpit.js` 4010 → 3857** (−153 lines) — **under 4k**; still **14 modules** (`cockpit-views-live.js` now 1399 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **80/0** — dashboard asserts the scope-pill registration, the render-time `ctx.bridgeStatus`/`ctx.bridgeOk` reads, and that its projection fetch is routed through `ctx.scopedUrl`. Self-test full 73/73, audit 14/0.
+- **Still inline (live):** queue, claims, chats, and the composer-deep trio (workbench/conductor/boss). Queue+claims next (private `renderQueueColumns`/`renderQueueCard`/`renderClaimsTable` move with them); composer-deep trio last — Codex consult.
+
 ## [v1.63.0] · 2026-06-20 · Cockpit decomposition — live cluster (Orientation + Gates + Reviews)
 
 Eighteenth view-module slice — three clean read-only ledger views in one move, **zero new seams**.

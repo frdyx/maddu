@@ -67,6 +67,7 @@ ok('exports renderApprovals', typeof m.renderApprovals === 'function');
 ok('exports renderOrientation', typeof m.renderOrientation === 'function');
 ok('exports renderGates', typeof m.renderGates === 'function');
 ok('exports renderReviews', typeof m.renderReviews === 'function');
+ok('exports renderDashboard', typeof m.renderDashboard === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -267,6 +268,27 @@ for (const [name, title, minPanels] of [
     try { spine({ detail: { type: 'GATE_RAN' } }); } catch { threw = true; }
     ok(`${name} handles a spine event without throwing`, threw === false);
   }
+}
+
+// ── renderDashboard — scope-aware headline overview: paints from the cached
+// bridge snapshot via ctx.bridgeStatus/bridgeOk, scopes its async fetches via
+// ctx.scopedUrl, registers a scope pill. No stream sub, no inspector. ──
+{
+  let statusReads = 0, okReads = 0, scopedReads = 0, scopePillCalls = 0;
+  const ctx = {
+    scopePill: () => { scopePillCalls++; return null; },
+    scopedUrl: (route, base) => { scopedReads++; return base; },
+    rerender: () => {},
+    bridgeStatus: () => { statusReads++; return { counts: {}, version: '1.0', host: '127.0.0.1', port: 4177, uptimeMs: 0, repoRoot: '/r', stateDir: '.maddu/' }; },
+    bridgeOk: () => { okReads++; return true; },
+  };
+  const root = m.renderDashboard(ctx);
+  ok('renderDashboard → .view root', root.className === 'view');
+  ok('renderDashboard → <h2> "Dashboard"', root.children[0].children[0].text === 'Dashboard');
+  ok('renderDashboard registers a scope pill via ctx.scopePill', scopePillCalls === 1);
+  ok('renderDashboard reads ctx.bridgeStatus on render', statusReads >= 1, `${statusReads}`);
+  ok('renderDashboard reads ctx.bridgeOk on render', okReads >= 1, `${okReads}`);
+  ok('renderDashboard scopes its projection fetch via ctx.scopedUrl', scopedReads >= 1, `${scopedReads}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
