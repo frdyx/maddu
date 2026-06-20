@@ -27,6 +27,7 @@ function mkNode(tag) {
 globalThis.document = {
   createElement(tag) { return mkNode(tag); },
   createTextNode(text) { return { text, nodeType: 3 }; },
+  getElementById() { return mkNode('div'); }, // workbench reads count/version spans by id
 };
 const fetchCount = { '/bridge/mailbox-counts': 0, '/bridge/tasks': 0, '/bridge/skills': 0, '/bridge/operations': 0 };
 // Queue + Claim Map resolve with canned data so their card/row builders run and
@@ -79,6 +80,7 @@ ok('exports renderDashboard', typeof m.renderDashboard === 'function');
 ok('exports renderQueueBoard', typeof m.renderQueueBoard === 'function');
 ok('exports renderClaimMap', typeof m.renderClaimMap === 'function');
 ok('exports renderChats', typeof m.renderChats === 'function');
+ok('exports renderWorkbench', typeof m.renderWorkbench === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -366,6 +368,37 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   ok('renderChats → .view root', root.className === 'view');
   ok('renderChats → <h2> "Chats"', root.children[0].children[0].text === 'Chats');
   ok('renderChats reads ctx.fetchProjection on render', projReads === 1, `${projReads}`);
+}
+
+// ── renderWorkbench — the 3-pane operator cockpit (composer-free). Reads via
+// ctx.fetch* + ctx.refreshStatus, live via ctx.onSpineEvent, and tears down its
+// 8s slow-tick setInterval via ctx.onRouteLeave. ──
+{
+  let spine = null, leaveFn = null;
+  let lanes = 0, proj = 0, status = 0;
+  const ctx = {
+    fetchLanes: () => { lanes++; return new Promise(() => {}); },
+    fetchProjection: () => { proj++; return new Promise(() => {}); },
+    fetchMemory: () => new Promise(() => {}),
+    fetchApprovals: () => new Promise(() => {}),
+    refreshStatus: () => { status++; return new Promise(() => {}); },
+    bridgeStatus: () => ({ counts: {}, version: '1', uptimeMs: 0 }),
+    onSpineEvent: (h) => { spine = h; },
+    onRouteLeave: (fn) => { leaveFn = fn; },
+  };
+  const root = m.renderWorkbench(ctx);
+  ok('renderWorkbench → .view root', root.className === 'view');
+  ok('renderWorkbench → no title chrome (first child is <p>)', root.children[0].tag === 'p');
+  ok('renderWorkbench reads ctx.fetchLanes on render', lanes >= 1, `${lanes}`);
+  ok('renderWorkbench reads ctx.fetchProjection on render', proj >= 1, `${proj}`);
+  ok('renderWorkbench refreshes status via ctx.refreshStatus', status >= 1, `${status}`);
+  ok('renderWorkbench subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  ok('renderWorkbench registers an interval teardown via ctx.onRouteLeave', typeof leaveFn === 'function');
+  if (typeof leaveFn === 'function') {
+    let threw = false;
+    try { leaveFn(); } catch { threw = true; } // clearInterval(slow) — must not throw
+    ok('renderWorkbench route-leave cleanup runs without throwing', threw === false);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

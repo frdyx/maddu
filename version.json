@@ -1,5 +1,5 @@
 {
-  "version": "1.66.0",
-  "phase": "cockpit-views-live-chats-extraction",
+  "version": "1.67.0",
+  "phase": "cockpit-views-live-workbench-extraction",
   "released": "2026-06-20"
 }

@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.67.0] · 2026-06-20 · Cockpit decomposition — live cluster (Workbench)
+
+Twenty-second view-module slice — moves **Workbench**, the first of the final trio. A **Codex consult** debunked the "composer-deep" label: `renderWorkbench`/`renderConductor`/`renderBoss` have **zero** global `composer.*` references (the `composer` identifier inside `renderBoss` is a *local* form node, not the shell slash-commander), so they extract with the existing seam discipline — no composer facade.
+
+- **Two new narrow seams:** `ctx.refreshStatus()` (force a status poll, resolve with the freshly-cached snapshot) and `ctx.onRouteLeave(fn)` (a one-shot route-leave cleanup hook, mirroring `onSpineEvent`'s teardown but for non-stream resources).
+- **`renderWorkbench`** (the 3-pane operator cockpit — lanes+sessions / tabbed stream·slices·approvals·memory / status) → `cockpit-views-live.js`. Composer-free: reads via `ctx.fetchLanes`/`fetchProjection`/`fetchMemory`/`fetchApprovals` + `ctx.refreshStatus`, lives via `ctx.onSpineEvent`, and tears down its 8s slow-tick `setInterval` via `ctx.onRouteLeave` (the original folded the interval clear into a manual `els.view` routechange teardown alongside the stream removeListener; those now split cleanly across the two seams). `eventRow`/`makeDecisionButton` from `cockpit-event-rows`.
+- **`cockpit.js` 3613 → 3346** (−267 lines); still **14 modules** (`cockpit-views-live.js` now 1949 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0 — and Playwright drives the workbench route in real Chromium, the layer that historically caught a workbench first-paint bug happy-dom masked). The live fixture grew to **107/0** — workbench asserts the composer-free 3-pane scaffold, the render-time `ctx.fetchLanes`/`fetchProjection`/`refreshStatus` reads, the `ctx.onSpineEvent` subscription, and that its `setInterval` teardown is registered via `ctx.onRouteLeave` and runs without throwing. Self-test full 73/73, audit 14/0.
+- **Remaining:** `renderConductor` (+ board helpers) and `renderBoss` (+ `renderBoss*`/`renderBossComposer` cluster) — both composer-free per Codex, both on existing seams. The global composer singleton + `renderSuggestions`/`renderPaletteResults` palette machinery stay legitimately shell-core.
+
 ## [v1.66.0] · 2026-06-20 · Cockpit decomposition — live cluster (Chats — last non-composer view)
 
 Twenty-first view-module slice — moves **Chats**, the simplest live view and the **last route view that doesn't drive the composer**.
