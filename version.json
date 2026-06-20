@@ -1,5 +1,5 @@
 {
-  "version": "1.62.0",
-  "phase": "cockpit-views-live-approvals-extraction",
+  "version": "1.63.0",
+  "phase": "cockpit-views-live-orientation-gates-reviews-extraction",
   "released": "2026-06-20"
 }

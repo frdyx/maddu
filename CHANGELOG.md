@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.63.0] · 2026-06-20 · Cockpit decomposition — live cluster (Orientation + Gates + Reviews)
+
+Eighteenth view-module slice — three clean read-only ledger views in one move, **zero new seams**.
+
+- **`renderOrientation`** (goal/phase brief + parent→child sessions tree + janitor activity), **`renderGates`** (recent `GATE_RAN` runs + pass/fail summary), **`renderReviews`** (`SLICE_REVIEWED` ledger + open follow-ups) → `cockpit-views-live.js`. Each registers a palette panel via `ctx.panelFocus` and refreshes on a debounced `ctx.onSpineEvent` subscription. No composer, no scope, no inspector — leaves + ctx only; no new imports.
+- **Tooling:** the extraction transform's stream-subscription rewrite is now **handler-name-agnostic** — a backreferenced capture (`const <name> = …; stream.bus.add(<name>); els.view…remove(<name>)`) collapses onto `ctx.onSpineEvent` whether the view named its handler `handler` or `onEvent`, and for any param list (`()`/`(e)`).
+- **`cockpit.js` 4236 → 4010** (−226 lines); still **14 modules** (`cockpit-views-live.js` now 1231 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **73/0** — each view asserts its `ctx.panelFocus` panel registration, the `ctx.onSpineEvent` subscription, and that a spine event is handled without throwing. Self-test full 73/73, audit 14/0.
+- **Still inline (live):** workbench, conductor, boss, queue, claims, dashboard, chats. Dashboard/queue/claims next (queue+claims add `ctx.openInspector` usage, already on seam); composer-deep trio (workbench/conductor/boss) last — Codex consult.
+
 ## [v1.62.0] · 2026-06-20 · Cockpit decomposition — live cluster (Approvals)
 
 Seventeenth view-module slice — moves the **Approvals** view, the first to exercise the shared-fetch-helper pattern at a real entanglement.
