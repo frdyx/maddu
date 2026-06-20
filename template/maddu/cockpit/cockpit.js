@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -2102,233 +2102,21 @@ function renderScoreMatrix(rows) {
 // GET /bridge/queue. Every parked card carries its reason code and a
 // safe next action affordance.
 
-const QUEUE_REASON_TONE = {
-  scheduled_next:     'blue',
-  scheduled_paused:   'neutral',
-  queue_ready:        'accent',
-  queue_blocked:      'warn',
-  dispatch_running:   'ok',
-  dispatch_stuck:     'danger',
-  preflight_pending:  'warn'
-};
-const QUEUE_REASON_LABEL = {
-  scheduled_next:    'scheduled',
-  scheduled_paused:  'paused',
-  queue_ready:       'ready',
-  queue_blocked:     'blocked',
-  dispatch_running:  'running',
-  dispatch_stuck:    'stuck',
-  preflight_pending: 'pending'
-};
+// renderQueueBoard + renderClaimMap (+ private renderQueueColumns/renderQueueCard/
+// renderClaimsTable + QUEUE_/CLAIM_REASON_TONE/LABEL palettes) � moved to
+// cockpit-views-live.js (v1.65.0). Queue scope-aware (ctx.scopePill/scopedUrl);
+// both debounced ctx.onSpineEvent + open Inspector via ctx.openInspector.
 
-function renderQueueBoard() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Queue Board'));
-  root.appendChild(el('p', {}, ROUTES.queue.description));
 
-  const pill = scopePill('queue', () => load());
-  if (pill) root.appendChild(pill);
 
-  const host = el('div', {});
-  host.appendChild(loading('Loading queue view…'));
-  root.appendChild(host);
-
-  const legend = el('div', { class: 'queue-legend' }, [
-    el('span', { class: 'next-command-pill tone-blue' }, 'Scheduler · scheduled / paused'),
-    el('span', { class: 'next-command-pill tone-accent' }, 'Queue · ready / blocked'),
-    el('span', { class: 'next-command-pill tone-ok' }, 'Dispatch · running / stuck'),
-    el('span', { class: 'next-command-pill tone-warn' }, 'Preflights · pending')
-  ]);
-  root.appendChild(panel('Reason codes', 'every parked card carries one', legend));
-
-  let pending = false;
-  const load = async () => {
-    let view;
-    try {
-      const r = await fetch(scopedUrl('queue', '/bridge/queue'), { cache: 'no-store' });
-      view = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    host.replaceChildren(renderQueueColumns(view.columns || []));
-  };
-  load();
-  const onEvent = () => {
-    if (pending) return;
-    pending = true;
-    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
-  };
-  stream.bus.addEventListener('event', onEvent);
-  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
-
-  return root;
-}
-
-function renderQueueColumns(columns) {
-  const wrap = el('div', { class: 'queue-grid' });
-  for (const col of columns) {
-    const c = el('div', { class: 'queue-col' });
-    c.appendChild(el('div', { class: `queue-col-head tone-${col.tone}` }, [
-      el('span', { class: 'queue-col-title' }, col.title),
-      el('span', { class: 'queue-col-count' }, String(col.items.length))
-    ]));
-    c.appendChild(el('div', { class: 'queue-col-hint' }, col.hint));
-    if (col.items.length === 0) {
-      c.appendChild(el('div', { class: 'queue-empty' }, '—'));
-    } else {
-      for (const item of col.items) {
-        c.appendChild(renderQueueCard(item, col.id));
-      }
-    }
-    wrap.appendChild(c);
-  }
-  return wrap;
-}
-
-function renderQueueCard(item, columnId) {
-  const tone = QUEUE_REASON_TONE[item.reasonCode] || 'neutral';
-  const card = el('div', { class: 'queue-card' });
-  card.appendChild(el('div', { class: 'queue-card-label' }, item.label || '(untitled)'));
-  if (item.detail) card.appendChild(el('div', { class: 'queue-card-detail' }, item.detail));
-  if (item.summary) card.appendChild(el('div', { class: 'queue-card-summary' }, item.summary));
-  const meta = el('div', { class: 'queue-card-meta' }, [
-    workspaceBadge(item),
-    el('span', { class: `next-command-pill tone-${tone}` }, QUEUE_REASON_LABEL[item.reasonCode] || item.reasonCode || 'unknown'),
-    item.nextFireTs ? el('span', { class: 'queue-card-next' }, `next: ${formatTs(item.nextFireTs)}`) : null,
-    (item.blockers && item.blockers.length) ? el('span', { class: 'queue-card-blockers' }, `blocked by ${item.blockers.length}`) : null
-  ]);
-  card.appendChild(meta);
-  if (item.action && item.route) {
-    const btn = el('button', { class: 'm-btn queue-card-btn', type: 'button' }, item.action);
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      location.hash = `#/${item.route}`;
-    });
-    card.appendChild(btn);
-  }
-  card.addEventListener('click', () => {
-    openInspector({
-      kind: columnId === 'preflights' ? 'approval' : (item.kind || (columnId === 'scheduler' ? 'schedule' : 'task')),
-      id: item.id,
-      data: item
-    });
-  });
-  return card;
-}
 
 // ─── Claim Map (Slice β) ────────────────────────────────────────────────
 //
 // Active claims by lane. Joins claims with session info; surfaces lease
 // state and heartbeat age. Operator can request a handoff with one click.
 
-const CLAIM_REASON_TONE = {
-  claim_healthy: 'ok',
-  claim_idle:    'accent',
-  claim_stale:   'warn',
-  claim_expired: 'danger'
-};
-const CLAIM_REASON_LABEL = {
-  claim_healthy: 'healthy',
-  claim_idle:    'idle',
-  claim_stale:   'stale',
-  claim_expired: 'expired'
-};
 
-function renderClaimMap() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Claim Map'));
-  root.appendChild(el('p', {}, ROUTES.claims.description));
 
-  const host = el('div', {});
-  host.appendChild(loading('Loading active claims…'));
-  root.appendChild(host);
-
-  let pending = false;
-  const load = async () => {
-    let view;
-    try {
-      const r = await fetch('/bridge/claims', { cache: 'no-store' });
-      view = await r.json();
-    } catch {
-      host.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    if (!view.claims || view.claims.length === 0) {
-      host.replaceChildren(placeholder('No active claims', 'No lanes are claimed right now. Claims appear here as sessions register and claim lanes.'));
-      return;
-    }
-    host.replaceChildren(renderClaimsTable(view.claims, load));
-  };
-  load();
-  const onEvent = () => {
-    if (pending) return;
-    pending = true;
-    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
-  };
-  stream.bus.addEventListener('event', onEvent);
-  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
-
-  return root;
-}
-
-function renderClaimsTable(claims, reload) {
-  const wrap = el('div', { class: 'claims-table' });
-  // Header row
-  wrap.appendChild(el('div', { class: 'claims-row claims-row-head' }, [
-    el('span', {}, 'lane'),
-    el('span', {}, 'session'),
-    el('span', {}, 'focus'),
-    el('span', {}, 'claimed'),
-    el('span', {}, 'heartbeat'),
-    el('span', {}, 'lease'),
-    el('span', {}, 'state'),
-    el('span', {}, 'action')
-  ]));
-  for (const c of claims) {
-    const tone = CLAIM_REASON_TONE[c.reasonCode] || 'neutral';
-    const leaseLabel = c.leaseSeconds
-      ? (c.leaseLeftMs == null ? `${c.leaseSeconds}s` : (c.leaseLeftMs < 0 ? `expired ${formatAge(-c.leaseLeftMs)}` : `${formatAge(c.leaseLeftMs)} left`))
-      : '—';
-    const row = el('div', { class: `claims-row tone-${tone}` }, [
-      el('span', { class: 'claims-lane' }, c.lane),
-      el('span', { class: 'claims-session' }, c.sessionLabel || c.sessionId),
-      el('span', { class: 'claims-focus' }, c.focus || '—'),
-      el('span', { class: 'claims-age' }, formatAge(c.claimAgeMs)),
-      el('span', { class: 'claims-heartbeat' }, c.heartbeatAgeMs == null ? '—' : formatAge(c.heartbeatAgeMs)),
-      el('span', { class: 'claims-lease' }, leaseLabel),
-      el('span', { class: `next-command-pill tone-${tone}` }, CLAIM_REASON_LABEL[c.reasonCode] || c.reasonCode),
-      (() => {
-        const btn = el('button', { class: 'm-btn', type: 'button' }, 'request handoff');
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const reason = prompt('Handoff reason (shown to the holding session):', 'operator request') || '';
-          if (!reason) return;
-          try {
-            const r = await fetch('/bridge/claims/handoff', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ lane: c.lane, reason, from: 'operator' })
-            });
-            if (!r.ok) {
-              const d = await r.json().catch(() => ({}));
-              showToast(`Handoff failed: ${d.error || r.statusText}`, 'err');
-            } else {
-              showToast(`Handoff requested for ${c.lane}`, 'ok');
-              reload();
-            }
-          } catch (err) {
-            showToast(`Handoff failed: ${err.message}`, 'err');
-          }
-        });
-        return btn;
-      })()
-    ]);
-    row.addEventListener('click', () => openInspector({ kind: 'claim', id: c.lane, data: c }));
-    wrap.appendChild(row);
-  }
-  return wrap;
-}
 
 // ─── BOSS (Slice γ) ──────────────────────────────────────────────────────
 //

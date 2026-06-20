@@ -1,5 +1,5 @@
 {
-  "version": "1.64.0",
-  "phase": "cockpit-views-live-dashboard-extraction",
+  "version": "1.65.0",
+  "phase": "cockpit-views-live-queue-claims-extraction",
   "released": "2026-06-20"
 }

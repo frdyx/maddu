@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.65.0] · 2026-06-20 · Cockpit decomposition — live cluster (Queue Board + Claim Map)
+
+Twentieth view-module slice — moves the two scheduler/lane views, **zero new ctx seams**.
+
+- **`renderQueueBoard`** (reason-coded scheduler→queue→dispatch→preflight columns) + **`renderClaimMap`** (active lane claims, lease/heartbeat state, request-handoff) → `cockpit-views-live.js`, with their private builders `renderQueueColumns`/`renderQueueCard`/`renderClaimsTable` and the `QUEUE_`/`CLAIM_REASON_TONE`/`LABEL` palettes. Queue is scope-aware (`ctx.scopePill`/`ctx.scopedUrl`); both refresh on a debounced `ctx.onSpineEvent` subscription and open the Inspector on card/row click via `ctx.openInspector`.
+- **ctx threaded into the private builders.** Like `taskCard` before them, `renderQueueColumns`/`renderQueueCard`/`renderClaimsTable` take a `ctx` parameter so their click handlers reach `ctx.openInspector` (call sites updated: `renderQueueColumns(cols, ctx)` → `renderQueueCard(item, id, ctx)`; `renderClaimsTable(claims, reload, ctx)`).
+- The module's util import widened to pull `formatTs`/`formatAge` — already-extracted leaves.
+- **`cockpit.js` 3857 → 3645** (−212 lines); still **14 modules** (`cockpit-views-live.js` now 1629 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **94/0** — it now feeds canned `/bridge/queue` + `/bridge/claims` responses so a real **card click** and **row click** fire and assert `ctx.openInspector` was invoked (verifying the threaded builders), plus the scope-pill/scopedUrl/onSpineEvent wiring. Self-test full 73/73, audit 14/0.
+- **Still inline (live):** chats, and the composer-deep trio (workbench/conductor/boss). Chats next; composer-deep trio last — Codex consult.
+
 ## [v1.64.0] · 2026-06-20 · Cockpit decomposition — live cluster (Dashboard)
 
 Nineteenth view-module slice — moves the headline **Dashboard** overview.
