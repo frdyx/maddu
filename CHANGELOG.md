@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.69.0] · 2026-06-20 · Cockpit decomposition — BOSS (route-view extraction COMPLETE)
+
+Twenty-fourth view-module slice and the **last route view**. With BOSS extracted, **every one of the cockpit's 42 routes now renders from a sibling module** — `cockpit.js` is a pure composition root.
+
+- **`renderBoss`** (the proposal · enforcer · decision terminal — operator strip, session tabs, transcript, proposal composer) → `cockpit-views-live.js`, as one cluster with `renderBossStrip`/`renderBossSessions`/`renderBossTranscript`, the line builders (`renderOperatorLine`/`renderEnforcerLine`/`renderDecisionLine`), `renderProposalCard`, `renderBossComposer`, and the `PROPOSAL_RISK_TONE`/`ENFORCER_ACTION_KINDS`/`ACTION_FIELDS` constants. Debounced `ctx.onSpineEvent`; proposal cards open the Inspector via `ctx.openInspector` (threaded through the transcript builder). **No new ctx seams, no new imports.**
+- **The Codex finding held:** `renderBossComposer` is a fully self-contained form (raw `fetch`, no ctx); the `composer` identifier inside `renderBoss` is that form *node*, not the shell slash-commander singleton — which stays in cockpit.js with `renderSuggestions`/`renderPaletteResults`.
+- **`cockpit.js` 3115 → 2686** — from the **9202-line pre-decomposition monolith, −71%**. `cockpit-views-live.js` is now 2621 lines (16 live views). The cockpit is **15 modules**. Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0 — drives the BOSS route in real Chromium). The live fixture grew to **125/0** — BOSS asserts the `.boss-view` root, the composer form, the `ctx.onSpineEvent` subscription, and that a canned proposal card's click fires `ctx.openInspector`. Self-test full 73/73, audit 14/0.
+- **What `cockpit.js` is now (the legitimate shell):** the route registry + `ctx` wiring + router (`renderRoute`), the Inspector (`renderInspector`/`renderInspectorTab`) and entity-drawer, the command palette + composer singleton (`renderSuggestions`/`renderPaletteResults`/`composer`), the long-poll stream loop, chrome/rail, and boot. Optional future polish (inspector/palette to their own files) carries no composer entanglement, but the decomposition's goal — **every route view in a focused module behind a clean `ctx` seam** — is met.
+
 ## [v1.68.0] · 2026-06-20 · Cockpit decomposition — live cluster (Conductor)
 
 Twenty-third view-module slice — moves **Conductor**, the second of the final trio (composer-free per the Codex consult).

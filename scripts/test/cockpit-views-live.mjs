@@ -48,6 +48,8 @@ globalThis.fetch = (url, init) => {
   if (path === '/bridge/queue' || path === '/bridge/_all/queue') return resolved(QUEUE_DATA);
   if (path === '/bridge/claims') return resolved(CLAIMS_DATA);
   if (path === '/bridge/conductor' || path === '/bridge/_all/conductor') return resolved(CONDUCTOR_DATA);
+  if (path === '/bridge/boss/sessions') return resolved({ sessions: [{ id: 'default', messageCount: 1, openProposals: 1 }] });
+  if (path.startsWith('/bridge/boss/sessions/')) return resolved({ transcript: [{ role: 'proposal', proposalId: 'p1' }], proposals: [{ id: 'p1', risk: 'low', status: 'open', summary: 'do the thing' }] });
   return new Promise(() => {});
 };
 
@@ -89,6 +91,7 @@ ok('exports renderClaimMap', typeof m.renderClaimMap === 'function');
 ok('exports renderChats', typeof m.renderChats === 'function');
 ok('exports renderWorkbench', typeof m.renderWorkbench === 'function');
 ok('exports renderConductor', typeof m.renderConductor === 'function');
+ok('exports renderBoss', typeof m.renderBoss === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -442,6 +445,29 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     const before = inspects;
     (scoreRow._l.click || []).forEach((fn) => fn());
     ok('score row click opens Inspector via ctx.openInspector', inspects === before + 1, `${inspects}`);
+  }
+}
+
+// ── renderBoss — the proposal/enforcer/decision terminal. Debounced
+// ctx.onSpineEvent; proposal cards open the Inspector via ctx.openInspector
+// (threaded through the transcript builder). Canned boss session → a proposal
+// card that, when clicked (not on a button), fires ctx.openInspector. ──
+{
+  let spine = null, inspects = 0;
+  const ctx = { onSpineEvent: (h) => { spine = h; }, openInspector: () => { inspects++; } };
+  const root = m.renderBoss(ctx);
+  ok('renderBoss → .view root', root.className === 'view boss-view');
+  ok('renderBoss → <h2> "BOSS"', root.children[0].children[0].text === 'BOSS');
+  ok('renderBoss subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  ok('renderBoss renders a composer form', !!findByClassToken(root, 'boss-composer')[0]);
+  await tick(); await tick(); await tick();
+  const card = findByClassToken(root, 'proposal-card')[0];
+  ok('renderBoss renders a proposal card from canned data', !!card);
+  if (card) {
+    // The card click ignores clicks on buttons (e.target.closest('button')); pass
+    // a mock event whose target is not within a button so the Inspector opens.
+    (card._l.click || []).forEach((fn) => fn({ target: { closest: () => null } }));
+    ok('proposal card click opens Inspector via ctx.openInspector', inspects === 1, `${inspects}`);
   }
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": "1.68.0",
-  "phase": "cockpit-views-live-conductor-extraction",
+  "version": "1.69.0",
+  "phase": "cockpit-views-live-boss-extraction-route-views-complete",
   "released": "2026-06-20"
 }
