@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.66.0] · 2026-06-20 · Cockpit decomposition — live cluster (Chats — last non-composer view)
+
+Twenty-first view-module slice — moves **Chats**, the simplest live view and the **last route view that doesn't drive the composer**.
+
+- **`renderChats`** (the sessions roster — role/label/focus panels per registered session) → `cockpit-views-live.js`. A single `ctx.fetchProjection` read; no stream subscription, no composer, no inspector. No new ctx seams, no new imports. (The old "openInspector+panelFocus" note in the plan was about `renderRoadmap`, not this view — Chats is genuinely trivial.)
+- **`cockpit.js` 3645 → 3613** (−32 lines); still **14 modules** (`cockpit-views-live.js` now 1668 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **98/0** — chats asserts its `.view` root, the `Chats` heading, and the render-time `ctx.fetchProjection` read. Self-test full 73/73, audit 14/0.
+- **Milestone:** every **non-composer** route view is now extracted. Only the **composer-deep trio** remains inline — `renderWorkbench`, `renderConductor`, `renderBoss` (+ the `renderBoss*`/`renderBossComposer` machinery and the command palette, which are legitimately shell-core). That trio drives the composer singleton deeply and is the subject of the planned **Codex consult** before its seam is designed.
+
 ## [v1.65.0] · 2026-06-20 · Cockpit decomposition — live cluster (Queue Board + Claim Map)
 
 Twentieth view-module slice — moves the two scheduler/lane views, **zero new ctx seams**.

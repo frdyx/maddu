@@ -78,6 +78,7 @@ ok('exports renderReviews', typeof m.renderReviews === 'function');
 ok('exports renderDashboard', typeof m.renderDashboard === 'function');
 ok('exports renderQueueBoard', typeof m.renderQueueBoard === 'function');
 ok('exports renderClaimMap', typeof m.renderClaimMap === 'function');
+ok('exports renderChats', typeof m.renderChats === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -354,6 +355,17 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     (row._l.click || []).forEach((fn) => fn());
     ok('claims row click opens Inspector via ctx.openInspector', inspects === 1, `${inspects}`);
   }
+}
+
+// ── renderChats — sessions roster: a single ctx.fetchProjection read rendered
+// as session panels. No stream sub, no composer, no inspector. ──
+{
+  let projReads = 0;
+  const ctx = { fetchProjection: () => { projReads++; return new Promise(() => {}); } };
+  const root = m.renderChats(ctx);
+  ok('renderChats → .view root', root.className === 'view');
+  ok('renderChats → <h2> "Chats"', root.children[0].children[0].text === 'Chats');
+  ok('renderChats reads ctx.fetchProjection on render', projReads === 1, `${projReads}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
