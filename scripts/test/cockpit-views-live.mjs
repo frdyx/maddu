@@ -35,12 +35,19 @@ const fetchCount = { '/bridge/mailbox-counts': 0, '/bridge/tasks': 0, '/bridge/s
 // be exercised. Everything else stays pending so other views render synchronously.
 const QUEUE_DATA = { columns: [{ id: 'queue', title: 'Queue', tone: 'accent', hint: 'ready/blocked', items: [{ id: 'q1', label: 'task one', reasonCode: 'queue_ready' }] }] };
 const CLAIMS_DATA = { claims: [{ lane: 'lane-a', sessionId: 's1', reasonCode: 'claim_healthy', claimAgeMs: 1000, heartbeatAgeMs: 500 }] };
+const CONDUCTOR_DATA = {
+  nextCommand: { text: 'claim a lane', reasonCode: 'task_ready', route: 'tasks' },
+  kpi: { activeClaims: 1, openApprovals: 0, stuckWorkers: 0, idleSessions: 0, openTasks: 2, lastSliceAgeMs: 1000 },
+  board: { now: [{ id: 't1', title: 'Task 1', lane: 'l' }], next: [], waiting: [], done: [] },
+  scoreMatrix: [{ lane: 'l', reasonCode: 'lane_active', done: 1, total: 2, progress: 0.5, scope: 'scope' }],
+};
 function resolved(body) { return Promise.resolve({ ok: true, json: () => Promise.resolve(body) }); }
 globalThis.fetch = (url, init) => {
   const path = String(url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
   if (path in fetchCount && (!init || !init.method)) fetchCount[path]++;
   if (path === '/bridge/queue' || path === '/bridge/_all/queue') return resolved(QUEUE_DATA);
   if (path === '/bridge/claims') return resolved(CLAIMS_DATA);
+  if (path === '/bridge/conductor' || path === '/bridge/_all/conductor') return resolved(CONDUCTOR_DATA);
   return new Promise(() => {});
 };
 
@@ -81,6 +88,7 @@ ok('exports renderQueueBoard', typeof m.renderQueueBoard === 'function');
 ok('exports renderClaimMap', typeof m.renderClaimMap === 'function');
 ok('exports renderChats', typeof m.renderChats === 'function');
 ok('exports renderWorkbench', typeof m.renderWorkbench === 'function');
+ok('exports renderConductor', typeof m.renderConductor === 'function');
 
 // ── renderMailbox — MAILBOX_* via ctx.onSpineEvent; render fires a counts GET ──
 {
@@ -398,6 +406,42 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     let threw = false;
     try { leaveFn(); } catch { threw = true; } // clearInterval(slow) — must not throw
     ok('renderWorkbench route-leave cleanup runs without throwing', threw === false);
+  }
+}
+
+// ── renderConductor — command-control surface. Scope-aware (ctx.scopePill/
+// scopedUrl), ctx.panelFocus panels, debounced ctx.onSpineEvent. Canned
+// /bridge/conductor lets the board + score matrix render; their card/row clicks
+// reach ctx.openInspector (threaded into the private builders). ──
+{
+  let spine = null, scopePillCalls = 0, panelCalls = 0, scopedReads = 0, inspects = 0;
+  const ctx = {
+    scopePill: () => { scopePillCalls++; return null; },
+    scopedUrl: (route, base) => { scopedReads++; return base; },
+    panelFocus(t, aside, body, opts) { panelCalls++; const n = mkNode('div'); n.className = 'panel'; if (body) n.appendChild(body); return n; },
+    onSpineEvent: (h) => { spine = h; },
+    openInspector: () => { inspects++; },
+  };
+  const root = m.renderConductor(ctx);
+  ok('renderConductor → .view root', root.className === 'view');
+  ok('renderConductor → <h2> "Conductor"', root.children[0].children[0].text === 'Conductor');
+  ok('renderConductor registers a scope pill via ctx.scopePill', scopePillCalls === 1);
+  ok('renderConductor registers panels via ctx.panelFocus (≥5)', panelCalls >= 5, `${panelCalls}`);
+  ok('renderConductor scopes its fetch via ctx.scopedUrl', scopedReads >= 1, `${scopedReads}`);
+  ok('renderConductor subscribes via ctx.onSpineEvent', typeof spine === 'function');
+  await tick(); await tick(); await tick();
+  const card = findByClassToken(root, 'board-card')[0];
+  ok('renderConductor renders a board card from canned data', !!card);
+  const scoreRow = findByClassToken(root, 'score-row')[0];
+  ok('renderConductor renders a score-matrix row from canned data', !!scoreRow);
+  if (card) {
+    (card._l.click || []).forEach((fn) => fn());
+    ok('board card click opens Inspector via ctx.openInspector', inspects === 1, `${inspects}`);
+  }
+  if (scoreRow) {
+    const before = inspects;
+    (scoreRow._l.click || []).forEach((fn) => fn());
+    ok('score row click opens Inspector via ctx.openInspector', inspects === before + 1, `${inspects}`);
   }
 }
 

@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.68.0] · 2026-06-20 · Cockpit decomposition — live cluster (Conductor)
+
+Twenty-third view-module slice — moves **Conductor**, the second of the final trio (composer-free per the Codex consult).
+
+- **Shared reason-code palettes extracted to a leaf.** `REASON_CODE_TONE`/`REASON_CODE_LABEL` were used by both the shell-core Inspector (stays in cockpit.js) *and* Conductor/BOSS, so they move to `cockpit-event-rows.js` (the leaf both sides already import) — the shell reaches them by import, no back-edge.
+- **`renderConductor`** (Next Command, KPI strip, Now/Next/Waiting/Done board, queue summary, Operation Score Matrix, last slice-stop, slash cheatsheet) → `cockpit-views-live.js`, with its private builders `renderNextCommand`/`renderConductorBoard`/`renderScoreMatrix`. Scope-aware (`ctx.scopePill`/`ctx.scopedUrl`), `ctx.panelFocus` palette panels, debounced `ctx.onSpineEvent`. The board + score builders take `ctx` so their card/row clicks reach `ctx.openInspector` (the threaded-builder pattern).
+- The module's imports widened: `bar` (widgets), `ageTone` (util), `renderSlashCheatsheet` (backbone-cards), `REASON_CODE_TONE`/`REASON_CODE_LABEL` (event-rows) — all already-extracted leaves.
+- **`cockpit.js` 3346 → 3115** (−231 lines); still **14 modules** (`cockpit-views-live.js` now 2169 lines). Mass ratchet re-baselined.
+- **Verification (all four layers green):** Gate A boot (48/0), Gate B golden snapshots **byte-identical** (43/0), Playwright real-browser smoke (45/0). The live fixture grew to **118/0** — it feeds canned `/bridge/conductor` so the board + score matrix render, then fires a **board card click** and a **score row click** asserting `ctx.openInspector` (verifying both threaded builders), plus the scope-pill/panelFocus/scopedUrl/onSpineEvent wiring. Self-test full 73/73, audit 14/0.
+- **Last one:** only `renderBoss` (+ the `renderBoss*`/`renderBossComposer` cluster) remains inline before cockpit.js is a pure composition root. The global composer singleton + `renderSuggestions`/`renderPaletteResults` palette stay shell-core.
+
 ## [v1.67.0] · 2026-06-20 · Cockpit decomposition — live cluster (Workbench)
 
 Twenty-second view-module slice — moves **Workbench**, the first of the final trio. A **Codex consult** debunked the "composer-deep" label: `renderWorkbench`/`renderConductor`/`renderBoss` have **zero** global `composer.*` references (the `composer` identifier inside `renderBoss` is a *local* form node, not the shell slash-commander), so they extract with the existing seam discipline — no composer facade.

@@ -10,6 +10,37 @@
 
 import { el } from './cockpit-util.js';
 
+// Reason-code → tone/label display palettes. Shared by the shell's Inspector
+// (cockpit.js) and the Conductor + BOSS views (cockpit-views-live.js) — the
+// derived "why this is the safe next action / lane state" codes the bridge
+// emits. Pure data; live here as the common leaf both sides import.
+export const REASON_CODE_TONE = {
+  approvals_pending: 'warn',
+  workers_stuck:     'danger',
+  task_ready:        'accent',
+  task_blocked:      'warn',
+  slice_stale:       'warn',
+  slice_never:       'blue',
+  all_clear:         'ok',
+  lane_active:       'accent',
+  lane_unclaimed:    'warn',
+  lane_idle:         'ok',
+  lane_empty:        'neutral'
+};
+export const REASON_CODE_LABEL = {
+  approvals_pending: 'approvals pending',
+  workers_stuck:     'workers stuck',
+  task_ready:        'task ready',
+  task_blocked:      'task blocked',
+  slice_stale:       'slice stale',
+  slice_never:       'first slice',
+  all_clear:         'all clear',
+  lane_active:       'active',
+  lane_unclaimed:    'unclaimed',
+  lane_idle:         'idle',
+  lane_empty:        'empty'
+};
+
 // classifyEvent(type) — map a spine event type to its colour-family CSS class.
 export function classifyEvent(type) {
   // SINGLE-EVENT specials first

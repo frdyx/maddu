@@ -8,7 +8,7 @@ import { el, panel, placeholder, truncatePathFromLeft, compactPath, formatUptime
 import { statusGrid, bar, segBar, donut, sparkline, meter, binByTime } from './cockpit-widgets.js';
 import { renderTelegramPanel, renderDiscordPanel, renderEmailPanel } from './cockpit-comms.js';
 import { renderSlashCheatsheet } from './cockpit-backbone-cards.js';
-import { classifyEvent, eventRow, prepend, makeDecisionButton } from './cockpit-event-rows.js';
+import { classifyEvent, eventRow, prepend, makeDecisionButton, REASON_CODE_TONE, REASON_CODE_LABEL } from './cockpit-event-rows.js';
 import { renderMarkdown } from './cockpit-markdown.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
 import { renderPipelinesRoute, renderCostRoute, renderAdvisorsRoute, renderSkillInjectionsRoute, renderModelRoutingRoute, renderTestStatusRoute } from './cockpit-views-backbone.js';
@@ -16,7 +16,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench, renderConductor } from './cockpit-views-live.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -1575,7 +1575,7 @@ function allSubTargets() {
 
 // ─── Workbench (Phase D1) ────────────────────────────────────────────────
 
-// renderWorkbench � moved to cockpit-views-live.js (v1.67.0). The 3-pane operator
+// renderWorkbench � moved to cockpit-views-live.js (v1.67.0). The 3-pane operator
 // cockpit (composer-free): ctx.fetch* reads + ctx.refreshStatus, live via
 // ctx.onSpineEvent, 8s slow-tick setInterval torn down via ctx.onRouteLeave.
 
@@ -1586,246 +1586,15 @@ function allSubTargets() {
 // Score Matrix (per-lane progress + reason codes), and Now/Next/Waiting/Done
 // task board. Everything reflects canonical state — no UI memory.
 
-function renderConductor() {
-  const root = el('div', { class: 'view' });
-  root.appendChild(el('h2', {}, 'Conductor'));
-  root.appendChild(el('p', {}, ROUTES.conductor.description));
+// renderConductor (+ renderNextCommand/renderConductorBoard/renderScoreMatrix) �
+// moved to cockpit-views-live.js (v1.68.0). Scope-aware (ctx.scopePill/scopedUrl),
+// ctx.panelFocus panels, debounced ctx.onSpineEvent, board/score open the Inspector
+// via ctx.openInspector. REASON_CODE_TONE/LABEL � cockpit-event-rows.js (shared with
+// the Inspector here + BOSS).
 
-  const pill = scopePill('conductor', () => load());
-  if (pill) root.appendChild(pill);
 
-  // ── Next Command strip (front and center) ──
-  const nextHost = el('div', { class: 'conductor-next' });
-  nextHost.appendChild(loading('Computing safe next action…'));
-  root.appendChild(nextHost);
 
-  // ── KPI strip ──
-  const kpiHost = el('div', {});
-  root.appendChild(kpiHost);
 
-  // ── Now / Next / Waiting / Done board ──
-  const boardHost = el('div', { class: 'conductor-board' });
-  boardHost.appendChild(loading('Loading task board…'));
-  root.appendChild(panelFocus('Now · Next · Waiting · Done', 'GET /bridge/conductor', boardHost,
-    { id: 'board', keywords: 'now next waiting done board kanban work-in-flight' }));
-
-  // ── Queue Board summary card ──
-  const queueHost = el('div', {});
-  queueHost.appendChild(loading('Loading queue counts…'));
-  const queueCard = panelFocus('Queue Board', 'scheduler · queue · dispatch · preflights', queueHost,
-    { id: 'queue', keywords: 'queue scheduler dispatch preflight parked reason-code' });
-  queueCard.style.cursor = 'pointer';
-  queueCard.addEventListener('click', () => { location.hash = '#/queue'; });
-  root.appendChild(queueCard);
-
-  // ── Operation Score Matrix ──
-  const matrixHost = el('div', {});
-  matrixHost.appendChild(loadingFor('table', 'Loading per-lane score matrix…'));
-  root.appendChild(panelFocus('Operation Score Matrix', 'per-lane progress · claims · reason codes', matrixHost,
-    { id: 'score', keywords: 'score matrix progress per-lane claims reason' }));
-
-  // ── Recent slice-stop summary ──
-  const sliceHost = el('div', {});
-  root.appendChild(panelFocus('Last slice-stop', 'most recent ritual close', sliceHost,
-    { id: 'last-slice', keywords: 'last slice-stop recent ritual learning' }));
-
-  // ── Slash-command quick reference (moved here in v0.19.2) ──
-  root.appendChild(panelFocus('Slash-command quick reference', '/maddu-*', renderSlashCheatsheet(),
-    { id: 'slash-cheatsheet', keywords: 'slash commands cheatsheet quick reference maddu-help maddu-autopilot' }));
-
-  let dataLoaded = false;
-  const load = async () => {
-    let view;
-    try {
-      const r = await fetch(scopedUrl('conductor', '/bridge/conductor'), { cache: 'no-store' });
-      view = await r.json();
-    } catch {
-      nextHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
-      return;
-    }
-    dataLoaded = true;
-
-    // Next Command
-    nextHost.replaceChildren(renderNextCommand(view.nextCommand));
-
-    // KPI strip
-    const k = view.kpi || {};
-    kpiHost.replaceChildren(statusGrid([
-      { value: k.activeClaims ?? '—',  label: 'Active claims',    tone: (k.activeClaims > 0 ? 'accent' : 'neutral'), onClick: () => { location.hash = '#/swarm'; } },
-      { value: k.openApprovals ?? '—', label: 'Open approvals',   tone: (k.openApprovals > 0 ? 'warn' : 'ok'),       onClick: () => { location.hash = '#/approvals'; } },
-      { value: k.stuckWorkers ?? '—',  label: 'Stuck workers',    tone: (k.stuckWorkers > 0 ? 'danger' : 'ok'),      onClick: () => { location.hash = '#/swarm'; } },
-      { value: k.idleSessions ?? '—',  label: 'Idle sessions',    tone: (k.idleSessions > 0 ? 'warn' : 'ok'),        onClick: () => { location.hash = '#/swarm'; } },
-      { value: k.openTasks ?? '—',     label: 'Open tasks',       tone: 'accent',                                    onClick: () => { location.hash = '#/tasks'; } },
-      { value: formatAge(k.lastSliceAgeMs), label: 'Last slice-stop', tone: ageTone(k.lastSliceAgeMs),               onClick: () => { location.hash = '#/operations'; } }
-    ]));
-
-    // Board
-    boardHost.replaceChildren(renderConductorBoard(view.board || {}));
-
-    // Score matrix
-    matrixHost.replaceChildren(renderScoreMatrix(view.scoreMatrix || []));
-
-    // Queue Board summary (counts per column)
-    try {
-      const qr = await fetch(scopedUrl('conductor', '/bridge/queue'), { cache: 'no-store' });
-      if (qr.ok) {
-        const qv = await qr.json();
-        const segs = (qv.columns || []).map((col) => {
-          const toneMap = { scheduler: 'blue', queue: 'accent', dispatch: 'ok', preflights: 'warn' };
-          return { label: col.title, value: col.items.length, tone: toneMap[col.id] || 'neutral' };
-        });
-        queueHost.replaceChildren(segBar(segs));
-      } else {
-        queueHost.replaceChildren(placeholder('Offline', 'Queue endpoint unavailable.'));
-      }
-    } catch {
-      queueHost.replaceChildren(placeholder('Offline', 'Queue endpoint unavailable.'));
-    }
-
-    // Last slice
-    if (k.lastSlice) {
-      sliceHost.replaceChildren(
-        el('dl', { class: 'kv' }, [
-          el('dt', {}, 'id'),      el('dd', {}, k.lastSlice.id || '—'),
-          el('dt', {}, 'when'),    el('dd', {}, formatTs(k.lastSlice.ts)),
-          el('dt', {}, 'age'),     el('dd', {}, formatAge(k.lastSliceAgeMs)),
-          el('dt', {}, 'summary'), el('dd', {}, k.lastSlice.summary || '(no summary)')
-        ])
-      );
-    } else {
-      sliceHost.replaceChildren(placeholder('No slice-stops yet', 'Run your first slice-stop to start writing learnings into the spine.'));
-    }
-  };
-  load();
-
-  // Refresh whenever a new event lands. Debounce by skipping if a load is in flight.
-  let pending = false;
-  const onEvent = () => {
-    if (pending) return;
-    pending = true;
-    setTimeout(async () => { try { await load(); } finally { pending = false; } }, 400);
-  };
-  stream.bus.addEventListener('event', onEvent);
-  els.view.addEventListener('routechange', () => stream.bus.removeEventListener('event', onEvent), { once: true });
-
-  return root;
-}
-
-const REASON_CODE_TONE = {
-  approvals_pending: 'warn',
-  workers_stuck:     'danger',
-  task_ready:        'accent',
-  task_blocked:      'warn',
-  slice_stale:       'warn',
-  slice_never:       'blue',
-  all_clear:         'ok',
-  lane_active:       'accent',
-  lane_unclaimed:    'warn',
-  lane_idle:         'ok',
-  lane_empty:        'neutral'
-};
-const REASON_CODE_LABEL = {
-  approvals_pending: 'approvals pending',
-  workers_stuck:     'workers stuck',
-  task_ready:        'task ready',
-  task_blocked:      'task blocked',
-  slice_stale:       'slice stale',
-  slice_never:       'first slice',
-  all_clear:         'all clear',
-  lane_active:       'active',
-  lane_unclaimed:    'unclaimed',
-  lane_idle:         'idle',
-  lane_empty:        'empty'
-};
-
-function renderNextCommand(nc) {
-  if (!nc) return placeholder('No signal', 'Bridge returned no next-command.');
-  const tone = REASON_CODE_TONE[nc.reasonCode] || 'accent';
-  const wrap = el('div', { class: `next-command tone-${tone}` });
-  wrap.appendChild(el('span', { class: 'next-command-glyph' }, '▸'));
-  const body = el('div', { class: 'next-command-body' });
-  body.appendChild(el('div', { class: 'next-command-text' }, nc.text || ''));
-  if (nc.hint) body.appendChild(el('div', { class: 'next-command-hint' }, nc.hint));
-  const meta = el('div', { class: 'next-command-meta' }, [
-    el('span', { class: `next-command-pill tone-${tone}` }, REASON_CODE_LABEL[nc.reasonCode] || nc.reasonCode || 'unknown'),
-    nc.route ? el('span', { class: 'next-command-route' }, `→ /${nc.route}`) : null
-  ]);
-  body.appendChild(meta);
-  wrap.appendChild(body);
-  if (nc.route) {
-    wrap.style.cursor = 'pointer';
-    wrap.addEventListener('click', () => {
-      if (nc.ref && nc.ref.kind === 'task' && nc.ref.id) {
-        location.hash = `#/tasks?inspect=task:${encodeURIComponent(nc.ref.id)}`;
-      } else {
-        location.hash = `#/${nc.route}`;
-      }
-    });
-  }
-  return wrap;
-}
-
-function renderConductorBoard(board) {
-  const wrap = el('div', { class: 'board-grid' });
-  const columns = [
-    { id: 'now',     title: 'Now',     tone: 'blue',    items: board.now || [],     hint: 'in-progress' },
-    { id: 'next',    title: 'Next',    tone: 'accent',  items: board.next || [],    hint: 'ready · no blockers' },
-    { id: 'waiting', title: 'Waiting', tone: 'warn',    items: board.waiting || [], hint: 'blocked on dependency' },
-    { id: 'done',    title: 'Done',    tone: 'ok',      items: board.done || [],    hint: 'recent · last 8' }
-  ];
-  for (const col of columns) {
-    const c = el('div', { class: 'board-col' });
-    c.appendChild(el('div', { class: `board-col-head tone-${col.tone}` }, [
-      el('span', { class: 'board-col-title' }, col.title),
-      el('span', { class: 'board-col-count' }, String(col.items.length))
-    ]));
-    c.appendChild(el('div', { class: 'board-col-hint' }, col.hint));
-    if (col.items.length === 0) {
-      c.appendChild(el('div', { class: 'board-empty' }, '—'));
-    } else {
-      for (const t of col.items.slice(0, 12)) {
-        const card = el('div', { class: 'board-card' });
-        card.appendChild(el('div', { class: 'board-card-title' }, t.title || '(untitled)'));
-        const metaParts = [];
-        if (t.lane) metaParts.push(t.lane);
-        if (t.owner) metaParts.push(`@${t.owner}`);
-        if ((t.activeBlockers || []).length > 0) metaParts.push(`blocked×${t.activeBlockers.length}`);
-        const meta = el('div', { class: 'board-card-meta' });
-        const badge = workspaceBadge(t);
-        if (badge) { meta.appendChild(badge); meta.appendChild(document.createTextNode(' ')); }
-        meta.appendChild(document.createTextNode(metaParts.join(' · ') || '—'));
-        card.appendChild(meta);
-        card.addEventListener('click', () => openInspector({ kind: 'task', id: t.id, data: t }));
-        c.appendChild(card);
-      }
-    }
-    wrap.appendChild(c);
-  }
-  return wrap;
-}
-
-function renderScoreMatrix(rows) {
-  if (!rows.length) return placeholder('No lanes', 'Lane catalog is empty.');
-  const wrap = el('div', { class: 'score-matrix' });
-  for (const r of rows) {
-    const tone = REASON_CODE_TONE[r.reasonCode] || 'neutral';
-    const row = el('div', { class: 'score-row' });
-    const headChildren = [];
-    const badge = workspaceBadge(r);
-    if (badge) headChildren.push(badge);
-    headChildren.push(
-      el('span', { class: 'score-lane' }, r.lane),
-      el('span', { class: `score-pill tone-${tone}` }, REASON_CODE_LABEL[r.reasonCode] || r.reasonCode),
-      el('span', { class: 'score-counts' }, `${r.done}/${r.total}${r.claimsHeld ? ` · claims ×${r.claimsHeld}` : ''}`)
-    );
-    const head = el('div', { class: 'score-head' }, headChildren);
-    row.appendChild(head);
-    row.appendChild(bar(r.progress * 100, r.scope || '', { tone, right: `${Math.round(r.progress * 100)}%` }));
-    row.addEventListener('click', () => openInspector({ kind: 'lane', id: r.lane, data: r }));
-    wrap.appendChild(row);
-  }
-  return wrap;
-}
 
 // formatAge / ageTone / formatTs → moved to cockpit-util.js (v1.38.0).
 
