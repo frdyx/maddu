@@ -458,7 +458,7 @@ export function renderRoadmap(ctx) {
       el('div', { class: 'kpi-lbl' }, 'lanes touched')
     ]));
     tiles.appendChild(el('div', { class: 'kpi-tile' }, [
-      el('div', { class: 'kpi-num mono' }, lastSlice ? (formatAge ? formatAge(lastSlice.ts) : lastSlice.ts) : 'n/a'),
+      el('div', { class: 'kpi-num mono' }, lastSlice ? formatAge(now - new Date(lastSlice.ts).getTime()) : 'n/a'),
       el('div', { class: 'kpi-lbl' }, 'since last slice')
     ]));
     kpiMount.appendChild(tiles);
