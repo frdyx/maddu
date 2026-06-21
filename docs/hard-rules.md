@@ -30,7 +30,7 @@ cockpit), not your application.
 
 ---
 
-These rules are non-negotiable *for the framework* because each one prevents a specific failure mode observed in prior agent-orchestration systems we studied (AionUi, Hermes, and others — see [`research/`](research/)). A repo whose **Máddu layer** violates any of them is not a sound Máddu install.
+These rules are non-negotiable *for the framework* because each one prevents a specific failure mode observed in prior agent-orchestration systems. A repo whose **Máddu layer** violates any of them is not a sound Máddu install.
 
 ## 1. Files-only state
 
@@ -92,7 +92,7 @@ Three brand domains exist in any Máddu installation:
 
 These never mix. Cockpit tokens never leak into app brand. App brand never leaks into content. Content brand never leaks into cockpit. This boundary is enforced **by construction**: the framework ships only the cockpit shell brand (`maddu/cockpit/tokens.css`) and never writes app or content brand. App and content brand are project-owned with no fixed framework path, so there is no runtime doctor gate for this rule — it is traced as *enforced-by-construction* in [39-rule-gate-traceability.md](39-rule-gate-traceability.md).
 
-**Why:** Prior systems (notably AionUi) repeatedly leaked cockpit aesthetics into user-saved brand profiles. The boundary makes that impossible by construction.
+**Why:** Prior systems repeatedly leaked cockpit aesthetics into user-saved brand profiles. The boundary makes that impossible by construction.
 
 ## 8. Lane ownership
 
@@ -122,25 +122,25 @@ The `command-tier-discipline` built-in gate enforces (1). The `schedule.tick` ev
 
 ## Do-not-copy reference
 
-The patterns below were observed in studied systems and are explicitly forbidden in Máddu. `maddu doctor` watches for them.
+The patterns below were observed in prior systems and are explicitly forbidden in Máddu. `maddu doctor` watches for them.
 
-| Pattern | Source observed | Violates rule |
+| Pattern | Antipattern shape | Violates rule |
 |---|---|---|
-| SQLite for feature state | AionUi `better-sqlite3`, Hermes `state.db` | #1 files-only |
-| `localStorage` for non-trivial UI state | AionUi renderer | #1 files-only |
-| Electron + Rust standalone backend | AionUi | #4 no broad deps |
-| Native provider SDKs in core runtime | Hermes `run_agent.py` (Anthropic, Bedrock transports) | #5 no SDK in app code |
-| **Cloud gateway** for Telegram/Slack/Discord (hosted webhook relay) | Hermes `gateway/` | #3 hosted backends, #6 token export, #7 brand boundary |
-| Pastebin upload (`/debug share`) | Hermes | #3 no hosted backends |
-| Google Desktop OAuth for built-in agent | AionUi | #6 no token-leaking flows |
-| API-key import during migration | Hermes OpenClaw migration | #6 no token export |
-| Remote WebUI / browser-based agent runtime | AionUi optional mode | #3 local-only |
-| Broad optional extras (`google`, `homeassistant`, `sms`, `youtube`) | Hermes | #4 no broad deps |
-| Provider configs written into installed CLI backends from renderer/app state | AionUi `McpService` | #5 (bridge-owned, not app-owned) |
+| SQLite for feature state | SQLite for feature state | #1 files-only |
+| `localStorage` for non-trivial UI state | localStorage for UI state | #1 files-only |
+| Electron + Rust standalone backend | Electron + standalone backend | #4 no broad deps |
+| Native provider SDKs in core runtime | native provider SDKs in core | #5 no SDK in app code |
+| **Cloud gateway** for Telegram/Slack/Discord (hosted webhook relay) | hosted webhook relay for chat | #3 hosted backends, #6 token export, #7 brand boundary |
+| Pastebin upload (`/debug share`) | pastebin upload of debug data | #3 no hosted backends |
+| Google Desktop OAuth for built-in agent | desktop OAuth token capture | #6 no token-leaking flows |
+| API-key import during migration | API-key import on migration | #6 no token export |
+| Remote WebUI / browser-based agent runtime | remote/browser-based agent runtime | #3 local-only |
+| Broad optional extras (`google`, `homeassistant`, `sms`, `youtube`) | broad optional extras | #4 no broad deps |
+| Provider configs written into installed CLI backends from renderer/app state | provider configs written into installed CLIs from app state | #5 (bridge-owned, not app-owned) |
 
 ### What is and isn't a "cloud gateway"
 
-The first row of the table above prohibits the **Hermes pattern**: a hosted
+The first row of the table above prohibits a **hosted webhook relay pattern**: a hosted
 service that receives webhooks from Telegram / Slack / Discord, holds bot
 tokens for many users, and relays messages between agents. That violates
 hard rules #3 (hosted backend), #6 (token export), and #7 (brand boundary
@@ -149,7 +149,7 @@ cockpit / app / content layers).
 
 It does **not** prohibit chat integrations as a category. The integrations
 shipped in v0.9.0 (Telegram) and v0.10.0 (Discord, Email) explicitly take
-the *opposite* shape from the Hermes gateway, and `maddu doctor` will not
+the *opposite* shape from that hosted-relay shape, and `maddu doctor` will not
 flag them. Specifically, every Máddu integration must:
 
 1. **Run locally.** All polling and sending happens inside

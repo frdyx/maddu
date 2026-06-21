@@ -348,7 +348,7 @@ async function checkRuleGateTraceability() {
 // briefs, catching a rule or scope carve-out DELETED from the registry (the
 // briefs would regenerate without it) or a non-registry routing phrase reworded
 // out of a still-hand-authored section. FAIL with the exact (file, phrase) miss.
-// Inspired by ponytail's check-rule-copies.js — a canary, not full equality.
+// A canary, not full equality.
 const RULE_FILES = {
   worker:  'template/maddu/CLAUDE.md',
   brief:   'template/maddu/agent-files/MADDU.md',

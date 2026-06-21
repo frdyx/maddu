@@ -13,7 +13,7 @@ import { pathsFor } from './paths.mjs';
 import { readAll, append } from './spine.mjs';
 
 // v1.9.0 adds 'correction' — a durable lesson distilled by `maddu learn` from a
-// failed→succeeded tool-call pair (Headroom-style). Unlike the SLICE_STOP-derived
+// failed→succeeded tool-call pair. Unlike the SLICE_STOP-derived
 // kinds, corrections originate from LEARN_CORRECTION_WRITTEN spine events and are
 // replayed on rebuild (see rebuildMemory) so they survive a memory rebuild.
 export const FACT_KINDS = ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary', 'correction'];

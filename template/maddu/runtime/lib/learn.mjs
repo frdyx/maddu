@@ -1,6 +1,6 @@
 // Failure-learning engine (`maddu learn`) — v1.9.0.
 //
-// Mines Claude Code session transcripts for the Headroom "failure→success
+// Mines Claude Code session transcripts for the "failure→success
 // correlation": a tool call that FAILED, paired with the later call that
 // RESOLVED it. Each pair is classified into one of five categories and
 // emitted as a deterministic candidate correction. This module is pure core:
@@ -154,7 +154,7 @@ function filePathOf(input) {
 
 // Filename without its extension, so `FirstClassEntity.java` and
 // `FirstClassEntity.scala` are recognized as the same logical file in a
-// different module (the canonical Headroom file-path example).
+// different module (the canonical file-path example).
 function stemOf(p) {
   const b = basename(p);
   const ext = extname(b);

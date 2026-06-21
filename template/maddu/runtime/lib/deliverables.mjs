@@ -6,8 +6,8 @@
 // the hollow claim: a target the agent *named* that has no evidence of
 // existing. An agent that reports writing `src/foo.ts` when no such file is on
 // disk (and git never saw it) produced a phantom deliverable; surfacing that
-// is the point. Inspired by oh-my-claudecode's verify-deliverables, kept
-// files-only and WARN-only — it records and reports, it never blocks the stop.
+// is the point. Kept files-only and WARN-only — it records and reports, it
+// never blocks the stop.
 //
 // A target counts as verified if it exists on disk OR appears in git's changed
 // set (so a legitimately deleted/renamed file isn't a false positive).

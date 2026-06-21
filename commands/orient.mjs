@@ -3,7 +3,7 @@
 // "The session always starts here." Where `brief` is a lightweight per-turn
 // digest and `status` is a live snapshot, `orient` is the goal-anchored
 // orientation. It runs the goal's measurable success conditions and renders a
-// posto-/orch:status-style block: project/branch/phase header, objective,
+// status block: project/branch/phase header, objective,
 // success-progress (✓ met / ○ pending / ? unverifiable), constraints, counters,
 // a typed recent timeline, the curated handoff, and a completion suggestion.
 //

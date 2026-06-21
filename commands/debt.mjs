@@ -11,8 +11,8 @@
 //   <comment> maddu-debt: <what>. ceiling: <limit>. upgrade: <trigger>.
 //
 // and renders a ledger. A marker with no `upgrade:` trigger is flagged
-// `no-trigger` — that's the one that rots. Inspired by ponytail's debt
-// convention; kept files-only and stdlib-only (rule #4).
+// `no-trigger` — that's the one that rots. Kept files-only and stdlib-only
+// (rule #4).
 //
 // Read-only over the source tree. It writes a derived cache to
 // .maddu/state/debt-ledger.json (regenerated every scan, never hand-edited)

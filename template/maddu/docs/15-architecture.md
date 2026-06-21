@@ -90,7 +90,7 @@ If the worker stays silent past 15 s, `project()` reports it as `stuck` at read 
 
 The three layers never reference each other. `maddu doctor` checks the directories do not cross-import.
 
-**Why this matters:** prior systems (notably AionUi) leaked cockpit aesthetics into user-saved brand profiles. The boundary makes that impossible by construction.
+**Why this matters:** prior systems leaked cockpit aesthetics into user-saved brand profiles. The boundary makes that impossible by construction.
 
 ## Why files-only
 

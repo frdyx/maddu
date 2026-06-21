@@ -1,9 +1,9 @@
 // Reversible briefings (CCR / retrieve-on-demand) — v1.9.0.
 //
 // Curated briefings (orient/handoff) summarize to a budget, which DROPS detail.
-// Inspired by Headroom's reversible compression: instead of losing the dropped
-// detail, persist the full original and hand back a short pointer so it stays
-// retrievable on demand (`maddu learn retrieve <briefingId>`).
+// Reversible compression: instead of losing the dropped detail, persist the
+// full original and hand back a short pointer so it stays retrievable on demand
+// (`maddu learn retrieve <briefingId>`).
 //
 // Hard-rule compliance: files-only (a JSON file under .maddu/state/briefings/),
 // Node stdlib only, append-only BRIEFING_CURATED event for provenance.

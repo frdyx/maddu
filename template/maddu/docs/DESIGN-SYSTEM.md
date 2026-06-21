@@ -171,6 +171,36 @@ gap between sibling panels: `12px` desktop, `10px` mobile.
   pills and small chips. Never use `border-radius: 50%` (donuts use SVG
   arcs, badges use 7 px stadium).
 
+### Glow-reactive borders (signature law)
+
+**Wherever a surface carries a corner or edge glow, its border tints toward
+that glow's hue along the same edge.** Glow and border must read as one light
+source — a card lit electric-blue in its top-right corner has a border that
+warms to electric blue *in that same corner*; a lime-lit corner gets a lime
+border. The stretch of border between lit corners stays neutral steel-blue
+(`--m-line` / `--m-bg-3`).
+
+- **Why.** An untinted border running alongside a colored glow looks like two
+  unrelated effects pasted together. Tinting the shared edge fuses them — the
+  panel reads as *lit*, not *decorated*. This is the same lit-cabin logic as
+  the `body::before` atmosphere, applied at the panel scale.
+- **How.** Render the border as a gradient with the `padding-box` /
+  `border-box` background trick: a 1 px transparent border over two stacked
+  backgrounds — the fill clipped to `padding-box`, a directional gradient
+  (`to top right`, etc.) clipped to `border-box`, brightening to the accent
+  only at the lit corners. Register the edge-tint custom properties with
+  `@property { syntax: "<color>" }` so the tint can animate on hover in step
+  with the glow.
+- **Coherence rule.** The glow corners and the bright stops of the border
+  gradient always point the same way. Move a glow, move the border tint with
+  it — the two are specified *together*, never independently. A glow with a
+  flat border, or a tinted border with no matching glow, is a bug.
+
+Reference implementation: `.m-card` in the marketing landing page (lives in the
+`maddu-site` repo, served at `maddu.frdyx.com`) — electric-blue top-right, lime
+bottom-left, matching its dual-corner glow exactly. Cockpit panels that carry a
+corner glow adopt the same pairing.
+
 ---
 
 ## Motion

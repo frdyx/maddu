@@ -126,7 +126,7 @@ VISIBLE for lane "bridge-server"  (3)
   …
 ```
 
-This is the "slot-tagged env injection" pattern adapted from AionUi's `TeamMcpServer`.
+This is the "slot-tagged env injection" pattern.
 
 ### The `#mcp` cockpit route
 

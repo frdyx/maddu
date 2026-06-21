@@ -6,10 +6,9 @@
   /* ─── SURFACES ─────────────────────────────────────────────────────────
    * Navy noir, materialized.
    *
-   * In OMC the body is technically #000 and the chrome surfaces use blue-
-   * tinted rgba over it — the composite is what an operator perceives as
-   * "navy noir". Máddu's stage-body is uncovered, so we materialize that
-   * composite as --m-bg-0 directly. Rail and panel layers on top still use
+   * A body of #000 with blue-tinted rgba chrome surfaces over it composites
+   * to what an operator perceives as "navy noir". Máddu's stage-body is
+   * uncovered, so we materialize that composite as --m-bg-0 directly. Rail and panel layers on top still use
    * rgba tints so they read as further-lifted surfaces over the navy base. */
   --m-bg-0: #050B17;                          /* navy canvas — the visible stage */
   --m-bg-1: rgba(0, 8, 18, 0.54);             /* shell — rail, stage chrome (lifted over canvas) */
@@ -64,7 +63,7 @@
   --m-accent-glow-bg:    rgba(208, 255, 0, 0.05);
   --m-accent-2-glow-bg:  rgba(86, 184, 255, 0.06);
 
-  /* Hairline row tint — OMC's `--surface-row`. Lifts a row off the body
+  /* Hairline row tint. Lifts a row off the body
    * surface by the slightest amount, without changing perceived colour. */
   --m-surface-row: rgba(255, 255, 255, 0.018);
 
@@ -112,7 +111,7 @@
   --m-radius-pill: 999px;
 
   /* ─── TYPOGRAPHY ───────────────────────────────────────────────────────
-   * Plex everywhere. OMC's operator-grade scale: dense, no display sizes,
+   * Plex everywhere. Operator-grade scale: dense, no display sizes,
    * no tabular-nums per project preference. */
   --m-font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --m-font-cond: 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif;
@@ -130,7 +129,7 @@
   --m-line-body:   1.45;
 
   /* ─── METRICS ──────────────────────────────────────────────────────────*/
-  --m-rail-w: 240px;     /* bumped from 220 toward OMC's 268; gives nav labels more air */
+  --m-rail-w: 240px;     /* bumped from 220; gives nav labels more air */
   --m-foot-h: 36px;
   --m-head-h: 56px;
 }

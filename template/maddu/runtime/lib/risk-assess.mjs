@@ -5,7 +5,7 @@
 // reviewer in hard. This classifies a set of changed paths into a risk level
 // from path shape alone — no LLM, no network, pure stdlib (rule #4). It is the
 // signal slice-stop records on the spine and the review-trigger escalates on.
-// Inspired by oh-my-claudecode's risk-assess, kept files-only + deterministic.
+// Kept files-only + deterministic.
 //
 // Levels: none < low < medium < high < critical.
 //   critical — a sensitive surface changed (auth / secrets / tokens / crypto /

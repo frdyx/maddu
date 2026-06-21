@@ -120,7 +120,7 @@ are no verbose CLI flags to memorize.
 - Not a SaaS — no cloud, no telemetry, no relay, no hosted DB.
 - Not a secret store / token-sync service.
 - Not a spine auto-repair tool — the operator reads the failure and decides.
-- Not a chat-gateway relay (the forbidden "Hermes pattern": a hosted webhook
+- Not a chat-gateway relay (a forbidden hosted webhook relay pattern: a hosted webhook
   holding many users' bot tokens). Chat integrations are allowed only if local,
   direct-API, device-bound-token, off-by-default, allowlisted, and never
   inbound-as-command.

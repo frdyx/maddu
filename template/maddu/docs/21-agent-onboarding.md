@@ -35,8 +35,7 @@ operator and for contributors extending the bootstrap layer.
 ## Event taxonomy added
 
 Four new types reserved in `EVENT_TYPES` (Phase 0), emitted in Phases
-1–5. Full payload schemas in
-[`research/governance-event-taxonomy.md`](research/governance-event-taxonomy.md).
+1–5. The payload schemas are summarized below.
 
 | Type | Emitted by | Carries |
 |---|---|---|

@@ -21,9 +21,14 @@ template/.maddu/
 !.maddu/state/architecture/
 .maddu/state/architecture/*
 !.maddu/state/architecture/mass-baseline.json
-.omc/
 
 # Brand and marketing assets are NOT part of the public repo.
 # Local copies are fine; do not commit them.
 brand/
 marketing/
+
+# Internal dev docs — kept locally for development, not part of the public repo.
+docs/audit/
+docs/research/
+docs/sessions/
+docs/releases/

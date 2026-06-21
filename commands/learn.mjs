@@ -1,7 +1,7 @@
 // `maddu learn` — failure→success session mining (v1.9.0).
 //
 // Mines Claude Code session transcripts for tool calls that FAILED and were
-// later RESOLVED (the Headroom failure→success correlation), then turns the
+// later RESOLVED (the failure→success correlation), then turns the
 // best of those into durable corrections written to two destinations:
 //   - agent-file: stable project facts → project-root CLAUDE.md learn block.
 //   - memory:     volatile patterns → .maddu memory as kind:'correction'.

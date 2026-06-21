@@ -1,5 +1,5 @@
 // Runtime adapters — pluggable subprocess workers (claude exec, codex exec,
-// Hermes, AionUi, future agents) registered via a JSON descriptor.
+// Hermes, future agents) registered via a JSON descriptor.
 //
 // Files-only:
 //   .maddu/runtimes/<name>.json     — canonical descriptor per adapter

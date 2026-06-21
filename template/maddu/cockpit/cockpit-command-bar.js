@@ -498,7 +498,7 @@ function initComposer() {
     renderSuggestions(composer.input.value);
   });
 
-  // Global "?" opens the Docs route from anywhere (mirrors OMC's wiki popup).
+  // Global "?" opens the Docs route from anywhere.
   document.addEventListener('keydown', (e) => {
     if (e.key !== '?') return;
     const t = e.target;

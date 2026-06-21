@@ -6,7 +6,7 @@
 // v1.6.0 — `--success "<verify-cmd>::<text>"` (repeatable, soft cap 5): a
 // measurable success condition. The part before `::` is a shell command that
 // exits 0 when met (consumed by `maddu orient`); the part after is the human
-// description. No `::` → text-only, unverifiable. Mirrors posto's goal.success[].
+// description. No `::` → text-only, unverifiable.
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -41,7 +41,7 @@ export default async function command(argv) {
       : (Array.isArray(raw) ? raw : [raw]);
     const success = parseSuccess(flags.success);
     if (success.length > 5) {
-      console.error(`warning: ${success.length} success conditions — keep it to ≤5 measurable ones (posto convention); recording all anyway.`);
+      console.error(`warning: ${success.length} success conditions — keep it to ≤5 measurable ones (keep it to a few measurable ones); recording all anyway.`);
     }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.GOAL_DECLARED,
