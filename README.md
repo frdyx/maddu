@@ -6,7 +6,9 @@
 
 ### Your AI agents are temporary. What they did shouldn't be.
 
-**Máddu is the memory and audit layer for AI coding agents.** Point Claude Code, Codex, or any agent CLI at it, and every approval, session, and slice of work lands on one append-only log on your disk — that you can read, replay, and trust long after the agent that wrote it is gone.
+**Máddu is a local-first orchestration spine for AI agents** — the durable backbone that AI coding agents (Claude Code, Codex, or any CLI) plug into. A small Node process records every approval, session, and slice of work as one line on an append-only log on your disk, so you can read, replay, and trust what your agents did long after they're gone.
+
+*New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps the permanent record — the **spine** — so their work has a memory and an audit trail instead of vanishing when the session closes.
 
 [![Version 1.71.0](https://img.shields.io/badge/version-1.71.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
