@@ -6,7 +6,9 @@
 
 ### Your AI agents are temporary. What they did shouldn't be.
 
-**Máddu is the memory and audit layer for AI coding agents.** Point Claude Code, Codex, or any agent CLI at it, and every approval, session, and slice of work lands on one append-only log on your disk — that you can read, replay, and trust long after the agent that wrote it is gone.
+**Máddu is a local-first orchestration spine for AI agents** — the durable backbone that AI coding agents (Claude Code, Codex, or any CLI) plug into. A small Node process records every approval, session, and slice of work as one line on an append-only log on your disk, so you can read, replay, and trust what your agents did long after they're gone.
+
+*New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps the permanent record — the **spine** — so their work has a memory and an audit trail instead of vanishing when the session closes.
 
 [![Version 1.71.0](https://img.shields.io/badge/version-1.71.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
@@ -118,6 +120,43 @@ Inside Claude Code or Codex CLI, you drive everything from one line:
 | `/maddu-blueprint` | Export how a project was built as a portable, variable-driven handoff. |
 
 …and a dozen more (`/maddu-skill`, `/maddu-insights`, `/maddu-debt`, `/maddu-architecture`, `/maddu-handoff`, `/maddu-advise` …). Full reference → [22-slash-commands.md](docs/22-slash-commands.md) + [natural-language routing](docs/23-natural-language-routing.md).
+
+## What it does for you
+
+The spine is the foundation. This is what you actually get standing on top of it — every item is a real command, and every step it takes lands as an event on the spine.
+
+| Capability | What it gives you | Run it |
+|---|---|---|
+| 🎛️ **Zero learning curve** | Slash commands or plain English — the agent classifies your intent, runs the right thing, and tells you which. No flags to memorize. | `/maddu-help` |
+| 🧭 **Architecture-drift detection** | Declare your module boundaries; Máddu diffs the contract against the *real* import graph and fails CI on new forbidden edges or cycles — with a diagram + ratchet. | `/maddu-architecture` |
+| 📦 **Blueprint a whole build** | Distil *how a project was built* into one portable, variable-driven handoff — intake → procedure → problems & fixes — optionally polished to prose. | `/maddu-blueprint` |
+| 🧠 **Agents that learn from mistakes** | Mines past transcripts for failed→succeeded tool calls and writes typed corrections into the project's `CLAUDE.md` + memory, so the next agent stops repeating them. | `/maddu-learn` |
+| ✅ **A real testing harness** | Runs your project's tests with adaptive profiles; `self-test` runs the framework's own suite, backed by a dogfooded multi-layer gate. | `/maddu-test` |
+| 🗂️ **One bridge, every repo** | Mount N repos on one bridge; `/_all/*` fans out reads across all of them, each row tagged by workspace. Each repo's spine stays its own truth. | `/maddu-status` |
+| 💰 **Cost accounting** | Token and call rollup per session, day, runtime, and model — so you can see what your agents actually spent. | `/maddu-cost` |
+| 🚦 **Default pipelines** | One canonical flow — orient → plan → coordinate → slice → test → review → land → account — as `ship-a-feature`, `fix-a-bug`, `plan-and-delegate`. | `/maddu-autopilot` |
+| 🔬 **Insights + debt ledger** | See what's actually used vs merely defined, and keep a ledger of deliberate shortcuts — flagged when they have no upgrade trigger. | `/maddu-insights`, `/maddu-debt` |
+
+### 🎛️ Zero learning curve
+
+There's nothing to memorize. Inside Claude Code or Codex, type a slash command — or just say what you want:
+
+```text
+ship the login form        → runs the ship-a-feature pipeline
+status                     → /maddu-status
+tokens this week           → /maddu-cost
+what should I run for X?    → /maddu-suggest
+```
+
+The agent reads your intent from `MADDU.md`, dispatches the matching command, and **tells you which one it chose** — so you learn the surface by using it, not by studying it. The verbose CLI stays first-class underneath for scripts and CI; the slash layer is just the part humans touch.
+
+### 🧭 Architecture-drift detection
+
+Most "architecture" lives in a diagram that's wrong by the next sprint. Máddu makes it executable. You declare the allowed module boundaries once in `.maddu/config/architecture.json`; then `maddu architecture` builds the **real** import graph from your code and diffs it against the contract:
+
+- **Drift, by name** — forbidden cross-area edges, dependency cycles, and undeclared areas, each reported with file precision.
+- **A diagram you can trust** — it renders the actual graph as mermaid, generated from the code, not hand-drawn.
+- **A CI gate with a ratchet** — the `architecture-drift` gate fails on a `failOn` ladder (`none` / `new` / `any`), and a structural-mass baseline enforces *"monoliths may only shrink."* Drift can't sneak in between reviews.
 
 ## Why Máddu
 
