@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.72.0] · 2026-06-25 · `maddu agents` — "install maddu" on demand, machine-wide
+
+New lifecycle command that makes **"install maddu"** a natural-language instruction every AI agent understands in *every* repo — not just ones where Máddu is already installed. It writes a self-contained install stanza into each agent's **global** instruction file, so the agent never has to research what Máddu is; it just runs the standard `npx github:frdyx/maddu init` flow and then offers to add the repo to the bridge.
+
+- **New runtime lib `template/maddu/runtime/lib/agent-targets.mjs`:** the known-agent table (Claude Code `~/.claude/CLAUDE.md`, Codex `~/.codex/AGENTS.md`, Gemini `~/.gemini/GEMINI.md`, generic `~/AGENTS.md`) + device-local resolution. Paths resolve from `os.homedir()` + per-agent convention (overridable by `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) — **never hardcoded** — detected by directory existence, with a custom-path escape hatch for any other agent. Idempotent marker-block merge (`<!-- BEGIN MADDU INSTALL v1 -->`) that preserves operator content outside the markers; `create` / `merge` / `no-change` / `removed` outcomes. Mirrors how the workspace registry handles device-local config.
+- **New command `maddu agents <detect|register|unregister>`** (`commands/agents.mjs`): `detect` shows known agents + resolved file + install state; `register` merges the stanza (interactive selection on a TTY, or `--agent claude,codex` / `--all` / `--path <file>` / `--yes` / `--dry-run`); `unregister` removes it. The advanced step asks for any other agent `.md` by absolute path, so unknown agents are still reachable. Tier: mutating, operator surface, autoTrigger forbidden.
+- **Single-sourced stanza** `template/maddu/agent-files/GLOBAL-INSTALL.section.md` — self-contained (carries the `npx` install command, `maddu doctor` verify, and the "add to the bridge?" follow-up), so it bootstraps a brand-new machine.
+- **`maddu init` now nudges** operators to run `maddu agents register` after install.
+- **Docs:** new [`docs/42-agents-global-install.md`](docs/42-agents-global-install.md); charter "Lifecycle & plumbing" row, `03-cli-reference.md`, `00-index.md`, and `capability-docs.json` all updated. Verification: audit 14/0, self-test quick 74/74 (new fixture `scripts/test/agents-register.mjs`, 17 assertions: detect/create/merge-preserving-content/idempotent-no-change/custom-path/dry-run/unregister), architecture drift 0.
+
 ## [v1.71.0] · 2026-06-20 · Cockpit decomposition — command-bar module (composer + palette)
 
 Second optional polish slice — extracts the **slash-command bar** (composer + Ctrl-K command palette), the largest remaining shell subsystem. A second **Codex consult** confirmed this is a principled module boundary (not a composer facade): the command-bar owns DOM event handlers, slash dispatch, palette search, and hash navigation — a coherent responsibility distinct from the router/ctx composition root.

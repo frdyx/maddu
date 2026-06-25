@@ -833,6 +833,30 @@ Opt-in reversible briefing: persists the full handoff original and prints a
 budget-bounded view plus a `maddu learn retrieve <id>` pointer (emits
 `BRIEFING_CURATED`). Default `maddu orient` stays read-only.
 
+## v1.72.0 commands
+
+### `maddu agents <verb>` *(v1.72.0)*
+
+Make **"install maddu"** a natural-language command in every repo by writing a
+self-contained install stanza into your agents' **global** instruction files
+(Claude Code, Codex, Gemini, generic `AGENTS.md`, or any custom path). Paths are
+resolved from `os.homedir()` + per-agent convention (never hardcoded), detected by
+directory existence, with a custom-path escape hatch for anything non-standard.
+
+```bash
+$ maddu agents detect                              # known agents + resolved file + install state
+$ maddu agents register                            # interactive on a TTY (pick agents + custom path)
+$ maddu agents register --agent claude,codex --yes
+$ maddu agents register --all --yes                # every known agent
+$ maddu agents register --path ~/.foo/BAR.md --yes # any other agent .md (advanced)
+$ maddu agents register --dry-run --agent claude   # show targets, write nothing
+$ maddu agents unregister --agent gemini --yes     # remove the stanza, keep your content
+```
+
+The stanza is marker-delimited (`<!-- BEGIN MADDU INSTALL v1 -->`), so register is
+idempotent and never disturbs operator content outside the markers. Full guide:
+[42-agents-global-install.md](42-agents-global-install.md).
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the

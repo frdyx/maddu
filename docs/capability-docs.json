@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "note": "Verb -> in-depth doc map for the 62 capability verbs. Companion to docs/charter.md (purpose + domain) and docs/03-cli-reference.md (CLI surface), which together cover every verb. A null value means the charter row + CLI reference IS the canonical depth (no separate deep-dive doc warranted). Paths are relative to docsDir. Kept honest by `maddu audit capability-docs`: keys must equal the bin COMMANDS set, and every referenced doc must exist.",
+  "note": "Verb -> in-depth doc map for the 63 capability verbs. Companion to docs/charter.md (purpose + domain) and docs/03-cli-reference.md (CLI surface), which together cover every verb. A null value means the charter row + CLI reference IS the canonical depth (no separate deep-dive doc warranted). Paths are relative to docsDir. Kept honest by `maddu audit capability-docs`: keys must equal the bin COMMANDS set, and every referenced doc must exist.",
   "docsDir": "docs",
   "verbs": {
     "advise": "11-runtimes-and-mcp.md",
+    "agents": "42-agents-global-install.md",
     "approval": "09-approvals-and-permissions.md",
     "architecture": "40-architecture-drift.md",
     "audit": "39-rule-gate-traceability.md",
