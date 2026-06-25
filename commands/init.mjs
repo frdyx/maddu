@@ -263,4 +263,8 @@ export default async function init(argv) {
   console.log(`  ./maddu/run session start "first session"   # register + cache active session`);
   console.log(`\nOr install 'maddu' globally:`);
   console.log(`  npm install -g github:frdyx/maddu#v${fwVersion}`);
+
+  console.log(`\nMake "install maddu" work via natural language in EVERY future repo:`);
+  console.log(`  ./maddu/run agents register   # add the install stanza to ~/.claude, ~/.codex, …`);
+  console.log(`  (asks which agents; idempotent; touches only its own marker block)`);
 }

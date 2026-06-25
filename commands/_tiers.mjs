@@ -22,6 +22,7 @@
 //                  on-ramp expected; verbose CLI is the surface.
 
 export default {
+  agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
