@@ -11,6 +11,19 @@ narrative summary.
 
 ---
 
+## [v1.73.0] · 2026-06-25 · `maddu debt` accuracy — the ledger stops miscounting itself
+
+The deliberate-shortcut scanner was blind in two ways that made its headline number mostly noise — and, worst of all, it stamped the **best-documented** marker in the repo (`architecture.mjs`) as `[no-trigger]` because that marker's `upgrade:` trigger lives on a continuation line the single-line scan never read. Real `maddu debt` went from **21 markers / 14 files / 7 no-trigger** to an accurate **2 / 2 / 0**.
+
+- **Multi-line gather** — `scanDebt` now joins adjacent comment-continuation lines (own-line markers only), stopping at a blank comment line (paragraph break) or an 8-line cap, so a marker whose `ceiling:`/`upgrade:` spills onto later lines is parsed whole without over-capturing unrelated trailing prose.
+- **Comment-body-start discriminator** — the token only counts when it begins a comment body, so a mention inside a string or mid-sentence in a comment is no longer miscounted as a declaration.
+- **Doc-class exclusion** — `.md`/`.markdown`/`CHANGELOG` are skipped; they describe the convention, they don't declare markers.
+- **Dogfood** — the scanner now carries its own `maddu-debt:` marker recording its residual regex/heuristic ceiling (a real tokenizer behind a worker/MCP is the documented upgrade).
+
+Also fixes the `package.json` version that the v1.72.0 release left at 1.71.0 (now aligned at 1.73.0 across `package.json`, `version.json`, and the README badge). Gates: debt fixture 19/0, self-test 74/0, audit 14/0, architecture drift 0, 53 generated artifacts current.
+
+---
+
 ## [v1.72.0] · 2026-06-25 · `maddu agents` — "install maddu" on demand, machine-wide
 
 New lifecycle command that makes **"install maddu"** a natural-language instruction every AI agent understands in *every* repo — not just ones where Máddu is already installed. It writes a self-contained install stanza into each agent's **global** instruction file, so the agent never has to research what Máddu is; it just runs the standard `npx github:frdyx/maddu init` flow and then offers to add the repo to the bridge.

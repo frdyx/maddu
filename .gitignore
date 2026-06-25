@@ -27,3 +27,9 @@ template/.maddu/
 # Local copies are fine; do not commit them.
 brand/
 marketing/
+
+# Local agent-instruction files at the repo ROOT only (anchored with a leading
+# slash so the SHIPPED worker brief template/maddu/CLAUDE.md stays tracked).
+# These are workstation-local and must never be swept in by `git add -A`.
+/AGENTS.md
+/CLAUDE.md
