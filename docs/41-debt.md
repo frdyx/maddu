@@ -40,6 +40,16 @@ $ maddu debt [list] [--json] [--no-write] [--repo <dir>]
 build dirs), renders the markers grouped by file, and prints a summary:
 `<N> marker(s) across <M> file(s) · <K> with no upgrade trigger`.
 
+A marker is only counted where the token **begins a comment body** — own-line or
+trailing — so the token inside a string or mid-sentence (prose that merely
+*mentions* the convention) is not miscounted as a declaration. Doc-class files
+(`.md`/`.markdown`/`CHANGELOG`) are skipped for the same reason: they describe
+markers, they don't declare them. A marker may span several adjacent comment
+lines — its `ceiling:`/`upgrade:` can sit on a continuation line; the scan joins
+the block up to a blank comment line (a paragraph break) or a small line cap. The
+scan is regex-based, not a full tokenizer — its own ceiling, itself recorded as a
+`maddu-debt:` marker on the scanner.
+
 It is **read-only** over the source tree. It writes a derived cache to
 `.maddu/state/debt-ledger.json` (suppress with `--no-write`, regenerated every
 run, never hand-edited) and appends one `DEBT_SCANNED` event to the spine as the

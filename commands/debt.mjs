@@ -34,9 +34,59 @@ import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
 import { exists } from './_libroot.mjs';
 
-// Assembled so this file does not itself contain the literal marker (it would
-// otherwise flag its own source when Máddu scans its own repo).
+// The token CONSTANT is assembled from two literals so the constant definition
+// (and other token mentions in this scanner's own prose) is not itself flagged
+// when Máddu scans its own repo. The ONE intentional, contiguous marker below
+// (`scanDebt`'s residual-ceiling declaration) is deliberate — it dogfoods the
+// ledger by appearing in it.
 const MARKER = 'maddu-' + 'debt:';
+
+// Doc-class files describe the marker convention in prose (and ship example
+// markers), so they are not real shortcut declarations. Skip them by file class
+// so a sentence ABOUT a marker is never counted AS one.
+function isDocClass(rel) {
+  const base = rel.split('/').pop().toLowerCase();
+  return /\.(md|markdown|mdx)$/.test(base) || /^changelog(\b|[._-]|$)/.test(base);
+}
+
+// True when the token at `idx` begins a comment BODY (own-line or trailing),
+// not a mention inside a string or mid-sentence. The text from the comment
+// opener up to the token must be whitespace only. This is heuristic, not a
+// tokenizer — see the residual-ceiling marker on `scanDebt`.
+function atCommentBodyStart(prefix) {
+  return /(\/\/+|#+|\/\*+|<!--)\s*$/.test(prefix)  // line/block opener, then token
+      || /^\s*\*+\s*$/.test(prefix);                // JSDoc/block continuation line
+}
+
+// True when the marker is its OWN line (only whitespace before the opener), as
+// opposed to a trailing `code  // marker`. Only own-line markers gather
+// continuation lines — a trailing comment is single-line by construction, and
+// gathering it would risk swallowing the next, unrelated comment line.
+function isOwnLineComment(prefix) {
+  return /^\s*(\/\/+|#+|\/\*+|<!--|\*+)\s*$/.test(prefix);
+}
+
+const GATHER_CAP = 8; // max continuation lines joined into one marker
+
+// Collect the marker text starting at line `i`, joining adjacent comment
+// continuation lines (own-line markers only, hard-capped) so a marker whose
+// `ceiling:`/`upgrade:` lives on a later line is parsed whole.
+function collectMarkerText(lines, i, restStart, prefix) {
+  let rest = lines[i].slice(restStart);
+  if (!isOwnLineComment(prefix)) return rest;
+  const cont = /^\s*\/\/+\s*$/.test(prefix) ? /^\s*\/\/+\s?(.*)$/
+    : /^\s*#+\s*$/.test(prefix) ? /^\s*#+\s?(.*)$/
+    : /^\s*(?:\*+|\/\*+)\s?(.*)$/; // block / JSDoc continuation
+  for (let j = i + 1, n = 0; j < lines.length && n < GATHER_CAP; j++, n++) {
+    const m = lines[j].match(cont);
+    if (!m) break; // blank line, code, or a different comment style ends the block
+    const piece = m[1].replace(/\*\/\s*$/, '');
+    if (piece.trim() === '') break; // blank comment line = paragraph break, marker ended
+    rest += ' ' + piece;
+    if (/\*\//.test(lines[j])) break; // block-comment close
+  }
+  return rest;
+}
 
 const SKIP_DIRS = new Set([
   '.git', 'node_modules', '.maddu', 'dist', 'build', 'out', 'coverage',
@@ -88,6 +138,14 @@ async function* walk(dir) {
 }
 
 // Scan a repo root for debt markers. Pure + injectable for testing.
+//
+// maddu-debt: marker detection is comment-aware but heuristic, not a tokenizer —
+// it keys on the token starting a comment body, so a string shaped like a comment
+// opener (e.g. a `//` URL) immediately before the token can still miscount, and a
+// marker whose body spills past the gather cap onto a non-comment line is not
+// joined. ceiling: comment-body-start markers in non-doc source files, joining at
+// most GATHER_CAP continuation lines. upgrade: a real per-language tokenizer/AST
+// comment pass (behind a worker/MCP, per rule #4) if precision is ever needed.
 export async function scanDebt(rootDir) {
   const token = MARKER.toLowerCase();
   const entries = [];
@@ -95,16 +153,20 @@ export async function scanDebt(rootDir) {
     let st;
     try { st = await stat(filePath); } catch { continue; }
     if (st.size > MAX_FILE_BYTES) continue;
+    const rel = relative(rootDir, filePath).split(sep).join('/');
+    if (isDocClass(rel)) continue; // prose about markers is not a marker
     let body;
     try { body = await readFile(filePath, 'utf8'); } catch { continue; }
     if (/\u0000/.test(body)) continue; // binary file — skip
     if (!body.toLowerCase().includes(token)) continue;
-    const rel = relative(rootDir, filePath).split(sep).join('/');
     const lines = body.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const idx = lines[i].toLowerCase().indexOf(token);
       if (idx < 0) continue;
-      const parsed = parseMarker(lines[i].slice(idx + token.length));
+      const prefix = lines[i].slice(0, idx);
+      if (!atCommentBodyStart(prefix)) continue; // mention in a string / mid-sentence
+      const rest = collectMarkerText(lines, i, idx + token.length, prefix);
+      const parsed = parseMarker(rest);
       entries.push({ file: rel, line: i + 1, ...parsed, hasTrigger: !!parsed.upgrade });
     }
   }

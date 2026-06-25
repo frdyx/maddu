@@ -73,6 +73,22 @@ async function main() {
       `export const x = 1;\n// ${TOKEN} in-memory dedup. ceiling: 10k. upgrade: index by segment.\n`);
     await writeFile(join(root, 'src', 'b.py'),
       `def f():\n    pass  # ${TOKEN} global lock, no per-account locks yet\n`);
+    // Multi-line own-line comment block: the `upgrade:` lives on a CONTINUATION
+    // line, so a single-line scan would falsely flag it `[no-trigger]`. Regression
+    // lock for the architecture.mjs marker that motivated the fix.
+    await writeFile(join(root, 'src', 'multi.js'),
+      `// ${TOKEN} regex parse misses dynamic imports and\n` +
+      `// computed requires. ceiling: relative JS/TS imports.\n` +
+      `// upgrade: pluggable AST extractor via a worker.\n` +
+      `//\n` +                                              // blank comment line = paragraph break
+      `// Pipeline: parse → resolve → graph. (NOT part of the marker.)\n` +
+      `export const y = 2;\n`);
+    // Comment-body-start discriminator: a token inside a STRING and a token
+    // MID-SENTENCE in a comment are mentions, not declarations — neither counts.
+    await writeFile(join(root, 'src', 'mention.js'),
+      `const help = 'usage (${TOKEN} <what>. ceiling: <x>.)';\n` +
+      `// see the convention (${TOKEN} <what>) described above\n`);
+    // Doc-class file: prose + example markers must be excluded by file class.
     await writeFile(join(root, 'c.md'),
       `Notes.\n<!-- ${TOKEN} flat-file store. ceiling: single host. -->\n`);
     // Must be ignored:
@@ -81,12 +97,20 @@ async function main() {
     await writeFile(join(root, 'src', 'bin.dat'), Buffer.from([0x00, 0x01, 0x02, 0x00]));
 
     const r = await scanDebt(root);
-    ok('scan: counts 3 markers (node_modules skipped)', r.counts.markers === 3, JSON.stringify(r.counts));
-    ok('scan: 2 with no upgrade trigger', r.counts.noTrigger === 2, JSON.stringify(r.counts));
+    ok('scan: counts 3 markers (md/mentions/node_modules excluded)', r.counts.markers === 3, JSON.stringify(r.counts));
+    ok('scan: 1 with no upgrade trigger', r.counts.noTrigger === 1, JSON.stringify(r.counts));
     ok('scan: spans 3 files', r.counts.files === 3, JSON.stringify(r.counts));
     ok('scan: no vendor marker', !r.entries.some((e) => /node_modules/.test(e.file)));
-    ok('scan: entries sorted by path (c.md first)', r.entries[0].file === 'c.md');
+    ok('scan: no doc-class (.md) marker', !r.entries.some((e) => e.file.endsWith('.md')));
+    ok('scan: entries sorted by path (src/a.js first)', r.entries[0].file === 'src/a.js');
     ok('scan: src/a.js marker has a trigger', r.entries.find((e) => e.file === 'src/a.js')?.hasTrigger === true);
+    const multi = r.entries.find((e) => e.file === 'src/multi.js');
+    ok('scan: multi-line marker keeps its continuation-line upgrade trigger',
+      multi?.hasTrigger === true, JSON.stringify(multi));
+    ok('scan: gather stops at blank comment line (no over-capture of trailing prose)',
+      multi != null && !/Pipeline/.test(multi.upgrade || ''), JSON.stringify(multi?.upgrade));
+    ok('scan: token in a string / mid-sentence is not a marker',
+      !r.entries.some((e) => e.file === 'src/mention.js'));
 
     // 3. CLI path — writes ledger + DEBT_SCANNED event, exit 0.
     const run = await cli(['debt', '--json', '--repo', root], root);
