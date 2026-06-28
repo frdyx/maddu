@@ -367,6 +367,22 @@ async function handleBridge(req, res, url, ctx) {
       recentSliceStops: (proj.sliceStops || []).slice(-3).reverse().map((s) => ({ summary: s.summary, next: s.next || [] })),
     });
   }
+  // Focus Director — trajectory slot + goal objective (for the TARGET label) +
+  // whether the operator has opted in (both triggers allowlisted). Read-only.
+  if (path === '/bridge/focus' && req.method === 'GET') {
+    const proj = await project(repoRoot);
+    let enabled = false;
+    try {
+      const t = JSON.parse(await readFile(join(repoRoot, '.maddu', 'config', 'triggers.json'), 'utf8'));
+      const allowed = Array.isArray(t.allowed) ? t.allowed : [];
+      enabled = ['heartbeat:focus-director', 'slice-stop:focus-director'].every((x) => allowed.includes(x));
+    } catch {}
+    return sendJson(res, 200, {
+      enabled,
+      goal: proj.goal ? { objective: proj.goal.objective } : null,
+      focus: proj.focus || { lastTag: null, window: [], openFlag: null, updatedAt: null },
+    });
+  }
   // Plugins discovered for this workspace — the cockpit gates plugin-owned
   // panels (e.g. comms) on enabled-state so a disabled plugin shows no UI.
   if (path === '/bridge/plugins' && req.method === 'GET') {

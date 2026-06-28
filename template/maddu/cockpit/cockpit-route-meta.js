@@ -25,6 +25,8 @@ export const ROUTE_META = {
   tasks:      { title: 'Tasks',      group: 'decide',    rank: 6,                 description: 'Dependency-aware task board. Completing a task auto-unblocks dependents.' },
   plans:      { title: 'Plans',      group: 'decide',    rank: 7,                 description: 'Multi-phase plan persistence + Kanban (Now / Next / Blocked / Done). State derived from spine PLAN_* events. (v1.1.0)',
                 keywords: 'plans plan phases kanban revision multi-phase' },
+  focus:      { title: 'Focus',      group: 'decide',    rank: 8,                 description: 'Focus Director — a domain-blind trajectory instrument. Per-turn drift tag (toward/lateral/away) vs the declared goal, with a sustained-drift flag carrying a swap/revert/continue choice. Opt-in: `maddu focus enable`.',
+                keywords: 'focus director drift trajectory toward lateral away goal pilot attention anti-adhd nudge' },
 
   workflows:  { title: 'Workflows',  group: 'operate',   anchor: true,  rank: 1,  description: 'Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.' },
   agents:     { title: 'Agents',     group: 'operate',   rank: 2,                 description: 'Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.' },

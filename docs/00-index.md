@@ -80,6 +80,7 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 | 40 | [40-architecture-drift.md](40-architecture-drift.md) | `maddu architecture` — declared architecture contract vs the real import graph → drift (forbidden edges, cycles, undeclared areas); mermaid diagram; `architecture-drift` gate with the `failOn` baseline ratchet. *(v1.18.0)* |
 | 41 | [41-debt.md](41-debt.md) | `maddu debt` — ledger of deliberate-shortcut markers (`maddu-debt: <what>. ceiling: … upgrade: …`); flags the ones with no upgrade trigger. The deferred-work counterpart to `learn` and `blueprint`. *(v1.17.0)* |
 | 42 | [42-agents-global-install.md](42-agents-global-install.md) | `maddu agents` — register a self-contained "install maddu" stanza into your agents' GLOBAL instruction files (Claude/Codex/Gemini/custom) so the framework is reachable by natural language from any future repo; paths resolved from `os.homedir()`, never hardcoded; idempotent marker-block merge. *(v1.72.0)* |
+| 43 | [43-focus-director.md](43-focus-director.md) | `maddu focus` — the opt-in Focus Director: a domain-blind instrument that tags each turn toward/lateral/away of the declared goal and flags sustained drift with a swap/revert/continue choice (never a gate). Deterministic per-turn tag + optional cheap-worker flag narrative; cockpit Focus route; `focus-ledger-coherent` gate. |
 
 Reference docs that are not in the numbered series:
 

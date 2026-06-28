@@ -1,0 +1,130 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Focus"
+    </h2>
+    <p>
+      "Focus Director — a domain-blind trajectory instrument. Per-turn drift tag (toward/lateral/away) vs the declared goal, with a sustained-drift flag carrying a swap/revert/continue choice. Opt-in: `maddu focus enable`."
+    </p>
+    <div class="panel" data-focus="focus focus director drift trajectory toward lateral away goal flag pilot">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Focus Director"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/focus · domain-blind drift instrument · opt-in via `maddu focus enable`"
+        </span>
+      </div>
+      <div>
+        <div style="display:flex;gap:28px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+              "Current direction"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+              "Overall score"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+              "Trend"
+            </div>
+          </div>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+          "Trajectory → target"
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 2px 4px;">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--m-accent);box-shadow:0 0 10px var(--m-accent);opacity:.92;" title="TOWARD">
+          </div>
+          <span style="color:var(--m-accent);opacity:.7;">
+            "→"
+          </span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--m-accent);box-shadow:0 0 10px var(--m-accent);opacity:.92;" title="TOWARD">
+          </div>
+          <span style="color:var(--m-accent);opacity:.7;">
+            "→"
+          </span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--m-warn);box-shadow:0 0 10px var(--m-warn);opacity:.92;" title="LATERAL">
+          </div>
+          <span style="color:var(--m-warn);opacity:.7;">
+            "→"
+          </span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--m-danger);box-shadow:0 0 10px var(--m-danger);opacity:.92;" title="AWAY">
+          </div>
+          <span style="color:var(--m-danger);opacity:.7;">
+            "→"
+          </span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:var(--m-danger);box-shadow:0 0 10px var(--m-danger);opacity:.92;" title="AWAY">
+          </div>
+          <span style="color:var(--m-danger);opacity:.7;">
+            "→"
+          </span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="width:26px;height:26px;border-radius:50%;border:2px solid var(--m-accent-2);box-shadow:0 0 14px var(--m-glow-accent-2,var(--m-accent-2));display:flex;align-items:center;justify-content:center;color:var(--m-accent-2);font-size:13px;" title="TARGET">
+              "◆"
+            </div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--m-fg-2);margin:4px 0 14px;">
+          "Goal: ship the focus director"
+        </div>
+        <div style="border:1px solid var(--m-danger-border);background:var(--m-danger-bg);border-radius:var(--m-radius-sm,6px);padding:12px 14px;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="color:var(--m-danger);font-size:14px;">
+              "⚑"
+            </span>
+          </div>
+          <div style="font-size:13px;color:var(--m-fg-0);margin-bottom:10px;">
+            "2 consecutive turns off the goal axis with no return"
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <span style="font-family:var(--m-font-mono);font-size:11px;padding:4px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,5px);color:var(--m-fg-1);background:var(--m-bg-2);">
+              "swap"
+            </span>
+            <span style="font-family:var(--m-font-mono);font-size:11px;padding:4px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,5px);color:var(--m-fg-1);background:var(--m-bg-2);">
+              "revert"
+            </span>
+            <span style="font-family:var(--m-font-mono);font-size:11px;padding:4px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,5px);color:var(--m-fg-1);background:var(--m-bg-2);">
+              "continue"
+            </span>
+          </div>
+          <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);margin-top:8px;">
+            "resolve: maddu focus resolve <swap|revert|continue>"
+          </div>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+          "Timeline"
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-accent);" title="TOWARD">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-accent);" title="TOWARD">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-warn);" title="LATERAL">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-danger);" title="AWAY">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-danger);" title="AWAY">
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--m-line);">
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--m-accent);">
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--m-warn);">
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--m-danger);">
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;border:2px solid var(--m-accent-2);">
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
