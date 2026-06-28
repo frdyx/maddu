@@ -54,7 +54,7 @@
         <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
           "Trajectory → target"
         </div>
-        <div style="padding:6px 2px 2px;">
+        <div style="position:relative;padding:6px 2px 2px;">
           <svg preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;overflow:visible" viewBox="0 0 640 200">
             <line style="stroke:var(--m-line);opacity:.5" x1="60" x2="554" y1="26" y2="26">
             <text style="fill:var(--m-fg-3);font:10px var(--m-font-mono)" x="6" y="29">
@@ -101,7 +101,13 @@
             <text style="fill:var(--m-fg-3);font:10px var(--m-font-mono)" text-anchor="end" x="554" y="194">
               "newer →"
             </text>
+            <circle cx="60" cy="51.9" data-i="0" r="14.4" style="fill:transparent;cursor:pointer">
+            <circle cx="183.5" cy="69.2" data-i="1" r="14.4" style="fill:transparent;cursor:pointer">
+            <circle cx="307" cy="105.2" data-i="2" r="14.4" style="fill:transparent;cursor:pointer">
+            <circle cx="430.5" cy="144.1" data-i="3" r="14.4" style="fill:transparent;cursor:pointer">
+            <circle cx="554" cy="157" data-i="4" r="14.4" style="fill:transparent;cursor:pointer">
           </svg>
+          <div class="focus-pop" style="position:fixed;z-index:60;display:none;max-width:280px;pointer-events:none;background:var(--m-bg-3);border:1px solid var(--m-line);border-radius:var(--m-radius-sm,6px);padding:8px 10px;box-shadow:var(--m-shadow-md);">
         </div>
         <div style="font-size:12px;color:var(--m-fg-2);margin:4px 0 14px;">
           "Goal: ship the focus director"

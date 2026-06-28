@@ -73,7 +73,68 @@ function buildTrajectorySvg(win) {
   nodes += `<circle cx="${tx}" cy="${ty}" r="3.5" style="fill:var(--m-accent-2)"/>`;
   nodes += `<text x="${tx}" y="${ty - 15}" text-anchor="middle" style="fill:var(--m-accent-2);font:10px var(--m-font-mono)">TARGET</text>`;
   const xhint = `<text x="${padL}" y="${H - 6}" style="fill:var(--m-fg-3);font:10px var(--m-font-mono)">older</text><text x="${padL + plotW}" y="${H - 6}" text-anchor="end" style="fill:var(--m-fg-3);font:10px var(--m-font-mono)">newer →</text>`;
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;overflow:visible">${grid}${segs}${nodes}${xhint}</svg>`;
+  // Invisible, generous hit-targets on top — comfortable hover/click even when
+  // the visible nodes shrink in the zoomed-out (dense) view. data-i indexes back
+  // into the node array for the popover + Inspector.
+  let hits = '';
+  pts.forEach((p, i) => { hits += `<circle cx="${p.x}" cy="${p.y}" r="${Math.max(13, +(r + 7).toFixed(1))}" data-i="${i}" style="fill:transparent;cursor:pointer"/>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;overflow:visible">${grid}${segs}${nodes}${xhint}${hits}</svg>`;
+}
+
+// The Inspector entity for a focus turn — generic shape ({kind,label,id,raw,
+// evidence[],related[]}) the cockpit Inspector renders across its tabs, with a
+// clickable link to the source heartbeat/slice-stop. Exported for the fixture.
+export function focusEntity(t) {
+  const sig = t.signals || {};
+  const tg = tagOf(t.tag);
+  return {
+    kind: 'focus-turn',
+    label: `${tg.label} · ${sig.focusText || 'turn'}`,
+    id: t.id || null,
+    raw: t,
+    evidence: [
+      { label: 'Direction', value: tg.label },
+      { label: 'Score (toward)', value: fmt2(score(t.distanceScore)) },
+      { label: 'Goal-distance', value: t.distanceScore == null ? '—' : fmt2(t.distanceScore) },
+      { label: 'Focus', value: sig.focusText || '—' },
+      { label: 'On-goal overlap', value: sig.overlap == null ? '—' : `${Math.round(sig.overlap * 100)}%` },
+      { label: 'Recent churn', value: sig.churn == null ? '—' : String(sig.churn) },
+      { label: 'When', value: t.ts || '—' },
+    ],
+    related: t.sourceEventId ? [{ kind: 'event', id: t.sourceEventId, label: `source turn · ${t.sourceEventId}` }] : [],
+  };
+}
+
+// Wire hover popover + click→Inspector on the chart's hit-targets. The popover
+// is created lazily-empty (deterministic for goldens); content fills on hover.
+function attachNodeInteractions(host, nodes, ctx) {
+  const svg = host.querySelector('svg');
+  if (!svg) return;
+  const pop = el('div', { class: 'focus-pop', style: 'position:fixed;z-index:60;display:none;max-width:280px;pointer-events:none;background:var(--m-bg-3);border:1px solid var(--m-line);border-radius:var(--m-radius-sm,6px);padding:8px 10px;box-shadow:var(--m-shadow-md);' });
+  host.appendChild(pop);
+  const turnAt = (e) => { const h = e.target && e.target.closest && e.target.closest('[data-i]'); return h ? nodes[+h.dataset.i] : null; };
+  svg.addEventListener('mousemove', (e) => {
+    const t = turnAt(e);
+    if (!t) { pop.style.display = 'none'; return; }
+    const sig = t.signals || {}, tg = tagOf(t.tag), meta = [];
+    if (sig.overlap != null) meta.push(`${Math.round(sig.overlap * 100)}% on-goal`);
+    if (sig.churn != null) meta.push(`churn ${sig.churn}`);
+    if (ctx && typeof ctx.openInspector === 'function') meta.push('click for detail');
+    pop.replaceChildren(
+      el('div', { style: `font-family:var(--m-font-mono);font-size:11px;color:${tg.color};margin-bottom:3px;` }, `${tg.arrow} ${tg.label} · score ${fmt2(score(t.distanceScore))}`),
+      ...(sig.focusText ? [el('div', { style: 'font-size:12px;color:var(--m-fg-0);margin-bottom:3px;' }, `"${sig.focusText}"`)] : []),
+      el('div', { style: 'font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);' }, meta.join(' · ')),
+    );
+    const vw = (host.ownerDocument && host.ownerDocument.defaultView && host.ownerDocument.defaultView.innerWidth) || 1280;
+    pop.style.display = 'block';
+    pop.style.left = Math.min(e.clientX + 14, vw - 292) + 'px';
+    pop.style.top = (e.clientY + 14) + 'px';
+  });
+  svg.addEventListener('mouseleave', () => { pop.style.display = 'none'; });
+  svg.addEventListener('click', (e) => {
+    const t = turnAt(e);
+    if (t && ctx && typeof ctx.openInspector === 'function') ctx.openInspector(focusEntity(t));
+  });
 }
 
 export function renderFocus(ctx) {
@@ -95,10 +156,13 @@ export function renderFocus(ctx) {
     mount.textContent = '';
     const f = (data && data.focus) || {};
     const win = Array.isArray(f.window) ? f.window : [];
+    // Prefer the full per-turn events (focusText + signals + source event) for
+    // hover/Inspector detail; fall back to the lean projection window.
+    const nodes = (data && Array.isArray(data.turns) && data.turns.length) ? data.turns : win;
     const enabled = !!(data && data.enabled);
     const goalObj = data && data.goal && data.goal.objective;
 
-    if (!win.length) {
+    if (!nodes.length) {
       mount.appendChild(placeholder(
         enabled ? 'No trajectory yet' : 'Focus Director is off',
         enabled
@@ -108,10 +172,10 @@ export function renderFocus(ctx) {
     }
 
     // ── Current Direction ──
-    const last = win[win.length - 1];
+    const last = nodes[nodes.length - 1];
     const lt = tagOf(last.tag);
     const spark = el('div', { style: 'display:flex;align-items:flex-end;gap:3px;height:40px;' },
-      win.map((w) => {
+      nodes.map((w) => {
         const s = score(w.distanceScore);
         return el('div', { title: `${tagOf(w.tag).label} ${fmt2(s)}`,
           style: `width:8px;height:${Math.max(5, Math.round(s * 38))}px;background:${tagOf(w.tag).color};border-radius:2px 2px 0 0;opacity:.85;` });
@@ -133,7 +197,9 @@ export function renderFocus(ctx) {
 
     // ── Trajectory → TARGET (zigzag line chart: Y = score over time) ──
     mount.appendChild(eyebrow('Trajectory → target'));
-    mount.appendChild(el('div', { style: 'padding:6px 2px 2px;', html: buildTrajectorySvg(win) }));
+    const chartHost = el('div', { style: 'position:relative;padding:6px 2px 2px;', html: buildTrajectorySvg(nodes) });
+    mount.appendChild(chartHost);
+    attachNodeInteractions(chartHost, nodes, ctx);
     mount.appendChild(el('div', { style: 'font-size:12px;color:var(--m-fg-2);margin:4px 0 14px;' },
       goalObj ? ('Goal: ' + goalObj) : 'No declared goal — the director stays silent until `maddu goal set`.'));
 
@@ -159,7 +225,7 @@ export function renderFocus(ctx) {
     // ── Timeline ──
     mount.appendChild(eyebrow('Timeline'));
     mount.appendChild(el('div', { style: 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;' },
-      win.map((w) => el('div', { title: tagOf(w.tag).label, style: `width:12px;height:12px;border-radius:50%;background:${tagOf(w.tag).color};` }))));
+      nodes.map((w) => el('div', { title: tagOf(w.tag).label, style: `width:12px;height:12px;border-radius:50%;background:${tagOf(w.tag).color};` }))));
 
     // ── Legend ──
     const legItem = (color, text, ring) => el('span', { style: 'display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);' }, [
