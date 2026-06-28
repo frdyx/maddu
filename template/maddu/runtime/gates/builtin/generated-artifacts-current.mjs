@@ -5,11 +5,26 @@
 // derived copy fails here instead of silently shipping. With the rule registry
 // and doc tree now behind generators, this gate SUPERSEDED and RETIRED the
 // hand-mirror docs-in-sync gate (v1.22.0) — it covers both byte-equality
-// (stronger than the old LF-normalized compare) and orphan detection. Skips
-// cleanly when authored sources are absent (a consumer install never carries
-// them).
+// (stronger than the old LF-normalized compare) and orphan detection.
+//
+// SOURCE-ONLY (v1.73.1). The generator discipline is a framework-source
+// concern: the authored sources, the generated targets (`template/maddu/**`),
+// and the regenerate script (`scripts/generate.mjs`) all ship only in a Máddu
+// source checkout, never in a consumer install. We skip on the positive signal
+// `scripts/generate.mjs` exists rather than inferring it from per-target
+// absence — the latter is fragile (a stray `template/` dir, or the npx clone's
+// own tree resolving as the repo root, made this gate FAIL on a clean consumer
+// install and tell the operator to run a script that wasn't there). Gating on
+// the remediation script's own presence keeps the message coherent: we only
+// demand `node scripts/generate.mjs` where that script actually exists.
 
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { loadGateLib } from '../../lib/gate-libroot.mjs';
+
+async function exists(path) {
+  try { await stat(path); return true; } catch { return false; }
+}
 
 export default {
   id: 'generated-artifacts-current',
@@ -17,6 +32,12 @@ export default {
   severity: 'safety',
   description: 'Every generated artifact is byte-equal to a fresh render of its authored source (run `node scripts/generate.mjs`).',
   run: async (ctx) => {
+    // Consumer installs carry nothing to generate. Skip on the absence of the
+    // regenerate script — the source-checkout marker that also backs the
+    // remediation hint below.
+    if (!(await exists(join(ctx.repoRoot, 'scripts', 'generate.mjs')))) {
+      return { ok: true, message: 'consumer install — generator discipline is source-only (skipped)' };
+    }
     const lib = await loadGateLib(ctx.repoRoot, 'generate.mjs');
     if (!lib || !lib.checkGenerators) return { ok: true, message: 'generation engine not present (skipped)' };
     const drifted = await lib.checkGenerators(ctx.repoRoot);
