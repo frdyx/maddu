@@ -24,8 +24,23 @@ import {
 } from './_manifest.mjs';
 
 const GITIGNORE_BLOCK = `
-# Máddu token paths — device-bound, must never be committed.
-.maddu/auth/
+# ─────────────────────────────────────────────────────────────────────────
+# Máddu state. The on-disk spine is the source of truth, but it's LOCAL
+# working state (like a reflog) — it doesn't belong in git. Projections under
+# state/ are rebuildable (\`maddu\` regenerates them) and the spine + session/
+# runtime dirs are rewritten on nearly every command, so tracking them makes
+# the working tree perpetually dirty. Ignore .maddu/* by default; re-include
+# only the durable, authored artifacts a team would want to share.
+.maddu/*
+!.maddu/config/
+!.maddu/skills/
+!.maddu/plans/
+!.maddu/wiki/
+!.maddu/lanes/
+.maddu/lanes/*
+!.maddu/lanes/catalog.json
+
+# Token paths — device-bound, must never be committed (also covered above).
 maddu/runtime/oauth/tokens/
 `;
 

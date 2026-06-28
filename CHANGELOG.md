@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.74.2] · 2026-06-29 · `.maddu/` runtime state stays out of git — the working tree stops being perpetually dirty
+
+Every `maddu` command appends to the spine (`.maddu/events/`) and refreshes projections (`.maddu/state/`). If those paths are git-tracked, the working tree is **never clean** — which blocks branch switches and buries real changes in noise. The framework repo had long since solved this for itself (its own `.gitignore` ignores `.maddu/*` except a couple durable files), but `maddu init` shipped consumers a `.gitignore` that ignored **only token paths** — so consumer repos tracked the entire spine + projections + sessions and churned on every command. The fix that was dogfooded was never shipped.
+
+- **Policy A `.gitignore` at init.** `maddu init` now ignores `.maddu/*` and re-includes only the durable, authored artifacts a team would share: `config/`, `skills/`, `plans/`, `wiki/`, and `lanes/catalog.json`. The on-disk spine remains the source of truth — it's just local working state (like a reflog), not a git artifact. Fresh trees stay clean.
+- **`maddu-state-untracked` gate (warn).** Installs created before this kept tracking everything; `.gitignore` doesn't untrack already-committed files. A new advisory `doctor` gate detects git-tracked rebuildable/volatile `.maddu` state and prints the exact, **non-destructive** remediation (`git rm -r --cached .maddu/events .maddu/state …` — files stay on disk, just leave the index). Durable artifacts (config/skills/plans/wiki, the lane catalog, the architecture baseline) are allowlisted, so it never nags about intentional tracking.
+
+Fixture `gate-maddu-state-untracked` (6/0). Troubleshooting doc updated. audit 14/0.
+
+---
+
 ## [v1.74.1] · 2026-06-29 · Integrity tolerates CRLF — Windows installs stop self-reporting as tampered
 
 On a Windows repo with `core.autocrlf=true` (a common Git-for-Windows default) and no `.gitattributes`, git rewrites every Máddu framework file to CRLF on checkout. The install-integrity manifest is authored LF and hashed **byte-exact**, so all ~360 managed files hashed differently than recorded — `maddu doctor` reported them as **locally modified** and `maddu upgrade` **skipped every one of them**, leaving installs stuck in a half-upgraded state. A clean install was self-reporting as tampered.
