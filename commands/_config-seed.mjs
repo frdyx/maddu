@@ -27,6 +27,12 @@ async function exists(p) { try { await stat(p); return true; } catch { return fa
 // slice-stop:skill-candidate (v1.4.0); slice-stop:trust-audit +
 // coordinator:pre-run-checkpoint (v1.7.0); slice-stop:auto-handoff +
 // slice-stop:auto-review (v1.10.0). Operator opts out by removing an entry.
+//
+// Deliberately ABSENT (opt-in): heartbeat:focus-director / slice-stop:focus-director
+// (the Focus Director). It writes a FOCUS_TAGGED every turn, so — unlike
+// auto-review, which no-ops without a reviewer — it is off by default and the
+// operator opts IN by allowlisting it (`maddu focus enable`). Its event types
+// are registered in insights' DORMANT_BY_DESIGN so they read as dormant, not dead.
 export const DEFAULT_TRIGGERS = [
   'janitor:sessions',
   'slice-stop:skill-candidate',

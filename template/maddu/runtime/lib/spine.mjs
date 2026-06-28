@@ -266,7 +266,17 @@ export const EVENT_TYPES = {
   // the spine record + the trend signal. data:
   //   { modules, edges, forbidden, cycles, undeclared, uncovered, driftScore,
   //     failOn, newViolations, blocking }
-  ARCHITECTURE_SCANNED:       'ARCHITECTURE_SCANNED'
+  ARCHITECTURE_SCANNED:       'ARCHITECTURE_SCANNED',
+  // Focus Director (maddu focus) — domain-blind trajectory instrument. The
+  // deterministic per-turn tagger scores the pilot's drift vs the declared
+  // goal and (only on sustained, un-returned divergence) a cheap worker writes
+  // a flag carrying a swap/revert/continue choice. Consumed by the focus{}
+  // projection slot; emitted by focus-trigger (fires on SESSION_HEARTBEAT +
+  // SLICE_STOP). data shapes:
+  //   FOCUS_TAGGED:   { tag:'toward'|'lateral'|'away', distanceScore, signals, goalSetAt }
+  //   DRIFT_FLAGGED:  { reason, runs, menu:['swap','revert','continue'], workerId?, cleared? }
+  FOCUS_TAGGED:               'FOCUS_TAGGED',
+  DRIFT_FLAGGED:              'DRIFT_FLAGGED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

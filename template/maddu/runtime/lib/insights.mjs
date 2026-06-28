@@ -109,6 +109,10 @@ export const DORMANT_BY_DESIGN = new Map([
   ['LEARN_CORRECTION_WRITTEN', 'fires only when `maddu learn` writes a correction'],
   ['MEMORY_FACT_SUPERSEDED',   'fires only when a memory fact is superseded'],
   ['BRIEFING_CURATED',         'fires only under a curated (--curate) orient/handoff briefing'],
+  // Focus Director — opt-in trajectory instrument (off by default); emits only
+  // when the operator allowlists heartbeat:focus-director / slice-stop:focus-director.
+  ['FOCUS_TAGGED',             'Focus Director is opt-in (off by default)'],
+  ['DRIFT_FLAGGED',            'Focus Director is opt-in; fires only on sustained drift'],
 ]);
 
 // Join the harvested projects against the DEFINED event-type set.
