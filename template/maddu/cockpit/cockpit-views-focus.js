@@ -28,6 +28,45 @@ function fmt2(n) { return (Math.round(n * 100) / 100).toFixed(2); }
 function eyebrow(text) {
   return el('div', { style: 'font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;' }, text);
 }
+function svgColor(tag) { return `var(--m-${tag === 'toward' ? 'accent' : tag === 'lateral' ? 'warn' : 'danger'})`; }
+
+// The trajectory as a zigzag LINE chart: Y = score (toward at top, away at the
+// bottom), X = turn order, segments colored by their destination tag, converging
+// on the TARGET top-right. Built as an SVG string (deterministic for goldens).
+function buildTrajectorySvg(win) {
+  const W = 620, H = 210, padL = 44, padR = 82, padT = 22, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = win.length;
+  const stepX = n > 1 ? plotW / (n - 1) : 0;
+  const X = (i) => +(padL + i * stepX).toFixed(1);
+  const Y = (s) => +(padT + (1 - s) * plotH).toFixed(1);
+  const pts = win.map((w, i) => ({ x: X(i), y: Y(score(w.distanceScore)), tag: w.tag, s: score(w.distanceScore) }));
+  const tx = +(padL + plotW + padR * 0.5).toFixed(1), ty = Y(1);
+
+  let grid = '';
+  for (const [s, label] of [[1, 'toward'], [0.5, ''], [0, 'away']]) {
+    const y = Y(s);
+    grid += `<line x1="${padL}" y1="${y}" x2="${padL + plotW}" y2="${y}" style="stroke:var(--m-line);opacity:.5"/>`;
+    if (label) grid += `<text x="${padL - 7}" y="${y + 3}" text-anchor="end" style="fill:var(--m-fg-3);font:9px var(--m-font-mono)">${label}</text>`;
+  }
+  let segs = '';
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    segs += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" style="stroke:${svgColor(b.tag)};stroke-width:2.5;opacity:.8"/>`;
+  }
+  const last = pts[pts.length - 1];
+  segs += `<line x1="${last.x}" y1="${last.y}" x2="${tx}" y2="${ty}" style="stroke:var(--m-accent-2);stroke-width:1.5;opacity:.5;stroke-dasharray:3 4"/>`;
+  let nodes = '';
+  for (const p of pts) {
+    nodes += `<circle cx="${p.x}" cy="${p.y}" r="6.5" style="fill:${svgColor(p.tag)}"/>`;
+    nodes += `<text x="${p.x}" y="${p.y - 12}" text-anchor="middle" style="fill:var(--m-fg-3);font:9px var(--m-font-mono)">${fmt2(p.s)}</text>`;
+  }
+  nodes += `<circle cx="${tx}" cy="${ty}" r="9" style="fill:none;stroke:var(--m-accent-2);stroke-width:2"/>`;
+  nodes += `<circle cx="${tx}" cy="${ty}" r="3.5" style="fill:var(--m-accent-2)"/>`;
+  nodes += `<text x="${tx}" y="${ty - 15}" text-anchor="middle" style="fill:var(--m-accent-2);font:9px var(--m-font-mono)">TARGET</text>`;
+  const xhint = `<text x="${padL}" y="${H - 8}" style="fill:var(--m-fg-3);font:9px var(--m-font-mono)">older</text><text x="${padL + plotW}" y="${H - 8}" text-anchor="end" style="fill:var(--m-fg-3);font:9px var(--m-font-mono)">newer →</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;overflow:visible">${grid}${segs}${nodes}${xhint}</svg>`;
+}
 
 export function renderFocus(ctx) {
   const root = el('div', { class: 'view' }, [
@@ -84,22 +123,9 @@ export function renderFocus(ctx) {
       el('div', { style: 'display:flex;flex-direction:column;' }, [eyebrow('Trend'), spark]),
     ]));
 
-    // ── Trajectory → TARGET ──
+    // ── Trajectory → TARGET (zigzag line chart: Y = score over time) ──
     mount.appendChild(eyebrow('Trajectory → target'));
-    const traj = el('div', { style: 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 2px 4px;' });
-    for (const w of win) {
-      const t = tagOf(w.tag);
-      traj.appendChild(el('div', { style: 'display:flex;flex-direction:column;align-items:center;gap:4px;' }, [
-        el('div', { title: t.label, style: `width:22px;height:22px;border-radius:50%;background:${t.color};box-shadow:0 0 10px ${t.color};opacity:.92;` }),
-        el('div', { style: 'font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);' }, fmt2(score(w.distanceScore))),
-      ]));
-      traj.appendChild(el('span', { style: `color:${t.color};opacity:.7;` }, '→'));
-    }
-    traj.appendChild(el('div', { style: 'display:flex;flex-direction:column;align-items:center;gap:4px;' }, [
-      el('div', { title: 'TARGET', style: `width:26px;height:26px;border-radius:50%;border:2px solid ${TARGET};box-shadow:0 0 14px var(--m-glow-accent-2,${TARGET});display:flex;align-items:center;justify-content:center;color:${TARGET};font-size:13px;` }, '◆'),
-      el('div', { style: `font-family:var(--m-font-mono);font-size:10px;color:${TARGET};` }, 'TARGET'),
-    ]));
-    mount.appendChild(traj);
+    mount.appendChild(el('div', { style: 'padding:6px 2px 2px;', html: buildTrajectorySvg(win) }));
     mount.appendChild(el('div', { style: 'font-size:12px;color:var(--m-fg-2);margin:4px 0 14px;' },
       goalObj ? ('Goal: ' + goalObj) : 'No declared goal — the director stays silent until `maddu goal set`.'));
 
