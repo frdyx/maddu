@@ -226,6 +226,19 @@ $ maddu architecture mass --baseline   # record today's monoliths as the shrink-
 
 `scan` records an `ARCHITECTURE_SCANNED` event with a `driftScore`. The `architecture-drift` gate (run by `doctor`/`audit`) and the `scan` exit code honor `options.failOn`: `none` warns + ratchets (default), `new` fails only on violations not in the baseline, `any` fails on all. Adoption: `init → edit → scan → baseline → failOn:"new"`. *(v1.18.0)* — `mass` adds a structural-mass dimension (monolith + duplicate-file detection) with its own shrink-only baseline, enforced by the `architecture-mass` gate; see [40-architecture-drift.md](40-architecture-drift.md) §"Structural mass". *(v1.26.0)*
 
+## `maddu focus`
+
+The **Focus Director** — an opt-in, domain-blind instrument that tags each turn `toward`/`lateral`/`away` of the declared goal and flags **sustained** drift (a `swap`/`revert`/`continue` choice, never a gate). Off by default; deterministic (no LLM) per-turn tag, with an optional cheap-worker flag narrative.
+
+```bash
+$ maddu focus [status]                        # trajectory (last tag + window) + any open flag
+$ maddu focus enable                          # opt IN — allowlist the heartbeat + slice-stop triggers
+$ maddu focus disable                         # opt OUT
+$ maddu focus resolve <swap|revert|continue>  # answer an open drift flag
+```
+
+Once enabled, every `session heartbeat` (and each `slice-stop`, as a floor) appends a deterministic `FOCUS_TAGGED`; a run of off-axis turns with no return emits one `DRIFT_FLAGGED` (cooldown-guarded) and surfaces it to the mailbox. The tag is goal-**relative** — with no declared goal it stays silent. Crosses the rule-#9 gauntlet; its event types are registered dormant-by-design so an un-enabled install reads them as dormant, not dead.
+
 ## `maddu approval`
 
 Manage the approvals ledger.

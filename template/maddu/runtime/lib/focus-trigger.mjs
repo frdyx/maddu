@@ -18,6 +18,7 @@
 import { readAll, append, EVENT_TYPES } from './spine.mjs';
 import { project } from './projections.mjs';
 import { tagTurn, shouldFlag } from './focus.mjs';
+import { writeFlag } from './focus-flag.mjs';
 
 const FLAG_COOLDOWN_MS = 30 * 60 * 1000; // 30 min — the director flags at most this often.
 const RECENT_WINDOW = 40;                 // events scanned for current-focus text + churn.
@@ -59,6 +60,7 @@ export async function maybeTagFocus(repoRoot, sourceEv, sessionId = null, trigge
     || { kind: srcType === 'SLICE_STOP' ? 'slice-stop' : 'heartbeat', id: 'focus-director', fired_at };
 
   const { tag, distanceScore, signals } = tagTurn(goal, recent);
+  const lane = sourceEv.lane || null;
 
   // Provenance anchor + the per-turn tag (no cooldown — every turn tags).
   await append(repoRoot, {
@@ -87,19 +89,11 @@ export async function maybeTagFocus(repoRoot, sourceEv, sessionId = null, trigge
     return { tagged: true, tag, flagged: false, runs: decision.runs, flagSuppressed: 'cooldown' };
   }
 
-  // Deterministic flag. The cheap-model worker (later slice) enriches the
-  // narrative + opens the swap/revert/continue approval; the reason here is the
-  // deterministic run summary so the director is useful even before that lands.
-  await append(repoRoot, {
-    type: EVENT_TYPES.DRIFT_FLAGGED,
-    actor: sessionId,
-    data: {
-      reason: decision.reason,
-      runs: decision.runs,
-      menu: ['swap', 'revert', 'continue'],
-      deterministic: true,
-      triggered_by: provenance,
-    },
+  // The flag is due. writeFlag emits DRIFT_FLAGGED (deterministic floor,
+  // optionally enriched by a cheap worker) and surfaces it to the mailbox.
+  const { enriched } = await writeFlag(repoRoot, {
+    decision, goal, focusText: signals?.focusText || '',
+    sessionId, provenance, lane,
   });
-  return { tagged: true, tag, flagged: true, runs: decision.runs };
+  return { tagged: true, tag, flagged: true, runs: decision.runs, enriched };
 }
