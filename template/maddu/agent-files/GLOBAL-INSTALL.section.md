@@ -25,6 +25,14 @@ the standard, best-practice way:
      device-local multi-workspace registry so one `maddu start` mounts it
      alongside your other repos; confirm with `maddu workspace list`.
    - If no → leave it single-repo; `maddu start` from inside it still works.
+5. **Then ASK (recommended yes):** "Wire session discipline so this repo never
+   starts building unrecorded?" → on yes, run `maddu hooks install` (or
+   `./maddu/run hooks install`). It wires Claude Code `SessionStart`
+   (auto-register a session + record to the spine) and `SessionEnd` (close)
+   into `.claude/settings.json`, idempotently and without disturbing existing
+   hooks. After that a single auto-registered session flows into `lane claim`
+   and `slice-stop` with no `--session`/env. Skip on non-Claude-Code runtimes
+   (the hooks are Claude Code-specific; the brief still describes the ritual).
 
 Do not auto-add to the bridge without asking. Do not commit or push unless the
 user asks. This block was installed by `maddu agents register`; re-running it
