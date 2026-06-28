@@ -5,10 +5,14 @@ import { createHash } from 'node:crypto';
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
+// EOL-normalized integrity hash — must match commands/_manifest.mjs#sha256OfFile.
+// A CRLF working-tree copy (Windows autocrlf) hashes equal to its LF source, so
+// framework files aren't misflagged as modified; binary files (any NUL byte)
+// are hashed raw. The latin1 round-trip is byte-exact, collapsing only CRLF→LF.
 async function sha256OfFile(p) {
-  const h = createHash('sha256');
-  h.update(await readFile(p));
-  return h.digest('hex');
+  const buf = await readFile(p);
+  const bytes = buf.includes(0) ? buf : Buffer.from(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return createHash('sha256').update(bytes).digest('hex');
 }
 
 async function readMadduJson(repoRoot) {

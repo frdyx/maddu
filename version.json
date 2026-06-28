@@ -1,5 +1,5 @@
 {
-  "version": "1.74.0",
-  "phase": "session-discipline-by-default",
+  "version": "1.74.1",
+  "phase": "crlf-integrity-tolerance",
   "released": "2026-06-29"
 }

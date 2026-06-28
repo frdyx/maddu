@@ -29,6 +29,24 @@ const GITIGNORE_BLOCK = `
 maddu/runtime/oauth/tokens/
 `;
 
+const GITATTRIBUTES_BLOCK = `
+# Máddu framework files are authored LF. Force LF for them so a Windows
+# core.autocrlf=true checkout doesn't rewrite them to CRLF — which makes every
+# managed file read as "locally modified" and makes upgrade/doctor skip them.
+# Scoped to Máddu paths; your own files keep your repo's line-ending policy.
+# text=auto lets git's binary detection skip real assets; eol=lf pins text.
+maddu/** text=auto eol=lf
+.maddu/** text=auto eol=lf
+maddu.json text=auto eol=lf
+maddu/**/*.png binary
+maddu/**/*.jpg binary
+maddu/**/*.jpeg binary
+maddu/**/*.gif binary
+maddu/**/*.ico binary
+maddu/**/*.woff binary
+maddu/**/*.woff2 binary
+`;
+
 export default async function init(argv) {
   const { flags } = parseFlags(argv);
   const force = !!flags.force;
@@ -151,6 +169,17 @@ export default async function init(argv) {
   if (!gi.includes('Máddu token paths')) {
     await appendFile(gitignorePath, gi.endsWith('\n') || gi.length === 0 ? GITIGNORE_BLOCK : '\n' + GITIGNORE_BLOCK);
     console.log(`  updated .gitignore (token paths only)`);
+  }
+
+  // 6-bis. .gitattributes — pin Máddu's files to LF so Windows autocrlf can't
+  //        CRLF-rewrite them and break the byte-hash integrity check. Append
+  //        only if our block isn't already present; scoped to Máddu paths.
+  const gitattributesPath = join(cwd, '.gitattributes');
+  let ga = '';
+  try { ga = await readFile(gitattributesPath, 'utf8'); } catch {}
+  if (!ga.includes('Máddu framework files are authored LF')) {
+    await appendFile(gitattributesPath, ga.endsWith('\n') || ga.length === 0 ? GITATTRIBUTES_BLOCK : '\n' + GITATTRIBUTES_BLOCK);
+    console.log(`  updated .gitattributes (Máddu paths pinned to LF)`);
   }
 
   // 6a. Seed every framework config default under .maddu/config/ — janitor,

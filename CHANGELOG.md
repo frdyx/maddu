@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.74.1] · 2026-06-29 · Integrity tolerates CRLF — Windows installs stop self-reporting as tampered
+
+On a Windows repo with `core.autocrlf=true` (a common Git-for-Windows default) and no `.gitattributes`, git rewrites every Máddu framework file to CRLF on checkout. The install-integrity manifest is authored LF and hashed **byte-exact**, so all ~360 managed files hashed differently than recorded — `maddu doctor` reported them as **locally modified** and `maddu upgrade` **skipped every one of them**, leaving installs stuck in a half-upgraded state. A clean install was self-reporting as tampered.
+
+- **EOL-normalized integrity hash.** `sha256OfFile` (the manifest helper in `commands/_manifest.mjs` *and* the `install-integrity` gate's own copy) now collapses CRLF→LF for text files before hashing, and hashes binary files (any NUL byte) raw. The collapse is a lossless `latin1` round-trip, so it only touches `\r\n`. Framework source is LF, so normalized == raw for it — existing manifests stay valid, no format change — but a CRLF working-tree copy now hashes **equal** to its LF source. This also fixes `maddu upgrade`'s skip-logic (same helper), so upgrades on CRLF trees proceed instead of skipping. Robust regardless of the consumer's git config or `.gitattributes`.
+- **`.gitattributes` at init.** `maddu init` now writes a **Máddu-scoped** `.gitattributes` (`maddu/**`, `.maddu/**`, `maddu.json` → `text=auto eol=lf`, with binary asset overrides) so fresh installs are pinned to LF and never churn in the first place. Scoped to Máddu paths — your own files keep your repo's line-ending policy. Appended idempotently, like the token-path `.gitignore` block.
+
+Reproduced: pre-fix gate flags all 363 managed files as locally-modified on a CRLF tree; post-fix → "hashes match". Fixture `integrity-eol-normalized` (4/0, incl. a gate end-to-end proof). audit 14/0.
+
+---
+
 ## [v1.74.0] · 2026-06-29 · Session discipline by default — fresh repos never build unrecorded
 
 Every Máddu repo's worker brief asks the agent to register a session, claim a lane, and slice-stop — but that's **agent discipline, not an enforced rule**, so an agent can build an entire feature with zero session/lane/slice records and nothing flags it (hard-rule #8, lane ownership, only bites when two sessions contend). On a fresh install the ritual is also easy to skip: each agent tool-call runs in a fresh shell, so `$MADDU_SESSION_ID` doesn't persist and threading `--session <id>` by hand on every command is friction nobody keeps up. This release closes both halves.
