@@ -50,7 +50,10 @@ ok('drawer is visible (not hidden)', panel && panel.hidden === false);
 ok('app gains the inspector-open class', app.classList.contains('inspector-open'));
 ok('title reflects the entity', document.getElementById('inspector-title').textContent === 'Ship it');
 const tabBtns = document.getElementById('inspector-tabs').querySelectorAll('button');
-ok('renders all 5 tabs', tabBtns.length === 5, `${tabBtns.length}`);
+const taskTabs = [...tabBtns].map((b) => b.textContent);
+// Adaptive tabs: a bare task has no relations → the empty "related" tab is hidden.
+ok('adaptive tabs hide empty "related" for a bare task', !taskTabs.includes('related'), taskTabs.join(','));
+ok('keeps overview + raw + non-empty tabs', taskTabs.includes('overview') && taskTabs.includes('raw') && taskTabs.includes('actions'));
 ok('overview tab is active by default', tabBtns[0].className.includes('active') && tabBtns[0].textContent === 'overview');
 const body = document.getElementById('inspector-body');
 ok('overview body shows the task title value', body.textContent.includes('Ship it') && body.textContent.includes('core'));
@@ -79,6 +82,10 @@ m.openInspector({
 });
 ok('re-open uses the entity label for the title', document.getElementById('inspector-title').textContent === 'A finding');
 const tabs2 = document.getElementById('inspector-tabs').querySelectorAll('button');
+const names2 = [...tabs2].map((b) => b.textContent);
+// overview already renders the evidence[] array → the redundant "evidence" tab is hidden.
+ok('overview/evidence de-duped (no redundant evidence tab)', !names2.includes('evidence'), names2.join(','));
+ok('non-empty actions + related are shown', names2.includes('actions') && names2.includes('related'));
 const actionsBtn = [...tabs2].find((b) => b.textContent === 'actions');
 actionsBtn.click();
 const runBtn = [...document.getElementById('inspector-body').querySelectorAll('button')].find((b) => b.textContent === 'Do');
