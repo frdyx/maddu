@@ -186,6 +186,13 @@ const CANNED = {
       openFlag: { reason: '2 consecutive turns off the goal axis with no return', runs: 2, menu: ['swap', 'revert', 'continue'], at: FIXED_TS },
       updatedAt: FIXED_TS,
     },
+    turns: [
+      { id: 'evt_ft1', ts: FIXED_TS, tag: 'toward', distanceScore: 0.18, signals: { focusText: 'focus director tagger', overlap: 0.82, churn: 0 }, sourceEventId: 'evt_hb1' },
+      { id: 'evt_ft2', ts: FIXED_TS, tag: 'toward', distanceScore: 0.30, signals: { focusText: 'cockpit route trajectory', overlap: 0.70, churn: 1 }, sourceEventId: 'evt_hb2' },
+      { id: 'evt_ft3', ts: FIXED_TS, tag: 'lateral', distanceScore: 0.55, signals: { focusText: 'director gradient palette', overlap: 0.45, churn: 2 }, sourceEventId: 'evt_hb3' },
+      { id: 'evt_ft4', ts: FIXED_TS, tag: 'away', distanceScore: 0.82, signals: { focusText: 'billing invoice stripe', overlap: 0.18, churn: 3 }, sourceEventId: 'evt_hb4' },
+      { id: 'evt_ft5', ts: FIXED_TS, tag: 'away', distanceScore: 0.91, signals: { focusText: 'stripe webhook retry', overlap: 0.09, churn: 4 }, sourceEventId: 'evt_ss1' },
+    ],
   },
 };
 

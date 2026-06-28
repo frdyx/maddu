@@ -377,10 +377,25 @@ async function handleBridge(req, res, url, ctx) {
       const allowed = Array.isArray(t.allowed) ? t.allowed : [];
       enabled = ['heartbeat:focus-director', 'slice-stop:focus-director'].every((x) => allowed.includes(x));
     } catch {}
+    // Per-node detail for the cockpit chart: the last 12 FOCUS_TAGGED events in
+    // full (the projection window keeps only tag/score/ts). Each turn carries the
+    // focus text + signal math + the source heartbeat/slice-stop it came from.
+    const turns = (await readAll(repoRoot))
+      .filter((e) => e.type === 'FOCUS_TAGGED')
+      .slice(-12)
+      .map((e) => ({
+        id: e.id,
+        ts: e.ts,
+        tag: e.data?.tag || null,
+        distanceScore: typeof e.data?.distanceScore === 'number' ? e.data.distanceScore : null,
+        signals: e.data?.signals || {},
+        sourceEventId: e.data?.sourceEventId || null,
+      }));
     return sendJson(res, 200, {
       enabled,
       goal: proj.goal ? { objective: proj.goal.objective } : null,
       focus: proj.focus || { lastTag: null, window: [], openFlag: null, updatedAt: null },
+      turns,
     });
   }
   // Plugins discovered for this workspace — the cockpit gates plugin-owned
