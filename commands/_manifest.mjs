@@ -138,9 +138,18 @@ export async function frameworkOwnedFiles() {
   return out;
 }
 
+// Integrity hash. EOL-NORMALIZED for text files: a CRLF working-tree copy
+// (Windows `core.autocrlf=true` rewrites every framework file to CRLF on
+// checkout) hashes EQUAL to its LF source, so it isn't misread as "locally
+// modified" — otherwise upgrade/doctor flag all ~300 framework files and skip
+// them. Binary files (any NUL byte, git's own heuristic) are hashed raw. The
+// `latin1` round-trip is byte-exact (lossless 1:1 byte↔codepoint), so this only
+// collapses CRLF→LF and never perturbs other bytes. Framework source is LF, so
+// normalized == raw for it: existing manifests stay valid, no format change.
 export async function sha256OfFile(p) {
   const buf = await readFile(p);
-  return createHash('sha256').update(buf).digest('hex');
+  const bytes = buf.includes(0) ? buf : Buffer.from(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return createHash('sha256').update(bytes).digest('hex');
 }
 
 // Read maddu.json from a target repo. Returns null if the file doesn't exist.
