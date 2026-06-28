@@ -215,6 +215,19 @@ $ ./maddu/run session start "<label>"        # register a fresh one
 
 The project-local `./maddu/run` (POSIX) + `./maddu/run.cmd` (Windows) wrapper(s) are missing. `maddu init --force` or `maddu upgrade` reinstalls them. On POSIX, `chmod +x maddu/run` if the file exists but isn't executable.
 
+## Working tree always dirty / Doctor reports `maddu state untracked` WARN *(v1.74.2+)*
+
+Every `maddu` command appends to the spine (`.maddu/events/`) and refreshes projections (`.maddu/state/`), so if those paths are **git-tracked** the working tree is perpetually dirty — which blocks branch switches and buries real changes in noise. The on-disk spine is the source of truth, but it's *local* working state (like a reflog) and doesn't belong in git.
+
+Fresh installs (v1.74.2+) get the right `.gitignore` automatically: `.maddu/*` is ignored except the durable, authored artifacts (`config/`, `skills/`, `plans/`, `wiki/`, `lanes/catalog.json`). Installs created before that tracked everything; the `maddu state untracked` gate detects it and prints the exact, non-destructive fix — untrack the runtime state (it stays on disk, just leaves the index):
+
+```bash
+$ git rm -r --cached .maddu/events .maddu/state .maddu/sessions   # exact list is in the doctor output
+$ git commit -m "stop tracking Máddu runtime state"
+```
+
+After that, the shipped `.gitignore` keeps them out and the tree stays clean.
+
 ## Where to ask for help
 
 - The `?` Docs popup in the cockpit has the full doc set.
