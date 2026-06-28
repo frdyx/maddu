@@ -46,10 +46,19 @@ function main() {
   const partial = tagTurn(GOAL, [hb('director drift tagger versus gradient palette swatches today')]);
   ok('partial overlap → lateral', partial.tag === 'lateral', JSON.stringify(partial));
 
-  // --- churn escalates independent of distance ---
+  // --- churn is a bounded, SECONDARY signal (anti-saturation calibration) ---
   const churny = [hb('tagger director drift'), hb('database migrations'), hb('css gradient'), hb('payment webhook')];
-  ok('churn counts domain shifts', churn(churny) === 3, `churn=${churn(churny)}`);
-  ok('high churn → away', tagTurn(GOAL, churny).tag === 'away');
+  ok('churn counts recent domain shifts', churn(churny) === 3, `churn=${churn(churny)}`);
+  // A clearly on-goal turn stays 'toward' even after heavy topic-hopping —
+  // churn must NOT override goal-proximity (the over-flag failure mode).
+  const onGoalAfterHopping = [hb('database migrations'), hb('css gradient'), hb('payment webhook'), hb('the deterministic tagger for pilot drift director')];
+  ok('on-goal turn stays toward despite churn', tagTurn(GOAL, onGoalAfterHopping).tag === 'toward', JSON.stringify(tagTurn(GOAL, onGoalAfterHopping)));
+  // A borderline (lateral) turn amid hopping escalates to away…
+  const lateralHopping = [hb('billing invoice'), hb('stripe webhook'), hb('css gradient'), hb('director drift gradient palette swatches')];
+  ok('lateral + high churn escalates to away', tagTurn(GOAL, lateralHopping).tag === 'away', JSON.stringify(tagTurn(GOAL, lateralHopping)));
+  // …but the SAME lateral focus, held steady, stays lateral (low churn).
+  const lateralStable = [hb('director drift gradient palette swatches'), hb('director drift gradient palette swatches')];
+  ok('lateral + low churn stays lateral', tagTurn(GOAL, lateralStable).tag === 'lateral', JSON.stringify(tagTurn(GOAL, lateralStable)));
 
   // --- shouldFlag: sustained, un-returned run ---
   const W = (...tags) => tags.map((tag) => ({ tag }));

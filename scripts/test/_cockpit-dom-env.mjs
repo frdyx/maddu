@@ -171,6 +171,22 @@ const CANNED = {
   },
   '/bridge/_workspaces': { legacy: true },
   '/bridge/events/poll': { lastEventId: 'evt_00000000', events: [] },
+  '/bridge/focus': {
+    enabled: true,
+    goal: { objective: 'ship the focus director' },
+    focus: {
+      lastTag: 'away',
+      window: [
+        { tag: 'toward', distanceScore: 0.18, ts: FIXED_TS },
+        { tag: 'toward', distanceScore: 0.30, ts: FIXED_TS },
+        { tag: 'lateral', distanceScore: 0.55, ts: FIXED_TS },
+        { tag: 'away', distanceScore: 0.82, ts: FIXED_TS },
+        { tag: 'away', distanceScore: 0.91, ts: FIXED_TS },
+      ],
+      openFlag: { reason: '2 consecutive turns off the goal axis with no return', runs: 2, menu: ['swap', 'revert', 'continue'], at: FIXED_TS },
+      updatedAt: FIXED_TS,
+    },
+  },
 };
 
 function jsonResponse(body) {

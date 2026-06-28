@@ -56,13 +56,14 @@ export function currentFocusText(recentEvents) {
   return sigs.length ? sigs[sigs.length - 1] : '';
 }
 
-// Domain churn = how many times the focus text changed across the recent
-// window. High churn = the pilot is hopping domains (a drift signal in its own
-// right, independent of goal-distance).
-export function churn(recentEvents) {
-  const sigs = focusSignals(recentEvents).map((s) => tokenize(s).sort().join(' '));
+// Domain churn = how many times the focus text changed across the LAST `lookback`
+// focus signals. Bounded to a short recent window on purpose: measured over a
+// whole active session, churn saturates (every turn re-words its focus), so it
+// would read as constant hopping. A short window reflects *current* hopping.
+export function churn(recentEvents, lookback = 6) {
+  const sigs = focusSignals(recentEvents).map((s) => tokenize(s).sort().join(' ')).slice(-lookback);
   let shifts = 0;
-  for (let i = 1; i < sigs.length; i++) if (sigs[i] !== sigs[i - 1]) shifts++;
+  for (let i = 1; i < sigs.length; i++) if (sigs[i] && sigs[i] !== sigs[i - 1]) shifts++;
   return shifts;
 }
 
@@ -94,10 +95,18 @@ export function tagTurn(goal, recentEvents, opts = {}) {
   const overlap = inter / fset.size; // share of current attention that is goal-relevant
   const distanceScore = 1 - overlap;
 
+  // Distance is the PRIMARY signal: a clearly on-goal turn is always 'toward',
+  // even amid heavy topic-switching. (Earlier, high churn independently forced
+  // 'away', which saturated in any active session — the over-flag / nag-death
+  // failure mode.)
   let tag;
-  if (distanceScore < near && ch < 2) tag = 'toward';
-  else if (distanceScore > far || ch >= churnAway) tag = 'away';
+  if (distanceScore <= near) tag = 'toward';
+  else if (distanceScore >= far) tag = 'away';
   else tag = 'lateral';
+
+  // Churn is only a SECONDARY escalator: a borderline (lateral) turn during
+  // genuine recent topic-hopping reads as away. It never overrides goal-proximity.
+  if (tag === 'lateral' && ch >= churnAway) tag = 'away';
 
   return { tag, distanceScore: round2(distanceScore), signals: { ...baseSignals, overlap: round2(overlap) } };
 }

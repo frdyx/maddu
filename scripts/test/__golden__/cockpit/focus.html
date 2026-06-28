@@ -1,0 +1,167 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Focus"
+    </h2>
+    <p>
+      "Focus Director — a domain-blind trajectory instrument. Per-turn drift tag (toward/lateral/away) vs the declared goal, with a sustained-drift flag carrying a swap/revert/continue choice. Opt-in: `maddu focus enable`."
+    </p>
+    <div class="panel" data-focus="focus focus director drift trajectory toward lateral away goal flag pilot">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Focus Director"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/focus · domain-blind drift instrument · opt-in via `maddu focus enable`"
+        </span>
+      </div>
+      <div>
+        <div style="display:flex;gap:28px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
+          <div style="display:flex;flex-direction:column;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
+              "Current direction"
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:30px;line-height:1;color:var(--m-danger);">
+                "↘"
+              </span>
+              <span style="font-family:var(--m-font-mono);font-size:22px;font-weight:600;letter-spacing:.06em;color:var(--m-danger);">
+                "AWAY"
+              </span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
+              "Overall score"
+            </div>
+            <div style="font-size:30px;font-weight:600;color:var(--m-fg-0);line-height:1;">
+              "0.09"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
+              "Trend"
+            </div>
+            <div style="display:flex;align-items:flex-end;gap:3px;height:40px;">
+              <div style="width:8px;height:31px;background:var(--m-accent);border-radius:2px 2px 0 0;opacity:.85;" title="TOWARD 0.82">
+              <div style="width:8px;height:27px;background:var(--m-accent);border-radius:2px 2px 0 0;opacity:.85;" title="TOWARD 0.70">
+              <div style="width:8px;height:17px;background:var(--m-warn);border-radius:2px 2px 0 0;opacity:.85;" title="LATERAL 0.45">
+              <div style="width:8px;height:7px;background:var(--m-danger);border-radius:2px 2px 0 0;opacity:.85;" title="AWAY 0.18">
+              <div style="width:8px;height:5px;background:var(--m-danger);border-radius:2px 2px 0 0;opacity:.85;" title="AWAY 0.09">
+            </div>
+          </div>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
+          "Trajectory → target"
+        </div>
+        <div style="padding:6px 2px 2px;">
+          <svg preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;overflow:visible" viewBox="0 0 640 200">
+            <line style="stroke:var(--m-line);opacity:.5" x1="60" x2="554" y1="26" y2="26">
+            <text style="fill:var(--m-fg-3);font:10px var(--m-font-mono)" x="6" y="29">
+              "toward"
+            </text>
+            <line style="stroke:var(--m-line);opacity:.5" x1="60" x2="554" y1="98" y2="98">
+            <line style="stroke:var(--m-line);opacity:.5" x1="60" x2="554" y1="170" y2="170">
+            <text style="fill:var(--m-fg-3);font:10px var(--m-font-mono)" x="6" y="173">
+              "away"
+            </text>
+            <line style="stroke:var(--m-accent);stroke-width:2.99;opacity:.8" x1="60" x2="183.5" y1="51.9" y2="69.2">
+            <line style="stroke:var(--m-warn);stroke-width:2.99;opacity:.8" x1="183.5" x2="307" y1="69.2" y2="105.2">
+            <line style="stroke:var(--m-danger);stroke-width:2.99;opacity:.8" x1="307" x2="430.5" y1="105.2" y2="144.1">
+            <line style="stroke:var(--m-danger);stroke-width:2.99;opacity:.8" x1="430.5" x2="554" y1="144.1" y2="157">
+            <line style="stroke:var(--m-accent-2);stroke-width:1.5;opacity:.5;stroke-dasharray:3 4" x1="554" x2="597" y1="157" y2="26">
+            <circle cx="60" cy="51.9" r="7.36" style="fill:var(--m-accent)">
+            <text style="fill:var(--m-fg-3);font:11.5px var(--m-font-mono)" text-anchor="middle" x="60" y="39.5">
+              "0.82"
+            </text>
+            <circle cx="183.5" cy="69.2" r="7.36" style="fill:var(--m-accent)">
+            <text style="fill:var(--m-fg-3);font:11.5px var(--m-font-mono)" text-anchor="middle" x="183.5" y="56.8">
+              "0.70"
+            </text>
+            <circle cx="307" cy="105.2" r="7.36" style="fill:var(--m-warn)">
+            <text style="fill:var(--m-fg-3);font:11.5px var(--m-font-mono)" text-anchor="middle" x="307" y="92.8">
+              "0.45"
+            </text>
+            <circle cx="430.5" cy="144.1" r="7.36" style="fill:var(--m-danger)">
+            <text style="fill:var(--m-fg-3);font:11.5px var(--m-font-mono)" text-anchor="middle" x="430.5" y="131.7">
+              "0.18"
+            </text>
+            <circle cx="554" cy="157" r="7.36" style="fill:var(--m-danger)">
+            <text style="fill:var(--m-fg-3);font:11.5px var(--m-font-mono)" text-anchor="middle" x="554" y="144.6">
+              "0.09"
+            </text>
+            <circle cx="597" cy="26" r="9" style="fill:none;stroke:var(--m-accent-2);stroke-width:2">
+            <circle cx="597" cy="26" r="3.5" style="fill:var(--m-accent-2)">
+            <text style="fill:var(--m-accent-2);font:10px var(--m-font-mono)" text-anchor="middle" x="597" y="11">
+              "TARGET"
+            </text>
+            <text style="fill:var(--m-fg-3);font:10px var(--m-font-mono)" x="60" y="194">
+              "older"
+            </text>
+            <text style="fill:var(--m-fg-3);font:10px var(--m-font-mono)" text-anchor="end" x="554" y="194">
+              "newer →"
+            </text>
+          </svg>
+        </div>
+        <div style="font-size:12px;color:var(--m-fg-2);margin:4px 0 14px;">
+          "Goal: ship the focus director"
+        </div>
+        <div style="border:1px solid var(--m-danger-border);background:var(--m-danger-bg);border-radius:var(--m-radius-sm,6px);padding:12px 14px;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="color:var(--m-danger);font-size:14px;">
+              "⚑"
+            </span>
+            <span style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.14em;color:var(--m-danger);">
+              "DRIFT FLAGGED"
+            </span>
+          </div>
+          <div style="font-size:13px;color:var(--m-fg-0);margin-bottom:10px;">
+            "2 consecutive turns off the goal axis with no return"
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <span style="font-family:var(--m-font-mono);font-size:11px;padding:4px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,5px);color:var(--m-fg-1);background:var(--m-bg-2);">
+              "swap"
+            </span>
+            <span style="font-family:var(--m-font-mono);font-size:11px;padding:4px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,5px);color:var(--m-fg-1);background:var(--m-bg-2);">
+              "revert"
+            </span>
+            <span style="font-family:var(--m-font-mono);font-size:11px;padding:4px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,5px);color:var(--m-fg-1);background:var(--m-bg-2);">
+              "continue"
+            </span>
+          </div>
+          <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);margin-top:8px;">
+            "resolve: maddu focus resolve <swap|revert|continue>"
+          </div>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
+          "Timeline"
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-accent);" title="TOWARD">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-accent);" title="TOWARD">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-warn);" title="LATERAL">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-danger);" title="AWAY">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--m-danger);" title="AWAY">
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--m-line);">
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--m-accent);">
+            "toward"
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--m-warn);">
+            "lateral"
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;background:var(--m-danger);">
+            "away"
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+            <span style="width:10px;height:10px;border-radius:50%;border:2px solid var(--m-accent-2);">
+            "target"
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

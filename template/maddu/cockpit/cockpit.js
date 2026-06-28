@@ -18,7 +18,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench, renderConductor, renderBoss } from './cockpit-views-live.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench, renderConductor, renderBoss } from './cockpit-views-live.js'; import { renderFocus } from './cockpit-views-focus.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -69,7 +69,7 @@ const RENDERERS = {
   pipelines: renderPipelinesRoute, loops: renderLoops, cost: renderCostRoute,
   advisors: renderAdvisorsRoute, skillinjections: renderSkillInjectionsRoute,
   modelrouting: renderModelRoutingRoute, trust: renderTrust, teststatus: renderTestStatusRoute,
-  dashboard: renderDashboard, roadmap: renderRoadmap, skills: renderSkills, docs: renderDocs,
+  dashboard: renderDashboard, roadmap: renderRoadmap, skills: renderSkills, docs: renderDocs, focus: renderFocus,
 };
 const ROUTES = {};
 for (const id of Object.keys(ROUTE_META)) ROUTES[id] = { ...ROUTE_META[id], render: RENDERERS[id] };
