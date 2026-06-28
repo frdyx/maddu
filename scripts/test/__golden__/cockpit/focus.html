@@ -17,52 +17,85 @@
       </div>
       <div>
         <div style="display:flex;gap:28px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
-          <div style="display:flex;flex-direction:column;gap:3px;">
-            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+          <div style="display:flex;flex-direction:column;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
               "Current direction"
             </div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:3px;">
-            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
-              "Overall score"
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:30px;line-height:1;color:var(--m-danger);">
+                "↘"
+              </span>
+              <span style="font-family:var(--m-font-mono);font-size:22px;font-weight:600;letter-spacing:.06em;color:var(--m-danger);">
+                "AWAY"
+              </span>
             </div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:3px;">
-            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+          <div style="display:flex;flex-direction:column;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
+              "Overall score"
+            </div>
+            <div style="font-size:30px;font-weight:600;color:var(--m-fg-0);line-height:1;">
+              "0.09"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
               "Trend"
+            </div>
+            <div style="display:flex;align-items:flex-end;gap:3px;height:40px;">
+              <div style="width:8px;height:31px;background:var(--m-accent);border-radius:2px 2px 0 0;opacity:.85;" title="TOWARD 0.82">
+              <div style="width:8px;height:27px;background:var(--m-accent);border-radius:2px 2px 0 0;opacity:.85;" title="TOWARD 0.70">
+              <div style="width:8px;height:17px;background:var(--m-warn);border-radius:2px 2px 0 0;opacity:.85;" title="LATERAL 0.45">
+              <div style="width:8px;height:7px;background:var(--m-danger);border-radius:2px 2px 0 0;opacity:.85;" title="AWAY 0.18">
+              <div style="width:8px;height:5px;background:var(--m-danger);border-radius:2px 2px 0 0;opacity:.85;" title="AWAY 0.09">
             </div>
           </div>
         </div>
-        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
           "Trajectory → target"
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 2px 4px;">
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="width:22px;height:22px;border-radius:50%;background:var(--m-accent);box-shadow:0 0 10px var(--m-accent);opacity:.92;" title="TOWARD">
+            <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);">
+              "0.82"
+            </div>
           </div>
           <span style="color:var(--m-accent);opacity:.7;">
             "→"
           </span>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="width:22px;height:22px;border-radius:50%;background:var(--m-accent);box-shadow:0 0 10px var(--m-accent);opacity:.92;" title="TOWARD">
+            <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);">
+              "0.70"
+            </div>
           </div>
           <span style="color:var(--m-accent);opacity:.7;">
             "→"
           </span>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="width:22px;height:22px;border-radius:50%;background:var(--m-warn);box-shadow:0 0 10px var(--m-warn);opacity:.92;" title="LATERAL">
+            <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);">
+              "0.45"
+            </div>
           </div>
           <span style="color:var(--m-warn);opacity:.7;">
             "→"
           </span>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="width:22px;height:22px;border-radius:50%;background:var(--m-danger);box-shadow:0 0 10px var(--m-danger);opacity:.92;" title="AWAY">
+            <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);">
+              "0.18"
+            </div>
           </div>
           <span style="color:var(--m-danger);opacity:.7;">
             "→"
           </span>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="width:22px;height:22px;border-radius:50%;background:var(--m-danger);box-shadow:0 0 10px var(--m-danger);opacity:.92;" title="AWAY">
+            <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-fg-3);">
+              "0.09"
+            </div>
           </div>
           <span style="color:var(--m-danger);opacity:.7;">
             "→"
@@ -70,6 +103,9 @@
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="width:26px;height:26px;border-radius:50%;border:2px solid var(--m-accent-2);box-shadow:0 0 14px var(--m-glow-accent-2,var(--m-accent-2));display:flex;align-items:center;justify-content:center;color:var(--m-accent-2);font-size:13px;" title="TARGET">
               "◆"
+            </div>
+            <div style="font-family:var(--m-font-mono);font-size:10px;color:var(--m-accent-2);">
+              "TARGET"
             </div>
           </div>
         </div>
@@ -80,6 +116,9 @@
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <span style="color:var(--m-danger);font-size:14px;">
               "⚑"
+            </span>
+            <span style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.14em;color:var(--m-danger);">
+              "DRIFT FLAGGED"
             </span>
           </div>
           <div style="font-size:13px;color:var(--m-fg-0);margin-bottom:10px;">
@@ -100,7 +139,7 @@
             "resolve: maddu focus resolve <swap|revert|continue>"
           </div>
         </div>
-        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:6px 0;">
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 4px;">
           "Timeline"
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -113,15 +152,19 @@
         <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--m-line);">
           <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
             <span style="width:10px;height:10px;border-radius:50%;background:var(--m-accent);">
+            "toward"
           </span>
           <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
             <span style="width:10px;height:10px;border-radius:50%;background:var(--m-warn);">
+            "lateral"
           </span>
           <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
             <span style="width:10px;height:10px;border-radius:50%;background:var(--m-danger);">
+            "away"
           </span>
           <span style="display:flex;align-items:center;gap:6px;font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
             <span style="width:10px;height:10px;border-radius:50%;border:2px solid var(--m-accent-2);">
+            "target"
           </span>
         </div>
       </div>
