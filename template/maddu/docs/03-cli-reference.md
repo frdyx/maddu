@@ -870,6 +870,25 @@ The stanza is marker-delimited (`<!-- BEGIN MADDU INSTALL v1 -->`), so register 
 idempotent and never disturbs operator content outside the markers. Full guide:
 [42-agents-global-install.md](42-agents-global-install.md).
 
+### `maddu hooks <verb>` *(v1.74.0)*
+
+Wire **Claude Code session hooks** into this repo so every session auto-registers
+and records to the spine — *session discipline by default*. Combined with the
+active-session resolver, a single auto-registered session flows into `lane claim`
+and `slice-stop` with no `--session`/`$MADDU_SESSION_ID`.
+
+```bash
+$ maddu hooks install        # merge SessionStart(auto-register) + SessionEnd(close)
+$ maddu hooks status         # which Máddu hooks are installed
+$ maddu hooks remove         # strip only Máddu's hook entries (keeps yours)
+```
+
+`install` is idempotent and surgical — it writes the **host** file
+`.claude/settings.json` (outside `.maddu/`), preserves your own hooks/settings,
+refuses malformed JSON, and runs only on explicit invocation (never silently at
+`init`, which offers it as a next step). Full guide:
+[44-session-hooks.md](44-session-hooks.md).
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the

@@ -106,6 +106,9 @@ export default {
   // v1.6.0 — curated cross-session handoff. `set` writes a HANDOFF_SET event;
   // mutating, operator/agent-explicit.
   handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  // hooks install/remove write a HOST file (.claude/settings.json); `hooks fire`
+  // is invoked by Claude Code's hook system (external), not a Máddu auto-trigger.
+  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   // v1.4.0 — plugin loader: capabilities that live outside the core. list/info
   // are read-only-shaped but the verb dispatches into enable/disable writes, so
   // the verb is mutating; auto-trigger forbidden (operator-explicit, like mcp).

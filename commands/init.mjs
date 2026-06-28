@@ -267,4 +267,8 @@ export default async function init(argv) {
   console.log(`\nMake "install maddu" work via natural language in EVERY future repo:`);
   console.log(`  ./maddu/run agents register   # add the install stanza to ~/.claude, ~/.codex, …`);
   console.log(`  (asks which agents; idempotent; touches only its own marker block)`);
+
+  console.log(`\nNever start building unrecorded — wire session discipline into Claude Code:`);
+  console.log(`  ./maddu/run hooks install   # SessionStart auto-registers + records to the spine`);
+  console.log(`  (writes .claude/settings.json; one register then flows into lane/slice-stop)`);
 }

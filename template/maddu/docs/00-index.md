@@ -81,6 +81,7 @@ The verbose `maddu <cmd>` CLI stays first-class for scripts and CI.
 | 41 | [41-debt.md](41-debt.md) | `maddu debt` — ledger of deliberate-shortcut markers (`maddu-debt: <what>. ceiling: … upgrade: …`); flags the ones with no upgrade trigger. The deferred-work counterpart to `learn` and `blueprint`. *(v1.17.0)* |
 | 42 | [42-agents-global-install.md](42-agents-global-install.md) | `maddu agents` — register a self-contained "install maddu" stanza into your agents' GLOBAL instruction files (Claude/Codex/Gemini/custom) so the framework is reachable by natural language from any future repo; paths resolved from `os.homedir()`, never hardcoded; idempotent marker-block merge. *(v1.72.0)* |
 | 43 | [43-focus-director.md](43-focus-director.md) | `maddu focus` — the opt-in Focus Director: a domain-blind instrument that tags each turn toward/lateral/away of the declared goal and flags sustained drift with a swap/revert/continue choice (never a gate). Deterministic per-turn tag + optional cheap-worker flag narrative; cockpit Focus route; `focus-ledger-coherent` gate. |
+| 44 | [44-session-hooks.md](44-session-hooks.md) | `maddu hooks` — session discipline by default: wire Claude Code `SessionStart`/`SessionEnd` hooks so every session auto-registers + records to the spine, and the active-session resolver flows that one session into `lane claim`/`slice-stop` with no `--session`/env. Idempotent, surgical, host-file (`.claude/settings.json`), opt-in at `init`. *(v1.74.0)* |
 
 Reference docs that are not in the numbered series:
 
