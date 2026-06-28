@@ -6,7 +6,7 @@
 
 import { createHash } from 'node:crypto';
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 
 const DEFAULT_BOUND = { maxFiles: 5, maxGrowthPct: 30 };
 
@@ -39,7 +39,7 @@ async function findOpenSlice(projections, repoRoot, sessionId) {
 export default async function command(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths, spine, projections } = await loadSpineLib();
+  const { paths, spine, projections, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   if (sub === 'scope-declare') {
@@ -49,7 +49,7 @@ export default async function command(argv) {
       console.error('error: --paths must include at least one path');
       process.exit(2);
     }
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await resolveSessionId(repoRoot, flags, sessionActive);
     const sliceId = typeof flags['slice-id'] === 'string' ? flags['slice-id'] : deriveSliceId(sessionId);
     const lockedScopeHash = scopeHash(scope);
     const expansionBound = {
@@ -71,7 +71,7 @@ export default async function command(argv) {
 
   if (sub === 'scope-expand') {
     const { flags } = parseFlags(rest);
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await resolveSessionId(repoRoot, flags, sessionActive);
     let sliceId = typeof flags['slice-id'] === 'string' ? flags['slice-id'] : null;
     if (!sliceId) sliceId = await findOpenSlice(projections, repoRoot, sessionId);
     if (!sliceId) {
@@ -123,7 +123,7 @@ export default async function command(argv) {
 
   if (sub === 'approve-functional') {
     const { flags } = parseFlags(rest);
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await resolveSessionId(repoRoot, flags, sessionActive);
     let sliceId = typeof flags['slice-id'] === 'string' ? flags['slice-id'] : null;
     if (!sliceId) sliceId = await findOpenSlice(projections, repoRoot, sessionId);
     if (!sliceId) {

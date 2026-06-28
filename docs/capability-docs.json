@@ -66,6 +66,7 @@
     "usage": "27-transcript-import.md",
     "worker": "11-runtimes-and-mcp.md",
     "workspace": "19-multi-workspace.md",
-    "focus": "43-focus-director.md"
+    "focus": "43-focus-director.md",
+    "hooks": "44-session-hooks.md"
   }
 }
