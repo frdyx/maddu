@@ -209,6 +209,15 @@ export default async function sliceStop(argv) {
     console.error(`  hindsight failed (non-fatal): ${err.message}`);
   }
 
+  // Rule-#9 gauntlet (shared): a single allowlist read for every auto-trigger
+  // below. Prefers the gauntlet helper; falls back to an inline read if an
+  // older install predates it. Either way it fails CLOSED on an unreadable file.
+  const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
+  const gauntlet = await loadLibOptional('gauntlet.mjs');
+  const allow = gauntlet
+    ? (id) => gauntlet.isAllowed(repoRoot, id)
+    : async (id) => { try { return (((JSON.parse(await readFile(triggersPath, 'utf8')).allowed)) || []).includes(id); } catch { return false; } };
+
   // v1.4.0 (Bucket C) — auto-funnel the skills system: after each slice-stop,
   // detect reusable patterns and emit SKILL_CANDIDATE_DETECTED for any that
   // crossed threshold. This is what makes the skills funnel fire without the
@@ -216,10 +225,7 @@ export default async function sliceStop(argv) {
   // the .maddu/config/triggers.json allowlist, and each emit carries
   // triggered_by provenance. Best-effort; never breaks the slice-stop.
   try {
-    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
-    let allowed = [];
-    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
-    if (allowed.includes('slice-stop:skill-candidate')) {
+    if (await allow('slice-stop:skill-candidate')) {
       const sc = await loadLibOptional('skill-candidates.mjs');
       if (sc) {
         const emitted = await sc.emitFreshCandidates(repoRoot, sessionId, {
@@ -241,10 +247,7 @@ export default async function sliceStop(argv) {
   // every emission carries triggered_by + a TRIGGER_FIRED record, cooldown
   // respected inside the trigger. Best-effort; never breaks the slice-stop.
   try {
-    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
-    let allowed = [];
-    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
-    if (allowed.includes('slice-stop:trust-audit')) {
+    if (await allow('slice-stop:trust-audit')) {
       const tt = await loadLibOptional('trust-trigger.mjs');
       if (tt) {
         const res = await tt.auditIfDepsChanged(repoRoot, sessionId, {
@@ -266,10 +269,7 @@ export default async function sliceStop(argv) {
   // gated on `slice-stop:auto-handoff`, carries triggered_by + TRIGGER_FIRED.
   // Best-effort; never breaks the slice-stop.
   try {
-    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
-    let allowed = [];
-    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
-    if (allowed.includes('slice-stop:auto-handoff')) {
+    if (await allow('slice-stop:auto-handoff')) {
       const ht = await loadLibOptional('handoff-trigger.mjs');
       if (ht) {
         const res = await ht.maybeSetHandoff(repoRoot, ev, sessionId, {
@@ -288,10 +288,7 @@ export default async function sliceStop(argv) {
   // opted in). Cooldown-guarded. Same rule-#9 gauntlet: gated on
   // `slice-stop:auto-review`, carries triggered_by + TRIGGER_FIRED. Best-effort.
   try {
-    const triggersPath = join(repoRoot, '.maddu', 'config', 'triggers.json');
-    let allowed = [];
-    try { allowed = (JSON.parse(await readFile(triggersPath, 'utf8')).allowed) || []; } catch {}
-    if (allowed.includes('slice-stop:auto-review')) {
+    if (await allow('slice-stop:auto-review')) {
       const rt = await loadLibOptional('review-trigger.mjs');
       if (rt) {
         const res = await rt.maybeReviewSliceStop(repoRoot, ev, sessionId, {
@@ -302,5 +299,21 @@ export default async function sliceStop(argv) {
     }
   } catch (err) {
     console.error(`  auto-review trigger failed (non-fatal): ${err.message}`);
+  }
+
+  // Focus Director floor — a slice-stop is a turn boundary too, so tag the
+  // trajectory vs the declared goal here in case heartbeats were sparse. Same
+  // rule-#9 gauntlet: gated on `slice-stop:focus-director`, carries triggered_by.
+  // Deterministic + cheap (no LLM); best-effort.
+  try {
+    if (await allow('slice-stop:focus-director')) {
+      const ft = await loadLibOptional('focus-trigger.mjs');
+      if (ft) {
+        const res = await ft.maybeTagFocus(repoRoot, ev, sessionId, { kind: 'slice-stop', id: 'focus-director', fired_at: ev.ts });
+        if (res.tagged) console.log(`  focus: ${res.tag}${res.flagged ? ` → DRIFT FLAGGED (${res.runs} turns off-axis) → \`maddu orient\`` : ''}`);
+      }
+    }
+  } catch (err) {
+    console.error(`  focus-director trigger failed (non-fatal): ${err.message}`);
   }
 }

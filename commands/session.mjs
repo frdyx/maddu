@@ -16,6 +16,7 @@
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLibOptional } from './_libroot.mjs';
 
 function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
 
@@ -131,13 +132,30 @@ export default async function session(argv) {
       console.error('  Run "maddu session start \\"<label>\\"" or pass --session <id>.');
       process.exit(2);
     }
-    await spine.append(repoRoot, {
+    const hbEv = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.SESSION_HEARTBEAT,
       actor: sessionId,
       lane: flags.lane || null,
       data: { focus: flags.focus || null }
     });
     if (process.stdout.isTTY) console.log(`heartbeat  ${sessionId}`);
+
+    // Focus Director — the per-turn pulse. Tag the trajectory vs the declared
+    // goal (deterministic, cheap — no LLM) and flag sustained drift. Rule-#9
+    // gauntlet: gated on `heartbeat:focus-director`. Best-effort; a focus
+    // failure must never break a heartbeat.
+    try {
+      const gauntlet = await loadLibOptional('gauntlet.mjs');
+      if (gauntlet && await gauntlet.isAllowed(repoRoot, 'heartbeat:focus-director')) {
+        const ft = await loadLibOptional('focus-trigger.mjs');
+        if (ft) {
+          const res = await ft.maybeTagFocus(repoRoot, hbEv, sessionId, { kind: 'heartbeat', id: 'focus-director', fired_at: hbEv.ts });
+          if (res?.flagged && process.stdout.isTTY) {
+            console.log(`  focus: DRIFT FLAGGED (${res.runs} turns off-axis) → \`maddu orient\``);
+          }
+        }
+      }
+    } catch { /* best-effort — never break a heartbeat */ }
     return;
   }
 

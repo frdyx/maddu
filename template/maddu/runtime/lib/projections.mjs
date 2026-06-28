@@ -61,6 +61,10 @@ export async function project(repoRoot) {
   let phase = null;
   // v1.6.0 — curated cross-session handoff (latest HANDOFF_SET wins).
   let handoff = null;
+  // Focus Director — the pilot's attention trail vs the declared goal. Rebuilt
+  // from FOCUS_TAGGED (per-turn tag) + DRIFT_FLAGGED (sustained-drift flag).
+  let focus = { lastTag: null, window: [], openFlag: null, updatedAt: null };
+  const FOCUS_WINDOW_CAP = 12;
 
   // Governance Phase 2: gate runs + tracked-source hashes.
   const gateRuns = [];                        // capped 200
@@ -537,6 +541,32 @@ export async function project(repoRoot) {
       case 'HANDOFF_SET':
         handoff = { body: ev.data.body || '', by: ev.data.by || ev.actor || null, setAt: ev.ts };
         break;
+      case 'FOCUS_TAGGED': {
+        const tag = ev.data?.tag || null;
+        focus.lastTag = tag;
+        focus.window.push({
+          tag,
+          distanceScore: typeof ev.data?.distanceScore === 'number' ? ev.data.distanceScore : null,
+          ts: ev.ts,
+        });
+        if (focus.window.length > FOCUS_WINDOW_CAP) focus.window = focus.window.slice(-FOCUS_WINDOW_CAP);
+        focus.updatedAt = ev.ts;
+        break;
+      }
+      case 'DRIFT_FLAGGED':
+        // Latest wins; an explicit `cleared:true` (operator answered the menu)
+        // resolves the open flag back to null.
+        focus.openFlag = ev.data?.cleared
+          ? null
+          : {
+              reason: ev.data?.reason || '',
+              runs: typeof ev.data?.runs === 'number' ? ev.data.runs : null,
+              menu: Array.isArray(ev.data?.menu) ? ev.data.menu : ['swap', 'revert', 'continue'],
+              workerId: ev.data?.workerId || null,
+              at: ev.ts,
+            };
+        focus.updatedAt = ev.ts;
+        break;
       case 'PHASE_DECLARED':
         phase = {
           name: ev.data.name || '',
@@ -757,6 +787,8 @@ export async function project(repoRoot) {
     // v1.6.0 — latest curated handoff (null if never set).
     handoff,
     phase,
+    // Focus Director — pilot trajectory trail (last tag, rolling window, open flag).
+    focus,
     // Governance Phase 2: gate runs + tracked-source hashes.
     gates: {
       lastRunAt: gatesLastRunAt,

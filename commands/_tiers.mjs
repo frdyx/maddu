@@ -24,6 +24,7 @@
 export default {
   agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
+  focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
   checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
