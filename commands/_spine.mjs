@@ -45,3 +45,29 @@ export async function resolveRepoRoot(paths) {
   // Dev fallback: framework's template/ acts as the .maddu/ host.
   return join(FRAMEWORK_ROOT, 'template');
 }
+
+// Resolve the acting session id for a command. Precedence:
+//   1. explicit --session <id> flag
+//   2. $MADDU_SESSION_ID env var
+//   3. the per-repo active-session cache (.maddu/state/session.active.json)
+//      written by `maddu register` / `maddu session start`.
+//
+// The cache read is liveness-VERIFIED against the spine, so a closed or
+// never-registered pointer never resolves — you get null and the caller
+// errors (or auto-registers) as it would with no session at all. This is
+// what lets a single `maddu register` flow into `lane claim` / `slice-stop`
+// across fresh tool-call shells where the env var doesn't persist: the
+// discipline stops being something an agent must thread by hand on every
+// command, which is the friction that made it get skipped. `sessionActive`
+// is the lib from loadSpineLib() (null on pre-v0.14 installs → cache step
+// is simply skipped, env/flag still work). Returns a string id, or null.
+export async function resolveSessionId(repoRoot, flags, sessionActive) {
+  if (flags && typeof flags.session === 'string' && flags.session.length > 0) return flags.session;
+  const env = process.env.MADDU_SESSION_ID;
+  if (env && env.length > 0) return env;
+  if (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function') {
+    const res = await sessionActive.readActiveSessionVerified(repoRoot);
+    if (res && !res.stale && res.sessionId) return res.sessionId;
+  }
+  return null;
+}

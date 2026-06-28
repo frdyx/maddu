@@ -11,7 +11,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 
 function printLaneHelp() {
   console.log([
@@ -23,7 +23,8 @@ function printLaneHelp() {
     '  claim ... --force                             # pre-empt prior holder',
     '  release --lane <id> --session <id>            # release a claim',
     '',
-    '  --session falls back to $MADDU_SESSION_ID when omitted.',
+    '  --session falls back to $MADDU_SESSION_ID, then the active session',
+    '  set by `maddu register` (no flag/env needed once registered).',
   ].join('\n'));
 }
 
@@ -31,7 +32,7 @@ export default async function lane(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printLaneHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths, spine, projections } = await loadSpineLib();
+  const { paths, spine, projections, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const p = paths.pathsFor(repoRoot);
   await spine.ensureSpine(repoRoot);
@@ -59,12 +60,11 @@ export default async function lane(argv) {
       ? flags.lane
       : (positional && positional[0]);
     if (!lid) { console.error('usage: maddu lane claim <lane-id> [--session <id>] [--focus "..."] [--force]'); process.exit(2); }
-    if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
-    if (!flags.session || flags.session === true) {
-      console.error('--session required (or set MADDU_SESSION_ID)');
+    const sid = await resolveSessionId(repoRoot, flags, sessionActive);
+    if (!sid) {
+      console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
       process.exit(2);
     }
-    const sid = flags.session;
     const proj = await projections.project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === lid);
     if (existing && existing.sessionId !== sid) {
@@ -111,12 +111,11 @@ export default async function lane(argv) {
       ? flags.lane
       : (positional && positional[0]);
     if (!lid) { console.error('usage: maddu lane release <lane-id> [--session <id>]'); process.exit(2); }
-    if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
-    if (!flags.session || flags.session === true) {
-      console.error('--session required (or set MADDU_SESSION_ID)');
+    const sid = await resolveSessionId(repoRoot, flags, sessionActive);
+    if (!sid) {
+      console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
       process.exit(2);
     }
-    const sid = flags.session;
     const proj = await projections.project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === lid);
     if (!existing) {

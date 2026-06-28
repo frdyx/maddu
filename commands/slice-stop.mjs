@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 import { loadLibOptional } from './_libroot.mjs';
 
 function csv(s) {
@@ -66,13 +66,20 @@ export default async function sliceStop(argv) {
   if ((!flags.summary || flags.summary === true) && positional.length > 0) {
     flags.summary = positional[0];
   }
-  // v0.19.1 PR-B1: fall back to MADDU_SESSION_ID env when --session omitted.
-  if (!flags.session || flags.session === true) flags.session = process.env.MADDU_SESSION_ID;
   const summary = requireFlag(flags, 'summary');
-  const sessionId = requireFlag(flags, 'session');
 
-  const { paths, spine, projections, hindsight } = await loadSpineLib();
+  const { paths, spine, projections, hindsight, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
+
+  // v0.19.1 PR-B1: --session falls back to $MADDU_SESSION_ID. v1.73.x: then to
+  // the active-session cache written by `maddu register`, so the slice-stop
+  // ritual records to the spine without the agent threading a session id by
+  // hand on every fresh tool-call shell — the friction that made it skipped.
+  const sessionId = await resolveSessionId(repoRoot, flags, sessionActive);
+  if (!sessionId) {
+    console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
+    process.exit(2);
+  }
 
   // Governance Phase 3: invoke the slice-scope gate before appending.
   // Skipped when no scope is declared for the current slice (opt-in).
