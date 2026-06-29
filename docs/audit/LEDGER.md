@@ -27,19 +27,28 @@ exactly one status with a one-line rationale and a date.
 
 | id | finding | status | disposition / rationale | date |
 |---|---|---|---|---|
-| F1 | Consumers never learn they're stale (no upgrade-staleness nudge) | `open` | Add staleness check to `doctor` INFO + one `orient` line; must degrade silently offline (rule #3). Highest leverage. | 2026-06-30 |
-| F2 | Skills domain is a dead funnel (candidates detected, 0 ever approved/applied across 13 projects) | `open` | Expose open candidates in `orient`/`status` with approve/reject one-liner; re-measure conversion; retire detector if still 0 after exposure. | 2026-06-30 |
-| F3 | 34 dead event types across 8 sub-domains (lane-admin, MCP-mgmt, checkpoints, worker-lifecycle, proposals/pending, slice-extras, approval/inbox, misc) | `open` | Each type → wire / accept-into-`DORMANT_BY_DESIGN` / retire. Per-type table below. | 2026-06-30 |
+| F1 | Consumers never learn they're stale (no upgrade-staleness nudge) | `in-progress` | FLOOR shipped v1.75.0: offline age-from-`released` nudge in `doctor` + `orient` (lib `framework-currency.mjs`, fixture `framework-currency`). The precise "N versions behind" delta needs the fleet aggregator (roadmap #1). | 2026-06-30 |
+| F2 | Skills domain is a dead funnel (candidates detected, 0 ever approved/applied across 13 projects) | `open` | Expose open candidates in `orient`/`status` with approve/reject one-liner; re-measure conversion; retire detector if still 0 after exposure. (Skill types parked as dormant-with-reason in the registry meanwhile.) | 2026-06-30 |
+| F3 | 34 dead event types across 8 sub-domains (lane-admin, MCP-mgmt, checkpoints, worker-lifecycle, proposals/pending, slice-extras, approval/inbox, misc) | `fixed` | Shipped v1.75.0 via DD1: definition-site `event-dispositions.mjs` (every type has a verdict) + `gate:event-dispositions-complete` (FAILs on any undispositioned type) + `DORMANT_BY_DESIGN` now derived from it. `insights` dead count 34 → 0. The class can't recur — adding a type without a disposition fails the gate + the `event-dispositions` fixture. | 2026-06-30 |
 | F4 | Máddu used as a discipline tracker, not an orchestrator (coordinator/loop/pipeline/team fire in 2–5 of 13) | `noted` | Strategic. Either make orchestration more reachable or lean into "disciplined substrate" as the core story. Operator decision. | 2026-06-30 |
 | F5 | Token/cost accounting is single-project (`TOKEN_USAGE_REPORTED` 1/13) | `accepted` (pending confirm) | Tied to a worker-spawn posture only snyggare uses; `maddu cost` empty elsewhere is "unexercised," not "broken." Confirm next audit. | 2026-06-30 |
+| F6 | Releases v1.74.0/.1/.2 were bumped in `version.json` and merged but their git **tags were never created** (last tag `v1.73.0`) | `open` | Surfaced by the new `release-parity` gate on first run. Operator release action: `git tag v1.74.0 <sha> … v1.74.2 <sha>` (and push), or accept the gap. Delivery is recorded in `FIXED-IN.json` regardless. | 2026-06-30 |
 
 ---
 
 ## F3 — dead event-type dispositions
 
-One decision per type. `accept` ⇒ also add to `DORMANT_BY_DESIGN` with the
-reason; `wire` ⇒ the invocation is missing and worth adding; `retire` ⇒ remove
-the defined type. Until decided, a type stays `open` and will keep surfacing.
+**RESOLVED (v1.75.0).** Every type below was `accept`ed as dormant-with-reason
+in the definition-site registry `template/maddu/runtime/lib/event-dispositions.mjs`
+(disp `dormant` + a reason), so `insights` reads them as dormant, not dead
+(dead count 34 → 0). The `event-dispositions-complete` gate now keeps the
+registry in 1:1 parity with `EVENT_TYPES`, so this table is historical — the
+verdicts live in code, not here. To `wire` or `retire` one later, change its
+disposition (or remove it from `EVENT_TYPES`); the gate enforces the rest.
+
+One decision per type. `accept` ⇒ disp `dormant` + reason in the registry;
+`wire` ⇒ the invocation is missing and worth adding; `retire` ⇒ remove the
+defined type. All rows below are now `accepted` unless noted.
 
 | type | domain | proposed | status |
 |---|---|---|---|

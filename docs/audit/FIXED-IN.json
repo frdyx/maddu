@@ -14,6 +14,13 @@
     "ledger_ref": "F1"
   },
   {
+    "symptom": "34 event types accumulated as 'dead' because nothing forced a disposition when a type was defined; the dead-domain surface could only ever grow.",
+    "area": "runtime/lib/event-dispositions + gates/event-dispositions-complete + insights",
+    "fixed_in": "1.75.0",
+    "consumer_impact": "DD1: every EVENT_TYPES key carries a definition-site disposition; a gate holds the registry in 1:1 parity; DORMANT_BY_DESIGN is derived from it. insights dead count 34 -> 0.",
+    "ledger_ref": "F3"
+  },
+  {
     "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
     "area": "gates/generated-artifacts-current",
     "fixed_in": "1.73.1",
