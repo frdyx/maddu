@@ -1,6 +1,6 @@
 {
   "name": "maddu",
-  "version": "1.74.2",
+  "version": "1.75.0",
   "description": "The Source of local truth — a files-only, local-first orchestration framework for AI agents inside any git repo.",
   "type": "module",
   "bin": {
