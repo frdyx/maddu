@@ -1,0 +1,44 @@
+[
+  {
+    "symptom": "Consumers never learned an install was stale; doctor checked integrity vs the install's own manifest, never vs latest, so a 55-versions-behind install passed green forever.",
+    "area": "doctor/orient",
+    "fixed_in": "1.75.0",
+    "consumer_impact": "doctor + orient now surface an offline staleness FLOOR (age from version.json released date) nudging `maddu upgrade`.",
+    "ledger_ref": "F1"
+  },
+  {
+    "symptom": "A consumer-impacting fix could be dogfooded in-tree but shipped to consumers as the un-fixed path, with nothing coupling the change to a release that records it.",
+    "area": "gates/release-parity",
+    "fixed_in": "1.75.0",
+    "consumer_impact": "release-parity gate: an impacting change carried by a version bump must record what it delivers here; pending impacting changes WARN as delivery debt.",
+    "ledger_ref": "F1"
+  },
+  {
+    "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
+    "area": "gates/generated-artifacts-current",
+    "fixed_in": "1.73.1",
+    "consumer_impact": "Gate skips on the positive source-checkout marker instead of inferring consumer-vs-source from per-target absence.",
+    "ledger_ref": "consumer-install-hardening"
+  },
+  {
+    "symptom": "An agent built a whole feature in a fresh install with 0 sessions/lanes/slice-stops because the discipline ritual was agent-convention, not enforced.",
+    "area": "commands/_spine,lane,slice,slice-stop + commands/hooks",
+    "fixed_in": "1.74.0",
+    "consumer_impact": "resolveSessionId precedence (flag -> env -> liveness-verified active-session cache) so one `maddu register` flows everywhere, plus `maddu hooks install` wiring SessionStart/SessionEnd.",
+    "ledger_ref": "consumer-install-hardening"
+  },
+  {
+    "symptom": "Windows core.autocrlf rewrote all framework files to CRLF on checkout, so byte-exact integrity hashes mismatched and `upgrade` skipped every file (half-upgrade).",
+    "area": "commands/_manifest + gates/install-integrity",
+    "fixed_in": "1.74.1",
+    "consumer_impact": "Integrity hashing EOL-normalizes text (lossless latin1 CRLF->LF), hashes binary raw; init writes a maddu-scoped .gitattributes.",
+    "ledger_ref": "consumer-install-hardening"
+  },
+  {
+    "symptom": "init tracked all of .maddu/ in git, so the perpetually-rewritten spine + projections churned the working tree and blocked branch switches.",
+    "area": "commands/init + gates/maddu-state-untracked",
+    "fixed_in": "1.74.2",
+    "consumer_impact": "Policy-A .gitignore (ignore .maddu/* except durable authored artifacts) + a maddu-state-untracked gate that prints the non-destructive `git rm -r --cached` for older installs.",
+    "ledger_ref": "consumer-install-hardening"
+  }
+]
