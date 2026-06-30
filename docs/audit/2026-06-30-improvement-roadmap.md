@@ -15,7 +15,9 @@ structurally prevents from recurring.
 > auto-detector) · **#10 `maddu fleet upgrade --plan` (v1.82.0 — planner leg;
 > mutation is a follow-up) · **#10-mutation `--apply` (v1.83.0 — staged delivery,
 > halt-on-red) · **#13 compat spine (v1.84.0 — schema stamp + total reader +
-> can-read-old-state gate)**. **Open:** #8 lesson federation, #14 cost ledger.
+> can-read-old-state gate) · **#8 lesson federation (v1.85.0 — `maddu learn
+> sync`, portable-by-recurrence/@portable, adopt approval-only)**. **Open:** #14
+> cost ledger (S, optional — F5 accepted).
 
 > **Top pick — `fleet-spine`.** The one clean SHIP (impact 5 / effort 3 /
 > leverage 5), fully offline + files-only, and the substrate nearly every other

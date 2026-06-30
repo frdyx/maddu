@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "maddu learn distils corrections per-repo but they stay siloed — a lesson learned the hard way in one repo (e.g. a shell/path quirk) never reaches the next, so the fleet re-learns the same things independently.",
+    "area": "commands/learn + runtime/lib/lesson-federation",
+    "fixed_in": "1.85.0",
+    "consumer_impact": "`maddu learn sync` reads sibling repos' corrections (fleet registry, local disk) and surfaces portable ones (recur in >=2 repos OR @portable), deduped + redacted; `--adopt` writes them into CLAUDE.md (approval-only) as first-class local corrections with federated provenance.",
+    "ledger_ref": "roadmap-8"
+  },
+  {
     "symptom": "fleet upgrade delivers new framework code into installs as old as v1.15, but new code reading a projection shaped by old code could crash on a key the old shape never had — a silent, field-by-field surprise discovered one install at a time.",
     "area": "runtime/lib/projections + gates/can-read-old-state",
     "fixed_in": "1.84.0",
