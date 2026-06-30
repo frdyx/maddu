@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.82.0] · 2026-06-30 · roadmap #10 — `maddu fleet upgrade --plan` (the F1 delivery leg)
+
+`maddu fleet` (v1.76.0) answered "who is behind?" but the operator still had to walk into each repo and run `maddu upgrade` by hand — the "fixed in-tree, never received" gap, structurally. This ships the **planner** half (the roadmap's mandated `--plan`-first leg).
+
+- **`maddu fleet upgrade --plan`.** A read-only, offline preview of what a fleet delivery WOULD do, per behind active repo: the **quiescence interlock** (any of {active lane claim, dirty git tree, recent spine activity <10m} marks a repo *blocked* with the reason, else *eligible*) and the **managed-byte delta** (changed/added/removed, computed from the canonical manifest vs the repo's recorded `maddu.json` hashes). Live, it immediately mapped 12 behind repos → 4 eligible / 8 blocked. `--json` for tooling.
+- **Two safety rules are pure, fixture-tested logic** (lib `fleet-upgrade.mjs`): the quiescence interlock, and a byte delta computed over **managed files only** — the live spine (`.maddu/events/`) is never a managed file, so it can never appear in a plan or be rolled back.
+- **The mutation is a deliberate follow-up.** The bare `maddu fleet upgrade` is guarded (points you at `--plan`) so there's no half-built delivery path. The staged mutation — snapshot managed bytes (never the spine), deliver, per-repo `doctor` halt-on-red — lands next. Fixture `fleet-upgrade` (17/0).
+
+audit 16/0, self-test 95/95, architecture drift 0.
+
 ## [v1.81.0] · 2026-06-30 · roadmap #5 — retire the dead skill funnel (F2)
 
 Audit finding F2: the autonomous skill-candidate detector fired (`SKILL_CANDIDATE_DETECTED`, 11× / 4 projects) but **every** downstream terminal was 0 across all 13 installs. The roadmap mandated a **skills-vs-`learn` spike first** — and it was decisive: the candidates are generic tag-set recurrences (`commit, test` · `plan, test` · `loop, test`), not reusable recipes, while `maddu learn` already does the valuable auto-capture (failure→success tool-call pairs → concrete corrections). Surfacing such candidates more prominently would only spam the operator. **Decision: retire the auto-detector.**
