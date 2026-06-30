@@ -140,6 +140,13 @@ export default async function orient(argv) {
     currency = currencyLib.currencyVerdict({ released: meta.released, version: meta.version });
   }
 
+  // Last gate verdict (roadmap #9) — the discipline loop's missing signal: is
+  // the work green right now? Computed from the GATE_RAN events orient already
+  // holds, with legible failures (event id + repro) instead of a stack trace.
+  let gates = null;
+  const gateLedgerLib = await loadLibOptional('gate-ledger.mjs');
+  if (gateLedgerLib?.summarizeGates) gates = gateLedgerLib.summarizeGates(events);
+
   if (flags.json) {
     process.stdout.write(JSON.stringify({
       project, branch, phase: phaseName, updated,
@@ -150,6 +157,11 @@ export default async function orient(argv) {
       recentSliceStops: trail, openApprovals: approvals.length, activeClaims: claims.length,
       decisionPending,
       currency: currency ? { level: currency.level, ageDays: currency.ageDays, message: currency.message } : null,
+      gates: gates ? {
+        ran: gates.ran, green: gates.green, ok: gates.ok, warn: gates.warn, fail: gates.fail,
+        lastTs: gates.lastTs,
+        failing: gates.failing.map((f) => ({ gateId: f.gateId, severity: f.severity, eventId: f.eventId, repro: gateLedgerLib.reproForGate(f.gateId) })),
+      } : null,
     }, null, 2) + '\n');
     return;
   }
@@ -159,6 +171,21 @@ export default async function orient(argv) {
   if (currency && currency.level !== 'PASS') {
     const tone = currency.level === 'WARN' ? C.unver : C.pending;
     console.log(`  ${tone}⟳ framework ${currency.message}${C.reset}`);
+  }
+
+  // One-glance card (roadmap #9): gate verdict · goal progress · next action,
+  // in a single line so the operator sees red/green before reading anything.
+  {
+    const parts = [];
+    if (gates && gates.ran) {
+      if (gates.green) parts.push(`${C.met}✓ gates green${C.reset}${C.dim} (${gates.ok} ok${gates.warn ? `, ${gates.warn} warn` : ''})${C.reset}`);
+      else parts.push(`${C.unver}✗ ${gates.fail} gate(s) failing${C.reset}`);
+    } else {
+      parts.push(`${C.dim}gates: none run yet${C.reset}`);
+    }
+    parts.push(goal ? `goal ${metCount}/${success.length} met` : `${C.unver}no goal${C.reset}`);
+    parts.push(decisionPending ? `${C.bold}▸ decision pending${C.reset}` : (pendingCount ? `▸ ${pendingCount} pending` : `${C.met}▸ ready${C.reset}`));
+    console.log(`  ${parts.join(`${C.dim}  ·  ${C.reset}`)}`);
   }
 
   if (!goal) {
@@ -178,6 +205,18 @@ export default async function orient(argv) {
   console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}COUNTERS${C.reset}\n${C.dim}${RULE}${C.reset}`);
   console.log(`  Sessions: ${counters.sessions}   Slices: ${counters.slices}   Pipelines: ${counters.pipelines}`);
   console.log(`  Workers: ${counters.workers}   Reviews: ${counters.reviews}   Checkpoints: ${counters.checkpoints}`);
+
+  // Legible gate verdict (roadmap #9): only when there's something to act on.
+  // Failures show id + severity + the spine event id + the exact repro — never
+  // a stack trace. Warnings stay compact (advisory).
+  if (gates && gates.ran && (gates.fail || gates.warn)) {
+    console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}GATES${C.reset}${gates.lastTs ? C.dim + '  (last run ' + gates.lastTs + ')' + C.reset : ''}\n${C.dim}${RULE}${C.reset}`);
+    console.log(`  ${gates.ok} pass · ${gates.warn} warn · ${gates.fail} fail`);
+    for (const f of gates.failing) console.log(`  ${C.unver}✗${C.reset} ${gateLedgerLib.formatFailure(f)}`);
+    if (gates.warning.length) {
+      console.log(`  ${C.dim}⚠ warn: ${gates.warning.map((w) => w.gateId).join(', ')}${C.reset}`);
+    }
+  }
 
   if (timeline.length) {
     console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}RECENT TIMELINE${C.reset} (last ${timeline.length})\n${C.dim}${RULE}${C.reset}`);
