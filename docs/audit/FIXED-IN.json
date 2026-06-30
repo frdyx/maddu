@@ -21,6 +21,20 @@
     "ledger_ref": "F3"
   },
   {
+    "symptom": "Version skew, liveness, and the delivery delta were invisible fleet-wide; the bridge knew every workspace path but read one repo at a time.",
+    "area": "runtime/lib/fleet + commands/fleet",
+    "fixed_in": "1.76.0",
+    "consumer_impact": "`maddu fleet`: read-only single-machine view of every registered repo's version/currency/liveness + the version delta vs fleet latest, computed offline without running them.",
+    "ledger_ref": "F1"
+  },
+  {
+    "symptom": "The cross-project audit was a manual one-off; nothing made it recurring/self-proving, so settled findings could re-surface and a guardrail could be silently removed.",
+    "area": "runtime/lib/audit-ledger + gates/audit-ledger-coherent + docs/audit/LEDGER.json",
+    "fixed_in": "1.76.0",
+    "consumer_impact": "audit-ledger-coherent gate: a `fixed` finding must backref a registered guardrail gate, so a guardrail can't vanish while the ledger claims the class is handled.",
+    "ledger_ref": "F2"
+  },
+  {
     "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
     "area": "gates/generated-artifacts-current",
     "fixed_in": "1.73.1",

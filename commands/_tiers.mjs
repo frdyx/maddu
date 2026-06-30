@@ -30,6 +30,7 @@ export default {
   checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   doctor:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
   events:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
+  fleet:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
   global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
   import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
