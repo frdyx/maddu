@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "fleet upgrade delivers new framework code into installs as old as v1.15, but new code reading a projection shaped by old code could crash on a key the old shape never had — a silent, field-by-field surprise discovered one install at a time.",
+    "area": "runtime/lib/projections + gates/can-read-old-state",
+    "fixed_in": "1.84.0",
+    "consumer_impact": "project() stamps schemaVersion; normalizeProjection(raw) reads any old/partial/garbage projection into a total current-shape object (all keys present, nested deep-defaulted, never a throw); the can-read-old-state gate enforces the reader stays total.",
+    "ledger_ref": "roadmap-13"
+  },
+  {
     "symptom": "maddu fleet upgrade --plan previewed a delivery but the operator still had to deliver by hand — the F1 'fixed in-tree, never received' gap was only half-closed. No safe, interlocked staged delivery across the fleet.",
     "area": "commands/fleet + commands/_tiers + runtime/lib/fleet-upgrade",
     "fixed_in": "1.83.0",

@@ -1,5 +1,5 @@
 {
-  "version": "1.83.0",
-  "phase": "fleet-upgrade-apply",
+  "version": "1.84.0",
+  "phase": "compat-spine",
   "released": "2026-06-30"
 }

@@ -9,6 +9,12 @@
 
 import { readAll, STUCK_THRESHOLD_MS } from './spine.mjs';
 
+// Projection schema version (roadmap #13, compat spine). Stamped into every
+// project() result so a reader can tell which shape it's holding. Bump this when
+// the projection's top-level shape changes in a way a reader must know about. A
+// projection with NO schemaVersion is legacy (pre-v1.84) and reads as 0.
+export const SCHEMA_VERSION = 1;
+
 export async function project(repoRoot) {
   const events = await readAll(repoRoot);
 
@@ -767,6 +773,7 @@ export async function project(repoRoot) {
   }
 
   return {
+    schemaVersion: SCHEMA_VERSION,
     lastEventId,
     eventCount: events.length,
     sessions: Array.from(sessions.values()),
@@ -870,4 +877,59 @@ function annotateWorker(w) {
 
 function policyKeyFor(tool, lane) {
   return `${tool || '*'}@${lane || '*'}`;
+}
+
+// ── Compat reader (roadmap #13) — read an OLD install's state safely ─────────
+// `maddu fleet upgrade` now delivers new code into installs as old as v1.15. New
+// code that reads a projection persisted (or rebuilt) by old code can crash on a
+// key the old shape never had — a silent, field-by-field surprise. The fix: one
+// versioned reader that default-fills every top-level (and known nested) key, so
+// reading old state is total. `can-read-old-state` gate enforces it stays total.
+
+// A fresh, fully-defaulted projection — every key project() returns, empty.
+// A factory (not a shared const) so callers can mutate the result freely.
+export function projectionDefaults() {
+  return {
+    schemaVersion: 0, // 0 = legacy/unstamped until normalized
+    lastEventId: null,
+    eventCount: 0,
+    sessions: [], activeSessions: [], claims: [], sliceStops: [], inbox: [],
+    approvals: { open: [], ledger: [], policies: [] },
+    tasks: [], workers: [], proposals: [], bossTranscripts: {},
+    goal: null, handoff: null, phase: null, focus: null,
+    gates: { lastRunAt: null, runs: [], summary: { ok: 0, warn: 0, fail: 0 } },
+    sourceHashes: { paths: {}, lastRecomputedAt: null },
+    sliceLocks: {}, triggers: {}, pendingActions: [],
+    reviews: { byVerdict: {}, recent: [] },
+    openFollowups: [], sessionsTree: {},
+    janitor: { lastRunAt: null, staleSessions: [], autoClosedTotal: 0 },
+    teams: [], pipelines: [], advisors: [], tokenLedger: [], skillInjections: [],
+  };
+}
+
+// A projection is legacy if it predates the schema stamp (no numeric
+// schemaVersion) or carries an older one than the code now expects.
+export function isLegacyProjection(raw) {
+  const v = raw && typeof raw.schemaVersion === 'number' ? raw.schemaVersion : 0;
+  return v < SCHEMA_VERSION;
+}
+
+// Read any projection (current, legacy, partial, or garbage) into a TOTAL
+// current-shape object: every top-level key present, the known nested objects
+// (approvals/gates/sourceHashes/reviews/janitor) deep-defaulted so e.g.
+// `normalizeProjection(old).gates.runs` is always an array. Records the source
+// version under `sourceSchemaVersion` and stamps the output at SCHEMA_VERSION.
+export function normalizeProjection(raw) {
+  const r = (raw && typeof raw === 'object') ? raw : {};
+  const d = projectionDefaults();
+  const out = { ...d, ...r };
+  out.approvals = { ...d.approvals, ...(r.approvals && typeof r.approvals === 'object' ? r.approvals : {}) };
+  out.gates = { ...d.gates, ...(r.gates && typeof r.gates === 'object' ? r.gates : {}) };
+  out.gates.summary = { ...d.gates.summary, ...(r.gates && r.gates.summary && typeof r.gates.summary === 'object' ? r.gates.summary : {}) };
+  out.sourceHashes = { ...d.sourceHashes, ...(r.sourceHashes && typeof r.sourceHashes === 'object' ? r.sourceHashes : {}) };
+  out.reviews = { ...d.reviews, ...(r.reviews && typeof r.reviews === 'object' ? r.reviews : {}) };
+  out.janitor = { ...d.janitor, ...(r.janitor && typeof r.janitor === 'object' ? r.janitor : {}) };
+  out.sourceSchemaVersion = (typeof r.schemaVersion === 'number') ? r.schemaVersion : 0;
+  out.schemaVersion = SCHEMA_VERSION;
+  return out;
 }
