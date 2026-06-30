@@ -11,6 +11,14 @@ narrative summary.
 
 ---
 
+## [v1.78.0] · 2026-06-30 · roadmap #7 — the governance surface is itself budgeted
+
+The audit program's fixes for F3 (dead domains) and F4 (discipline-vs-orchestration) were both *more machinery* — gates, registries, verbs. Unbudgeted, that cure becomes the next F3/F4: the enforcement layer bloats faster than dead surface retires. This caps it.
+
+- **Governance-budget (roadmap #7).** A self-applying cap inside `maddu audit` (also `maddu audit budget`). Each governance category — **gates**, **CLI verbs**, **audit checks** — has a ceiling in `docs/audit/governance-budget.json`, and the audit reads every count from **ground truth** (`discoverGates`, `bin` COMMANDS, the audit's own check registry) so nothing is hand-maintained. Over a cap → **FAIL** unless you retire/merge something **or** add a waiver row — each waiver raises that category's effective ceiling by exactly one and shows as recorded debt (**WARN**), so the escape hatch is never silent. The `audit-checks` category measures *itself*, so adding a future audit check bites the same budget. Folds in a relative **self-test latency** signal (WARN, never FAIL) from the last recorded run's `durationMs`. Pure lib `governance-budget.mjs`, fixture `governance-budget` (20/0). Caps ship with deliberate headroom (gates 66/70 · verbs 66/70 · audit-checks 15/17), so the cap is green on arrival and bites the *next* unchecked growth.
+
+audit 15/0, self-test 91/91, architecture drift 0.
+
 ## [v1.77.0] · 2026-06-30 · audit sprint 3 — the outcome ledger (does the guardrail edifice earn its weight?)
 
 Every prior sprint counted events, dispositions, or deliveries. None measured whether the guardrails actually **change an outcome**. The outcome ledger does.
