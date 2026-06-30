@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { project } from './projections.mjs';
 import { readRegistry } from './workspaces.mjs';
 import { currencyVerdict } from './framework-currency.mjs';
+import { countCatches } from './outcome.mjs';
 
 const DAY_MS = 86400000;
 // Liveness tiers, in days since the last spine event.
@@ -110,6 +111,7 @@ export async function digestRepo(workspace, now = Date.now()) {
     lastActivity: lastActivity != null ? new Date(lastActivity).toISOString() : null,
     eventCount: proj ? (proj.eventCount || 0) : 0,
     gatePassRate: proj ? gatePassRate(proj.gates) : null,
+    caught: proj && proj.gates ? countCatches(proj.gates.runs) : { total: 0, hard: 0, soft: 0 },
     lastSlice: lastStop ? { ts: lastStop.ts, summary: (lastStop.summary || '').split('\n')[0].slice(0, 100) } : null,
     goal: proj && proj.goal ? (proj.goal.objective || null) : null,
     readable: !!proj,
@@ -130,6 +132,12 @@ export function aggregate(digests, now = Date.now()) {
   const activeRepos = repos.filter((r) => r.liveness === 'active');
   const behindActive = activeRepos.filter((r) => r.behind);
   const staleActive = activeRepos.filter((r) => r.currency.level === 'WARN');
+  // PREVENTED_FAULTs caught across active repos (roadmap #11) — the proof the
+  // guardrails earn their weight.
+  const caughtActive = activeRepos.reduce((acc, r) => {
+    const c = r.caught || { total: 0, hard: 0, soft: 0 };
+    return { total: acc.total + c.total, hard: acc.hard + c.hard, soft: acc.soft + c.soft };
+  }, { total: 0, hard: 0, soft: 0 });
   return {
     generatedAt: new Date(now).toISOString(),
     fleetLatest,
@@ -140,6 +148,7 @@ export function aggregate(digests, now = Date.now()) {
       behind: behindActive.length,
       behindIds: behindActive.map((r) => r.id),
       staleWarn: staleActive.length,
+      caught: caughtActive,
     },
     repos,
   };

@@ -11,6 +11,14 @@ narrative summary.
 
 ---
 
+## [v1.77.0] · 2026-06-30 · audit sprint 3 — the outcome ledger (does the guardrail edifice earn its weight?)
+
+Every prior sprint counted events, dispositions, or deliveries. None measured whether the guardrails actually **change an outcome**. The outcome ledger does.
+
+- **Prevented-fault counter (F11, roadmap #11).** `outcome.mjs` counts the faults the gates caught: every gate run that FAILED is a recorded PREVENTED_FAULT, split hard (would-block) vs soft (warn) by severity and tallied per gate. `isCatch()` is the single source of truth, shared by `buildOutcome` (all-time over the spine) and `countCatches` (the projection's recent capped window). The **`maddu fleet`** view now shows per-repo `⚿ N caught` and an active-fleet headline ("N fault(s) caught by guardrails across active repos"). Fixture `outcome` (11/0); `fleet-aggregate` extended (22/0).
+
+audit 14/0, self-test 90/90, architecture drift 0.
+
 ## [v1.76.0] · 2026-06-30 · audit sprint 2 — Fleet Spine + the self-verifying audit circuit
 
 The roadmap's keystone: turn the *manual* cross-repo audit into standing instruments.

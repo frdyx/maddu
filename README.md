@@ -10,7 +10,7 @@
 
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps the permanent record — the **spine** — so their work has a memory and an audit trail instead of vanishing when the session closes.
 
-[![Version 1.76.0](https://img.shields.io/badge/version-1.76.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.77.0](https://img.shields.io/badge/version-1.77.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -87,7 +87,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.76.0 installed.
+Máddu v1.77.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 

@@ -52,10 +52,10 @@ ok('no runs → null', gatePassRate({ runs: [] }) === null && gatePassRate({}) =
 
 // ── the rollup: ACTIVE-scoped, with the version delta ──
 const digests = [
-  { id: 'canonical', version: '1.75.0', liveness: 'active', currency: { level: 'PASS' } },
-  { id: 'cairn',     version: '1.18.1', liveness: 'active', currency: { level: 'WARN' } },
-  { id: 'fresh',     version: '1.75.0', liveness: 'active', currency: { level: 'PASS' } },
-  { id: 'olddead',   version: '0.19.0', liveness: 'abandoned', currency: { level: 'WARN' } }, // must NOT count
+  { id: 'canonical', version: '1.75.0', liveness: 'active', currency: { level: 'PASS' }, caught: { total: 3, hard: 2, soft: 1 } },
+  { id: 'cairn',     version: '1.18.1', liveness: 'active', currency: { level: 'WARN' }, caught: { total: 2, hard: 2, soft: 0 } },
+  { id: 'fresh',     version: '1.75.0', liveness: 'active', currency: { level: 'PASS' }, caught: { total: 0, hard: 0, soft: 0 } },
+  { id: 'olddead',   version: '0.19.0', liveness: 'abandoned', currency: { level: 'WARN' }, caught: { total: 9, hard: 9, soft: 0 } }, // must NOT count
 ];
 const fleet = aggregate(digests, NOW);
 ok('fleetLatest = highest version', fleet.fleetLatest === '1.75.0', fleet.fleetLatest);
@@ -65,6 +65,8 @@ ok('ACTIVE-scoped behind excludes the abandoned old repo', fleet.active.behind =
   JSON.stringify(fleet.active));
 ok('ACTIVE-scoped staleWarn excludes abandoned', fleet.active.staleWarn === 1, String(fleet.active.staleWarn));
 ok('active total excludes abandoned', fleet.active.total === 3, String(fleet.active.total));
+ok('ACTIVE-scoped caught excludes the abandoned repo (5 not 14)', fleet.active.caught.total === 5 && fleet.active.caught.hard === 4 && fleet.active.caught.soft === 1,
+  JSON.stringify(fleet.active.caught));
 
 // ── empty fleet degrades cleanly ──
 const empty = aggregate([], NOW);

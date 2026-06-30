@@ -83,7 +83,8 @@ export default async function fleet(argv) {
     const curStr = cur.level === 'WARN' ? `${C.red}stale${C.reset}` : (cur.level === 'INFO' ? `${C.yellow}aging${C.reset}` : `${C.dim}ok${C.reset}`);
     const gate = r.gatePassRate;
     const gateStr = gate ? `${gate.ok}/${gate.total} gates` : `${C.dim}no gates${C.reset}`;
-    console.log(`  ${live.dot} ${pad(r.label, 22)} ${pad(ver, 9)} ${pad(behindTag, 18)} ${pad(curStr, 14)} ${pad(ageStr, 6)} ${C.dim}${gateStr}${C.reset}`);
+    const caught = r.caught && r.caught.total ? `${C.cyan}⚿ ${r.caught.total}${C.reset}` : `${C.dim}⚿ 0${C.reset}`;
+    console.log(`  ${live.dot} ${pad(r.label, 22)} ${pad(ver, 9)} ${pad(behindTag, 18)} ${pad(curStr, 14)} ${pad(ageStr, 6)} ${pad(gateStr, 12)} ${C.dim}·${C.reset} ${caught}`);
     if (r.lastSlice && r.lastSlice.summary) {
       console.log(`     ${C.dim}↳ ${r.lastSlice.summary.replace(/^SLICE STOP:\s*/i, '')}${C.reset}`);
     }
@@ -99,5 +100,8 @@ export default async function fleet(argv) {
   }
   if (a.staleWarn > 0) {
     console.log(`  ${C.red}⚠${C.reset} ${a.staleWarn} active repo(s) flagged stale (>90d since release)`);
+  }
+  if (a.caught && a.caught.total > 0) {
+    console.log(`  ${C.cyan}⚿${C.reset} ${a.caught.total} fault(s) caught by guardrails across active repos ${C.dim}(${a.caught.hard} hard · ${a.caught.soft} soft · recent window)${C.reset}`);
   }
 }
