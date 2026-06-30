@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.84.0] · 2026-06-30 · roadmap #13 — compat spine (read an old install safely)
+
+`maddu fleet upgrade` (v1.82–83) now delivers new framework code into installs as old as **v1.15**. New code that reads a projection shaped by old code can crash on a key the old shape never carried — a silent, field-by-field surprise discovered one install at a time. This makes reading old state **total**.
+
+- **Schema stamp.** `project()` now stamps `schemaVersion` (`projections.SCHEMA_VERSION`, currently 1) into every result, so a reader can tell which shape it holds. A projection with no stamp is legacy (reads as 0).
+- **Versioned reader.** `normalizeProjection(raw)` turns ANY projection — current, legacy, partial, or garbage — into a total current-shape object: every top-level key present and the known nested objects (`approvals`/`gates`/`sourceHashes`/`reviews`/`janitor`) deep-defaulted, so `normalizeProjection(old).gates.runs` is always an array, never a throw. `projectionDefaults()` (fresh factory) + `isLegacyProjection()` round it out.
+- **`can-read-old-state` gate.** Enforces the reader stays total against representative legacy shapes (pre-stamp, pre-gates, partial, garbage) — synthesized, not vendored from real installs, so no private spine content lands in this public repo. Fixture `compat-spine` (15/0).
+
+audit 16/0, self-test 96/96, architecture drift 0. (Governance budget: gates 68/70.)
+
 ## [v1.83.0] · 2026-06-30 · roadmap #10-mutation — `maddu fleet upgrade --apply` (staged delivery)
 
 The planner (v1.82.0) previewed who's behind and who's safe to touch; this delivers. It completes the F1 arc — `maddu fleet` *detects*, `--plan` *previews*, `--apply` *delivers* — closing the "fixed in-tree, never received" gap structurally.
