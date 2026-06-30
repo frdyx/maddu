@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "maddu fleet upgrade --plan previewed a delivery but the operator still had to deliver by hand — the F1 'fixed in-tree, never received' gap was only half-closed. No safe, interlocked staged delivery across the fleet.",
+    "area": "commands/fleet + commands/_tiers + runtime/lib/fleet-upgrade",
+    "fixed_in": "1.83.0",
+    "consumer_impact": "`maddu fleet upgrade --apply` (scoped --only/--all): delivers canonical bytes to eligible behind repos by reusing the proven `maddu upgrade` engine. Per repo, sequential: re-check quiescence, snapshot managed bytes (never .maddu/events), upgrade, doctor — halt-on-red. `fleet` reclassified mutating/auto-forbidden.",
+    "ledger_ref": "F1"
+  },
+  {
     "symptom": "maddu fleet detects who is behind but delivery was manual — the operator had to walk into each repo and run `maddu upgrade` by hand (the 'fixed in-tree, never received' gap, F1 delivery leg). No safe preview of what a fleet-wide upgrade would change or which repos are safe to touch.",
     "area": "commands/fleet + runtime/lib/fleet-upgrade",
     "fixed_in": "1.82.0",

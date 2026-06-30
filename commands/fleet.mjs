@@ -19,10 +19,14 @@
 
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { loadLib } from './_libroot.mjs';
 import { frameworkOwnedFiles, sha256OfFile, frameworkVersion } from './_manifest.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SOURCE_BIN = join(__dirname, '..', 'bin', 'maddu.mjs');
 
 const C = {
   bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
@@ -114,12 +118,14 @@ export default async function fleet(argv) {
   }
 }
 
-// ── `maddu fleet upgrade` (roadmap #10) — the staged-delivery PLANNER ───────
-// `--plan` ships first: a read-only preview of what a fleet delivery WOULD do,
-// per behind repo — quiescence (safe to touch?) + the managed-byte delta. The
-// actual mutation (snapshot managed bytes, deliver, per-repo doctor halt-on-red)
-// is a deliberate follow-up; the bare verb is guarded until then so there is no
-// half-built mutation path.
+// ── `maddu fleet upgrade` (roadmap #10) — staged delivery ──────────────────
+// `--plan`  : read-only preview (quiescence + managed-byte delta). No mutation.
+// `--apply` : deliver to ELIGIBLE behind repos. Must be scoped (`--only <id>`
+//             or `--all`). Per repo, in sequence: re-check quiescence, snapshot
+//             the managed bytes a delivery would overwrite (NEVER .maddu/events),
+//             spawn the proven `maddu upgrade` engine with cwd=<target>, then run
+//             that repo's doctor — and HALT the whole run on the first red.
+// The bare verb (neither flag) is guarded so there is no accidental mutation.
 
 // The canonical manifest the source ships now: { relPath: sha256 } over managed
 // files. Empty when not run from a source checkout (consumer installs have no
@@ -153,12 +159,45 @@ function gitDirty(repoRoot) {
   } catch { return false; }
 }
 
+// Build the per-repo plan rows (behind active repos + quiescence + byte delta).
+// Shared by --plan and --apply so they can never disagree. now injected.
+async function collectPlanRows(up, fleetLib, canonical, now) {
+  const report = await fleetLib.buildFleet({ now });
+  const projections = await loadLib('projections.mjs');
+  const behind = report.repos.filter((r) => r.liveness === 'active' && r.behind);
+  const rows = [];
+  for (const r of behind) {
+    const recorded = await recordedManifest(r.path);
+    let activeClaims = 0;
+    try { const proj = await projections.project(r.path); activeClaims = Array.isArray(proj.claims) ? proj.claims.length : 0; } catch {}
+    const dirty = gitDirty(r.path);
+    const lastActivityMs = r.lastActivity ? Date.parse(r.lastActivity) : null;
+    const quiescence = up.quiescenceVerdict({ activeClaims, dirty, lastActivityMs, now });
+    const delta = recorded ? up.byteDelta(canonical, recorded) : null;
+    rows.push({ id: r.id, label: r.label, path: r.path, version: r.version, quiescence, delta, readable: !!recorded });
+  }
+  return { report, rows };
+}
+
+// Re-check quiescence for ONE repo immediately before touching it (TOCTOU: a
+// repo could have become busy between the plan and this moment).
+async function recheckQuiescence(up, repo, now) {
+  let activeClaims = 0;
+  try { const projections = await loadLib('projections.mjs'); const proj = await projections.project(repo.path); activeClaims = Array.isArray(proj.claims) ? proj.claims.length : 0; } catch {}
+  const dirty = gitDirty(repo.path);
+  // lastActivity is re-read coarsely from the original digest; the lane/dirty
+  // signals are the live ones that matter most for a just-in-time recheck.
+  return up.quiescenceVerdict({ activeClaims, dirty, lastActivityMs: null, now });
+}
+
 async function fleetUpgrade(flags, fleetLib) {
   const isPlan = !!flags.plan;
-  if (!isPlan) {
-    console.error('maddu fleet upgrade: staged delivery is not yet implemented.');
-    console.error('  Run `maddu fleet upgrade --plan` to preview what a delivery would do.');
-    console.error('  (The mutating delivery — snapshot managed bytes, deliver, per-repo doctor halt-on-red — lands in a follow-up.)');
+  const isApply = !!flags.apply;
+  if (!isPlan && !isApply) {
+    console.error('maddu fleet upgrade: choose a mode.');
+    console.error('  --plan                 preview what a delivery would do (read-only)');
+    console.error('  --apply --only <repo>  deliver to one eligible repo');
+    console.error('  --apply --all          deliver to every eligible repo');
     process.exit(2);
   }
 
@@ -170,37 +209,23 @@ async function fleetUpgrade(flags, fleetLib) {
 
   const canonical = await buildCanonicalManifest();
   if (Object.keys(canonical).length === 0) {
-    console.error('maddu fleet upgrade --plan: no canonical framework manifest found.');
+    console.error('maddu fleet upgrade: no canonical framework manifest found.');
     console.error('  Run this from the canonical Máddu source checkout (the delivery source of truth), not a consumer install.');
     process.exit(2);
   }
   const srcVersion = await frameworkVersion();
-
   const now = Date.now();
-  const report = await fleetLib.buildFleet({ now });
-  const projections = await loadLib('projections.mjs');
+  const { report, rows } = await collectPlanRows(up, fleetLib, canonical, now);
 
-  // Plan only the behind ACTIVE repos — abandoned/dormant repos aren't delivery
-  // targets, and a current repo needs nothing.
-  const targets = report.repos.filter((r) => r.liveness === 'active' && r.behind);
-  const rows = [];
-  for (const r of targets) {
-    const recorded = await recordedManifest(r.path);
-    let activeClaims = 0;
-    try { const proj = await projections.project(r.path); activeClaims = Array.isArray(proj.claims) ? proj.claims.length : 0; } catch {}
-    const dirty = gitDirty(r.path);
-    const lastActivityMs = r.lastActivity ? Date.parse(r.lastActivity) : null;
-    const quiescence = up.quiescenceVerdict({ activeClaims, dirty, lastActivityMs, now });
-    const delta = recorded ? up.byteDelta(canonical, recorded) : null;
-    rows.push({ id: r.id, label: r.label, path: r.path, version: r.version, quiescence, delta, readable: !!recorded });
-  }
-  const summary = up.planSummary(rows);
+  if (isPlan) return renderPlan(rows, up.planSummary(rows), srcVersion, report, flags);
+  return applyDelivery(rows, up, srcVersion, flags);
+}
 
+function renderPlan(rows, summary, srcVersion, report, flags) {
   if (flags.json) {
     process.stdout.write(JSON.stringify({ source: { version: srcVersion, fleetLatest: report.fleetLatest }, summary, rows }, null, 2) + '\n');
     return;
   }
-
   console.log(`${C.bold}Máddu fleet upgrade — plan${C.reset}  ${C.dim}source v${srcVersion || '?'} · ${summary.behind} behind active repo(s)${C.reset}`);
   console.log(`${C.dim}(read-only preview — no repo is touched; the live spine is never in a delivery)${C.reset}`);
   console.log();
@@ -224,5 +249,85 @@ async function fleetUpgrade(flags, fleetLib) {
   console.log();
   console.log(`  ${summary.eligible} eligible · ${summary.blocked} blocked · ${summary.totalBytes} managed file change(s) total`);
   console.log(`  ${C.dim}quiescence interlock: active lane claim · dirty tree · recent spine activity (<10m) each block a repo${C.reset}`);
-  console.log(`  ${C.dim}delivery (snapshot managed bytes — never .maddu/events — then deliver + per-repo doctor halt-on-red) ships in a follow-up.${C.reset}`);
+  console.log(`  ${C.dim}deliver with: maddu fleet upgrade --apply --only <repo>  (or --all)${C.reset}`);
+}
+
+// Run a child Máddu verb against a target repo, capturing exit + tail output.
+function runIn(repoPath, args, timeout) {
+  const r = spawnSync('node', [SOURCE_BIN, ...args], { cwd: repoPath, encoding: 'utf8', timeout });
+  const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-4).join('\n');
+  return { ok: r.status === 0, status: r.status, tail };
+}
+
+async function applyDelivery(rows, up, srcVersion, flags) {
+  const { targets, error } = up.selectTargets(rows, { only: flags.only || null, all: !!flags.all, max: flags.max ? Number(flags.max) : Infinity });
+  if (error) {
+    console.error(`maddu fleet upgrade --apply: ${error}`);
+    process.exit(2);
+  }
+  if (targets.length === 0) {
+    console.log(`${C.green}✓${C.reset} no eligible behind repos to deliver to.`);
+    return;
+  }
+
+  console.log(`${C.bold}Máddu fleet upgrade — apply${C.reset}  ${C.dim}delivering v${srcVersion || '?'} to ${targets.length} repo(s), sequentially, halt-on-red${C.reset}`);
+  console.log(`${C.dim}(each repo: re-check quiescence → snapshot managed bytes (never the spine) → upgrade → doctor)${C.reset}`);
+  console.log();
+
+  const stamp = new Date(Date.now()).toISOString().replace(/[:.]/g, '-');
+  const results = [];
+  let halted = false;
+  for (const r of targets) {
+    process.stdout.write(`  ${C.cyan}▸${C.reset} ${r.label} ${C.dim}(v${r.version} → v${srcVersion})${C.reset} … `);
+
+    // 1. Just-in-time quiescence re-check (TOCTOU).
+    const q = await recheckQuiescence(up, r, Date.now());
+    if (!q.eligible) {
+      console.log(`${C.yellow}skipped${C.reset} ${C.dim}(became busy: ${q.blockers.join('; ')})${C.reset}`);
+      results.push({ id: r.id, delivered: false, doctorOk: false, halted: false, skipped: true });
+      continue;
+    }
+
+    // 2. Snapshot the managed bytes a delivery would overwrite/remove.
+    const snapDir = join(r.path, '.maddu', 'state', 'fleet-snapshots', stamp);
+    let snap = { files: [] };
+    try {
+      snap = await up.snapshotManagedBytes(r.path, up.snapshotRelPaths(r.delta), snapDir, { from: r.version, to: srcVersion });
+    } catch (err) {
+      console.log(`${C.red}snapshot failed${C.reset} ${C.dim}(${err.message}) — skipping (nothing touched)${C.reset}`);
+      results.push({ id: r.id, delivered: false, doctorOk: false, halted: false, skipped: true });
+      continue;
+    }
+
+    // 3. Deliver via the proven single-repo engine (no --force: respect local edits).
+    const delivery = runIn(r.path, ['upgrade'], 180000);
+    if (!delivery.ok) {
+      console.log(`${C.red}delivery failed${C.reset} ${C.dim}(exit ${delivery.status})${C.reset}`);
+      console.log(`     ${C.dim}snapshot: ${snap.dir} (${snap.files.length} file(s))${C.reset}`);
+      results.push({ id: r.id, delivered: false, doctorOk: false, halted: true });
+      halted = true; break;
+    }
+
+    // 4. Post-delivery doctor — halt the whole run on red.
+    const doctor = runIn(r.path, ['doctor'], 120000);
+    if (!doctor.ok) {
+      console.log(`${C.red}doctor RED${C.reset} ${C.dim}(exit ${doctor.status}) — halting fleet run${C.reset}`);
+      console.log(`     ${C.dim}snapshot for rollback: ${snap.dir}${C.reset}`);
+      console.log(`     ${C.dim}${doctor.tail.replace(/\n/g, '\n     ')}${C.reset}`);
+      results.push({ id: r.id, delivered: true, doctorOk: false, halted: true });
+      halted = true; break;
+    }
+
+    console.log(`${C.green}✓ delivered${C.reset} ${C.dim}(${snap.files.length} byte(s) snapshotted · doctor green)${C.reset}`);
+    results.push({ id: r.id, delivered: true, doctorOk: true, halted: false });
+  }
+
+  const summary = up.summarizeApply(results);
+  console.log();
+  if (halted) {
+    console.log(`  ${C.red}■ halted${C.reset} at ${summary.haltedAt} after ${summary.delivered} successful delivery(ies). Fix the red repo (or roll back from its snapshot), then re-run.`);
+    process.exit(1);
+  }
+  const skipped = results.filter((r) => r.skipped).length;
+  console.log(`  ${C.green}✓${C.reset} delivered v${srcVersion} to ${summary.delivered} repo(s)${skipped ? ` · ${skipped} skipped (became busy)` : ''}.`);
 }

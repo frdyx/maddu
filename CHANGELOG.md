@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.83.0] · 2026-06-30 · roadmap #10-mutation — `maddu fleet upgrade --apply` (staged delivery)
+
+The planner (v1.82.0) previewed who's behind and who's safe to touch; this delivers. It completes the F1 arc — `maddu fleet` *detects*, `--plan` *previews*, `--apply` *delivers* — closing the "fixed in-tree, never received" gap structurally.
+
+- **`maddu fleet upgrade --apply`.** Delivers the canonical framework bytes to eligible behind repos by reusing the **proven single-repo `maddu upgrade` engine** (spawned with `cwd=<target>`, no `--force` — local edits are respected, the spine is preserved). Must be scoped: **`--only <repo>`** (one repo) or **`--all`** (every eligible); the bare verb and unscoped `--apply` both refuse, so there is no accidental fleet-wide mutation.
+- **Per-repo safety, sequential, halt-on-red.** For each target, in order: re-check quiescence (TOCTOU), **snapshot** the managed bytes a delivery would overwrite to `.maddu/state/fleet-snapshots/<ts>/` (**never `.maddu/events/`** — the live spine can't be snapshotted or rolled back), `upgrade`, then run that repo's `doctor`. **The first red doctor halts the whole run** (later repos untouched) and prints the snapshot path for rollback.
+- **`fleet` reclassified `mutating` / auto-trigger forbidden** (the verb now has a write path — same convention as `trust`/`mcp`/`plugin`). Lib `fleet-upgrade.mjs` gains pure `selectTargets` / `snapshotRelPaths` / `summarizeApply` + the `snapshotManagedBytes` copy; fixture `fleet-upgrade` (33/0).
+
+audit 16/0, self-test 95/95, architecture drift 0.
+
 ## [v1.82.0] · 2026-06-30 · roadmap #10 — `maddu fleet upgrade --plan` (the F1 delivery leg)
 
 `maddu fleet` (v1.76.0) answered "who is behind?" but the operator still had to walk into each repo and run `maddu upgrade` by hand — the "fixed in-tree, never received" gap, structurally. This ships the **planner** half (the roadmap's mandated `--plan`-first leg).
