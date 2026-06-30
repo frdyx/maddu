@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "maddu fleet detects who is behind but delivery was manual — the operator had to walk into each repo and run `maddu upgrade` by hand (the 'fixed in-tree, never received' gap, F1 delivery leg). No safe preview of what a fleet-wide upgrade would change or which repos are safe to touch.",
+    "area": "commands/fleet + runtime/lib/fleet-upgrade",
+    "fixed_in": "1.82.0",
+    "consumer_impact": "`maddu fleet upgrade --plan`: read-only offline preview per behind active repo — quiescence interlock (active lane claim / dirty tree / recent spine activity each block) + managed-byte delta (canonical vs recorded maddu.json hashes). The live spine is never in a delta. Mutation guarded as a follow-up.",
+    "ledger_ref": "F1"
+  },
+  {
     "symptom": "The autonomous skill-candidate detector fired (11x/4 projects) but every downstream terminal was 0 across all 13 installs (F2): candidates are generic tag-sets (commit, test), not reusable recipes, and `maddu learn` already does the valuable auto-capture. A dead funnel carried as live.",
     "area": "commands/slice-stop + commands/skill + runtime/lib/skill-candidates + runtime/lib/event-dispositions + gates/funnel-integrity",
     "fixed_in": "1.81.0",
