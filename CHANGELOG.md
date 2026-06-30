@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.76.0] · 2026-06-30 · audit sprint 2 — Fleet Spine + the self-verifying audit circuit
+
+The roadmap's keystone: turn the *manual* cross-repo audit into standing instruments.
+
+- **Fleet Spine — `maddu fleet` (F1).** A read-only, single-machine aggregator. The bridge already knows every workspace path but only ever read one repo at a time; `fleet` walks the registry and digests each repo from its **on-disk projection + `version.json` without running it** (a cold never-run repo is still seen), tiers them ACTIVE/DORMANT/ABANDONED from their last-event time, and computes the **version delta vs the fleet's latest** — the offline answer to "N versions behind" the staleness FLOOR couldn't give. Every headline metric scopes to ACTIVE so a dead repo can't inflate or hide the skew. The live fleet immediately showed 12/13 active repos behind. Lib `fleet.mjs` + `commands/fleet.mjs`, fixture `fleet-aggregate` (21/0).
+- **Self-verifying audit circuit (F2 meta-loop).** `docs/audit/LEDGER.json` is now the checked mirror of the findings, and the `audit-ledger-coherent` gate holds it to discipline: every finding needs a valid status, a `fixed` finding must name the **guardrail gate** that enforces it, and every named gate must be a *registered* gate id — so a guardrail can't be renamed or deleted while the ledger still claims the fault class is handled (the backref goes dangling → FAIL). Lib `audit-ledger.mjs` + gate, fixture `audit-ledger` (9/0).
+
+audit 14/0, self-test 89/89, architecture drift 0. Dogfooded through `maddu plan` sprint 2.
+
 ## [v1.75.0] · 2026-06-30 · audit sprint 1 — structural guardrails from the 13-repo cross-project audit
 
 A cross-project audit (13 real installs) plus a Ralph-loop ideation workflow produced a ranked roadmap (`docs/audit/`). This release ships the first sprint: three no-fleet-dependency guardrails that each make a fault **class** structurally impossible rather than patching one instance.
