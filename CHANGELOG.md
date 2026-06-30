@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.85.0] · 2026-06-30 · roadmap #8 — lesson federation (corrections compound across the fleet)
+
+`maddu learn` distils a repo's failed→succeeded tool calls into durable corrections, but they stayed **siloed**: a lesson learned the hard way in one repo never reached the next. Federation crosses that gap — over the fleet registry, local disk only.
+
+- **`maddu learn sync`.** Reads sibling repos' agent-file corrections off the workspace registry and surfaces the ones **portable** here: a lesson is portable when it **recurs in ≥2 repos** (the same lesson, independently learned, is a cross-repo truth) **or** is explicitly tagged **`@portable`**. Recurrence is matched on a normalized fingerprint, so the same lesson with different absolute paths still counts as one. Preview by default; lessons this repo already knows are deduped out.
+- **Adoption is approval-only + redacted.** `maddu learn sync --adopt` writes the portable lessons into this repo's `CLAUDE.md` learn block (and a `LEARN_CORRECTION_WRITTEN` event each, with `federated` provenance + source repos) — but only on the explicit flag, and with OS-absolute paths redacted to `<path>` so a sibling's machine layout never leaks in.
+- The recurrence-hash normalizer is reusable as the outcome-ledger MISSES fault-signature (roadmap #11). Pure lib `lesson-federation.mjs`, fixture `lesson-federation` (18/0).
+
+audit 16/0, self-test 97/97, architecture drift 0.
+
 ## [v1.84.0] · 2026-06-30 · roadmap #13 — compat spine (read an old install safely)
 
 `maddu fleet upgrade` (v1.82–83) now delivers new framework code into installs as old as **v1.15**. New code that reads a projection shaped by old code can crash on a key the old shape never carried — a silent, field-by-field surprise discovered one install at a time. This makes reading old state **total**.

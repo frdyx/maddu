@@ -31,6 +31,8 @@ import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import { spawnWorker, isProviderSignedIn } from './_worker-spawn.mjs';
 
+const C = { dim: '\x1b[2m', green: '\x1b[32m', reset: '\x1b[0m' };
+
 // `stdin: true` runtimes receive the (large, multi-line) judgment prompt on
 // STDIN instead of argv. This is both safer (no shell-quoting of a KB-scale JSON
 // prompt) and the only thing that works on Windows, where npm installs these
@@ -145,6 +147,68 @@ export default async function learnCmd(argv) {
     if (!rec) { console.error(`maddu learn retrieve: no briefing ${id}`); process.exit(1); }
     if (flags.json) { process.stdout.write(JSON.stringify(rec, null, 2) + '\n'); return; }
     process.stdout.write((rec.full || '') + '\n');
+    return;
+  }
+
+  // ── sync (roadmap #8) — lesson federation across the fleet ──────────────────
+  // Read sibling repos' agent-file corrections (off the workspace registry, local
+  // disk only), surface the ones PORTABLE here (recur in ≥2 repos OR @portable),
+  // redacted + deduped against what this repo already knows. Preview by default;
+  // `--adopt` writes them into CLAUDE.md (approval-only) as first-class local
+  // corrections (a LEARN_CORRECTION_WRITTEN event each, federated provenance).
+  if (sub === 'sync') {
+    const fed = await loadLib('lesson-federation.mjs');
+    const workspaces = await loadLib('workspaces.mjs');
+    if (!fed?.federate || !workspaces?.readRegistry) {
+      console.error('maddu learn sync: federation libs not available (run `maddu upgrade`)');
+      process.exit(2);
+    }
+    const reg = await workspaces.readRegistry();
+    const ws = Array.isArray(reg.workspaces) ? reg.workspaces : [];
+    const norm = (p) => String(p || '').replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+    const here = norm(repoRoot);
+    const local = await agentFileCorrections(spine, repoRoot);
+    const foreignByRepo = {};
+    let read = 0;
+    for (const w of ws) {
+      if (!w || !w.path || norm(w.path) === here) continue;
+      try { foreignByRepo[w.label || w.id || w.path] = await agentFileCorrections(spine, w.path); read++; } catch {}
+    }
+    const result = fed.federate(local, foreignByRepo);
+
+    if (flags.json) {
+      process.stdout.write(JSON.stringify({ ...result, localCount: local.length, siblingsRead: read }, null, 2) + '\n');
+      return;
+    }
+
+    console.log(`maddu learn sync  ${C.dim}${read} sibling repo(s) read · ${local.length} local lesson(s)${C.reset}`);
+    if (!result.portable.length) {
+      console.log(result.siloed
+        ? `  ${C.dim}no NEW portable lessons (${result.siloed} single-repo lesson(s) stayed siloed)${C.reset}`
+        : `  ${C.dim}no portable lessons found across the fleet${C.reset}`);
+      return;
+    }
+    console.log(`  ${result.portable.length} portable lesson(s) this repo lacks:`);
+    for (const p of result.portable) {
+      console.log(`  ${C.green}+${C.reset} ${C.dim}[${p.category}]${C.reset} ${p.text}`);
+      console.log(`      ${C.dim}${p.reason} · from ${p.sources.join(', ')}${C.reset}`);
+    }
+    if (!flags.adopt) {
+      console.log(`\n  ${C.dim}preview only — adopt into CLAUDE.md (approval-only): maddu learn sync --adopt${C.reset}`);
+      return;
+    }
+    // ── adopt (approval-only) ──
+    for (const p of result.portable) {
+      const correction = { id: 'cor_fed_' + p.hash, text: p.text, category: p.category };
+      await spine.append(repoRoot, {
+        type: spine.EVENT_TYPES.LEARN_CORRECTION_WRITTEN,
+        actor,
+        data: { correctionId: correction.id, category: p.category, destination: 'agent-file', target: 'CLAUDE.md', correction, federated: true, sources: p.sources },
+      });
+    }
+    const merged = await agentFileCorrections(spine, repoRoot);
+    const res = await learn.writeAgentFileBlock(repoRoot, 'CLAUDE.md', merged);
+    console.log(`\n  ${C.green}✓${C.reset} adopted ${result.portable.length} lesson(s) → CLAUDE.md (${res.action})`);
     return;
   }
 
