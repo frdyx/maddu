@@ -85,6 +85,19 @@ async function loadSpineLib() {
   return null;
 }
 
+async function loadGovernanceBudgetLib() {
+  const candidates = [
+    join(frameworkRoot(), 'template', 'maddu', 'runtime', 'lib', 'governance-budget.mjs'),
+    join(frameworkRoot(), 'runtime', 'lib', 'governance-budget.mjs'),
+  ];
+  for (const c of candidates) {
+    if (await exists(c)) {
+      try { return await import(pathToFileURL(c).href); } catch {}
+    }
+  }
+  return null;
+}
+
 const GATE_IDS = {
   events: 'event-types-reachable',
   commands: 'command-surface-coherent',
@@ -453,7 +466,81 @@ async function checkCapabilityDocs() {
   return { level: 'PASS', label: 'capability-docs', detail: `${keys.length} verb(s) mapped; ${withDoc} with an in-depth doc, all present` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated']);
+// ── Audit-only check: governance budget (roadmap #7) ───────────────────────
+// The cure for F3/F4 (dead-domain bloat, discipline-vs-orchestration drift) was
+// MORE machinery — gates, registries, verbs. Unbudgeted, that cure becomes the
+// next F3/F4: the enforcement surface grows faster than dead surface retires.
+// This is the self-applying cap. It reads each governance category's count from
+// GROUND TRUTH (gate files, bin COMMANDS, the audit's own check registry) and
+// compares to docs/audit/governance-budget.json. Over the cap → FAIL unless a
+// waiver row carries it (then WARN, recorded debt). It also folds in a relative
+// self-test latency signal (WARN, never FAIL) from the last recorded run.
+//
+// AUDIT_ONLY_LABELS is the single source for the audit-only check count, so the
+// 'audit-checks' category measures itself: add an audit-only check here and the
+// count rises, biting the budget exactly as a new gate or verb would.
+const AUDIT_ONLY_LABELS = [
+  'slash on-ramp',
+  'charter drift',
+  'rule-gate traceability',
+  'rule-invariant drift',
+  'capability-docs',
+  'governance budget',
+];
+
+async function checkGovernanceBudget() {
+  const lib = await loadGovernanceBudgetLib();
+  if (!lib?.budgetVerdict) {
+    return { level: 'WARN', label: 'governance budget', detail: 'governance-budget.mjs not available (skipped)' };
+  }
+  const manifestPath = join(frameworkRoot(), 'docs', 'audit', 'governance-budget.json');
+  if (!(await exists(manifestPath))) {
+    return { level: 'WARN', label: 'governance budget', detail: 'docs/audit/governance-budget.json not found (skipped)' };
+  }
+  let manifest;
+  try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); }
+  catch (err) { return { level: 'FAIL', label: 'governance budget', detail: `governance-budget.json invalid JSON: ${err.message}` }; }
+
+  // Ground-truth counts — never hand-maintained.
+  const gateIds = await presentGateIds();
+  const binPath = join(frameworkRoot(), 'bin', 'maddu.mjs');
+  const verbs = (await exists(binPath)) ? (extractCommands(await readFile(binPath, 'utf8')) || []) : [];
+  const counts = {
+    gates: gateIds.size,
+    verbs: verbs.length,
+    'audit-checks': Object.keys(GATE_IDS).length + AUDIT_ONLY_LABELS.length,
+  };
+
+  const verdict = lib.budgetVerdict({ counts, manifest });
+
+  // Latency half: the last recorded self-test duration (source-only; absent on a
+  // consumer or fresh checkout → SKIP, never a false alarm).
+  let durationMs = null;
+  const lastRunPath = join(frameworkRoot(), '.maddu', 'state', 'self-test-last-run.json');
+  if (await exists(lastRunPath)) {
+    try { const doc = JSON.parse(await readFile(lastRunPath, 'utf8')); durationMs = Number(doc?.durationMs) || null; } catch {}
+  }
+  const latency = lib.latencyVerdict({ durationMs, selfTest: manifest.selfTest });
+
+  const summary = lib.summarizeBudget(verdict);
+  if (verdict.level === 'FAIL') {
+    const detail = verdict.over
+      .map((r) => `${r.category} ${r.count} over cap ${r.cap}${r.waivers ? `+${r.waivers}w` : ''} — retire/merge one or add a waiver`)
+      .join('; ');
+    return { level: 'FAIL', label: 'governance budget', detail: `${detail} (${summary})` };
+  }
+  const warns = [];
+  if (verdict.level === 'WARN') {
+    warns.push(verdict.warn.map((r) => `${r.category} carried by ${r.waivers} waiver(s) (${r.count}/${r.cap})`).join('; '));
+  }
+  if (latency.level === 'WARN') warns.push(latency.message);
+  if (warns.length) {
+    return { level: 'WARN', label: 'governance budget', detail: `${warns.join('; ')} (${summary})` };
+  }
+  return { level: 'PASS', label: 'governance budget', detail: `${summary}${latency.level === 'OK' ? ` · ${latency.message}` : ''}` };
+}
+
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -488,6 +575,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'traceability') checks.push(await checkRuleGateTraceability());
   if (!sub || sub === 'invariants') checks.push(await checkRuleInvariants());
   if (!sub || sub === 'capability-docs') checks.push(await checkCapabilityDocs());
+  if (!sub || sub === 'budget') checks.push(await checkGovernanceBudget());
 
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const c of checks) counts[c.level]++;

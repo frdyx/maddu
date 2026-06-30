@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "The audit program's own fixes for F3/F4 were more machinery (gates, registries, verbs); unbudgeted, the enforcement surface could grow faster than dead surface retires — the cure becoming the next F3/F4.",
+    "area": "commands/audit + runtime/lib/governance-budget",
+    "fixed_in": "1.78.0",
+    "consumer_impact": "`maddu audit` (and `maddu audit budget`) now caps each governance category (gates, verbs, audit checks) from ground-truth counts vs docs/audit/governance-budget.json; over a cap FAILs unless a waiver row carries it, plus a relative self-test latency WARN.",
+    "ledger_ref": "roadmap-7"
+  },
+  {
     "symptom": "Consumers never learned an install was stale; doctor checked integrity vs the install's own manifest, never vs latest, so a 55-versions-behind install passed green forever.",
     "area": "doctor/orient",
     "fixed_in": "1.75.0",

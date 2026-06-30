@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "description": "Roadmap #7 — the governance surface is itself budgeted. A per-category cap on the framework's own enforcement machinery (gates, CLI verbs, audit checks) so it can't grow faster than dead surface retires — the cure for F3/F4 becoming the next F3/F4. To exceed a cap, either retire/merge something OR add a waiver row here with a reason (each waiver raises that category's effective cap by exactly one, and shows as visible debt in `maddu audit`). Counts are read from ground truth (discoverGates / bin COMMANDS / the audit's own check registry) — nothing is hand-maintained. Enforced by checkGovernanceBudget in commands/audit.mjs via template/maddu/runtime/lib/governance-budget.mjs.",
+  "categories": {
+    "gates": {
+      "cap": 70,
+      "note": "builtin enforcement gates (template/maddu/runtime/gates/builtin/*.mjs)"
+    },
+    "verbs": {
+      "cap": 70,
+      "note": "top-level CLI verbs (bin/maddu.mjs COMMANDS)"
+    },
+    "audit-checks": {
+      "cap": 17,
+      "note": "maddu audit coherence checks (reusable gates surfaced + audit-only checks)"
+    }
+  },
+  "waivers": [],
+  "selfTest": {
+    "baselineMs": 36000,
+    "tolerancePct": 50,
+    "note": "relative self-test latency ceiling. WARN (never FAIL) when the last recorded quick/full run in .maddu/state/self-test-last-run.json exceeds baselineMs * (1 + tolerancePct/100). Raise the baseline deliberately when the suite legitimately grows."
+  }
+}
