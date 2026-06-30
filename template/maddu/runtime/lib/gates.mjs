@@ -115,7 +115,12 @@ export async function runGates(repoRoot, opts = {}) {
       try {
         await ctx.spine.append(repoRoot, {
           type: ctx.spine.EVENT_TYPES.GATE_RAN,
-          data: { gateId: g.id, ok, severity: g.severity, durationMs, evidence },
+          // Persist the resolved `status` too: the ok/severity pair can't
+          // reconstruct an explicit status='warn' (e.g. install-integrity's
+          // locally-modified soft pass), so the verdict ledger + projection read
+          // it back exactly instead of re-deriving and mislabelling a soft warn
+          // as a hard fail.
+          data: { gateId: g.id, ok, status, severity: g.severity, durationMs, evidence },
         });
       } catch {} // gate-run reporting is best-effort
     }

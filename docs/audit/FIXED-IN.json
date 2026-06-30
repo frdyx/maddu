@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "maddu orient showed goal progress + a timeline but never the last gate verdict, so an operator couldn't see red/green at a glance; a failing gate surfaced as a raw stack trace, not which-gate/where/how-to-repro — friction that pushes operators to skip slices and gates.",
+    "area": "commands/orient + runtime/lib/gate-ledger + runtime/lib/gates + projections",
+    "fixed_in": "1.79.0",
+    "consumer_impact": "orient opens with a one-glance card (gate verdict · goal · next) and a legible GATES section (gate id + severity + spine event id + `maddu doctor --gate <id>` repro, no stack trace). GATE_RAN events persist the resolved status + event id so verdicts are exact.",
+    "ledger_ref": "roadmap-9"
+  },
+  {
     "symptom": "The audit program's own fixes for F3/F4 were more machinery (gates, registries, verbs); unbudgeted, the enforcement surface could grow faster than dead surface retires — the cure becoming the next F3/F4.",
     "area": "commands/audit + runtime/lib/governance-budget",
     "fixed_in": "1.78.0",

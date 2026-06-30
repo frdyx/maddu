@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.79.0] · 2026-06-30 · roadmap #9 — sharpen the discipline loop
+
+Friction in the core loop quietly pushes operators to skip slices and gates. The worst of it: `maddu orient` showed goal progress and a timeline but **not whether the work is green right now**, and a failing gate surfaced as a raw stack trace rather than "which gate, where's the record, how do I reproduce it".
+
+- **One-glance card + last gate verdict (roadmap #9).** `maddu orient` now opens with a single status line — `✓ gates green (N ok) · goal M/V met · ▸ next` — so red/green registers before anything else. A new **GATES** section appears only when there's something to act on, rendering each hard failure **legibly**: gate id, severity, the **spine event id** to inspect, and the exact repro (`maddu doctor --gate <id>` — the single-gate runner), **never a stack trace**. Soft warns stay compact and advisory. The full verdict is in `orient --json` for the slash view.
+- **Exact verdicts persist.** `GATE_RAN` events now carry the resolved `status` (the ok/severity pair couldn't reconstruct an explicit `status='warn'` like install-integrity's locally-modified soft pass), and the gates projection reads it back plus the event id — so the ledger never mislabels a soft warn as a hard fail. Backward compatible: pre-1.79 events fall back to the old mapping.
+- Pure lib `gate-ledger.mjs` (`latestGateRuns` / `summarizeGates` / `formatFailure` / `reproForGate`), fixture `gate-ledger` (18/0).
+
+audit 15/0, self-test 92/92, architecture drift 0.
+
 ## [v1.78.0] · 2026-06-30 · roadmap #7 — the governance surface is itself budgeted
 
 The audit program's fixes for F3 (dead domains) and F4 (discipline-vs-orchestration) were both *more machinery* — gates, registries, verbs. Unbudgeted, that cure becomes the next F3/F4: the enforcement layer bloats faster than dead surface retires. This caps it.

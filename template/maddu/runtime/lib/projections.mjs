@@ -398,20 +398,21 @@ export async function project(repoRoot) {
       case 'GATE_RAN': {
         const ok = !!ev.data?.ok;
         const severity = ev.data?.severity || 'warn';
-        // Map result → ok/fail/warn buckets. The gate runner's full status
-        // mapping (including explicit status='warn') isn't replayable from
-        // GATE_RAN alone; for projection counters we treat !ok as fail when
-        // severity != warn, else warn.
-        if (ok) gateSummary.ok++;
-        else if (severity === 'warn') gateSummary.warn++;
+        // Prefer the persisted `status` (v1.79.0+); older events lack it, so
+        // fall back to the ok/severity mapping (!ok && severity!=warn → fail).
+        const status = ev.data?.status || (ok ? 'ok' : (severity === 'warn' ? 'warn' : 'fail'));
+        if (status === 'ok') gateSummary.ok++;
+        else if (status === 'warn') gateSummary.warn++;
         else gateSummary.fail++;
         gateRuns.push({
           gateId: ev.data?.gateId || null,
           ok,
+          status,
           severity,
           durationMs: ev.data?.durationMs ?? null,
           evidence: ev.data?.evidence ?? null,
           ts: ev.ts,
+          eventId: ev.id || null,
         });
         if (gateRuns.length > 200) gateRuns.splice(0, gateRuns.length - 200);
         gatesLastRunAt = ev.ts;
