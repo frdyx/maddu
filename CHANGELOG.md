@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.86.0] · 2026-06-30 · roadmap #14 — cost-budget gate (the runaway-session guard)
+
+The #14 spike confirmed what already shipped: `maddu usage import` reads Claude Code's on-disk usage (159 transcripts, 60k+ usage turns) into `TOKEN_USAGE_REPORTED` rule-5-cleanly, and `maddu cost` rolls it up. So the one net-new piece F5 names — *"a runaway session staying invisible"* — is a budget signal.
+
+- **`cost-budget` gate (opt-in, advisory).** Does nothing unless the repo carries `.maddu/config/cost-budget.json` (`{ windowDays, maxTokens, metric }`, `metric` = `total`|`output`|`input`). With a budget set, it sums recent `tokenLedger` spend in the trailing window and **WARNs — never FAILs** — when it's over, so a runaway session is visible in `doctor`/`audit` without ever blocking a land. No provider call (rule #5): it only sums numbers the ledger already holds. Pure lib `cost-budget.mjs`, fixture `cost-budget` (17/0).
+- **Scope note:** this is the standalone-valuable half of #14. **Fleet-wide** cost aggregation (F5's "cost is single-project") stays deferred — F5 is `accepted`.
+
+audit 16/0, self-test 98/98, architecture drift 0. (Governance budget: gates 69/70 — one slot from the cap; the next gate needs a retirement or a budget waiver.)
+
 ## [v1.85.0] · 2026-06-30 · roadmap #8 — lesson federation (corrections compound across the fleet)
 
 `maddu learn` distils a repo's failed→succeeded tool calls into durable corrections, but they stayed **siloed**: a lesson learned the hard way in one repo never reached the next. Federation crosses that gap — over the fleet registry, local disk only.

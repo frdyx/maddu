@@ -16,8 +16,10 @@ structurally prevents from recurring.
 > mutation is a follow-up) · **#10-mutation `--apply` (v1.83.0 — staged delivery,
 > halt-on-red) · **#13 compat spine (v1.84.0 — schema stamp + total reader +
 > can-read-old-state gate) · **#8 lesson federation (v1.85.0 — `maddu learn
-> sync`, portable-by-recurrence/@portable, adopt approval-only)**. **Open:** #14
-> cost ledger (S, optional — F5 accepted).
+> sync`, portable-by-recurrence/@portable, adopt approval-only) · **#14
+> cost-budget gate (v1.86.0 — spike confirmed capture already ships; added the
+> runaway-session WARN; fleet-wide cost deferred, F5 accepted)**. **ROADMAP
+> COMPLETE** — every item delivered; fleet-wide cost is the only deferred-by-choice piece.
 
 > **Top pick — `fleet-spine`.** The one clean SHIP (impact 5 / effort 3 /
 > leverage 5), fully offline + files-only, and the substrate nearly every other
