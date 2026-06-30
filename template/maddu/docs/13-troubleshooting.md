@@ -228,6 +228,25 @@ $ git commit -m "stop tracking Máddu runtime state"
 
 After that, the shipped `.gitignore` keeps them out and the tree stays clean.
 
+## Doctor reports `framework currency` INFO/WARN *(v1.75.0+)*
+
+```
+INFO  framework currency  v1.50.0 is 60d old — run `maddu upgrade` to check for a newer release
+WARN  framework currency  v0.19.0 is 400d old — likely behind; run `maddu upgrade`
+```
+
+The **staleness FLOOR** — a purely offline age check computed from your
+install's own `version.json` `released` date (no network, works on a private
+repo and a cold off-fleet clone). It is a *reminder to check for a newer
+release*, not a claim that one exists: an offline install can't know the latest
+version, but elapsed time since its own release is a sound proxy. Thresholds:
+≤30 days current (no line), 31–90 days INFO, >90 days WARN. It never FAILs, so
+an old-but-still-latest install never breaks a doctor run.
+
+`maddu orient` shows the same nudge at session start. To clear it, run `maddu
+upgrade` (pulls the latest framework from GitHub). The precise "you are N
+versions behind" delta across all your repos is a separate fleet view.
+
 ## Where to ask for help
 
 - The `?` Docs popup in the cockpit has the full doc set.

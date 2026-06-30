@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.75.0] · 2026-06-30 · audit sprint 1 — structural guardrails from the 13-repo cross-project audit
+
+A cross-project audit (13 real installs) plus a Ralph-loop ideation workflow produced a ranked roadmap (`docs/audit/`). This release ships the first sprint: three no-fleet-dependency guardrails that each make a fault **class** structurally impossible rather than patching one instance.
+
+- **Offline staleness FLOOR (F1).** Consumers never learned an install was stale — `doctor` checked integrity against the install's *own* manifest, so a 55-versions-behind install passed green forever. `doctor` + `orient` now compute age from the install's own `version.json` `released` date (pure offline arithmetic — works on a private repo and a cold off-fleet clone) and nudge `maddu upgrade`: ≤30d quiet, 31–90d INFO, >90d WARN. Never FAILs. Lib `framework-currency.mjs`, fixture `framework-currency` (17/0).
+- **`release-parity` gate (F1 root cause).** The framework could dogfood a fix in `template/maddu/**` but ship consumers the un-fixed path. The gate diffs last-tag..HEAD, classifies consumer-impacting changes, and at the release boundary requires a `docs/audit/FIXED-IN.json` row for the bumped version (FAIL); pending impacting changes WARN as delivery debt. It immediately caught a real lapse — v1.74.0/.1/.2 were bumped + merged but never git-tagged. Fixture `gate-release-parity` (12/0).
+- **DD1 — definition-site disposition registry (F3).** 34 event types had accumulated as "dead" because nothing forced a verdict at definition time. `event-dispositions.mjs` gives every `EVENT_TYPES` key a disposition; the `event-dispositions-complete` gate holds it in 1:1 parity (no undisposed type can be added); `DORMANT_BY_DESIGN` is now derived from it. `maddu insights` dead count: **34 → 0**. Fixture `event-dispositions` (14/0).
+
+Also: `docs/audit/LEDGER.md` (standing finding→disposition log so re-audits don't re-flag settled items) + `FIXED-IN.json` (delivery record). audit 14/0, self-test 87/87, architecture drift 0.
+
 ## [v1.74.2] · 2026-06-29 · `.maddu/` runtime state stays out of git — the working tree stops being perpetually dirty
 
 Every `maddu` command appends to the spine (`.maddu/events/`) and refreshes projections (`.maddu/state/`). If those paths are git-tracked, the working tree is **never clean** — which blocks branch switches and buries real changes in noise. The framework repo had long since solved this for itself (its own `.gitignore` ignores `.maddu/*` except a couple durable files), but `maddu init` shipped consumers a `.gitignore` that ignored **only token paths** — so consumer repos tracked the entire spine + projections + sessions and churned on every command. The fix that was dogfooded was never shipped.

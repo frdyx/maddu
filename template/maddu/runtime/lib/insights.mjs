@@ -23,6 +23,7 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { dormantByDesignMap } from './event-dispositions.mjs';
 
 // ── DEFINED surface ─────────────────────────────────────────────────────────
 
@@ -83,37 +84,14 @@ export function classify(presence, n) {
 // from genuinely-dead types keeps `insights dead` honest: the dead count
 // then reflects real "nothing invokes it" gaps worth fixing, which is the
 // whole point of the invocation-logic work. Map: type -> why-dormant.
-export const DORMANT_BY_DESIGN = new Map([
-  ['AUTH_KEY_ADDED',           'API-key auth path; OAuth is the default'],
-  ['AUTH_KEY_REMOVED',         'API-key auth path; OAuth is the default'],
-  ['AUTH_KEY_ROTATED',         'API-key auth path; OAuth is the default'],
-  ['AUTH_KEY_RATE_LIMITED',    'fires only on a provider rate-limit response'],
-  ['SCHEDULE_CREATED',         'operator opt-in recurring tasks'],
-  ['SCHEDULE_UPDATED',         'operator opt-in recurring tasks'],
-  ['SCHEDULE_REMOVED',         'operator opt-in recurring tasks'],
-  ['SCHEDULE_FIRED',           'operator opt-in recurring tasks'],
-  ['TRUST_PIN_ADDED',          'fires only when an operator pins a dependency'],
-  ['TRUST_PIN_REMOVED',        'fires only when an operator unpins a dependency'],
-  ['MCP_PROVENANCE_VERIFIED',  'fires only under MCP use with provenance checks'],
-  ['MCP_PROVENANCE_MISMATCH',  'attack/tamper signal under MCP provenance checks'],
-  ['MCP_APPROVAL_GRANTED',     'fires only under gated MCP approval'],
-  ['WORKER_ENV_FILTERED',      'fires only when a real worker spawn strips env'],
-  ['IMPORT_ACCEPTED',          'cross-machine spine import only'],
-  ['IMPORT_REJECTED',          'cross-machine spine import only'],
-  ['CHECKPOINT_WORKTREE_CREATED',    'fires only when an operator materializes a checkpoint worktree'],
-  ['CHECKPOINT_ROLLBACK_REQUESTED',  'fires only when an operator rolls back to a checkpoint'],
-  // v1.9.0 failure-learning — fire only when `maddu learn` runs (LEARN_MINED is
-  // the load-bearing entry point and is intentionally NOT listed here).
-  ['LEARN_DIGEST_WRITTEN',     'no-provider fallback path; autonomous judging is the default'],
-  ['LEARN_JUDGED',             'fires only when a `maddu learn` judgment worker runs'],
-  ['LEARN_CORRECTION_WRITTEN', 'fires only when `maddu learn` writes a correction'],
-  ['MEMORY_FACT_SUPERSEDED',   'fires only when a memory fact is superseded'],
-  ['BRIEFING_CURATED',         'fires only under a curated (--curate) orient/handoff briefing'],
-  // Focus Director — opt-in trajectory instrument (off by default); emits only
-  // when the operator allowlists heartbeat:focus-director / slice-stop:focus-director.
-  ['FOCUS_TAGGED',             'Focus Director is opt-in (off by default)'],
-  ['DRIFT_FLAGGED',            'Focus Director is opt-in; fires only on sustained drift'],
-]);
+//
+// DERIVED (DD1, roadmap #3): this is no longer a hand-maintained Map — it is
+// computed from the definition-site disposition registry
+// (event-dispositions.mjs), the single source of truth that the
+// `event-dispositions-complete` gate holds in 1:1 parity with EVENT_TYPES. To
+// accept a type as dormant, give it `disp:'dormant'` + a reason there; it then
+// flows here automatically and can never silently re-read as "dead".
+export const DORMANT_BY_DESIGN = dormantByDesignMap();
 
 // Join the harvested projects against the DEFINED event-type set.
 //

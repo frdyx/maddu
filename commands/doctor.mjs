@@ -154,6 +154,31 @@ async function loadGatesLib() {
   try { return await import(pathToFileURL(p).href); } catch { return null; }
 }
 
+// Resolve and import the framework-currency lib (staleness FLOOR, roadmap #6).
+// Returns null on installs older than it shipped.
+async function loadCurrencyLib() {
+  const p = await resolveRuntimeLib('framework-currency.mjs');
+  if (!p) return null;
+  try { return await import(pathToFileURL(p).href); } catch { return null; }
+}
+
+// Read the TARGET install's own version + release date — the consumer's
+// bundled maddu/version.json (or, in the framework source repo, the root
+// version.json). This is what the staleness FLOOR measures, so `--all` reports
+// each workspace's true currency rather than the running CLI's.
+async function readInstallMeta(repoRoot) {
+  for (const rel of ['maddu/version.json', 'version.json']) {
+    const p = join(repoRoot, rel);
+    if (await exists(p)) {
+      try {
+        const v = JSON.parse(await readFile(p, 'utf8'));
+        return { version: v.version || null, released: v.released || null };
+      } catch {}
+    }
+  }
+  return { version: null, released: null };
+}
+
 // Map a gate run record into a doctor check row, preserving label text.
 function gateRunToCheck(run, tagLabel) {
   const labelText = `${tagLabel}${run.label || run.gateId}`;
@@ -218,6 +243,17 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
     if (cliVersion !== madduJson.framework_version) {
       checks.push({ level: 'WARN', label: `${tagLabel}framework version`, detail: `CLI v${cliVersion} but install is v${madduJson.framework_version} — run \`maddu upgrade\`` });
     }
+  }
+
+  // ── Framework currency (staleness FLOOR, roadmap #6) ──
+  // Offline age-from-release-date nudge. Always surfaced (PASS/INFO/WARN) so an
+  // install that's rotting in the field self-reports even off-fleet; never a
+  // FAIL. Degrades silently on installs predating the lib or with no `released`.
+  const currencyLib = await loadCurrencyLib();
+  if (currencyLib?.currencyVerdict) {
+    const meta = await readInstallMeta(repoRoot);
+    const verdict = currencyLib.currencyVerdict({ released: meta.released, version: meta.version });
+    checks.push({ level: verdict.level, label: `${tagLabel}framework currency`, detail: verdict.message });
   }
 
   // ── Gate runner — built-in gates + operator gates ──

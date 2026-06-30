@@ -17,10 +17,24 @@
 // `maddu learn retrieve <id>` pointer (so curation never silently drops detail).
 
 import { spawnSync } from 'node:child_process';
-import { basename } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
-import { loadLib } from './_libroot.mjs';
+import { loadLib, loadLibOptional } from './_libroot.mjs';
+
+// Read this install's own version + release date for the staleness FLOOR
+// (roadmap #6) — the consumer's bundled maddu/version.json, or the framework
+// source repo's root version.json. Best-effort; missing → nulls.
+async function readInstallMeta(repoRoot) {
+  for (const rel of ['maddu/version.json', 'version.json']) {
+    try {
+      const v = JSON.parse(await readFile(join(repoRoot, rel), 'utf8'));
+      return { version: v.version || null, released: v.released || null };
+    } catch {}
+  }
+  return { version: null, released: null };
+}
 
 const C = {
   bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
@@ -118,6 +132,14 @@ export default async function orient(argv) {
   const handoffFlagsDecision = !!(handoff?.body && /decision pending|operator decision|RESUME HERE|pending:/i.test(handoff.body));
   const decisionPending = allMet || handoffFlagsDecision;
 
+  // Framework currency (staleness FLOOR, roadmap #6) — offline age nudge.
+  let currency = null;
+  const currencyLib = await loadLibOptional('framework-currency.mjs');
+  if (currencyLib?.currencyVerdict) {
+    const meta = await readInstallMeta(repoRoot);
+    currency = currencyLib.currencyVerdict({ released: meta.released, version: meta.version });
+  }
+
   if (flags.json) {
     process.stdout.write(JSON.stringify({
       project, branch, phase: phaseName, updated,
@@ -127,12 +149,17 @@ export default async function orient(argv) {
       handoff: handoff ? { body: handoff.body, setAt: handoff.setAt } : null,
       recentSliceStops: trail, openApprovals: approvals.length, activeClaims: claims.length,
       decisionPending,
+      currency: currency ? { level: currency.level, ageDays: currency.ageDays, message: currency.message } : null,
     }, null, 2) + '\n');
     return;
   }
 
   console.log(`${C.bold}═══ MÁDDU ORIENT ═══${C.reset}  ${C.dim}session-start briefing${C.reset}`);
   console.log(`${C.dim}Project: ${project}${branch ? '   Branch: ' + branch : ''}${phaseName ? '   Phase: ' + phaseName : ''}${updated ? '   Updated: ' + updated : ''}${C.reset}`);
+  if (currency && currency.level !== 'PASS') {
+    const tone = currency.level === 'WARN' ? C.unver : C.pending;
+    console.log(`  ${tone}⟳ framework ${currency.message}${C.reset}`);
+  }
 
   if (!goal) {
     console.log(`\n  ${C.unver}⚠ NO GOAL DEFINED${C.reset} — set one: maddu goal set "<objective>" --success "<cmd>::<text>"`);
