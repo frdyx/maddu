@@ -44,13 +44,14 @@ async function main() {
     if (cands[0].confidence !== 'high') fail(`confidence ${cands[0].confidence} != high`);
     if (cands[0].examples.length !== 2) fail(`expected 2 examples, got ${cands[0].examples.length}`);
 
-    // emitFreshCandidates emits exactly one SKILL_CANDIDATE_DETECTED, once.
+    // v1.81.0 (roadmap #5 / F2): the autonomous detector is RETIRED. Detection
+    // (detectCandidates, above) stays pure for any historical/manual use, but
+    // emitFreshCandidates is a deliberate no-op — it appends NOTHING, so no
+    // dead funnel can re-form. (Lock enforced by the funnel-integrity gate.)
     const e1 = await sc.emitFreshCandidates(repo, 'ses_x', { kind: 'slice-stop', id: 'skill-candidate', fired_at: '2026-06-09T00:00:00Z' });
-    if (e1.length !== 1) fail(`emit expected 1, got ${e1.length}`);
-    const e2 = await sc.emitFreshCandidates(repo, 'ses_x', null);
-    if (e2.length !== 0) fail(`re-emit expected 0 (idempotent), got ${e2.length}`);
+    if (e1.length !== 0) fail(`retired emit expected 0, got ${e1.length}`);
     const all = await spine.readAll(repo);
-    if (all.filter((x) => x.type === 'SKILL_CANDIDATE_DETECTED').length !== 1) fail('expected exactly 1 SKILL_CANDIDATE_DETECTED in spine');
+    if (all.filter((x) => x.type === 'SKILL_CANDIDATE_DETECTED').length !== 0) fail('retired detector must append no SKILL_CANDIDATE_DETECTED');
   } finally { await fs.rm(repo, { recursive: true, force: true }); }
 
   // --- Case 2: a single occurrence → NO candidate (high-confidence only). ---

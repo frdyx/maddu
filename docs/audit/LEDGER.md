@@ -36,7 +36,7 @@ exactly one status with a one-line rationale and a date.
 | id | finding | status | disposition / rationale | date |
 |---|---|---|---|---|
 | F1 | Consumers never learn they're stale (no upgrade-staleness nudge) | `in-progress` | FLOOR shipped v1.75.0: offline age-from-`released` nudge in `doctor` + `orient` (lib `framework-currency.mjs`, fixture `framework-currency`). The precise "N versions behind" delta needs the fleet aggregator (roadmap #1). | 2026-06-30 |
-| F2 | Skills domain is a dead funnel (candidates detected, 0 ever approved/applied across 13 projects) | `open` | Expose open candidates in `orient`/`status` with approve/reject one-liner; re-measure conversion; retire detector if still 0 after exposure. (Skill types parked as dormant-with-reason in the registry meanwhile.) | 2026-06-30 |
+| F2 | Skills domain is a dead funnel (candidates detected, 0 ever approved/applied across 13 projects) | `fixed` (#5, v1.81.0) → gate `funnel-integrity` | Spike: candidates are generic tag-sets ("commit, test"), not recipes; 0 conversion fleet-wide; `maddu learn` already does the valuable auto-capture. Decision = **retire the auto-detector** (no slice-stop auto-emit; `emitFreshCandidates` no-op; `SKILL_CANDIDATE_DETECTED` dormant). Skills are hand-authored (`maddu skill create`/`from-slice`). `funnel-integrity` gate keeps it retired. | 2026-06-30 |
 | F3 | 34 dead event types across 8 sub-domains (lane-admin, MCP-mgmt, checkpoints, worker-lifecycle, proposals/pending, slice-extras, approval/inbox, misc) | `fixed` | Shipped v1.75.0 via DD1: definition-site `event-dispositions.mjs` (every type has a verdict) + `gate:event-dispositions-complete` (FAILs on any undispositioned type) + `DORMANT_BY_DESIGN` now derived from it. `insights` dead count 34 → 0. The class can't recur — adding a type without a disposition fails the gate + the `event-dispositions` fixture. | 2026-06-30 |
 | F4 | Máddu used as a discipline tracker, not an orchestrator (coordinator/loop/pipeline/team fire in 2–5 of 13) | `fixed` (#12, v1.80.0) → gate `command-tier-discipline` | Leaned into "disciplined substrate is the core story": capabilities tagged `core` vs `orchestration` in `_tiers.mjs`; `maddu audit positioning` frames orchestration as an opt-in fire-rate (never dead); the gate requires a valid `layer` on every verb. The finding stays TRUE — what's fixed is the false-alarm recurrence. | 2026-06-30 |
 | F5 | Token/cost accounting is single-project (`TOKEN_USAGE_REPORTED` 1/13) | `accepted` (pending confirm) | Tied to a worker-spawn posture only snyggare uses; `maddu cost` empty elsewhere is "unexercised," not "broken." Confirm next audit. | 2026-06-30 |
@@ -73,7 +73,7 @@ defined type. All rows below are now `accepted` unless noted.
 | `SOURCE_HASH_RECOMPUTED` | integrity | accept (fires only on a hash recompute path) | `open` |
 | `PIPELINE_HALTED` | pipeline | accept (failure branch; pipelines rarely halt) | `open` |
 | `BLUEPRINT_DISTILLED` | blueprint | decide: `blueprint --distill` never emits it — wire or retire | `open` |
-| `SKILL_*` (created/applied/injected/imported/trusted/candidate-approved/-rejected) | skills | tracked under F2 (funnel), not retired piecemeal | `open` |
+| `SKILL_*` (created/applied/injected/imported/trusted/candidate-detected/-approved/-rejected) | skills | F2 resolved (#5): auto-detector retired, skills hand-authored → all `dormant` by design | `fixed` |
 
 ---
 

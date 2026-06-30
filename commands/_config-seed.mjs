@@ -23,10 +23,13 @@ async function exists(p) { try { await stat(p); return true; } catch { return fa
 
 // ── The defaults (the single source of truth) ──────────────────────────────
 
-// Rule-#9 auto-trigger allowlist. janitor:sessions (v0.17);
-// slice-stop:skill-candidate (v1.4.0); slice-stop:trust-audit +
-// coordinator:pre-run-checkpoint (v1.7.0); slice-stop:auto-handoff +
+// Rule-#9 auto-trigger allowlist. janitor:sessions (v0.17); slice-stop:trust-audit
+// + coordinator:pre-run-checkpoint (v1.7.0); slice-stop:auto-handoff +
 // slice-stop:auto-review (v1.10.0). Operator opts out by removing an entry.
+//
+// RETIRED (v1.81.0, roadmap #5 / F2): slice-stop:skill-candidate. The autonomous
+// skill-candidate detector produced generic tag-set candidates (0 conversion
+// fleet-wide); it is no longer wired, so the allowlist no longer seeds it.
 //
 // Deliberately ABSENT (opt-in): heartbeat:focus-director / slice-stop:focus-director
 // (the Focus Director). It writes a FOCUS_TAGGED every turn, so — unlike
@@ -35,7 +38,6 @@ async function exists(p) { try { await stat(p); return true; } catch { return fa
 // are registered in insights' DORMANT_BY_DESIGN so they read as dormant, not dead.
 export const DEFAULT_TRIGGERS = [
   'janitor:sessions',
-  'slice-stop:skill-candidate',
   'slice-stop:trust-audit',
   'coordinator:pre-run-checkpoint',
   'slice-stop:auto-handoff',
