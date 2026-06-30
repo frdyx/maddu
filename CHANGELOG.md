@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.80.0] · 2026-06-30 · roadmap #12 — reposition the charter (F4)
+
+Audit finding F4: across 13 installs the value consumers extract is the disciplined session substrate, not multi-agent orchestration (which fires in only 2–5 of 13). That's an **opt-in layer, not a dead one** — but "orchestration events ≈ 0" reads as a dead domain to a naive re-audit, so every audit risked re-raising it as a false alarm.
+
+- **Capability layers (roadmap #12 / F4).** Every verb in `commands/_tiers.mjs` now carries a `layer`: **`core`** (the always-on substrate — session/lane/slice/gate/plan/review/memory/tools, 62 verbs) vs **`orchestration`** (the opt-in multi-agent layer — `coordinator`/`loop`/`pipeline`/`team`, 4 verbs). `command-tier-discipline` requires a valid `layer` on every command, so a new verb can't be added unclassified and re-inflate the false alarm.
+- **Honest opt-in frame replaces "orchestration=0=dead".** New `maddu audit positioning` (pure lib `capability-positioning.mjs`) reads the `layer` tags + this repo's spine and reports orchestration as an **opt-in fire-rate** ("reached here" / "opt-in, not reached — expected"), **never** as dead. It is informational and never FAILs. Fixture `capability-positioning` (14/0).
+- **F4 → `fixed`** in `docs/audit/LEDGER.{md,json}`, enforced by `command-tier-discipline`. The finding stays true (Máddu is a disciplined substrate; orchestration is opt-in) — what's fixed is the false-alarm **recurrence**. Charter gains a "Capability layers — positioning" section; README foregrounds the discipline loop as the core, orchestration as opt-in.
+
+audit 16/0, self-test 93/93, architecture drift 0. (Governance budget: audit-checks 16/17 — the new check is the honest frame, counted.)
+
 ## [v1.79.0] · 2026-06-30 · roadmap #9 — sharpen the discipline loop
 
 Friction in the core loop quietly pushes operators to skip slices and gates. The worst of it: `maddu orient` showed goal progress and a timeline but **not whether the work is green right now**, and a failing gate surfaced as a raw stack trace rather than "which gate, where's the record, how do I reproduce it".

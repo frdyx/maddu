@@ -98,6 +98,19 @@ async function loadGovernanceBudgetLib() {
   return null;
 }
 
+async function loadCapabilityPositioningLib() {
+  const candidates = [
+    join(frameworkRoot(), 'template', 'maddu', 'runtime', 'lib', 'capability-positioning.mjs'),
+    join(frameworkRoot(), 'runtime', 'lib', 'capability-positioning.mjs'),
+  ];
+  for (const c of candidates) {
+    if (await exists(c)) {
+      try { return await import(pathToFileURL(c).href); } catch {}
+    }
+  }
+  return null;
+}
+
 const GATE_IDS = {
   events: 'event-types-reachable',
   commands: 'command-surface-coherent',
@@ -486,7 +499,34 @@ const AUDIT_ONLY_LABELS = [
   'rule-invariant drift',
   'capability-docs',
   'governance budget',
+  'capability positioning',
 ];
+
+// ── Audit-only check: capability positioning (roadmap #12 / F4) ────────────
+// F4 found Máddu is used as a disciplined session substrate, not a multi-agent
+// orchestrator — orchestration fires in only 2–5 of 13 installs. That's an
+// opt-in layer, not a dead one, but "orchestration events ≈ 0" reads as "dead"
+// to a naive re-audit. This check reads the `layer` tags in _tiers.mjs + this
+// repo's spine and reports the honest frame (core always-on; orchestration
+// opt-in, reached here or not) — it is INFORMATIONAL and never FAILs, so it
+// structurally replaces the "orchestration=0=dead" false alarm.
+async function checkCapabilityPositioning(repoRoot) {
+  const lib = await loadCapabilityPositioningLib();
+  if (!lib?.positioningVerdict) {
+    return { level: 'WARN', label: 'capability positioning', detail: 'capability-positioning.mjs not available (skipped)' };
+  }
+  const tiersPath = join(frameworkRoot(), 'commands', '_tiers.mjs');
+  if (!(await exists(tiersPath))) {
+    return { level: 'WARN', label: 'capability positioning', detail: '_tiers.mjs not adjacent (skipped)' };
+  }
+  let tiers = {};
+  try { tiers = (await import(pathToFileURL(tiersPath).href)).default || {}; }
+  catch { return { level: 'WARN', label: 'capability positioning', detail: '_tiers.mjs not loadable' }; }
+  let events = [];
+  try { const spine = await loadSpineLib(); if (spine?.readAll) events = await spine.readAll(repoRoot); } catch {}
+  const v = lib.positioningVerdict({ tiers, events });
+  return { level: 'PASS', label: 'capability positioning', detail: v.message };
+}
 
 async function checkGovernanceBudget() {
   const lib = await loadGovernanceBudgetLib();
@@ -540,7 +580,7 @@ async function checkGovernanceBudget() {
   return { level: 'PASS', label: 'governance budget', detail: `${summary}${latency.level === 'OK' ? ` · ${latency.message}` : ''}` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget', 'positioning']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -576,6 +616,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'invariants') checks.push(await checkRuleInvariants());
   if (!sub || sub === 'capability-docs') checks.push(await checkCapabilityDocs());
   if (!sub || sub === 'budget') checks.push(await checkGovernanceBudget());
+  if (!sub || sub === 'positioning') checks.push(await checkCapabilityPositioning(repoRoot));
 
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const c of checks) counts[c.level]++;

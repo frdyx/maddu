@@ -39,7 +39,7 @@ export default {
   id: 'command-tier-discipline',
   label: 'command tier discipline',
   severity: 'safety',
-  description: 'Every top-level CLI command has a tier in commands/_tiers.mjs.',
+  description: 'Every top-level CLI command has a tier and a layer (core|orchestration) in commands/_tiers.mjs.',
   run: async (ctx) => {
     const r = await resolveBin(ctx.repoRoot);
     if (!r) return { ok: true, message: 'bin/maddu.mjs not located (skipped)' };
@@ -62,6 +62,19 @@ export default {
         evidence: { missing, total: cmds.length },
       };
     }
-    return { ok: true, message: `${cmds.length} command(s), all tiered` };
+    // v1.80.0 (roadmap #12 / F4): every command must also declare a positioning
+    // layer, so a new verb can't be added unclassified and silently re-inflate
+    // the "orchestration unused" false alarm.
+    const VALID_LAYERS = new Set(['core', 'orchestration']);
+    const badLayer = cmds.filter((c) => !VALID_LAYERS.has(tiers[c].layer));
+    if (badLayer.length) {
+      return {
+        ok: false,
+        message: `${badLayer.length} command(s) missing a valid layer (core|orchestration): ${badLayer.join(', ')}`,
+        evidence: { badLayer, total: cmds.length },
+      };
+    }
+    const orch = cmds.filter((c) => tiers[c].layer === 'orchestration').length;
+    return { ok: true, message: `${cmds.length} command(s), all tiered and layered (${cmds.length - orch} core, ${orch} orchestration)` };
   },
 };

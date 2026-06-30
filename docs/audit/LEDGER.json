@@ -25,7 +25,9 @@
     {
       "id": "F4",
       "title": "Used as a discipline tracker, not an orchestrator",
-      "status": "noted",
+      "status": "fixed",
+      "gates": ["command-tier-discipline"],
+      "note": "Roadmap #12 (v1.80.0): capabilities tagged core vs orchestration in _tiers.mjs; command-tier-discipline enforces a valid layer on every verb; maddu audit positioning reports orchestration as an opt-in fire-rate, never dead. The finding (Máddu is used as a disciplined substrate, orchestration is opt-in) remains TRUE and intended — what's fixed is the false-alarm RECURRENCE: a re-audit can no longer read 'orchestration unused' as a dead domain.",
       "date": "2026-06-30"
     },
     {

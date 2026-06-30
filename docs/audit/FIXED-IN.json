@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "Orchestration (coordinator/loop/pipeline/team) fires in only 2-5 of 13 installs, so a naive audit reads 'orchestration events ~= 0' as a dead domain and re-raises it as a false-alarm finding every audit (F4) — when in truth it's an opt-in advanced layer and the disciplined substrate is the real product.",
+    "area": "commands/_tiers + commands/audit + runtime/lib/capability-positioning + gates/command-tier-discipline",
+    "fixed_in": "1.80.0",
+    "consumer_impact": "Every verb is tagged layer:core|orchestration in _tiers.mjs; `maddu audit positioning` frames orchestration as an opt-in fire-rate (never dead); command-tier-discipline requires a valid layer so a new verb can't be added unclassified. Charter + README reposition around the discipline loop.",
+    "ledger_ref": "F4"
+  },
+  {
     "symptom": "maddu orient showed goal progress + a timeline but never the last gate verdict, so an operator couldn't see red/green at a glance; a failing gate surfaced as a raw stack trace, not which-gate/where/how-to-repro — friction that pushes operators to skip slices and gates.",
     "area": "commands/orient + runtime/lib/gate-ledger + runtime/lib/gates + projections",
     "fixed_in": "1.79.0",
