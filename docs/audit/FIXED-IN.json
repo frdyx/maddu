@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "Token/cost usage is captured (maddu usage import / maddu cost) but nothing flags a runaway session — spend stays invisible until someone looks (F5 symptom).",
+    "area": "runtime/lib/cost-budget + gates/cost-budget",
+    "fixed_in": "1.86.0",
+    "consumer_impact": "Opt-in `cost-budget` gate: with .maddu/config/cost-budget.json {windowDays,maxTokens,metric} it sums recent tokenLedger spend and WARNs (never FAILs) when over, surfacing a runaway session in doctor/audit. Rule-5 clean (sums existing numbers, no provider call). Fleet-wide cost stays deferred (F5 accepted).",
+    "ledger_ref": "roadmap-14"
+  },
+  {
     "symptom": "maddu learn distils corrections per-repo but they stay siloed — a lesson learned the hard way in one repo (e.g. a shell/path quirk) never reaches the next, so the fleet re-learns the same things independently.",
     "area": "commands/learn + runtime/lib/lesson-federation",
     "fixed_in": "1.85.0",
