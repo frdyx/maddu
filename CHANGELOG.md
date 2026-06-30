@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.81.0] · 2026-06-30 · roadmap #5 — retire the dead skill funnel (F2)
+
+Audit finding F2: the autonomous skill-candidate detector fired (`SKILL_CANDIDATE_DETECTED`, 11× / 4 projects) but **every** downstream terminal was 0 across all 13 installs. The roadmap mandated a **skills-vs-`learn` spike first** — and it was decisive: the candidates are generic tag-set recurrences (`commit, test` · `plan, test` · `loop, test`), not reusable recipes, while `maddu learn` already does the valuable auto-capture (failure→success tool-call pairs → concrete corrections). Surfacing such candidates more prominently would only spam the operator. **Decision: retire the auto-detector.**
+
+- **Auto-detector retired.** The `slice-stop` auto-trigger is removed; `emitFreshCandidates` is now a deliberate no-op (emits nothing); `SKILL_CANDIDATE_DETECTED` is dispositioned **dormant** (DD1), and the default trigger allowlist no longer seeds `slice-stop:skill-candidate`. `maddu skill candidates list` no longer manufactures candidates — it lists any historical ones with a retired note.
+- **Skills are hand-authored.** `maddu skill create` / `maddu skill from-slice` are unchanged — a real, distinct capability. Auto-knowledge-capture is `maddu learn`. (Not redundant: different inputs, different outputs.)
+- **`funnel-integrity` gate (F2 lock).** New gate FAILs if `SKILL_CANDIDATE_DETECTED` is re-activated (disp flipped to `active`) or the `slice-stop` auto-emit is re-wired — so the dead funnel can't silently re-form. **F2 → `fixed`** in `docs/audit/LEDGER.{md,json}` with this gate backref. Fixture `funnel-integrity` (5/0).
+
+audit 16/0, self-test 94/94, architecture drift 0. `maddu insights` dead count stays 0 (the retired type reads dormant-by-design).
+
 ## [v1.80.0] · 2026-06-30 · roadmap #12 — reposition the charter (F4)
 
 Audit finding F4: across 13 installs the value consumers extract is the disciplined session substrate, not multi-agent orchestration (which fires in only 2–5 of 13). That's an **opt-in layer, not a dead one** — but "orchestration events ≈ 0" reads as a dead domain to a naive re-audit, so every audit risked re-raising it as a false alarm.

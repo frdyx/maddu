@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "The autonomous skill-candidate detector fired (11x/4 projects) but every downstream terminal was 0 across all 13 installs (F2): candidates are generic tag-sets (commit, test), not reusable recipes, and `maddu learn` already does the valuable auto-capture. A dead funnel carried as live.",
+    "area": "commands/slice-stop + commands/skill + runtime/lib/skill-candidates + runtime/lib/event-dispositions + gates/funnel-integrity",
+    "fixed_in": "1.81.0",
+    "consumer_impact": "Auto-detector retired: no slice-stop auto-emit, emitFreshCandidates is a no-op, SKILL_CANDIDATE_DETECTED dispositioned dormant, allowlist no longer seeds it. Skills are hand-authored (`maddu skill create`/`from-slice`); auto-capture is `maddu learn`. The funnel-integrity gate keeps it retired.",
+    "ledger_ref": "F2"
+  },
+  {
     "symptom": "Orchestration (coordinator/loop/pipeline/team) fires in only 2-5 of 13 installs, so a naive audit reads 'orchestration events ~= 0' as a dead domain and re-raises it as a false-alarm finding every audit (F4) — when in truth it's an opt-in advanced layer and the disciplined substrate is the real product.",
     "area": "commands/_tiers + commands/audit + runtime/lib/capability-positioning + gates/command-tier-discipline",
     "fixed_in": "1.80.0",

@@ -225,25 +225,13 @@ export default async function sliceStop(argv) {
     ? (id) => gauntlet.isAllowed(repoRoot, id)
     : async (id) => { try { return (((JSON.parse(await readFile(triggersPath, 'utf8')).allowed)) || []).includes(id); } catch { return false; } };
 
-  // v1.4.0 (Bucket C) — auto-funnel the skills system: after each slice-stop,
-  // detect reusable patterns and emit SKILL_CANDIDATE_DETECTED for any that
-  // crossed threshold. This is what makes the skills funnel fire without the
-  // agent remembering. Rule-#9 gauntlet: only fires when the trigger id is in
-  // the .maddu/config/triggers.json allowlist, and each emit carries
-  // triggered_by provenance. Best-effort; never breaks the slice-stop.
-  try {
-    if (await allow('slice-stop:skill-candidate')) {
-      const sc = await loadLibOptional('skill-candidates.mjs');
-      if (sc) {
-        const emitted = await sc.emitFreshCandidates(repoRoot, sessionId, {
-          kind: 'slice-stop', id: 'skill-candidate', fired_at: ev.ts,
-        });
-        if (emitted.length) console.log(`  skill candidate(s): ${emitted.length} detected → review with \`maddu skill candidates\``);
-      }
-    }
-  } catch (err) {
-    console.error(`  skill-candidate detection failed (non-fatal): ${err.message}`);
-  }
+  // v1.81.0 (roadmap #5 / F2) — the autonomous skill-candidate detector was
+  // RETIRED. It emitted SKILL_CANDIDATE_DETECTED from recurring slice-stop
+  // tag-sets, but those are generic ("commit, test"), not reusable recipes:
+  // 0 conversion across ~50 sessions / 4 fleet projects. Auto-knowledge-capture
+  // is `maddu learn` (failure→success tool-call pairs → concrete corrections);
+  // skills are now HAND-AUTHORED only (`maddu skill create` / `from-slice`). The
+  // `funnel-integrity` gate keeps this auto-trigger from being silently re-wired.
 
   // v1.7.0 (invocation-logic) — auto-funnel the supply-chain trust audit:
   // after a slice-stop, if the dependency surface changed since the last

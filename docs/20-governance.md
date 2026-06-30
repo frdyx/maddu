@@ -182,7 +182,6 @@ record, and are gated on a flat string id in the same `allowed` array:
 ```json
 { "allowed": [
     "janitor:sessions",
-    "slice-stop:skill-candidate",
     "slice-stop:trust-audit",
     "coordinator:pre-run-checkpoint",
     "slice-stop:auto-handoff",
@@ -192,11 +191,18 @@ record, and are gated on a flat string id in the same `allowed` array:
 
 | Trigger id | Fires | When (the invocation logic) |
 |---|---|---|
-| `slice-stop:skill-candidate` | at slice-stop | a tag-set RECURS across ≥2 slices (v1.4.0; v1.10.0 generalized the tags to `area:<dir>`/`ext:<ext>` so it fires in any product, not just Máddu's own conventions, and is high-confidence-only) |
 | `slice-stop:trust-audit` | at slice-stop | the dependency surface changed since the last `TRUST_AUDIT_RAN` — re-audits so freshness/pin drift on new deps is caught in-flow (v1.7.0) |
 | `coordinator:pre-run-checkpoint` | before a real coordinator run | a multi-phase worker run is about to mutate the repo — snapshots HEAD as a git-tag checkpoint so the operator can roll back (v1.7.0) |
 | `slice-stop:auto-handoff` | at slice-stop | always — derives a "▶ RESUME HERE" handoff (summary + next steps) and emits `HANDOFF_SET` so `maddu orient` is never empty; latest-wins, manual `handoff set` still overrides (v1.10.0) |
 | `slice-stop:auto-review` | at slice-stop | a reviewer is configured — runs `runSliceReview` over the slice (`SLICE_REVIEWED`/`FOLLOWUP_OPENED`). **No-op when no `kind:'reviewer'` runtime exists**, so on-by-default never bills by surprise; cooldown-guarded (v1.10.0) |
+
+> **Retired (v1.81.0, roadmap #5 / F2):** `slice-stop:skill-candidate`. The
+> autonomous skill-candidate detector emitted `SKILL_CANDIDATE_DETECTED` from
+> recurring slice-stop tag-sets, but those are generic (`commit, test`), not
+> reusable recipes — 0 conversion across the fleet. Skills are now hand-authored
+> (`maddu skill create` / `from-slice`); the real auto-capture path is
+> `maddu learn`. The `funnel-integrity` gate keeps the auto-trigger from being
+> silently re-wired.
 
 The operator opts out of any by removing its entry. These are *defined WHEN*
 conditions, not "fire always" — the whole point of the v1.7.0 invocation-logic

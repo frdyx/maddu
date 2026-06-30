@@ -116,37 +116,17 @@ export async function detectCandidates(repoRoot) {
   return candidates;
 }
 
-// Emit SKILL_CANDIDATE_DETECTED for any candidate not yet emitted.
-// v1.1.2: soft candidates throttle via SOFT_COOLDOWN_MS to avoid flooding
-// the operator surface on every slice-stop with one-shot patterns. High
-// candidates emit on the first observation (no cooldown).
-// `triggeredBy` (v1.4.0): when this runs as an auto-trigger (e.g. from
-// slice-stop), pass the rule-#9 provenance ({kind,id,fired_at}); it rides on
-// each emitted SKILL_CANDIDATE_DETECTED so the auto-fire is auditable.
-export async function emitFreshCandidates(repoRoot, by = null, triggeredBy = null) {
-  const all = await readAll(repoRoot);
-  const detectedEvents = all.filter((e) => e.type === EVENT_TYPES.SKILL_CANDIDATE_DETECTED);
-  const lastEmitByHash = new Map();
-  for (const e of detectedEvents) {
-    const h = e.data?.hash;
-    if (!h) continue;
-    const ts = e.ts ? Date.parse(e.ts) : 0;
-    if (!lastEmitByHash.has(h) || ts > lastEmitByHash.get(h)) lastEmitByHash.set(h, ts);
-  }
-  const candidates = await detectCandidates(repoRoot);
-  const emitted = [];
-  for (const c of candidates) {
-    const lastEmit = lastEmitByHash.get(c.hash);
-    if (lastEmit) continue; // Each candidate hash emits once; subsequent runs are no-ops.
-    await append(repoRoot, {
-      type: EVENT_TYPES.SKILL_CANDIDATE_DETECTED,
-      actor: by, lane: null,
-      triggered_by: triggeredBy,
-      data: { hash: c.hash, tags: c.tags, examples: c.examples.slice(0, 5), confidence: c.confidence },
-    });
-    emitted.push(c);
-  }
-  return emitted;
+// RETIRED (v1.81.0, roadmap #5 / F2). The autonomous detector emitted
+// SKILL_CANDIDATE_DETECTED from recurring slice-stop tag-sets, but those are
+// generic ("commit, test") rather than reusable recipes — 0 conversion across
+// ~50 sessions in 4 fleet projects. So auto-emission is now a deliberate no-op:
+// skills are HAND-AUTHORED (`maddu skill create` / `from-slice`) and the real
+// auto-knowledge-capture path is `maddu learn`. The function is kept (callers +
+// back-compat) but never appends. `detectCandidates` / `listCandidates` remain
+// pure read helpers for historical candidates. The `funnel-integrity` gate
+// enforces that this stays retired (no slice-stop auto-trigger re-wired).
+export async function emitFreshCandidates(_repoRoot, _by = null, _triggeredBy = null) {
+  return []; // retired: emits nothing
 }
 
 export async function approveCandidate(repoRoot, hash, by = null) {

@@ -124,11 +124,17 @@ export default async function skill(argv) {
     const lib = await loadLibOptional('skill-candidates.mjs');
     if (!lib) { console.error('skill-candidates.mjs not present — run `maddu upgrade`'); process.exit(2); }
     if (tsub === 'list') {
-      // First detect + emit any fresh candidates.
-      await lib.emitFreshCandidates(repoRoot);
+      // v1.81.0 (roadmap #5 / F2): the autonomous detector is RETIRED — this no
+      // longer emits fresh candidates (it produced generic tag-set noise with 0
+      // conversion). It only lists any historical candidates. Author skills by
+      // hand with `maddu skill create` / `from-slice`; for auto-capture use
+      // `maddu learn`.
       const candidates = await lib.listCandidates(repoRoot);
-      if (candidates.length === 0) { console.log('(no skill candidates)'); return; }
-      console.log(`${ANSI.bold}SKILL CANDIDATES  (${candidates.length})${ANSI.reset}`);
+      if (candidates.length === 0) {
+        console.log('(no skill candidates — the auto-detector is retired; author skills with `maddu skill create` / `from-slice`, or use `maddu learn`)');
+        return;
+      }
+      console.log(`${ANSI.bold}SKILL CANDIDATES  (${candidates.length})${ANSI.reset}  ${ANSI.dim}(historical — auto-detector retired in v1.81.0)${ANSI.reset}`);
       for (const c of candidates) {
         const color = c.status === 'approved' ? ANSI.pass : (c.status === 'rejected' ? ANSI.dim : ANSI.warn);
         console.log(`  ${ANSI.accent}${c.hash}${ANSI.reset}  ${color}${c.status.padEnd(10)}${ANSI.reset}  ${ANSI.dim}tags:${ANSI.reset} ${c.tags.join(', ')}  ${ANSI.dim}(${c.examples.length} ex)${ANSI.reset}`);

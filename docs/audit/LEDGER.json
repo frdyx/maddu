@@ -12,7 +12,9 @@
     {
       "id": "F2",
       "title": "Skills domain is a dead funnel (candidates detected, 0 ever applied)",
-      "status": "open",
+      "status": "fixed",
+      "gates": ["funnel-integrity"],
+      "note": "Roadmap #5 (v1.81.0): spike found the auto-detector emits generic tag-set candidates ('commit, test'), not reusable recipes — 0 conversion fleet-wide, and `maddu learn` already does the valuable auto-capture. Decision: RETIRE the autonomous detector (no slice-stop auto-emit; emitFreshCandidates is a no-op; SKILL_CANDIDATE_DETECTED dispositioned dormant). Skills are hand-authored (`maddu skill create`/`from-slice`). The funnel-integrity gate keeps it retired (FAILs if re-activated or the auto-trigger is re-wired).",
       "date": "2026-06-30"
     },
     {
