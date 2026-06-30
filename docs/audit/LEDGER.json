@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "note": "Machine-readable mirror of LEDGER.md, checked by the audit-ledger-coherent gate. A finding marked `fixed` must name the registered guardrail (gate) that enforces it; a dangling gate ref fails the gate so a guardrail can't be silently removed while the ledger claims the class is handled.",
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Consumers never learn they're stale (no upgrade-staleness nudge)",
+      "status": "in-progress",
+      "gates": ["release-parity"],
+      "date": "2026-06-30"
+    },
+    {
+      "id": "F2",
+      "title": "Skills domain is a dead funnel (candidates detected, 0 ever applied)",
+      "status": "open",
+      "date": "2026-06-30"
+    },
+    {
+      "id": "F3",
+      "title": "34 dead event types accumulated with no disposition",
+      "status": "fixed",
+      "gates": ["event-dispositions-complete"],
+      "date": "2026-06-30"
+    },
+    {
+      "id": "F4",
+      "title": "Used as a discipline tracker, not an orchestrator",
+      "status": "noted",
+      "date": "2026-06-30"
+    },
+    {
+      "id": "F5",
+      "title": "Token/cost accounting is single-project",
+      "status": "accepted",
+      "date": "2026-06-30"
+    },
+    {
+      "id": "F6",
+      "title": "Releases v1.73.1-v1.74.2 bumped + merged but never git-tagged",
+      "status": "fixed",
+      "gates": ["release-parity"],
+      "date": "2026-06-30"
+    }
+  ]
+}
