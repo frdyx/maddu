@@ -13,8 +13,9 @@ structurally prevents from recurring.
 > (v1.78.0) · #9 discipline loop (v1.79.0) · #12 reposition charter (v1.80.0,
 > F4→fixed) · #5 skill funnel (v1.81.0, F2→fixed — spike chose RETIRE the
 > auto-detector) · **#10 `maddu fleet upgrade --plan` (v1.82.0 — planner leg;
-> mutation is a follow-up)**. **Open:** #8 lesson federation, #10-mutation,
-> #13 compat spine, #14 cost ledger.
+> mutation is a follow-up) · **#10-mutation `--apply` (v1.83.0 — staged delivery,
+> halt-on-red)**. **Open:** #8 lesson federation, #13 compat spine, #14 cost
+> ledger.
 
 > **Top pick — `fleet-spine`.** The one clean SHIP (impact 5 / effort 3 /
 > leverage 5), fully offline + files-only, and the substrate nearly every other

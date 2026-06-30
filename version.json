@@ -1,5 +1,5 @@
 {
-  "version": "1.82.0",
-  "phase": "fleet-upgrade-plan",
+  "version": "1.83.0",
+  "phase": "fleet-upgrade-apply",
   "released": "2026-06-30"
 }
