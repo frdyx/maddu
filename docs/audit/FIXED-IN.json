@@ -35,6 +35,13 @@
     "ledger_ref": "F2"
   },
   {
+    "symptom": "Everything counted events/dispositions; nothing measured whether the guardrails actually caught faults, so the edifice had no evidence it earns its weight.",
+    "area": "runtime/lib/outcome + commands/fleet",
+    "fixed_in": "1.77.0",
+    "consumer_impact": "Outcome ledger: every gate FAIL is counted as a PREVENTED_FAULT (hard/soft by severity, per gate); the fleet view shows per-repo + active-fleet 'faults caught'.",
+    "ledger_ref": "F11"
+  },
+  {
     "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
     "area": "gates/generated-artifacts-current",
     "fixed_in": "1.73.1",
