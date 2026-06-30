@@ -6,6 +6,14 @@ framework audit runs, it should **diff against this ledger first**: anything
 marked `accepted`, `wontfix`, or `fixed` is not a fresh finding unless new
 evidence contradicts the recorded rationale.
 
+> **Checked mirror (v1.76.0):** `LEDGER.json` is the machine-readable copy of
+> these findings, enforced by the `audit-ledger-coherent` gate — every finding
+> needs a valid status, a `fixed` finding must name the **guardrail gate** that
+> enforces it, and every named gate must be a *registered* gate id. So a
+> guardrail can't be renamed or deleted while the ledger still claims the fault
+> class is handled (the backref goes dangling → the gate fails). Keep the two in
+> sync when you add or resolve a finding.
+
 This is the human/strategic half. The **machine half for event types** already
 exists: `DORMANT_BY_DESIGN` in `template/maddu/runtime/lib/insights.mjs` records
 which defined-but-unfired types are expected — so `maddu insights` already

@@ -26,6 +26,7 @@
     "handoff": null,
     "help": null,
     "import": "27-transcript-import.md",
+    "fleet": null,
     "init": "01-getting-started.md",
     "insights": null,
     "install": "28-default-tools.md",
