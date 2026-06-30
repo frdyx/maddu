@@ -74,9 +74,9 @@ const shipped = JSON.parse(await readFile(join(repoRoot, 'docs', 'audit', 'gover
 const builtinGates = (await discoverGates(repoRoot)).filter((g) => g.__source === 'builtin').length;
 const binSrc = await readFile(join(repoRoot, 'bin', 'maddu.mjs'), 'utf8');
 const verbCount = (() => { const m = binSrc.match(/const\s+COMMANDS\s*=\s*(\[[^\]]+\])/); return m ? new Function(`return ${m[1]}`)().length : 0; })();
-// audit-checks: 9 reusable gates surfaced + the 6 audit-only labels (kept in sync
+// audit-checks: 9 reusable gates surfaced + the 7 audit-only labels (kept in sync
 // with commands/audit.mjs by the audit-checks budget itself catching drift).
-const auditChecks = 9 + 6;
+const auditChecks = 9 + 7;
 const shippedVerdict = budgetVerdict({ counts: { gates: builtinGates, verbs: verbCount, 'audit-checks': auditChecks }, manifest: shipped });
 ok('shipped manifest is PASS against real counts', shippedVerdict.level === 'PASS',
   `${shippedVerdict.level} | ${summarizeBudget(shippedVerdict)}`);

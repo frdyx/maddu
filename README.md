@@ -10,7 +10,7 @@
 
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps the permanent record — the **spine** — so their work has a memory and an audit trail instead of vanishing when the session closes.
 
-[![Version 1.79.0](https://img.shields.io/badge/version-1.79.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.80.0](https://img.shields.io/badge/version-1.80.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -69,6 +69,10 @@ Every state question reduces to `tail`, `grep`, or `git log` on a file you alrea
 
 </div>
 
+### The discipline loop is the product
+
+What Máddu gives **every** install, from day one, is the always-on core: register a session, claim a lane, run a slice, stop it with a structured summary, let the gates check it — each one line on the spine. That disciplined substrate is the value; it's what makes the history trustworthy. Multi-agent **orchestration** (`coordinator`, `loop`, `pipeline`, `team`) is a powerful **opt-in** layer on top — reach for it when a job fans out across lanes, skip it when it doesn't. Most work just needs the loop, and that's by design. (See the [charter](docs/charter.md#capability-layers--positioning-v1800) for the core-vs-orchestration split.)
+
 ## How it works
 
 Three moving parts, and nothing else:
@@ -87,7 +91,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.79.0 installed.
+Máddu v1.80.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 

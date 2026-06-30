@@ -144,6 +144,26 @@ Grouped by purpose area, each is named here so the surface stays intentional and
 | Discovery & observability | `status`, `events`, `spine`, `search`, `brief`, `orient`, `help`, `audit`, `insights`, `fleet`, `focus` | Watch and replay the event log — `status` and `events` surface live state, `spine` verifies the append-only truth (never auto-repairs), `search` and `brief` query it, `orient` is the goal-anchored session-start briefing (success-condition progress + curated handoff), `help` is the on-ramp, `audit` runs the charter-drift check, `insights` reports empirically what is actually utilized across registered workspaces vs merely defined, `fleet` is the read-only single-machine fleet view (per-repo version/currency/liveness + the version delta vs fleet latest, computed offline from each repo's on-disk projection without running it), and `focus` is the opt-in Focus Director — a domain-blind instrument that tags each turn toward/lateral/away of the declared goal and flags sustained drift (a swap/revert/continue choice, never a gate). |
 | Lifecycle & plumbing | `init`, `start`, `upgrade`, `agents`, `hooks`, `workspace`, `global`, `runtime`, `schedule`, `checkpoint`, `auth`, `bridges` | Operator/script plumbing only (verbose CLI, no slash on-ramp): `init`/`start`/`upgrade` install and run the spine, `agents` registers a self-contained "install maddu" stanza into the operator's GLOBAL agent instruction files (Claude/Codex/Gemini/custom) so the framework is reachable by natural language from any future repo, `hooks` wires Claude Code session hooks into a repo (`SessionStart` auto-registers a session + records to the spine, `SessionEnd` closes it) so fresh repos never start building unrecorded, `workspace`/`global`/`runtime` configure it, `schedule` fires allowlisted triggers, `checkpoint` snapshots, `auth` keeps device-bound tokens, and `bridges` manages live agent connections. |
 
+### Capability layers — positioning (v1.80.0)
+
+Orthogonal to the purpose areas above, every verb carries a **`layer`** in
+`commands/_tiers.mjs` that states what kind of value it delivers:
+
+- **`core`** — the always-on disciplined substrate. Session, lane, slice, gate,
+  plan, review, memory, search, the tools. This is what **every** install
+  actually uses; it is Máddu's load-bearing value.
+- **`orchestration`** — the **opt-in** multi-agent layer: `coordinator`, `loop`,
+  `pipeline`, `team`. Powerful, but advanced — only a minority of installs reach
+  for it, and that is by design, not decay.
+
+This distinction is deliberate (roadmap #12 / audit finding F4). Empirically the
+discipline loop is the product; orchestration is the advanced opt-in. So Máddu
+measures orchestration as an **opt-in fire-rate** ("reached here or not"), never
+as a dead domain — `maddu audit positioning` reports the honest frame, and
+`command-tier-discipline` requires a valid `layer` on every verb so a new
+capability can't be added unclassified and re-inflate the old "orchestration
+unused = dead" false alarm.
+
 ---
 
 ## How features earn their place

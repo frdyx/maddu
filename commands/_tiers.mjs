@@ -6,6 +6,7 @@
 //   tier:        'mutating' | 'read-only'
 //   autoTrigger: 'allowed'  | 'forbidden'
 //   surface:     'agent'    | 'operator'  (v1.3.0)
+//   layer:       'core'     | 'orchestration'  (v1.80.0)
 //
 // Schedule integration (`template/maddu/runtime/lib/schedule.mjs`) consults
 // this manifest before firing: mutating + non-allowlisted → refused.
@@ -20,113 +21,122 @@
 //   - 'operator' — install / lifecycle / plumbing reached only by scripts or
 //                  the framework itself (init, upgrade, spine, auth, …). No
 //                  on-ramp expected; verbose CLI is the surface.
+//
+// `layer` (v1.80.0, roadmap #12 / F4): the honest positioning axis. Most
+// capabilities are 'core' — the always-on disciplined substrate (session, lane,
+// slice, gate, plan, review, memory, tools, …) that every install actually
+// uses. 'orchestration' is the OPT-IN multi-agent layer (coordinator, loop,
+// pipeline, team) that only 2–5 of 13 installs reach for. The audit reads this
+// to frame orchestration as opt-in (an honest fire-rate), NOT as "dead" — so a
+// future audit can't re-raise "orchestration unused" as a false-alarm finding.
+// `command-tier-discipline` requires a valid `layer` on every command.
 
 export default {
-  agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
-  checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  doctor:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  events:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
-  fleet:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
-  global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  init:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  memory:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  phase:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  register:     { tier: 'mutating',  autoTrigger: 'allowed',   surface: 'operator' },
-  review:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  schedule:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  search:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  skill:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  slice:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  'slice-stop': { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  sources:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  spine:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
-  start:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator' },
-  stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  task:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  worker:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
-  workspace:    { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
+  agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  doctor:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  events:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  fleet:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  init:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  memory:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  phase:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  register:     { tier: 'mutating',  autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  review:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  schedule:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  search:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  skill:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  slice:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  'slice-stop': { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  sources:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  spine:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  start:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  task:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  worker:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  workspace:    { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   // v0.18 — discovery surface (read-only).
-  help:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  suggest:      { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  help:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  suggest:      { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v0.18 Phase 4 — architectural backbone.
-  team:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  pipeline:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  advise:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  cost:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  team:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
+  pipeline:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
+  advise:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  cost:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v0.19.1 — retroactive transcript import populates the ledger.
-  usage:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
+  usage:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   // v1.1.0 Phase 1 — default tools. All mutating; auto-trigger forbidden
   // (the slash command path is the explicit-invocation surface).
-  git:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  test:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  'self-test':  { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  format:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
-  lint:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
-  install:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  git:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  test:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  'self-test':  { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  format:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  lint:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  install:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.1.0 Phase 3 — governance tier control surface.
-  governance:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  governance:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.1.0 Phase 4 — receipt log viewer.
-  log:          { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  log:          { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.1.0 Phase 5 — plan persistence.
-  plan:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  plan:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.1.0 Phase 6 — loops.
-  loop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  loop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
   // v1.1.0 Phase 7 — coordinator primitive.
-  coordinator:  { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  coordinator:  { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
   // v1.2.0 Phase 1 — supply-chain trust audit + pinning. `audit/list/verify/report`
   // are read-only-shaped but the verb dispatches into write paths too (pin/unpin),
   // so the verb itself is mutating; auto-trigger forbidden (operator explicit).
-  trust:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  trust:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.2.1 F2 — bridges list/kill-all is operator-explicit only.
   // `list` is read-only-shaped but the verb dispatches into kill-all too,
   // so the verb itself is mutating; auto-trigger forbidden.
-  bridges:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
+  bridges:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   // v1.3.0 — framework-coherence self-audit. Read-only (scans source, appends
   // one best-effort AUDIT_REPORT timeline event); safe to auto-trigger so the
   // drift check can run on a schedule every release.
-  audit:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  audit:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.4.0 — cross-project empirical usage audit. Read-only (scans registered
   // workspaces' spines + transcripts, writes nothing); safe to auto-trigger.
-  insights:     { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  insights:     { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.6.0 — session-start briefing. Read-only (runs operator-declared verify
   // commands + reads the spine; writes nothing).
-  orient:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  orient:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.6.0 — curated cross-session handoff. `set` writes a HANDOFF_SET event;
   // mutating, operator/agent-explicit.
-  handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // hooks install/remove write a HOST file (.claude/settings.json); `hooks fire`
   // is invoked by Claude Code's hook system (external), not a Máddu auto-trigger.
-  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator' },
+  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   // v1.4.0 — plugin loader: capabilities that live outside the core. list/info
   // are read-only-shaped but the verb dispatches into enable/disable writes, so
   // the verb is mutating; auto-trigger forbidden (operator-explicit, like mcp).
-  plugin:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  plugin:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.9.0 — failure-learning. `run` spawns a judgment worker + writes
   // corrections (agent-file + memory); mutating and auto-trigger forbidden
   // (operator/agent-explicit, like advise). `digest` is the read-only fallback.
-  learn:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  learn:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.12.0 — portable project-blueprint export. Reads transcripts + spine and
   // writes a brief artifact under .maddu/state/blueprints/; no spine mutation.
-  blueprint:    { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  blueprint:    { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.17.0 — deliberate-shortcut ledger. Read-only (scans the source tree,
   // writes a derived .maddu/state cache + one best-effort DEBT_SCANNED event);
   // safe to auto-trigger so the ledger can refresh on a schedule.
-  debt:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent'    },
+  debt:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.18.0 — architecture-drift. `init`/`baseline` write the contract/baseline,
   // so the verb is mutating + auto-trigger forbidden (operator-explicit). The
   // AUTO path is the read-only `architecture-drift` gate (doctor/audit).
-  architecture: { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent'    },
+  architecture: { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
 };

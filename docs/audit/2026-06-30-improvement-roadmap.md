@@ -10,9 +10,9 @@ structurally prevents from recurring.
 > **Delivery status** (tracked in [`FIXED-IN.json`](./FIXED-IN.json)). **Shipped:**
 > #6 staleness FLOOR + #4 release-parity + #3 DD1 (v1.75.0) · #1 fleet-spine + #2
 > audit-circuit (v1.76.0) · #11 outcome ledger (v1.77.0) · #7 governance-budget
-> (v1.78.0) · **#9 discipline loop (v1.79.0)**. **Open:** #5 skill funnel, #8
-> lesson federation, #10 `maddu fleet upgrade`, #12 reposition charter, #13
-> compat spine, #14 cost ledger.
+> (v1.78.0) · #9 discipline loop (v1.79.0) · **#12 reposition charter (v1.80.0,
+> F4→fixed)**. **Open:** #5 skill funnel, #8 lesson federation, #10 `maddu fleet
+> upgrade`, #13 compat spine, #14 cost ledger.
 
 > **Top pick — `fleet-spine`.** The one clean SHIP (impact 5 / effort 3 /
 > leverage 5), fully offline + files-only, and the substrate nearly every other
