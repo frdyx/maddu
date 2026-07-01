@@ -17,6 +17,10 @@
 //       LEARN_DIGEST_WRITTEN. Reviewable by the operator or the live agent.
 //   list                 show corrections written so far (from the spine).
 //   show <correctionId>  print one correction + its provenance.
+//   scan [--threshold N] [--recent-days N] [--root <dir>] [--json]
+//       Read-only reflect v1: report SLICE_STOP slices whose summary hedges
+//       completion while NO observed proof (real GATE_RAN ok / verified
+//       deliverable) exists. Writes nothing — shadow measurement for a v2.
 //
 // Hard-rule compliance: the PARENT process is the only spine writer. The
 // judgment worker only emits JSON on stdout; the parent parses it and appends
@@ -137,6 +141,50 @@ export default async function learnCmd(argv) {
     process.stdout.write(JSON.stringify(ev, null, 2) + '\n');
     return;
   }
+  // ── scan (reflect v1) — read-only completion-claim-without-proof report ─────
+  // Deterministic, no LLM, no writes, no new event type. Scans SLICE_STOP events
+  // for summaries that HEDGE completion while the slice shows NO OBSERVED proof
+  // (a real GATE_RAN ok during the slice, or a verified deliverable on-event).
+  // Self-reported --gates/--targets are NOT proof. This is the shadow-measurement
+  // stage: it reports so the operator can see whether the pattern is worth a v2
+  // write path — it never touches CLAUDE.md.
+  if (sub === 'scan') {
+    const reflect = await loadLib('reflect.mjs');
+    // --root scans another repo's spine (fleet baseline) with THIS checkout's
+    // reflect lib, so sibling repos need no upgrade to be measured.
+    const scanRoot = (flags.root && flags.root !== true) ? String(flags.root) : repoRoot;
+    const all = await spine.readAll(scanRoot);
+    const threshold = Number(flags.threshold) > 0 ? Number(flags.threshold) : undefined;
+    const recentDays = Number(flags['recent-days']) > 0 ? Number(flags['recent-days']) : undefined;
+    const res = reflect.scanCompletionClaims(all, { nowMs: Date.now(), threshold, recentDays });
+
+    if (flags.json) { process.stdout.write(JSON.stringify(res, null, 2) + '\n'); return; }
+
+    // Always print a one-line summary so "ran clean, nothing to report" is
+    // distinguishable from a silent error.
+    console.log(
+      `maddu learn scan  ${C.dim}${res.scanned} slice-stop(s) scanned · ${res.hedgeMatches} hedged · ` +
+      `${res.cumulativeCount} without observed proof (${res.recentCount} recent) · cumulative ${res.cumulativeCount}/${res.threshold}${C.reset}`
+    );
+    if (!res.matches.length) {
+      console.log(`  ${C.green}✓${C.reset} ${C.dim}no hedged-without-proof slices found — nothing to report.${C.reset}`);
+      return;
+    }
+    for (const m of res.matches) {
+      const when = m.ts ? m.ts.slice(0, 10) : '----------';
+      const laneTag = m.lane ? ` ${C.dim}[${m.lane}]${C.reset}` : '';
+      const staleTag = m.recent ? '' : ` ${C.dim}(stale)${C.reset}`;
+      console.log(`  ${C.dim}${when}${C.reset}${laneTag} ${m.summary}${staleTag}`);
+    }
+    if (res.crossed) {
+      console.log(`\n  ${C.dim}pattern recurs ${res.recentCount} time(s) recently (threshold ${res.threshold}). Proposed note (NOT written):${C.reset}`);
+      console.log(`  ${C.dim}“${res.proposedNote}”${C.reset}`);
+      console.log(`  ${C.dim}read-only v1 — if this keeps happening, that note is the v2 candidate.${C.reset}`);
+    } else {
+      console.log(`\n  ${C.dim}below the live threshold (${res.threshold}); reported for awareness only.${C.reset}`);
+    }
+    return;
+  }
   if (sub === 'retrieve') {
     // Reversible briefings (CCR): return the full original a curated
     // orient/handoff briefing persisted.
@@ -230,7 +278,7 @@ export default async function learnCmd(argv) {
     return;
   }
 
-  if (sub !== 'run') { console.error(`maddu learn: unknown subcommand "${sub}". Use run | digest | list | show | retrieve.`); process.exit(2); }
+  if (sub !== 'run') { console.error(`maddu learn: unknown subcommand "${sub}". Use run | digest | scan | list | show | sync | retrieve.`); process.exit(2); }
 
   // ── run ─────────────────────────────────────────────────────────────────--
   if (!digest.paired) {

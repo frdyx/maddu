@@ -132,7 +132,8 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "run tests", "test the project", "verify project tests", "adaptive tests" | `/maddu-test` |
 | "test Máddu itself", "run the framework test suite", "self-test" | `/maddu-self-test` |
 | "audit the framework", "coherence check", "drift", "dead events" | `/maddu-audit` |
-| "learn from my mistakes", "what went wrong", "review past failures", "mine my sessions" | `/maddu-learn` |
+| "learn from my mistakes", "what went wrong", "review past failures", "mine my sessions" | `/maddu-learn` (→ `learn run`/`digest`: judges failure→success pairs and **auto-writes** project facts) |
+| "am I claiming done without proof", "hedged completions", "did we verify what we shipped", "reflect on slice quality" | `/maddu-learn` (→ `learn scan`: **read-only** report of hedged-completion-without-observed-proof slices; writes nothing) |
 | "what corrections do we have", "learned project facts" | `/maddu-memory` (then `--kind correction`) |
 | "blueprint this project", "export how we built X", "make a reusable handoff/recipe", "reproduce this as a system" | `/maddu-blueprint` |
 | "what shortcuts did we take", "technical debt", "deferred work", "what needs upgrading" | `/maddu-debt` |
