@@ -18,6 +18,12 @@ Máddu framework; they are never framed as Máddu's hard rules.
      `--since <iso-date>` or `--slug <substr>` to narrow scope).
    - `digest` → no-provider review only: `./maddu/run learn digest`. Use this
      first if you want to eyeball candidates before any write.
+   - `scan` → **read-only reflect report**: `./maddu/run learn scan` (add
+     `--threshold N` / `--recent-days N`). Reports SLICE_STOP slices whose
+     summary hedges completion (e.g. "should work") while the slice recorded
+     **no observed proof** — no real gate pass and no verified deliverable.
+     Self-reported `--gates`/`--targets` are deliberately NOT treated as proof.
+     It **writes nothing** — a shadow measurement, not a correction.
    - `list` / `show <id>` → inspect corrections already written.
 2. Run the resolved command via Bash and **re-print its complete output inside a
    fenced markdown code block**, verbatim.

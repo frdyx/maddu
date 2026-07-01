@@ -88,6 +88,41 @@ maddu learn retrieve <briefingId>  # the byte-exact full original
 
 Each curation emits `BRIEFING_CURATED { briefingId, kind, originalRef, dropped }`.
 
+## `learn scan` — reflect v1 (read-only completion-claim check)
+
+`maddu learn` above *mines failures* and **auto-writes** project facts.
+`maddu learn scan` is a different trust model: a **deterministic, read-only**
+report that writes nothing. It answers one question — *"are we claiming done
+without proof?"*
+
+It scans `SLICE_STOP` events for summaries that **hedge a completion claim**
+("should work", "seems to pass", "probably fine") **joined with an absence of
+observed proof** on that slice:
+
+- **The JOIN is the signal, not the hedge alone.** A hedge that co-occurs with
+  real green proof is honest confidence, not a defect — so it is *not* flagged.
+- **Proof means observed events, never self-report.** Proof is a real
+  `GATE_RAN` with `status:'ok'` that ran during the slice, **or** a verified
+  deliverable recorded on the event (`deliverables.verified > 0` — declared
+  `--targets` that actually exist on disk/git). The self-reported `--gates` /
+  `--targets` CSV strings — whatever the worker *typed* on the flag — are
+  deliberately **not** treated as proof.
+- **Recency-gated.** A pattern is only "live" when it recurs `≥ threshold`
+  (default 3) with at least one hit inside `--recent-days` (default 30), so a
+  mature repo's long-fixed slices are not diagnosed as a current problem.
+
+```bash
+maddu learn scan                       # read-only report + a one-line summary
+maddu learn scan --threshold 3 --recent-days 30
+maddu learn scan --json                # machine-readable
+```
+
+It **never touches `CLAUDE.md`**, adds no gate, and emits no event — it is the
+shadow-measurement stage. A behavioral note ("verify before claiming done") is
+*framework work-discipline*, not a project fact, so it must never land in the
+`learn` project-facts block; the write/approval path is a deferred v2, earned
+only if this report shows the pattern actually recurs and converts.
+
 ## Events
 
 `LEARN_MINED` (load-bearing) · `LEARN_DIGEST_WRITTEN` · `LEARN_JUDGED` ·
