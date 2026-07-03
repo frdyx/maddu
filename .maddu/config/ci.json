@@ -11,6 +11,7 @@
     "cockpit-routes-reachable",
     "command-surface-coherent",
     "command-tier-discipline",
+    "completion-claim",
     "coordinator-phase-coherent",
     "cost-budget",
     "default-tools-shipped",
@@ -25,6 +26,7 @@
     "funnel-integrity",
     "generated-artifacts-current",
     "governance-mode-coherent",
+    "heavy-suites-recent",
     "help-roster-matches-cli",
     "kanban-coherent",
     "lane-force-discipline",
@@ -56,14 +58,12 @@
     "slash-commands-installed",
     "slice-scope",
     "spine-integrity",
-    "stress-harness-recent",
     "strict-mode-approval-active",
     "suggest-engine-deterministic",
     "token-ledger-populated",
     "token-ledger-schema",
     "tool-allowlist",
     "tracked-source-drift",
-    "upgrade-matrix-recent",
     "worker-env-policy-coherent"
   ]
 }

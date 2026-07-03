@@ -770,7 +770,7 @@ console.log('');
 console.log(`Stress harness summary: ${results.filter((r) => r.ok).length}/${results.length} scenarios passed in ${totalMs}ms`);
 console.log(`Assertions: ${totalPassed} passed · ${totalFailed} failed`);
 
-// Record last-run timestamp for the stress-harness-recent gate.
+// Record last-run timestamp for the heavy-suites-recent gate (stress half).
 const lastRunPath = join(process.cwd(), '.maddu', 'state', 'stress-last-run.json');
 try {
   await mkdir(dirname(lastRunPath), { recursive: true });

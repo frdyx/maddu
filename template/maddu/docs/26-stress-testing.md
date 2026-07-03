@@ -97,9 +97,9 @@ Each scenario writes a JSON report to `.maddu/state/stress-reports/stress-report
 
 **Aggregate budget:** under 60 seconds on dev hardware.
 
-### The `stress-harness-recent` gate
+### The `heavy-suites-recent` gate (stress half)
 
-Severity: **warn**. Reads `.maddu/state/stress-last-run.json`. Flags coverage drift older than 30 days. Skipped on fresh installs that haven't run the harness yet. Output examples:
+Severity: **warn**. Since v1.88.0 one merged gate covers BOTH heavy suites (the retired `stress-harness-recent` + `upgrade-matrix-recent` pair — a named 2→1 governance-budget retirement). The stress half reads `.maddu/state/stress-last-run.json` and flags coverage drift older than 30 days. Skipped on fresh installs that haven't run the harness yet. Output examples:
 
 - `last stress run 4h ago — 15 scenarios in 7547ms`
 - `last stress run 42d ago (> 30d)`
@@ -125,9 +125,9 @@ Four scenarios verifying any supported prior version upgrades to v0.19 cleanly:
 
 Each scenario writes `.maddu/state/upgrade-matrix-reports/upgrade-matrix.<scenario>.json` and the aggregate run records to `.maddu/state/upgrade-matrix-last-run.json`.
 
-### The `upgrade-matrix-recent` gate
+### The `heavy-suites-recent` gate (upgrade-matrix half)
 
-Severity: **warn**. Reads `.maddu/state/upgrade-matrix-last-run.json`. Flags:
+Severity: **warn**. The upgrade-matrix half of the merged gate reads `.maddu/state/upgrade-matrix-last-run.json`. Flags:
 
 - Last run had failures.
 - Last run predates the current `maddu.json` install (which would mean the matrix hasn't covered the version the operator is running today).

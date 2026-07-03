@@ -74,8 +74,13 @@ to a **charter-coherence concern** (keeping the surface honest — the charter's
   `default-tools-shipped`, `lanes-catalog-parseable`, `pipeline-schema-valid`,
   `model-hint-shape`, `tool-allowlist`, `suggest-engine-deterministic`,
   `skills-starter-pack-installed`.
-- **Harness freshness (verification posture):** `stress-harness-recent`,
-  `upgrade-matrix-recent`, `self-test-recent`, `project-test-recent`.
+- **Harness freshness (verification posture):** `heavy-suites-recent` (the
+  merged stress + upgrade-matrix pair, v1.88.0), `self-test-recent`,
+  `project-test-recent`.
+- **Work honesty (verification posture):** `completion-claim` — the
+  deterministic hedged-claim-without-observed-proof check at every slice-stop
+  (warn tier; a model checking a model is a second opinion, a deterministic
+  check against declared deliverables is evidence).
 
 No built-in gate is unjustified; no hard rule is unenforced (rules 3 and 7 by
 documented construction). The `maddu audit` sub-check holds this true over time.
