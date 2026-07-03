@@ -38,6 +38,10 @@ export default {
   auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  // v1.87.0 — bare `ci` is read-only (headless gate run, no spine writes), but
+  // `ci pin` writes the required-gate profile (maddu.json / .maddu/config), so
+  // the verb is mutating + auto-trigger forbidden (fleet/trust convention).
+  ci:           { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   doctor:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   events:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers

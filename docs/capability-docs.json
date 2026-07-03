@@ -10,14 +10,17 @@
     "audit": "39-rule-gate-traceability.md",
     "auth": "12-auth-and-imports.md",
     "blueprint": "38-blueprint.md",
-    "brief": "21-agent-onboarding.md",
     "bridges": "05-bridge-endpoints.md",
+    "brief": "21-agent-onboarding.md",
     "checkpoint": null,
+    "ci": "46-ci.md",
     "coordinator": "33-loops-and-coordinator.md",
     "cost": "31-operations-log.md",
     "debt": "41-debt.md",
     "doctor": "06-hard-rules.md",
     "events": null,
+    "fleet": null,
+    "focus": "43-focus-director.md",
     "format": "28-default-tools.md",
     "git": "28-default-tools.md",
     "global": "19-multi-workspace.md",
@@ -25,8 +28,8 @@
     "governance": "30-governance-tiers.md",
     "handoff": null,
     "help": null,
+    "hooks": "44-session-hooks.md",
     "import": "27-transcript-import.md",
-    "fleet": null,
     "init": "01-getting-started.md",
     "insights": null,
     "install": "28-default-tools.md",
@@ -66,8 +69,6 @@
     "upgrade": "14-upgrading.md",
     "usage": "27-transcript-import.md",
     "worker": "11-runtimes-and-mcp.md",
-    "workspace": "19-multi-workspace.md",
-    "focus": "43-focus-director.md",
-    "hooks": "44-session-hooks.md"
+    "workspace": "19-multi-workspace.md"
   }
 }
