@@ -44,7 +44,19 @@ ok('classify SESSION_* → t-session', m.classifyEvent('SESSION_HEARTBEAT') === 
 ok('classify LANE_* → t-lane', m.classifyEvent('LANE_CLAIMED') === 't-lane');
 ok('classify APPROVAL_* → t-approval', m.classifyEvent('APPROVAL_REQUESTED') === 't-approval');
 ok('classify FRAMEWORK_* → t-framework', m.classifyEvent('FRAMEWORK_UPGRADED') === 't-framework');
+ok('classify AUTONOMY_* → t-approval', m.classifyEvent('AUTONOMY_RECOMMENDATION') === 't-approval' && m.classifyEvent('AUTONOMY_SCORED') === 't-approval');
 ok('classify unknown → empty', m.classifyEvent('SOMETHING_ELSE') === '');
+
+// summary text of a row: cell 3 → first child is .event-summary.
+function summaryOf(r) { return (r.children[3].children[0].children[0] || {}).text || ''; }
+
+// earned-autonomy rows (v1.92.0) — scored digest + rung-change arrows.
+const scoredRow = m.eventRow({ ts: '2026-07-03T12:00:00Z', type: 'AUTONOMY_SCORED', data: { totalSlices: 61, lanes: [{ lane: 'a' }, { lane: 'b' }] } });
+ok('AUTONOMY_SCORED summarized', /61 slice\(s\) · 2 lane\(s\) scored/.test(summaryOf(scoredRow)), summaryOf(scoredRow));
+const recRow = m.eventRow({ ts: '2026-07-03T12:00:00Z', type: 'AUTONOMY_RECOMMENDATION', data: { lane: 'backend', fromRung: 'observe', toRung: 'relaxation-candidate', recommendation: 'consider-relaxed', muted: false } });
+ok('AUTONOMY_RECOMMENDATION summarized with arrow + verdict', /backend: observe → relaxation-candidate · consider-relaxed/.test(summaryOf(recRow)), summaryOf(recRow));
+const mutedRow = m.eventRow({ ts: '2026-07-03T12:00:00Z', type: 'AUTONOMY_RECOMMENDATION', data: { lane: 'backend', fromRung: 'observe', toRung: 'established', muted: true } });
+ok('muted recommendation says so', /· muted/.test(summaryOf(mutedRow)), summaryOf(mutedRow));
 
 // eventRow — .event-row, fresh adds " new", classified type, summarized payload.
 const row = m.eventRow({ ts: '2026-06-19T12:00:00.000Z', type: 'SLICE_STOP', lane: 'harness', actor: 'me', data: { summary: 'did a thing' } });

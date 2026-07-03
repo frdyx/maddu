@@ -70,6 +70,7 @@ export function classifyEvent(type) {
   if (type.startsWith('APPROVAL_'))       return 't-approval';
   if (type.startsWith('AUTH_KEY_'))       return 't-approval';
   if (type.startsWith('IMPORT_'))         return 't-approval';
+  if (type.startsWith('AUTONOMY_'))       return 't-approval';
 
   // Knowledge work — bold cream (slice family)
   if (type.startsWith('SKILL_'))          return 't-slice';
@@ -101,6 +102,8 @@ function summarize(ev) {
     case 'VENDOR_MEMORY_IMPORTED': return `${d.file || d.factId || ''}`;
     case 'PHASE_DECLARED':      return `${d.name || ''}${d.tier ? `  · tier: ${d.tier}` : ''}`;
     case 'PHASE_CLEARED':       return d.name ? `${d.name} exited` : '';
+    case 'AUTONOMY_SCORED':     return `${d.totalSlices ?? '?'} slice(s) · ${(d.lanes || []).length} lane(s) scored`;
+    case 'AUTONOMY_RECOMMENDATION': return `${d.lane || '?'}: ${d.fromRung || '?'} → ${d.toRung || '?'}${d.muted ? ' · muted' : d.recommendation ? ` · ${d.recommendation}` : ''}`;
     default: return '';
   }
 }

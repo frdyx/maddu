@@ -11,6 +11,13 @@ narrative summary.
 
 ---
 
+## [v1.92.1] · 2026-07-03 · cockpit surfaces earned autonomy
+
+- Event stream: `AUTONOMY_SCORED` / `AUTONOMY_RECOMMENDATION` classified into the trust (amber) family with human summaries — scored digest (`61 slice(s) · 5 lane(s) scored`) and rung-change arrows (`backend: observe → relaxation-candidate · consider-relaxed`, muted shown as such).
+- Orientation brief card: a live recommendation renders as its own `Autonomy` row (typeof-guarded against the snapshot harness null-proxy; line-neutral in `cockpit-views-live.js` — mass ratchet honored at 2621).
+- Plumbing: `autonomy` projection slot (latest recommendation, rebuilt from the spine) → `buildOrientation` → `/bridge/orientation`; snapshot-harness canned fixture showcases a muted recommendation, orientation golden regenerated + diff-reviewed.
+- Gates: boot 49 · goldens 44 · Playwright 46 · event-rows 24 · views-live 125 · self-test 107/107 · audit 16/0.
+
 ## [v1.92.0] · 2026-07-03 · earned autonomy — `maddu autonomy` (market roadmap #11, operator-directed)
 
 - **`maddu autonomy`** — deterministic per-lane trust score over the verified record: Wilson lower bound (z=1.96) over witnessed-clean vs witnessed-dirty slice outcomes, 3-rung ladder (observe / established / relaxation-candidate), daily clean-credit cap against deliverable-farming. **Recommend-only by contract**: nothing anywhere in the feature writes governance config — applying a recommendation is the operator running `maddu governance set`. UEAL-inspired (concept, not mechanism); design contract in `docs/research/earned-autonomy-proposal.md`, Codex-consulted.

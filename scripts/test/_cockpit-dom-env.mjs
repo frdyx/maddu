@@ -175,6 +175,7 @@ const CANNED = {
       lastEventId: 'evt_00000042',
       goal: { objective: 'ship the focus director', constraints: [] },
       phase: { name: 'release 2.0', tier: 'strict', setAt: FIXED_TS },
+      autonomy: { lane: 'backend', fromRung: 'observe', toRung: 'established', recommendation: 'maintain', muted: true, mutedReason: 'active phase: release 2.0', wilson: 0.72, n: 12, at: FIXED_TS },
       activeSession: { id: 'ses_fixture01' },
       lastSliceStop: { summary: 'SLICE STOP: cockpit fixtures wired' },
       counters: { sessions: 1, slices: 1 },

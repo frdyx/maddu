@@ -65,6 +65,9 @@ export async function project(repoRoot) {
   // Governance Phase 1: goal + phase declarations (latest wins).
   let goal = null;
   let phase = null;
+  // Earned autonomy (v1.92.0) — latest recommendation + score digest (latest
+  // wins; recommend-only, so this is display state, never behavior).
+  let autonomy = null;
   // v1.6.0 — curated cross-session handoff (latest HANDOFF_SET wins).
   let handoff = null;
   // Focus Director — the pilot's attention trail vs the declared goal. Rebuilt
@@ -585,6 +588,19 @@ export async function project(repoRoot) {
       case 'PHASE_CLEARED':
         phase = null;
         break;
+      case 'AUTONOMY_RECOMMENDATION':
+        autonomy = {
+          lane: ev.data?.lane || null,
+          fromRung: ev.data?.fromRung || null,
+          toRung: ev.data?.toRung || null,
+          recommendation: ev.data?.recommendation || null,
+          muted: !!ev.data?.muted,
+          mutedReason: ev.data?.mutedReason || null,
+          wilson: typeof ev.data?.wilson === 'number' ? ev.data.wilson : null,
+          n: typeof ev.data?.n === 'number' ? ev.data.n : null,
+          at: ev.ts,
+        };
+        break;
       case 'BOSS_MESSAGE': {
         const sid = ev.data.bossSessionId || 'default';
         if (!bossTranscripts.has(sid)) bossTranscripts.set(sid, []);
@@ -799,6 +815,8 @@ export async function project(repoRoot) {
     // v1.6.0 — latest curated handoff (null if never set).
     handoff,
     phase,
+    // Earned autonomy — latest recommendation (null until a rung ever changes).
+    autonomy,
     // Focus Director — pilot trajectory trail (last tag, rolling window, open flag).
     focus,
     // Governance Phase 2: gate runs + tracked-source hashes.
@@ -900,7 +918,7 @@ export function projectionDefaults() {
     sessions: [], activeSessions: [], claims: [], sliceStops: [], inbox: [],
     approvals: { open: [], ledger: [], policies: [] },
     tasks: [], workers: [], proposals: [], bossTranscripts: {},
-    goal: null, handoff: null, phase: null, focus: null,
+    goal: null, handoff: null, phase: null, autonomy: null, focus: null,
     gates: { lastRunAt: null, runs: [], summary: { ok: 0, warn: 0, fail: 0 } },
     sourceHashes: { paths: {}, lastRecomputedAt: null },
     sliceLocks: {}, triggers: {}, pendingActions: [],
