@@ -6,7 +6,7 @@
 
 ### Your AI agents are temporary. The system that governs them shouldn't be.
 
-**Máddu is a local-first orchestration spine for AI agents** — the external, cooperative layer that AI coding agents (Claude Code, Codex, or any CLI) plug into so multi-agent work stays **governed and coordinated**: one agent per lane, risky changes held behind approvals, every slice checked by a gate. It runs as a small Node process that writes each approval, session, and slice as one line on an append-only log on your disk — the durable record is *how* the governance earns your trust, not a flight recorder bolted on the side.
+**Máddu is a local-first orchestration spine for AI agents** — the external, cooperative layer that AI coding agents (Claude Code, Codex, or any CLI) plug into to work as an **auditable team**: one agent per lane, risky changes held behind approvals, every slice checked by a gate. *Cooperative* means exactly that — the agent calls Máddu; Máddu never sits in the request path and never touches your keys. It runs as a small Node process with local-first, append-only files as the system of record — each approval, session, and slice one line on disk. The durable record is *how* the governance earns your trust, not what it sells.
 
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **in line** — one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay — instead of a black box that vanishes when the session closes.
 
@@ -45,6 +45,8 @@ You've handed real work to AI agents. They claim lanes, request approvals, ship 
 - **Can I trust what happened while I was away?** Scattered across SQLite files, vendor dashboards, and agent memory you can't inspect — with no way to prove it wasn't quietly rewritten.
 
 Agents are getting more autonomous. The thing that **governs and coordinates** them shouldn't be the least durable part of your stack.
+
+Tracing tools observe runs. Memory layers help agents remember. **Máddu governs how agents collaborate.**
 
 ## The idea
 
