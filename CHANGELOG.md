@@ -11,6 +11,13 @@ narrative summary.
 
 ---
 
+## [v1.92.2] · 2026-07-04 · focus director: verbosity is not drift (incident catch)
+
+- **The drift metric punished detail, not distance.** The tagger divided goal-token intersection by the *focus text's* size — so every detailed, honest, on-goal slice summary of the earned-autonomy arc read as `away` (0.85–0.99; 5/5 false positives on 2026-07-03, two spurious `DRIFT_FLAGGED`), while a terse "working on autonomy" would have passed. Diagnosed from the spine's own `FOCUS_TAGGED.signals`.
+- **New metric: absolute anchor count.** What separates on-goal from off-goal in real data is whether the goal's *distinctive terms* appear at all — on-goal texts anchor 2–5 of them, off-goal texts anchor zero. `distance = 1 − min(1, anchors/4)` (capped by goal vocabulary); ≥2 anchors → `toward`, 1 → `lateral`, 0 → `away`. Signals now carry `anchors` + `anchorHits` so every tag is self-explanatory.
+- Two supporting fixes: light deterministic **stemming** ("scored"/"scoring"/"score" now meet), and the goal axis is **objective + constraints only** — success-condition texts are verification commands ("fixture", "green") whose generic vocabulary had matched genuinely off-goal maintenance work.
+- Regression cases are the incident itself: the real phase-2/phase-5 summaries must tag `toward`, the real doctor-detour summary (a *true* positive) must stay `away`. Fixture `focus` 29/0. This closes the roadmap #9-second-half retro question with measured data: the drift tags did not correlate with real drift, and now the mechanism is calibrated on exactly that evidence.
+
 ## [v1.92.1] · 2026-07-03 · cockpit surfaces earned autonomy
 
 - Event stream: `AUTONOMY_SCORED` / `AUTONOMY_RECOMMENDATION` classified into the trust (amber) family with human summaries — scored digest (`61 slice(s) · 5 lane(s) scored`) and rung-change arrows (`backend: observe → relaxation-candidate · consider-relaxed`, muted shown as such).

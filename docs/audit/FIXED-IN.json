@@ -185,5 +185,11 @@
     "area": "cockpit (event-rows classify+summarize, orientation brief Autonomy row) + autonomy projection slot + buildOrientation + snapshot-harness orientation fixture",
     "fixed_in": "1.92.1",
     "consumer_impact": "Cockpit surfaces earned autonomy: both event types classified into the trust family with human summaries (scored digest, rung-change arrows, muted marker), and the orientation brief card shows the latest live recommendation as its own row."
+  },
+  {
+    "symptom": "Focus Director tagged detailed, honest, on-goal slice summaries as away (0.85-0.99) and raised two spurious DRIFT_FLAGGED on 2026-07-03: the drift metric divided goal-token intersection by the focus text's own size, punishing verbosity as distance, compounded by no stemming and by success-condition verification vocabulary polluting the goal token set.",
+    "area": "focus director: lib/focus.mjs (tokenize stemming, goalTokens objective+constraints only, tagTurn absolute-anchor metric + anchors/anchorHits signals) + docs/43",
+    "fixed_in": "1.92.2",
+    "consumer_impact": "Drift tags now measure whether the goal's distinctive terms appear in current attention (>=2 anchors toward, 1 lateral, 0 away) instead of penalizing detail; every FOCUS_TAGGED event carries the matched anchors so a tag is self-explanatory; regression fixture pins the real 2026-07-03 false positives AND the true positive."
   }
 ]
