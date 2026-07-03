@@ -135,6 +135,38 @@ quarter of own-repo spine data before any promotion to fail; revisit stronger
 proof tiers only if a quarterly spine-derived file shows
 deterministic-pass-but-false claims.
 
+## `learn sync --from-claude-memory` — vendor-memory interop (v1.90.0)
+
+Claude Code keeps its own auto-memory per project
+(`~/.claude/projects/<slug>/memory/*.md`). That knowledge is real but lives
+outside the repo's durable record. `learn sync --from-claude-memory` imports
+it — **import-only, by contract**:
+
+- **Reads, never writes.** The vendor directory is never modified, renamed,
+  or deleted. Máddu does not compete to be the memory layer; it makes what
+  the vendor tool remembered queryable, provenance-carrying, repo-owned
+  record.
+- **Idempotent by content hash.** A fact's id derives from the memory file's
+  name + body — re-running imports nothing twice, and an *edited* vendor
+  memory imports as a new fact (the old one stays; history is append-only
+  here too).
+- **Preview by default.** `--adopt` writes each memory as a `kind:'vendor'`
+  fact in `.maddu/state/memory.ndjson` plus a `VENDOR_MEMORY_IMPORTED` spine
+  event carrying the full fact — so `maddu memory extract --rebuild` replays
+  imports faithfully.
+
+```bash
+maddu learn sync --from-claude-memory            # preview: what would import
+maddu learn sync --from-claude-memory --adopt    # import as kind:'vendor' facts
+maddu learn sync --from-claude-memory --dir <d>  # explicit vendor dir override
+maddu memory list --kind vendor                  # query the imported corpus
+```
+
+The vendor index (`MEMORY.md`) is skipped — it's a table of contents, not a
+fact. Vendor facts are tagged `vendor:claude-memory` (+ `vtype:<type>` from
+the memory's frontmatter) and carry `source.origin/file/dir` provenance, so
+they are always distinguishable from facts Máddu observed first-hand.
+
 ## Events
 
 `LEARN_MINED` (load-bearing) · `LEARN_DIGEST_WRITTEN` · `LEARN_JUDGED` ·

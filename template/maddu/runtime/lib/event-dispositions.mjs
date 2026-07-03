@@ -109,6 +109,7 @@ export const EVENT_DISPOSITIONS = {
   SESSION_AUTO_REGISTERED: { disp: 'active' },
   SESSION_STALE_DETECTED: { disp: 'active' },
   COMPACTION_CHECKPOINT: { disp: 'dormant', reason: "fires only when the PreCompact hook is installed and a Claude Code compaction occurs" },
+  VENDOR_MEMORY_IMPORTED: { disp: 'dormant', reason: "fires only when the operator runs `learn sync --from-claude-memory --adopt`" },
   SLASH_COMMANDS_SYNCED: { disp: 'active' },
   TEAM_OPENED: { disp: 'active' },
   TEAM_LANE_ALLOCATED: { disp: 'active' },

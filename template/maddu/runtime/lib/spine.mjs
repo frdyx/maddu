@@ -117,6 +117,9 @@ export const EVENT_TYPES = {
   // hook just before Claude Code compacts its context, recording what the
   // durable record held at that moment (last slice-stop, handoff currency).
   COMPACTION_CHECKPOINT:     'COMPACTION_CHECKPOINT',
+  // Vendor-memory interop (v1.90.0) — one per fact imported from a vendor
+  // tool's own memory store (import-only; carries the full fact for rebuild).
+  VENDOR_MEMORY_IMPORTED:    'VENDOR_MEMORY_IMPORTED',
   // No-learning-curve UX shell (v0.18; emitted in Phases 1–5)
   SLASH_COMMANDS_SYNCED:     'SLASH_COMMANDS_SYNCED',
   // Architectural backbone (v0.18 Phase 4) — teams, pipelines, advisors, token ledger.

@@ -818,6 +818,9 @@ $ maddu learn digest                 # no-provider fallback: write a review dige
 $ maddu learn list                   # corrections written so far
 $ maddu learn show <correctionId>    # one correction + provenance
 $ maddu learn retrieve <briefingId>  # full original of a curated (reversible) briefing
+$ maddu learn scan                   # read-only: hedged completion claims w/o observed proof
+$ maddu learn sync                   # fleet lesson federation (preview; --adopt writes)
+$ maddu learn sync --from-claude-memory [--adopt]  # import Claude Code auto-memory (v1.90.0)
 ```
 
 `run` mines deterministically, then spawns the configured runtime **CLI** as a
@@ -826,7 +829,11 @@ parent is the only spine writer). Accepted corrections route to two
 destinations — stable facts to a marker block in the project-root `CLAUDE.md`,
 volatile patterns to `kind:'correction'` memory facts. Emits `LEARN_MINED`,
 `LEARN_JUDGED`, `LEARN_CORRECTION_WRITTEN` (or `LEARN_DIGEST_WRITTEN` on the
-fallback path). See [37-failure-learning.md](37-failure-learning.md).
+fallback path). `sync --from-claude-memory` imports Claude Code's own
+auto-memory as `kind:'vendor'` facts — **import-only** (the vendor directory
+is never written), content-hash-deduped, preview by default; each adopted
+fact rides a `VENDOR_MEMORY_IMPORTED` event so rebuilds replay it. See
+[37-failure-learning.md](37-failure-learning.md).
 
 ### `maddu memory` — supersession *(v1.9.0)*
 
