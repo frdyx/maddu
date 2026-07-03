@@ -36,6 +36,17 @@ const ANSI = {
   reset: '\x1b[0m'
 };
 
+// Numeric-aware dotted-version compare ("1.10.0" > "1.9.0"). Returns -1/0/1.
+function cmpVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
 function tag(level) {
   if (level === 'PASS') return `${ANSI.pass}PASS${ANSI.reset}`;
   if (level === 'WARN') return `${ANSI.warn}WARN${ANSI.reset}`;
@@ -231,6 +242,26 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
         label: `${tagLabel}install marker`,
         detail: 'framework source repo — install marker (maddu.json) intentionally absent; run inside a consumer install to verify install integrity.',
       });
+      // ── Global binary currency (framework source repo) ──
+      // `maddu fleet` tracks per-repo install currency, but nothing watched
+      // the global npm binary: a stale `npm i -g` maddu shadows the newer
+      // source checkout on PATH and silently runs old behavior (surfaced
+      // 2026-07-03 when an old global demanded --session on slice-stop).
+      // Compare the RUNNING CLI's version.json against the repo's own.
+      {
+        const cliVersion = await frameworkVersion();
+        const repoMeta = await readInstallMeta(repoRoot);
+        if (cliVersion && repoMeta.version) {
+          const cmp = cmpVersions(cliVersion, repoMeta.version);
+          if (cmp < 0) {
+            checks.push({ level: 'WARN', label: `${tagLabel}global binary currency`, detail: `running CLI v${cliVersion} is older than this checkout v${repoMeta.version} — a stale global maddu is shadowing it; refresh with \`npm i -g github:frdyx/maddu\`` });
+          } else if (cmp > 0) {
+            checks.push({ level: 'INFO', label: `${tagLabel}global binary currency`, detail: `running CLI v${cliVersion} is newer than this checkout v${repoMeta.version} — older branch or unpulled main` });
+          } else {
+            checks.push({ level: 'PASS', label: `${tagLabel}global binary currency`, detail: `running CLI matches this checkout (v${cliVersion})` });
+          }
+        }
+      }
       if (!gateOpts.onlyId && !gateOpts.severity) return checks;
       sourceGateOnly = true;
     } else {
@@ -241,7 +272,13 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   if (madduJson) {
     const cliVersion = await frameworkVersion();
     if (cliVersion !== madduJson.framework_version) {
-      checks.push({ level: 'WARN', label: `${tagLabel}framework version`, detail: `CLI v${cliVersion} but install is v${madduJson.framework_version} — run \`maddu upgrade\`` });
+      // Direction matters: a CLI older than the install means a stale GLOBAL
+      // binary is shadowing the vendored one — `maddu upgrade` (the old advice
+      // for both directions) would do nothing about that.
+      const detail = cmpVersions(cliVersion, madduJson.framework_version) < 0
+        ? `running CLI v${cliVersion} is older than this install v${madduJson.framework_version} — a stale global maddu is shadowing it; refresh with \`npm i -g github:frdyx/maddu\` (or invoke \`./maddu/run\`)`
+        : `CLI v${cliVersion} but install is v${madduJson.framework_version} — run \`maddu upgrade\``;
+      checks.push({ level: 'WARN', label: `${tagLabel}framework version`, detail });
     }
   }
 
