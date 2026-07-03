@@ -34,11 +34,14 @@ function ok(name, cond, extra = '') {
 const run = (args, cwd) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', timeout: 30000 });
 
 async function main() {
-  // ── pure: slug derivation ──
+  // ── pure: slug derivation (platform-appropriate abs path — resolve() only
+  // treats C:\… as absolute on Windows) ──
   {
-    const slugs = vm.slugsFor('C:\\Users\\x\\my.repo');
-    ok('slugsFor flattens separators + drive colon', slugs[0] === 'C--Users-x-my.repo');
-    ok('slugsFor offers a loose fallback for dotted paths', slugs[1] === 'C--Users-x-my-repo');
+    const abs = process.platform === 'win32' ? 'C:\\Users\\x\\my.repo' : '/users/x/my.repo';
+    const slugs = vm.slugsFor(abs);
+    const expectedStrict = process.platform === 'win32' ? 'C--Users-x-my.repo' : '-users-x-my.repo';
+    ok('slugsFor flattens separators + drive colon', slugs[0] === expectedStrict, slugs[0]);
+    ok('slugsFor offers a loose fallback for dotted paths', slugs[1] === expectedStrict.replace('my.repo', 'my-repo'), slugs[1]);
   }
 
   // ── pure: frontmatter parse + content-hashed id ──
