@@ -911,6 +911,29 @@ refuses malformed JSON, and runs only on explicit invocation (never silently at
 `init`, which offers it as a next step). Full guide:
 [44-session-hooks.md](44-session-hooks.md).
 
+### `maddu autonomy` *(v1.92.0)*
+
+**Earned autonomy** — a deterministic per-lane trust score over the verified
+record: Wilson lower bound (z=1.96) over witnessed-clean vs witnessed-dirty
+slice outcomes, mapped to a 3-rung ladder (`observe` / `established` /
+`relaxation-candidate`), with a daily clean-credit cap against
+deliverable-farming. **Recommend-only by contract** — it never writes
+governance config; applying a recommendation is `maddu governance set`.
+
+```bash
+$ maddu autonomy                  # per-lane table: rung · wilson · n · clean · dirty · neutral · unwit. · coverage
+$ maddu autonomy --lane backend   # one lane
+$ maddu autonomy --json           # machine-readable; byte-identical for identical inputs
+$ maddu autonomy --no-emit        # read-only: append no events
+```
+
+Explicit runs append `AUTONOMY_SCORED`; `AUTONOMY_RECOMMENDATION` fires only on
+a rung change, deduped against the spine itself. Relax recommendations are
+**muted while any phase is active** (the phase floor is absolute). The latest
+live recommendation also surfaces in `maddu orient`, `maddu governance show`,
+and the cockpit. Thresholds: `.maddu/config/autonomy.json` (hashed onto every
+event as `configHash`). Full guide: [47-earned-autonomy.md](47-earned-autonomy.md).
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the
