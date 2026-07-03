@@ -16,7 +16,9 @@ import { readAll, append } from './spine.mjs';
 // failed→succeeded tool-call pair (Headroom-style). Unlike the SLICE_STOP-derived
 // kinds, corrections originate from LEARN_CORRECTION_WRITTEN spine events and are
 // replayed on rebuild (see rebuildMemory) so they survive a memory rebuild.
-export const FACT_KINDS = ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary', 'correction'];
+// v1.90.0 adds 'vendor' — a fact imported from a vendor tool's own memory
+// (VENDOR_MEMORY_IMPORTED events, import-only; see vendor-memory.mjs).
+export const FACT_KINDS = ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary', 'correction', 'vendor'];
 
 function memoryPath(repoRoot) {
   return join(pathsFor(repoRoot).state, 'memory.ndjson');
@@ -246,6 +248,9 @@ export async function rebuildMemory(repoRoot) {
   for (const ev of events) {
     if (ev.type === 'SLICE_STOP') all.push(...extractFromSliceStop(ev));
     else if (ev.type === 'LEARN_CORRECTION_WRITTEN' && ev.data?.destination === 'memory' && ev.data?.fact) {
+      all.push(ev.data.fact);
+    } else if (ev.type === 'VENDOR_MEMORY_IMPORTED' && ev.data?.fact) {
+      // Replay vendor-memory imports (each event carries its full fact).
       all.push(ev.data.fact);
     } else if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.fact) {
       // Replay supersession entries so chains survive a rebuild.

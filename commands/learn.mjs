@@ -21,6 +21,12 @@
 //       Read-only reflect v1: report SLICE_STOP slices whose summary hedges
 //       completion while NO observed proof (real GATE_RAN ok / verified
 //       deliverable) exists. Writes nothing — shadow measurement for a v2.
+//   sync [--adopt] [--json]
+//       Lesson federation across the fleet (workspace registry, local disk).
+//   sync --from-claude-memory [--adopt] [--dir <d>] [--json]
+//       Vendor-memory interop (v1.90.0): import Claude Code's auto-memory as
+//       kind:'vendor' facts. IMPORT-ONLY (vendor dir never written),
+//       content-hash-deduped (idempotent), preview by default.
 //
 // Hard-rule compliance: the PARENT process is the only spine writer. The
 // judgment worker only emits JSON on stdout; the parent parses it and appends
@@ -204,6 +210,66 @@ export default async function learnCmd(argv) {
   // redacted + deduped against what this repo already knows. Preview by default;
   // `--adopt` writes them into CLAUDE.md (approval-only) as first-class local
   // corrections (a LEARN_CORRECTION_WRITTEN event each, federated provenance).
+  if (sub === 'sync' && flags['from-claude-memory']) {
+    // ── vendor-memory interop (roadmap #6, v1.90.0) — IMPORT-ONLY ──
+    // Reads Claude Code's auto-memory for THIS repo and imports each memory as
+    // a provenance-carrying `kind:'vendor'` fact. Content-hashed ids make
+    // re-runs idempotent; the vendor directory is never written. Preview by
+    // default; --adopt appends facts + a VENDOR_MEMORY_IMPORTED event each
+    // (fact carried on the event, so rebuilds replay it).
+    const vm = await loadLib('vendor-memory.mjs');
+    const hindsight = await loadLib('hindsight.mjs');
+    if (!vm?.readVendorMemories || !hindsight?.appendFactIfNew) {
+      console.error('maddu learn sync: vendor-memory libs not available (run `maddu upgrade`)');
+      process.exit(2);
+    }
+    const dirOverride = typeof flags.dir === 'string' ? flags.dir : null;
+    const { dir, memories } = await vm.readVendorMemories(repoRoot, { dir: dirOverride });
+    if (!dir) {
+      console.log(`maddu learn sync  ${C.dim}no Claude Code memory directory found for this repo (nothing to import)${C.reset}`);
+      return;
+    }
+    const known = new Set((await hindsight.readMemory(repoRoot)).map((f) => f.id));
+    const candidates = memories.map((m) => ({ memory: m, fact: vm.buildVendorFact(m, { dir }) }));
+    const fresh = candidates.filter((c) => !known.has(c.fact.id));
+
+    if (flags.json) {
+      process.stdout.write(JSON.stringify({
+        dir, found: memories.length, new: fresh.length, alreadyImported: candidates.length - fresh.length,
+        facts: fresh.map((c) => ({ id: c.fact.id, file: c.memory.file, name: c.memory.name })),
+        adopted: !!flags.adopt,
+      }, null, 2) + '\n');
+      if (!flags.adopt) return;
+    } else {
+      console.log(`maddu learn sync  ${C.dim}claude-memory: ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} in ${dir}${C.reset}`);
+      if (!fresh.length) {
+        console.log(`  ${C.dim}nothing new — ${candidates.length} already imported (content-hash match)${C.reset}`);
+        return;
+      }
+      for (const c of fresh) {
+        console.log(`  ${C.green}+${C.reset} ${c.memory.file}  ${C.dim}${(c.memory.description || c.memory.name || '').slice(0, 70)}${C.reset}`);
+      }
+      if (!flags.adopt) {
+        console.log(`\n  ${C.dim}preview only — import as kind:'vendor' facts: maddu learn sync --from-claude-memory --adopt${C.reset}`);
+        return;
+      }
+    }
+    let imported = 0;
+    for (const c of fresh) {
+      await spine.append(repoRoot, {
+        type: spine.EVENT_TYPES.VENDOR_MEMORY_IMPORTED,
+        actor,
+        data: { factId: c.fact.id, file: c.memory.file, dir, fact: c.fact },
+      });
+      imported += await hindsight.appendFactIfNew(repoRoot, c.fact);
+    }
+    if (!flags.json) {
+      console.log(`\n  ${C.green}✓${C.reset} imported ${imported} fact(s) → .maddu/state/memory.ndjson  ${C.dim}(query: maddu memory list --kind vendor)${C.reset}`);
+      console.log(`  ${C.dim}import-only: the vendor directory was not modified${C.reset}`);
+    }
+    return;
+  }
+
   if (sub === 'sync') {
     const fed = await loadLib('lesson-federation.mjs');
     const workspaces = await loadLib('workspaces.mjs');

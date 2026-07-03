@@ -1,5 +1,5 @@
 {
-  "version": "1.89.1",
-  "phase": "precompact-checkpoint",
+  "version": "1.90.0",
+  "phase": "vendor-memory",
   "released": "2026-07-03"
 }

@@ -155,5 +155,11 @@
     "area": "claude-hooks (resolveHookBin) + hooks install + doctor session-hooks currency",
     "fixed_in": "1.89.1",
     "consumer_impact": "None for consumers (maddu/bin exists there; consumer default unchanged). Source-repo installs now resolve to node bin/maddu.mjs at install time; doctor staleness comparison uses the same resolution."
+  },
+  {
+    "symptom": "Claude Code auto-memory (default-on) accumulates real project knowledge outside the repo-owned record \u2014 invisible to the spine, other agents, and rebuilds.",
+    "area": "learn sync --from-claude-memory (new) + vendor-memory lib + hindsight vendor kind + VENDOR_MEMORY_IMPORTED replay",
+    "fixed_in": "1.90.0",
+    "consumer_impact": "Import-only vendor-memory interop: preview by default, --adopt writes kind:vendor facts with provenance; content-hash-deduped (idempotent, edits import as new facts); vendor directory never modified; imports survive memory rebuild via events."
   }
 ]
