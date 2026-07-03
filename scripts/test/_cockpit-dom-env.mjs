@@ -170,6 +170,17 @@ const CANNED = {
     host: '127.0.0.1', port: 4177,
   },
   '/bridge/_workspaces': { legacy: true },
+  '/bridge/orientation': {
+    orientation: {
+      lastEventId: 'evt_00000042',
+      goal: { objective: 'ship the focus director', constraints: [] },
+      phase: { name: 'release 2.0', tier: 'strict', setAt: FIXED_TS },
+      activeSession: { id: 'ses_fixture01' },
+      lastSliceStop: { summary: 'SLICE STOP: cockpit fixtures wired' },
+      counters: { sessions: 1, slices: 1 },
+      openFollowups: [],
+    },
+  },
   '/bridge/events/poll': { lastEventId: 'evt_00000000', events: [] },
   '/bridge/focus': {
     enabled: true,
