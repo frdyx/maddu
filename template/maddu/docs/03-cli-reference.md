@@ -455,14 +455,23 @@ $ maddu goal set "<obj>" [--constraint "<c>" --constraint "<c>" …]
 $ maddu goal show
 ```
 
-## `maddu phase` *(v0.16)*
+## `maddu phase` *(v0.16; per-phase strictness v1.91.0)*
 
-Declare the agent's current phase (a coarser-grained context than goal). Latest `PHASE_DECLARED` wins.
+Declare the agent's current phase (a coarser-grained context than goal). Latest `PHASE_DECLARED` wins; `clear` emits `PHASE_CLEARED` (explicit phase exit).
 
 ```bash
-$ maddu phase set --name "<name>" [--notes "<notes>"]
+$ maddu phase set --name "<name>" [--notes "<notes>"] [--tier strict|standard|relaxed]
+$ maddu phase clear
 $ maddu phase show
 ```
+
+A `--tier` makes the phase **sterile** (v1.91.0): while it is active, the
+effective governance mode is the **stricter** of the workspace mode and the
+phase tier — escalation-only, so a phase can tighten a release/stabilize
+window but never silently weaken the workspace baseline. Loops, coordinator
+phases, strict-mode approvals, and `governance show` all resolve through the
+escalated view; explicit `governance override` keys keep winning. `phase
+clear` lifts the escalation.
 
 ## `maddu brief` *(v0.16, agent-context flag v0.17)*
 

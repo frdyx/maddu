@@ -41,8 +41,11 @@ export default async function governanceCmd(argv) {
   const lib = await loadGovernanceLib();
 
   if (!sub || sub === 'show') {
-    const cfg = await lib.readGovernance(repoRoot);
+    const cfg = lib.readEffectiveGovernance ? await lib.readEffectiveGovernance(repoRoot) : await lib.readGovernance(repoRoot);
     console.log(`${ANSI.bold}Governance${ANSI.reset}  mode: ${modeBadge(cfg.mode)}  ${ANSI.dim}(source: ${cfg.__source})${ANSI.reset}`);
+    if (cfg.__phase) {
+      console.log(`  ${cfg.__phase.escalated ? ANSI.warn + '↑ escalated' + ANSI.reset : ANSI.dim + '· phase tier' + ANSI.reset} by phase "${cfg.__phase.name}" (tier: ${cfg.__phase.tier})${cfg.__phase.escalated ? ' — lifts when the phase clears' : ''}`);
+    }
     console.log('');
     console.log(`${ANSI.bold}Effective behavior:${ANSI.reset}`);
     for (const key of lib.listOverrideKeys()) {

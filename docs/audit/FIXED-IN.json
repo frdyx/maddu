@@ -161,5 +161,11 @@
     "area": "learn sync --from-claude-memory (new) + vendor-memory lib + hindsight vendor kind + VENDOR_MEMORY_IMPORTED replay",
     "fixed_in": "1.90.0",
     "consumer_impact": "Import-only vendor-memory interop: preview by default, --adopt writes kind:vendor facts with provenance; content-hash-deduped (idempotent, edits import as new facts); vendor directory never modified; imports survive memory rebuild via events."
+  },
+  {
+    "symptom": "Governance mode was workspace-global: a release/stabilize window could not tighten discipline without an operator manually flipping the mode and remembering to flip it back.",
+    "area": "phase (--tier, clear, PHASE_CLEARED) + governance readEffectiveGovernance + consumers (loops, coordinator, strict-approval, trust, governance show)",
+    "fixed_in": "1.91.0",
+    "consumer_impact": "Sterile phases: phase set --tier <mode> escalates the effective governance mode while the phase is active (escalation-only, never weakens; explicit overrides keep winning); phase clear lifts it. Base governance.json untouched \u2014 the overlay is computed per read."
   }
 ]

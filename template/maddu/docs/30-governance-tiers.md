@@ -70,3 +70,34 @@ on the spine. The Operations log surfaces them.
   of `strict|standard|relaxed`, every override key references a real
   behavior. Reports `relaxed` as a WARN-flavored PASS so the mode is
   visible in doctor output.
+
+## Per-phase strictness — sterile phases *(v1.91.0)*
+
+A declared phase may carry a governance tier:
+
+```bash
+maddu phase set --name "release 2.0" --tier strict   # PHASE_DECLARED { tier }
+maddu phase clear                                    # PHASE_CLEARED — escalation lifts
+```
+
+While a tiered phase is active, the **effective** mode (what loops,
+coordinator phases, strict-mode approvals, and `governance show` resolve)
+is the **stricter** of the workspace mode and the phase tier:
+
+- **Escalation-only.** A `--tier relaxed` phase on a `strict` workspace
+  changes nothing — a phase can tighten a release/stabilize window, never
+  silently weaken the baseline. Weakening stays an explicit
+  `maddu governance set relaxed`.
+- **Explicit overrides keep winning.** Keys in `governance.json`'s
+  `overrides` beat the escalated mode's defaults — operator intent is
+  precise.
+- **The base config is untouched.** `governance set`/`override` still
+  read and write the workspace baseline; the phase overlay is computed
+  per read (`readEffectiveGovernance`), so clearing the phase is the
+  whole rollback.
+
+`governance show` prints the escalation line (`↑ escalated by phase
+"release 2.0" (tier: strict) — lifts when the phase clears`). The
+drift-tag coupling half of this idea (correlating Focus Director tags
+with phase windows) is deliberately deferred until a retro over real
+release-phase data justifies it.
