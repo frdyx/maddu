@@ -52,7 +52,7 @@ Commands:
   global         Subcommands: cron <add|list|show|enable|disable|remove> | policy <add|list|remove>. (Multi-workspace, machine-scope)
   spine          Subcommands: verify [--json] | show <eventId>. Integrity check + event lookup against the append-only spine.
   goal           Subcommands: set --objective "…" [--constraint "…" …] | show. (Governance Phase 1)
-  phase          Subcommands: set --name "…" [--notes "…"] | show. (Governance Phase 1)
+  phase          Subcommands: set --name "…" [--notes "…"] [--tier strict|standard|relaxed] | clear | show. A --tier makes the phase sterile: effective governance escalates while it is active. (v1.91.0)
   brief          Turn-start orientation digest. Writes .maddu/state/orientation.json + handoff.md. [--json] (Governance Phase 1)
   sources        Subcommands: rebuild | status. Tracked SSOT files for the tracked-source-drift gate. (Governance Phase 2)
   slice          Subcommands: scope-declare | scope-expand | approve-functional | show. Optional slice scope-lock. (Governance Phase 3)
@@ -83,12 +83,13 @@ Commands:
   plugin         Subcommands: list | info | enable | disable. Capabilities that live outside the core. [--trust] [--json] (v1.4.0)
   orient         Session-start briefing: goal + success-progress (run verify cmds) + handoff + trail. [--json] [--no-verify] (v1.6.0)
   handoff        Subcommands: set "<markdown>" | show. Curated "▶ RESUME HERE" cross-session handoff. (v1.6.0)
-  learn          Mine past sessions for failed→succeeded tool calls; distil corrections. run | digest | list | show. (v1.9.0)
+  learn          Mine past sessions for failed→succeeded tool calls; distil corrections. run | digest | scan | list | show | sync [--from-claude-memory] | retrieve. (v1.9.0; scan v1.87.0; vendor import v1.90.0)
   blueprint      Export a portable variable-driven handoff of how a project was built. [--slug a,b] [--repo p,p] [--full] (v1.12.0)
   debt           Ledger of deliberate-shortcut markers (maddu-debt: …); flags ones with no upgrade trigger. [--json] [--no-write] (v1.17.0)
   architecture   Declared architecture contract vs the real import graph → drift. Subcommands: init | scan | diagram | baseline. (v1.18.0)
   agents         Make "install maddu" available to AI agents machine-wide. Subcommands: detect | register | unregister. (v1.72.0)
   focus          Focus Director (opt-in): per-turn drift tag vs the goal + sustained-drift flag. Subcommands: status | enable | disable | resolve.
+  hooks          Wire Claude Code session hooks: auto-register + auto-close + pre-compaction checkpoint. install | status | remove. (v1.74.0; PreCompact v1.89.0)
   fleet          Read-only single-machine fleet view: per-repo version/currency/liveness + version delta vs fleet latest. [--json] (v1.76.0)
   ci             Headless LLM-free gate rail for CI: run | pin. Exit 1 only on pinned required gates (churn-proof). [--json --strict] (v1.87.0)
 

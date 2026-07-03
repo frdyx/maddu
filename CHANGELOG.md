@@ -11,6 +11,36 @@ narrative summary.
 
 ---
 
+## [v1.91.0] · 2026-07-03 · sterile phases — per-phase strictness (market roadmap #9, first half)
+
+- **`maddu phase set --name <n> --tier strict|standard|relaxed`** — while the phase is active, the *effective* governance mode is the **stricter** of workspace mode and phase tier. Escalation-only: a relaxed phase tier on a strict workspace changes nothing; weakening stays an explicit `governance set`. Explicit `governance.json` overrides keep winning; the base config is never rewritten — `maddu phase clear` (new; emits `PHASE_CLEARED`) is the whole rollback.
+- Consumers resolve through the escalated view (`readEffectiveGovernance`): loops, coordinator, strict-mode approvals, trust snapshot, `governance show` (↑ escalated banner). Fixture `phase-strictness` 23/0.
+- Deferred by design: the drift-tag coupling half waits for a retro over real release-phase focus data.
+
+## [v1.90.0] · 2026-07-03 · vendor-memory interop (market roadmap #6)
+
+- **`maddu learn sync --from-claude-memory`** — imports Claude Code's default-on auto-memory (`~/.claude/projects/<slug>/memory/*.md`) as `kind:'vendor'` facts with full provenance. **Import-only by contract** (the vendor directory is never written), **content-hash-deduped** (idempotent; an edited memory imports as a new fact), preview by default / `--adopt` to write. Each import rides a `VENDOR_MEMORY_IMPORTED` event carrying the fact, so `memory extract --rebuild` replays faithfully. Fixture `vendor-memory-sync` 21/0.
+
+## [v1.89.1] · 2026-07-03 · hook entrypoint per repo layout (dogfood catch)
+
+- Installing the v1.89.0 hooks on the maddu source repo itself caught `hooks install` writing the consumer entrypoint (`maddu/bin/maddu.mjs`) everywhere — nonexistent in a source checkout, so every hook errored silently (fails-open masked it). `resolveHookBin` now picks the layout at install time; doctor's stanza-currency check uses the same resolution. Consumers were never affected. The source repo's own `.claude/settings.json` is now committed as the dogfood artifact.
+
+## [v1.89.0] · 2026-07-03 · pre-compaction governance checkpoint (market roadmap #4)
+
+- **Precondition met before any code:** `PreCompact` cited in the official Claude Code hooks docs + one empirical fire test capturing the live stdin payload (`{trigger: "manual", session_id, transcript_path, …}`).
+- **`maddu hooks install` now also wires `PreCompact`** (no matcher — manual `/compact` AND auto-compaction). The fire handler appends `COMPACTION_CHECKPOINT` to the spine: trigger, the last recorded slice-stop (the durable anchor — anything after it that wasn't recorded did not survive), handoff currency, open approvals, active claims. **Fails open** — always exit 0; exit 2 would *block* compaction, and a governance instrument must never break the session it observes.
+- **`maddu orient` auto-announces the latest checkpoint** with no flag (`⧉ context compacted … — last recorded slice-stop: …`), plus `--json lastCompaction`. **`maddu doctor`** validates hook-stanza currency (partial/stale → WARN with the fix; not installed stays PASS — opt-in). Fixture `precompact-checkpoint` 13/0.
+
+## [v1.88.0] · 2026-07-03 · completion-claim gate at every slice-stop (market roadmap #3)
+
+- **`completion-claim` gate (warn)** — the `learn scan` heuristic as enforcement placement: flags a LIVE pattern (≥3 cumulative, ≥1 in 30 days) of hedged completion claims ("should work", "seems to pass") on slices with **no observed proof** — no real `GATE_RAN(ok)` during the slice, no verified deliverable on the event; self-reported flags deliberately don't count. Runs at **every** slice-stop (surfaces, never blocks). Deterministic: *a model checking a model is a second opinion; a deterministic check against declared deliverables is evidence.* Warn tier holds ≥1 quarter of own-repo data before any fail promotion.
+- **Named governance-budget retirement:** `stress-harness-recent` + `upgrade-matrix-recent` merged into one `heavy-suites-recent` gate (both sub-checks kept) — the freed slot's sole claimant is `completion-claim`; gates stay 69/70 and the standing retirement note is resolved. Fixture `completion-claim-gate` 10/0.
+
+## [v1.87.0] · 2026-07-03 · `maddu ci` — the headless gate rail (market roadmap #2)
+
+- **`maddu ci`** — runs every deterministic gate headlessly (no LLM, no network) and exits nonzero **only on gates the repo pinned as required** (`maddu ci pin` → `maddu.json` `ci.requiredGates`, or the committed team artifact `.maddu/config/ci.json`). Churn-proof by construction: framework upgrades can add gates without turning anyone's pipeline red until they re-pin. `--strict`, GitHub Actions auto-detection (`::error` annotations + job summary table), `learn scan` advisory line (never affects the exit code).
+- **Local enforcement first:** the same exit code drives a fully-offline git pre-push hook (`exec maddu ci`) — no GitHub required; docs lead with it. The source repo dogfoods a `.github/workflows/maddu-ci.yml` (never shipped to consumers) — it caught two real bugs before its own merge: runtime wrappers' fire-and-forget spine appends killed by `process.exit` on Linux, and a stash/pop that silently dropped staged files. Fixture `ci-command` 16/0.
+
 ## [v1.86.0] · 2026-06-30 · roadmap #14 — cost-budget gate (the runaway-session guard)
 
 The #14 spike confirmed what already shipped: `maddu usage import` reads Claude Code's on-disk usage (159 transcripts, 60k+ usage turns) into `TOKEN_USAGE_REPORTED` rule-5-cleanly, and `maddu cost` rolls it up. So the one net-new piece F5 names — *"a runaway session staying invisible"* — is a budget signal.
