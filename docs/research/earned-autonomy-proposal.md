@@ -84,7 +84,11 @@ CLI auto-registration emits the latter). Each outcome is classified:
   as unwitnessed unless gate runs in their window provide proof or fault.
   ⊕ A warn-status `GATE_RAN` makes a slice witnessed (it is evidence the work
   was checked) but is neither proof nor fault — `isHardCatch` stays the only
-  dirty gate axis, warn-severity catches don't damn a slice.
+  dirty gate axis, warn-severity catches don't damn a slice. Implementation
+  refinement (phase 2): these slices form an explicit fourth bucket,
+  **neutral** — witnessed for coverage, excluded from n — so the trichotomy
+  stays exhaustive. `witnessed = clean + dirty + neutral`;
+  `coverage = witnessed / total`; `n = cleanCapped + dirty`.
 
 Windowing (which `GATE_RAN`s belong to a slice) reuses the `reflect.mjs`
 between-slice-stops idiom for historical events. ⊕ Report/meta events
@@ -155,7 +159,8 @@ AUTONOMY_SCORED.data = {
   "schemaVersion": 1, "asOf": "<ISO ts>", "attribution": "session-join+window|stamped",
   "configHash": "<sha256 of effective thresholds>",
   "lanes": [{ "lane": "...", "clean": 0, "cleanCapped": 0, "dirty": 0,
-              "unwitnessed": 0, "n": 0, "coverage": 0.0, "wilson": 0.0,
+              "neutral": 0, "unwitnessed": 0, "total": 0, "n": 0,
+              "coverage": 0.0, "wilson": 0.0,
               "rung": "observe|established|relaxation-candidate" }]
 }
 
