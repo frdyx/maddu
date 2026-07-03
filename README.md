@@ -4,11 +4,11 @@
 
 # Máddu
 
-### Your AI agents are temporary. What they did shouldn't be.
+### Your AI agents are temporary. The system that governs them shouldn't be.
 
-**Máddu is a local-first orchestration spine for AI agents** — the durable backbone that AI coding agents (Claude Code, Codex, or any CLI) plug into. A small Node process records every approval, session, and slice of work as one line on an append-only log on your disk, so you can read, replay, and trust what your agents did long after they're gone.
+**Máddu is a local-first orchestration spine for AI agents** — the external, cooperative layer that AI coding agents (Claude Code, Codex, or any CLI) plug into so multi-agent work stays **governed and coordinated**: one agent per lane, risky changes held behind approvals, every slice checked by a gate. It runs as a small Node process that writes each approval, session, and slice as one line on an append-only log on your disk — the durable record is *how* the governance earns your trust, not a flight recorder bolted on the side.
 
-*New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps the permanent record — the **spine** — so their work has a memory and an audit trail instead of vanishing when the session closes.
+*New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **in line** — one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay — instead of a black box that vanishes when the session closes.
 
 [![Version 1.86.0](https://img.shields.io/badge/version-1.86.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
@@ -38,13 +38,13 @@ Máddu spawns no models, stores no secrets, calls no clouds.
 
 ## The problem
 
-You've handed real work to AI agents. They claim lanes, request approvals, ship slices, hand off to each other. And then the session ends — and the *why* goes with it.
+You've handed real work to AI agents. They claim lanes, request approvals, ship slices, hand off to each other — often several at once. And the moment a session ends, the control goes with it.
 
-- **Where did that decision get made?** Buried in a chat log you can't grep, on a machine you're not on.
-- **What actually happened while I was away?** Scattered across SQLite files, vendor dashboards, and agent memory you can't inspect.
-- **Can I prove the history wasn't quietly rewritten?** Not with most tools. You're trusting a black box.
+- **Who's actually in charge?** Two agents editing the same thing, and nothing holding the line between them.
+- **Did that approval get honored — or just clicked past?** You can't tell from a chat log you can't grep, on a machine you're not on.
+- **Can I trust what happened while I was away?** Scattered across SQLite files, vendor dashboards, and agent memory you can't inspect — with no way to prove it wasn't quietly rewritten.
 
-Agents are getting more autonomous. The thing keeping track of them shouldn't be the least durable part of your stack.
+Agents are getting more autonomous. The thing that **governs and coordinates** them shouldn't be the least durable part of your stack.
 
 ## The idea
 

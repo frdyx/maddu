@@ -16,7 +16,8 @@ file, this file is the intent; the disagreement is drift to be fixed.
 > agent that touches it. **No SQLite. No cloud relay. No provider SDKs in your
 > code.** Máddu spawns no models, stores no secrets, calls no clouds.
 
-Máddu's identity is its **audit / portability / supply-chain posture** — not its
+Máddu's identity is its **governance, coordination, and supply-chain posture** —
+an external, cooperative, files-only substrate any CLI agent plugs into — not its
 feature count. Every feature must earn its place against that posture.
 
 ---
