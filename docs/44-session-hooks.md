@@ -62,6 +62,8 @@ and refuses to touch a `.claude/settings.json` that isn't valid JSON. It writes 
 
 The hook command is `node maddu/bin/maddu.mjs hooks fire <event>` — pure Node via
 the project-local CLI, so it is cross-platform (no shell-specific shim path).
+In the framework **source** checkout (which has `bin/maddu.mjs`, not
+`maddu/bin/`), install resolves the entrypoint accordingly (v1.89.1).
 
 ## The pre-compaction checkpoint (v1.89.0)
 

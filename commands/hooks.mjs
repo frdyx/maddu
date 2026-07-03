@@ -147,7 +147,8 @@ export default async function hooks(argv) {
       console.error(`\x1b[31mrefusing to touch ${lib.settingsPath(repoRoot)} — it exists but is not valid JSON. Fix or remove it first.\x1b[0m`);
       process.exit(1);
     }
-    const next = removing ? lib.stripMaddu(settings) : lib.mergeInstall(settings);
+    const bin = lib.resolveHookBin ? await lib.resolveHookBin(repoRoot) : undefined;
+    const next = removing ? lib.stripMaddu(settings) : lib.mergeInstall(settings, { bin });
     const before = JSON.stringify(settings);
     const after = JSON.stringify(next);
     if (before === after) {

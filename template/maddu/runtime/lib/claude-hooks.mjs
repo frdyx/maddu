@@ -19,12 +19,27 @@
 // without a temp repo; the IO wrappers are thin.
 
 import { join } from 'node:path';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, stat } from 'node:fs/promises';
 
 // The node invocation the project-local CLI shim (maddu/run) wraps. Pure node,
 // so the hook command is cross-platform (no bash/cmd-specific shim path).
+// Consumer installs carry the CLI at maddu/bin/maddu.mjs; the framework
+// SOURCE repo carries it at bin/maddu.mjs (there is no maddu/bin there —
+// dogfooding v1.89.0 surfaced hooks that silently errored on every fire).
+// resolveHookBin picks the right one at install time.
 export const HOOK_BIN = 'node maddu/bin/maddu.mjs';
+export const HOOK_BIN_SOURCE = 'node bin/maddu.mjs';
 export const MADDU_SENTINEL = 'hooks fire';
+
+// IO: which entrypoint exists in THIS repo. Consumer layout wins; the source
+// layout is the fallback only when the consumer path is absent and the source
+// CLI is present. Unknown layouts keep the consumer default.
+export async function resolveHookBin(repoRoot) {
+  const has = async (p) => { try { await stat(p); return true; } catch { return false; } };
+  if (await has(join(repoRoot, 'maddu', 'bin', 'maddu.mjs'))) return HOOK_BIN;
+  if (await has(join(repoRoot, 'bin', 'maddu.mjs'))) return HOOK_BIN_SOURCE;
+  return HOOK_BIN;
+}
 
 // The hook events Máddu wires, in install order. `event` is the Claude Code
 // hook event name; `fire` is the `maddu hooks fire <fire>` sub-event.
@@ -36,8 +51,8 @@ export const MADDU_HOOKS = [
   { event: 'PreCompact', fire: 'pre-compact' },
 ];
 
-export function hookCommandFor(fire) {
-  return `${HOOK_BIN} hooks fire ${fire}`;
+export function hookCommandFor(fire, bin = HOOK_BIN) {
+  return `${bin} hooks fire ${fire}`;
 }
 
 function isMadduCommand(cmd) {
@@ -51,7 +66,9 @@ function groupHasMaddu(group) {
 
 // Pure: return a NEW settings object with Máddu's hook entries ensured. Any
 // non-Máddu hooks (the user's own) are preserved untouched. Idempotent.
-export function mergeInstall(settings) {
+// `bin` selects the entrypoint (consumer default; pass resolveHookBin's
+// answer so a source-repo install writes a command that actually exists).
+export function mergeInstall(settings, { bin = HOOK_BIN } = {}) {
   const next = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
   if (!next.hooks || typeof next.hooks !== 'object') next.hooks = {};
   for (const { event, fire } of MADDU_HOOKS) {
@@ -59,7 +76,7 @@ export function mergeInstall(settings) {
     // Drop any prior Máddu group for this event (so re-install refreshes the
     // command text), keep everything else, then append a fresh group.
     const kept = arr.filter((g) => !groupHasMaddu(g));
-    kept.push({ hooks: [{ type: 'command', command: hookCommandFor(fire) }] });
+    kept.push({ hooks: [{ type: 'command', command: hookCommandFor(fire, bin) }] });
     next.hooks[event] = kept;
   }
   return next;

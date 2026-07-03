@@ -149,5 +149,11 @@
     "area": "hooks/pre-compact (new fire event) + claude-hooks (PreCompact stanza) + orient (auto-announce) + doctor (stanza currency)",
     "fixed_in": "1.89.0",
     "consumer_impact": "maddu hooks install now also wires a PreCompact hook that writes a COMPACTION_CHECKPOINT (trigger, last recorded slice-stop, handoff currency) before every manual/auto compaction; orient auto-announces the latest checkpoint with no flag; doctor WARNs on partial/stale hook stanzas. Fails OPEN by design: the handler always exits 0, so compaction is never blocked. Precondition met before build: PreCompact cited in official code.claude.com hooks docs + one empirical fire test capturing the live payload."
+  },
+  {
+    "symptom": "In the framework SOURCE repo, hooks install wrote the consumer entrypoint (node maddu/bin/maddu.mjs), which does not exist there \u2014 every installed hook (SessionStart/SessionEnd/PreCompact) errored silently on fire. Surfaced by dogfooding v1.89.0 minutes after release.",
+    "area": "claude-hooks (resolveHookBin) + hooks install + doctor session-hooks currency",
+    "fixed_in": "1.89.1",
+    "consumer_impact": "None for consumers (maddu/bin exists there; consumer default unchanged). Source-repo installs now resolve to node bin/maddu.mjs at install time; doctor staleness comparison uses the same resolution."
   }
 ]

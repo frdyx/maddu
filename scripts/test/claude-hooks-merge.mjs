@@ -8,7 +8,12 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mergeInstall, stripMaddu, summarize, MADDU_HOOKS, hookCommandFor } from '../../template/maddu/runtime/lib/claude-hooks.mjs';
+import { mergeInstall, stripMaddu, summarize, MADDU_HOOKS, hookCommandFor, resolveHookBin, HOOK_BIN, HOOK_BIN_SOURCE } from '../../template/maddu/runtime/lib/claude-hooks.mjs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let passed = 0, failed = 0;
 function ok(name, cond, extra = '') {
@@ -57,6 +62,33 @@ async function main() {
   ok('no duplicate Máddu groups after double install', twice.hooks.SessionStart.length === 1);
 
   ok('MADDU_HOOKS covers SessionStart + SessionEnd + PreCompact', MADDU_HOOKS.map((h) => h.event).join(',') === 'SessionStart,SessionEnd,PreCompact');
+
+  // ── source-repo bin resolution (v1.89.1) — the dogfood bug: the framework
+  // source repo has bin/maddu.mjs, not maddu/bin/maddu.mjs; installing the
+  // consumer command there produced hooks that errored on every fire. ──
+  const srcBin = mergeInstall({}, { bin: HOOK_BIN_SOURCE });
+  ok('mergeInstall honors a bin override', srcBin.hooks.SessionStart[0].hooks[0].command === `${HOOK_BIN_SOURCE} hooks fire session-start`);
+  ok('strip still identifies bin-overridden entries (sentinel match)', !stripMaddu(srcBin).hooks);
+  {
+    const consumer = await mkdtemp(join(tmpdir(), 'maddu-chm-consumer-'));
+    await mkdir(join(consumer, 'maddu', 'bin'), { recursive: true });
+    await writeFile(join(consumer, 'maddu', 'bin', 'maddu.mjs'), '// stub');
+    ok('resolveHookBin: consumer layout → maddu/bin', await resolveHookBin(consumer) === HOOK_BIN);
+    await rm(consumer, { recursive: true, force: true });
+
+    const source = await mkdtemp(join(tmpdir(), 'maddu-chm-source-'));
+    await mkdir(join(source, 'bin'), { recursive: true });
+    await writeFile(join(source, 'bin', 'maddu.mjs'), '// stub');
+    ok('resolveHookBin: source layout → bin/', await resolveHookBin(source) === HOOK_BIN_SOURCE);
+    await rm(source, { recursive: true, force: true });
+
+    const bare = await mkdtemp(join(tmpdir(), 'maddu-chm-bare-'));
+    ok('resolveHookBin: unknown layout → consumer default', await resolveHookBin(bare) === HOOK_BIN);
+    await rm(bare, { recursive: true, force: true });
+  }
+  // The real framework source checkout resolves to the source bin.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  ok('resolveHookBin: this repo (framework source) → bin/', await resolveHookBin(resolve(HERE, '..', '..')) === HOOK_BIN_SOURCE);
   ok('install wires the PreCompact checkpoint hook', a.hooks.PreCompact?.[0]?.hooks?.[0]?.command === hookCommandFor('pre-compact'));
   ok('PreCompact group has no matcher (fires on manual AND auto)', !('matcher' in (a.hooks.PreCompact?.[0] || { matcher: 1 })));
 }
