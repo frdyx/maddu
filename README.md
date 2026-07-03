@@ -48,6 +48,10 @@ Agents are getting more autonomous. The thing that **governs and coordinates** t
 
 Tracing tools observe runs. Memory layers help agents remember. **Máddu governs how agents collaborate.**
 
+## The category
+
+**Local-first cooperative agent governance.** Not a control plane, not a gateway, not a proxy — a governance layer the agent itself calls; one NDJSON file you can `tail`; nothing leaves your machine. *Local-first* is operational, not marketing: delete `.maddu/` and Máddu is gone — and `git clone` brings the whole governance history with it. Enterprise platforms govern **which** agents run in your org; **Máddu governs *how* they work** once they're in your repo. The canonical definition — and why every nearby name already means something else — lives in [docs/45-category.md](docs/45-category.md).
+
 ## The idea
 
 One append-only log on disk is the single source of truth. Everything else is derived from it — and thrown away on conflict.
