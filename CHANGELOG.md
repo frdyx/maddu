@@ -11,6 +11,14 @@ narrative summary.
 
 ---
 
+## [v1.92.0] · 2026-07-03 · earned autonomy — `maddu autonomy` (market roadmap #11, operator-directed)
+
+- **`maddu autonomy`** — deterministic per-lane trust score over the verified record: Wilson lower bound (z=1.96) over witnessed-clean vs witnessed-dirty slice outcomes, 3-rung ladder (observe / established / relaxation-candidate), daily clean-credit cap against deliverable-farming. **Recommend-only by contract**: nothing anywhere in the feature writes governance config — applying a recommendation is the operator running `maddu governance set`. UEAL-inspired (concept, not mechanism); design contract in `docs/research/earned-autonomy-proposal.md`, Codex-consulted.
+- Lane attribution is a **session join** (`SLICE_STOP.actor` → registered/claimed lane), because `SLICE_STOP.lane` is null in practice. Historical `GATE_RAN`s attach by the between-slice-stops window; **forward-only enrichment starts now** — slice-stop stamps its session onto the gate events it runs (`runGates` `attribution` opt), so exact attribution accumulates from this release.
+- New spine events (schemaVersion-1 shapes frozen pre-emit): `AUTONOMY_SCORED` on explicit runs; `AUTONOMY_RECOMMENDATION` only on rung change, spine-deduped. **Muted while any phase is active** — the phase floor is absolute, sterile or not.
+- Surfacing: `maddu orient` + `maddu governance show` announce the latest live recommendation next to the tier it informs. Charter row (Supply-chain & trust) + capability-docs registered. Thresholds overridable via `.maddu/config/autonomy.json`, hashed onto every event.
+- Fixtures: `autonomy-score` 34/0 (pure engine, v1.91.2→) + `autonomy-cli` 20/0 (verb, events, dedup, phase-mute, enrichment, never-writes-governance).
+
 ## [v1.91.2] · 2026-07-03 · doctor watches the global binary (incident catch)
 
 - **`maddu doctor` now checks global-binary currency.** `maddu fleet` tracks per-repo install currency, but nothing watched the global npm binary — a stale `npm i -g` maddu on PATH shadows a newer checkout and silently runs old behavior (surfaced today: a stale global demanded `--session` on slice-stop inside a v1.91.1 checkout and doctor stayed green). In the framework source repo doctor compares the running CLI's version against the checkout's `version.json`: older → WARN with the `npm i -g github:frdyx/maddu` remedy; newer → INFO (old branch / unpulled main); equal → PASS.

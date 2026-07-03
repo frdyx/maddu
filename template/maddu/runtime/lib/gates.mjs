@@ -61,7 +61,11 @@ export async function discoverGates(repoRoot) {
 }
 
 export async function runGates(repoRoot, opts = {}) {
-  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null } = opts;
+  // opts.attribution (v1.92.0, earned autonomy): forward-only GATE_RAN
+  // enrichment — { actor?, lane?, sliceId? }. Callers that know which session
+  // is running the gates (slice-stop does) stamp it so the autonomy scorer can
+  // bind gate runs exactly instead of by time window. Absent → legacy shape.
+  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null, attribution = null } = opts;
 
   // Build the gate execution context. Lazy-load spine/projections/verify
   // (matches commands/_spine.mjs:loadSpineLib resolution).
@@ -115,12 +119,17 @@ export async function runGates(repoRoot, opts = {}) {
       try {
         await ctx.spine.append(repoRoot, {
           type: ctx.spine.EVENT_TYPES.GATE_RAN,
+          actor: attribution?.actor || null,
+          lane: attribution?.lane || null,
           // Persist the resolved `status` too: the ok/severity pair can't
           // reconstruct an explicit status='warn' (e.g. install-integrity's
           // locally-modified soft pass), so the verdict ledger + projection read
           // it back exactly instead of re-deriving and mislabelling a soft warn
           // as a hard fail.
-          data: { gateId: g.id, ok, status, severity: g.severity, durationMs, evidence },
+          data: {
+            gateId: g.id, ok, status, severity: g.severity, durationMs, evidence,
+            ...(attribution?.sliceId ? { sliceId: attribution.sliceId } : {}),
+          },
         });
       } catch {} // gate-run reporting is best-effort
     }

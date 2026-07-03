@@ -144,6 +144,15 @@ export default async function orient(argv) {
     return null;
   })();
 
+  // Earned autonomy (v1.92.0) — the latest live recommendation, so a tier
+  // decision meets its evidence at session start. Read-only, recommend-only.
+  const lastAutonomyRec = (() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'AUTONOMY_RECOMMENDATION') return events[i].data || null;
+    }
+    return null;
+  })();
+
   // Framework currency (staleness FLOOR, roadmap #6) — offline age nudge.
   let currency = null;
   const currencyLib = await loadLibOptional('framework-currency.mjs');
@@ -180,6 +189,11 @@ export default async function orient(argv) {
         lastTs: gates.lastTs,
         failing: gates.failing.map((f) => ({ gateId: f.gateId, severity: f.severity, eventId: f.eventId, repro: gateLedgerLib.reproForGate(f.gateId) })),
       } : null,
+      autonomyRecommendation: lastAutonomyRec ? {
+        lane: lastAutonomyRec.lane, fromRung: lastAutonomyRec.fromRung, toRung: lastAutonomyRec.toRung,
+        recommendation: lastAutonomyRec.recommendation, muted: !!lastAutonomyRec.muted,
+        wilson: lastAutonomyRec.wilson, n: lastAutonomyRec.n,
+      } : null,
     }, null, 2) + '\n');
     return;
   }
@@ -196,6 +210,13 @@ export default async function orient(argv) {
       ? `last recorded slice-stop: "${cleanSummary(d.lastSliceStop.summary).slice(0, 60)}"`
       : 'no slice-stop was recorded before it';
     console.log(`  ${C.dim}⧉ context compacted ${lastCompaction.ts} (${d.trigger || '?'}) — ${anchor}${C.reset}`);
+  }
+  if (lastAutonomyRec && lastAutonomyRec.lane && !lastAutonomyRec.muted && lastAutonomyRec.recommendation !== 'maintain') {
+    const arrow = `${lastAutonomyRec.fromRung} → ${lastAutonomyRec.toRung}`;
+    const line = lastAutonomyRec.recommendation === 'consider-relaxed'
+      ? `lane "${lastAutonomyRec.lane}" earned ${arrow} (wilson ${lastAutonomyRec.wilson}, n=${lastAutonomyRec.n}) — record supports relaxed`
+      : `lane "${lastAutonomyRec.lane}" fell ${arrow} — record no longer supports relaxation`;
+    console.log(`  ${C.dim}∴ autonomy: ${line} — \`maddu autonomy\`${C.reset}`);
   }
 
   // One-glance card (roadmap #9): gate verdict · goal progress · next action,

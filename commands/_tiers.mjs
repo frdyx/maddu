@@ -33,6 +33,11 @@
 
 export default {
   agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  // v1.92.0 — `autonomy` reads the whole spine but appends AUTONOMY_SCORED /
+  // AUTONOMY_RECOMMENDATION report events by default (--no-emit for read-only),
+  // so the verb is mutating + auto-trigger forbidden. Recommend-only contract:
+  // it never writes governance config.
+  autonomy:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },

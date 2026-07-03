@@ -286,7 +286,17 @@ export const EVENT_TYPES = {
   //   FOCUS_TAGGED:   { tag:'toward'|'lateral'|'away', distanceScore, signals, goalSetAt }
   //   DRIFT_FLAGGED:  { reason, runs, menu:['swap','revert','continue'], workerId?, cleared? }
   FOCUS_TAGGED:               'FOCUS_TAGGED',
-  DRIFT_FLAGGED:              'DRIFT_FLAGGED'
+  DRIFT_FLAGGED:              'DRIFT_FLAGGED',
+
+  // Earned autonomy (maddu autonomy, roadmap #11) — deterministic per-lane
+  // trust score over the verified record; RECOMMEND-ONLY (never writes
+  // governance config). Frozen data shapes (schemaVersion 1) in
+  // docs/research/earned-autonomy-proposal.md. Both are report/meta events —
+  // the scorer ignores them, so scoring never feeds on itself.
+  //   AUTONOMY_SCORED:         { schemaVersion, asOf, attribution, configHash, totalSlices, lanes:[{lane, clean, cleanCapped, dirty, neutral, unwitnessed, total, n, coverage, wilson, rung}] }
+  //   AUTONOMY_RECOMMENDATION: { schemaVersion, asOf, lane, fromRung, toRung, wilson, n, coverage, recommendation, muted, mutedReason, configHash }
+  AUTONOMY_SCORED:            'AUTONOMY_SCORED',
+  AUTONOMY_RECOMMENDATION:    'AUTONOMY_RECOMMENDATION'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

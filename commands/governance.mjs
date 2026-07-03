@@ -58,6 +58,26 @@ export default async function governanceCmd(argv) {
       console.log(`${ANSI.warn}NOTE${ANSI.reset}  relaxed mode lifts operational gates. The 8+1 structural`);
       console.log(`     hard rules remain enforced regardless of mode.`);
     }
+    // Earned autonomy (v1.92.0): surface the latest recommendation next to the
+    // tier it informs. Read-only; recommend-only — nothing here writes config.
+    try {
+      const events = await spine.readAll(repoRoot);
+      let rec = null;
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].type === 'AUTONOMY_RECOMMENDATION') { rec = events[i].data || null; break; }
+      }
+      if (rec && rec.lane) {
+        console.log('');
+        const arrow = `${rec.fromRung} → ${rec.toRung}`;
+        if (rec.muted) {
+          console.log(`  ${ANSI.dim}∴ autonomy: lane "${rec.lane}" ${arrow} — muted (${rec.mutedReason})${ANSI.reset}`);
+        } else if (rec.recommendation === 'consider-relaxed') {
+          console.log(`  ${ANSI.pass}∴ autonomy: lane "${rec.lane}" earned ${arrow} (wilson ${rec.wilson}, n=${rec.n}) — the record supports relaxed; \`maddu autonomy\` for the table${ANSI.reset}`);
+        } else if (rec.recommendation === 'revert-to-standard') {
+          console.log(`  ${ANSI.warn}∴ autonomy: lane "${rec.lane}" fell ${arrow} — the record no longer supports relaxation${ANSI.reset}`);
+        }
+      }
+    } catch {}
     return;
   }
 
