@@ -169,6 +169,19 @@ Most "architecture" lives in a diagram that's wrong by the next sprint. Máddu m
 - **A diagram you can trust** — it renders the actual graph as mermaid, generated from the code, not hand-drawn.
 - **A CI gate with a ratchet** — the `architecture-drift` gate fails on a `failOn` ladder (`none` / `new` / `any`), and a structural-mass baseline enforces *"monoliths may only shrink."* Drift can't sneak in between reviews.
 
+### ✅ Governance as a merge requirement
+
+`maddu ci` runs every deterministic gate headlessly — no LLM, no network — and exits nonzero **only on gates your repo has pinned as required** (`maddu ci pin`), so framework upgrades can add gates without ever turning your pipeline red until you opt in. One branch-protection rule later, agent work doesn't merge unless the governance record is green:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-node@v4
+  with: { node-version: 20 }
+- run: npx github:frdyx/maddu ci
+```
+
+Failed required gates surface as GitHub annotations plus a one-table job summary. Full contract in [docs/46-ci.md](docs/46-ci.md).
+
 ## Why Máddu
 
 Six design choices — and the thing each one lets you do that you couldn't before.

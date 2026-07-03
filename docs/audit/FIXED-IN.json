@@ -1,135 +1,141 @@
 [
-  {
-    "symptom": "Token/cost usage is captured (maddu usage import / maddu cost) but nothing flags a runaway session — spend stays invisible until someone looks (F5 symptom).",
-    "area": "runtime/lib/cost-budget + gates/cost-budget",
-    "fixed_in": "1.86.0",
-    "consumer_impact": "Opt-in `cost-budget` gate: with .maddu/config/cost-budget.json {windowDays,maxTokens,metric} it sums recent tokenLedger spend and WARNs (never FAILs) when over, surfacing a runaway session in doctor/audit. Rule-5 clean (sums existing numbers, no provider call). Fleet-wide cost stays deferred (F5 accepted).",
-    "ledger_ref": "roadmap-14"
-  },
-  {
-    "symptom": "maddu learn distils corrections per-repo but they stay siloed — a lesson learned the hard way in one repo (e.g. a shell/path quirk) never reaches the next, so the fleet re-learns the same things independently.",
-    "area": "commands/learn + runtime/lib/lesson-federation",
-    "fixed_in": "1.85.0",
-    "consumer_impact": "`maddu learn sync` reads sibling repos' corrections (fleet registry, local disk) and surfaces portable ones (recur in >=2 repos OR @portable), deduped + redacted; `--adopt` writes them into CLAUDE.md (approval-only) as first-class local corrections with federated provenance.",
-    "ledger_ref": "roadmap-8"
-  },
-  {
-    "symptom": "fleet upgrade delivers new framework code into installs as old as v1.15, but new code reading a projection shaped by old code could crash on a key the old shape never had — a silent, field-by-field surprise discovered one install at a time.",
-    "area": "runtime/lib/projections + gates/can-read-old-state",
-    "fixed_in": "1.84.0",
-    "consumer_impact": "project() stamps schemaVersion; normalizeProjection(raw) reads any old/partial/garbage projection into a total current-shape object (all keys present, nested deep-defaulted, never a throw); the can-read-old-state gate enforces the reader stays total.",
-    "ledger_ref": "roadmap-13"
-  },
-  {
-    "symptom": "maddu fleet upgrade --plan previewed a delivery but the operator still had to deliver by hand — the F1 'fixed in-tree, never received' gap was only half-closed. No safe, interlocked staged delivery across the fleet.",
-    "area": "commands/fleet + commands/_tiers + runtime/lib/fleet-upgrade",
-    "fixed_in": "1.83.0",
-    "consumer_impact": "`maddu fleet upgrade --apply` (scoped --only/--all): delivers canonical bytes to eligible behind repos by reusing the proven `maddu upgrade` engine. Per repo, sequential: re-check quiescence, snapshot managed bytes (never .maddu/events), upgrade, doctor — halt-on-red. `fleet` reclassified mutating/auto-forbidden.",
-    "ledger_ref": "F1"
-  },
-  {
-    "symptom": "maddu fleet detects who is behind but delivery was manual — the operator had to walk into each repo and run `maddu upgrade` by hand (the 'fixed in-tree, never received' gap, F1 delivery leg). No safe preview of what a fleet-wide upgrade would change or which repos are safe to touch.",
-    "area": "commands/fleet + runtime/lib/fleet-upgrade",
-    "fixed_in": "1.82.0",
-    "consumer_impact": "`maddu fleet upgrade --plan`: read-only offline preview per behind active repo — quiescence interlock (active lane claim / dirty tree / recent spine activity each block) + managed-byte delta (canonical vs recorded maddu.json hashes). The live spine is never in a delta. Mutation guarded as a follow-up.",
-    "ledger_ref": "F1"
-  },
-  {
-    "symptom": "The autonomous skill-candidate detector fired (11x/4 projects) but every downstream terminal was 0 across all 13 installs (F2): candidates are generic tag-sets (commit, test), not reusable recipes, and `maddu learn` already does the valuable auto-capture. A dead funnel carried as live.",
-    "area": "commands/slice-stop + commands/skill + runtime/lib/skill-candidates + runtime/lib/event-dispositions + gates/funnel-integrity",
-    "fixed_in": "1.81.0",
-    "consumer_impact": "Auto-detector retired: no slice-stop auto-emit, emitFreshCandidates is a no-op, SKILL_CANDIDATE_DETECTED dispositioned dormant, allowlist no longer seeds it. Skills are hand-authored (`maddu skill create`/`from-slice`); auto-capture is `maddu learn`. The funnel-integrity gate keeps it retired.",
-    "ledger_ref": "F2"
-  },
-  {
-    "symptom": "Orchestration (coordinator/loop/pipeline/team) fires in only 2-5 of 13 installs, so a naive audit reads 'orchestration events ~= 0' as a dead domain and re-raises it as a false-alarm finding every audit (F4) — when in truth it's an opt-in advanced layer and the disciplined substrate is the real product.",
-    "area": "commands/_tiers + commands/audit + runtime/lib/capability-positioning + gates/command-tier-discipline",
-    "fixed_in": "1.80.0",
-    "consumer_impact": "Every verb is tagged layer:core|orchestration in _tiers.mjs; `maddu audit positioning` frames orchestration as an opt-in fire-rate (never dead); command-tier-discipline requires a valid layer so a new verb can't be added unclassified. Charter + README reposition around the discipline loop.",
-    "ledger_ref": "F4"
-  },
-  {
-    "symptom": "maddu orient showed goal progress + a timeline but never the last gate verdict, so an operator couldn't see red/green at a glance; a failing gate surfaced as a raw stack trace, not which-gate/where/how-to-repro — friction that pushes operators to skip slices and gates.",
-    "area": "commands/orient + runtime/lib/gate-ledger + runtime/lib/gates + projections",
-    "fixed_in": "1.79.0",
-    "consumer_impact": "orient opens with a one-glance card (gate verdict · goal · next) and a legible GATES section (gate id + severity + spine event id + `maddu doctor --gate <id>` repro, no stack trace). GATE_RAN events persist the resolved status + event id so verdicts are exact.",
-    "ledger_ref": "roadmap-9"
-  },
-  {
-    "symptom": "The audit program's own fixes for F3/F4 were more machinery (gates, registries, verbs); unbudgeted, the enforcement surface could grow faster than dead surface retires — the cure becoming the next F3/F4.",
-    "area": "commands/audit + runtime/lib/governance-budget",
-    "fixed_in": "1.78.0",
-    "consumer_impact": "`maddu audit` (and `maddu audit budget`) now caps each governance category (gates, verbs, audit checks) from ground-truth counts vs docs/audit/governance-budget.json; over a cap FAILs unless a waiver row carries it, plus a relative self-test latency WARN.",
-    "ledger_ref": "roadmap-7"
-  },
-  {
-    "symptom": "Consumers never learned an install was stale; doctor checked integrity vs the install's own manifest, never vs latest, so a 55-versions-behind install passed green forever.",
-    "area": "doctor/orient",
-    "fixed_in": "1.75.0",
-    "consumer_impact": "doctor + orient now surface an offline staleness FLOOR (age from version.json released date) nudging `maddu upgrade`.",
-    "ledger_ref": "F1"
-  },
-  {
-    "symptom": "A consumer-impacting fix could be dogfooded in-tree but shipped to consumers as the un-fixed path, with nothing coupling the change to a release that records it.",
-    "area": "gates/release-parity",
-    "fixed_in": "1.75.0",
-    "consumer_impact": "release-parity gate: an impacting change carried by a version bump must record what it delivers here; pending impacting changes WARN as delivery debt.",
-    "ledger_ref": "F1"
-  },
-  {
-    "symptom": "34 event types accumulated as 'dead' because nothing forced a disposition when a type was defined; the dead-domain surface could only ever grow.",
-    "area": "runtime/lib/event-dispositions + gates/event-dispositions-complete + insights",
-    "fixed_in": "1.75.0",
-    "consumer_impact": "DD1: every EVENT_TYPES key carries a definition-site disposition; a gate holds the registry in 1:1 parity; DORMANT_BY_DESIGN is derived from it. insights dead count 34 -> 0.",
-    "ledger_ref": "F3"
-  },
-  {
-    "symptom": "Version skew, liveness, and the delivery delta were invisible fleet-wide; the bridge knew every workspace path but read one repo at a time.",
-    "area": "runtime/lib/fleet + commands/fleet",
-    "fixed_in": "1.76.0",
-    "consumer_impact": "`maddu fleet`: read-only single-machine view of every registered repo's version/currency/liveness + the version delta vs fleet latest, computed offline without running them.",
-    "ledger_ref": "F1"
-  },
-  {
-    "symptom": "The cross-project audit was a manual one-off; nothing made it recurring/self-proving, so settled findings could re-surface and a guardrail could be silently removed.",
-    "area": "runtime/lib/audit-ledger + gates/audit-ledger-coherent + docs/audit/LEDGER.json",
-    "fixed_in": "1.76.0",
-    "consumer_impact": "audit-ledger-coherent gate: a `fixed` finding must backref a registered guardrail gate, so a guardrail can't vanish while the ledger claims the class is handled.",
-    "ledger_ref": "F2"
-  },
-  {
-    "symptom": "Everything counted events/dispositions; nothing measured whether the guardrails actually caught faults, so the edifice had no evidence it earns its weight.",
-    "area": "runtime/lib/outcome + commands/fleet",
-    "fixed_in": "1.77.0",
-    "consumer_impact": "Outcome ledger: every gate FAIL is counted as a PREVENTED_FAULT (hard/soft by severity, per gate); the fleet view shows per-repo + active-fleet 'faults caught'.",
-    "ledger_ref": "F11"
-  },
-  {
-    "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
-    "area": "gates/generated-artifacts-current",
-    "fixed_in": "1.73.1",
-    "consumer_impact": "Gate skips on the positive source-checkout marker instead of inferring consumer-vs-source from per-target absence.",
-    "ledger_ref": "consumer-install-hardening"
-  },
-  {
-    "symptom": "An agent built a whole feature in a fresh install with 0 sessions/lanes/slice-stops because the discipline ritual was agent-convention, not enforced.",
-    "area": "commands/_spine,lane,slice,slice-stop + commands/hooks",
-    "fixed_in": "1.74.0",
-    "consumer_impact": "resolveSessionId precedence (flag -> env -> liveness-verified active-session cache) so one `maddu register` flows everywhere, plus `maddu hooks install` wiring SessionStart/SessionEnd.",
-    "ledger_ref": "consumer-install-hardening"
-  },
-  {
-    "symptom": "Windows core.autocrlf rewrote all framework files to CRLF on checkout, so byte-exact integrity hashes mismatched and `upgrade` skipped every file (half-upgrade).",
-    "area": "commands/_manifest + gates/install-integrity",
-    "fixed_in": "1.74.1",
-    "consumer_impact": "Integrity hashing EOL-normalizes text (lossless latin1 CRLF->LF), hashes binary raw; init writes a maddu-scoped .gitattributes.",
-    "ledger_ref": "consumer-install-hardening"
-  },
-  {
-    "symptom": "init tracked all of .maddu/ in git, so the perpetually-rewritten spine + projections churned the working tree and blocked branch switches.",
-    "area": "commands/init + gates/maddu-state-untracked",
-    "fixed_in": "1.74.2",
-    "consumer_impact": "Policy-A .gitignore (ignore .maddu/* except durable authored artifacts) + a maddu-state-untracked gate that prints the non-destructive `git rm -r --cached` for older installs.",
-    "ledger_ref": "consumer-install-hardening"
-  }
+ {
+  "symptom": "Token/cost usage is captured (maddu usage import / maddu cost) but nothing flags a runaway session — spend stays invisible until someone looks (F5 symptom).",
+  "area": "runtime/lib/cost-budget + gates/cost-budget",
+  "fixed_in": "1.86.0",
+  "consumer_impact": "Opt-in `cost-budget` gate: with .maddu/config/cost-budget.json {windowDays,maxTokens,metric} it sums recent tokenLedger spend and WARNs (never FAILs) when over, surfacing a runaway session in doctor/audit. Rule-5 clean (sums existing numbers, no provider call). Fleet-wide cost stays deferred (F5 accepted).",
+  "ledger_ref": "roadmap-14"
+ },
+ {
+  "symptom": "maddu learn distils corrections per-repo but they stay siloed — a lesson learned the hard way in one repo (e.g. a shell/path quirk) never reaches the next, so the fleet re-learns the same things independently.",
+  "area": "commands/learn + runtime/lib/lesson-federation",
+  "fixed_in": "1.85.0",
+  "consumer_impact": "`maddu learn sync` reads sibling repos' corrections (fleet registry, local disk) and surfaces portable ones (recur in >=2 repos OR @portable), deduped + redacted; `--adopt` writes them into CLAUDE.md (approval-only) as first-class local corrections with federated provenance.",
+  "ledger_ref": "roadmap-8"
+ },
+ {
+  "symptom": "fleet upgrade delivers new framework code into installs as old as v1.15, but new code reading a projection shaped by old code could crash on a key the old shape never had — a silent, field-by-field surprise discovered one install at a time.",
+  "area": "runtime/lib/projections + gates/can-read-old-state",
+  "fixed_in": "1.84.0",
+  "consumer_impact": "project() stamps schemaVersion; normalizeProjection(raw) reads any old/partial/garbage projection into a total current-shape object (all keys present, nested deep-defaulted, never a throw); the can-read-old-state gate enforces the reader stays total.",
+  "ledger_ref": "roadmap-13"
+ },
+ {
+  "symptom": "maddu fleet upgrade --plan previewed a delivery but the operator still had to deliver by hand — the F1 'fixed in-tree, never received' gap was only half-closed. No safe, interlocked staged delivery across the fleet.",
+  "area": "commands/fleet + commands/_tiers + runtime/lib/fleet-upgrade",
+  "fixed_in": "1.83.0",
+  "consumer_impact": "`maddu fleet upgrade --apply` (scoped --only/--all): delivers canonical bytes to eligible behind repos by reusing the proven `maddu upgrade` engine. Per repo, sequential: re-check quiescence, snapshot managed bytes (never .maddu/events), upgrade, doctor — halt-on-red. `fleet` reclassified mutating/auto-forbidden.",
+  "ledger_ref": "F1"
+ },
+ {
+  "symptom": "maddu fleet detects who is behind but delivery was manual — the operator had to walk into each repo and run `maddu upgrade` by hand (the 'fixed in-tree, never received' gap, F1 delivery leg). No safe preview of what a fleet-wide upgrade would change or which repos are safe to touch.",
+  "area": "commands/fleet + runtime/lib/fleet-upgrade",
+  "fixed_in": "1.82.0",
+  "consumer_impact": "`maddu fleet upgrade --plan`: read-only offline preview per behind active repo — quiescence interlock (active lane claim / dirty tree / recent spine activity each block) + managed-byte delta (canonical vs recorded maddu.json hashes). The live spine is never in a delta. Mutation guarded as a follow-up.",
+  "ledger_ref": "F1"
+ },
+ {
+  "symptom": "The autonomous skill-candidate detector fired (11x/4 projects) but every downstream terminal was 0 across all 13 installs (F2): candidates are generic tag-sets (commit, test), not reusable recipes, and `maddu learn` already does the valuable auto-capture. A dead funnel carried as live.",
+  "area": "commands/slice-stop + commands/skill + runtime/lib/skill-candidates + runtime/lib/event-dispositions + gates/funnel-integrity",
+  "fixed_in": "1.81.0",
+  "consumer_impact": "Auto-detector retired: no slice-stop auto-emit, emitFreshCandidates is a no-op, SKILL_CANDIDATE_DETECTED dispositioned dormant, allowlist no longer seeds it. Skills are hand-authored (`maddu skill create`/`from-slice`); auto-capture is `maddu learn`. The funnel-integrity gate keeps it retired.",
+  "ledger_ref": "F2"
+ },
+ {
+  "symptom": "Orchestration (coordinator/loop/pipeline/team) fires in only 2-5 of 13 installs, so a naive audit reads 'orchestration events ~= 0' as a dead domain and re-raises it as a false-alarm finding every audit (F4) — when in truth it's an opt-in advanced layer and the disciplined substrate is the real product.",
+  "area": "commands/_tiers + commands/audit + runtime/lib/capability-positioning + gates/command-tier-discipline",
+  "fixed_in": "1.80.0",
+  "consumer_impact": "Every verb is tagged layer:core|orchestration in _tiers.mjs; `maddu audit positioning` frames orchestration as an opt-in fire-rate (never dead); command-tier-discipline requires a valid layer so a new verb can't be added unclassified. Charter + README reposition around the discipline loop.",
+  "ledger_ref": "F4"
+ },
+ {
+  "symptom": "maddu orient showed goal progress + a timeline but never the last gate verdict, so an operator couldn't see red/green at a glance; a failing gate surfaced as a raw stack trace, not which-gate/where/how-to-repro — friction that pushes operators to skip slices and gates.",
+  "area": "commands/orient + runtime/lib/gate-ledger + runtime/lib/gates + projections",
+  "fixed_in": "1.79.0",
+  "consumer_impact": "orient opens with a one-glance card (gate verdict · goal · next) and a legible GATES section (gate id + severity + spine event id + `maddu doctor --gate <id>` repro, no stack trace). GATE_RAN events persist the resolved status + event id so verdicts are exact.",
+  "ledger_ref": "roadmap-9"
+ },
+ {
+  "symptom": "The audit program's own fixes for F3/F4 were more machinery (gates, registries, verbs); unbudgeted, the enforcement surface could grow faster than dead surface retires — the cure becoming the next F3/F4.",
+  "area": "commands/audit + runtime/lib/governance-budget",
+  "fixed_in": "1.78.0",
+  "consumer_impact": "`maddu audit` (and `maddu audit budget`) now caps each governance category (gates, verbs, audit checks) from ground-truth counts vs docs/audit/governance-budget.json; over a cap FAILs unless a waiver row carries it, plus a relative self-test latency WARN.",
+  "ledger_ref": "roadmap-7"
+ },
+ {
+  "symptom": "Consumers never learned an install was stale; doctor checked integrity vs the install's own manifest, never vs latest, so a 55-versions-behind install passed green forever.",
+  "area": "doctor/orient",
+  "fixed_in": "1.75.0",
+  "consumer_impact": "doctor + orient now surface an offline staleness FLOOR (age from version.json released date) nudging `maddu upgrade`.",
+  "ledger_ref": "F1"
+ },
+ {
+  "symptom": "A consumer-impacting fix could be dogfooded in-tree but shipped to consumers as the un-fixed path, with nothing coupling the change to a release that records it.",
+  "area": "gates/release-parity",
+  "fixed_in": "1.75.0",
+  "consumer_impact": "release-parity gate: an impacting change carried by a version bump must record what it delivers here; pending impacting changes WARN as delivery debt.",
+  "ledger_ref": "F1"
+ },
+ {
+  "symptom": "34 event types accumulated as 'dead' because nothing forced a disposition when a type was defined; the dead-domain surface could only ever grow.",
+  "area": "runtime/lib/event-dispositions + gates/event-dispositions-complete + insights",
+  "fixed_in": "1.75.0",
+  "consumer_impact": "DD1: every EVENT_TYPES key carries a definition-site disposition; a gate holds the registry in 1:1 parity; DORMANT_BY_DESIGN is derived from it. insights dead count 34 -> 0.",
+  "ledger_ref": "F3"
+ },
+ {
+  "symptom": "Version skew, liveness, and the delivery delta were invisible fleet-wide; the bridge knew every workspace path but read one repo at a time.",
+  "area": "runtime/lib/fleet + commands/fleet",
+  "fixed_in": "1.76.0",
+  "consumer_impact": "`maddu fleet`: read-only single-machine view of every registered repo's version/currency/liveness + the version delta vs fleet latest, computed offline without running them.",
+  "ledger_ref": "F1"
+ },
+ {
+  "symptom": "The cross-project audit was a manual one-off; nothing made it recurring/self-proving, so settled findings could re-surface and a guardrail could be silently removed.",
+  "area": "runtime/lib/audit-ledger + gates/audit-ledger-coherent + docs/audit/LEDGER.json",
+  "fixed_in": "1.76.0",
+  "consumer_impact": "audit-ledger-coherent gate: a `fixed` finding must backref a registered guardrail gate, so a guardrail can't vanish while the ledger claims the class is handled.",
+  "ledger_ref": "F2"
+ },
+ {
+  "symptom": "Everything counted events/dispositions; nothing measured whether the guardrails actually caught faults, so the edifice had no evidence it earns its weight.",
+  "area": "runtime/lib/outcome + commands/fleet",
+  "fixed_in": "1.77.0",
+  "consumer_impact": "Outcome ledger: every gate FAIL is counted as a PREVENTED_FAULT (hard/soft by severity, per gate); the fleet view shows per-repo + active-fleet 'faults caught'.",
+  "ledger_ref": "F11"
+ },
+ {
+  "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
+  "area": "gates/generated-artifacts-current",
+  "fixed_in": "1.73.1",
+  "consumer_impact": "Gate skips on the positive source-checkout marker instead of inferring consumer-vs-source from per-target absence.",
+  "ledger_ref": "consumer-install-hardening"
+ },
+ {
+  "symptom": "An agent built a whole feature in a fresh install with 0 sessions/lanes/slice-stops because the discipline ritual was agent-convention, not enforced.",
+  "area": "commands/_spine,lane,slice,slice-stop + commands/hooks",
+  "fixed_in": "1.74.0",
+  "consumer_impact": "resolveSessionId precedence (flag -> env -> liveness-verified active-session cache) so one `maddu register` flows everywhere, plus `maddu hooks install` wiring SessionStart/SessionEnd.",
+  "ledger_ref": "consumer-install-hardening"
+ },
+ {
+  "symptom": "Windows core.autocrlf rewrote all framework files to CRLF on checkout, so byte-exact integrity hashes mismatched and `upgrade` skipped every file (half-upgrade).",
+  "area": "commands/_manifest + gates/install-integrity",
+  "fixed_in": "1.74.1",
+  "consumer_impact": "Integrity hashing EOL-normalizes text (lossless latin1 CRLF->LF), hashes binary raw; init writes a maddu-scoped .gitattributes.",
+  "ledger_ref": "consumer-install-hardening"
+ },
+ {
+  "symptom": "init tracked all of .maddu/ in git, so the perpetually-rewritten spine + projections churned the working tree and blocked branch switches.",
+  "area": "commands/init + gates/maddu-state-untracked",
+  "fixed_in": "1.74.2",
+  "consumer_impact": "Policy-A .gitignore (ignore .maddu/* except durable authored artifacts) + a maddu-state-untracked gate that prints the non-destructive `git rm -r --cached` for older installs.",
+  "ledger_ref": "consumer-install-hardening"
+ },
+ {
+  "symptom": "No CI-safe way to enforce the gates: any-red-fails would let framework gate-set churn break consumer pipelines on upgrade, so gates stayed advisory outside the terminal.",
+  "area": "commands/ci (new verb) + docs/46-ci.md",
+  "fixed_in": "1.87.0",
+  "consumer_impact": "maddu ci — headless LLM-free gate rail: exit nonzero only on gates the repo pinned as required (maddu ci pin; maddu.json ci.requiredGates or .maddu/config/ci.json), --strict opt-in for any-fail-is-red, GitHub Actions annotations + job summary, learn-scan advisory line. Also carries the v1.86.0→v1.87.0 docs/positioning changes (category doc 45, README governance-first reframe)."
+ }
 ]
