@@ -120,6 +120,10 @@ export default async function sliceStop(argv) {
         onlyId: 'slice-scope',
         emitEvents: true,
         ctx: baseCtx,
+        // Earned autonomy (v1.92.0): stamp the session onto the GATE_RAN so the
+        // scorer binds it exactly. No sliceId — the SLICE_STOP event id doesn't
+        // exist yet at gate time.
+        attribution: { actor: sessionId, lane: flags.lane || null },
       });
       if (result.summary.fail > 0) {
         const failRun = result.runs.find((r) => !r.ok);
@@ -141,6 +145,7 @@ export default async function sliceStop(argv) {
         onlyId: 'completion-claim',
         emitEvents: true,
         ctx: { repoRoot, paths, spine, projections, project: () => projections.project(repoRoot) },
+        attribution: { actor: sessionId, lane: flags.lane || null },
       });
       const run = cc.runs[0];
       if (run && !run.ok) console.error(`  completion-claim: ${run.message}`);

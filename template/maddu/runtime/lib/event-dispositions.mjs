@@ -175,6 +175,8 @@ export const EVENT_DISPOSITIONS = {
   ARCHITECTURE_SCANNED: { disp: 'active' },
   FOCUS_TAGGED: { disp: 'dormant', reason: "Focus Director is opt-in (off by default)" },
   DRIFT_FLAGGED: { disp: 'dormant', reason: "Focus Director is opt-in; fires only on sustained drift" },
+  AUTONOMY_SCORED: { disp: 'active' },
+  AUTONOMY_RECOMMENDATION: { disp: 'dormant', reason: "fires only on a rung change — a lane's record crossing (or falling from) a trust-ladder threshold" },
 };
 
 export const DISP_KINDS = new Set(['active', 'dormant', 'plugin']);

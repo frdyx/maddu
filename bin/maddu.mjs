@@ -11,7 +11,7 @@ const repoRoot = join(__dirname, '..');
 // Operational surface (additive — agents and operators use these to participate
 // in the spine without needing the bridge running):
 //   session, lane
-const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'self-test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin', 'orient', 'handoff', 'learn', 'blueprint', 'debt', 'architecture', 'agents', 'focus', 'hooks', 'fleet', 'ci'];
+const COMMANDS = ['init', 'upgrade', 'doctor', 'start', 'stop', 'status', 'slice-stop', 'session', 'lane', 'approval', 'events', 'memory', 'mailbox', 'task', 'skill', 'worker', 'search', 'runtime', 'mcp', 'schedule', 'checkpoint', 'auth', 'import', 'workspace', 'global', 'spine', 'goal', 'phase', 'brief', 'sources', 'slice', 'review', 'register', 'help', 'suggest', 'team', 'pipeline', 'advise', 'cost', 'usage', 'git', 'test', 'self-test', 'format', 'lint', 'install', 'governance', 'log', 'plan', 'loop', 'coordinator', 'trust', 'bridges', 'audit', 'insights', 'plugin', 'orient', 'handoff', 'learn', 'blueprint', 'debt', 'architecture', 'agents', 'focus', 'hooks', 'fleet', 'ci', 'autonomy'];
 
 async function printVersion() {
   const v = JSON.parse(await readFile(join(repoRoot, 'version.json'), 'utf8'));
@@ -92,6 +92,7 @@ Commands:
   hooks          Wire Claude Code session hooks: auto-register + auto-close + pre-compaction checkpoint. install | status | remove. (v1.74.0; PreCompact v1.89.0)
   fleet          Read-only single-machine fleet view: per-repo version/currency/liveness + version delta vs fleet latest. [--json] (v1.76.0)
   ci             Headless LLM-free gate rail for CI: run | pin. Exit 1 only on pinned required gates (churn-proof). [--json --strict] (v1.87.0)
+  autonomy       Earned autonomy: per-lane Wilson trust score over the verified record → recommend-only tier guidance. [--lane <id>] [--json] [--no-emit] (v1.92.0)
 
 Flags:
   --version      Print framework version.

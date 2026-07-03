@@ -1,37 +1,37 @@
 [
   {
-    "symptom": "Token/cost usage is captured (maddu usage import / maddu cost) but nothing flags a runaway session \u2014 spend stays invisible until someone looks (F5 symptom).",
+    "symptom": "Token/cost usage is captured (maddu usage import / maddu cost) but nothing flags a runaway session — spend stays invisible until someone looks (F5 symptom).",
     "area": "runtime/lib/cost-budget + gates/cost-budget",
     "fixed_in": "1.86.0",
     "consumer_impact": "Opt-in `cost-budget` gate: with .maddu/config/cost-budget.json {windowDays,maxTokens,metric} it sums recent tokenLedger spend and WARNs (never FAILs) when over, surfacing a runaway session in doctor/audit. Rule-5 clean (sums existing numbers, no provider call). Fleet-wide cost stays deferred (F5 accepted).",
     "ledger_ref": "roadmap-14"
   },
   {
-    "symptom": "maddu learn distils corrections per-repo but they stay siloed \u2014 a lesson learned the hard way in one repo (e.g. a shell/path quirk) never reaches the next, so the fleet re-learns the same things independently.",
+    "symptom": "maddu learn distils corrections per-repo but they stay siloed — a lesson learned the hard way in one repo (e.g. a shell/path quirk) never reaches the next, so the fleet re-learns the same things independently.",
     "area": "commands/learn + runtime/lib/lesson-federation",
     "fixed_in": "1.85.0",
     "consumer_impact": "`maddu learn sync` reads sibling repos' corrections (fleet registry, local disk) and surfaces portable ones (recur in >=2 repos OR @portable), deduped + redacted; `--adopt` writes them into CLAUDE.md (approval-only) as first-class local corrections with federated provenance.",
     "ledger_ref": "roadmap-8"
   },
   {
-    "symptom": "fleet upgrade delivers new framework code into installs as old as v1.15, but new code reading a projection shaped by old code could crash on a key the old shape never had \u2014 a silent, field-by-field surprise discovered one install at a time.",
+    "symptom": "fleet upgrade delivers new framework code into installs as old as v1.15, but new code reading a projection shaped by old code could crash on a key the old shape never had — a silent, field-by-field surprise discovered one install at a time.",
     "area": "runtime/lib/projections + gates/can-read-old-state",
     "fixed_in": "1.84.0",
     "consumer_impact": "project() stamps schemaVersion; normalizeProjection(raw) reads any old/partial/garbage projection into a total current-shape object (all keys present, nested deep-defaulted, never a throw); the can-read-old-state gate enforces the reader stays total.",
     "ledger_ref": "roadmap-13"
   },
   {
-    "symptom": "maddu fleet upgrade --plan previewed a delivery but the operator still had to deliver by hand \u2014 the F1 'fixed in-tree, never received' gap was only half-closed. No safe, interlocked staged delivery across the fleet.",
+    "symptom": "maddu fleet upgrade --plan previewed a delivery but the operator still had to deliver by hand — the F1 'fixed in-tree, never received' gap was only half-closed. No safe, interlocked staged delivery across the fleet.",
     "area": "commands/fleet + commands/_tiers + runtime/lib/fleet-upgrade",
     "fixed_in": "1.83.0",
-    "consumer_impact": "`maddu fleet upgrade --apply` (scoped --only/--all): delivers canonical bytes to eligible behind repos by reusing the proven `maddu upgrade` engine. Per repo, sequential: re-check quiescence, snapshot managed bytes (never .maddu/events), upgrade, doctor \u2014 halt-on-red. `fleet` reclassified mutating/auto-forbidden.",
+    "consumer_impact": "`maddu fleet upgrade --apply` (scoped --only/--all): delivers canonical bytes to eligible behind repos by reusing the proven `maddu upgrade` engine. Per repo, sequential: re-check quiescence, snapshot managed bytes (never .maddu/events), upgrade, doctor — halt-on-red. `fleet` reclassified mutating/auto-forbidden.",
     "ledger_ref": "F1"
   },
   {
-    "symptom": "maddu fleet detects who is behind but delivery was manual \u2014 the operator had to walk into each repo and run `maddu upgrade` by hand (the 'fixed in-tree, never received' gap, F1 delivery leg). No safe preview of what a fleet-wide upgrade would change or which repos are safe to touch.",
+    "symptom": "maddu fleet detects who is behind but delivery was manual — the operator had to walk into each repo and run `maddu upgrade` by hand (the 'fixed in-tree, never received' gap, F1 delivery leg). No safe preview of what a fleet-wide upgrade would change or which repos are safe to touch.",
     "area": "commands/fleet + runtime/lib/fleet-upgrade",
     "fixed_in": "1.82.0",
-    "consumer_impact": "`maddu fleet upgrade --plan`: read-only offline preview per behind active repo \u2014 quiescence interlock (active lane claim / dirty tree / recent spine activity each block) + managed-byte delta (canonical vs recorded maddu.json hashes). The live spine is never in a delta. Mutation guarded as a follow-up.",
+    "consumer_impact": "`maddu fleet upgrade --plan`: read-only offline preview per behind active repo — quiescence interlock (active lane claim / dirty tree / recent spine activity each block) + managed-byte delta (canonical vs recorded maddu.json hashes). The live spine is never in a delta. Mutation guarded as a follow-up.",
     "ledger_ref": "F1"
   },
   {
@@ -42,21 +42,21 @@
     "ledger_ref": "F2"
   },
   {
-    "symptom": "Orchestration (coordinator/loop/pipeline/team) fires in only 2-5 of 13 installs, so a naive audit reads 'orchestration events ~= 0' as a dead domain and re-raises it as a false-alarm finding every audit (F4) \u2014 when in truth it's an opt-in advanced layer and the disciplined substrate is the real product.",
+    "symptom": "Orchestration (coordinator/loop/pipeline/team) fires in only 2-5 of 13 installs, so a naive audit reads 'orchestration events ~= 0' as a dead domain and re-raises it as a false-alarm finding every audit (F4) — when in truth it's an opt-in advanced layer and the disciplined substrate is the real product.",
     "area": "commands/_tiers + commands/audit + runtime/lib/capability-positioning + gates/command-tier-discipline",
     "fixed_in": "1.80.0",
     "consumer_impact": "Every verb is tagged layer:core|orchestration in _tiers.mjs; `maddu audit positioning` frames orchestration as an opt-in fire-rate (never dead); command-tier-discipline requires a valid layer so a new verb can't be added unclassified. Charter + README reposition around the discipline loop.",
     "ledger_ref": "F4"
   },
   {
-    "symptom": "maddu orient showed goal progress + a timeline but never the last gate verdict, so an operator couldn't see red/green at a glance; a failing gate surfaced as a raw stack trace, not which-gate/where/how-to-repro \u2014 friction that pushes operators to skip slices and gates.",
+    "symptom": "maddu orient showed goal progress + a timeline but never the last gate verdict, so an operator couldn't see red/green at a glance; a failing gate surfaced as a raw stack trace, not which-gate/where/how-to-repro — friction that pushes operators to skip slices and gates.",
     "area": "commands/orient + runtime/lib/gate-ledger + runtime/lib/gates + projections",
     "fixed_in": "1.79.0",
-    "consumer_impact": "orient opens with a one-glance card (gate verdict \u00b7 goal \u00b7 next) and a legible GATES section (gate id + severity + spine event id + `maddu doctor --gate <id>` repro, no stack trace). GATE_RAN events persist the resolved status + event id so verdicts are exact.",
+    "consumer_impact": "orient opens with a one-glance card (gate verdict · goal · next) and a legible GATES section (gate id + severity + spine event id + `maddu doctor --gate <id>` repro, no stack trace). GATE_RAN events persist the resolved status + event id so verdicts are exact.",
     "ledger_ref": "roadmap-9"
   },
   {
-    "symptom": "The audit program's own fixes for F3/F4 were more machinery (gates, registries, verbs); unbudgeted, the enforcement surface could grow faster than dead surface retires \u2014 the cure becoming the next F3/F4.",
+    "symptom": "The audit program's own fixes for F3/F4 were more machinery (gates, registries, verbs); unbudgeted, the enforcement surface could grow faster than dead surface retires — the cure becoming the next F3/F4.",
     "area": "commands/audit + runtime/lib/governance-budget",
     "fixed_in": "1.78.0",
     "consumer_impact": "`maddu audit` (and `maddu audit budget`) now caps each governance category (gates, verbs, audit checks) from ground-truth counts vs docs/audit/governance-budget.json; over a cap FAILs unless a waiver row carries it, plus a relative self-test latency WARN.",
@@ -105,7 +105,7 @@
     "ledger_ref": "F11"
   },
   {
-    "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs \u2014 a script that ships only in a source checkout.",
+    "symptom": "`maddu doctor` reported a hard FAIL on a clean consumer install, telling the operator to run scripts/generate.mjs — a script that ships only in a source checkout.",
     "area": "gates/generated-artifacts-current",
     "fixed_in": "1.73.1",
     "consumer_impact": "Gate skips on the positive source-checkout marker instead of inferring consumer-vs-source from per-target absence.",
@@ -136,13 +136,13 @@
     "symptom": "No CI-safe way to enforce the gates: any-red-fails would let framework gate-set churn break consumer pipelines on upgrade, so gates stayed advisory outside the terminal.",
     "area": "commands/ci (new verb) + docs/46-ci.md",
     "fixed_in": "1.87.0",
-    "consumer_impact": "maddu ci \u2014 headless LLM-free gate rail: exit nonzero only on gates the repo pinned as required (maddu ci pin; maddu.json ci.requiredGates or .maddu/config/ci.json), --strict opt-in for any-fail-is-red, GitHub Actions annotations + job summary, learn-scan advisory line. Also carries the v1.86.0\u2192v1.87.0 docs/positioning changes (category doc 45, README governance-first reframe)."
+    "consumer_impact": "maddu ci — headless LLM-free gate rail: exit nonzero only on gates the repo pinned as required (maddu ci pin; maddu.json ci.requiredGates or .maddu/config/ci.json), --strict opt-in for any-fail-is-red, GitHub Actions annotations + job summary, learn-scan advisory line. Also carries the v1.86.0→v1.87.0 docs/positioning changes (category doc 45, README governance-first reframe)."
   },
   {
     "symptom": "Hedged completion claims without observed proof had detection (learn scan) but no enforcement placement; gate budget stood at 69/70 with a standing next-gate-needs-retirement note.",
     "area": "gates/completion-claim (new) + gates/heavy-suites-recent (2->1 merge retirement) + commands/slice-stop",
     "fixed_in": "1.88.0",
-    "consumer_impact": "completion-claim warn gate at every slice-stop (surfaces, never blocks; >=3 cumulative + >=1 recent 30d; proof = observed GATE_RAN(ok)/verified deliverable, never self-reported flags; warn tier holds >=1 quarter before any fail promotion). Named governance-budget retirement: stress-harness-recent + upgrade-matrix-recent merged into heavy-suites-recent (same two state files, same severity) \u2014 gates stay 69/70, freed slot sole claimant declared."
+    "consumer_impact": "completion-claim warn gate at every slice-stop (surfaces, never blocks; >=3 cumulative + >=1 recent 30d; proof = observed GATE_RAN(ok)/verified deliverable, never self-reported flags; warn tier holds >=1 quarter before any fail promotion). Named governance-budget retirement: stress-harness-recent + upgrade-matrix-recent merged into heavy-suites-recent (same two state files, same severity) — gates stay 69/70, freed slot sole claimant declared."
   },
   {
     "symptom": "Context compaction was an invisible boundary: anything an agent knew but never recorded was silently gone from model memory, and nothing in the durable record marked when/what was lost.",
@@ -151,13 +151,13 @@
     "consumer_impact": "maddu hooks install now also wires a PreCompact hook that writes a COMPACTION_CHECKPOINT (trigger, last recorded slice-stop, handoff currency) before every manual/auto compaction; orient auto-announces the latest checkpoint with no flag; doctor WARNs on partial/stale hook stanzas. Fails OPEN by design: the handler always exits 0, so compaction is never blocked. Precondition met before build: PreCompact cited in official code.claude.com hooks docs + one empirical fire test capturing the live payload."
   },
   {
-    "symptom": "In the framework SOURCE repo, hooks install wrote the consumer entrypoint (node maddu/bin/maddu.mjs), which does not exist there \u2014 every installed hook (SessionStart/SessionEnd/PreCompact) errored silently on fire. Surfaced by dogfooding v1.89.0 minutes after release.",
+    "symptom": "In the framework SOURCE repo, hooks install wrote the consumer entrypoint (node maddu/bin/maddu.mjs), which does not exist there — every installed hook (SessionStart/SessionEnd/PreCompact) errored silently on fire. Surfaced by dogfooding v1.89.0 minutes after release.",
     "area": "claude-hooks (resolveHookBin) + hooks install + doctor session-hooks currency",
     "fixed_in": "1.89.1",
     "consumer_impact": "None for consumers (maddu/bin exists there; consumer default unchanged). Source-repo installs now resolve to node bin/maddu.mjs at install time; doctor staleness comparison uses the same resolution."
   },
   {
-    "symptom": "Claude Code auto-memory (default-on) accumulates real project knowledge outside the repo-owned record \u2014 invisible to the spine, other agents, and rebuilds.",
+    "symptom": "Claude Code auto-memory (default-on) accumulates real project knowledge outside the repo-owned record — invisible to the spine, other agents, and rebuilds.",
     "area": "learn sync --from-claude-memory (new) + vendor-memory lib + hindsight vendor kind + VENDOR_MEMORY_IMPORTED replay",
     "fixed_in": "1.90.0",
     "consumer_impact": "Import-only vendor-memory interop: preview by default, --adopt writes kind:vendor facts with provenance; content-hash-deduped (idempotent, edits import as new facts); vendor directory never modified; imports survive memory rebuild via events."
@@ -166,12 +166,18 @@
     "symptom": "Governance mode was workspace-global: a release/stabilize window could not tighten discipline without an operator manually flipping the mode and remembering to flip it back.",
     "area": "phase (--tier, clear, PHASE_CLEARED) + governance readEffectiveGovernance + consumers (loops, coordinator, strict-approval, trust, governance show)",
     "fixed_in": "1.91.0",
-    "consumer_impact": "Sterile phases: phase set --tier <mode> escalates the effective governance mode while the phase is active (escalation-only, never weakens; explicit overrides keep winning); phase clear lifts it. Base governance.json untouched \u2014 the overlay is computed per read."
+    "consumer_impact": "Sterile phases: phase set --tier <mode> escalates the effective governance mode while the phase is active (escalation-only, never weakens; explicit overrides keep winning); phase clear lifts it. Base governance.json untouched — the overlay is computed per read."
   },
   {
     "symptom": "The v1.87-v1.91 governance domains existed only in the CLI: the cockpit rendered COMPACTION_CHECKPOINT/VENDOR_MEMORY_IMPORTED/PHASE_* events unclassified with empty summaries, the memory kind filter offered neither correction nor vendor, and the brief card hid an active phase tier.",
     "area": "cockpit (event-rows classify+summarize, learning kind filter, orientation brief phase-tier line) + snapshot harness /bridge/orientation fixture",
     "fixed_in": "1.91.1",
     "consumer_impact": "Cockpit surfaces the new domains: compaction checkpoints and phase events classified into the framework color family with human summaries (trigger + slice-stop anchor), vendor imports in the knowledge family, memory filterable by correction/vendor kinds, and the brief card shows the active sterile-phase tier."
+  },
+  {
+    "symptom": "Governance-tier decisions had no evidence surface: nothing computed whether a lane's verified record (clean slice-stops, green gates, no hedged claims) supported relaxing or demanded reverting a tier — trust was operator intuition, and GATE_RAN events carried no session/lane attribution for any future scorer to bind on.",
+    "area": "earned autonomy: lib/autonomy.mjs scorer + commands/autonomy.mjs verb + AUTONOMY_SCORED/AUTONOMY_RECOMMENDATION spine events + GATE_RAN attribution enrichment (gates.mjs/slice-stop.mjs) + orient/governance-show surfacing",
+    "fixed_in": "1.92.0",
+    "consumer_impact": "maddu autonomy grades each lane's earned trust deterministically (Wilson lower bound over witnessed-clean vs dirty outcomes, 3-rung ladder, daily clean-credit cap) and recommends — never applies — tier changes; recommendations are muted while any phase is active; slice-stop-run gates are now session-stamped so exact attribution accumulates from this release."
   }
 ]
