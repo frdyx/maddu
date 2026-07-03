@@ -330,10 +330,11 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
           } else {
             const expected = ch.MADDU_HOOKS.map((h) => h.event);
             const missing = expected.filter((e) => !installed.includes(e));
+            const bin = ch.resolveHookBin ? await ch.resolveHookBin(repoRoot) : undefined;
             const stale = installed.filter((event) => {
               const fire = ch.MADDU_HOOKS.find((h) => h.event === event)?.fire;
               const groups = settings.hooks?.[event] || [];
-              return !groups.some((g) => Array.isArray(g.hooks) && g.hooks.some((h) => h.command === ch.hookCommandFor(fire)));
+              return !groups.some((g) => Array.isArray(g.hooks) && g.hooks.some((h) => h.command === ch.hookCommandFor(fire, bin)));
             });
             if (missing.length || stale.length) {
               const parts = [];
