@@ -179,5 +179,11 @@
     "area": "earned autonomy: lib/autonomy.mjs scorer + commands/autonomy.mjs verb + AUTONOMY_SCORED/AUTONOMY_RECOMMENDATION spine events + GATE_RAN attribution enrichment (gates.mjs/slice-stop.mjs) + orient/governance-show surfacing",
     "fixed_in": "1.92.0",
     "consumer_impact": "maddu autonomy grades each lane's earned trust deterministically (Wilson lower bound over witnessed-clean vs dirty outcomes, 3-rung ladder, daily clean-credit cap) and recommends — never applies — tier changes; recommendations are muted while any phase is active; slice-stop-run gates are now session-stamped so exact attribution accumulates from this release."
+  },
+  {
+    "symptom": "Earned autonomy (v1.92.0) existed only in the CLI: the cockpit rendered AUTONOMY_SCORED/AUTONOMY_RECOMMENDATION unclassified with empty summaries and the orientation brief card had no trust-ladder surface.",
+    "area": "cockpit (event-rows classify+summarize, orientation brief Autonomy row) + autonomy projection slot + buildOrientation + snapshot-harness orientation fixture",
+    "fixed_in": "1.92.1",
+    "consumer_impact": "Cockpit surfaces earned autonomy: both event types classified into the trust family with human summaries (scored digest, rung-change arrows, muted marker), and the orientation brief card shows the latest live recommendation as its own row."
   }
 ]

@@ -55,6 +55,8 @@ export function buildOrientation(projection) {
     lastEventId: projection?.lastEventId || null,
     goal: projection?.goal || null,
     phase: projection?.phase || null,
+    // Earned autonomy (v1.92.0) — latest recommendation, for the brief card.
+    autonomy: projection?.autonomy || null,
     activeSession: activeSessions[0] || null,
     activeClaims: claims,
     lastSliceStop,
