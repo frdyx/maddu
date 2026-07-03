@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **in line** — one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay — instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.87.0](https://img.shields.io/badge/version-1.87.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.91.0](https://img.shields.io/badge/version-1.91.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -98,7 +98,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.86.0 installed.
+Máddu v1.91.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -141,7 +141,10 @@ The spine is the foundation. This is what you actually get standing on top of it
 | 🎛️ **Zero learning curve** | Slash commands or plain English — the agent classifies your intent, runs the right thing, and tells you which. No flags to memorize. | `/maddu-help` |
 | 🧭 **Architecture-drift detection** | Declare your module boundaries; Máddu diffs the contract against the *real* import graph and fails CI on new forbidden edges or cycles — with a diagram + ratchet. | `/maddu-architecture` |
 | 📦 **Blueprint a whole build** | Distil *how a project was built* into one portable, variable-driven handoff — intake → procedure → problems & fixes — optionally polished to prose. | `/maddu-blueprint` |
-| 🧠 **Agents that learn from mistakes** | Mines past transcripts for failed→succeeded tool calls and writes typed corrections into the project's `CLAUDE.md` + memory, so the next agent stops repeating them — and `learn sync` federates the portable ones across your repos, so a fix learned once propagates (approval-only). | `/maddu-learn` |
+| 🧠 **Agents that learn from mistakes** | Mines past transcripts for failed→succeeded tool calls and writes typed corrections into the project's `CLAUDE.md` + memory, so the next agent stops repeating them — `learn sync` federates the portable ones across your repos, and `learn sync --from-claude-memory` imports Claude Code's own auto-memory as provenance-carrying facts (import-only, deduped). | `/maddu-learn` |
+| 🧷 **Session discipline by default** | One `maddu hooks install` wires Claude Code hooks so every session auto-registers to the spine, auto-closes, and writes a **governance checkpoint before every context compaction** — the durable record marks exactly what survived, and `orient` announces it on resume. | `maddu hooks install` |
+| 🧾 **Completion claims, verified** | A deterministic check (no LLM) joins hedged "done" claims ("should work now") against *observed* proof — real gate passes, verified deliverables — and a warn-tier gate surfaces any live pattern at every slice-stop. A model checking a model is a second opinion; this is evidence. | `maddu learn scan` |
+| 🧊 **Sterile release phases** | Declare a phase with a governance tier and discipline escalates for exactly that window — stricter approvals, tighter loops — then lifts on `phase clear`. Escalation-only: a phase can never silently weaken your baseline. | `maddu phase set --tier strict` |
 | ✅ **A real testing harness** | Runs your project's tests with adaptive profiles; `self-test` runs the framework's own suite, backed by a dogfooded multi-layer gate. | `/maddu-test` |
 | 🗂️ **One bridge, every repo** | Mount N repos on one bridge; `/_all/*` fans out reads across all of them, each row tagged by workspace. Each repo's spine stays its own truth. | `/maddu-status` |
 | 🛰️ **Fleet view + staged upgrade** | See every Máddu install on your machine at a glance — version, liveness, how far behind — computed offline without running any of them. Then `fleet upgrade --plan` previews exactly what a delivery would change and which repos are safe to touch, and `--apply` delivers it: snapshot → upgrade → per-repo doctor, **halt-on-red**. | `maddu fleet` |
