@@ -879,9 +879,15 @@ and `slice-stop` with no `--session`/`$MADDU_SESSION_ID`.
 
 ```bash
 $ maddu hooks install        # merge SessionStart(auto-register) + SessionEnd(close)
+                             #   + PreCompact(compaction checkpoint, v1.89.0)
 $ maddu hooks status         # which Máddu hooks are installed
 $ maddu hooks remove         # strip only Máddu's hook entries (keeps yours)
 ```
+
+The `PreCompact` hook writes a `COMPACTION_CHECKPOINT` to the spine before
+every context compaction (manual or auto) — `maddu orient` auto-announces the
+latest one, and `maddu doctor` warns when the installed stanza is partial or
+stale. It **fails open** (never blocks compaction).
 
 `install` is idempotent and surgical — it writes the **host** file
 `.claude/settings.json` (outside `.maddu/`), preserves your own hooks/settings,

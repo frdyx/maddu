@@ -108,6 +108,7 @@ export const EVENT_DISPOSITIONS = {
   SESSION_AUTO_CLOSED: { disp: 'active' },
   SESSION_AUTO_REGISTERED: { disp: 'active' },
   SESSION_STALE_DETECTED: { disp: 'active' },
+  COMPACTION_CHECKPOINT: { disp: 'dormant', reason: "fires only when the PreCompact hook is installed and a Claude Code compaction occurs" },
   SLASH_COMMANDS_SYNCED: { disp: 'active' },
   TEAM_OPENED: { disp: 'active' },
   TEAM_LANE_ALLOCATED: { disp: 'active' },

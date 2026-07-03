@@ -10,6 +10,8 @@
 //   maddu hooks fire <ev>   # runtime entrypoint the settings.json calls:
 //                           #   session-start → register + remind to slice-stop
 //                           #   session-end   → close the active session
+//                           #   pre-compact   → COMPACTION_CHECKPOINT on the spine
+//                           #                   (fails OPEN: never blocks compaction)
 //
 // install/remove touch a HOST-repo file (.claude/settings.json) outside
 // .maddu/, so they run only on explicit invocation — never silently at init.
@@ -24,7 +26,8 @@ function printHelp() {
   console.log([
     'Usage: maddu hooks <install|status|remove> [--dry-run]',
     '',
-    '  install     Wire SessionStart (auto-register) + SessionEnd (close) into',
+    '  install     Wire SessionStart (auto-register) + SessionEnd (close) +',
+    '              PreCompact (compaction checkpoint) into',
     '              <repo>/.claude/settings.json so every Claude Code session in',
     '              this repo records to the spine. Idempotent; preserves your',
     '              own hooks.',
@@ -79,7 +82,41 @@ export default async function hooks(argv) {
       await quietly(() => sessionCmd(['close', '--focus', 'session ended (auto)']));
       return;
     }
-    console.error(`maddu hooks fire: unknown event "${event}". One of: session-start, session-end.`);
+    if (event === 'pre-compact') {
+      // FAILS OPEN by design: whatever goes wrong, exit 0 so compaction is
+      // never blocked (exit 2 would block it) and the session never breaks.
+      try {
+        // Claude Code pipes the hook payload on stdin ({trigger, session_id,
+        // transcript_path, …}); a human running this from a terminal has a TTY
+        // there, so skip reading to avoid blocking on interactive stdin.
+        let payload = {};
+        if (!process.stdin.isTTY) {
+          let raw = '';
+          try {
+            for await (const chunk of process.stdin) raw += chunk;
+            if (raw.trim()) payload = JSON.parse(raw);
+          } catch { payload = {}; }
+        }
+        const { spine, projections } = await loadSpineLib();
+        const proj = await projections.project(repoRoot);
+        const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
+        const last = stops.length ? stops[stops.length - 1] : null;
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.COMPACTION_CHECKPOINT,
+          actor: process.env.MADDU_SESSION_ID || null,
+          data: {
+            trigger: payload.trigger || null,             // 'manual' | 'auto'
+            claudeSessionId: payload.session_id || null,
+            lastSliceStop: last ? { id: last.id, ts: last.ts, summary: String(last.summary || '').slice(0, 200) } : null,
+            handoffSetAt: proj.handoff?.setAt || null,
+            openApprovals: Array.isArray(proj.approvals) ? proj.approvals.filter((a) => a.status === 'requested' || a.status === 'pending').length : 0,
+            activeClaims: Array.isArray(proj.claims) ? proj.claims.length : 0,
+          },
+        });
+      } catch {}
+      process.exit(0);
+    }
+    console.error(`maddu hooks fire: unknown event "${event}". One of: session-start, session-end, pre-compact.`);
     process.exit(2);
   }
 
@@ -129,7 +166,8 @@ export default async function hooks(argv) {
     } else {
       const { installed } = lib.summarize(next);
       console.log(`\x1b[32minstalled\x1b[0m Máddu hooks (${installed.join(', ')}) → ${lib.settingsPath(repoRoot)}`);
-      console.log(`  Every Claude Code session in this repo now auto-registers + records to the spine.`);
+      console.log(`  Every Claude Code session in this repo now auto-registers, records to the spine,`);
+      console.log(`  and writes a governance checkpoint before every context compaction.`);
       console.log(`  Remove with \x1b[1mmaddu hooks remove\x1b[0m.`);
     }
     return;

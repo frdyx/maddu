@@ -113,6 +113,10 @@ export const EVENT_TYPES = {
   SESSION_AUTO_CLOSED:       'SESSION_AUTO_CLOSED',
   SESSION_AUTO_REGISTERED:   'SESSION_AUTO_REGISTERED',
   SESSION_STALE_DETECTED:    'SESSION_STALE_DETECTED',
+  // Pre-compaction governance checkpoint (v1.89.0) — written by the PreCompact
+  // hook just before Claude Code compacts its context, recording what the
+  // durable record held at that moment (last slice-stop, handoff currency).
+  COMPACTION_CHECKPOINT:     'COMPACTION_CHECKPOINT',
   // No-learning-curve UX shell (v0.18; emitted in Phases 1–5)
   SLASH_COMMANDS_SYNCED:     'SLASH_COMMANDS_SYNCED',
   // Architectural backbone (v0.18 Phase 4) — teams, pipelines, advisors, token ledger.

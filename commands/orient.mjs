@@ -79,6 +79,7 @@ const TIMELINE_TYPES = {
   COORDINATOR_COMPLETED:(d) => `coordinator ${d.coordinatorId || ''} (${d.phaseCount ?? '?'} phases)`,
   SLICE_REVIEWED:       (d) => `review ${d.sliceEventId || ''} → ${d.verdict || '?'}`,
   CHECKPOINT_CREATED:   (d) => `checkpoint ${d.label || d.id || ''}`,
+  COMPACTION_CHECKPOINT:(d) => `context compacted (${d.trigger || '?'})`,
   TEAM_CLOSED:          (d) => `team ${d.teamId || ''} closed`,
   FRAMEWORK_UPGRADED:   (d) => `upgraded → v${d.version || '?'}`,
   SLICE_STOP:           (d) => cleanSummary(d.summary),
@@ -132,6 +133,17 @@ export default async function orient(argv) {
   const handoffFlagsDecision = !!(handoff?.body && /decision pending|operator decision|RESUME HERE|pending:/i.test(handoff.body));
   const decisionPending = allMet || handoffFlagsDecision;
 
+  // Latest pre-compaction checkpoint (roadmap #4) — auto-announced, no flag.
+  // The load-bearing signal after a compaction: what the durable record held
+  // at that moment, so a resumed session knows anything after it that wasn't
+  // recorded is gone from model memory.
+  const lastCompaction = (() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'COMPACTION_CHECKPOINT') return events[i];
+    }
+    return null;
+  })();
+
   // Framework currency (staleness FLOOR, roadmap #6) — offline age nudge.
   let currency = null;
   const currencyLib = await loadLibOptional('framework-currency.mjs');
@@ -157,6 +169,12 @@ export default async function orient(argv) {
       recentSliceStops: trail, openApprovals: approvals.length, activeClaims: claims.length,
       decisionPending,
       currency: currency ? { level: currency.level, ageDays: currency.ageDays, message: currency.message } : null,
+      lastCompaction: lastCompaction ? {
+        ts: lastCompaction.ts,
+        trigger: lastCompaction.data?.trigger || null,
+        lastSliceStop: lastCompaction.data?.lastSliceStop || null,
+        handoffSetAt: lastCompaction.data?.handoffSetAt || null,
+      } : null,
       gates: gates ? {
         ran: gates.ran, green: gates.green, ok: gates.ok, warn: gates.warn, fail: gates.fail,
         lastTs: gates.lastTs,
@@ -171,6 +189,13 @@ export default async function orient(argv) {
   if (currency && currency.level !== 'PASS') {
     const tone = currency.level === 'WARN' ? C.unver : C.pending;
     console.log(`  ${tone}⟳ framework ${currency.message}${C.reset}`);
+  }
+  if (lastCompaction) {
+    const d = lastCompaction.data || {};
+    const anchor = d.lastSliceStop
+      ? `last recorded slice-stop: "${cleanSummary(d.lastSliceStop.summary).slice(0, 60)}"`
+      : 'no slice-stop was recorded before it';
+    console.log(`  ${C.dim}⧉ context compacted ${lastCompaction.ts} (${d.trigger || '?'}) — ${anchor}${C.reset}`);
   }
 
   // One-glance card (roadmap #9): gate verdict · goal progress · next action,

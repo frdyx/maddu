@@ -310,6 +310,47 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
     checks.push({ level: 'PASS', label: `${tagLabel}cli shim`, detail: `${which} present` });
   }
 
+  // ── Session-hooks stanza currency (roadmap #4) ──
+  // Not installed is fine (hooks are opt-in). But a PARTIAL or stale install —
+  // e.g. SessionStart/SessionEnd wired by a pre-v1.89 install, missing the
+  // PreCompact checkpoint, or a hook whose command text no longer matches the
+  // current entrypoint — silently drops discipline the operator thinks is on.
+  {
+    const p = await resolveRuntimeLib('claude-hooks.mjs');
+    if (p) {
+      try {
+        const ch = await import(pathToFileURL(p).href);
+        const { settings } = await ch.loadSettings(repoRoot);
+        if (settings === null) {
+          checks.push({ level: 'WARN', label: `${tagLabel}session hooks`, detail: '.claude/settings.json is not valid JSON — hooks state unknown' });
+        } else {
+          const { installed } = ch.summarize(settings);
+          if (installed.length === 0) {
+            checks.push({ level: 'PASS', label: `${tagLabel}session hooks`, detail: 'not installed (opt-in — wire with `maddu hooks install`)' });
+          } else {
+            const expected = ch.MADDU_HOOKS.map((h) => h.event);
+            const missing = expected.filter((e) => !installed.includes(e));
+            const stale = installed.filter((event) => {
+              const fire = ch.MADDU_HOOKS.find((h) => h.event === event)?.fire;
+              const groups = settings.hooks?.[event] || [];
+              return !groups.some((g) => Array.isArray(g.hooks) && g.hooks.some((h) => h.command === ch.hookCommandFor(fire)));
+            });
+            if (missing.length || stale.length) {
+              const parts = [];
+              if (missing.length) parts.push(`missing: ${missing.join(', ')}`);
+              if (stale.length) parts.push(`stale command: ${stale.join(', ')}`);
+              checks.push({ level: 'WARN', label: `${tagLabel}session hooks`, detail: `${parts.join('; ')} — re-run \`maddu hooks install\` to refresh` });
+            } else {
+              checks.push({ level: 'PASS', label: `${tagLabel}session hooks`, detail: `current (${installed.join(', ')})` });
+            }
+          }
+        }
+      } catch {
+        checks.push({ level: 'WARN', label: `${tagLabel}session hooks`, detail: 'claude-hooks.mjs failed to load — hooks state unknown' });
+      }
+    }
+  }
+
   return checks;
 }
 
