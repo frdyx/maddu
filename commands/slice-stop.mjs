@@ -129,6 +129,24 @@ export default async function sliceStop(argv) {
     }
   }
 
+  // completion-claim (v1.88.0, roadmap #3): the hedged-claim-without-proof
+  // check fires at EVERY slice-stop — unlike slice-scope it needs no declared
+  // slice id. Warn-tier: it SURFACES, never blocks the stop (the failOn-ladder
+  // discipline: at least a quarter of own-repo data before any promotion to
+  // fail). A check error never breaks the stop ritual.
+  try {
+    const ccGates = await loadLibOptional('gates.mjs');
+    if (ccGates?.runGates) {
+      const cc = await ccGates.runGates(repoRoot, {
+        onlyId: 'completion-claim',
+        emitEvents: true,
+        ctx: { repoRoot, paths, spine, projections, project: () => projections.project(repoRoot) },
+      });
+      const run = cc.runs[0];
+      if (run && !run.ok) console.error(`  completion-claim: ${run.message}`);
+    }
+  } catch {}
+
   // v1.1.0 Phase 5 — optional --triggered-by plan:<id> records lineage on
   // the slice-stop and triggers plan auto-revision.
   let triggered_by = null;

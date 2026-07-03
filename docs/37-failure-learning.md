@@ -117,11 +117,23 @@ maddu learn scan --threshold 3 --recent-days 30
 maddu learn scan --json                # machine-readable
 ```
 
-It **never touches `CLAUDE.md`**, adds no gate, and emits no event — it is the
+It **never touches `CLAUDE.md`** and emits no event — it is the
 shadow-measurement stage. A behavioral note ("verify before claiming done") is
 *framework work-discipline*, not a project fact, so it must never land in the
 `learn` project-facts block; the write/approval path is a deferred v2, earned
 only if this report shows the pattern actually recurs and converts.
+
+### The `completion-claim` gate (v1.88.0)
+
+The same heuristic also runs as a **warn-tier gate** at every slice-stop —
+it surfaces, never blocks the stop. It flags only a **live** pattern
+(≥3 cumulative hedged-without-proof slices with ≥1 in the last 30 days) and
+its evidence carries the offending slice ids. Deterministic by construction:
+*a model checking a model is a second opinion; a deterministic check against
+declared deliverables is evidence.* The warn tier holds for at least a
+quarter of own-repo spine data before any promotion to fail; revisit stronger
+proof tiers only if a quarterly spine-derived file shows
+deterministic-pass-but-false claims.
 
 ## Events
 

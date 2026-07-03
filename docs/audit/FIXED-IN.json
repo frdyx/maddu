@@ -137,5 +137,11 @@
   "area": "commands/ci (new verb) + docs/46-ci.md",
   "fixed_in": "1.87.0",
   "consumer_impact": "maddu ci — headless LLM-free gate rail: exit nonzero only on gates the repo pinned as required (maddu ci pin; maddu.json ci.requiredGates or .maddu/config/ci.json), --strict opt-in for any-fail-is-red, GitHub Actions annotations + job summary, learn-scan advisory line. Also carries the v1.86.0→v1.87.0 docs/positioning changes (category doc 45, README governance-first reframe)."
+ },
+ {
+  "symptom": "Hedged completion claims without observed proof had detection (learn scan) but no enforcement placement; gate budget stood at 69/70 with a standing next-gate-needs-retirement note.",
+  "area": "gates/completion-claim (new) + gates/heavy-suites-recent (2->1 merge retirement) + commands/slice-stop",
+  "fixed_in": "1.88.0",
+  "consumer_impact": "completion-claim warn gate at every slice-stop (surfaces, never blocks; >=3 cumulative + >=1 recent 30d; proof = observed GATE_RAN(ok)/verified deliverable, never self-reported flags; warn tier holds >=1 quarter before any fail promotion). Named governance-budget retirement: stress-harness-recent + upgrade-matrix-recent merged into heavy-suites-recent (same two state files, same severity) — gates stay 69/70, freed slot sole claimant declared."
  }
 ]
