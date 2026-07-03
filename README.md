@@ -180,7 +180,7 @@ Most "architecture" lives in a diagram that's wrong by the next sprint. Máddu m
 - run: npx github:frdyx/maddu ci
 ```
 
-Failed required gates surface as GitHub annotations plus a one-table job summary. Full contract in [docs/46-ci.md](docs/46-ci.md).
+No GitHub? No problem — the same exit code drives a fully-offline git pre-push hook (`exec maddu ci`) or any other CI system. Failed required gates surface as GitHub annotations plus a one-table job summary when Actions is detected. Full contract in [docs/46-ci.md](docs/46-ci.md).
 
 ## Why Máddu
 

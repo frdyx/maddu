@@ -69,7 +69,15 @@ async function handleLine(line) {
   }
 }
 
-const splitter = lineSplitter((line) => { handleLine(line).catch(() => {}); });
+// Track in-flight appends so exit can await them: `close` fires as soon as
+// the child dies, and a bare process.exit() there kills pending spine writes
+// — a race Windows teardown timing masked and Linux CI exposed (count=0).
+const pending = new Set();
+const splitter = lineSplitter((line) => {
+  const p = handleLine(line).catch(() => {});
+  pending.add(p);
+  p.finally(() => pending.delete(p));
+});
 
 child.stdout.on('data', (chunk) => {
   process.stdout.write(chunk);
@@ -83,6 +91,8 @@ child.on('error', (err) => {
   process.exit(2);
 });
 
-child.on('close', (code) => {
+child.on('close', async (code) => {
+  // Let pending spine appends land before the process dies with the child.
+  await Promise.allSettled([...pending]);
   process.exit(code ?? 0);
 });

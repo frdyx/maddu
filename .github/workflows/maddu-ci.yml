@@ -1,0 +1,41 @@
+# Dogfood: the maddu source repo enforced by its own gate rail.
+#
+# This workflow is the SOURCE REPO's own QA — it is never shipped to consumer
+# installs (`maddu init` writes .maddu/, maddu/, and maddu.json; nothing else).
+# Máddu itself needs no GitHub: the same exit code drives a local pre-push
+# hook or any other CI (docs/46-ci.md, "Local enforcement first").
+#
+# Two checks:
+#   gate-rail  — `maddu ci` against the committed pin (.maddu/config/ci.json):
+#                red iff a pinned required gate fails. Annotations + job
+#                summary come from the verb itself (GITHUB_ACTIONS detected).
+#   self-test  — the framework's full quick suite in a bare runner: the
+#                clean-environment evidence the v1.87.0 release owed.
+name: maddu ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gate-rail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: maddu ci (pinned required gates)
+        run: node bin/maddu.mjs ci
+
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: maddu self-test (quick profile)
+        run: node bin/maddu.mjs self-test --profile quick

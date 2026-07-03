@@ -14,6 +14,10 @@ template/.maddu/
 !.maddu/config/
 .maddu/config/*
 !.maddu/config/architecture.json
+# The pinned CI gate profile is likewise a committed team artifact: it must
+# ship so `maddu ci` enforces the SAME required set on a fresh checkout / CI
+# runner as it does locally (the churn-proof contract, docs/46-ci.md).
+!.maddu/config/ci.json
 # Likewise the structural-mass baseline (the monolith ratchet floor) must ship so
 # the architecture-mass gate enforces "monoliths may only shrink" in CI.
 !.maddu/state/
