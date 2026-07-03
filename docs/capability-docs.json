@@ -9,7 +9,7 @@
     "architecture": "40-architecture-drift.md",
     "audit": "39-rule-gate-traceability.md",
     "auth": "12-auth-and-imports.md",
-    "autonomy": null,
+    "autonomy": "47-earned-autonomy.md",
     "blueprint": "38-blueprint.md",
     "bridges": "05-bridge-endpoints.md",
     "brief": "21-agent-onboarding.md",
