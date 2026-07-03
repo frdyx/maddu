@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.91.2] · 2026-07-03 · doctor watches the global binary (incident catch)
+
+- **`maddu doctor` now checks global-binary currency.** `maddu fleet` tracks per-repo install currency, but nothing watched the global npm binary — a stale `npm i -g` maddu on PATH shadows a newer checkout and silently runs old behavior (surfaced today: a stale global demanded `--session` on slice-stop inside a v1.91.1 checkout and doctor stayed green). In the framework source repo doctor compares the running CLI's version against the checkout's `version.json`: older → WARN with the `npm i -g github:frdyx/maddu` remedy; newer → INFO (old branch / unpulled main); equal → PASS.
+- **Consumer framework-version WARN is now direction-aware.** The old message advised `maddu upgrade` in both directions; when the *CLI* is the stale side that does nothing. It now names the stale global and points at `npm i -g` / `./maddu/run` instead. Fixture `doctor-global-currency` 11/0.
+- Inherent limit: a stale global can't warn about itself with code it doesn't have — the check protects every mismatch *after* the global is ≥ v1.91.2.
+
+## [v1.91.1] · 2026-07-03 · cockpit surfacing for the governance-arc domains
+
+- (Backfilled entry — shipped in PR #209 without a changelog line.) Event stream renders `COMPACTION_CHECKPOINT`, vendor-memory facts, and the sterile-phase tier; memory filter gains correction+vendor kinds; brief card shows the sterile-phase line.
+
 ## [v1.91.0] · 2026-07-03 · sterile phases — per-phase strictness (market roadmap #9, first half)
 
 - **`maddu phase set --name <n> --tier strict|standard|relaxed`** — while the phase is active, the *effective* governance mode is the **stricter** of workspace mode and phase tier. Escalation-only: a relaxed phase tier on a strict workspace changes nothing; weakening stays an explicit `governance set`. Explicit `governance.json` overrides keep winning; the base config is never rewritten — `maddu phase clear` (new; emits `PHASE_CLEARED`) is the whole rollback.
