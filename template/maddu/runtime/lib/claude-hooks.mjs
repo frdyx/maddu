@@ -31,6 +31,9 @@ export const MADDU_SENTINEL = 'hooks fire';
 export const MADDU_HOOKS = [
   { event: 'SessionStart', fire: 'session-start' },
   { event: 'SessionEnd', fire: 'session-end' },
+  // No matcher on the group → fires on BOTH manual (/compact) and auto
+  // compaction; the payload's `trigger` field records which (v1.89.0).
+  { event: 'PreCompact', fire: 'pre-compact' },
 ];
 
 export function hookCommandFor(fire) {

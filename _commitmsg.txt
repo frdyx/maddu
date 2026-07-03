@@ -1,0 +1,35 @@
+feat(hooks): pre-compaction governance checkpoint (v1.89.0)
+
+Context compaction is where sessions silently lose state: anything the
+agent knew but never recorded is gone the moment the context is
+summarized, and nothing in the durable record marked the boundary.
+
+Roadmap #4 — precondition met BEFORE building: PreCompact is cited in
+the official code.claude.com hooks docs (matchers manual/auto, non-2
+exit codes proceed), and one empirical fire test captured the live
+stdin payload ({session_id, transcript_path, hook_event_name:
+"PreCompact", trigger: "manual", ...}) — the hook fires even when
+compaction itself bails.
+
+- claude-hooks: `maddu hooks install` now also wires PreCompact (no
+  matcher — fires on manual AND auto). Table-driven merge/strip/status
+  extend for free; install stays idempotent + surgical.
+- hooks fire pre-compact: reads the hook payload from stdin (TTY-
+  guarded), appends COMPACTION_CHECKPOINT to the spine carrying the
+  trigger, the last recorded slice-stop (the durable anchor), handoff
+  currency, open approvals, active claims. FAILS OPEN: exits 0 no
+  matter what — exit 2 would block compaction, and a governance
+  instrument must never break the session it observes.
+- orient: auto-announces the latest checkpoint with no flag (header
+  line + timeline entry + --json lastCompaction).
+- doctor: session-hooks stanza-currency check — partial (pre-v1.89)
+  or stale-command installs WARN with the fix; not-installed stays
+  PASS (hooks are opt-in).
+- spine/event-dispositions: COMPACTION_CHECKPOINT registered dormant-
+  with-reason (fires only when the hook is installed).
+- fixtures: precompact-checkpoint.mjs (13, end-to-end over temp repos
+  incl. fails-open paths) + claude-hooks-merge extended (16).
+
+self-test 102/102 · audit 16/0 · ci green.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>

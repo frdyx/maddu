@@ -56,7 +56,9 @@ async function main() {
   const twice = mergeInstall(mergeInstall({}));
   ok('no duplicate Máddu groups after double install', twice.hooks.SessionStart.length === 1);
 
-  ok('MADDU_HOOKS covers SessionStart + SessionEnd', MADDU_HOOKS.map((h) => h.event).join(',') === 'SessionStart,SessionEnd');
+  ok('MADDU_HOOKS covers SessionStart + SessionEnd + PreCompact', MADDU_HOOKS.map((h) => h.event).join(',') === 'SessionStart,SessionEnd,PreCompact');
+  ok('install wires the PreCompact checkpoint hook', a.hooks.PreCompact?.[0]?.hooks?.[0]?.command === hookCommandFor('pre-compact'));
+  ok('PreCompact group has no matcher (fires on manual AND auto)', !('matcher' in (a.hooks.PreCompact?.[0] || { matcher: 1 })));
 }
 
 try {

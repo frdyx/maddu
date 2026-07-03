@@ -1,5 +1,5 @@
 {
-  "version": "1.88.0",
-  "phase": "completion-claim",
+  "version": "1.89.0",
+  "phase": "precompact-checkpoint",
   "released": "2026-07-03"
 }
