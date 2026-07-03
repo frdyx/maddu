@@ -9,7 +9,7 @@
 // Cooldown read from the governance tier (Phase 3 lib).
 
 import { append, EVENT_TYPES, makeId } from './spine.mjs';
-import { readGovernance, effectiveValue } from './governance.mjs';
+import { readEffectiveGovernance, effectiveValue } from './governance.mjs';
 
 function genLoopId() {
   return makeId('lop', undefined, 2);
@@ -19,7 +19,7 @@ async function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
 export async function runLoop(repoRoot, { kind = 'ralph', goal, verify, iterate, maxIter = null, cooldownMs = null, by = null, lane = null, triggered_by = null }) {
   if (typeof verify !== 'function') throw new Error('runLoop: verify(iter) callback required');
-  const gov = await readGovernance(repoRoot);
+  const gov = await readEffectiveGovernance(repoRoot); // phase-tier aware (v1.91.0)
   const effMax = maxIter != null ? maxIter : effectiveValue(gov, 'loop-max-iter-default');
   const effCooldown = cooldownMs != null ? cooldownMs : effectiveValue(gov, 'loop-cooldown-ms');
 

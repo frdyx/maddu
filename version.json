@@ -1,5 +1,5 @@
 {
-  "version": "1.90.0",
-  "phase": "vendor-memory",
+  "version": "1.91.0",
+  "phase": "phase-strictness",
   "released": "2026-07-03"
 }

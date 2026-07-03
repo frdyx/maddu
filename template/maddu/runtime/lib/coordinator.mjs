@@ -16,7 +16,7 @@
 import { spawn } from 'node:child_process';
 import { append, EVENT_TYPES, makeId, readAll } from './spine.mjs';
 import { readPlan, completePhase } from './plans.mjs';
-import { readGovernance, effectiveValue } from './governance.mjs';
+import { readEffectiveGovernance, effectiveValue } from './governance.mjs';
 import { runSliceReview } from './review.mjs';
 import { spawnWorker } from './runtimes.mjs';
 
@@ -74,7 +74,7 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
     throw new Error(`plan ${planId} is ${plan.status} — refusing to coordinate`);
   }
 
-  const gov = await readGovernance(repoRoot);
+  const gov = await readEffectiveGovernance(repoRoot); // phase-tier aware (v1.91.0)
   const effIterCap = iterCap != null ? iterCap : PHASE_ITER_CAP;
   const cooldownMs = effectiveValue(gov, 'loop-cooldown-ms');
 

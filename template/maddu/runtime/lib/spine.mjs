@@ -100,6 +100,9 @@ export const EVENT_TYPES = {
   PENDING_ACTION_DRAINED:    'PENDING_ACTION_DRAINED',
   PENDING_ACTION_ENQUEUED:   'PENDING_ACTION_ENQUEUED',
   PHASE_DECLARED:            'PHASE_DECLARED',
+  // Per-phase strictness (v1.91.0) — explicit phase exit; while a phase with
+  // a `tier` is active, the effective governance mode escalates to it.
+  PHASE_CLEARED:             'PHASE_CLEARED',
   SLICE_FUNCTIONAL_APPROVED: 'SLICE_FUNCTIONAL_APPROVED',
   SLICE_REVIEWED:            'SLICE_REVIEWED',
   SLICE_SCOPE_DECLARED:      'SLICE_SCOPE_DECLARED',

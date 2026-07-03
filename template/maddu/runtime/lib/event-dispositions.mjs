@@ -98,6 +98,7 @@ export const EVENT_DISPOSITIONS = {
   PENDING_ACTION_DRAINED: { disp: 'dormant', reason: "deferred-action queue; fires only when the queue is drained" },
   PENDING_ACTION_ENQUEUED: { disp: 'dormant', reason: "deferred-action queue; fires only when an action is deferred" },
   PHASE_DECLARED: { disp: 'active' },
+  PHASE_CLEARED: { disp: 'dormant', reason: "fires only when the operator explicitly exits a phase (`maddu phase clear`)" },
   SLICE_FUNCTIONAL_APPROVED: { disp: 'dormant', reason: "optional functional-approval branch of slice review" },
   SLICE_REVIEWED: { disp: 'active' },
   SLICE_SCOPE_DECLARED: { disp: 'active' },

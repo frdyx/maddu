@@ -99,3 +99,52 @@ export function validateOverrideKey(key) {
 export function listOverrideKeys() {
   return Array.from(VALID_OVERRIDE_KEYS);
 }
+
+// ── Per-phase strictness (v1.91.0, market roadmap #9 — sterile phases) ─────
+//
+// A declared phase may carry a governance `tier`. While that phase is active,
+// the EFFECTIVE mode is the STRICTER of workspace mode and phase tier —
+// escalation-only by design: a phase can tighten discipline for a release/
+// stabilize window, but can never silently weaken the workspace baseline
+// (weakening stays an explicit `governance set-mode`). Explicit overrides in
+// governance.json keep winning for their keys (operator intent is precise).
+
+const TIER_ORDER = { relaxed: 0, standard: 1, strict: 2 };
+
+// Pure: the stricter of two modes; invalid/absent phase tiers never escalate.
+export function escalateMode(baseMode, phaseTier) {
+  const base = VALID_MODES.includes(baseMode) ? baseMode : DEFAULT_MODE;
+  if (!VALID_MODES.includes(phaseTier)) return base;
+  return TIER_ORDER[phaseTier] > TIER_ORDER[base] ? phaseTier : base;
+}
+
+// Latest phase state straight off the spine (PHASE_DECLARED / PHASE_CLEARED,
+// last one wins) — deliberately not via projections.mjs to keep this lib leaf.
+async function activePhase(repoRoot) {
+  try {
+    const { readAll } = await import('./spine.mjs');
+    const events = await readAll(repoRoot);
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'PHASE_CLEARED') return null;
+      if (events[i].type === 'PHASE_DECLARED') {
+        return { name: events[i].data?.name || '', tier: events[i].data?.tier || null };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// readGovernance + phase-tier overlay. Returns the same cfg shape consumers
+// already use with `effectiveValue`, plus `__phase` metadata:
+//   { name, tier, escalated } — or null when no phase (or no tier) is active.
+export async function readEffectiveGovernance(repoRoot) {
+  const cfg = await readGovernance(repoRoot);
+  const phase = await activePhase(repoRoot);
+  if (!phase || !phase.tier) return { ...cfg, __phase: null };
+  const mode = escalateMode(cfg.mode, phase.tier);
+  return {
+    ...cfg,
+    mode,
+    __phase: { name: phase.name, tier: phase.tier, escalated: mode !== cfg.mode },
+  };
+}

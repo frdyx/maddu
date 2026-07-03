@@ -578,8 +578,12 @@ export async function project(repoRoot) {
         phase = {
           name: ev.data.name || '',
           notes: ev.data.notes || null,
+          tier: ev.data.tier || null,
           setAt: ev.ts
         };
+        break;
+      case 'PHASE_CLEARED':
+        phase = null;
         break;
       case 'BOSS_MESSAGE': {
         const sid = ev.data.bossSessionId || 'default';

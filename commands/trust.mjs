@@ -224,8 +224,8 @@ async function cmdReport(repoRoot, flags, lib, spineLib) {
   // Governance (layout-aware import).
   try {
     const g = await loadLib('governance.mjs');
-    const cfg = await g.readGovernance(repoRoot);
-    extras.governance = { mode: cfg.mode, overrides: cfg.overrides || {} };
+    const cfg = g.readEffectiveGovernance ? await g.readEffectiveGovernance(repoRoot) : await g.readGovernance(repoRoot);
+    extras.governance = { mode: cfg.mode, overrides: cfg.overrides || {}, phase: cfg.__phase || null };
   } catch {}
 
   // Worker-env policy.

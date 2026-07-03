@@ -102,6 +102,8 @@ async function readGovernance(spineLib, repoRoot) {
   try {
     const { loadLib } = await import('./_libroot.mjs');
     const mod = await loadLib('governance.mjs');
+    // Phase-tier aware (v1.91.0): a sterile phase escalates the effective mode.
+    if (mod.readEffectiveGovernance) return await mod.readEffectiveGovernance(repoRoot);
     return await mod.readGovernance(repoRoot);
   } catch {}
   return { mode: 'standard', overrides: {} };
