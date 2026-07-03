@@ -51,6 +51,8 @@ export function classifyEvent(type) {
   // Lifecycle & versioning ops — lavender (framework family)
   if (type.startsWith('FRAMEWORK_'))      return 't-framework';
   if (type.startsWith('CHECKPOINT_'))     return 't-framework';
+  if (type === 'COMPACTION_CHECKPOINT')   return 't-framework';
+  if (type.startsWith('PHASE_'))          return 't-framework';
 
   // Session & infrastructure runtime — cyan
   if (type.startsWith('SESSION_'))        return 't-session';
@@ -71,6 +73,7 @@ export function classifyEvent(type) {
 
   // Knowledge work — bold cream (slice family)
   if (type.startsWith('SKILL_'))          return 't-slice';
+  if (type === 'VENDOR_MEMORY_IMPORTED')  return 't-slice';
 
   return '';
 }
@@ -94,6 +97,10 @@ function summarize(ev) {
     case 'APPROVAL_REQUESTED':  return `${d.tool}  ${d.action || ''}`;
     case 'APPROVAL_DECIDED':    return `${d.decision}  ${d.tool || ''}`;
     case 'APPROVAL_POLICY_SET': return `${d.decision}  ${d.tool}@${d.lane || '*'}`;
+    case 'COMPACTION_CHECKPOINT': return `context compacted (${d.trigger || '?'})${d.lastSliceStop?.summary ? ` · anchor: ${d.lastSliceStop.summary}` : ''}`;
+    case 'VENDOR_MEMORY_IMPORTED': return `${d.file || d.factId || ''}`;
+    case 'PHASE_DECLARED':      return `${d.name || ''}${d.tier ? `  · tier: ${d.tier}` : ''}`;
+    case 'PHASE_CLEARED':       return d.name ? `${d.name} exited` : '';
     default: return '';
   }
 }

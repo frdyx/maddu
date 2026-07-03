@@ -167,5 +167,11 @@
     "area": "phase (--tier, clear, PHASE_CLEARED) + governance readEffectiveGovernance + consumers (loops, coordinator, strict-approval, trust, governance show)",
     "fixed_in": "1.91.0",
     "consumer_impact": "Sterile phases: phase set --tier <mode> escalates the effective governance mode while the phase is active (escalation-only, never weakens; explicit overrides keep winning); phase clear lifts it. Base governance.json untouched \u2014 the overlay is computed per read."
+  },
+  {
+    "symptom": "The v1.87-v1.91 governance domains existed only in the CLI: the cockpit rendered COMPACTION_CHECKPOINT/VENDOR_MEMORY_IMPORTED/PHASE_* events unclassified with empty summaries, the memory kind filter offered neither correction nor vendor, and the brief card hid an active phase tier.",
+    "area": "cockpit (event-rows classify+summarize, learning kind filter, orientation brief phase-tier line) + snapshot harness /bridge/orientation fixture",
+    "fixed_in": "1.91.1",
+    "consumer_impact": "Cockpit surfaces the new domains: compaction checkpoints and phase events classified into the framework color family with human summaries (trigger + slice-stop anchor), vendor imports in the knowledge family, memory filterable by correction/vendor kinds, and the brief card shows the active sterile-phase tier."
   }
 ]

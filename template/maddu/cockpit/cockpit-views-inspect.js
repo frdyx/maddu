@@ -33,7 +33,7 @@ export function renderLearning(ctx) {
   const controls = el('div', { class: 'panel-head', style: 'gap:8px;flex-wrap:wrap;' });
   const kindSel = el('select', { class: 'm-select', 'aria-label': 'Kind filter' });
   kindSel.appendChild(el('option', { value: '' }, 'all kinds'));
-  for (const k of ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary']) {
+  for (const k of ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary', 'correction', 'vendor']) {
     kindSel.appendChild(el('option', { value: k }, k));
   }
   const laneSel = el('select', { class: 'm-select', 'aria-label': 'Lane filter' });
