@@ -20,20 +20,38 @@ const STOPWORDS = new Set([
 
 function round2(x) { return Math.round(x * 100) / 100; }
 
-// Tokenize free text into a deduped set of meaningful lowercase terms.
-export function tokenize(text) {
-  const raw = String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
-  return raw.filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+// Light deterministic suffix-stripper so inflections meet their stems
+// ("scored"/"scoring"/"score" → "scor", "verified"/"verify" → "verifi").
+// v1.92.2: without this, the goal's vocabulary missed its own inflections in
+// slice summaries and honest on-goal turns read as drift. Crude by design —
+// it only needs to be SELF-consistent, never linguistically correct.
+function stem(t) {
+  let s = t;
+  if (s.endsWith('ies') || s.endsWith('ied')) s = s.slice(0, -3) + 'i';
+  else if (s.endsWith('ing')) s = s.slice(0, -3);
+  else if (s.endsWith('ed') || s.endsWith('es')) s = s.slice(0, -2);
+  else if (s.endsWith('s') && !s.endsWith('ss')) s = s.slice(0, -1);
+  if (s.endsWith('e')) s = s.slice(0, -1);
+  if (s.endsWith('y')) s = s.slice(0, -1) + 'i';
+  return s.length >= 3 ? s : t;
 }
 
-// The goal's keyword set, from objective + success texts + constraints.
+// Tokenize free text into meaningful lowercase stems.
+export function tokenize(text) {
+  const raw = String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+  return raw.filter((t) => t.length >= 3 && !STOPWORDS.has(t)).map(stem);
+}
+
+// The goal's keyword set — objective + constraints ONLY. Success-condition
+// texts are deliberately excluded (v1.92.2): they are verification commands
+// ("self-test", "fixture", "green", "exits 0") whose generic vocabulary
+// matched genuinely off-goal maintenance work and diluted the goal's
+// distinctive terms. The objective is what the operator MEANS; the
+// constraints are how they bound it; the success conditions are how orient
+// checks it — only the first two describe the goal axis.
 export function goalTokens(goal) {
   if (!goal) return new Set();
-  const parts = [
-    goal.objective,
-    ...((goal.success || []).map((s) => (typeof s === 'string' ? s : s && s.text))),
-    ...(goal.constraints || []),
-  ];
+  const parts = [goal.objective, ...(goal.constraints || [])];
   return new Set(parts.flatMap(tokenize));
 }
 
@@ -74,10 +92,12 @@ export function churn(recentEvents, lookback = 6) {
 // (never assert drift without evidence — the anti-nag principle).
 export function tagTurn(goal, recentEvents, opts = {}) {
   const near = opts.near ?? 0.5;
-  const far = opts.far ?? 0.75;
+  const far = opts.far ?? 0.8;
   const churnAway = opts.churnAway ?? 3;
-
   const gset = goalTokens(goal);
+  // How many distinct goal-anchor matches count as fully on-axis. Capped by
+  // the goal's own vocabulary so a terse 2-token goal can still be fully met.
+  const anchorsFull = Math.min(opts.anchorsFull ?? 4, Math.max(1, gset.size));
   const focusText = currentFocusText(recentEvents);
   const fset = new Set(tokenize(focusText));
   const ch = churn(recentEvents);
@@ -90,9 +110,16 @@ export function tagTurn(goal, recentEvents, opts = {}) {
   if (gset.size === 0) return { tag: 'toward', distanceScore: 0, signals: { ...baseSignals, note: 'no-goal' } };
   if (fset.size === 0) return { tag: 'toward', distanceScore: 0, signals: { ...baseSignals, note: 'no-focus-signal' } };
 
-  let inter = 0;
-  for (const t of fset) if (gset.has(t)) inter++;
-  const overlap = inter / fset.size; // share of current attention that is goal-relevant
+  // ABSOLUTE anchor count, not a ratio (v1.92.2). The old metric divided the
+  // intersection by the focus text's size — so a detailed, honest, on-goal
+  // slice summary read as drift (verbosity punished as distance: 5/5 real
+  // false positives on 2026-07-03), while the terse were rewarded. What
+  // separates on-goal from off-goal in real data is whether the goal's
+  // DISTINCTIVE terms appear at all: on-goal texts anchor 2–5 of them,
+  // off-goal texts anchor zero.
+  const anchorHits = [...fset].filter((t) => gset.has(t)).sort();
+  const inter = anchorHits.length;
+  const overlap = Math.min(1, inter / anchorsFull); // 0 anchors → 0 · ≥anchorsFull → fully on-axis
   const distanceScore = 1 - overlap;
 
   // Distance is the PRIMARY signal: a clearly on-goal turn is always 'toward',
@@ -108,7 +135,7 @@ export function tagTurn(goal, recentEvents, opts = {}) {
   // genuine recent topic-hopping reads as away. It never overrides goal-proximity.
   if (tag === 'lateral' && ch >= churnAway) tag = 'away';
 
-  return { tag, distanceScore: round2(distanceScore), signals: { ...baseSignals, overlap: round2(overlap) } };
+  return { tag, distanceScore: round2(distanceScore), signals: { ...baseSignals, overlap: round2(overlap), anchors: inter, anchorHits: anchorHits.slice(0, 8) } };
 }
 
 // Decide whether the accumulated window earns a flag. Looks at the TRAILING run
