@@ -3,8 +3,8 @@
   "description": "Roadmap #7 — the governance surface is itself budgeted. A per-category cap on the framework's own enforcement machinery (gates, CLI verbs, audit checks) so it can't grow faster than dead surface retires — the cure for F3/F4 becoming the next F3/F4. To exceed a cap, either retire/merge something OR add a waiver row here with a reason (each waiver raises that category's effective cap by exactly one, and shows as visible debt in `maddu audit`). Counts are read from ground truth (discoverGates / bin COMMANDS / the audit's own check registry) — nothing is hand-maintained. Enforced by checkGovernanceBudget in commands/audit.mjs via template/maddu/runtime/lib/governance-budget.mjs.",
   "categories": {
     "gates": {
-      "cap": 70,
-      "note": "builtin enforcement gates (template/maddu/runtime/gates/builtin/*.mjs)"
+      "cap": 71,
+      "note": "builtin enforcement gates (template/maddu/runtime/gates/builtin/*.mjs). Raised 70→71 (v1.94.0, roadmap #12b phase 7): +event-schema-complete, the parity gate for the newly-published event contract (EVENT_SCHEMA ↔ EVENT_TYPES 1:1). A deliberate, attributed raise for a permanent, warranted enforcement surface — not temporary debt (which would be a waiver) — mirroring the selfTest baseline-raise precedent below. Nothing retired: the contract-parity invariant has no existing home."
     },
     "verbs": {
       "cap": 70,
@@ -17,8 +17,8 @@
   },
   "waivers": [],
   "selfTest": {
-    "baselineMs": 36000,
+    "baselineMs": 115000,
     "tolerancePct": 50,
-    "note": "relative self-test latency ceiling. WARN (never FAIL) when the last recorded quick/full run in .maddu/state/self-test-last-run.json exceeds baselineMs * (1 + tolerancePct/100). Raise the baseline deliberately when the suite legitimately grows."
+    "note": "relative self-test latency ceiling. WARN (never FAIL) when the last recorded quick/full run in .maddu/state/self-test-last-run.json exceeds baselineMs * (1 + tolerancePct/100). Raise the baseline deliberately when the suite legitimately grows. Raised 36000→48000 then →115000 across v1.93.0 (roadmap #12a phases 1-5). Attribution (measured, not laundered): (a) `maddu ci` grew 5.4s→8.7s from the #12 surface additions (2 new event types, 3 new runtime libs, more source for the architecture gates) and the ci-command self-test invokes `maddu ci` 7× sequentially, so that +3.3s amplifies to ~+23s; (b) the two git-spawning integration tests worktree-attach + worktree-detach add ~11s; (c) the suite runs sequentially so per-test costs sum. The dominant driver is ci-command's 7× ci pattern — a candidate to parallelize or thin in a future pass."
   }
 }

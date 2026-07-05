@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId, resolveWorkAndStateRoots } from './_spine.mjs';
 import { loadLibOptional } from './_libroot.mjs';
 
 function csv(s) {
@@ -69,7 +69,15 @@ export default async function sliceStop(argv) {
   const summary = requireFlag(flags, 'summary');
 
   const { paths, spine, projections, hindsight, sessionActive } = await loadSpineLib();
-  const repoRoot = await resolveRepoRoot(paths);
+  // v1.93.0 (roadmap #12a phase 1): inside a lane worktree the two roots
+  // diverge — git diffs and deliverable checks are scoped to the WORK root
+  // (the checkout being edited) while the spine append, session resolution,
+  // and gates bind to the STATE root (the primary repo's .maddu/). Without
+  // the split, a slice-stop run inside .maddu/worktrees/<lane>/ would diff
+  // the wrong checkout and append to the checkout's own .maddu copy.
+  const roots = await resolveWorkAndStateRoots(paths);
+  const repoRoot = roots ? roots.stateRoot : await resolveRepoRoot(paths);
+  const workRoot = roots ? roots.workRoot : repoRoot;
 
   // v0.19.1 PR-B1: --session falls back to $MADDU_SESSION_ID. v1.73.x: then to
   // the active-session cache written by `maddu register`, so the slice-stop
@@ -93,7 +101,7 @@ export default async function sliceStop(argv) {
     // is still seen by the slice-scope gate. `--no-git-diff` opts out (e.g. a
     // non-git workspace or a deliberately partial slice-stop).
     if (flags['no-git-diff'] !== true) {
-      const gitTouched = await gitTouchedPaths(repoRoot);
+      const gitTouched = await gitTouchedPaths(workRoot);
       if (gitTouched && gitTouched.length) {
         const set = new Set(reportedPaths);
         for (const p of gitTouched) set.add(p);
@@ -174,7 +182,7 @@ export default async function sliceStop(argv) {
   let risk = null;
   let deliverables = null;
   try {
-    const gitTouched = (flags['no-git-diff'] === true) ? null : await gitTouchedPaths(repoRoot);
+    const gitTouched = (flags['no-git-diff'] === true) ? null : await gitTouchedPaths(workRoot);
     const riskLib = await loadLibOptional('risk-assess.mjs');
     if (riskLib?.assessRisk) {
       const basis = touchedPaths.length ? touchedPaths : (gitTouched || []);
@@ -182,7 +190,9 @@ export default async function sliceStop(argv) {
     }
     const delivLib = await loadLibOptional('deliverables.mjs');
     if (delivLib?.verifyDeliverables) {
-      deliverables = await delivLib.verifyDeliverables({ repoRoot, targets: csv(flags.targets), gitTouched });
+      // Declared targets are files in the checkout being edited — verify
+      // against the work root, not the (possibly redirected) state root.
+      deliverables = await delivLib.verifyDeliverables({ repoRoot: workRoot, targets: csv(flags.targets), gitTouched });
     }
   } catch {}
 

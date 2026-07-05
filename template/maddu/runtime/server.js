@@ -745,6 +745,14 @@ async function handleBridge(req, res, url, ctx) {
     try {
       const preProj = await project(repoRoot);
       const summary = await runJanitor(repoRoot, preProj);
+      // Surface orphaned lane worktrees (roadmap #12a phase 6): auto-closing a
+      // holder drops its claim and orphans any worktree — make that visible in
+      // the bridge log (the janitor never removes them; that stays explicit).
+      if (summary.orphanedWorktrees && summary.orphanedWorktrees.length) {
+        for (const o of summary.orphanedWorktrees) {
+          console.error(`janitor: lane "${o.lane}" worktree ${o.path} orphaned by auto-close of ${o.session} — disposition with \`maddu lane release ${o.lane} --worktree <merged|abandoned|keep>\``);
+        }
+      }
       if (summary.staleEmitted > 0 || summary.closedEmitted > 0) {
         // Force a re-projection so the response includes the events
         // we just appended.

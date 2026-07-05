@@ -162,7 +162,7 @@ Events without `triggered_by` are byte-identical to v0.12.0.
 
 ## Hard rules
 
-All eight invariants are preserved per workspace:
+All nine invariants are preserved per workspace:
 
 - **Files-only.** Per-repo `.maddu/` plus device-local
   `~/.config/maddu/{workspaces.json, global/}`. No SQLite anywhere.
@@ -246,5 +246,5 @@ $ grep APPROVAL_DECIDED ~/code/repo-a/.maddu/events/*.ndjson | tail -1
 - [09-approvals-and-permissions.md](09-approvals-and-permissions.md) —
   per-repo approvals + standing policies (the per-repo half of the
   cascade).
-- [06-hard-rules.md](06-hard-rules.md) — the eight invariants this
+- [06-hard-rules.md](06-hard-rules.md) — the nine invariants this
   slice was designed against.

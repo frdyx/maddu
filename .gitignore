@@ -37,3 +37,11 @@ marketing/
 # These are workstation-local and must never be swept in by `git add -A`.
 /AGENTS.md
 /CLAUDE.md
+
+# Competitive-research working artifacts (2026-07) — deep-research agent
+# outputs + diff synthesis contain unverified third-party claims; kept
+# local until manually verified. Brief lives in marketing/ (tracked or not
+# at operator's discretion).
+docs/research/*.pdf
+docs/research/competitive-analysis-diff-2026-07.md
+docs/research/competitive-response-proposal.md

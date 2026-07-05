@@ -12,6 +12,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { project } from './projections.mjs';
 import { listSchedules } from './schedule.mjs';
 import { totalUnread as mailboxTotalUnread } from './mailbox.mjs';
+import { readAttachments } from './worktrees.mjs';
 
 // The runtime root (template/maddu/runtime in source, maddu/runtime when
 // installed) — this module lives in runtime/lib, so go up one level. server.js
@@ -59,10 +60,22 @@ export async function buildConductor(repoRoot) {
     const k = c.lane || 'unassigned';
     claimsByLane.set(k, (claimsByLane.get(k) || 0) + 1);
   }
+  // Lane worktrees (roadmap #12a phase 6): fold live attachments so the cockpit
+  // lane rows can badge which lanes have an isolated git worktree. Pure spine
+  // read; empty when the feature is unused. No git calls here — git-reality
+  // checks belong to the worktree-lane-coherence gate, not the hot orientation
+  // path.
+  const worktreeByLane = new Map();
+  try {
+    for (const att of (await readAttachments(repoRoot)).values()) {
+      worktreeByLane.set(att.lane, { path: att.pathRepoRel, branch: att.branchRef, session: att.session });
+    }
+  } catch { /* older install without worktrees lib → no badges */ }
   const laneIds = new Set([
     ...lanes.map((l) => l.id),
     ...tasksByLane.keys(),
-    ...claimsByLane.keys()
+    ...claimsByLane.keys(),
+    ...worktreeByLane.keys()
   ]);
   const scoreMatrix = [];
   for (const id of laneIds) {
@@ -85,6 +98,7 @@ export async function buildConductor(repoRoot) {
       open,
       progress,
       claimsHeld,
+      worktree: worktreeByLane.get(id) || null,
       reasonCode
     });
   }

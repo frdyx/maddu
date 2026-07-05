@@ -296,7 +296,24 @@ export const EVENT_TYPES = {
   //   AUTONOMY_SCORED:         { schemaVersion, asOf, attribution, configHash, totalSlices, lanes:[{lane, clean, cleanCapped, dirty, neutral, unwitnessed, total, n, coverage, wilson, rung}] }
   //   AUTONOMY_RECOMMENDATION: { schemaVersion, asOf, lane, fromRung, toRung, wilson, n, coverage, recommendation, muted, mutedReason, configHash }
   AUTONOMY_SCORED:            'AUTONOMY_SCORED',
-  AUTONOMY_RECOMMENDATION:    'AUTONOMY_RECOMMENDATION'
+  AUTONOMY_RECOMMENDATION:    'AUTONOMY_RECOMMENDATION',
+
+  // Lane worktrees (roadmap #12a) — a worktree ATTACHMENT binds a lane claim
+  // to an isolated git-worktree checkout under .maddu/worktrees/<lane>/.
+  // Frozen data shapes (schemaVersion 1) in
+  // docs/research/competitive-response-proposal.md; verifier rules in
+  // verify.mjs (orphan/duplicate detach, live-path reuse, claim-ref
+  // presence). Emitted by the attach/release flow (phase 4+); registered and
+  // verifier-covered FIRST so no unshaped event can ever land on a spine.
+  //   WORKTREE_ATTACHED: { schemaVersion, attachmentId, claimEventId, lane, session,
+  //                        pathRepoRel, pathAbs, branchRef, baseRef, baseHeadAtAttach,
+  //                        created, reused, dirty, gitCommonDir, platform }
+  //   WORKTREE_DETACHED: { schemaVersion, attachmentId, lane, pathRepoRel,
+  //                        disposition: merged|abandoned|kept|orphaned,
+  //                        branchHead, integrationRef, integrationHead,
+  //                        ancestorCheck: pass|fail|skipped, dirtyAtDetach, reason }
+  WORKTREE_ATTACHED:          'WORKTREE_ATTACHED',
+  WORKTREE_DETACHED:          'WORKTREE_DETACHED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

@@ -16,9 +16,13 @@
 // `generated-artifacts-current` gate can share one engine (a gate may import
 // runtime-libs but not commands).
 //
-// A generator is one of two shapes (both source/target paths are repo-relative):
+// A generator is one of three shapes (all source/target paths are repo-relative):
 //   whole-file: { id, source, target, transform }
 //       expected target = transform(sourceText). Skipped if source is absent.
+//   module:     { id, target, module, render }
+//       expected target = render(importedModule). The authored source is a JS
+//       module whose exports are static data; render is pure so check-mode can
+//       regenerate and byte-compare. Skipped only if the module file is absent.
 //   section:    { id, target, marker, sources?, render }
 //       expected target = the current target with the region between its
 //       `<!-- GENERATED:<marker> ... -->` and `<!-- /GENERATED:<marker> -->`
@@ -30,6 +34,7 @@
 
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // Render the 8+1 hard-rules section for a brief style ('worker' | 'brief') from
 // the canonical rules.json registry. Pure function of the parsed registry.
@@ -52,6 +57,122 @@ export function renderHardRulesCompact(registry) {
   const bullets = c.bullets.map((b) => `- ${b}`).join('\n');
   const outro = c.outro.join('\n');
   return `${intro}\n\n${bullets}\n\n${outro}`;
+}
+
+// ── Published event contract (roadmap #12b phase 7) ──
+// Both renderers are PURE functions of the EVENT_SCHEMA module's exports, so
+// the module-backed generator below can regenerate and byte-compare in check
+// mode. The authored source is event-schema.mjs; these targets are derived.
+
+// Map one data-field type spec ('string', 'number?', 'string|null', 'any', …)
+// to a JSON-Schema fragment. A trailing '?' (optional) does not affect the
+// fragment — optionality is expressed by absence from `required`, and every
+// data field is treated as optional-when-present (the payload is open).
+function fieldToJsonSchema(spec) {
+  const base = spec.replace(/\?$/, '');
+  const nullable = base.endsWith('|null');
+  const core = base.replace(/\|null$/, '');
+  if (core === 'any') return {};
+  return nullable ? { type: [core, 'null'] } : { type: core };
+}
+
+// docs/event-schema.json — a JSON Schema (draft 2020-12) for a single spine
+// event: the shared envelope plus a per-`type` `data` constraint via allOf/if.
+// The envelope shape + required set come from event-schema.mjs (single source);
+// the JSON-Schema specifics (`v` const, `ts` format, `type` enum) are layered on
+// by field name.
+export function renderEventSchemaJson(schema, version, envelope, envelopeRequired) {
+  const types = Object.keys(schema);
+  const props = {};
+  for (const [f, ty] of Object.entries(envelope)) props[f] = fieldToJsonSchema(ty);
+  props.v = { const: 1 };
+  props.ts = { type: 'string', format: 'date-time' };
+  props.type = { type: 'string', enum: types };
+  const allOf = types.map((t) => {
+    const spec = schema[t];
+    const dProps = {};
+    for (const [f, ty] of Object.entries(spec.data)) dProps[f] = fieldToJsonSchema(ty);
+    const dataSchema = { type: 'object', additionalProperties: true };
+    if (Object.keys(dProps).length) dataSchema.properties = dProps;
+    return {
+      if: { properties: { type: { const: t } } },
+      then: { properties: { data: { description: spec.summary, ...dataSchema } } },
+    };
+  });
+  const doc = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://github.com/frdyx/maddu/blob/main/docs/event-schema.json',
+    title: 'Máddu spine event',
+    description:
+      'The published contract for a single append-only spine event. Generated from ' +
+      'template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are ' +
+      'typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).',
+    'x-contractVersion': version,
+    type: 'object',
+    required: envelopeRequired,
+    properties: props,
+    additionalProperties: true,
+    allOf,
+  };
+  return JSON.stringify(doc, null, 2) + '\n';
+}
+
+// docs/event-schema.md — the human-readable contract reference: envelope,
+// semver rules, and a one-row-per-type table of data fields.
+export function renderEventSchemaMarkdown(schema, version, envelope) {
+  const types = Object.keys(schema);
+  const ENV_NOTE = {
+    v: 'Envelope schema version.', id: '`evt_<ts14>_<hex>`.', ts: 'ISO-8601 timestamp.',
+    type: 'One of the event types below.', actor: 'Session/worker id, or null.',
+    lane: 'Lane id, or null.', prev_hash: 'Chain link to the prior line (absent pre-chain, null on genesis).',
+    triggered_by: 'Object provenance ({ kind, id, … }) or null.', data: 'Per-type payload — see below.',
+  };
+  const mdType = (ty) => `\`${ty.replace(/\|/g, '\\|')}\``;
+  const L = [];
+  L.push('# Máddu spine event contract');
+  L.push('');
+  L.push('<!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.');
+  L.push('     Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->');
+  L.push('');
+  L.push(`**Contract version:** \`${version}\` · **Event types:** ${types.length}`);
+  L.push('');
+  L.push('The spine is an append-only NDJSON event log. Every event shares one envelope;');
+  L.push('each `type` constrains its `data` payload. Data fields are **typed when present**');
+  L.push('and the payload is **open** — extra keys may appear and are additive-only within a');
+  L.push('MAJOR. `frozen` shapes carry a `schemaVersion` discriminator and their listed');
+  L.push('fields are guaranteed stable.');
+  L.push('');
+  L.push('## Envelope');
+  L.push('');
+  L.push('| Field | Type | Notes |');
+  L.push('| --- | --- | --- |');
+  for (const [f, ty] of Object.entries(envelope)) {
+    L.push(`| \`${f}\` | ${mdType(ty)} | ${ENV_NOTE[f] || ''} |`);
+  }
+  L.push('');
+  L.push('## Semantic versioning');
+  L.push('');
+  L.push('The contract version (`EVENT_CONTRACT_VERSION`) moves by:');
+  L.push('');
+  L.push('- **MAJOR** — remove an event type or a listed field, or change a field\'s type.');
+  L.push('- **MINOR** — add an event type, or add a listed field to an existing type.');
+  L.push('- **PATCH** — summary/wording only; no shape change.');
+  L.push('');
+  L.push(`## Events (${types.length})`);
+  L.push('');
+  L.push('| Event | Summary | Data fields |');
+  L.push('| --- | --- | --- |');
+  for (const t of types) {
+    const spec = schema[t];
+    const fields = Object.entries(spec.data)
+      .map(([f, ty]) => `\`${f}: ${ty.replace(/\|/g, '\\|')}\``)
+      .join(', ') || '—';
+    const label = spec.frozen ? `\`${t}\` 🔒` : `\`${t}\``;
+    const summary = spec.summary.replace(/\|/g, '\\|');
+    L.push(`| ${label} | ${summary} | ${fields} |`);
+  }
+  L.push('');
+  return L.join('\n');
 }
 
 const RULES_REGISTRY = 'template/maddu/agent-files/rules.json';
@@ -87,6 +208,33 @@ export const GENERATORS = [
     // derive the AGENTS copy. Identity transform. MUST run AFTER
     // hard-rules-section so the copy carries the freshly-generated block.
     transform: (src) => src,
+  },
+  {
+    // Published event contract — human reference. Rendered from the authored
+    // EVENT_SCHEMA module. MUST run BEFORE docs-tree so the docs/ mirror copies
+    // the fresh file into the shipped payload (template/maddu/docs/).
+    id: 'event-schema-md',
+    target: 'docs/event-schema.md',
+    module: 'template/maddu/runtime/lib/event-schema.mjs',
+    render: (mod) => renderEventSchemaMarkdown(mod.EVENT_SCHEMA, mod.EVENT_CONTRACT_VERSION, mod.EVENT_ENVELOPE),
+  },
+  {
+    // Published event contract — machine-readable JSON Schema (draft 2020-12).
+    // Ships to npm consumers via package.json `files: ["docs/"]`.
+    id: 'event-schema-json',
+    target: 'docs/event-schema.json',
+    module: 'template/maddu/runtime/lib/event-schema.mjs',
+    render: (mod) => renderEventSchemaJson(mod.EVENT_SCHEMA, mod.EVENT_CONTRACT_VERSION, mod.EVENT_ENVELOPE, mod.ENVELOPE_REQUIRED),
+  },
+  {
+    // Shipped payload copy of the JSON Schema. The docs-tree mirror only carries
+    // *.md, so the machine-readable contract is generated directly into the
+    // consumer-facing tree too — otherwise an installed docs index would
+    // reference an event-schema.json that isn't there.
+    id: 'event-schema-json-payload',
+    target: 'template/maddu/docs/event-schema.json',
+    module: 'template/maddu/runtime/lib/event-schema.mjs',
+    render: (mod) => renderEventSchemaJson(mod.EVENT_SCHEMA, mod.EVENT_CONTRACT_VERSION, mod.EVENT_ENVELOPE, mod.ENVELOPE_REQUIRED),
   },
   {
     id: 'docs-tree',
@@ -130,6 +278,19 @@ export function spliceMarker(targetText, marker, block) {
 // Compute { skipped, expected, current, targetPath } for one generator.
 async function plan(repoRoot, gen) {
   const targetPath = join(repoRoot, gen.target);
+
+  // Module generator: { id, target, module, render }. The authored source is a
+  // JS module (repo-relative path); expected = render(importedModule). Pure —
+  // the module's exports are static data, so check-mode regenerates and byte-
+  // compares. Skipped only if the module file is absent (never in a checkout).
+  if (gen.module) {
+    const modPath = join(repoRoot, gen.module);
+    if ((await readIfPresent(modPath)) === null) return { skipped: true, targetPath };
+    const mod = await import(pathToFileURL(modPath).href);
+    const current = await readIfPresent(targetPath);
+    return { skipped: false, expected: gen.render(mod), current, targetPath };
+  }
+
   const sourceRels = gen.marker ? (gen.sources || []) : [gen.source];
   const sources = {};
   let sourceMissing = false;

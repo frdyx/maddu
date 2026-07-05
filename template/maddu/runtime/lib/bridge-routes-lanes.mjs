@@ -15,6 +15,7 @@
 import { append, ensureSpine, EVENT_TYPES, genSessionId } from './spine.mjs';
 import { project } from './projections.mjs';
 import { pathsFor } from './paths.mjs';
+import { LANE_SLUG_RE } from './worktrees.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { sendJson, readBody } from './http-util.mjs';
 
@@ -133,8 +134,11 @@ export async function routeLanes({ req, res, path, repoRoot }) {
   // Add a new lane to the catalog.
   if (path === '/bridge/lanes' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
-    if (!body.id || !/^[a-z][a-z0-9\-]{1,40}$/.test(body.id)) {
-      return reply(res, 400, { error: 'id required: ^[a-z][a-z0-9-]{1,40}$' });
+    // v1.93.x (roadmap #12a phase 2): the slug rule is SSOT'd in
+    // worktrees.mjs — lane ids become worktree paths and branch refs, so the
+    // creation rule and the attach rule must be the same regex.
+    if (!body.id || !LANE_SLUG_RE.test(body.id)) {
+      return reply(res, 400, { error: `id required: ${LANE_SLUG_RE.source}` });
     }
     const paths = pathsFor(repoRoot);
     const catalog = JSON.parse(await readFile(paths.laneCatalog, 'utf8'));

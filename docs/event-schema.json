@@ -1,0 +1,5740 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
+  "title": "Máddu spine event",
+  "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
+  "x-contractVersion": "1.0.0",
+  "type": "object",
+  "required": [
+    "v",
+    "id",
+    "ts",
+    "type",
+    "actor",
+    "lane",
+    "data"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "id": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "FRAMEWORK_INSTALLED",
+        "FRAMEWORK_UPGRADED",
+        "FRAMEWORK_BOOTED",
+        "DOCTOR_REPORT",
+        "AUDIT_REPORT",
+        "SESSION_REGISTERED",
+        "SESSION_HEARTBEAT",
+        "SESSION_CLOSED",
+        "LANE_CLAIMED",
+        "LANE_RELEASED",
+        "LANE_ADDED",
+        "LANE_REMOVED",
+        "LANE_DEFAULTS_SET",
+        "LANE_POLICY_SET",
+        "SLICE_STOP",
+        "INBOX_MESSAGE",
+        "APPROVAL_REQUESTED",
+        "APPROVAL_DECIDED",
+        "APPROVAL_POLICY_SET",
+        "MAILBOX_SENT",
+        "MAILBOX_READ",
+        "TASK_CREATED",
+        "TASK_UPDATED",
+        "TASK_COMPLETED",
+        "SKILL_CREATED",
+        "SKILL_UPDATED",
+        "SKILL_DELETED",
+        "SKILL_APPLIED",
+        "WORKER_SPAWNED",
+        "WORKER_HEARTBEAT",
+        "WORKER_EXITED",
+        "WORKER_KILLED",
+        "RUNTIME_REGISTERED",
+        "RUNTIME_DETECTED",
+        "RUNTIME_REMOVED",
+        "MCP_REGISTERED",
+        "MCP_ENABLED",
+        "MCP_DISABLED",
+        "MCP_TESTED",
+        "MCP_REMOVED",
+        "SCHEDULE_CREATED",
+        "SCHEDULE_UPDATED",
+        "SCHEDULE_REMOVED",
+        "SCHEDULE_FIRED",
+        "CHECKPOINT_CREATED",
+        "CHECKPOINT_REMOVED",
+        "CHECKPOINT_WORKTREE_CREATED",
+        "CHECKPOINT_ROLLBACK_REQUESTED",
+        "AUTH_KEY_ADDED",
+        "AUTH_KEY_REMOVED",
+        "AUTH_KEY_ROTATED",
+        "AUTH_KEY_RATE_LIMITED",
+        "IMPORT_ACCEPTED",
+        "IMPORT_REJECTED",
+        "PROPOSAL_CREATED",
+        "PROPOSAL_DECIDED",
+        "BOSS_MESSAGE",
+        "TELEGRAM_ENABLED",
+        "TELEGRAM_DISABLED",
+        "TELEGRAM_ALLOWLIST_SET",
+        "TELEGRAM_INBOUND",
+        "TELEGRAM_OUTBOUND",
+        "TELEGRAM_OUTBOUND_FAILED",
+        "TELEGRAM_DROPPED",
+        "DISCORD_ENABLED",
+        "DISCORD_DISABLED",
+        "DISCORD_ALLOWLIST_SET",
+        "DISCORD_OUTBOUND",
+        "DISCORD_OUTBOUND_FAILED",
+        "EMAIL_ENABLED",
+        "EMAIL_DISABLED",
+        "EMAIL_CONFIG_SET",
+        "EMAIL_ALLOWLIST_SET",
+        "EMAIL_SENT",
+        "EMAIL_OUTBOUND_FAILED",
+        "FOLLOWUP_OPENED",
+        "GATE_RAN",
+        "GOAL_DECLARED",
+        "PENDING_ACTION_DRAINED",
+        "PENDING_ACTION_ENQUEUED",
+        "PHASE_DECLARED",
+        "PHASE_CLEARED",
+        "SLICE_FUNCTIONAL_APPROVED",
+        "SLICE_REVIEWED",
+        "SLICE_SCOPE_DECLARED",
+        "SLICE_SCOPE_EXPANDED",
+        "SOURCE_HASH_RECOMPUTED",
+        "TRIGGER_FIRED",
+        "AGENT_FILE_SYNCED",
+        "SESSION_AUTO_CLOSED",
+        "SESSION_AUTO_REGISTERED",
+        "SESSION_STALE_DETECTED",
+        "COMPACTION_CHECKPOINT",
+        "VENDOR_MEMORY_IMPORTED",
+        "SLASH_COMMANDS_SYNCED",
+        "TEAM_OPENED",
+        "TEAM_LANE_ALLOCATED",
+        "TEAM_MEMBER_JOINED",
+        "TEAM_MEMBER_LEFT",
+        "TEAM_CLOSED",
+        "PIPELINE_STARTED",
+        "PIPELINE_STAGE_ENTERED",
+        "PIPELINE_STAGE_EXITED",
+        "PIPELINE_COMPLETED",
+        "PIPELINE_HALTED",
+        "ADVISOR_INVOKED",
+        "ADVISOR_ARTIFACT_WRITTEN",
+        "TOKEN_USAGE_REPORTED",
+        "SKILL_INJECTED",
+        "TOOL_INVOKED",
+        "TOOL_COMPLETED",
+        "TOOL_REFUSED",
+        "GOVERNANCE_MODE_CHANGED",
+        "PLAN_CREATED",
+        "PLAN_PHASE_ADDED",
+        "PLAN_PHASE_COMPLETED",
+        "PLAN_PHASE_BLOCKED",
+        "PLAN_REVISED",
+        "PLAN_COMPLETED",
+        "PLAN_CANCELLED",
+        "LOOP_STARTED",
+        "LOOP_ITERATION_STARTED",
+        "LOOP_ITERATION_COMPLETED",
+        "LOOP_HALTED",
+        "LOOP_COMPLETED",
+        "COORDINATOR_STARTED",
+        "COORDINATOR_PHASE_STARTED",
+        "COORDINATOR_PHASE_COMPLETED",
+        "COORDINATOR_HALTED",
+        "COORDINATOR_COMPLETED",
+        "LANE_CLAIM_FORCED",
+        "SKILL_CANDIDATE_DETECTED",
+        "SKILL_CANDIDATE_APPROVED",
+        "SKILL_CANDIDATE_REJECTED",
+        "TRUST_AUDIT_RAN",
+        "TRUST_PIN_ADDED",
+        "TRUST_PIN_REMOVED",
+        "TRUST_VIOLATION_DETECTED",
+        "MCP_PROVENANCE_VERIFIED",
+        "MCP_PROVENANCE_MISMATCH",
+        "MCP_APPROVAL_GRANTED",
+        "WORKER_ENV_FILTERED",
+        "SECRET_DETECTED_IN_ARGV",
+        "SKILL_IMPORTED",
+        "SKILL_TRUSTED",
+        "HANDOFF_SET",
+        "LEARN_MINED",
+        "LEARN_DIGEST_WRITTEN",
+        "LEARN_JUDGED",
+        "LEARN_CORRECTION_WRITTEN",
+        "MEMORY_FACT_SUPERSEDED",
+        "BRIEFING_CURATED",
+        "BRIDGE_ORIGIN_REJECTED",
+        "BLUEPRINT_DISTILLED",
+        "DEBT_SCANNED",
+        "ARCHITECTURE_SCANNED",
+        "FOCUS_TAGGED",
+        "DRIFT_FLAGGED",
+        "AUTONOMY_SCORED",
+        "AUTONOMY_RECOMMENDATION",
+        "WORKTREE_ATTACHED",
+        "WORKTREE_DETACHED"
+      ]
+    },
+    "actor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lane": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "prev_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "triggered_by": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "FRAMEWORK_INSTALLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Máddu was installed into a repo for the first time.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "files": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "FRAMEWORK_UPGRADED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An existing install was upgraded to a new framework version.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "updated": {
+                "type": "number"
+              },
+              "added": {
+                "type": "number"
+              },
+              "removed": {
+                "type": "number"
+              },
+              "skipped": {
+                "type": "number"
+              },
+              "warnings": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "FRAMEWORK_BOOTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The bridge server started and bound its port.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "number"
+              },
+              "port": {
+                "type": "number"
+              },
+              "version": {
+                "type": "string"
+              },
+              "workspaceId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DOCTOR_REPORT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A `maddu doctor` integrity run completed with per-check results.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "checks": {
+                "type": "array"
+              },
+              "counts": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUDIT_REPORT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A `maddu audit` governance run completed with per-check results.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "checks": {
+                "type": "array"
+              },
+              "counts": {
+                "type": "object"
+              },
+              "scope": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_REGISTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An agent session was registered (explicitly or by a hook).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "focus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "runtime": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_HEARTBEAT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A live session reported it is still active.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "focus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_CLOSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A session ended, optionally leaving a handoff note.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "handoff": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_CLAIMED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A session took exclusive ownership of a lane.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "focus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_RELEASED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A session released its claim on a lane.",
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_ADDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A lane was added to the catalog.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "lane": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A lane was removed from the catalog.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_DEFAULTS_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Default lane assignments were configured.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "defaults": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_POLICY_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A per-lane governance policy was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "policy": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SLICE_STOP"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A slice boundary was recorded with its summary, deliverables, and next step.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "gates": {
+                "type": "array"
+              },
+              "learnings": {
+                "type": "array"
+              },
+              "next": {
+                "type": "array"
+              },
+              "paths": {
+                "type": "array"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": "string"
+              },
+              "targets": {
+                "type": "array"
+              },
+              "risk": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "deliverables": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "INBOX_MESSAGE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A message was written to a session inbox.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "scheduleId": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "APPROVAL_REQUESTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An action was submitted for operator approval.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "payload": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "APPROVAL_DECIDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A pending approval was approved or denied.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "approvalId": {
+                "type": "string"
+              },
+              "decision": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "APPROVAL_POLICY_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A standing approval policy for a tool was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "decision": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MAILBOX_SENT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A mailbox message was sent between sessions.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "hasBody": {
+                "type": "boolean"
+              },
+              "messageId": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MAILBOX_READ"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A mailbox message was marked read.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "messageId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TASK_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A task was created on the dependency-aware board.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "blockedBy": {
+                "type": "array"
+              },
+              "description": {
+                "type": "string"
+              },
+              "metadata": {
+                "type": "object"
+              },
+              "owner": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TASK_UPDATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A task's fields or status were updated.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TASK_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A task was marked complete.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A skill was authored and added to the gallery.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_UPDATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An existing skill was edited.",
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_DELETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A skill was removed from the gallery.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_APPLIED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A skill body was applied during a session.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKER_SPAWNED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A sub-worker subprocess was launched.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array"
+              },
+              "command": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "log": {
+                "type": "string"
+              },
+              "modelHint": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "pid": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stage": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wrapper": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKER_HEARTBEAT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A running worker reported it is still alive.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "focus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKER_EXITED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A worker subprocess exited on its own.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "exitCode": {
+                "type": "number"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKER_KILLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A worker subprocess was killed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "RUNTIME_REGISTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A runtime adapter was registered.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "binary": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "RUNTIME_DETECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A runtime binary was auto-detected on the host.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "exitCode": {
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "RUNTIME_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A runtime adapter was removed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_REGISTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP server template was registered.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "transport": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_ENABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP server was enabled.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_DISABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP server was disabled.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_TESTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP server connectivity test ran.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "transport": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP server registration was removed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SCHEDULE_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A recurring schedule (cron) was created.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "cron": {
+                "type": "string"
+              },
+              "natural": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SCHEDULE_UPDATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A schedule's definition or enabled state changed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "cron": {
+                "type": "string"
+              },
+              "natural": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SCHEDULE_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A schedule was removed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SCHEDULE_FIRED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A schedule reached its trigger time and fired.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "cron": {
+                "type": "string"
+              },
+              "action": {
+                "type": "object"
+              },
+              "fireCount": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "CHECKPOINT_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A git-backed checkpoint was recorded.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "CHECKPOINT_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A checkpoint was removed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "CHECKPOINT_WORKTREE_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A worktree was materialized for a checkpoint.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "CHECKPOINT_ROLLBACK_REQUESTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A rollback to a checkpoint was requested.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "applied": {
+                "type": "boolean"
+              },
+              "mode": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUTH_KEY_ADDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An API key was added to the keyring.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "keyId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "replaced": {
+                "type": "boolean"
+              },
+              "tail": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUTH_KEY_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An API key was removed from the keyring.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "keyId": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUTH_KEY_ROTATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An API key was rotated to a new value.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUTH_KEY_RATE_LIMITED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An API key hit a provider rate limit and was benched.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "keyId": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "until": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "IMPORT_ACCEPTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An external artifact passed the import gate and was accepted.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "refId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "IMPORT_REJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An external artifact was rejected by the import gate.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "hitCount": {
+                "type": "number"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "patterns": {
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PROPOSAL_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A governance proposal was raised for a boss decision.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "bossSessionId": {
+                "type": "string"
+              },
+              "action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "actionPayload": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "risk": {
+                "type": "string"
+              },
+              "preconditions": {
+                "type": "array"
+              },
+              "enforcer": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PROPOSAL_DECIDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A governance proposal was decided.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "decision": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "BOSS_MESSAGE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A boss/enforcer message was posted in the governance channel.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "bossSessionId": {
+                "type": "string"
+              },
+              "citedRule": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "proposalId": {
+                "type": "string"
+              },
+              "reasonCode": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_ENABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The Telegram comms bridge was enabled.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "tail": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_DISABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The Telegram comms bridge was disabled.",
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_ALLOWLIST_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The Telegram chat allowlist was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "chatIds": {
+                "type": "array"
+              },
+              "count": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_INBOUND"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An inbound Telegram update was received.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "chatId": {
+                "type": "string"
+              },
+              "hasText": {
+                "type": "boolean"
+              },
+              "length": {
+                "type": "number"
+              },
+              "updateId": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_OUTBOUND"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An outbound Telegram message was sent.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "chatId": {
+                "type": "string"
+              },
+              "length": {
+                "type": "number"
+              },
+              "messageId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_OUTBOUND_FAILED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An outbound Telegram message failed to send.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "chatId": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TELEGRAM_DROPPED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An inbound Telegram update was dropped (not allowlisted).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "chatId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "updateId": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DISCORD_ENABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The Discord comms bridge was enabled.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "tail": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DISCORD_DISABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The Discord comms bridge was disabled.",
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DISCORD_ALLOWLIST_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The Discord channel allowlist was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "channelIds": {
+                "type": "array"
+              },
+              "count": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DISCORD_OUTBOUND"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An outbound Discord message was sent.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "channelId": {
+                "type": "string"
+              },
+              "length": {
+                "type": "number"
+              },
+              "messageId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DISCORD_OUTBOUND_FAILED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An outbound Discord message failed to send.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "channelId": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "EMAIL_ENABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The email comms bridge was enabled.",
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "EMAIL_DISABLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The email comms bridge was disabled.",
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "EMAIL_CONFIG_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The email (SMTP) configuration was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "number"
+              },
+              "user": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "EMAIL_ALLOWLIST_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The email recipient allowlist was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "count": {
+                "type": "number"
+              },
+              "recipients": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "EMAIL_SENT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An email was sent.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "length": {
+                "type": "number"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "EMAIL_OUTBOUND_FAILED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An outbound email failed to send.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "FOLLOWUP_OPENED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A follow-up was opened from a slice review finding.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "draftScope": {
+                "type": "array"
+              },
+              "fromReviewEventId": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "GATE_RAN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A verification gate ran and recorded its verdict.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "durationMs": {
+                "type": "number"
+              },
+              "evidence": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "gateId": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "sliceId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "GOAL_DECLARED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A goal with success conditions and constraints was declared.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "constraints": {
+                "type": "array"
+              },
+              "objective": {
+                "type": "string"
+              },
+              "success": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PENDING_ACTION_DRAINED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A queued pending action was drained (executed or resolved).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "actionId": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PENDING_ACTION_ENQUEUED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An action was enqueued for later draining.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "actionId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PHASE_DECLARED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan phase was entered, optionally raising the governance tier.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tier": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PHASE_CLEARED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan phase was explicitly exited.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SLICE_FUNCTIONAL_APPROVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A slice's functional deliverable was approved.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "sliceId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SLICE_REVIEWED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A slice review completed with a verdict and findings.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "findingsCount": {
+                "type": "number"
+              },
+              "reviewPath": {
+                "type": "string"
+              },
+              "reviewerRuntime": {
+                "type": "string"
+              },
+              "sliceEventId": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SLICE_SCOPE_DECLARED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A slice locked its intended file scope.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "expansionBound": {
+                "type": "object"
+              },
+              "lockedScopeHash": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "array"
+              },
+              "sliceId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SLICE_SCOPE_EXPANDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A slice's locked scope was expanded with a reason.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "addedPaths": {
+                "type": "array"
+              },
+              "newHash": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "sliceId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SOURCE_HASH_RECOMPUTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Source-file hashes were recomputed for drift tracking.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "count": {
+                "type": "number"
+              },
+              "paths": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TRIGGER_FIRED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A registered trigger fired and dispatched its target.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "cooldownMs": {
+                "type": "number"
+              },
+              "depsHash": {
+                "type": "string"
+              },
+              "escalated": {
+                "type": "boolean"
+              },
+              "planId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "risk": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sliceEventId": {
+                "type": "string"
+              },
+              "sourceEventId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "triggerId": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AGENT_FILE_SYNCED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Agent instruction files were synced.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array"
+              },
+              "perFile": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_AUTO_CLOSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A stale session was auto-closed by the janitor.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "ageMs": {
+                "type": "number"
+              },
+              "lastHeartbeatAt": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_AUTO_REGISTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A session was auto-registered by a SessionStart hook.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "parentSessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_STALE_DETECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A session was detected as stale (missed heartbeats).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "ageMs": {
+                "type": "number"
+              },
+              "lastHeartbeatAt": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "COMPACTION_CHECKPOINT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A pre-compaction checkpoint captured record currency before context compaction.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "trigger": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "claudeSessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lastSliceStop": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "handoffSetAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "openApprovals": {
+                "type": "number"
+              },
+              "activeClaims": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "VENDOR_MEMORY_IMPORTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A fact was imported from a vendor tool's own memory store.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "dir": {
+                "type": "string"
+              },
+              "fact": {
+                "type": "object"
+              },
+              "factId": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SLASH_COMMANDS_SYNCED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Slash-command definitions were synced to the runtime.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array"
+              },
+              "perFile": {
+                "type": "object"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TEAM_OPENED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A team was opened with allocated lanes and members.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "lanes": {
+                "type": "array"
+              },
+              "members": {
+                "type": "number"
+              },
+              "parentSessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "teamId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TEAM_LANE_ALLOCATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A lane was allocated to a team.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "teamId": {
+                "type": "string"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TEAM_MEMBER_JOINED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A member session joined a team.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              },
+              "teamId": {
+                "type": "string"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TEAM_MEMBER_LEFT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A member session left a team.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "exitCode": {
+                "type": "number"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "teamId": {
+                "type": "string"
+              },
+              "workerId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TEAM_CLOSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A team was closed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "openMembers": {
+                "type": "array"
+              },
+              "teamId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PIPELINE_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A multi-stage pipeline run started.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "goal": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "pipelineRunId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PIPELINE_STAGE_ENTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A pipeline run entered a stage.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "intent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "pipelineRunId": {
+                "type": "string"
+              },
+              "stage": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PIPELINE_STAGE_EXITED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A pipeline run exited a stage with a status.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "pipelineRunId": {
+                "type": "string"
+              },
+              "stage": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PIPELINE_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A pipeline run completed all stages.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "pipelineRunId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PIPELINE_HALTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A pipeline run halted before completion.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "pipelineRunId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ADVISOR_INVOKED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An advisor (external CLI) was invoked in a subprocess.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "advisorId": {
+                "type": "string"
+              },
+              "authProvider": {
+                "type": "string"
+              },
+              "binary": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "parentSessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "timeoutSec": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ADVISOR_ARTIFACT_WRITTEN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An advisor wrote its result artifact.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "advisorId": {
+                "type": "string"
+              },
+              "artifactPath": {
+                "type": "string"
+              },
+              "exitCode": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TOKEN_USAGE_REPORTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Token usage for a session/model was reported to the ledger.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "cacheCreation": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cacheRead": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "importHash": {
+                "type": "string"
+              },
+              "inputTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outputTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "runtime": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "ts": {
+                "type": "string"
+              },
+              "unreportedTokens": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_INJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Skill bodies were auto-injected into an orientation digest.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "skillIds": {
+                "type": "array"
+              },
+              "tags": {
+                "type": "array"
+              },
+              "totalBytes": {
+                "type": "number"
+              },
+              "triggers": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TOOL_INVOKED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A default framework tool invocation started.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "argv": {
+                "type": "array"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": "string"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TOOL_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A default framework tool invocation exited.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "argv": {
+                "type": "array"
+              },
+              "durationMs": {
+                "type": "number"
+              },
+              "exitCode": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": "string"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TOOL_REFUSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A tool invocation was refused (allowlist or dangerous form).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "argv": {
+                "type": "array"
+              },
+              "argv_index": {
+                "type": "number"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "pattern_type": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "GOVERNANCE_MODE_CHANGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The workspace governance tier changed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "from": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_CREATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A persisted plan was created.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "goal": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "intent": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "phases": {
+                "type": "array"
+              },
+              "planId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_PHASE_ADDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A phase was added to a plan.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "intent": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "planId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_PHASE_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan phase was completed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "planId": {
+                "type": "string"
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_PHASE_BLOCKED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan phase was blocked with a reason.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "planId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_REVISED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan was revised (phases added/removed/modified).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "planId": {
+                "type": "string"
+              },
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "diff": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan was completed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "planId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "PLAN_CANCELLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A plan was cancelled.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "planId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LOOP_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A loop (ralph or plan-loop) started.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "loopId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              },
+              "maxIter": {
+                "type": "number"
+              },
+              "cooldownMs": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LOOP_ITERATION_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A loop iteration started.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "loopId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "iter": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LOOP_ITERATION_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A loop iteration completed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "loopId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "iter": {
+                "type": "number"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "signature": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LOOP_HALTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A loop halted before its goal.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "loopId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "iter": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "signature": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LOOP_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A loop completed its goal.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "loopId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "iter": {
+                "type": "number"
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "COORDINATOR_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A coordinator primitive started driving a plan.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "coordinatorId": {
+                "type": "string"
+              },
+              "dryRun": {
+                "type": "boolean"
+              },
+              "planId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "COORDINATOR_PHASE_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A coordinator entered a plan phase.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "coordinatorId": {
+                "type": "string"
+              },
+              "intent": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "planId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "COORDINATOR_PHASE_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A coordinator completed a plan phase.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "coordinatorId": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "planId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "COORDINATOR_HALTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A coordinator halted.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "coordinatorId": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "exitCode": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": "string"
+              },
+              "planId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "signature": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "COORDINATOR_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A coordinator completed the plan.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "coordinatorId": {
+                "type": "string"
+              },
+              "phaseCount": {
+                "type": "number"
+              },
+              "planId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LANE_CLAIM_FORCED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A lane claim was force-taken from a prior holder.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "by": {
+                "type": "string"
+              },
+              "focus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "priorSessionId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_CANDIDATE_DETECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A candidate skill pattern was detected.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "examples": {
+                "type": "array"
+              },
+              "hash": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_CANDIDATE_APPROVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A skill candidate was approved into the gallery.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "hash": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_CANDIDATE_REJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A skill candidate was rejected.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "hash": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TRUST_AUDIT_RAN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A supply-chain trust audit ran over dependencies.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "audited": {
+                "type": "number"
+              },
+              "blockDays": {
+                "type": "number"
+              },
+              "cacheHit": {
+                "type": "boolean"
+              },
+              "cacheHits": {
+                "type": "number"
+              },
+              "cacheMisses": {
+                "type": "number"
+              },
+              "cveTotal": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "depsHash": {
+                "type": "string"
+              },
+              "fails": {
+                "type": "number"
+              },
+              "freshDays": {
+                "type": "number"
+              },
+              "violations": {
+                "type": "number"
+              },
+              "warns": {
+                "type": "number"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TRUST_PIN_ADDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A dependency version/hash pin was added.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TRUST_PIN_REMOVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A dependency pin was removed.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "TRUST_VIOLATION_DETECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A supply-chain trust violation was detected.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "actual": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "expected": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": "string"
+              },
+              "pkg": {
+                "type": "string"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_PROVENANCE_VERIFIED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP template's provenance hash verified.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "sha256": {
+                "type": "string"
+              },
+              "template": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_PROVENANCE_MISMATCH"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP template's provenance hash did not match.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "actual": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "expected": {
+                "type": "string"
+              },
+              "template": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MCP_APPROVAL_GRANTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An MCP server was approved for use.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "by": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKER_ENV_FILTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A worker's environment was filtered against an allowlist.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "KEYS_ONLY": {
+                "type": "string"
+              },
+              "allowed": {
+                "type": "string"
+              },
+              "allowedCount": {
+                "type": "number"
+              },
+              "denied": {
+                "type": "array"
+              },
+              "deniedSecretCount": {
+                "type": "number"
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "workerId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SECRET_DETECTED_IN_ARGV"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A secret-shaped value was detected in tool argv.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "tool": {
+                "type": "string"
+              },
+              "pattern_type": {
+                "type": "string"
+              },
+              "argv_index": {
+                "type": "number"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "override": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_IMPORTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A skill was imported from an external source.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "trusted": {
+                "type": "boolean"
+              },
+              "dest": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_TRUSTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An imported skill was marked trusted.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "HANDOFF_SET"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A cross-session handoff narrative was set.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "auto": {
+                "type": "boolean"
+              },
+              "body": {
+                "type": "string"
+              },
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sliceEventId": {
+                "type": "string"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LEARN_MINED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Transcripts were mined for failed→succeeded correction pairs.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "candidates": {
+                "type": "number"
+              },
+              "mined": {
+                "type": "number"
+              },
+              "paired": {
+                "type": "number"
+              },
+              "since": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LEARN_DIGEST_WRITTEN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A no-provider learning digest was written.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "candidates": {
+                "type": "number"
+              },
+              "digestPath": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LEARN_JUDGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A correction candidate was judged by a worker.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "candidateId": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "destination": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string"
+              },
+              "workerId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "LEARN_CORRECTION_WRITTEN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A typed correction was written to an agent file or memory.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "correctionId": {
+                "type": "string"
+              },
+              "destination": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "memory": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MEMORY_FACT_SUPERSEDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A memory fact was superseded by a newer fact.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "fact": {
+                "type": "object"
+              },
+              "factId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "supersedes": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "BRIEFING_CURATED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A curated orient/handoff briefing persisted its original for retrieval.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "briefingId": {
+                "type": "string"
+              },
+              "dropped": {
+                "type": "string"
+              },
+              "handoff": {
+                "type": "object"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "orient": {
+                "type": "string"
+              },
+              "originalRef": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "BRIDGE_ORIGIN_REJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The bridge rejected a request with a non-loopback Host/Origin.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "host": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "origin": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "BLUEPRINT_DISTILLED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A blueprint skeleton was distilled into prose by a provider CLI.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "distilledBytes": {
+                "type": "number"
+              },
+              "outPath": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "skeletonBytes": {
+                "type": "number"
+              },
+              "slug": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DEBT_SCANNED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The source tree was scanned for deliberate-shortcut debt markers.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "files": {
+                "type": "number"
+              },
+              "ledgerPath": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "markers": {
+                "type": "number"
+              },
+              "noTrigger": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ARCHITECTURE_SCANNED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The declared architecture contract was checked against the import graph.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "blocking": {
+                "type": "boolean"
+              },
+              "cycles": {
+                "type": "number"
+              },
+              "driftScore": {
+                "type": "number"
+              },
+              "edges": {
+                "type": "number"
+              },
+              "failOn": {
+                "type": "string"
+              },
+              "forbidden": {
+                "type": "number"
+              },
+              "modules": {
+                "type": "number"
+              },
+              "newViolations": {
+                "type": "number"
+              },
+              "uncovered": {
+                "type": "number"
+              },
+              "undeclared": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "FOCUS_TAGGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A per-turn drift trajectory tag was recorded vs the declared goal.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "away": {
+                "type": "string"
+              },
+              "distanceScore": {
+                "type": "number"
+              },
+              "goalSetAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lateral": {
+                "type": "string"
+              },
+              "signals": {
+                "type": "object"
+              },
+              "sourceEventId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": "string"
+              },
+              "toward": {
+                "type": "string"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DRIFT_FLAGGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Sustained un-returned drift raised a swap/revert/continue flag.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "cleared": {
+                "type": "boolean"
+              },
+              "continue": {
+                "type": "string"
+              },
+              "deterministic": {
+                "type": "boolean"
+              },
+              "enriched": {
+                "type": "boolean"
+              },
+              "menu": {
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "revert": {
+                "type": "string"
+              },
+              "runs": {
+                "type": "number"
+              },
+              "swap": {
+                "type": "string"
+              },
+              "workerId": {
+                "type": "string"
+              },
+              "triggered_by": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUTONOMY_SCORED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Per-lane earned-autonomy trust scores were computed over the record.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "asOf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "attribution": {
+                "type": "string"
+              },
+              "configHash": {
+                "type": "string"
+              },
+              "totalSlices": {
+                "type": "number"
+              },
+              "lanes": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "AUTONOMY_RECOMMENDATION"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An autonomy rung change was recommended (recommend-only).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "asOf": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lane": {
+                "type": "string"
+              },
+              "fromRung": {
+                "type": "string"
+              },
+              "toRung": {
+                "type": "string"
+              },
+              "wilson": {
+                "type": "number"
+              },
+              "n": {
+                "type": "number"
+              },
+              "coverage": {
+                "type": "number"
+              },
+              "recommendation": {
+                "type": "string"
+              },
+              "muted": {
+                "type": "boolean"
+              },
+              "mutedReason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "configHash": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKTREE_ATTACHED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A worktree checkout was attached to a lane claim.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "attachmentId": {
+                "type": "string"
+              },
+              "claimEventId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lane": {
+                "type": "string"
+              },
+              "session": {
+                "type": "string"
+              },
+              "pathRepoRel": {
+                "type": "string"
+              },
+              "pathAbs": {
+                "type": "string"
+              },
+              "branchRef": {
+                "type": "string"
+              },
+              "baseRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "baseHeadAtAttach": {
+                "type": "string"
+              },
+              "created": {
+                "type": "boolean"
+              },
+              "reused": {
+                "type": "boolean"
+              },
+              "dirty": {
+                "type": "boolean"
+              },
+              "gitCommonDir": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "platform": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKTREE_DETACHED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A worktree was detached from a lane claim with a disposition.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "attachmentId": {
+                "type": "string"
+              },
+              "lane": {
+                "type": "string"
+              },
+              "pathRepoRel": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string"
+              },
+              "branchHead": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "integrationRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "integrationHead": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ancestorCheck": {
+                "type": "string"
+              },
+              "dirtyAtDetach": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

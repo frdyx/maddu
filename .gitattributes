@@ -7,3 +7,12 @@ template/maddu/run text eol=lf
 # byte-for-byte against the serializer's LF output. Pin to LF so a Windows
 # checkout doesn't rewrite them to CRLF (the gate also normalizes on read).
 scripts/test/__golden__/cockpit/*.html text eol=lf
+
+# Published event-contract artifacts (roadmap #12b): rendered with LF by the
+# event-schema module generators and byte-compared by the
+# `generated-artifacts-current` gate. Pin to LF so a Windows checkout doesn't
+# rewrite them to CRLF and trip the drift gate against the LF-rendering source.
+docs/event-schema.md text eol=lf
+docs/event-schema.json text eol=lf
+template/maddu/docs/event-schema.md text eol=lf
+template/maddu/docs/event-schema.json text eol=lf

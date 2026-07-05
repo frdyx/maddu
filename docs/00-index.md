@@ -102,6 +102,10 @@ Reference docs that are not in the numbered series:
   and the marketing video.
 - [`lanes.md`](lanes.md) — default lane catalog.
 - [`upgrade-policy.md`](upgrade-policy.md) — what `maddu upgrade` touches.
+- [`event-schema.md`](event-schema.md) — the published spine event contract:
+  the envelope, the semver rules, and the per-type `data` schema for every
+  event. Generated from `event-schema.mjs`; the machine-readable JSON Schema is
+  [`event-schema.json`](event-schema.json).
 
 ## Where to go next
 
