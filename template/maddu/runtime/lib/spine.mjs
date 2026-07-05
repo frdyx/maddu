@@ -11,9 +11,15 @@
 
 import { mkdir, readFile, readdir, stat, writeFile, appendFile, open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
 import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
+// Sync-mode (#12c) partitioned append + the canonical line hash live in the
+// stdlib-only core so the worker token-wrapper can share them. hashLine is
+// re-exported below so verify.mjs / usage.mjs (which import it from here) are
+// unaffected.
+import { hashLine, readReplicaId, appendPartitioned } from './spine-append-core.mjs';
+export { hashLine };
 
 const ROLL_BYTES = 10 * 1024 * 1024;
 
@@ -413,9 +419,7 @@ export async function ensureSpine(repoRoot) {
 // Forward-only: events written before v1.14.0 have no `prev_hash`; the chain is
 // only checked from the first event that has one, so no migration is needed.
 // Both this writer and the verifier import `hashLine` so they can never drift.
-export function hashLine(line) {
-  return createHash('sha256').update(String(line).replace(/\r$/, ''), 'utf8').digest('hex');
-}
+// (Definition moved to spine-append-core.mjs; re-exported at the top of this file.)
 
 // Return the exact stored text of the last non-empty event line across all
 // segments, or null for an empty spine. Tail-reads (≤64 KB) so the cost stays
@@ -451,6 +455,15 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
   if (triggered_by) ev.triggered_by = triggered_by;
+
+  // ── Sync mode (#12c): partitioned append ──
+  // When this checkout has a replicaId (sync mode is opt-in via `spine sync
+  // init`), route to this replica's own partition under the append funnel, with
+  // prev_hash computed inside the lock so the per-partition chain cannot fork.
+  // Absent a replicaId this is a no-op and the DEFAULT path below runs unchanged.
+  const replicaId = await readReplicaId(repoRoot);
+  if (replicaId) return appendPartitioned(repoRoot, replicaId, ev);
+
   // Tamper-evidence (v1.14.0): link to the prior event by hashing its stored
   // line. Computed before the append so it reflects the true predecessor;
   // genesis (empty spine) → null.
