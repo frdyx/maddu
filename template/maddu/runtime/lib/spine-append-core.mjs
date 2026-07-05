@@ -108,6 +108,93 @@ function onWaitStderr(dir) {
   };
 }
 
+// ── Sync-mode read: deterministic k-way merge (#12c §B) ──
+//
+// Read order is NOT a flat sort on (ts, replicaId, seq). Each partition is an
+// ordered stream (append order = line seq) and is consumed in seq order ALWAYS —
+// so a backward clock step inside a partition can never reorder its own events (it
+// would contradict that partition's prev_hash chain). `ts` (tie-break replicaId)
+// only decides the CROSS-partition interleave: which stream's head goes next.
+
+// Parse the numeric segments directly under `dir` (non-recursive) into an ordered
+// event array (seq = segment index + line position). Mirrors spine.mjs#readAll's
+// bad-line tolerance so a torn line never aborts the whole read.
+async function readStreamEvents(dir) {
+  const segs = await listSegmentsInDir(dir);
+  const out = [];
+  for (const seg of segs) {
+    let text;
+    try { text = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line)); }
+      catch (err) { console.error(`spine: bad line in ${seg}:`, err.message); }
+    }
+  }
+  return out;
+}
+
+// Pure k-way merge of seq-ordered streams. Each `streams[k]` = { replicaId,
+// events } already in seq order; events are emitted in that order within a stream,
+// interleaved across streams by the smallest (ts, replicaId) at each step.
+export function kWayMergeStreams(streams) {
+  const cur = streams.map((s) => ({ replicaId: s.replicaId, events: s.events, i: 0 }));
+  const out = [];
+  for (;;) {
+    let best = -1;
+    for (let k = 0; k < cur.length; k++) {
+      const c = cur[k];
+      if (c.i >= c.events.length) continue;
+      if (best === -1) { best = k; continue; }
+      const a = c.events[c.i];
+      const b = cur[best].events[cur[best].i];
+      const at = a.ts ?? '', bt = b.ts ?? '';
+      if (at < bt || (at === bt && c.replicaId < cur[best].replicaId)) best = k;
+    }
+    if (best === -1) break;
+    const c = cur[best];
+    out.push(c.events[c.i++]);
+  }
+  return out;
+}
+
+// True when a non-empty by-replica partition tree exists (this checkout is in
+// sync mode, or has imported another replica's partitions). Drives readAll's
+// branch — the default single-machine repo (no by-replica dir) never enters here.
+export async function hasPartitions(repoRoot) {
+  const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
+  try {
+    const ents = await readdir(byReplica, { withFileTypes: true });
+    return ents.some((e) => e.isDirectory());
+  } catch {
+    return false;
+  }
+}
+
+// Sync-mode readAll: k-way merge across every partition, plus any residual flat
+// legacy stream (pre-migration) as a sentinel partition (replicaId '' sorts first
+// on a ts tie). After `spine sync init` migrates legacy into a partition, the flat
+// stream is empty and contributes nothing.
+export async function readAllPartitioned(repoRoot) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const streams = [];
+  const flat = await readStreamEvents(eventsDir);
+  if (flat.length) streams.push({ replicaId: '', events: flat });
+  const byReplica = join(eventsDir, 'by-replica');
+  let dirs = [];
+  try {
+    dirs = (await readdir(byReplica, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch { /* no partitions */ }
+  for (const rid of dirs) {
+    const evs = await readStreamEvents(join(byReplica, rid));
+    if (evs.length) streams.push({ replicaId: rid, events: evs });
+  }
+  return kWayMergeStreams(streams);
+}
+
 // Append a pre-built event into THIS replica's partition, under the append funnel,
 // with `prev_hash` computed INSIDE the lock so the read-then-write cannot fork.
 // `ev` must be a complete envelope WITHOUT prev_hash; prev_hash is set here.

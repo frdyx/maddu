@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readReplicaId, appendPartitioned } from './spine-append-core.mjs';
+import { hashLine, readReplicaId, appendPartitioned, hasPartitions, readAllPartitioned } from './spine-append-core.mjs';
 export { hashLine };
 
 const ROLL_BYTES = 10 * 1024 * 1024;
@@ -504,6 +504,11 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
 
 export async function readAll(repoRoot) {
   const paths = await ensureSpine(repoRoot);
+  // Sync mode (#12c): if a by-replica partition tree exists, return the k-way
+  // merge of the partitions (plus any residual flat legacy stream). A default
+  // single-machine repo has no by-replica dir and falls through to the unchanged
+  // flat concat below.
+  if (await hasPartitions(repoRoot)) return readAllPartitioned(repoRoot);
   const segs = await listSegments(paths);
   const out = [];
   for (const seg of segs) {
