@@ -3,8 +3,8 @@
   "description": "Roadmap #7 — the governance surface is itself budgeted. A per-category cap on the framework's own enforcement machinery (gates, CLI verbs, audit checks) so it can't grow faster than dead surface retires — the cure for F3/F4 becoming the next F3/F4. To exceed a cap, either retire/merge something OR add a waiver row here with a reason (each waiver raises that category's effective cap by exactly one, and shows as visible debt in `maddu audit`). Counts are read from ground truth (discoverGates / bin COMMANDS / the audit's own check registry) — nothing is hand-maintained. Enforced by checkGovernanceBudget in commands/audit.mjs via template/maddu/runtime/lib/governance-budget.mjs.",
   "categories": {
     "gates": {
-      "cap": 70,
-      "note": "builtin enforcement gates (template/maddu/runtime/gates/builtin/*.mjs)"
+      "cap": 71,
+      "note": "builtin enforcement gates (template/maddu/runtime/gates/builtin/*.mjs). Raised 70→71 (v1.94.0, roadmap #12b phase 7): +event-schema-complete, the parity gate for the newly-published event contract (EVENT_SCHEMA ↔ EVENT_TYPES 1:1). A deliberate, attributed raise for a permanent, warranted enforcement surface — not temporary debt (which would be a waiver) — mirroring the selfTest baseline-raise precedent below. Nothing retired: the contract-parity invariant has no existing home."
     },
     "verbs": {
       "cap": 70,

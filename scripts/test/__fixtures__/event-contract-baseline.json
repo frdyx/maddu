@@ -1,0 +1,1469 @@
+{
+  "version": "1.0.0",
+  "fingerprint": "69bae705",
+  "shape": {
+    "envelope": {
+      "actor": "string|null",
+      "data": "object",
+      "id": "string",
+      "lane": "string|null",
+      "prev_hash": "string|null",
+      "triggered_by": "object|null",
+      "ts": "string",
+      "type": "string",
+      "v": "number"
+    },
+    "envelopeRequired": [
+      "actor",
+      "data",
+      "id",
+      "lane",
+      "ts",
+      "type",
+      "v"
+    ],
+    "types": {
+      "ADVISOR_ARTIFACT_WRITTEN": {
+        "frozen": false,
+        "data": {
+          "advisorId": "string",
+          "artifactPath": "string",
+          "exitCode": "number|null",
+          "status": "string"
+        }
+      },
+      "ADVISOR_INVOKED": {
+        "frozen": false,
+        "data": {
+          "advisorId": "string",
+          "authProvider": "string",
+          "binary": "string",
+          "kind": "string",
+          "parentSessionId": "string|null",
+          "prompt": "string",
+          "runtime": "string",
+          "timeoutSec": "number"
+        }
+      },
+      "AGENT_FILE_SYNCED": {
+        "frozen": false,
+        "data": {
+          "action": "string",
+          "files": "array",
+          "perFile": "object"
+        }
+      },
+      "APPROVAL_DECIDED": {
+        "frozen": false,
+        "data": {
+          "approvalId": "string",
+          "decision": "string",
+          "reason": "string|null",
+          "tool": "string|null"
+        }
+      },
+      "APPROVAL_POLICY_SET": {
+        "frozen": false,
+        "data": {
+          "decision": "string",
+          "lane": "string|null",
+          "tool": "string"
+        }
+      },
+      "APPROVAL_REQUESTED": {
+        "frozen": false,
+        "data": {
+          "action": "string|null",
+          "payload": "object|null",
+          "summary": "string|null",
+          "tool": "string"
+        }
+      },
+      "ARCHITECTURE_SCANNED": {
+        "frozen": false,
+        "data": {
+          "blocking": "boolean",
+          "cycles": "number",
+          "driftScore": "number",
+          "edges": "number",
+          "failOn": "string",
+          "forbidden": "number",
+          "modules": "number",
+          "newViolations": "number",
+          "uncovered": "number",
+          "undeclared": "number"
+        }
+      },
+      "AUDIT_REPORT": {
+        "frozen": false,
+        "data": {
+          "checks": "array",
+          "counts": "object",
+          "scope": "string"
+        }
+      },
+      "AUTH_KEY_ADDED": {
+        "frozen": false,
+        "data": {
+          "keyId": "string",
+          "label": "string",
+          "provider": "string",
+          "replaced": "boolean",
+          "tail": "string"
+        }
+      },
+      "AUTH_KEY_RATE_LIMITED": {
+        "frozen": false,
+        "data": {
+          "keyId": "string",
+          "provider": "string",
+          "until": "string"
+        }
+      },
+      "AUTH_KEY_REMOVED": {
+        "frozen": false,
+        "data": {
+          "keyId": "string",
+          "provider": "string"
+        }
+      },
+      "AUTH_KEY_ROTATED": {
+        "frozen": false,
+        "data": {
+          "from": "string",
+          "provider": "string",
+          "reason": "string",
+          "to": "string"
+        }
+      },
+      "AUTONOMY_RECOMMENDATION": {
+        "frozen": true,
+        "data": {
+          "asOf": "string|null",
+          "configHash": "string",
+          "coverage": "number",
+          "fromRung": "string",
+          "lane": "string",
+          "muted": "boolean",
+          "mutedReason": "string|null",
+          "n": "number",
+          "recommendation": "string",
+          "schemaVersion": "number",
+          "toRung": "string",
+          "wilson": "number"
+        }
+      },
+      "AUTONOMY_SCORED": {
+        "frozen": true,
+        "data": {
+          "asOf": "string|null",
+          "attribution": "string",
+          "configHash": "string",
+          "lanes": "array",
+          "schemaVersion": "number",
+          "totalSlices": "number"
+        }
+      },
+      "BLUEPRINT_DISTILLED": {
+        "frozen": false,
+        "data": {
+          "distilledBytes": "number",
+          "outPath": "string",
+          "provider": "string",
+          "runtime": "string",
+          "skeletonBytes": "number",
+          "slug": "string"
+        }
+      },
+      "BOSS_MESSAGE": {
+        "frozen": false,
+        "data": {
+          "bossSessionId": "string",
+          "citedRule": "string|null",
+          "proposalId": "string",
+          "reasonCode": "string",
+          "role": "string",
+          "text": "string"
+        }
+      },
+      "BRIDGE_ORIGIN_REJECTED": {
+        "frozen": false,
+        "data": {
+          "host": "string|null",
+          "method": "string",
+          "origin": "string|null",
+          "path": "string",
+          "reason": "string"
+        }
+      },
+      "BRIEFING_CURATED": {
+        "frozen": false,
+        "data": {
+          "briefingId": "string",
+          "dropped": "string",
+          "handoff": "object",
+          "kind": "string",
+          "orient": "string",
+          "originalRef": "string"
+        }
+      },
+      "CHECKPOINT_CREATED": {
+        "frozen": false,
+        "data": {
+          "commit": "string",
+          "id": "string",
+          "tag": "string",
+          "title": "string",
+          "triggered_by": "object|null"
+        }
+      },
+      "CHECKPOINT_REMOVED": {
+        "frozen": false,
+        "data": {
+          "id": "string"
+        }
+      },
+      "CHECKPOINT_ROLLBACK_REQUESTED": {
+        "frozen": false,
+        "data": {
+          "applied": "boolean",
+          "id": "string",
+          "mode": "string"
+        }
+      },
+      "CHECKPOINT_WORKTREE_CREATED": {
+        "frozen": false,
+        "data": {
+          "id": "string",
+          "path": "string"
+        }
+      },
+      "COMPACTION_CHECKPOINT": {
+        "frozen": false,
+        "data": {
+          "activeClaims": "number",
+          "claudeSessionId": "string|null",
+          "handoffSetAt": "string|null",
+          "lastSliceStop": "object|null",
+          "openApprovals": "number",
+          "trigger": "string|null"
+        }
+      },
+      "COORDINATOR_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "coordinatorId": "string",
+          "phaseCount": "number",
+          "planId": "string"
+        }
+      },
+      "COORDINATOR_HALTED": {
+        "frozen": false,
+        "data": {
+          "coordinatorId": "string",
+          "detail": "string",
+          "exitCode": "number|null",
+          "phase": "string",
+          "planId": "string",
+          "reason": "string",
+          "signature": "string|null"
+        }
+      },
+      "COORDINATOR_PHASE_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "coordinatorId": "string",
+          "phase": "string",
+          "planId": "string"
+        }
+      },
+      "COORDINATOR_PHASE_STARTED": {
+        "frozen": false,
+        "data": {
+          "coordinatorId": "string",
+          "intent": "string",
+          "phase": "string",
+          "planId": "string"
+        }
+      },
+      "COORDINATOR_STARTED": {
+        "frozen": false,
+        "data": {
+          "coordinatorId": "string",
+          "dryRun": "boolean",
+          "planId": "string",
+          "runtime": "string|null"
+        }
+      },
+      "DEBT_SCANNED": {
+        "frozen": false,
+        "data": {
+          "files": "number",
+          "ledgerPath": "string|null",
+          "markers": "number",
+          "noTrigger": "number"
+        }
+      },
+      "DISCORD_ALLOWLIST_SET": {
+        "frozen": false,
+        "data": {
+          "channelIds": "array",
+          "count": "number"
+        }
+      },
+      "DISCORD_DISABLED": {
+        "frozen": false,
+        "data": {}
+      },
+      "DISCORD_ENABLED": {
+        "frozen": false,
+        "data": {
+          "tail": "string"
+        }
+      },
+      "DISCORD_OUTBOUND": {
+        "frozen": false,
+        "data": {
+          "channelId": "string",
+          "length": "number",
+          "messageId": "string"
+        }
+      },
+      "DISCORD_OUTBOUND_FAILED": {
+        "frozen": false,
+        "data": {
+          "channelId": "string",
+          "error": "string",
+          "reason": "string",
+          "status": "string"
+        }
+      },
+      "DOCTOR_REPORT": {
+        "frozen": false,
+        "data": {
+          "checks": "array",
+          "counts": "object"
+        }
+      },
+      "DRIFT_FLAGGED": {
+        "frozen": false,
+        "data": {
+          "cleared": "boolean",
+          "continue": "string",
+          "deterministic": "boolean",
+          "enriched": "boolean",
+          "menu": "array",
+          "reason": "string",
+          "revert": "string",
+          "runs": "number",
+          "swap": "string",
+          "triggered_by": "object|null",
+          "workerId": "string"
+        }
+      },
+      "EMAIL_ALLOWLIST_SET": {
+        "frozen": false,
+        "data": {
+          "count": "number",
+          "recipients": "array"
+        }
+      },
+      "EMAIL_CONFIG_SET": {
+        "frozen": false,
+        "data": {
+          "from": "string",
+          "host": "string",
+          "port": "number",
+          "user": "string"
+        }
+      },
+      "EMAIL_DISABLED": {
+        "frozen": false,
+        "data": {}
+      },
+      "EMAIL_ENABLED": {
+        "frozen": false,
+        "data": {}
+      },
+      "EMAIL_OUTBOUND_FAILED": {
+        "frozen": false,
+        "data": {
+          "error": "string",
+          "reason": "string",
+          "to": "string"
+        }
+      },
+      "EMAIL_SENT": {
+        "frozen": false,
+        "data": {
+          "length": "number",
+          "to": "string"
+        }
+      },
+      "FOCUS_TAGGED": {
+        "frozen": false,
+        "data": {
+          "away": "string",
+          "distanceScore": "number",
+          "goalSetAt": "string|null",
+          "lateral": "string",
+          "signals": "object",
+          "sourceEventId": "string|null",
+          "tag": "string",
+          "toward": "string",
+          "triggered_by": "object|null"
+        }
+      },
+      "FOLLOWUP_OPENED": {
+        "frozen": false,
+        "data": {
+          "draftScope": "array",
+          "fromReviewEventId": "string",
+          "severity": "string"
+        }
+      },
+      "FRAMEWORK_BOOTED": {
+        "frozen": false,
+        "data": {
+          "host": "string",
+          "pid": "number",
+          "port": "number",
+          "version": "string",
+          "workspaceId": "string"
+        }
+      },
+      "FRAMEWORK_INSTALLED": {
+        "frozen": false,
+        "data": {
+          "files": "number",
+          "version": "string"
+        }
+      },
+      "FRAMEWORK_UPGRADED": {
+        "frozen": false,
+        "data": {
+          "added": "number",
+          "from": "string",
+          "removed": "number",
+          "skipped": "number",
+          "to": "string",
+          "updated": "number",
+          "warnings": "array"
+        }
+      },
+      "GATE_RAN": {
+        "frozen": false,
+        "data": {
+          "durationMs": "number",
+          "evidence": "object|null",
+          "gateId": "string",
+          "ok": "boolean",
+          "severity": "string",
+          "sliceId": "string",
+          "status": "string"
+        }
+      },
+      "GOAL_DECLARED": {
+        "frozen": false,
+        "data": {
+          "constraints": "array",
+          "objective": "string",
+          "success": "array"
+        }
+      },
+      "GOVERNANCE_MODE_CHANGED": {
+        "frozen": false,
+        "data": {
+          "by": "string|null",
+          "from": "string",
+          "reason": "string|null",
+          "to": "string"
+        }
+      },
+      "HANDOFF_SET": {
+        "frozen": false,
+        "data": {
+          "auto": "boolean",
+          "body": "string",
+          "by": "string|null",
+          "sliceEventId": "string",
+          "triggered_by": "object|null"
+        }
+      },
+      "IMPORT_ACCEPTED": {
+        "frozen": false,
+        "data": {
+          "id": "string",
+          "kind": "string",
+          "refId": "string"
+        }
+      },
+      "IMPORT_REJECTED": {
+        "frozen": false,
+        "data": {
+          "error": "string",
+          "hitCount": "number",
+          "id": "string",
+          "kind": "string",
+          "patterns": "array",
+          "reason": "string"
+        }
+      },
+      "INBOX_MESSAGE": {
+        "frozen": false,
+        "data": {
+          "kind": "string",
+          "message": "string",
+          "reason": "string",
+          "scheduleId": "string",
+          "scope": "string",
+          "text": "string",
+          "to": "string"
+        }
+      },
+      "LANE_ADDED": {
+        "frozen": false,
+        "data": {
+          "lane": "object"
+        }
+      },
+      "LANE_CLAIMED": {
+        "frozen": false,
+        "data": {
+          "focus": "string|null"
+        }
+      },
+      "LANE_CLAIM_FORCED": {
+        "frozen": false,
+        "data": {
+          "by": "string",
+          "focus": "string|null",
+          "lane": "string|null",
+          "priorSessionId": "string",
+          "reason": "string|null"
+        }
+      },
+      "LANE_DEFAULTS_SET": {
+        "frozen": false,
+        "data": {
+          "defaults": "object"
+        }
+      },
+      "LANE_POLICY_SET": {
+        "frozen": false,
+        "data": {
+          "policy": "object"
+        }
+      },
+      "LANE_RELEASED": {
+        "frozen": false,
+        "data": {}
+      },
+      "LANE_REMOVED": {
+        "frozen": false,
+        "data": {
+          "ok": "boolean"
+        }
+      },
+      "LEARN_CORRECTION_WRITTEN": {
+        "frozen": false,
+        "data": {
+          "agent": "string",
+          "category": "string",
+          "correctionId": "string",
+          "destination": "string",
+          "file": "string",
+          "memory": "string",
+          "target": "string"
+        }
+      },
+      "LEARN_DIGEST_WRITTEN": {
+        "frozen": false,
+        "data": {
+          "candidates": "number",
+          "digestPath": "string"
+        }
+      },
+      "LEARN_JUDGED": {
+        "frozen": false,
+        "data": {
+          "candidateId": "string",
+          "category": "string",
+          "destination": "string",
+          "verdict": "string",
+          "workerId": "string"
+        }
+      },
+      "LEARN_MINED": {
+        "frozen": false,
+        "data": {
+          "candidates": "number",
+          "mined": "number",
+          "paired": "number",
+          "since": "string|null",
+          "slug": "string|null"
+        }
+      },
+      "LOOP_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "iter": "number",
+          "kind": "string",
+          "loopId": "string",
+          "summary": "string|null"
+        }
+      },
+      "LOOP_HALTED": {
+        "frozen": false,
+        "data": {
+          "iter": "number|null",
+          "kind": "string|null",
+          "loopId": "string",
+          "reason": "string",
+          "signature": "string"
+        }
+      },
+      "LOOP_ITERATION_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "iter": "number",
+          "kind": "string",
+          "loopId": "string",
+          "ok": "boolean",
+          "signature": "string|null",
+          "summary": "string|null"
+        }
+      },
+      "LOOP_ITERATION_STARTED": {
+        "frozen": false,
+        "data": {
+          "iter": "number",
+          "kind": "string",
+          "loopId": "string"
+        }
+      },
+      "LOOP_STARTED": {
+        "frozen": false,
+        "data": {
+          "cooldownMs": "number",
+          "goal": "string",
+          "kind": "string",
+          "loopId": "string",
+          "maxIter": "number"
+        }
+      },
+      "MAILBOX_READ": {
+        "frozen": false,
+        "data": {
+          "messageId": "string"
+        }
+      },
+      "MAILBOX_SENT": {
+        "frozen": false,
+        "data": {
+          "hasBody": "boolean",
+          "messageId": "string",
+          "subject": "string"
+        }
+      },
+      "MCP_APPROVAL_GRANTED": {
+        "frozen": false,
+        "data": {
+          "by": "string",
+          "name": "string"
+        }
+      },
+      "MCP_DISABLED": {
+        "frozen": false,
+        "data": {
+          "name": "string"
+        }
+      },
+      "MCP_ENABLED": {
+        "frozen": false,
+        "data": {
+          "name": "string"
+        }
+      },
+      "MCP_PROVENANCE_MISMATCH": {
+        "frozen": false,
+        "data": {
+          "actual": "string",
+          "detail": "string",
+          "expected": "string",
+          "template": "string"
+        }
+      },
+      "MCP_PROVENANCE_VERIFIED": {
+        "frozen": false,
+        "data": {
+          "sha256": "string",
+          "template": "string"
+        }
+      },
+      "MCP_REGISTERED": {
+        "frozen": false,
+        "data": {
+          "enabled": "boolean",
+          "name": "string",
+          "transport": "string"
+        }
+      },
+      "MCP_REMOVED": {
+        "frozen": false,
+        "data": {
+          "name": "string"
+        }
+      },
+      "MCP_TESTED": {
+        "frozen": false,
+        "data": {
+          "error": "string|null",
+          "name": "string",
+          "ok": "boolean",
+          "transport": "string"
+        }
+      },
+      "MEMORY_FACT_SUPERSEDED": {
+        "frozen": false,
+        "data": {
+          "fact": "object",
+          "factId": "string",
+          "kind": "string",
+          "reason": "string",
+          "supersedes": "string"
+        }
+      },
+      "PENDING_ACTION_DRAINED": {
+        "frozen": false,
+        "data": {
+          "actionId": "string",
+          "detail": "string",
+          "kind": "string",
+          "outcome": "string",
+          "payload": "object"
+        }
+      },
+      "PENDING_ACTION_ENQUEUED": {
+        "frozen": false,
+        "data": {
+          "actionId": "string",
+          "kind": "string",
+          "payload": "object"
+        }
+      },
+      "PHASE_CLEARED": {
+        "frozen": false,
+        "data": {
+          "name": "string|null"
+        }
+      },
+      "PHASE_DECLARED": {
+        "frozen": false,
+        "data": {
+          "name": "string",
+          "notes": "string|null",
+          "tier": "string|null"
+        }
+      },
+      "PIPELINE_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "name": "string",
+          "pipelineRunId": "string"
+        }
+      },
+      "PIPELINE_HALTED": {
+        "frozen": false,
+        "data": {
+          "pipelineRunId": "string",
+          "reason": "string"
+        }
+      },
+      "PIPELINE_STAGE_ENTERED": {
+        "frozen": false,
+        "data": {
+          "intent": "string|null",
+          "pipelineRunId": "string",
+          "stage": "string"
+        }
+      },
+      "PIPELINE_STAGE_EXITED": {
+        "frozen": false,
+        "data": {
+          "pipelineRunId": "string",
+          "stage": "string",
+          "status": "string"
+        }
+      },
+      "PIPELINE_STARTED": {
+        "frozen": false,
+        "data": {
+          "goal": "string|null",
+          "name": "string",
+          "pipelineRunId": "string"
+        }
+      },
+      "PLAN_CANCELLED": {
+        "frozen": false,
+        "data": {
+          "planId": "string",
+          "reason": "string|null"
+        }
+      },
+      "PLAN_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "planId": "string"
+        }
+      },
+      "PLAN_CREATED": {
+        "frozen": false,
+        "data": {
+          "goal": "string|null",
+          "intent": "string",
+          "name": "string",
+          "phases": "array",
+          "planId": "string",
+          "title": "string"
+        }
+      },
+      "PLAN_PHASE_ADDED": {
+        "frozen": false,
+        "data": {
+          "at": "string",
+          "intent": "string",
+          "name": "string",
+          "planId": "string"
+        }
+      },
+      "PLAN_PHASE_BLOCKED": {
+        "frozen": false,
+        "data": {
+          "name": "string",
+          "planId": "string",
+          "reason": "string"
+        }
+      },
+      "PLAN_PHASE_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "name": "string",
+          "planId": "string",
+          "summary": "string|null"
+        }
+      },
+      "PLAN_REVISED": {
+        "frozen": false,
+        "data": {
+          "by": "string|null",
+          "diff": "object",
+          "planId": "string"
+        }
+      },
+      "PROPOSAL_CREATED": {
+        "frozen": false,
+        "data": {
+          "action": "string|null",
+          "actionPayload": "object|null",
+          "bossSessionId": "string",
+          "enforcer": "object|null",
+          "id": "string",
+          "preconditions": "array",
+          "risk": "string",
+          "summary": "string|null"
+        }
+      },
+      "PROPOSAL_DECIDED": {
+        "frozen": false,
+        "data": {
+          "decision": "string",
+          "id": "string",
+          "reason": "string|null"
+        }
+      },
+      "RUNTIME_DETECTED": {
+        "frozen": false,
+        "data": {
+          "exitCode": "number",
+          "name": "string",
+          "ok": "boolean",
+          "version": "string|null"
+        }
+      },
+      "RUNTIME_REGISTERED": {
+        "frozen": false,
+        "data": {
+          "binary": "string",
+          "displayName": "string",
+          "name": "string",
+          "version": "string|null"
+        }
+      },
+      "RUNTIME_REMOVED": {
+        "frozen": false,
+        "data": {
+          "name": "string"
+        }
+      },
+      "SCHEDULE_CREATED": {
+        "frozen": false,
+        "data": {
+          "cron": "string",
+          "enabled": "boolean",
+          "id": "string",
+          "natural": "string|null",
+          "title": "string"
+        }
+      },
+      "SCHEDULE_FIRED": {
+        "frozen": false,
+        "data": {
+          "action": "object",
+          "cron": "string",
+          "fireCount": "number",
+          "id": "string",
+          "title": "string"
+        }
+      },
+      "SCHEDULE_REMOVED": {
+        "frozen": false,
+        "data": {
+          "id": "string"
+        }
+      },
+      "SCHEDULE_UPDATED": {
+        "frozen": false,
+        "data": {
+          "cron": "string",
+          "enabled": "boolean",
+          "id": "string",
+          "natural": "string|null",
+          "title": "string"
+        }
+      },
+      "SECRET_DETECTED_IN_ARGV": {
+        "frozen": false,
+        "data": {
+          "argv_index": "number",
+          "lane": "string|null",
+          "override": "string|null",
+          "pattern_type": "string",
+          "sessionId": "string|null",
+          "tool": "string"
+        }
+      },
+      "SESSION_AUTO_CLOSED": {
+        "frozen": false,
+        "data": {
+          "ageMs": "number",
+          "lastHeartbeatAt": "string",
+          "reason": "string",
+          "sessionId": "string"
+        }
+      },
+      "SESSION_AUTO_REGISTERED": {
+        "frozen": false,
+        "data": {
+          "label": "string",
+          "parentSessionId": "string|null",
+          "role": "string",
+          "runtime": "string",
+          "sessionId": "string",
+          "source": "string"
+        }
+      },
+      "SESSION_CLOSED": {
+        "frozen": false,
+        "data": {
+          "handoff": "object|null"
+        }
+      },
+      "SESSION_HEARTBEAT": {
+        "frozen": false,
+        "data": {
+          "focus": "string|null"
+        }
+      },
+      "SESSION_REGISTERED": {
+        "frozen": false,
+        "data": {
+          "focus": "string|null",
+          "label": "string|null",
+          "role": "string|null",
+          "runtime": "string|null"
+        }
+      },
+      "SESSION_STALE_DETECTED": {
+        "frozen": false,
+        "data": {
+          "ageMs": "number",
+          "lastHeartbeatAt": "string",
+          "sessionId": "string"
+        }
+      },
+      "SKILL_APPLIED": {
+        "frozen": false,
+        "data": {
+          "id": "string",
+          "sessionId": "string",
+          "title": "string"
+        }
+      },
+      "SKILL_CANDIDATE_APPROVED": {
+        "frozen": false,
+        "data": {
+          "hash": "string"
+        }
+      },
+      "SKILL_CANDIDATE_DETECTED": {
+        "frozen": false,
+        "data": {
+          "examples": "array",
+          "hash": "string",
+          "tags": "array"
+        }
+      },
+      "SKILL_CANDIDATE_REJECTED": {
+        "frozen": false,
+        "data": {
+          "hash": "string",
+          "reason": "string"
+        }
+      },
+      "SKILL_CREATED": {
+        "frozen": false,
+        "data": {
+          "title": "string"
+        }
+      },
+      "SKILL_DELETED": {
+        "frozen": false,
+        "data": {
+          "id": "string"
+        }
+      },
+      "SKILL_IMPORTED": {
+        "frozen": false,
+        "data": {
+          "dest": "string",
+          "sha256": "string",
+          "source": "string",
+          "trusted": "boolean"
+        }
+      },
+      "SKILL_INJECTED": {
+        "frozen": false,
+        "data": {
+          "sessionId": "string|null",
+          "skillIds": "array",
+          "tags": "array",
+          "totalBytes": "number",
+          "triggers": "array"
+        }
+      },
+      "SKILL_TRUSTED": {
+        "frozen": false,
+        "data": {
+          "id": "string"
+        }
+      },
+      "SKILL_UPDATED": {
+        "frozen": false,
+        "data": {}
+      },
+      "SLASH_COMMANDS_SYNCED": {
+        "frozen": false,
+        "data": {
+          "action": "string",
+          "files": "array",
+          "perFile": "object",
+          "reason": "string|null"
+        }
+      },
+      "SLICE_FUNCTIONAL_APPROVED": {
+        "frozen": false,
+        "data": {
+          "sliceId": "string"
+        }
+      },
+      "SLICE_REVIEWED": {
+        "frozen": false,
+        "data": {
+          "findingsCount": "number",
+          "reviewPath": "string",
+          "reviewerRuntime": "string",
+          "sliceEventId": "string",
+          "verdict": "string"
+        }
+      },
+      "SLICE_SCOPE_DECLARED": {
+        "frozen": false,
+        "data": {
+          "expansionBound": "object",
+          "lockedScopeHash": "string",
+          "scope": "array",
+          "sliceId": "string"
+        }
+      },
+      "SLICE_SCOPE_EXPANDED": {
+        "frozen": false,
+        "data": {
+          "addedPaths": "array",
+          "newHash": "string",
+          "reason": "string",
+          "sliceId": "string"
+        }
+      },
+      "SLICE_STOP": {
+        "frozen": false,
+        "data": {
+          "action": "string|null",
+          "deliverables": "object|null",
+          "gates": "array",
+          "learnings": "array",
+          "next": "array",
+          "paths": "array",
+          "reason": "string|null",
+          "risk": "object|null",
+          "summary": "string",
+          "targets": "array"
+        }
+      },
+      "SOURCE_HASH_RECOMPUTED": {
+        "frozen": false,
+        "data": {
+          "count": "number",
+          "paths": "array"
+        }
+      },
+      "TASK_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "id": "string"
+        }
+      },
+      "TASK_CREATED": {
+        "frozen": false,
+        "data": {
+          "blockedBy": "array",
+          "description": "string",
+          "id": "string",
+          "metadata": "object",
+          "owner": "string|null",
+          "status": "string",
+          "tags": "array",
+          "title": "string"
+        }
+      },
+      "TASK_UPDATED": {
+        "frozen": false,
+        "data": {
+          "by": "string",
+          "id": "string"
+        }
+      },
+      "TEAM_CLOSED": {
+        "frozen": false,
+        "data": {
+          "openMembers": "array",
+          "teamId": "string"
+        }
+      },
+      "TEAM_LANE_ALLOCATED": {
+        "frozen": false,
+        "data": {
+          "lane": "string|null",
+          "teamId": "string"
+        }
+      },
+      "TEAM_MEMBER_JOINED": {
+        "frozen": false,
+        "data": {
+          "lane": "string|null",
+          "sessionId": "string",
+          "teamId": "string"
+        }
+      },
+      "TEAM_MEMBER_LEFT": {
+        "frozen": false,
+        "data": {
+          "error": "string|null",
+          "exitCode": "number",
+          "lane": "string|null",
+          "sessionId": "string",
+          "teamId": "string",
+          "workerId": "string|null"
+        }
+      },
+      "TEAM_OPENED": {
+        "frozen": false,
+        "data": {
+          "label": "string",
+          "lanes": "array",
+          "members": "number",
+          "parentSessionId": "string|null",
+          "teamId": "string"
+        }
+      },
+      "TELEGRAM_ALLOWLIST_SET": {
+        "frozen": false,
+        "data": {
+          "chatIds": "array",
+          "count": "number"
+        }
+      },
+      "TELEGRAM_DISABLED": {
+        "frozen": false,
+        "data": {}
+      },
+      "TELEGRAM_DROPPED": {
+        "frozen": false,
+        "data": {
+          "chatId": "string",
+          "reason": "string",
+          "updateId": "number"
+        }
+      },
+      "TELEGRAM_ENABLED": {
+        "frozen": false,
+        "data": {
+          "tail": "string"
+        }
+      },
+      "TELEGRAM_INBOUND": {
+        "frozen": false,
+        "data": {
+          "chatId": "string",
+          "hasText": "boolean",
+          "length": "number",
+          "updateId": "number"
+        }
+      },
+      "TELEGRAM_OUTBOUND": {
+        "frozen": false,
+        "data": {
+          "chatId": "string",
+          "length": "number",
+          "messageId": "string"
+        }
+      },
+      "TELEGRAM_OUTBOUND_FAILED": {
+        "frozen": false,
+        "data": {
+          "chatId": "string",
+          "error": "string",
+          "reason": "string"
+        }
+      },
+      "TOKEN_USAGE_REPORTED": {
+        "frozen": false,
+        "data": {
+          "cacheCreation": "number|null",
+          "cacheRead": "number|null",
+          "importHash": "string",
+          "inputTokens": "number|null",
+          "model": "string|null",
+          "outputTokens": "number|null",
+          "runtime": "string|null",
+          "sessionId": "string|null",
+          "source": "string",
+          "ts": "string",
+          "unreportedTokens": "boolean"
+        }
+      },
+      "TOOL_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "argv": "array",
+          "durationMs": "number",
+          "exitCode": "number|null",
+          "lane": "string|null",
+          "sessionId": "string|null",
+          "tool": "string"
+        }
+      },
+      "TOOL_INVOKED": {
+        "frozen": false,
+        "data": {
+          "argv": "array",
+          "lane": "string|null",
+          "mode": "string",
+          "sessionId": "string|null",
+          "tool": "string"
+        }
+      },
+      "TOOL_REFUSED": {
+        "frozen": false,
+        "data": {
+          "argv": "array",
+          "argv_index": "number",
+          "detail": "string",
+          "lane": "string|null",
+          "pattern_type": "string",
+          "reason": "string",
+          "sessionId": "string|null",
+          "source": "string",
+          "tool": "string"
+        }
+      },
+      "TRIGGER_FIRED": {
+        "frozen": false,
+        "data": {
+          "cooldownMs": "number",
+          "depsHash": "string",
+          "escalated": "boolean",
+          "planId": "string",
+          "reason": "string",
+          "risk": "string|null",
+          "sliceEventId": "string",
+          "sourceEventId": "string|null",
+          "tag": "string",
+          "target": "string",
+          "triggerId": "string",
+          "triggered_by": "object|null",
+          "verdict": "string"
+        }
+      },
+      "TRUST_AUDIT_RAN": {
+        "frozen": false,
+        "data": {
+          "audited": "number",
+          "blockDays": "number",
+          "cacheHit": "boolean",
+          "cacheHits": "number",
+          "cacheMisses": "number",
+          "cveTotal": "number|null",
+          "depsHash": "string",
+          "fails": "number",
+          "freshDays": "number",
+          "triggered_by": "object|null",
+          "violations": "number",
+          "warns": "number"
+        }
+      },
+      "TRUST_PIN_ADDED": {
+        "frozen": false,
+        "data": {
+          "name": "string",
+          "sha256": "string",
+          "version": "string"
+        }
+      },
+      "TRUST_PIN_REMOVED": {
+        "frozen": false,
+        "data": {
+          "name": "string"
+        }
+      },
+      "TRUST_VIOLATION_DETECTED": {
+        "frozen": false,
+        "data": {
+          "actual": "string|null",
+          "detail": "string|null",
+          "expected": "string|null",
+          "kind": "string",
+          "pkg": "string",
+          "triggered_by": "object|null"
+        }
+      },
+      "VENDOR_MEMORY_IMPORTED": {
+        "frozen": false,
+        "data": {
+          "dir": "string",
+          "fact": "object",
+          "factId": "string",
+          "file": "string"
+        }
+      },
+      "WORKER_ENV_FILTERED": {
+        "frozen": false,
+        "data": {
+          "KEYS_ONLY": "string",
+          "allowed": "string",
+          "allowedCount": "number",
+          "denied": "array",
+          "deniedSecretCount": "number",
+          "runtime": "string",
+          "workerId": "string"
+        }
+      },
+      "WORKER_EXITED": {
+        "frozen": false,
+        "data": {
+          "exitCode": "number",
+          "id": "string",
+          "reason": "string",
+          "runtime": "string",
+          "sessionId": "string|null"
+        }
+      },
+      "WORKER_HEARTBEAT": {
+        "frozen": false,
+        "data": {
+          "focus": "string|null",
+          "id": "string"
+        }
+      },
+      "WORKER_KILLED": {
+        "frozen": false,
+        "data": {
+          "id": "string",
+          "reason": "string|null"
+        }
+      },
+      "WORKER_SPAWNED": {
+        "frozen": false,
+        "data": {
+          "args": "array",
+          "command": "string|null",
+          "error": "string|null",
+          "id": "string",
+          "log": "string",
+          "modelHint": "string|null",
+          "pid": "number|null",
+          "runtime": "string",
+          "sessionId": "string|null",
+          "stage": "string|null",
+          "wrapper": "string|null"
+        }
+      },
+      "WORKTREE_ATTACHED": {
+        "frozen": true,
+        "data": {
+          "attachmentId": "string",
+          "baseHeadAtAttach": "string",
+          "baseRef": "string|null",
+          "branchRef": "string",
+          "claimEventId": "string|null",
+          "created": "boolean",
+          "dirty": "boolean",
+          "gitCommonDir": "string|null",
+          "lane": "string",
+          "pathAbs": "string",
+          "pathRepoRel": "string",
+          "platform": "string",
+          "reused": "boolean",
+          "schemaVersion": "number",
+          "session": "string"
+        }
+      },
+      "WORKTREE_DETACHED": {
+        "frozen": true,
+        "data": {
+          "ancestorCheck": "string",
+          "attachmentId": "string",
+          "branchHead": "string|null",
+          "dirtyAtDetach": "boolean",
+          "disposition": "string",
+          "integrationHead": "string|null",
+          "integrationRef": "string|null",
+          "lane": "string",
+          "pathRepoRel": "string",
+          "reason": "string|null",
+          "schemaVersion": "number"
+        }
+      }
+    }
+  }
+}

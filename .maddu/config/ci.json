@@ -20,6 +20,7 @@
     "dependency-freshness",
     "docs-indexed",
     "event-dispositions-complete",
+    "event-schema-complete",
     "event-types-reachable",
     "focus-ledger-coherent",
     "framework-layout",
