@@ -196,16 +196,18 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
     if (res.code !== 0) {
       throw new Error(`git worktree add failed: ${(res.stderr || res.error || '').trim()}`);
     }
+    const created = !branchExists;
 
-    // Owner re-check inside the tightest possible window (Codex P1): the git
-    // worktree now exists, but if a concurrent force-claim stole the lane
-    // between the caller's projection check and here, remove the worktree and
-    // bail WITHOUT emitting WORKTREE_ATTACHED — nothing bound to a lost claim.
-    if (typeof ownerCheck === 'function' && !(await ownerCheck())) {
+    // Unwind the git side of a provisioning that must not become an
+    // attachment. Removes the checkout AND, when THIS invocation created the
+    // lane branch, deletes it — otherwise a later attach would see
+    // branchExists=true, check out that stale branch, yet record the current
+    // HEAD as baseHeadAtAttach (wrong base). (Codex P2.)
+    const rollbackGit = async () => {
       await gitRun(['worktree', 'remove', '--force', path], stateRoot, 10000);
       try { await rm(path, { recursive: true, force: true }); } catch {}
-      throw new Error(`lane "${lane}" ownership changed during provisioning — worktree rolled back, not attached`);
-    }
+      if (created) await gitRun(['branch', '-D', branch], stateRoot, 5000);
+    };
 
     // Hide the pointer from git status in the new worktree (Codex P2): write it
     // to the worktree's own info/exclude so the checkout isn't dirtied and a
@@ -228,6 +230,17 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
 
     const commonDir = (await gitRun(['rev-parse', '--git-common-dir'], stateRoot, 3000)).stdout.trim() || null;
     const attachmentId = makeId('wta');
+
+    // Owner re-check in the TIGHTEST possible window (Codex P1): re-evaluate
+    // ownership as the immediately-preceding step to the append, so the only
+    // thing between the check and the durable WORKTREE_ATTACHED is the
+    // synchronous object build below — no async op a concurrent force-claim
+    // could interleave into. On a lost race: unwind git, emit no event.
+    if (typeof ownerCheck === 'function' && !(await ownerCheck())) {
+      await rollbackGit();
+      throw new Error(`lane "${lane}" ownership changed during provisioning — worktree rolled back, not attached`);
+    }
+
     const ev = await append(stateRoot, {
       type: EVENT_TYPES.WORKTREE_ATTACHED,
       actor: by || session, lane,
@@ -240,13 +253,13 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
         branchRef,
         baseRef: head.branch ? `refs/heads/${head.branch}` : null,
         baseHeadAtAttach: head.commit,
-        created: !branchExists, reused: false, dirty: false,
+        created, reused: false, dirty: false,
         gitCommonDir: commonDir, platform: process.platform,
       },
     });
     return {
       attachmentId, lane, session, path, relPath, branch, branchRef,
-      created: !branchExists, reused: false, eventId: ev.id,
+      created, reused: false, eventId: ev.id,
     };
   } finally {
     try { await rm(lockDir, { recursive: true, force: true }); } catch {}

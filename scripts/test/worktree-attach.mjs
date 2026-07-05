@@ -152,6 +152,10 @@ async function main() {
     const afterAtt = (await spine.readAll(repo)).filter((e) => e.type === 'WORKTREE_ATTACHED').length;
     ok('owner-change during provisioning throws + emits no event', rolledBack && afterAtt === beforeAtt);
     ok('rolled-back worktree removed from disk', !(await exists(path.join(repo, '.maddu', 'worktrees', 'cockpit-shell'))));
+    // Codex P2: rollback must also delete the branch this attach created, or a
+    // retry would check out a stale branch while recording a fresh base head.
+    const staleBranch = await git(['rev-parse', '--verify', '--quiet', 'refs/heads/maddu/lane/cockpit-shell'], repo);
+    ok('rolled-back attach deleted the branch it created', staleBranch.code !== 0);
 
     // ── the spine verifies clean ──
     const res = await verify.verifySpine(repo);
