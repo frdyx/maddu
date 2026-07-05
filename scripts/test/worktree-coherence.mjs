@@ -121,6 +121,19 @@ async function main() {
     await git(['branch', '-D', 'maddu/lane/cockpit-shell'], repo);
     ok('coherent after orphan removed', (await run(repo)).ok === true);
 
+    // ── Codex P2 (chain-3): a DETACHED orphan worktree (no branch) must NOT be
+    // labeled a plain safe remove — its commits live only on HEAD. Advise
+    // rescue/inspect first.
+    const detPath = path.join(repo, '.maddu', 'worktrees', 'cockpit-shell');
+    await git(['worktree', 'add', '--detach', detPath, 'HEAD'], repo);
+    const detRes = await run(repo);
+    const detOrphan = (detRes.evidence?.issues || []).find((i) => i.kind === 'orphaned_worktree');
+    ok('detached orphan flagged as detached', detOrphan?.detached === true);
+    ok('detached orphan advises rescue, not a plain safe remove',
+      /DETACHED|rescue|log -1 HEAD/.test(detOrphan?.detail || '') && !/refuses if work would be lost/.test(detOrphan?.detail || ''), detOrphan?.detail?.slice(0, 120));
+    await git(['worktree', 'remove', '--force', detPath], repo);
+    ok('coherent after detached orphan removed', (await run(repo)).ok === true);
+
     // ── Codex P2: an EMPTY-but-present catalog still flags an invalid lane ──
     await writeCatalog([]); // catalog exists, zero lanes, git-integration still attached
     res = await run(repo);
