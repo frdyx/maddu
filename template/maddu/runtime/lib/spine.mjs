@@ -11,9 +11,15 @@
 
 import { mkdir, readFile, readdir, stat, writeFile, appendFile, open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
 import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
+// Sync-mode (#12c) partitioned append + the canonical line hash live in the
+// stdlib-only core so the worker token-wrapper can share them. hashLine is
+// re-exported below so verify.mjs / usage.mjs (which import it from here) are
+// unaffected.
+import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, readAllPartitioned } from './spine-append-core.mjs';
+export { hashLine };
 
 const ROLL_BYTES = 10 * 1024 * 1024;
 
@@ -413,9 +419,7 @@ export async function ensureSpine(repoRoot) {
 // Forward-only: events written before v1.14.0 have no `prev_hash`; the chain is
 // only checked from the first event that has one, so no migration is needed.
 // Both this writer and the verifier import `hashLine` so they can never drift.
-export function hashLine(line) {
-  return createHash('sha256').update(String(line).replace(/\r$/, ''), 'utf8').digest('hex');
-}
+// (Definition moved to spine-append-core.mjs; re-exported at the top of this file.)
 
 // Return the exact stored text of the last non-empty event line across all
 // segments, or null for an empty spine. Tail-reads (≤64 KB) so the cost stays
@@ -451,12 +455,30 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
   if (triggered_by) ev.triggered_by = triggered_by;
+
+  // ── Sync mode (#12c): partitioned append ──
+  // Write to this replica's partition under the funnel (prev_hash computed inside
+  // the lock, so the chain cannot fork). A write NEVER touches a partition whose
+  // migration hasn't committed: if a `spine sync init` is in progress, resolveWrite-
+  // Replica WAITS for it to commit, then writes to the completed partition; if it
+  // stalls, we refuse rather than fork. Absent any replicaId/marker this is a no-op
+  // and the DEFAULT flat path below runs unchanged.
+  const w = await resolveWriteReplica(repoRoot);
+  if (w.id) return appendPartitioned(repoRoot, w.id, ev);
+  if (w.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+
   // Tamper-evidence (v1.14.0): link to the prior event by hashing its stored
   // line. Computed before the append so it reflects the true predecessor;
   // genesis (empty spine) → null.
-  const prevLine = await lastEventLine(paths);
-  ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
-  const seg = await currentSegment(paths);
+  //
+  // The flat write is wrapped: a concurrent `spine sync init` can rename these
+  // segments out from under us (ENOENT). That never happens in pure default mode
+  // (no migration ever runs); when it does, re-resolve and route to the now-
+  // committing partition instead of failing. Non-ENOENT errors propagate unchanged.
+  try {
+    const prevLine = await lastEventLine(paths);
+    ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
+    const seg = await currentSegment(paths);
 
   // ── Concurrency + framing (A2 / hard rule #2) ──
   //
@@ -481,20 +503,54 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // docs/15-architecture.md). A crash between write() and the OS flushing can
   // leave a truncated final line; that is detected, not auto-repaired, by
   // `maddu spine verify` (issue kind `torn_trailing_line`).
-  const line = JSON.stringify(ev);
-  if (line.includes('\n')) {
-    throw new Error('spine.append: serialized event contains a raw newline — NDJSON framing invariant violated');
+    const line = JSON.stringify(ev);
+    if (line.includes('\n')) {
+      throw new Error('spine.append: serialized event contains a raw newline — NDJSON framing invariant violated');
+    }
+    await appendFile(join(paths.events, seg), line + '\n', { flag: 'a' });
+    return ev;
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      // A `spine sync init` migration began mid-write and renamed a segment. Re-
+      // resolve: it routes to the committed partition (or waits for it). A rename
+      // implies the marker exists, so this never loops back to the flat branch.
+      const w2 = await resolveWriteReplica(repoRoot);
+      if (w2.id) return appendPartitioned(repoRoot, w2.id, ev);
+      if (w2.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+    }
+    throw err;
   }
-  await appendFile(join(paths.events, seg), line + '\n', { flag: 'a' });
-  return ev;
 }
 
 export async function readAll(repoRoot) {
   const paths = await ensureSpine(repoRoot);
+  // Sync mode (#12c) uses the SAME opt-in predicate as the write path: this
+  // checkout has an active replicaId (committed, or a pending migration target).
+  // Keying read and write on the one signal keeps a default repo (no replica.json)
+  // byte/behaviour-identical even if a stray by-replica dir happens to be present,
+  // and keeps reads consistent with writes DURING a migration. A teammate joins the
+  // shared spine by running `spine sync init`, then readAllPartitioned merges every
+  // partition present, including imported ones.
+  if (await readActiveReplicaId(repoRoot)) return readAllPartitioned(repoRoot);
   const segs = await listSegments(paths);
+  // Re-check AFTER the flat snapshot: a `spine sync init` may have begun between the
+  // first check and listSegments, so this snapshot could already miss a just-renamed
+  // segment WITHOUT any ENOENT firing. The migration writes its marker before any
+  // rename, so it is visible now — restart into the consistent partitioned read
+  // rather than return a partial flat view (which would give readSince/lastEventId
+  // cursor consumers a persistent gap).
+  if (await readActiveReplicaId(repoRoot)) return readAllPartitioned(repoRoot);
   const out = [];
   for (const seg of segs) {
-    const text = await readFile(join(paths.events, seg), 'utf8');
+    let text;
+    try { text = await readFile(join(paths.events, seg), 'utf8'); }
+    catch (err) {
+      // A segment can vanish mid-read only when a migration began after the re-check
+      // above (never in pure default mode). Do NOT return a PARTIAL flat view —
+      // restart into the now-consistent partitioned read (partition + residual flat).
+      if (err && err.code === 'ENOENT') return readAllPartitioned(repoRoot);
+      throw err;
+    }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }

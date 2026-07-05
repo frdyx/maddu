@@ -11,6 +11,11 @@
 // here because (a) wrappers should be standalone (b) the spine module pulls
 // in defaults/catalog logic the wrapper doesn't need.
 //
+// #12c: in team-sync mode this event must land in the replica's partition on a
+// valid chain (not the flat default segment), so the sync path routes through
+// spine-append-core.mjs — which is stdlib-only (no catalog/defaults), preserving
+// the standalone contract above. The DEFAULT (single-machine) path is unchanged.
+//
 // Failure mode: silent + non-blocking. If parsing throws, append fails, or
 // the provider emits unexpected JSON, the wrapper logs to
 // `.maddu/state/worker-logs/<workerId>.wrapper-errors.log` and keeps
@@ -19,6 +24,7 @@
 import { appendFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { resolveWriteReplica, appendPartitioned } from '../spine-append-core.mjs';
 
 const ROLL_BYTES = 10 * 1024 * 1024;
 
@@ -75,6 +81,17 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (typeof payload.cacheRead === 'number') ev.data.cacheRead = payload.cacheRead;
   if (typeof payload.cacheCreation === 'number') ev.data.cacheCreation = payload.cacheCreation;
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
+
+  // #12c sync mode: land in the replica's partition on a valid chain (shared,
+  // stdlib-only core). Token accounting is best-effort and MUST NOT block the
+  // worker's exit: the funnel wait is bounded (maxWaitMs), and if a `spine sync
+  // init` migration is pending we DROP this one event rather than block or write
+  // into an incomplete partition (nothing written → no chain fork). The caller wraps
+  // this in try/catch + logWrapperError. Default mode keeps the flat write below.
+  const w = await resolveWriteReplica(repoRoot, { timeoutMs: 3000 });
+  if (w.pending) return null; // migration in flight — drop this token event
+  if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: 3000 });
+
   const seg = await currentSegment(eventsDir);
   await appendFile(join(eventsDir, seg), JSON.stringify(ev) + '\n');
   return ev;
