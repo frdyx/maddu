@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { randomBytes } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -823,6 +824,85 @@ async function refusalArgvRedacted() {
   return { name, ok: allOk, duration };
 }
 
+// (roadmap #12b follow-up) — worker-spawn command/args must never reach the
+// append-only spine raw. WORKER_SPAWNED is written from three sites
+// (runtimes.spawnWorker, the bridge POST /bridge/workers route, and the
+// `maddu worker register` CLI), all funnelling through redactSpawn. The
+// high-risk prompt already rides via stdin (never logged); this covers the
+// caller-supplied command/args channel. redactSpawn is a no-op on clean text
+// so provenance (what a worker ran) is preserved.
+async function workerSpawnSecretRedacted() {
+  const name = 'worker-spawn-secret-redacted';
+  const start = Date.now();
+  const tmp = await newTmp(name);
+  const SEC = 'sk-ant-' + 'A'.repeat(40); // anthropic-api-key pattern
+  const NEEDLE = 'A'.repeat(40);
+  let allOk = true;
+  try {
+    // (a) redactSpawn unit — the shared scrubber all three sites use.
+    const ss = await import(pathToFileURL(join(LIB, 'secret-scan.mjs')).href);
+    const r = ss.redactSpawn({ command: `claude --api-key ${SEC}`, args: ['exec', SEC, '--model', 'opus'] });
+    allOk = ok(name, 'redactSpawn scrubs command secret', !r.command.includes(NEEDLE) && r.command.includes('[REDACTED:anthropic-api-key]')) && allOk;
+    allOk = ok(name, 'redactSpawn scrubs args secret', !JSON.stringify(r.args).includes(NEEDLE) && r.args.includes('[REDACTED:anthropic-api-key]')) && allOk;
+    allOk = ok(name, 'redactSpawn preserves clean command (provenance)', ss.redactSpawn({ command: 'claude', args: ['exec', '-p'] }).command === 'claude') && allOk;
+    // deep leaf redaction: a secret nested in an object arg (bridge JSON body
+    // is arbitrary, not just string[]) must be scrubbed, structure preserved.
+    const deep = ss.redactSpawn({ command: null, args: [SEC, { token: SEC }, ['--flag', SEC], 7] });
+    allOk = ok(name, 'redactSpawn recurses into nested object/array args', !JSON.stringify(deep.args).includes(NEEDLE) && deep.args[3] === 7) && allOk;
+    // keys are NOT redacted, so two secret-shaped keys can't collide and drop a
+    // field (provenance preserved; the secret rides in the value, still scrubbed).
+    const keyed = ss.redactSpawn({ command: null, args: [{ ['ghp_' + 'A'.repeat(36)]: 1, ['ghp_' + 'B'.repeat(36)]: 2 }] });
+    allOk = ok(name, 'redactSpawn keeps distinct object keys (no collision/drop)', Object.keys(keyed.args[0]).length === 2) && allOk;
+    // a JSON-parsed own `__proto__` key (realistic bridge body) is preserved,
+    // not swallowed by the prototype setter, and its value is still redacted.
+    const pp = ss.redactSpawn({ command: null, args: [JSON.parse(`{"__proto__":"${SEC}","x":"${SEC}"}`)] });
+    allOk = ok(name, 'redactSpawn preserves own __proto__ key + redacts its value',
+      Object.prototype.hasOwnProperty.call(pp.args[0], '__proto__') && !JSON.stringify(pp.args).includes(NEEDLE)) && allOk;
+
+    // (b) bridge POST /bridge/workers — drive routeWorkers directly with a
+    //     mock req/res carrying a secret in command + args (incl. a NESTED
+    //     object arg, which only the deep scrub catches).
+    const { routeWorkers } = await import(pathToFileURL(join(LIB, 'bridge-routes-work.mjs')).href);
+    const { spine } = await loadSpine();
+    const mkReq = (method, body) => { const rq = Readable.from([Buffer.from(JSON.stringify(body))]); rq.method = method; rq.headers = {}; return rq; };
+    const mkRes = () => { const rs = { code: null, body: null }; rs.writeHead = (c) => { rs.code = c; }; rs.end = (b) => { rs.body = b; }; return rs; };
+    await routeWorkers({ req: mkReq('POST', { command: `codex exec --token ${SEC}`, args: [SEC, { token: SEC }, '--json'], sessionId: 'ses_x' }), res: mkRes(), path: '/bridge/workers', repoRoot: tmp });
+    const bridgeSpawned = (await spine.readAll(tmp)).filter((e) => e.type === 'WORKER_SPAWNED').pop();
+    allOk = ok(name, 'bridge WORKER_SPAWNED command redacted', bridgeSpawned && !JSON.stringify(bridgeSpawned.data.command).includes(NEEDLE) && bridgeSpawned.data.command.includes('[REDACTED')) && allOk;
+    allOk = ok(name, 'bridge WORKER_SPAWNED args redacted (incl. nested object)', bridgeSpawned && !JSON.stringify(bridgeSpawned.data.args).includes(NEEDLE) && JSON.stringify(bridgeSpawned.data.args).includes('[REDACTED')) && allOk;
+
+    // (b2) runtimes.spawnWorker — register a harmless node runtime that exits
+    //      0, spawn it with a secret in extraArgs, and assert the emitted
+    //      WORKER_SPAWNED args are redacted (this is the third write site).
+    const rtMod = await import(pathToFileURL(join(LIB, 'runtimes.mjs')).href);
+    await rtMod.saveRuntime(tmp, { name: 'probe', binary: process.execPath, args: ['-e', 'process.exit(0)'] });
+    await rtMod.spawnWorker(tmp, 'probe', { extraArgs: ['--api-key', SEC], wait: true, lane: null }).catch(() => {});
+    const rtSpawned = (await spine.readAll(tmp)).filter((e) => e.type === 'WORKER_SPAWNED' && e.data.runtime === 'probe').pop();
+    allOk = ok(name, 'runtimes.spawnWorker WORKER_SPAWNED emitted', !!rtSpawned) && allOk;
+    allOk = ok(name, 'runtimes.spawnWorker extraArgs secret redacted', rtSpawned && !JSON.stringify(rtSpawned.data.args).includes(NEEDLE) && JSON.stringify(rtSpawned.data.args).includes('[REDACTED')) && allOk;
+
+    // (c) `maddu worker register` CLI — subprocess, reads the real spine.
+    const cliRepo = join(tmp, 'cli');
+    await mkdir(join(cliRepo, '.maddu', 'events'), { recursive: true });
+    const code = await new Promise((resolve) => {
+      const cp = spawn(process.execPath, [BIN, 'worker', 'register', '--command', `claude --api-key ${SEC}`, '--args', `exec,${SEC}`], { cwd: cliRepo, stdio: 'ignore' });
+      cp.on('close', (c) => resolve(c)); cp.on('error', () => resolve(-1));
+    });
+    let cliRaw = '';
+    for (const f of (await readdir(join(cliRepo, '.maddu', 'events')).catch(() => []))) cliRaw += await readFile(join(cliRepo, '.maddu', 'events', f), 'utf8');
+    const cliSpawned = cliRaw.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.type === 'WORKER_SPAWNED');
+    allOk = ok(name, 'worker-register CLI succeeds', code === 0) && allOk;
+    allOk = ok(name, 'CLI WORKER_SPAWNED has no raw secret (command+args)', cliSpawned && !JSON.stringify(cliSpawned.data).includes(NEEDLE) && JSON.stringify(cliSpawned.data).includes('[REDACTED')) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception', false, err.message);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 // A3 (v1.13.0) — bridge loopback-origin enforcement under the harness. A
 // browser-shaped request whose Host/Origin hostname is not loopback (DNS
 // rebinding) must be rejected 403 and recorded on the spine; legit loopback
@@ -910,6 +990,7 @@ const SCENARIOS = {
   'upgrade-marker-collision': upgradeMarkerCollision,
   'tool-refusals-coherent':   toolRefusalsCoherent,
   'refusal-argv-redacted':    refusalArgvRedacted,
+  'worker-spawn-secret-redacted': workerSpawnSecretRedacted,
   'ralph-always-fail-halts':  ralphAlwaysFailHalts,
   'windows-spawn-npm-shim':   windowsSpawnNpmShim,
   'port-collision-refusal':   portCollisionRefusal,
