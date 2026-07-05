@@ -83,9 +83,13 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
 
   // #12c sync mode: land in the replica's partition on a valid chain (shared,
-  // stdlib-only core). Default single-machine mode keeps the flat write below.
+  // stdlib-only core). Token accounting is best-effort and MUST NOT block the
+  // worker's exit, so the funnel wait is BOUNDED — on a stuck lock we let
+  // ELOCKTIMEOUT drop this one event (nothing was written, so no chain fork). The
+  // caller already wraps this in try/catch + logWrapperError. Default single-
+  // machine mode keeps the flat write below.
   const replicaId = await readReplicaId(repoRoot);
-  if (replicaId) return appendPartitioned(repoRoot, replicaId, ev);
+  if (replicaId) return appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs: 3000 });
 
   const seg = await currentSegment(eventsDir);
   await appendFile(join(eventsDir, seg), JSON.stringify(ev) + '\n');

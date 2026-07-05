@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readReplicaId, appendPartitioned, hasPartitions, readAllPartitioned } from './spine-append-core.mjs';
+import { hashLine, readReplicaId, appendPartitioned, readAllPartitioned } from './spine-append-core.mjs';
 export { hashLine };
 
 const ROLL_BYTES = 10 * 1024 * 1024;
@@ -504,11 +504,13 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
 
 export async function readAll(repoRoot) {
   const paths = await ensureSpine(repoRoot);
-  // Sync mode (#12c): if a by-replica partition tree exists, return the k-way
-  // merge of the partitions (plus any residual flat legacy stream). A default
-  // single-machine repo has no by-replica dir and falls through to the unchanged
-  // flat concat below.
-  if (await hasPartitions(repoRoot)) return readAllPartitioned(repoRoot);
+  // Sync mode (#12c) uses the SAME opt-in predicate as the write path: this
+  // checkout has a replicaId (opt-in via `spine sync init`). Keying read and write
+  // on the one signal keeps a default repo (no replica.json) byte/behaviour-
+  // identical even if a stray by-replica dir happens to be present. A teammate
+  // joins the shared spine by running `spine sync init` (mints replica.json), then
+  // readAllPartitioned merges every partition present, including imported ones.
+  if (await readReplicaId(repoRoot)) return readAllPartitioned(repoRoot);
   const segs = await listSegments(paths);
   const out = [];
   for (const seg of segs) {

@@ -13,6 +13,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, access } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { append, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
+import { readReplicaId } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
 import { appendTokenUsage } from '../../template/maddu/runtime/lib/runtimes/_wrapper-common.mjs';
 
 let pass = 0, fail = 0;
@@ -95,6 +96,43 @@ async function main() {
     // The lock file must never pollute the segment listing.
     ok(!(await numericSegs(partDir)).includes('.append.lock'), 'SYNC: .append.lock excluded from segments');
     await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── Sync-config safety (Codex post-seal fixes) ────────────────────────────
+  async function throws(fn) { try { await fn(); return false; } catch { return true; } }
+  {
+    // Absent replica.json → default mode (null), NOT an error.
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-cfg-absent-'));
+    ok((await readReplicaId(repo)) === null, 'absent replica.json → null (default mode)');
+    await rm(repo, { recursive: true, force: true });
+  }
+  {
+    // Present but malformed → FAIL CLOSED (throw), never silent flat write.
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-cfg-bad-'));
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), '{ not json');
+    ok(await throws(() => readReplicaId(repo)), 'malformed replica.json → readReplicaId throws (fail-closed)');
+    ok(await throws(() => append(repo, { type: TYPE, data: {} })), 'malformed replica.json → append throws (no silent flat write)');
+    await rm(repo, { recursive: true, force: true });
+  }
+  {
+    // Path-traversal replicaId → rejected before it becomes a path.
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-cfg-trav-'));
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: '../escaped' }));
+    ok(await throws(() => readReplicaId(repo)), 'traversal replicaId "../escaped" → rejected');
+    ok(!(await exists(join(repo, '.maddu', 'events', 'escaped'))), 'traversal never wrote outside by-replica');
+    await rm(repo, { recursive: true, force: true });
+  }
+  {
+    // Whitespace-padded id is NOT silently normalized — validated raw, fails closed.
+    for (const bad of [' repA', 'repA ', '\nrepA']) {
+      const repo = await mkdtemp(join(tmpdir(), 'maddu-cfg-ws-'));
+      await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+      await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: bad }));
+      ok(await throws(() => readReplicaId(repo)), `whitespace-padded id ${JSON.stringify(bad)} → rejected (raw validation)`);
+      await rm(repo, { recursive: true, force: true });
+    }
   }
 
   console.log(`spine-partition: ${pass}/${pass + fail}`);

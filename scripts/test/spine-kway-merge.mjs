@@ -50,8 +50,11 @@ async function main() {
   }
 
   // 4. Integration through readAll: two real partitions on disk merge in order.
+  //    readAll gates on replica.json (sync opt-in), so the repo must be sync-init'd.
   {
     const repo = await mkdtemp(join(tmpdir(), 'maddu-kway-'));
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repself' }) + '\n');
     const mk = async (rid, rows) => {
       const dir = join(repo, '.maddu', 'events', 'by-replica', rid);
       await mkdir(dir, { recursive: true });

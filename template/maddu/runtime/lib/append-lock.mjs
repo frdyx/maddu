@@ -100,7 +100,14 @@ function sleep(ms) {
 }
 
 // Acquire the lock, blocking until held. Returns { ownerId, release }.
-export async function acquireAppendLock(lockPath, { onWait = null } = {}) {
+//
+// `maxWaitMs` (default Infinity) bounds how long we wait on a LIVE holder before
+// throwing ELOCKTIMEOUT. Strict callers (spine.append — an orchestration event
+// must never be lost or forked) leave it Infinity. Best-effort callers (token-
+// usage accounting, which may be DROPPED but must never block a worker's exit)
+// pass a finite budget and treat the timeout as "skip this write" — dropping is
+// safe because nothing was written, so no chain fork can result.
+export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = Infinity } = {}) {
   const ownerId = nonce();
   const body = JSON.stringify({
     ownerId,
@@ -119,8 +126,14 @@ export async function acquireAppendLock(lockPath, { onWait = null } = {}) {
       const rec = await readLock(lockPath);
       const stole = await tryStealDead(lockPath, rec);
       if (!stole) {
+        const elapsed = waited * POLL_MS;
+        if (elapsed >= maxWaitMs) {
+          const err = new Error(`append lock not acquired within ${maxWaitMs}ms (${lockPath})`);
+          err.code = 'ELOCKTIMEOUT';
+          throw err;
+        }
         if (onWait && waited % WAIT_LOG_EVERY === 0) {
-          onWait({ waitedMs: waited * POLL_MS, holder: rec });
+          onWait({ waitedMs: elapsed, holder: rec });
         }
         waited++;
         await sleep(POLL_MS);

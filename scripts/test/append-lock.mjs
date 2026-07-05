@@ -140,6 +140,21 @@ async function main() {
     await rm(dir, { recursive: true, force: true });
   }
 
+  // 6. Bounded wait: a LIVE holder + finite maxWaitMs must throw ELOCKTIMEOUT
+  //    (the best-effort/token path that must never block indefinitely).
+  {
+    const dir = await mkdtemp(join(tmpdir(), 'maddu-applock-timeout-'));
+    const lockPath = join(dir, '.append.lock');
+    const held = await acquireAppendLock(lockPath);
+    let code = null;
+    try {
+      await acquireAppendLock(lockPath, { maxWaitMs: 200 });
+    } catch (e) { code = e && e.code; }
+    ok(code === 'ELOCKTIMEOUT', `bounded wait throws ELOCKTIMEOUT on a live holder — got ${code}`);
+    await held.release();
+    await rm(dir, { recursive: true, force: true });
+  }
+
   console.log(`append-lock: ${pass}/${pass + fail}`);
   if (fail) process.exit(1);
 }

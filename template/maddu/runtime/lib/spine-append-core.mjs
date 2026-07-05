@@ -30,17 +30,42 @@ export function configReplicaPath(repoRoot) {
   return join(repoRoot, '.maddu', 'config', 'replica.json');
 }
 
+// A replicaId is a path segment (partition dir name), so it must be a safe token
+// with no path separators or traversal — a minted id is `makeId('rep')`, but we
+// validate the CHARSET (not the exact shape) to also reject a hand-edited
+// `../escaped` before it is ever joined into a filesystem path.
+export function isValidReplicaId(id) {
+  return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id);
+}
+
 // The replicaId of THIS checkout, or null when sync mode is not initialised
-// (default single-machine mode). Never throws — a missing/torn file → null → the
-// caller takes the unchanged default append path, preserving the opt-in invariant.
+// (no replica.json → default single-machine mode). FAILS CLOSED on a replica.json
+// that is present but malformed/unsafe: rather than silently reverting to the flat
+// path (which would fork a synced spine), it throws so the operator fixes the
+// config. Only a genuinely ABSENT file (ENOENT) means "default mode".
 export async function readReplicaId(repoRoot) {
+  const p = configReplicaPath(repoRoot);
+  let txt;
   try {
-    const obj = JSON.parse(await readFile(configReplicaPath(repoRoot), 'utf8'));
-    const id = obj && typeof obj.replicaId === 'string' ? obj.replicaId.trim() : '';
-    return id || null;
-  } catch {
-    return null;
+    txt = await readFile(p, 'utf8');
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return null; // default mode — sync not initialised
+    throw e; // present but unreadable (perms, etc.) — surface it, don't fail open
   }
+  let obj;
+  try {
+    obj = JSON.parse(txt);
+  } catch {
+    throw new Error(`replica.json is malformed JSON at ${p} — fix or remove it (remove = default single-machine mode)`);
+  }
+  // Validate the RAW stored value — do NOT trim first, or a whitespace-padded id
+  // (" repA", "\nrepA") would be silently normalized instead of failing closed.
+  const id = obj && typeof obj.replicaId === 'string' ? obj.replicaId : '';
+  if (!id) throw new Error(`replica.json has no replicaId at ${p} — fix or remove it`);
+  if (!isValidReplicaId(id)) {
+    throw new Error(`replica.json replicaId ${JSON.stringify(id)} is not a valid partition id (allowed: alnum, _, -; no whitespace or path separators) at ${p}`);
+  }
+  return id;
 }
 
 export function partitionDir(repoRoot, replicaId) {
@@ -199,7 +224,12 @@ export async function readAllPartitioned(repoRoot) {
 // with `prev_hash` computed INSIDE the lock so the read-then-write cannot fork.
 // `ev` must be a complete envelope WITHOUT prev_hash; prev_hash is set here.
 // Returns the same `ev` (now carrying prev_hash), matching spine.append()'s return.
-export async function appendPartitioned(repoRoot, replicaId, ev) {
+// `maxWaitMs` bounds the funnel wait for best-effort callers (see acquireAppendLock);
+// strict callers omit it (Infinity) so an event is never dropped.
+export async function appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs = Infinity } = {}) {
+  if (!isValidReplicaId(replicaId)) {
+    throw new Error(`appendPartitioned: invalid replicaId "${replicaId}"`);
+  }
   const dir = partitionDir(repoRoot, replicaId);
   await mkdir(dir, { recursive: true });
   const lockPath = join(dir, '.append.lock');
@@ -216,6 +246,6 @@ export async function appendPartitioned(repoRoot, replicaId, ev) {
       await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
       return ev;
     },
-    { onWait: onWaitStderr(dir) }
+    { onWait: onWaitStderr(dir), maxWaitMs }
   );
 }
