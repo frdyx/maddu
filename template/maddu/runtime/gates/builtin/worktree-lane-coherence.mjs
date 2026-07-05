@@ -127,16 +127,19 @@ export default {
         const st = await gitRun(['-C', w.path, 'status', '--porcelain'], root, 5000);
         const isDirty = st.code === 0 && st.stdout.trim().length > 0;
         const dirtyNote = isDirty ? ' — HAS UNCOMMITTED CHANGES, inspect before removing' : '';
+        // Quote the path in copy-paste guidance (Codex P2): a repo under
+        // "My Project" or a spaced Windows profile would otherwise split.
+        const q = `"${w.path}"`;
         let rec;
         if (branch) {
           // Branch-backed: git's own safe variants are the guardrail —
           // `worktree remove` refuses if dirty, `branch -d` refuses if unmerged.
-          rec = `Clean up (safe — refuses if work would be lost): git worktree remove ${w.path} && git branch -d ${branch}`;
+          rec = `Clean up (safe — refuses if work would be lost): git worktree remove ${q} && git branch -d ${branch}`;
         } else {
           // DETACHED (Codex P2): no branch holds this worktree's commits, so a
           // plain `worktree remove` can drop the ONLY ref to work reachable
           // from its detached HEAD (no merge check applies). Rescue first.
-          rec = `DETACHED worktree — its commits are reachable only from HEAD. Inspect (git -C ${w.path} log -1 HEAD), rescue if wanted (git branch <name> $(git -C ${w.path} rev-parse HEAD)), THEN git worktree remove ${w.path}`;
+          rec = `DETACHED worktree — its commits are reachable only from HEAD. Inspect (git -C ${q} log -1 HEAD), rescue if wanted (git branch <name> $(git -C ${q} rev-parse HEAD)), THEN git worktree remove ${q}`;
         }
         issues.push({ kind: 'orphaned_worktree', dirty: isDirty, detached: !branch, detail: `git worktree ${w.path} under .maddu/worktrees/ has no live attachment (kept, manual, or a failed detach)${dirtyNote}. ${rec}` });
       }

@@ -131,6 +131,8 @@ async function main() {
     ok('detached orphan flagged as detached', detOrphan?.detached === true);
     ok('detached orphan advises rescue, not a plain safe remove',
       /DETACHED|rescue|log -1 HEAD/.test(detOrphan?.detail || '') && !/refuses if work would be lost/.test(detOrphan?.detail || ''), detOrphan?.detail?.slice(0, 120));
+    // Codex P2: copy-paste guidance must quote paths (spaces-safe).
+    ok('remediation quotes the worktree path', new RegExp('"' + detPath.replace(/\\/g, '\\\\').replace(/[.*+?^${}()|[\]]/g, '\\$&') + '"').test(detOrphan?.detail || '') || /"[^"]*worktrees[^"]*"/.test(detOrphan?.detail || ''), detOrphan?.detail?.slice(0, 100));
     await git(['worktree', 'remove', '--force', detPath], repo);
     ok('coherent after detached orphan removed', (await run(repo)).ok === true);
 
