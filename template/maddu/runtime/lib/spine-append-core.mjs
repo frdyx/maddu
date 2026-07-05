@@ -196,6 +196,20 @@ export async function hasPartitions(repoRoot) {
   }
 }
 
+// Sorted list of partition (replicaId) directory names under by-replica/, or []
+// when none exist. Used by the verifier to walk each partition's chain.
+export async function listPartitionIds(repoRoot) {
+  const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
+  try {
+    return (await readdir(byReplica, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 // Sync-mode readAll: k-way merge across every partition, plus any residual flat
 // legacy stream (pre-migration) as a sentinel partition (replicaId '' sorts first
 // on a ts tie). After `spine sync init` migrates legacy into a partition, the flat

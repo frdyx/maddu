@@ -57,6 +57,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
+import { listPartitionIds, partitionDir } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -97,29 +98,16 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
     counts: { WARN: 0, FAIL: 0 },
     capped: false
   };
-  const push = (it) => { result.issues.push(it); result.counts[it.level]++; };
-
-  // ── Discover + check segment continuity ──
-  let entries;
-  try { entries = await readdir(eventsDir); }
-  catch { push(issue('FAIL', 'events_dir_missing', `cannot read ${eventsDir}`)); return result; }
-  const segs = entries.filter((f) => SEGMENT_RE.test(f)).sort();
-  if (segs.length === 0) return result;  // empty spine is fine
-
-  const segNums = segs.map((s) => parseInt(s.match(SEGMENT_RE)[1], 10));
-  // Continuity from 1 to N — gaps anywhere fail.
-  const expectedFirst = 1;
-  for (let i = 0; i < segNums.length; i++) {
-    const expected = expectedFirst + i;
-    if (segNums[i] !== expected) {
-      const missing = String(expected).padStart(12, '0') + '.ndjson';
-      push(issue('FAIL', 'segment_gap',
-        `expected segment ${missing} between …${String(segNums[i - 1] || 0).padStart(12, '0')} and ${segs[i]}`,
-        { segment: missing }));
-      // Continue with what we have — partial verification is better than none.
-      break;
-    }
-  }
+  // In sync mode each partition is scanned as its own chain; `currentPartition`
+  // stamps every issue/segment with its replicaId so a `000000000001.ndjson`
+  // ambiguity across partitions is disambiguated. Null in default mode → issues
+  // are byte-identical to before.
+  let currentPartition = null;
+  const push = (it) => {
+    if (currentPartition) it.replicaId = currentPartition;
+    result.issues.push(it);
+    result.counts[it.level]++;
+  };
 
   // ── Single forward pass: parse, envelope, refs, monotonicity ──
   const ids = new Map();              // eventId → { segment, line }
@@ -155,15 +143,46 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   const startedCoordinators = new Set();  // COORDINATOR_STARTED.data.coordinatorId
   const invokedAdvisors = new Set();      // ADVISOR_INVOKED.data.advisorId
   let installedAt = null;                // FRAMEWORK_INSTALLED.ts — lower bound for ts sanity
-  // v1.14.0 forward `prev_hash` chain. prevLineHash spans segments (the chain is
-  // continuous across rolls). chainStarted flips true at the first event that
-  // carries prev_hash — everything before it is pre-v1.14.0 legacy and unchecked.
-  let prevLineHash = null;
-  let chainStarted = false;
 
-  outer:
+  // Scan ONE independent prev_hash chain — the ordered segments in `dir`. In
+  // default mode there is a single chain (the flat events dir). In sync mode (#12c)
+  // each replica partition is scanned as its own chain (this function is called
+  // once per partition), because the chain is per-partition: `prevLineHash` /
+  // `chainStarted` are chain-LOCAL and reset on every call. `referential` gates the
+  // cross-event switch — it is deferred in sync mode, where the correct input for
+  // referential integrity is the k-way-MERGED order across partitions (a child in
+  // one replica may reference a parent in another), which import (phase 3) supplies.
+  // Global concerns that DON'T depend on order (envelope, id-uniqueness across all
+  // partitions via the shared `ids` map, id-format, ts-sanity, type registry, chain)
+  // run in every mode. Returns false if the maxEvents cap was hit (stop scanning).
+  async function scanChain(dir, { referential }) {
+    let entries;
+    try { entries = await readdir(dir); }
+    catch { push(issue('FAIL', 'events_dir_missing', `cannot read ${dir}`)); return true; }
+    const segs = entries.filter((f) => SEGMENT_RE.test(f)).sort();
+    if (segs.length === 0) return true; // empty chain is fine
+
+    // Segment continuity from 1 to N within this chain — gaps anywhere fail.
+    const segNums = segs.map((s) => parseInt(s.match(SEGMENT_RE)[1], 10));
+    for (let i = 0; i < segNums.length; i++) {
+      const expected = 1 + i;
+      if (segNums[i] !== expected) {
+        const missing = String(expected).padStart(12, '0') + '.ndjson';
+        push(issue('FAIL', 'segment_gap',
+          `expected segment ${missing} between …${String(segNums[i - 1] || 0).padStart(12, '0')} and ${segs[i]}`,
+          { segment: missing }));
+        break; // partial verification is better than none
+      }
+    }
+
+    // v1.14.0 forward `prev_hash` chain — continuous across this chain's rolls,
+    // reset per chain. chainStarted flips true at the first event carrying
+    // prev_hash; everything before it is pre-v1.14.0 legacy and unchecked.
+    let prevLineHash = null;
+    let chainStarted = false;
+
   for (const segName of segs) {
-    const abs = join(eventsDir, segName);
+    const abs = join(dir, segName);
     let text;
     try { text = await readFile(abs, 'utf8'); }
     catch (err) { push(issue('FAIL', 'segment_unreadable', `${segName}: ${err.message}`, { segment: segName })); continue; }
@@ -313,6 +332,10 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
       }
 
       // ─── Type-specific tracking + referential integrity ───
+      // Deferred in sync mode: cross-replica references resolve only in the
+      // k-way-merged order, which import (phase 3) supplies. Here (per-partition)
+      // it would false-flag a legitimate cross-replica reference as an orphan.
+      if (referential)
       switch (ev.type) {
         case 'FRAMEWORK_INSTALLED':
           if (installedAt === null && !Number.isNaN(tsMs)) installedAt = tsMs;
@@ -736,13 +759,50 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
       result.events++;
       if (result.events >= maxEvents) {
         result.capped = true;
-        // Record the partial segment summary before breaking out.
-        result.segments.push({ name: segName, events: evCount, bytes: st.size, firstTs, lastTs });
-        break outer;
+        // Record the partial segment summary before stopping.
+        result.segments.push({ name: segName, events: evCount, bytes: st.size, firstTs, lastTs, ...(currentPartition ? { replicaId: currentPartition } : {}) });
+        return false; // cap hit — stop scanning this and any further chains
       }
     }
 
-    result.segments.push({ name: segName, events: evCount, bytes: st.size, firstTs, lastTs });
+    result.segments.push({ name: segName, events: evCount, bytes: st.size, firstTs, lastTs, ...(currentPartition ? { replicaId: currentPartition } : {}) });
+  }
+    return true;
+  } // ── end scanChain ──
+
+  // ── Dispatch: default single flat chain vs sync per-partition chains ──
+  // The verifier keys on partitions that ACTUALLY HOLD a segment file — not merely
+  // the presence of a by-replica dir. A stray/empty `by-replica/<id>/` must NOT
+  // flip a default repo into sync mode (which disables the flat referential pass).
+  // Keying on segment-bearing partitions (rather than replica.json) also keeps the
+  // fresh-clone case working: a clone has committed partitions but no replica.json,
+  // and `maddu spine verify` should still check those partitions' integrity.
+  const nonEmptyParts = [];
+  for (const rid of await listPartitionIds(repoRoot)) {
+    let segs = [];
+    try { segs = (await readdir(partitionDir(repoRoot, rid))).filter((f) => SEGMENT_RE.test(f)); }
+    catch { /* unreadable partition dir — treat as empty */ }
+    if (segs.length) nonEmptyParts.push(rid);
+  }
+
+  if (nonEmptyParts.length) {
+    // Sync mode. Each partition is its own single-writer chain; scan them
+    // independently, report-only. Cross-replica referential integrity is deferred
+    // to `spine import` (phase 3), which sees the k-way-merged order. Any residual
+    // flat legacy segments are scanned as their own (referential-off) chain too.
+    currentPartition = null;
+    if (!(await scanChain(eventsDir, { referential: false }))) return result;
+    for (const rid of nonEmptyParts) {
+      currentPartition = rid;
+      if (!(await scanChain(partitionDir(repoRoot, rid), { referential: false }))) {
+        currentPartition = null;
+        return result;
+      }
+    }
+    currentPartition = null;
+  } else {
+    // Default single-machine mode — the unchanged single flat chain, referential ON.
+    await scanChain(eventsDir, { referential: true });
   }
 
   return result;
