@@ -191,5 +191,12 @@
     "area": "focus director: lib/focus.mjs (tokenize stemming, goalTokens objective+constraints only, tagTurn absolute-anchor metric + anchors/anchorHits signals) + docs/43",
     "fixed_in": "1.92.2",
     "consumer_impact": "Drift tags now measure whether the goal's distinctive terms appear in current attention (>=2 anchors toward, 1 lateral, 0 away) instead of penalizing detail; every FOCUS_TAGGED event carries the matched anchors so a tag is self-explanatory; regression fixture pins the real 2026-07-03 false positives AND the true positive."
+  },
+  {
+    "symptom": "Root resolution walked up to the NEAREST .maddu/ directory, so any command run inside a future lane worktree (.maddu/worktrees/<lane>/ carries its own tracked .maddu/ copy) would bind spine appends, sessions, and gates to the checkout copy instead of the primary repo record — a split spine. Additionally, CLI lane claim accepted arbitrary lane strings that phase-4 attach would have interpolated into filesystem paths and git branch refs.",
+    "area": "lib/paths.mjs (resolveRoots work/state split, .maddu-state-root pointer, MADDU_STATE_ROOT env) + commands/_spine.mjs (resolveRepoRoot binds STATE root; resolveWorkAndStateRoots) + commands/slice-stop.mjs (git diff + deliverables scoped to WORK root) + new lib/worktrees.mjs (LANE_SLUG_RE SSOT, branch encoding, containment-checked worktree paths) + bridge-routes-lanes.mjs (imports the SSOT regex)",
+    "fixed_in": "1.93.0",
+    "consumer_impact": "Commands run inside a redirected checkout (pointer file or MADDU_STATE_ROOT) append to the primary spine while diffing the local checkout; broken pointers fail loudly instead of silently splitting the record; lane ids destined for worktree paths/branch refs are validated by one shared rule. No behavior change for repos without redirection markers.",
+    "ledger_ref": "roadmap #12a phases 1-2 (plan pln_20260705002732_7773); Codex consult P1 #1-#2"
   }
 ]
