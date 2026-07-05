@@ -119,9 +119,16 @@ export default {
         // worktree to disposition" (Codex P2). The working cleanup is git's
         // own worktree removal — this is a kept disposition, a manually-made
         // worktree, or a failed detach the operator must clear by hand.
+        // Suggest the NON-DESTRUCTIVE variants by default (Codex P2): plain
+        // `git worktree remove` (refuses if dirty) + `git branch -d` (refuses
+        // if unmerged) — an orphan may hold un-integrated work, so never
+        // default to --force/-D. Flag dirt so the operator inspects first.
         const branch = w.branch ? w.branch.replace(/^refs\/heads\//, '') : null;
-        const rec = `git worktree remove --force ${w.path}${branch ? ` && git branch -D ${branch}` : ''}`;
-        issues.push({ kind: 'orphaned_worktree', detail: `git worktree ${w.path} under .maddu/worktrees/ has no live attachment (kept, manual, or a failed detach) — remove it: ${rec}` });
+        const st = await gitRun(['-C', w.path, 'status', '--porcelain'], root, 5000);
+        const isDirty = st.code === 0 && st.stdout.trim().length > 0;
+        const rec = `git worktree remove ${w.path}${branch ? ` && git branch -d ${branch}` : ''}`;
+        const dirtyNote = isDirty ? ' — HAS UNCOMMITTED CHANGES, inspect before removing' : '';
+        issues.push({ kind: 'orphaned_worktree', dirty: isDirty, detail: `git worktree ${w.path} under .maddu/worktrees/ has no live attachment (kept, manual, or a failed detach)${dirtyNote}. Clean up (safe — refuses if work would be lost): ${rec}` });
       }
     }
 

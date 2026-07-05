@@ -109,6 +109,14 @@ async function main() {
     const orphanIssue = (res.evidence?.issues || []).find((i) => i.kind === 'orphaned_worktree');
     ok('orphan remediation points to `git worktree remove` (not lane release)',
       /git worktree remove/.test(orphanIssue?.detail || '') && !/lane release/.test(orphanIssue?.detail || ''), orphanIssue?.detail?.slice(0, 100));
+    // Codex P2: default remediation must be NON-destructive (no --force / -D).
+    ok('orphan remediation is non-destructive by default',
+      !/--force/.test(orphanIssue?.detail || '') && !/branch -D/.test(orphanIssue?.detail || '') && /git branch -d/.test(orphanIssue?.detail || ''), orphanIssue?.detail?.slice(0, 120));
+    // A DIRTY orphan is flagged so work isn't silently discarded.
+    await writeFile(path.join(orphanPath, 'wip.txt'), 'un-integrated work\n');
+    const dres = await run(repo);
+    const dirtyOrphan = (dres.evidence?.issues || []).find((i) => i.kind === 'orphaned_worktree');
+    ok('dirty orphan is flagged with a work-loss warning', dirtyOrphan?.dirty === true && /UNCOMMITTED/.test(dirtyOrphan?.detail || ''), dirtyOrphan?.detail?.slice(0, 100));
     await git(['worktree', 'remove', '--force', orphanPath], repo);
     await git(['branch', '-D', 'maddu/lane/cockpit-shell'], repo);
     ok('coherent after orphan removed', (await run(repo)).ok === true);
