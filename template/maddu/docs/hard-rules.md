@@ -1,6 +1,6 @@
 # Hard rules
 
-Máddu enforces eight invariants. `maddu doctor` verifies them on every install and every upgrade.
+Máddu enforces nine invariants. `maddu doctor` verifies them on every install and every upgrade.
 
 ## Scope: these rules govern Máddu, not your product
 

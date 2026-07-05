@@ -39,11 +39,29 @@ export async function loadSpineLib() {
   return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify };
 }
 
+// v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,
+// lanes) to the state root, which inside a lane worktree is redirected to the
+// primary repo via the .maddu-state-root pointer / MADDU_STATE_ROOT env.
+// `resolveRepoRoot` keeps its name and callers but now returns the STATE
+// root, so every existing command automatically appends to the primary spine
+// instead of a worktree's checkout copy. Older installed libs without
+// `resolveRoots` fall back to the legacy walk (work == state).
 export async function resolveRepoRoot(paths) {
-  const found = await paths.findRepoRoot(process.cwd());
-  if (found) return found;
+  const roots = await resolveWorkAndStateRoots(paths);
+  if (roots) return roots.stateRoot;
   // Dev fallback: framework's template/ acts as the .maddu/ host.
   return join(FRAMEWORK_ROOT, 'template');
+}
+
+// Full split for commands that need both (slice-stop scopes git diffs to the
+// work root while appending to the state root). Returns
+// { workRoot, stateRoot, redirected } or null when no root marker exists.
+export async function resolveWorkAndStateRoots(paths) {
+  if (typeof paths.resolveRoots === 'function') {
+    return paths.resolveRoots(process.cwd());
+  }
+  const found = await paths.findRepoRoot(process.cwd());
+  return found ? { workRoot: found, stateRoot: found, redirected: false } : null;
 }
 
 // Resolve the acting session id for a command. Precedence:

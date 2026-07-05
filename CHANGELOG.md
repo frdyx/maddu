@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.93.0] · 2026-07-05 · root-resolver split: work root vs spine state root (roadmap #12a, phase 1)
+
+- **The trap:** a lane worktree under `.maddu/worktrees/<lane>/` is a full checkout carrying its own tracked copy of `.maddu/` — the legacy walk-up found that copy, so every spine append from inside the worktree would land in the checkout instead of the primary repo's record (split spine). Flagged P1 in the roadmap-#12 Codex consult; ships FIRST, before any worktree-attach code exists.
+- **`resolveRoots(startDir, env)`** in `paths.mjs` — returns `{ workRoot, stateRoot, redirected }`. Work root = nearest ancestor holding `.maddu/` **or** a `.maddu-state-root` pointer file (where git diffs run); state root = where the spine/sessions/lanes bind. Precedence: `MADDU_STATE_ROOT` env > pointer file > work root itself. A pointer/env target without `.maddu/` **throws** — silent fallback would re-create the exact bug. No marker → work == state, byte-identical legacy behavior; `findRepoRoot` kept verbatim for callers that mean "the local checkout" (init/upgrade).
+- **CLI binding:** `resolveRepoRoot` now returns the STATE root (every command automatically appends to the primary spine), with graceful fallback on older installed libs without `resolveRoots`. New `resolveWorkAndStateRoots` for commands needing both.
+- **`slice-stop`** scopes `git diff` cross-checks and deliverable verification to the WORK root while the spine append, session resolution, and gates bind to the state root.
+- Fixture `root-resolver` 14/0 — pins the nested-worktree trap (including that legacy `findRepoRoot` falls into it, documenting why the split exists), pointer-only worktrees, env-over-pointer precedence, broken/empty-pointer throws, relative + CRLF pointer tolerance. Self-test 108/108; `maddu ci` green.
+- Design contract: `docs/research/competitive-response-proposal.md` (local), plan `pln_20260705002732_7773` phase 1.
+
 ## [v1.92.2] · 2026-07-04 · focus director: verbosity is not drift (incident catch)
 
 - **The drift metric punished detail, not distance.** The tagger divided goal-token intersection by the *focus text's* size — so every detailed, honest, on-goal slice summary of the earned-autonomy arc read as `away` (0.85–0.99; 5/5 false positives on 2026-07-03, two spurious `DRIFT_FLAGGED`), while a terse "working on autonomy" would have passed. Diagnosed from the spine's own `FOCUS_TAGGED.signals`.
