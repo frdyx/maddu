@@ -666,6 +666,163 @@ async function toolRefusalsCoherent() {
   return { name, ok: allOk, duration };
 }
 
+// (roadmap #12b follow-up) — a secret-shaped argv element must NEVER reach the
+// spine on a REFUSAL path. The allowlist and dangerous-form refusals emit the
+// argv, and they run before the secret scan; the fix scans up-front and every
+// TOOL_REFUSED carries the redacted argv. Detection still uses the real argv,
+// so a dangerous form is still caught (reason stays dangerous-form, not
+// secret-detected). Exercises runTool end-to-end against a real temp spine.
+async function refusalArgvRedacted() {
+  const name = 'refusal-argv-redacted';
+  const start = Date.now();
+  const tmp = await newTmp(name);
+  const { spine } = await loadSpine();
+  const SECRET = 'AKIAIOSFODNN7EXAMPLE'; // matches secret-scan aws-access-key
+  let allOk = true;
+  const cfgDir = join(tmp, '.maddu', 'config'); // pathsFor().state = <repo>/.maddu
+  const writeCfg = (tools) => writeFile(join(cfgDir, 'triggers.json'), JSON.stringify({ schemaVersion: 1, tools }, null, 2));
+  const lastRefused = async () => {
+    const events = await spine.readAll(tmp);
+    return events.filter((e) => e.type === 'TOOL_REFUSED').pop();
+  };
+  const argvClean = (ev) => {
+    const s = JSON.stringify(ev?.data?.argv ?? []);
+    return !s.includes(SECRET) && s.includes('[REDACTED:aws-access-key]');
+  };
+  try {
+    const toolsMod = await import(pathToFileURL(join(LIB, 'tools.mjs')).href);
+    await mkdir(cfgDir, { recursive: true });
+
+    // 1. allowlist-not-allowed: git absent from the allow list, secret in argv.
+    await writeCfg({ '*': { allow: ['test'] } });
+    const r1 = await toolsMod.runTool(tmp, { tool: 'git', argv: ['status', SECRET], captureOutput: true });
+    const e1 = await lastRefused();
+    allOk = ok(name, 'allowlist-not-allowed refuses', r1.refused && r1.reason === 'allowlist-not-allowed') && allOk;
+    allOk = ok(name, 'allowlist refusal argv redacted, no raw secret', argvClean(e1)) && allOk;
+
+    // 2. allowlist-deny: git explicitly denied, secret in argv.
+    await writeCfg({ '*': { deny: ['git'] } });
+    const r2 = await toolsMod.runTool(tmp, { tool: 'git', argv: ['status', SECRET], captureOutput: true });
+    const e2 = await lastRefused();
+    allOk = ok(name, 'allowlist-deny refuses', r2.refused && r2.reason === 'allowlist-deny') && allOk;
+    allOk = ok(name, 'deny refusal argv redacted, no raw secret', argvClean(e2)) && allOk;
+
+    // 3. dangerous-form: git push -f wins over the secret refusal (priority),
+    //    and the emitted argv is still redacted. Detection saw the real -f.
+    await writeCfg({ '*': { allow: ['git'] } });
+    const r3 = await toolsMod.runTool(tmp, { tool: 'git', argv: ['push', '-f', SECRET], captureOutput: true });
+    const e3 = await lastRefused();
+    allOk = ok(name, 'dangerous-form wins over secret refusal', r3.refused && r3.reason === 'dangerous-form') && allOk;
+    allOk = ok(name, 'dangerous-form refusal argv redacted, no raw secret', argvClean(e3)) && allOk;
+    allOk = ok(name, 'dangerous-form detection kept the real -f flag', JSON.stringify(e3?.data?.argv ?? []).includes('-f')) && allOk;
+
+    // 4. secret-detected refusal (no allowlist/danger hit) still redacts + never
+    //    emits SECRET_DETECTED_IN_ARGV with a raw value.
+    await writeCfg({ '*': { allow: ['git'] } });
+    const r4 = await toolsMod.runTool(tmp, { tool: 'git', argv: ['status', SECRET], captureOutput: true });
+    allOk = ok(name, 'secret-detected refuses when no earlier gate hits', r4.refused && r4.reason === 'secret-detected') && allOk;
+    const detected = (await spine.readAll(tmp)).filter((e) => e.type === 'SECRET_DETECTED_IN_ARGV');
+    const noRawInDetect = detected.every((e) => !JSON.stringify(e.data).includes(SECRET));
+    allOk = ok(name, 'SECRET_DETECTED_IN_ARGV never carries the raw value', detected.length >= 1 && noRawInDetect) && allOk;
+
+    // 5. install dangerous-form: the refusal DETAIL interpolates the rejected
+    //    package spec — a secret-shaped pkg must be redacted in `detail`, not
+    //    just argv (Codex P1: detail was leaking the raw value).
+    const HE = 'api_key=' + 'A'.repeat(40); // matches high-entropy-adjacent
+    await writeCfg({ '*': { allow: ['install'] } });
+    const r5 = await toolsMod.runTool(tmp, { tool: 'install', argv: [HE], captureOutput: true });
+    const e5 = await lastRefused();
+    allOk = ok(name, 'install secret-pkg refuses dangerous-form', r5.refused && r5.reason === 'dangerous-form') && allOk;
+    allOk = ok(name, 'install refusal detail is redacted, no raw secret value',
+      !JSON.stringify(e5?.data ?? {}).includes('A'.repeat(40)) && JSON.stringify(e5?.data ?? {}).includes('[REDACTED')) && allOk;
+
+    // 6. multiple secrets in one argv: scanArgv returns only the FIRST hit, so
+    //    a per-element redactText scrub (not the single index) is required
+    //    (Codex P1: a later secret stayed raw). Both must be scrubbed.
+    const S2 = 'ghp_' + 'A'.repeat(36); // github-token
+    await writeCfg({ '*': { deny: ['git'] } });
+    const r6 = await toolsMod.runTool(tmp, { tool: 'git', argv: ['status', SECRET, S2], captureOutput: true });
+    const e6 = await lastRefused();
+    const s6 = JSON.stringify(e6?.data?.argv ?? []);
+    allOk = ok(name, 'multi-secret: first secret redacted', !s6.includes(SECRET) && s6.includes('[REDACTED:aws-access-key]')) && allOk;
+    allOk = ok(name, 'multi-secret: SECOND secret also redacted (not just first hit)', !s6.includes(S2) && s6.includes('[REDACTED:github-token]')) && allOk;
+
+    // 7. strict-mode approval gate runs BEFORE runTool and emits
+    //    APPROVAL_REQUESTED with action = `${tool} ${argv.join(' ')}` — its own
+    //    raw-argv path, which runTool redaction can't reach (Codex P1). The
+    //    action must be scrubbed. Call the helper directly with a tiny timeout
+    //    so it times out instead of polling for a real operator decision.
+    const gov = await import(pathToFileURL(join(LIB, 'governance.mjs')).href);
+    const projections = await import(pathToFileURL(join(LIB, 'projections.mjs')).href);
+    const approvalsLib = await import(pathToFileURL(join(LIB, 'approvals.mjs')).href);
+    const strictMod = await import(pathToFileURL(join(FRAMEWORK_ROOT, 'commands', '_strict-approval.mjs')).href);
+    await gov.writeGovernance(tmp, { mode: 'strict', overrides: {} });
+    const rs = await strictMod.requireStrictApprovalIfNeeded(
+      { spine, projections, approvals: approvalsLib }, tmp,
+      { tool: 'install', argv: [HE], timeoutMs: 150 });
+    const reqEv = (await spine.readAll(tmp)).filter((e) => e.type === 'APPROVAL_REQUESTED').pop();
+    allOk = ok(name, 'strict-mode approval gate engaged (refused on timeout)', rs.refused === true) && allOk;
+    allOk = ok(name, 'strict APPROVAL_REQUESTED.action redacts the raw secret',
+      reqEv && !JSON.stringify(reqEv.data).includes('A'.repeat(40)) && JSON.stringify(reqEv.data.action).includes('[REDACTED')) && allOk;
+
+    // 8. adaptive `maddu test` runs its OWN preflight (outside runTool) and
+    //    emitted raw argv on TOOL_REFUSED/INVOKED/COMPLETED (Codex P1). Drive
+    //    the real CLI in a scratch repo that denies `test` — the adaptive flag
+    //    (--profile) routes through the adaptive preflight, which refuses and
+    //    must log a redacted argv. Subprocess because the path calls exit().
+    const atRepo = join(tmp, 'adaptive');
+    await mkdir(join(atRepo, '.maddu', 'config'), { recursive: true });
+    await mkdir(join(atRepo, '.maddu', 'events'), { recursive: true });
+    await writeFile(join(atRepo, '.maddu', 'config', 'triggers.json'), JSON.stringify({ schemaVersion: 1, tools: { '*': { deny: ['test'] } } }));
+    const atCode = await new Promise((resolve) => {
+      const cp = spawn(process.execPath, [BIN, 'test', '--profile', 'quick', HE], { cwd: atRepo, stdio: 'ignore' });
+      cp.on('close', (c) => resolve(c));
+      cp.on('error', () => resolve(-1));
+    });
+    const atEvents = (await readdir(join(atRepo, '.maddu', 'events')).catch(() => []));
+    let atRefused = null;
+    for (const f of atEvents) {
+      const lines = (await readFile(join(atRepo, '.maddu', 'events', f), 'utf8')).trim().split('\n').filter(Boolean);
+      for (const ln of lines) { const e = JSON.parse(ln); if (e.type === 'TOOL_REFUSED') atRefused = e; }
+    }
+    allOk = ok(name, 'adaptive-test allowlist refusal fires (exit 2)', atCode === 2) && allOk;
+    allOk = ok(name, 'adaptive-test TOOL_REFUSED argv redacted, no raw secret',
+      atRefused && !JSON.stringify(atRefused.data).includes('A'.repeat(40)) && JSON.stringify(atRefused.data.argv).includes('[REDACTED')) && allOk;
+
+    // 9. --allow-secret override: the ONLY reachable path where a real secret
+    //    survives past the scan into TOOL_INVOKED/TOOL_COMPLETED (step 2b
+    //    records the override and PROCEEDS). This makes the invoke/complete
+    //    argv redaction load-bearing — a regression to raw argv there would
+    //    now surface a secret in these events (and fail the final sweep).
+    await writeCfg({ '*': { allow: ['git'] } });
+    const r9 = await toolsMod.runTool(tmp, { tool: 'git', argv: ['status', SECRET, '--allow-secret'], captureOutput: true });
+    const ev9 = await spine.readAll(tmp);
+    const invoked = ev9.filter((e) => e.type === 'TOOL_INVOKED').pop();
+    const completed = ev9.filter((e) => e.type === 'TOOL_COMPLETED').pop();
+    allOk = ok(name, 'allow-secret override proceeds past the scan (not refused)', r9 && r9.refused !== true) && allOk;
+    allOk = ok(name, 'override TOOL_INVOKED argv redacted, no raw secret',
+      invoked && !JSON.stringify(invoked.data).includes(SECRET) && JSON.stringify(invoked.data.argv).includes('[REDACTED:aws-access-key]')) && allOk;
+    allOk = ok(name, 'override TOOL_COMPLETED argv redacted, no raw secret',
+      completed && !JSON.stringify(completed.data).includes(SECRET)) && allOk;
+
+    // Whole-spine sweep: NO field of ANY event (TOOL_REFUSED argv/detail,
+    // APPROVAL_REQUESTED action, TOOL_INVOKED/COMPLETED argv/mode, …) carries a
+    // raw secret. With case 9 seeding a redacted secret into INVOKED/COMPLETED,
+    // this sweep is load-bearing for those paths too.
+    const allEvents = await spine.readAll(tmp);
+    const rawNeedles = [SECRET, S2, 'A'.repeat(40)];
+    const cleanSpine = allEvents.every((e) => { const s = JSON.stringify(e.data ?? {}); return rawNeedles.every((n) => !s.includes(n)); });
+    allOk = ok(name, 'no spine record (any event, argv/detail/action) carries a raw secret', cleanSpine) && allOk;
+  } catch (err) {
+    allOk = ok(name, 'no exception', false, err.message);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+  const duration = Date.now() - start;
+  await writeReport(name, allOk, duration);
+  return { name, ok: allOk, duration };
+}
+
 // A3 (v1.13.0) — bridge loopback-origin enforcement under the harness. A
 // browser-shaped request whose Host/Origin hostname is not loopback (DNS
 // rebinding) must be rejected 403 and recorded on the spine; legit loopback
@@ -752,6 +909,7 @@ const SCENARIOS = {
   'suggest-ambiguous':        suggestAmbiguous,
   'upgrade-marker-collision': upgradeMarkerCollision,
   'tool-refusals-coherent':   toolRefusalsCoherent,
+  'refusal-argv-redacted':    refusalArgvRedacted,
   'ralph-always-fail-halts':  ralphAlwaysFailHalts,
   'windows-spawn-npm-shim':   windowsSpawnNpmShim,
   'port-collision-refusal':   portCollisionRefusal,
