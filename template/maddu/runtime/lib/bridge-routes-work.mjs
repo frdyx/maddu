@@ -17,6 +17,7 @@
 
 import { append, EVENT_TYPES, genWorkerId, genTaskId, readAll } from './spine.mjs';
 import { project } from './projections.mjs';
+import { redactSpawn } from './secret-scan.mjs';
 import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './skills.mjs';
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts } from './mailbox.mjs';
 import { searchMemory, rebuildMemory, extractEvent } from './hindsight.mjs';
@@ -33,14 +34,18 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
   if (path === '/bridge/workers' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     const id = body.id || genWorkerId();
+    // Scrub caller-supplied command/args before persisting (no-op on clean
+    // text). The bridge accepts these from any loopback client, so a
+    // secret-shaped value here must not reach the append-only spine raw.
+    const spawnRec = redactSpawn({ command: body.command || null, args: body.args || [] });
     const ev = await append(repoRoot, {
       type: EVENT_TYPES.WORKER_SPAWNED,
       actor: body.sessionId || null,
       lane: body.lane || null,
       data: {
         id,
-        command: body.command || null,
-        args: body.args || [],
+        command: spawnRec.command,
+        args: spawnRec.args,
         pid: body.pid || null,
         sessionId: body.sessionId || null
       }

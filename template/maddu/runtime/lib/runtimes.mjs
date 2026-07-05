@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, genWorkerId, makeId } from './spine.mjs';
 import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
+import { redactSpawn } from './secret-scan.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -453,11 +454,15 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   // descriptors the actor and sessionId are the freshly-minted child
   // session id (not the caller's) — that's how the cockpit reads the
   // fan-out as a tree instead of a flat list keyed by parent.
+  // Scrub command/args before persisting — no-op on clean text (r.binary +
+  // runtime flags), redacts a secret-shaped value a caller slipped into
+  // extraArgs. The prompt itself rides via stdin and is never logged.
+  const spawnRec = redactSpawn({ command: r.binary, args });
   await append(repoRoot, {
     type: EVENT_TYPES.WORKER_SPAWNED,
     actor: effectiveSession,
     lane: opts.lane || null,
-    data: { id: workerId, command: r.binary, args, pid, runtime: name, log: logPath, sessionId: effectiveSession, wrapper: wrapperPath ? (r.wrapper || 'custom') : null, modelHint: resolvedHint || null, stage: opts.stage || null, error }
+    data: { id: workerId, command: spawnRec.command, args: spawnRec.args, pid, runtime: name, log: logPath, sessionId: effectiveSession, wrapper: wrapperPath ? (r.wrapper || 'custom') : null, modelHint: resolvedHint || null, stage: opts.stage || null, error }
   });
   // v1.2.0 Phase 2 — WORKER_ENV_FILTERED event records what was allowed
   // and denied for this spawn. Denied list is KEYS ONLY — never values —

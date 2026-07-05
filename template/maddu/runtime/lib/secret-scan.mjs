@@ -115,6 +115,45 @@ export function redactText(input) {
   return { text, redactions };
 }
 
+// Scrub a worker-spawn `command` string + `args` array before they are
+// written to the append-only spine (WORKER_SPAWNED). Worker command/args are
+// operator/caller-supplied and persisted; the high-risk prompt already rides
+// via stdin (never logged), but a caller can still put a secret-shaped value in
+// command/args (e.g. `--command "claude --api-key sk-ant-…"`). This applies the
+// SAME canonical redactor used everywhere else, so it is a no-op on clean text
+// — the operator still sees exactly what a worker ran in the cockpit / `worker
+// show`; only a secret-shaped substring becomes `[REDACTED:<type>]`.
+export function redactSpawn({ command = null, args = [] } = {}) {
+  return {
+    command: command == null ? null : redactText(String(command)).text,
+    // args may be arbitrary JSON on the bridge path (POST body), not just a
+    // string[]. Recurse so a secret nested in an object/array element
+    // (e.g. args: [{ token: 'sk-ant-…' }]) is scrubbed too — string LEAVES are
+    // redacted, structure + non-string scalars preserved.
+    args: deepRedactLeaves(args),
+  };
+}
+
+// Recursively redact string leaves of an arbitrary JSON value, preserving
+// structure and non-string scalars (number/boolean/null). Object KEYS are left
+// intact on purpose: the secret always rides in a VALUE, not a field name, and
+// redacting keys would let two secret-shaped keys collide to the same
+// `[REDACTED:…]` string and silently drop a field (losing provenance).
+function deepRedactLeaves(v) {
+  if (typeof v === 'string') return redactText(v).text;
+  if (Array.isArray(v)) return v.map(deepRedactLeaves);
+  if (v && typeof v === 'object') {
+    // null-proto target: assigning a literal `__proto__` key sets an OWN
+    // property (no prototype accessor to intercept), so every key is faithfully
+    // preserved and there's no prototype-pollution surface. JSON.stringify still
+    // serializes own enumerable props, so the spine record is unaffected.
+    const out = Object.create(null);
+    for (const [k, val] of Object.entries(v)) out[k] = deepRedactLeaves(val);
+    return out;
+  }
+  return v; // number | boolean | null | undefined
+}
+
 // Operator override helpers. `--allow-secret` is a Máddu-level token —
 // stripped from argv before spawn so the underlying tool never sees it.
 export function hasAllowSecret(argv) {
