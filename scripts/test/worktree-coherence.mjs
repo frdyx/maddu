@@ -103,9 +103,21 @@ async function main() {
     await git(['worktree', 'add', '-b', 'maddu/lane/cockpit-shell', orphanPath], repo);
     res = await run(repo);
     ok('orphaned worktree flagged', res.ok === false && kinds(res).includes('orphaned_worktree'), res.message);
+    // Codex P2: the remediation must be a command that WORKS on an orphan
+    // (lane release --worktree fails — no live attachment), i.e. `git worktree
+    // remove`, not the maddu disposition path.
+    const orphanIssue = (res.evidence?.issues || []).find((i) => i.kind === 'orphaned_worktree');
+    ok('orphan remediation points to `git worktree remove` (not lane release)',
+      /git worktree remove/.test(orphanIssue?.detail || '') && !/lane release/.test(orphanIssue?.detail || ''), orphanIssue?.detail?.slice(0, 100));
     await git(['worktree', 'remove', '--force', orphanPath], repo);
     await git(['branch', '-D', 'maddu/lane/cockpit-shell'], repo);
     ok('coherent after orphan removed', (await run(repo)).ok === true);
+
+    // ── Codex P2: an EMPTY-but-present catalog still flags an invalid lane ──
+    await writeCatalog([]); // catalog exists, zero lanes, git-integration still attached
+    res = await run(repo);
+    ok('empty catalog still flags lane_not_in_catalog', res.ok === false && kinds(res).includes('lane_not_in_catalog'), res.message);
+    await writeCatalog(['git-integration', 'cockpit-shell']); // restore
 
     // ── missing worktree: spine has an attachment, git does not ──
     // Remove the git worktree behind the live attachment without detaching.

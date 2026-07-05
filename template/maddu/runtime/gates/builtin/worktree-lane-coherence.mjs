@@ -69,12 +69,17 @@ export default {
     const registered = parseWorktreeList(wl.stdout);
     const registeredByPath = new Map(registered.map((w) => [pathKey(w.path), w]));
 
-    // Lane catalog (for the "lane deleted while attached" check).
+    // Lane catalog (for the "lane deleted while attached" check). Track
+    // whether the catalog was READ separately from how many lanes it holds
+    // (Codex P2): an existing-but-empty catalog — or one whose last lane was
+    // the attached one, now removed — must still flag an invalid lane.
     let catalogIds = new Set();
+    let catalogRead = false;
     try {
       const cat = JSON.parse(await readFile(pathsFor(root).laneCatalog, 'utf8'));
       catalogIds = new Set((cat.lanes || []).map((l) => l.id));
-    } catch { /* no catalog → skip that check */ }
+      catalogRead = true;
+    } catch { /* no catalog → skip that check entirely */ }
 
     const issues = [];
     const liveByPath = new Map();
@@ -99,7 +104,7 @@ export default {
           issues.push({ kind: 'dirty_worktree', lane: att.lane, detail: `uncommitted changes in ${att.pathRepoRel} — disposition before releasing` });
         }
       }
-      if (catalogIds.size && !catalogIds.has(att.lane)) {
+      if (catalogRead && !catalogIds.has(att.lane)) {
         issues.push({ kind: 'lane_not_in_catalog', lane: att.lane, detail: `live worktree for lane "${att.lane}" which is no longer in the catalog` });
       }
     }
@@ -110,7 +115,13 @@ export default {
       const key = pathKey(w.path);
       if (!key.startsWith(wtBaseKey)) continue; // only our lane-worktree dir
       if (!liveByPath.has(key)) {
-        issues.push({ kind: 'orphaned_worktree', detail: `git worktree ${w.path} under .maddu/worktrees/ has no live attachment — release it: maddu lane release <lane> --worktree <merged|abandoned|keep>` });
+        // No live attachment ⇒ `lane release --worktree` exits "no live
+        // worktree to disposition" (Codex P2). The working cleanup is git's
+        // own worktree removal — this is a kept disposition, a manually-made
+        // worktree, or a failed detach the operator must clear by hand.
+        const branch = w.branch ? w.branch.replace(/^refs\/heads\//, '') : null;
+        const rec = `git worktree remove --force ${w.path}${branch ? ` && git branch -D ${branch}` : ''}`;
+        issues.push({ kind: 'orphaned_worktree', detail: `git worktree ${w.path} under .maddu/worktrees/ has no live attachment (kept, manual, or a failed detach) — remove it: ${rec}` });
       }
     }
 
