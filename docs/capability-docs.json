@@ -27,6 +27,7 @@
     "global": "19-multi-workspace.md",
     "goal": "32-kanban-and-plans.md",
     "governance": "30-governance-tiers.md",
+    "export": "48-otel-export.md",
     "handoff": null,
     "help": null,
     "hooks": "44-session-hooks.md",

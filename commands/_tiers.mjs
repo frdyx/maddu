@@ -56,6 +56,7 @@ export default {
   global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  export:       { tier: 'read-only', autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   init:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
