@@ -29,12 +29,17 @@ function ok(name, cond, extra = '') {
 }
 function git(args, cwd) {
   return new Promise((resolve) => {
-    const c = spawn('git', args, { cwd });
+    // spawn can throw SYNCHRONOUSLY (EPERM on locked-down Windows, sandboxed
+    // runs) — catch it so the harness SKIPS via the init check below instead
+    // of dying with a harness error. (Codex P2, mirrors git-exec.mjs.)
+    let c;
+    try { c = spawn('git', args, { cwd }); }
+    catch (e) { return resolve({ code: -1, err: e.message, out: '' }); }
     let out = '', err = '';
     c.stdout.on('data', (b) => (out += b));
     c.stderr.on('data', (b) => (err += b));
     c.on('close', (code) => resolve({ code, out, err }));
-    c.on('error', (e) => resolve({ code: -1, err: e.message }));
+    c.on('error', (e) => resolve({ code: -1, err: e.message, out: '' }));
   });
 }
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
@@ -126,6 +131,27 @@ async function main() {
     try { await wt.attachLaneWorktree(repo, { lane: 'cockpit-shell', session: 'ses_2' }); } catch (e) { lockBlocked = /in progress/.test(e.message); }
     ok('held lock dir blocks a concurrent attach', lockBlocked);
     await rm(lock2, { recursive: true, force: true });
+
+    // ── Codex P2: the pointer is hidden from git status (not dirty) ──
+    const status = (await git(['status', '--porcelain'], wtPath)).out;
+    ok('worktree is clean — .maddu-state-root excluded from git status', !/maddu-state-root/.test(status), status.trim());
+
+    // ── Codex P2: a DIFFERENT session cannot silently reuse a live attachment ──
+    let crossSessionRefused = false;
+    try { await wt.attachLaneWorktree(repo, { lane: 'git-integration', session: 'ses_OTHER' }); }
+    catch (e) { crossSessionRefused = /held by ses_1/.test(e.message); }
+    ok('cross-session reuse refused (must disposition first)', crossSessionRefused);
+
+    // ── Codex P1: ownership change during provisioning rolls the worktree back ──
+    // Fresh lane, ownerCheck returns false → git worktree add happens then is
+    // removed, and NO WORKTREE_ATTACHED is emitted.
+    const beforeAtt = (await spine.readAll(repo)).filter((e) => e.type === 'WORKTREE_ATTACHED').length;
+    let rolledBack = false;
+    try { await wt.attachLaneWorktree(repo, { lane: 'cockpit-shell', session: 'ses_3', ownerCheck: async () => false }); }
+    catch (e) { rolledBack = /ownership changed/.test(e.message); }
+    const afterAtt = (await spine.readAll(repo)).filter((e) => e.type === 'WORKTREE_ATTACHED').length;
+    ok('owner-change during provisioning throws + emits no event', rolledBack && afterAtt === beforeAtt);
+    ok('rolled-back worktree removed from disk', !(await exists(path.join(repo, '.maddu', 'worktrees', 'cockpit-shell'))));
 
     // ── the spine verifies clean ──
     const res = await verify.verifySpine(repo);

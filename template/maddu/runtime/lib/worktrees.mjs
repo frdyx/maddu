@@ -134,14 +134,30 @@ export async function liveAttachmentForLane(stateRoot, lane) {
 // guards the worktree path so two processes can't both run `git worktree add`
 // on it. Idempotent: a lane with a live attachment returns it (reused), it
 // does not stack a second worktree.
-export async function attachLaneWorktree(stateRoot, { lane, session, claimEventId = null, by = null }) {
+// `ownerCheck` (optional): an async predicate re-evaluated AFTER `git worktree
+// add` but BEFORE the WORKTREE_ATTACHED append. spine.append has no mutex, so
+// a concurrent force-claim can land during provisioning; if ownerCheck returns
+// false the freshly-made worktree is removed and the function throws WITHOUT
+// emitting an event — no attachment is ever bound to a lost claim. (Codex P1.)
+export async function attachLaneWorktree(stateRoot, { lane, session, claimEventId = null, by = null, ownerCheck = null }) {
   assertLaneSlug(lane);
   const catalog = JSON.parse(await readFile(pathsFor(stateRoot).laneCatalog, 'utf8'));
   assertCatalogMember(catalog, lane);
 
-  // Reuse a live attachment rather than stacking.
+  // Reuse a live attachment rather than stacking — but ONLY for the same
+  // session. If a prior holder released the lane without dispositioning its
+  // worktree (no WORKTREE_DETACHED), a DIFFERENT session must not inherit that
+  // attachment silently; it has to be dispositioned first. (Codex P2.)
   const existing = await liveAttachmentForLane(stateRoot, lane);
-  if (existing) return { ...existing, created: false, reused: true };
+  if (existing) {
+    if (existing.session && existing.session !== session) {
+      throw new Error(
+        `lane "${lane}" already has a live worktree (${existing.pathRepoRel}) held by ${existing.session} — ` +
+        `disposition it first: maddu lane release ${lane} --worktree <merged|abandoned|keep>`
+      );
+    }
+    return { ...existing, created: false, reused: true };
+  }
 
   const path = laneWorktreePath(stateRoot, lane);
   const relPath = laneWorktreeRepoRel(lane);
@@ -179,6 +195,31 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
     const res = await gitRun(addArgs, stateRoot, 30000);
     if (res.code !== 0) {
       throw new Error(`git worktree add failed: ${(res.stderr || res.error || '').trim()}`);
+    }
+
+    // Owner re-check inside the tightest possible window (Codex P1): the git
+    // worktree now exists, but if a concurrent force-claim stole the lane
+    // between the caller's projection check and here, remove the worktree and
+    // bail WITHOUT emitting WORKTREE_ATTACHED — nothing bound to a lost claim.
+    if (typeof ownerCheck === 'function' && !(await ownerCheck())) {
+      await gitRun(['worktree', 'remove', '--force', path], stateRoot, 10000);
+      try { await rm(path, { recursive: true, force: true }); } catch {}
+      throw new Error(`lane "${lane}" ownership changed during provisioning — worktree rolled back, not attached`);
+    }
+
+    // Hide the pointer from git status in the new worktree (Codex P2): write it
+    // to the worktree's own info/exclude so the checkout isn't dirtied and a
+    // stray `git add -A` can't commit a machine-local absolute path.
+    const excludeRel = (await gitRun(['-C', path, 'rev-parse', '--git-path', 'info/exclude'], stateRoot, 3000)).stdout.trim();
+    if (excludeRel) {
+      const excludePath = isAbsolute(excludeRel) ? excludeRel : join(path, excludeRel);
+      try {
+        let cur = '';
+        try { cur = await readFile(excludePath, 'utf8'); } catch {}
+        if (!cur.split(/\r?\n/).includes(STATE_ROOT_POINTER)) {
+          await writeFile(excludePath, (cur && !cur.endsWith('\n') ? cur + '\n' : cur) + STATE_ROOT_POINTER + '\n');
+        }
+      } catch {}
     }
 
     // The pointer that makes commands run INSIDE the worktree bind their spine

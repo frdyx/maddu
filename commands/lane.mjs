@@ -32,14 +32,19 @@ async function loadWorktreesLib() {
 // concurrent claim could have landed between our append and now. A loser
 // reports and exits nonzero WITHOUT provisioning a worktree.
 async function attachAndReport(wtLib, repoRoot, projections, { lane, sid, focus, claimEventId = null }) {
-  const proj = await projections.project(repoRoot);
-  const holder = proj.claims.find((c) => c.lane === lane);
-  if (!holder || holder.sessionId !== sid) {
-    console.error(`  worktree: lane "${lane}" is now held by ${holder ? holder.sessionId : '(nobody)'} — not this session; skipping attach`);
+  const stillOwner = async () => {
+    const proj = await projections.project(repoRoot);
+    const holder = proj.claims.find((c) => c.lane === lane);
+    return !!holder && holder.sessionId === sid;
+  };
+  if (!(await stillOwner())) {
+    console.error(`  worktree: lane "${lane}" is no longer held by this session; skipping attach`);
     process.exit(3);
   }
   try {
-    const r = await wtLib.attachLaneWorktree(repoRoot, { lane, session: sid, claimEventId, by: sid });
+    // The ownerCheck re-runs inside attachLaneWorktree after `git worktree
+    // add`, closing the race window spine.append leaves open (Codex P1).
+    const r = await wtLib.attachLaneWorktree(repoRoot, { lane, session: sid, claimEventId, by: sid, ownerCheck: stillOwner });
     if (r.reused) {
       console.log(`  worktree: reusing ${r.pathRepoRel} (already attached)`);
     } else {
@@ -157,13 +162,15 @@ export default async function lane(argv) {
           actor: sid, lane: lid,
           data: { lane: lid, priorSessionId: existing.sessionId, by: sid, focus: flags.focus || null, reason: typeof flags.reason === 'string' ? flags.reason : null },
         });
-        await spine.append(repoRoot, {
+        const forcedClaimEv = await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.LANE_CLAIMED,
           actor: sid, lane: lid,
           data: { focus: flags.focus || null, forcedFrom: existing.sessionId }
         });
         console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${existing.sessionId})`);
-        if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus });
+        // Bind the worktree to THIS forced claim (Codex P2): pass the forced
+        // LANE_CLAIMED id so WORKTREE_ATTACHED carries a claimEventId.
+        if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: forcedClaimEv.id });
         return;
       }
       console.error(`lane "${lid}" already claimed by ${existing.sessionId}`);
