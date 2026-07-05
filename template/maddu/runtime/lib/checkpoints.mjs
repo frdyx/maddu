@@ -12,9 +12,15 @@
 
 import { mkdir, readFile, writeFile, appendFile, stat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, makeId } from './spine.mjs';
+// v1.93.0 (roadmap #12a phase 4): the low-level git-subprocess idiom moved to
+// git-exec.mjs so worktrees.mjs reuses the exact same runner. gitAvailable is
+// re-exported below so existing importers (coordinator, bridge-routes-
+// capabilities) keep resolving `checkpoints.gitAvailable` unchanged.
+import { gitRun, gitAvailable, currentHead } from './git-exec.mjs';
+
+export { gitAvailable };
 
 const TAG_PREFIX = 'maddu/checkpoint/';
 
@@ -34,38 +40,6 @@ function genCheckpointId() {
 
 async function ensureDir(repoRoot) {
   await mkdir(checkpointsDir(repoRoot), { recursive: true });
-}
-
-// Run `git ...args` in cwd, return { code, stdout, stderr }.
-function gitRun(args, cwd, timeoutMs = 10000) {
-  return new Promise((resolve) => {
-    let stdout = '', stderr = '', resolved = false;
-    let child;
-    try { child = spawn('git', args, { cwd }); }
-    catch (e) { return resolve({ code: -1, error: e.message, stdout, stderr }); }
-    const timer = setTimeout(() => { if (!resolved) { try { child.kill(); } catch {} } }, timeoutMs);
-    child.on('error', (e) => { if (resolved) return; resolved = true; clearTimeout(timer); resolve({ code: -1, error: e.message, stdout, stderr }); });
-    child.on('close', (code) => { if (resolved) return; resolved = true; clearTimeout(timer); resolve({ code, stdout, stderr }); });
-    child.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
-    child.stderr.on('data', (b) => { stderr += b.toString('utf8'); });
-  });
-}
-
-export async function gitAvailable(repoRoot) {
-  const r = await gitRun(['rev-parse', '--is-inside-work-tree'], repoRoot, 3000);
-  return r.code === 0 && r.stdout.trim() === 'true';
-}
-
-async function currentHead(repoRoot) {
-  const sha = await gitRun(['rev-parse', 'HEAD'], repoRoot, 3000);
-  if (sha.code !== 0) throw new Error(`git rev-parse HEAD failed: ${(sha.stderr || sha.error || '').trim()}`);
-  const branch = await gitRun(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot, 3000);
-  const subject = await gitRun(['log', '-1', '--pretty=%s'], repoRoot, 3000);
-  return {
-    commit: sha.stdout.trim(),
-    branch: branch.code === 0 ? branch.stdout.trim() : null,
-    subject: subject.code === 0 ? subject.stdout.trim() : ''
-  };
 }
 
 export async function listCheckpoints(repoRoot) {

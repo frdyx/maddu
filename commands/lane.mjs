@@ -10,8 +10,47 @@
 // to MADDU_SESSION_ID. `--lane <id>` flag form is retained.
 
 import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
+import { resolveLibDir } from './_libroot.mjs';
+
+// Lazy-load the worktrees lib (cwd-installed → dev-template fallback), so an
+// older install without it degrades gracefully — `--worktree` errors clearly
+// instead of crashing the whole `lane claim`.
+async function loadWorktreesLib() {
+  try {
+    const dir = await resolveLibDir();
+    return await import(pathToFileURL(join(dir, 'worktrees.mjs')).href);
+  } catch { return null; }
+}
+
+// Race-safe worktree attach (roadmap #12a phase 4). The claim event is
+// already on the spine; re-project and confirm THIS session still holds the
+// lane before touching git — spine.append has no app-level mutex, so a
+// concurrent claim could have landed between our append and now. A loser
+// reports and exits nonzero WITHOUT provisioning a worktree.
+async function attachAndReport(wtLib, repoRoot, projections, { lane, sid, focus, claimEventId = null }) {
+  const proj = await projections.project(repoRoot);
+  const holder = proj.claims.find((c) => c.lane === lane);
+  if (!holder || holder.sessionId !== sid) {
+    console.error(`  worktree: lane "${lane}" is now held by ${holder ? holder.sessionId : '(nobody)'} — not this session; skipping attach`);
+    process.exit(3);
+  }
+  try {
+    const r = await wtLib.attachLaneWorktree(repoRoot, { lane, session: sid, claimEventId, by: sid });
+    if (r.reused) {
+      console.log(`  worktree: reusing ${r.pathRepoRel} (already attached)`);
+    } else {
+      console.log(`  worktree: ${r.relPath}  [${r.branch}${r.created ? ', new branch' : ''}]`);
+      console.log(`    cd ${r.relPath}`);
+    }
+  } catch (e) {
+    console.error(`  worktree attach failed: ${e.message}`);
+    process.exit(1);
+  }
+}
 
 function printLaneHelp() {
   console.log([
@@ -21,6 +60,7 @@ function printLaneHelp() {
     '  claim <lane-id> [--session <id>] [--focus]    # claim a lane (positional shorthand)',
     '  claim --lane <id> --session <id> [--focus]    # claim (legacy flag form)',
     '  claim ... --force                             # pre-empt prior holder',
+    '  claim ... --worktree                          # provision an isolated git worktree bound to the claim',
     '  release --lane <id> --session <id>            # release a claim',
     '',
     '  --session falls back to $MADDU_SESSION_ID, then the active session',
@@ -59,7 +99,30 @@ export default async function lane(argv) {
     const lid = (typeof flags.lane === 'string' && flags.lane.length > 0)
       ? flags.lane
       : (positional && positional[0]);
-    if (!lid) { console.error('usage: maddu lane claim <lane-id> [--session <id>] [--focus "..."] [--force]'); process.exit(2); }
+    if (!lid) { console.error('usage: maddu lane claim <lane-id> [--session <id>] [--focus "..."] [--force] [--worktree]'); process.exit(2); }
+
+    // v1.93.0 (roadmap #12a phase 4) — --worktree provisions an isolated git
+    // worktree bound to this claim. Validate the lane id + catalog membership
+    // FAIL-FAST, before we claim anything: it becomes a filesystem path and a
+    // git branch ref, so a bad id must never reach `git worktree add`.
+    const wantWorktree = flags.worktree === true;
+    let wtLib = null;
+    if (wantWorktree) {
+      wtLib = await loadWorktreesLib();
+      if (!wtLib?.attachLaneWorktree) {
+        console.error('--worktree requires a newer maddu runtime (worktrees.mjs not found)');
+        process.exit(2);
+      }
+      try {
+        wtLib.assertLaneSlug(lid);
+        const catalog = JSON.parse(await readFile(p.laneCatalog, 'utf8'));
+        wtLib.assertCatalogMember(catalog, lid);
+      } catch (e) {
+        console.error(`--worktree: ${e.message}`);
+        process.exit(2);
+      }
+    }
+
     const sid = await resolveSessionId(repoRoot, flags, sessionActive);
     if (!sid) {
       console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
@@ -72,6 +135,18 @@ export default async function lane(argv) {
       // LANE_RELEASED (for the prior holder) + LANE_CLAIM_FORCED +
       // LANE_CLAIMED so the audit trail preserves who got booted.
       if (flags.force) {
+        // #12a phase 4: a force-claim WITH --worktree over a lane that still
+        // has a LIVE attachment is refused — the prior worktree must be
+        // dispositioned first (`lane release --worktree ...`, phase 5). We do
+        // not silently orphan a checkout that may hold un-integrated work.
+        if (wantWorktree) {
+          const liveAttach = await wtLib.liveAttachmentForLane(repoRoot, lid);
+          if (liveAttach) {
+            console.error(`lane "${lid}" has a live worktree (${liveAttach.pathRepoRel}) held by ${liveAttach.session}`);
+            console.error(`  disposition it first: maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
+            process.exit(3);
+          }
+        }
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.LANE_RELEASED,
           actor: existing.sessionId, lane: lid,
@@ -88,19 +163,21 @@ export default async function lane(argv) {
           data: { focus: flags.focus || null, forcedFrom: existing.sessionId }
         });
         console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${existing.sessionId})`);
+        if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus });
         return;
       }
       console.error(`lane "${lid}" already claimed by ${existing.sessionId}`);
       console.error(`  retry with --force to pre-empt (audit-logged via LANE_CLAIM_FORCED)`);
       process.exit(3);
     }
-    await spine.append(repoRoot, {
+    const claimEv = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LANE_CLAIMED,
       actor: sid,
       lane: lid,
       data: { focus: flags.focus || null }
     });
     console.log(`claimed  ${lid}  by  ${sid}`);
+    if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: claimEv.id });
     return;
   }
 
