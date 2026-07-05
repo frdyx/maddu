@@ -18,7 +18,9 @@ narrative summary.
 - **CLI binding:** `resolveRepoRoot` now returns the STATE root (every command automatically appends to the primary spine), with graceful fallback on older installed libs without `resolveRoots`. New `resolveWorkAndStateRoots` for commands needing both.
 - **`slice-stop`** scopes `git diff` cross-checks and deliverable verification to the WORK root while the spine append, session resolution, and gates bind to the state root.
 - Fixture `root-resolver` 14/0 — pins the nested-worktree trap (including that legacy `findRepoRoot` falls into it, documenting why the split exists), pointer-only worktrees, env-over-pointer precedence, broken/empty-pointer throws, relative + CRLF pointer tolerance. Self-test 108/108; `maddu ci` green.
-- Design contract: `docs/research/competitive-response-proposal.md` (local), plan `pln_20260705002732_7773` phase 1.
+- **Phase 2 — lane-id validation SSOT** (`lib/worktrees.mjs`): `LANE_SLUG_RE` (`^[a-z][a-z0-9-]{1,40}$` — the bridge's lane-creation rule, now imported there as the single source), `assertLaneSlug` / `assertCatalogMember`, `laneBranch(Ref)` encoding under the fixed `maddu/lane/` namespace, and `laneWorktreePath` with containment under `<stateRoot>/.maddu/worktrees/` (throws on escape). The attach flow must route every path and ref through here. Fixture `lane-worktree-validation` 27/0.
+- **Phase 3 — frozen event contract**: `WORKTREE_ATTACHED` / `WORKTREE_DETACHED` registered in `EVENT_TYPES` with schemaVersion-1 shapes, and four verifier rules (orphan detach → FAIL, duplicate detach → WARN, attach without a claim ref → WARN, live-path reuse → WARN) — all covered BEFORE any attach code exists, so no unshaped worktree event can ever land on a spine. Fixture `worktree-events` 9/0.
+- Design contract: `docs/research/competitive-response-proposal.md` (local), plan `pln_20260705002732_7773` phases 1–3. Self-test 110/110; audit 16/0 (162 event types reachable); `maddu ci` green.
 
 ## [v1.92.2] · 2026-07-04 · focus director: verbosity is not drift (incident catch)
 

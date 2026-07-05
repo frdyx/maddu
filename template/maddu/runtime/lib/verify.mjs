@@ -35,6 +35,9 @@
 //   LOOP_{ITERATION_STARTED,ITERATION_COMPLETED,HALTED,COMPLETED} → LOOP_STARTED        (WARN) [B2]
 //   COORDINATOR_{PHASE_STARTED,PHASE_COMPLETED,HALTED,COMPLETED}  → COORDINATOR_STARTED (WARN) [B2]
 //   ADVISOR_ARTIFACT_WRITTEN                 → ADVISOR_INVOKED                    (WARN) [B2]
+//   WORKTREE_DETACHED                        → live WORKTREE_ATTACHED (attachmentId) (FAIL never-attached, WARN duplicate detach) [#12a]
+//   WORKTREE_ATTACHED missing claimEventId   → orphan attach (no claim ref)        (WARN) [#12a]
+//   WORKTREE_ATTACHED on a still-live pathRepoRel → live-path reuse                (WARN) [#12a]
 //
 // INTENTIONALLY UNCONSTRAINED — no parent-anchor invariant; flagging would be
 // over-constraining (the "create" may legitimately predate an export/replay
@@ -134,6 +137,12 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   // (lane, sessionId) → "claimed" / "released". Used to verify LANE_RELEASED has a prior LANE_CLAIMED.
   const laneClaims = new Map();
   const laneEverClaimed = new Set();
+  // #12a — worktree attachment lifecycle. attachmentId → "attached"/"detached";
+  // livePaths tracks pathRepoRel → attachmentId while an attachment is live so
+  // path reuse across live attachments is flagged.
+  const worktreeAttachments = new Map();
+  const worktreeEverAttached = new Set();
+  const worktreeLivePaths = new Map();
   // B2 (v1.13.0) — orchestration-lifecycle anchors. Each family's child events
   // carry the parent id; a child whose parent was never opened is an orphan,
   // exactly like the TASK / WORKER / SCHEDULE checks above. WARN (not FAIL):
@@ -429,6 +438,53 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
             }
           } else {
             laneClaims.set(key, 'released');
+          }
+          break;
+        }
+
+        case 'WORKTREE_ATTACHED': {
+          const aid = ev.data?.attachmentId;
+          if (aid) {
+            worktreeAttachments.set(aid, 'attached');
+            worktreeEverAttached.add(aid);
+          }
+          // Orphan attach: an attachment must reference the claim it binds.
+          if (!ev.data?.claimEventId) {
+            push(issue('WARN', 'worktree_attach_no_claim_ref',
+              `${ev.id}: WORKTREE_ATTACHED without a claimEventId — attachment is not bound to any lane claim`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          // Live-path reuse: two live attachments must never share a path.
+          const rel = ev.data?.pathRepoRel;
+          if (rel) {
+            const holder = worktreeLivePaths.get(rel);
+            if (holder && holder !== aid && worktreeAttachments.get(holder) === 'attached') {
+              push(issue('WARN', 'worktree_live_path_reuse',
+                `${ev.id}: WORKTREE_ATTACHED at "${rel}" while attachment ${holder} is still live on that path`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
+            if (aid) worktreeLivePaths.set(rel, aid);
+          }
+          break;
+        }
+
+        case 'WORKTREE_DETACHED': {
+          const aid = ev.data?.attachmentId;
+          if (!aid) break; // forward-compat: unshaped detach is not flagged here
+          if (worktreeAttachments.get(aid) !== 'attached') {
+            if (worktreeEverAttached.has(aid)) {
+              push(issue('WARN', 'duplicate_worktree_detach',
+                `${ev.id}: WORKTREE_DETACHED for attachment ${aid} after it was already detached`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            } else {
+              push(issue('FAIL', 'orphan_worktree_detach',
+                `${ev.id}: WORKTREE_DETACHED for attachment ${aid} with no prior WORKTREE_ATTACHED`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
+          } else {
+            worktreeAttachments.set(aid, 'detached');
+            const rel = ev.data?.pathRepoRel;
+            if (rel && worktreeLivePaths.get(rel) === aid) worktreeLivePaths.delete(rel);
           }
           break;
         }
