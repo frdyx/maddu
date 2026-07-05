@@ -220,9 +220,16 @@ async function main() {
       const a = await wt.attachLaneWorktree(repo, { lane, session: 'ghost', claimEventId: 'evt_orphan' });
       ok('orphaned attachment is live before CLI disposition', !!(await wt.liveAttachmentForLane(repo, lane)));
       const BIN = path.resolve(__dirname, '..', '..', 'bin', 'maddu.mjs');
+      // Pin the child to the fixture repo (Codex P2): clear MADDU_STATE_ROOT /
+      // MADDU_SESSION_ID so an outer env — e.g. running the self-test from
+      // INSIDE a lane worktree (now possible!) — can't redirect the spawned
+      // `maddu` at the caller's real state and disposition a real worktree.
+      const childEnv = { ...process.env };
+      delete childEnv.MADDU_STATE_ROOT;
+      delete childEnv.MADDU_SESSION_ID;
       const r = await new Promise((resolve) => {
         let c;
-        try { c = spawn(process.execPath, [BIN, 'lane', 'release', lane, '--worktree', 'keep', '--session', 'cleaner'], { cwd: repo }); }
+        try { c = spawn(process.execPath, [BIN, 'lane', 'release', lane, '--worktree', 'keep', '--session', 'cleaner'], { cwd: repo, env: childEnv }); }
         catch (e) { return resolve({ code: -1, out: '', err: e.message }); }
         let out = '', err = '';
         c.stdout.on('data', (b) => (out += b));
@@ -231,7 +238,10 @@ async function main() {
         c.on('error', (e) => resolve({ code: -1, out: '', err: e.message }));
       });
       ok('CLI orphan-disposition exits 0', r.code === 0, (r.err || '').trim().slice(0, 120));
-      ok('CLI dispositioned the orphaned worktree (not a no-op)', /worktree: kept|claim already gone/.test(r.out), r.out.trim().slice(0, 160));
+      // Require the KEEP outcome specifically (Codex P3): "claim already gone"
+      // prints for any disposition, so it wouldn't catch keep→abandoned drift.
+      ok('CLI reports worktree: kept', /worktree: kept/.test(r.out), r.out.trim().slice(0, 160));
+      ok('keep LEFT the checkout on disk', await exists(a.path));
       ok('orphaned attachment no longer live after CLI', !(await wt.liveAttachmentForLane(repo, lane)));
       await git(['worktree', 'remove', '--force', a.path], repo);
     }
