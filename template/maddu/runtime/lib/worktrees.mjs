@@ -231,11 +231,8 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
     const commonDir = (await gitRun(['rev-parse', '--git-common-dir'], stateRoot, 3000)).stdout.trim() || null;
     const attachmentId = makeId('wta');
 
-    // Owner re-check in the TIGHTEST possible window (Codex P1): re-evaluate
-    // ownership as the immediately-preceding step to the append, so the only
-    // thing between the check and the durable WORKTREE_ATTACHED is the
-    // synchronous object build below — no async op a concurrent force-claim
-    // could interleave into. On a lost race: unwind git, emit no event.
+    // Cheap early-out (Codex P1): if we've already lost the lane, unwind now
+    // and emit NO event at all — the common lost-race case costs no spine churn.
     if (typeof ownerCheck === 'function' && !(await ownerCheck())) {
       await rollbackGit();
       throw new Error(`lane "${lane}" ownership changed during provisioning — worktree rolled back, not attached`);
@@ -257,6 +254,32 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
         gitCommonDir: commonDir, platform: process.platform,
       },
     });
+
+    // Authoritative reconcile (Codex P1). The spine is append-only and
+    // lock-free: `append` itself does awaited fs work, so NO pre-append check
+    // can be atomic with the write — a force-claim can always interleave. So
+    // we don't try to PREVENT the interleave, we COMPENSATE for it. Verify
+    // ownership once more AFTER the durable append; if we lost the lane in the
+    // window, append a WORKTREE_DETACHED(orphaned) so the CONVERGED live set
+    // (readAttachments folds ATTACHED→DETACHED) never contains the loser, then
+    // unwind git. A reader that catches the transient live attachment sees it
+    // vanish on the very next event — the same eventual-consistency the whole
+    // projection model already relies on.
+    if (typeof ownerCheck === 'function' && !(await ownerCheck())) {
+      await append(stateRoot, {
+        type: EVENT_TYPES.WORKTREE_DETACHED,
+        actor: by || session, lane,
+        data: {
+          schemaVersion: 1, attachmentId, lane, pathRepoRel: relPath,
+          disposition: 'orphaned', reason: 'ownership-lost-during-attach',
+          branchHead: null, integrationRef: null, integrationHead: null,
+          ancestorCheck: 'skipped', dirtyAtDetach: false,
+        },
+      });
+      await rollbackGit();
+      throw new Error(`lane "${lane}" ownership changed during provisioning — attachment orphaned + rolled back`);
+    }
+
     return {
       attachmentId, lane, session, path, relPath, branch, branchRef,
       created, reused: false, eventId: ev.id,

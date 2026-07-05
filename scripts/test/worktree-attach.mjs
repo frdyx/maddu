@@ -157,6 +157,25 @@ async function main() {
     const staleBranch = await git(['rev-parse', '--verify', '--quiet', 'refs/heads/maddu/lane/cockpit-shell'], repo);
     ok('rolled-back attach deleted the branch it created', staleBranch.code !== 0);
 
+    // ── Codex P1 (chain-3): the COMPENSATION path — race lost AFTER the append.
+    // ownerCheck passes the early-out (call 1 → true) then fails post-append
+    // (call 2 → false), so WORKTREE_ATTACHED lands and is then reconciled by a
+    // WORKTREE_DETACHED(orphaned). Converged live set must not contain it.
+    let calls = 0;
+    const toggling = async () => { calls += 1; return calls === 1; };
+    let compensated = false;
+    try { await wt.attachLaneWorktree(repo, { lane: 'cockpit-shell', session: 'ses_4', claimEventId: 'evt_z', ownerCheck: toggling }); }
+    catch (e) { compensated = /orphaned/.test(e.message); }
+    ok('lost-after-append compensates (ATTACHED then DETACHED orphaned)', compensated);
+    const evs = await spine.readAll(repo);
+    const orphanDet = evs.find((e) => e.type === 'WORKTREE_DETACHED' && e.data?.reason === 'ownership-lost-during-attach');
+    ok('a WORKTREE_DETACHED(orphaned) was appended', !!orphanDet);
+    const liveNow = await wt.liveAttachmentForLane(repo, 'cockpit-shell');
+    ok('converged live set has NO attachment for the lost lane', liveNow === null);
+    ok('compensated worktree removed + branch deleted',
+      !(await exists(path.join(repo, '.maddu', 'worktrees', 'cockpit-shell')))
+      && (await git(['rev-parse', '--verify', '--quiet', 'refs/heads/maddu/lane/cockpit-shell'], repo)).code !== 0);
+
     // ── the spine verifies clean ──
     const res = await verify.verifySpine(repo);
     const wtIssues = res.issues.filter((i) => i.kind.includes('worktree'));
