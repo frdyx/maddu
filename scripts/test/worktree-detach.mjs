@@ -220,13 +220,17 @@ async function main() {
       const a = await wt.attachLaneWorktree(repo, { lane, session: 'ghost', claimEventId: 'evt_orphan' });
       ok('orphaned attachment is live before CLI disposition', !!(await wt.liveAttachmentForLane(repo, lane)));
       const BIN = path.resolve(__dirname, '..', '..', 'bin', 'maddu.mjs');
-      // Pin the child to the fixture repo (Codex P2): clear MADDU_STATE_ROOT /
+      // Pin the child to the fixture repo (Codex P2): drop MADDU_STATE_ROOT /
       // MADDU_SESSION_ID so an outer env — e.g. running the self-test from
       // INSIDE a lane worktree (now possible!) — can't redirect the spawned
       // `maddu` at the caller's real state and disposition a real worktree.
-      const childEnv = { ...process.env };
-      delete childEnv.MADDU_STATE_ROOT;
-      delete childEnv.MADDU_SESSION_ID;
+      // Case-INSENSITIVE filter: Windows env vars ignore case, but a spread of
+      // process.env is a case-sensitive object, so a non-canonically-cased
+      // `Maddu_State_Root` would survive a plain `delete`.
+      const DROP = new Set(['MADDU_STATE_ROOT', 'MADDU_SESSION_ID']);
+      const childEnv = Object.fromEntries(
+        Object.entries(process.env).filter(([k]) => !DROP.has(k.toUpperCase()))
+      );
       const r = await new Promise((resolve) => {
         let c;
         try { c = spawn(process.execPath, [BIN, 'lane', 'release', lane, '--worktree', 'keep', '--session', 'cleaner'], { cwd: repo, env: childEnv }); }
