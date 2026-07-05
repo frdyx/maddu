@@ -155,6 +155,62 @@ async function main() {
     try { await wt.detachLaneWorktree(repo, { lane: 'git-integration', disposition: 'keep' }); } catch (e) { noLive = /no live worktree/.test(e.message); }
     ok('no-live-attachment throws', noLive);
 
+    // ── Codex P1: the delete path is derived from the CURRENT stateRoot, not
+    // the spine-persisted att.pathAbs (which could point outside the repo after
+    // a move). Attach, then corrupt att.pathAbs by faking a moved repo: the
+    // detach must still target THIS repo's .maddu/worktrees, never the stale
+    // absolute path. We prove it indirectly: keep-disposition on a lane whose
+    // attachment we know, and confirm the worktree under the CURRENT root is
+    // the one acted on (abandoned removes exactly it).
+    {
+      const lane = 'cockpit-shell';
+      const a = await wt.attachLaneWorktree(repo, { lane, session: 's1', claimEventId: 'evt_p1' });
+      const underCurrentRoot = path.join(repo, '.maddu', 'worktrees', 'cockpit-shell');
+      ok('attach path is under the current state root', a.path === underCurrentRoot);
+      await wt.detachLaneWorktree(repo, { lane, disposition: 'abandoned', by: 's1' });
+      ok('abandoned removed exactly the current-root worktree', !(await exists(underCurrentRoot)));
+    }
+
+    // ── Codex P2: git-removal failure aborts BEFORE recording the detach.
+    // Simulate by making `git worktree remove` fail: attach, then manually
+    // delete the worktree's admin registration so `git worktree remove` errors,
+    // and assert no WORKTREE_DETACHED is appended (attachment stays live).
+    {
+      const lane = 'bridge-server';
+      const a = await wt.attachLaneWorktree(repo, { lane, session: 's1', claimEventId: 'evt_p2' });
+      // Make the NEXT `git worktree remove` fail: remove the worktree via git
+      // now (drops the checkout + admin registration, leaves the branch), so
+      // detach's `git worktree remove` errors "is not a working tree".
+      await git(['worktree', 'remove', '--force', a.path], repo);
+      const detBefore = (await detEvents(repo)).length;
+      let aborted = false;
+      try { await wt.detachLaneWorktree(repo, { lane, disposition: 'abandoned', by: 's1' }); }
+      catch (e) { aborted = /not detached|left intact/.test(e.message); }
+      const detAfter = (await detEvents(repo)).length;
+      ok('git-removal failure aborts the detach', aborted);
+      ok('no WORKTREE_DETACHED recorded on removal failure', detAfter === detBefore);
+      ok('attachment stays live after a failed detach', !!(await wt.liveAttachmentForLane(repo, lane)));
+      // Operator-side recovery: checkout is already gone, delete the leftover
+      // branch and record a manual detach so the fixture ends non-dangling.
+      await git(['branch', '-D', 'maddu/lane/bridge-server'], repo);
+      await spine.append(repo, { type: 'WORKTREE_DETACHED', lane, data: { schemaVersion: 1, attachmentId: a.attachmentId, lane, pathRepoRel: a.relPath, disposition: 'abandoned', branchHead: null, integrationRef: null, integrationHead: null, ancestorCheck: 'skipped', dirtyAtDetach: false, reason: 'test-recovery' } });
+    }
+
+    // ── Codex P2: an ORPHANED-but-live attachment (claim gone) is still
+    // dispositionable. Attach, drop the attachment's session/claim from the
+    // picture (no LANE_RELEASED, no WORKTREE_DETACHED), then keep-disposition
+    // it directly via detachLaneWorktree — which works off the attachment, not
+    // the claim.
+    {
+      const lane = 'harness';
+      const a = await wt.attachLaneWorktree(repo, { lane, session: 'ghost', claimEventId: 'evt_orphan' });
+      ok('orphaned attachment is live before disposition', !!(await wt.liveAttachmentForLane(repo, lane)));
+      const r = await wt.detachLaneWorktree(repo, { lane, disposition: 'keep', by: 'cleaner' });
+      ok('orphaned attachment dispositioned without a claim', r.disposition === 'kept');
+      ok('orphaned attachment no longer live', !(await wt.liveAttachmentForLane(repo, lane)));
+      await git(['worktree', 'remove', '--force', a.path], repo);
+    }
+
     // ── the whole spine verifies clean ──
     const res = await verify.verifySpine(repo);
     const wtIssues = res.issues.filter((i) => i.kind.includes('worktree'));

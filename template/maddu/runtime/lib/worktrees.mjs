@@ -290,13 +290,30 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
 // `git worktree remove --force` (required when the checkout is dirty). A null
 // `branch` leaves the branch in place (the `keep`/`kept` disposition, or a
 // reused-not-created attachment).
+// Returns { removed, branchDeleted, error } — NEVER partially reports success.
+// gitRun does not throw on nonzero exit (Codex P2), so we inspect the code: if
+// `git worktree remove` fails (locked worktree, stale metadata, running from
+// inside the worktree on Windows), `removed` is false and the caller must NOT
+// record a detachment — otherwise Máddu's projection drops the attachment
+// while git still tracks it, blocking every future attach.
 async function removeWorktreeGit(stateRoot, path, { branch = null, force = false } = {}) {
   const args = ['worktree', 'remove'];
   if (force) args.push('--force');
   args.push(path);
-  await gitRun(args, stateRoot, 10000);
+  const rm1 = await gitRun(args, stateRoot, 10000);
+  if (rm1.code !== 0) {
+    return { removed: false, branchDeleted: false, error: `git worktree remove failed: ${(rm1.stderr || rm1.error || '').trim()}` };
+  }
   try { await rm(path, { recursive: true, force: true }); } catch {}
-  if (branch) await gitRun(['branch', '-D', branch], stateRoot, 5000);
+  let branchDeleted = false;
+  if (branch) {
+    const rm2 = await gitRun(['branch', '-D', branch], stateRoot, 5000);
+    branchDeleted = rm2.code === 0;
+    if (!branchDeleted) {
+      return { removed: true, branchDeleted: false, error: `worktree removed but git branch -D ${branch} failed: ${(rm2.stderr || rm2.error || '').trim()}` };
+    }
+  }
+  return { removed: true, branchDeleted, error: null };
 }
 
 // ── Detach: disposition a lane's live worktree ──
@@ -322,7 +339,12 @@ export async function detachLaneWorktree(stateRoot, { lane, disposition, integra
   const att = await liveAttachmentForLane(stateRoot, lane);
   if (!att) throw new Error(`lane "${lane}" has no live worktree to disposition`);
 
-  const path = att.pathAbs || laneWorktreePath(stateRoot, lane);
+  // Derive the delete target from the CURRENT state root + validated lane, not
+  // the spine-persisted att.pathAbs (Codex P1): pathAbs is frozen at attach
+  // time, so after a repo move/copy it can point outside this repo — and
+  // removeWorktreeGit ends in a recursive rm. laneWorktreePath re-validates
+  // containment under <stateRoot>/.maddu/worktrees/.
+  const path = laneWorktreePath(stateRoot, lane);
   const branchRef = att.branchRef || laneBranchRef(lane);
   const branch = laneBranch(lane);
 
@@ -353,8 +375,19 @@ export async function detachLaneWorktree(stateRoot, { lane, disposition, integra
   // Git-side unwind. kept leaves everything; merged/abandoned remove the
   // checkout and delete the branch (merged is safe — it's contained; abandoned
   // is deliberate discard).
+  let branchCleanupWarning = null;
   if (norm !== 'kept') {
-    await removeWorktreeGit(stateRoot, path, { branch, force: true });
+    const g = await removeWorktreeGit(stateRoot, path, { branch, force: true });
+    // Abort BEFORE recording the detach if the CHECKOUT removal failed (Codex
+    // P2) — never drop the attachment while git still tracks the worktree.
+    if (!g.removed) {
+      throw new Error(`cannot ${norm} lane "${lane}": ${g.error} — worktree left intact, not detached`);
+    }
+    // A branch that survived is a lingering ref, not an inconsistency: the
+    // checkout IS gone, so the attachment MUST end. Record the detach and
+    // surface the leftover branch for the operator to delete by hand — never
+    // leave a live attachment pointing at a removed worktree.
+    if (!g.branchDeleted) branchCleanupWarning = g.error;
   }
 
   const ev = await append(stateRoot, {
@@ -375,5 +408,5 @@ export async function detachLaneWorktree(stateRoot, { lane, disposition, integra
     },
   });
 
-  return { attachmentId: att.attachmentId, lane, disposition: norm, dirty, ancestorCheck, eventId: ev.id, path: att.pathRepoRel };
+  return { attachmentId: att.attachmentId, lane, disposition: norm, dirty, ancestorCheck, eventId: ev.id, path: att.pathRepoRel, branchCleanupWarning };
 }

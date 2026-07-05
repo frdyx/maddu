@@ -203,19 +203,15 @@ export default async function lane(argv) {
     }
     const proj = await projections.project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === lid);
-    if (!existing) {
-      console.log(`released  ${lid}  (no active claim)`);
-      return;
-    }
-    if (existing.sessionId !== sid) {
-      console.error(`lane "${lid}" is claimed by ${existing.sessionId}; ${sid} cannot release it`);
-      process.exit(3);
-    }
 
-    // v1.93.0 (roadmap #12a phase 5) — disposition a live worktree before (or
-    // instead of leaving) the lane release. `--worktree <merged|abandoned|keep>`.
-    // A plain release on a lane that still has a live worktree is REFUSED, so a
-    // checkout with un-integrated work is never silently orphaned.
+    // v1.93.0 (roadmap #12a phase 5) — disposition a live worktree.
+    // `--worktree <merged|abandoned|keep>`. This runs based on the ATTACHMENT,
+    // not the claim: a session close / janitor auto-close drops the claim
+    // WITHOUT emitting WORKTREE_DETACHED (Codex P2), so an orphaned-but-live
+    // worktree must still be dispositionable or it blocks every future
+    // `claim --worktree` on the lane. Guard: only the claim HOLDER (or, if the
+    // claim is already gone, anyone) may disposition — never yank a worktree
+    // out from under an actively-claiming other session.
     const wtLib = await loadWorktreesLib();
     const liveAttach = wtLib?.liveAttachmentForLane ? await wtLib.liveAttachmentForLane(repoRoot, lid) : null;
     const dispRaw = flags.worktree;
@@ -224,6 +220,10 @@ export default async function lane(argv) {
       if (dispRaw === true) { console.error('--worktree needs a disposition: merged | abandoned | keep'); process.exit(2); }
       if (!liveAttach) {
         console.error(`lane "${lid}" has no live worktree to disposition`);
+        process.exit(3);
+      }
+      if (existing && existing.sessionId !== sid) {
+        console.error(`lane "${lid}" is actively claimed by ${existing.sessionId}; ${sid} cannot disposition its worktree`);
         process.exit(3);
       }
       try {
@@ -235,11 +235,26 @@ export default async function lane(argv) {
         });
         const kept = r.disposition === 'kept';
         console.log(`  worktree: ${r.disposition}${r.ancestorCheck === 'pass' ? ' (verified merged)' : ''}${kept ? ` — kept at ${r.path}` : ' — removed'}`);
+        if (r.branchCleanupWarning) console.error(`  note: ${r.branchCleanupWarning} — delete the branch by hand`);
       } catch (e) {
         console.error(`  worktree ${dispRaw} refused: ${e.message}`);
         process.exit(1);
       }
-    } else if (liveAttach) {
+      // Orphaned worktree (claim already gone): the disposition WAS the cleanup.
+      if (!existing) { console.log(`released  ${lid}  (claim already gone; worktree dispositioned)`); return; }
+    }
+
+    if (!existing) {
+      console.log(`released  ${lid}  (no active claim)`);
+      return;
+    }
+    if (existing.sessionId !== sid) {
+      console.error(`lane "${lid}" is claimed by ${existing.sessionId}; ${sid} cannot release it`);
+      process.exit(3);
+    }
+    // A plain release on a lane that still has a live worktree is REFUSED, so a
+    // checkout with un-integrated work is never silently orphaned.
+    if (dispRaw === undefined && liveAttach) {
       console.error(`lane "${lid}" has a live worktree (${liveAttach.pathRepoRel}) — disposition it first:`);
       console.error(`  maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
       process.exit(3);
