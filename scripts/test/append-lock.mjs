@@ -155,6 +155,23 @@ async function main() {
     await rm(dir, { recursive: true, force: true });
   }
 
+  // 7. Bodyless/torn lock (created by open('wx') but the owner record was never
+  //    written — the creator died in between) must be RECLAIMED after the grace,
+  //    not hang forever (Codex-found).
+  {
+    const dir = await mkdtemp(join(tmpdir(), 'maddu-applock-bodyless-'));
+    const lockPath = join(dir, '.append.lock');
+    await writeFile(lockPath, ''); // empty file = torn/bodyless lock, no owner record
+    let acquired = false;
+    const lock = await Promise.race([
+      acquireAppendLock(lockPath).then((l) => { acquired = true; return l; }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('bodyless lock NOT reclaimed (hung)')), 5000)),
+    ]).catch((e) => { console.error(`  ! ${e.message}`); return null; });
+    ok(acquired && lock, 'bodyless/torn lock is reclaimed after the grace (no hang)');
+    if (lock) await lock.release();
+    await rm(dir, { recursive: true, force: true });
+  }
+
   console.log(`append-lock: ${pass}/${pass + fail}`);
   if (fail) process.exit(1);
 }

@@ -3,6 +3,9 @@
 // Usage:
 //   maddu spine verify [--json]            # walk every segment, report integrity issues
 //   maddu spine show <eventId>             # pretty-print a single event by id
+//   maddu spine sync init [--json]         # opt into #12c team-sync (mint replicaId,
+//                                          #   migrate legacy segment, template gitignore)
+//   maddu spine import [--json]            # validate git-synced partitions (read-only)
 
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -35,8 +38,80 @@ export default async function spine(argv) {
   const repoRoot = await resolveRepoRoot(lib.paths);
 
   if (!sub) {
-    console.error('Usage: maddu spine <verify|show> [args]');
+    console.error('Usage: maddu spine <verify|show|sync|import> [args]');
     process.exit(2);
+  }
+
+  if (sub === 'sync') {
+    if (rest[0] !== 'init') {
+      console.error('Usage: maddu spine sync init [--json]');
+      process.exit(2);
+    }
+    if (!lib.spineSync) {
+      console.error('spine-sync.mjs not found in this install. Run `maddu upgrade` to enable team-sync.');
+      process.exit(2);
+    }
+    const { flags } = parseFlags(rest.slice(1));
+    const res = await lib.spineSync.syncInit(repoRoot);
+    if (flags.json) {
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      process.exit(res.ok ? 0 : 1);
+    }
+    if (!res.ok) {
+      if (res.reason === 'secret') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} committing the spine would expose ${res.hits.length} secret-shaped value(s):`);
+        for (const h of res.hits.slice(0, 10)) console.error(`  ${ANSI.dim}${h.where}${ANSI.reset}  ${h.patternTypes.join(', ')}`);
+        console.error(`\nRedact these events before enabling sync (the whole data payload becomes git-visible).`);
+      } else if (res.reason === 'config-invalid') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
+      } else {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.reason}`);
+      }
+      process.exit(1);
+    }
+    if (res.already) {
+      console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
+    } else {
+      console.log(`${levelTag('PASS')}  team-sync initialised`);
+      console.log(`  replicaId: ${ANSI.accent}${res.replicaId}${ANSI.reset}  ${ANSI.dim}(this checkout's identity — never committed)${ANSI.reset}`);
+      console.log(`  migrated:  ${res.migrated.length} legacy segment(s) → by-replica/${res.replicaId}/`);
+      if (res.strandedFlat && res.strandedFlat.length) {
+        console.log(`  ${ANSI.warn}WARN${ANSI.reset}  ${res.strandedFlat.length} flat segment(s) written concurrently during init remain unmerged (${res.strandedFlat.join(', ')}) — run sync init while writes are quiescent`);
+      }
+      console.log(`  ${ANSI.dim}.gitignore / .gitattributes templated — commit .maddu/events/by-replica/ to share.${ANSI.reset}`);
+    }
+    process.exit(0);
+  }
+
+  if (sub === 'import') {
+    if (!lib.spineSync) {
+      console.error('spine-sync.mjs not found in this install. Run `maddu upgrade` to enable team-sync.');
+      process.exit(2);
+    }
+    const { flags } = parseFlags(rest);
+    const rep = await lib.spineSync.importPartitions(repoRoot);
+    if (flags.json) {
+      process.stdout.write(JSON.stringify(rep, null, 2) + '\n');
+      process.exit(rep.ok ? 0 : 1);
+    }
+    console.log(`${ANSI.bold}Máddu spine import${ANSI.reset}  ${repoRoot}`);
+    console.log();
+    if (rep.partitions.length === 0) {
+      console.log(`  ${ANSI.dim}(no partitions — this repo is not in sync mode; run \`maddu spine sync init\`)${ANSI.reset}`);
+    } else {
+      for (const p of rep.partitions) {
+        console.log(`  ${ANSI.accent}${p.replicaId}${ANSI.reset}  ${ANSI.dim}${p.events} events · ${p.segments} segment${p.segments === 1 ? '' : 's'}${ANSI.reset}`);
+      }
+    }
+    console.log();
+    if (rep.secretHits.length) console.log(`  ${levelTag('FAIL')}  ${rep.secretHits.length} secret-shaped value(s) in partitions — redact before sharing`);
+    if (rep.forks.length) console.log(`  ${levelTag('FAIL')}  ${rep.forks.length} partition chain fork(s) — a strictly-valid chain must not fork (tampering/corruption)`);
+    if (rep.structuralFails.length) console.log(`  ${levelTag('FAIL')}  ${rep.structuralFails.length} structural error(s) (e.g. segment gap / missing genesis) — partition is corrupt`);
+    if (rep.dupWithin.length) console.log(`  ${levelTag('FAIL')}  ${rep.dupWithin.length} duplicate event id(s) WITHIN a partition — single-writer invariant broken`);
+    if (rep.quarantined.length) console.log(`  ${levelTag('WARN')}  ${rep.quarantined.length} unparseable/torn line(s) quarantined (skipped, not merged)`);
+    if (rep.dupAcross.length) console.log(`  ${levelTag('WARN')}  ${rep.dupAcross.length} duplicate event id(s) ACROSS partitions — tolerated (identity is partition-position)`);
+    console.log(`  ${rep.ok ? levelTag('PASS') : levelTag('FAIL')}  ${rep.totalEvents} events across ${rep.partitions.length} partition${rep.partitions.length === 1 ? '' : 's'}${rep.ok ? ' — safe to merge' : ''}`);
+    process.exit(rep.ok ? 0 : 1);
   }
 
   if (sub === 'verify') {

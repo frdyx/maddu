@@ -68,6 +68,25 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
+  // 4b. Migration read-consistency: an event present in BOTH the flat-legacy stream
+  //     and a partition (a byte-identical copy captured mid-rename by `spine sync
+  //     init`) must be counted ONCE; a distinct flat-only event still appears.
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-dedup-'));
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repX' }));
+    const dup = { v: 1, id: 'evt_20260101000000_aaaaaa', ts: '2026-01-01T00:00:01Z', type: TYPE, data: {}, prev_hash: null };
+    const only = { v: 1, id: 'evt_20260101000000_bbbbbb', ts: '2026-01-01T00:00:02Z', type: TYPE, data: {}, prev_hash: null };
+    const pdir = join(repo, '.maddu', 'events', 'by-replica', 'repX');
+    await mkdir(pdir, { recursive: true });
+    await writeFile(join(pdir, '000000000001.ndjson'), JSON.stringify(dup) + '\n');       // partition copy
+    await writeFile(join(repo, '.maddu', 'events', '000000000001.ndjson'), JSON.stringify(dup) + '\n' + JSON.stringify(only) + '\n'); // flat: same dup + a distinct event
+    const all = await readAll(repo);
+    ok(all.filter((e) => e.id === dup.id).length === 1, 'mid-rename event counted once (flat copy deduped vs partition)');
+    ok(all.some((e) => e.id === only.id), 'a distinct flat-only event is still present');
+    await rm(repo, { recursive: true, force: true });
+  }
+
   // 5. Default mode unchanged: no by-replica dir → flat append order preserved.
   {
     const repo = await mkdtemp(join(tmpdir(), 'maddu-flat-'));

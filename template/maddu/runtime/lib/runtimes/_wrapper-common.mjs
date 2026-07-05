@@ -24,7 +24,7 @@
 import { appendFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { readReplicaId, appendPartitioned } from '../spine-append-core.mjs';
+import { resolveWriteReplica, appendPartitioned } from '../spine-append-core.mjs';
 
 const ROLL_BYTES = 10 * 1024 * 1024;
 
@@ -84,12 +84,13 @@ export async function appendTokenUsage(repoRoot, payload) {
 
   // #12c sync mode: land in the replica's partition on a valid chain (shared,
   // stdlib-only core). Token accounting is best-effort and MUST NOT block the
-  // worker's exit, so the funnel wait is BOUNDED — on a stuck lock we let
-  // ELOCKTIMEOUT drop this one event (nothing was written, so no chain fork). The
-  // caller already wraps this in try/catch + logWrapperError. Default single-
-  // machine mode keeps the flat write below.
-  const replicaId = await readReplicaId(repoRoot);
-  if (replicaId) return appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs: 3000 });
+  // worker's exit: the funnel wait is bounded (maxWaitMs), and if a `spine sync
+  // init` migration is pending we DROP this one event rather than block or write
+  // into an incomplete partition (nothing written → no chain fork). The caller wraps
+  // this in try/catch + logWrapperError. Default mode keeps the flat write below.
+  const w = await resolveWriteReplica(repoRoot, { timeoutMs: 3000 });
+  if (w.pending) return null; // migration in flight — drop this token event
+  if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: 3000 });
 
   const seg = await currentSegment(eventsDir);
   await appendFile(join(eventsDir, seg), JSON.stringify(ev) + '\n');

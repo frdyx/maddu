@@ -278,13 +278,17 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
       }
 
       // ─── Event-id uniqueness ───
+      // firstReplicaId records where the FIRST occurrence lived so a consumer
+      // (import) can tell a within-partition duplicate (a real single-writer bug —
+      // fatal) from a cross-partition id collision (tolerated: identity is
+      // partition-position, and ids are only probabilistically unique).
       if (ids.has(ev.id)) {
         const prev = ids.get(ev.id);
         push(issue('FAIL', 'duplicate_id',
           `${ev.id}: duplicate (first seen at ${prev.segment}:${prev.line})`,
-          { segment: segName, line: lineNo, eventId: ev.id }));
+          { segment: segName, line: lineNo, eventId: ev.id, firstReplicaId: prev.replicaId ?? null }));
       } else {
-        ids.set(ev.id, { segment: segName, line: lineNo });
+        ids.set(ev.id, { segment: segName, line: lineNo, replicaId: currentPartition });
       }
 
       // ─── Event-id format ───

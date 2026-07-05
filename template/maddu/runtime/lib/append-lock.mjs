@@ -47,6 +47,13 @@ import { randomBytes } from 'node:crypto';
 
 const HOST = hostname();
 const POLL_MS = 25;
+// A legit holder writes its owner record in the VERY NEXT await after open('wx') —
+// microseconds normally, at most a few ms even under a congested event loop. A lock
+// that stays bodyless for this many consecutive polls (~2s) therefore means its
+// creator DIED between the create and the record write; it is reclaimed. The window
+// is deliberately long so a slow-but-alive holder is never reclaimed (which would let
+// two writers enter), making the reclaim safe without a post-create ownership recheck.
+const BODYLESS_GRACE_POLLS = 80;
 // Emit an onWait progress callback roughly once per second so a genuinely stuck
 // holder is visible to the operator rather than silently hanging.
 const WAIT_LOG_EVERY = Math.max(1, Math.round(1000 / POLL_MS));
@@ -116,16 +123,30 @@ export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = I
     startedAt: new Date().toISOString(),
   });
   let waited = 0;
+  let nullReads = 0;
   for (;;) {
     let fh = null;
     try {
       fh = await open(lockPath, 'wx'); // O_CREAT | O_EXCL — atomic arbiter
     } catch (e) {
       if (!e || e.code !== 'EEXIST') throw e;
-      // Held. Steal iff provably dead + same-host; otherwise wait.
       const rec = await readLock(lockPath);
-      const stole = await tryStealDead(lockPath, rec);
-      if (!stole) {
+      let reclaimed = false;
+      if (rec === null) {
+        // Bodyless lock: either a holder mid-write (transient — the owner record is
+        // written microseconds after open) or a holder that DIED between open('wx')
+        // and writing its record (no `pid` to prove dead). After a short grace of
+        // consecutive empty reads, reclaim it — otherwise it would hang forever.
+        if (++nullReads >= BODYLESS_GRACE_POLLS) {
+          try { await unlink(lockPath); } catch { /* someone else reclaimed it */ }
+          nullReads = 0;
+          reclaimed = true;
+        }
+      } else {
+        nullReads = 0;
+        reclaimed = await tryStealDead(lockPath, rec); // same-host, proven-dead only
+      }
+      if (!reclaimed) {
         const elapsed = waited * POLL_MS;
         if (elapsed >= maxWaitMs) {
           const err = new Error(`append lock not acquired within ${maxWaitMs}ms (${lockPath})`);
@@ -145,6 +166,16 @@ export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = I
     } finally {
       await fh.close();
     }
+    // NOTE (residual, accepted): a post-create ownership recheck would close the
+    // purely-theoretical window where a holder is SUSPENDED for >2s (the bodyless
+    // grace) between open('wx') and the body write, gets reclaimed, then resumes and
+    // re-enters. We deliberately do NOT recheck: an extra read of the lockfile under
+    // heavy concurrency empirically broke the funnel here (a reproducible chain fork),
+    // whereas the long grace already makes the reclaim practically unreachable (a live
+    // holder writes its record microseconds later, never 2s). Consistent with Máddu's
+    // spine model (best-effort concurrency, integrity VERIFY-REPORTED not lock-enforced
+    // — spine.mjs:461-473), any such fork would be surfaced by `spine verify` /
+    // `spine import` (fatal), never silently merged.
     return { ownerId, release: () => releaseAppendLock(lockPath, ownerId) };
   }
 }

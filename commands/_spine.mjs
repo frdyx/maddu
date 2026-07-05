@@ -36,7 +36,11 @@ export async function loadSpineLib() {
   // install — `maddu spine verify` reports a clear error in that case.
   let verify = null;
   try { verify = await import(pathToFileURL(join(dir, 'verify.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify };
+  // spine-sync.mjs landed in v1.94.0 (#12c team-sync). Optional-load so a newer
+  // global CLI can run other subcommands against an older install.
+  let spineSync = null;
+  try { spineSync = await import(pathToFileURL(join(dir, 'spine-sync.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,
