@@ -155,20 +155,34 @@ async function main() {
     try { await wt.detachLaneWorktree(repo, { lane: 'git-integration', disposition: 'keep' }); } catch (e) { noLive = /no live worktree/.test(e.message); }
     ok('no-live-attachment throws', noLive);
 
-    // ── Codex P1: the delete path is derived from the CURRENT stateRoot, not
-    // the spine-persisted att.pathAbs (which could point outside the repo after
-    // a move). Attach, then corrupt att.pathAbs by faking a moved repo: the
-    // detach must still target THIS repo's .maddu/worktrees, never the stale
-    // absolute path. We prove it indirectly: keep-disposition on a lane whose
-    // attachment we know, and confirm the worktree under the CURRENT root is
-    // the one acted on (abandoned removes exactly it).
+    // ── Codex P1: detach deletes the CURRENT-root path, NEVER the spine-
+    // persisted att.pathAbs. Craft a live attachment whose pathAbs points at a
+    // DECOY outside the repo: after detach the real current-root worktree is
+    // gone and the decoy is untouched — which would FAIL if detach still used
+    // att.pathAbs. Build it with a real git worktree + a hand-written
+    // WORKTREE_ATTACHED carrying the decoy pathAbs.
     {
       const lane = 'cockpit-shell';
-      const a = await wt.attachLaneWorktree(repo, { lane, session: 's1', claimEventId: 'evt_p1' });
-      const underCurrentRoot = path.join(repo, '.maddu', 'worktrees', 'cockpit-shell');
-      ok('attach path is under the current state root', a.path === underCurrentRoot);
+      const relPath = '.maddu/worktrees/cockpit-shell';
+      const realPath = path.join(repo, '.maddu', 'worktrees', 'cockpit-shell');
+      await git(['worktree', 'add', '-b', 'maddu/lane/cockpit-shell', realPath], repo);
+      const decoy = path.join(base, 'DECOY-outside-repo');
+      await mkdir(decoy, { recursive: true });
+      await writeFile(path.join(decoy, 'sentinel.txt'), 'must survive\n');
+      await spine.append(repo, {
+        type: 'WORKTREE_ATTACHED', lane,
+        data: {
+          schemaVersion: 1, attachmentId: 'wta_decoy', claimEventId: 'evt_d',
+          lane, session: 's1', pathRepoRel: relPath,
+          pathAbs: decoy, // <-- the trap: a stale absolute path outside the repo
+          branchRef: 'refs/heads/maddu/lane/cockpit-shell', baseRef: 'refs/heads/main',
+          baseHeadAtAttach: 'a'.repeat(40), created: true, reused: false, dirty: false,
+          gitCommonDir: null, platform: process.platform,
+        },
+      });
       await wt.detachLaneWorktree(repo, { lane, disposition: 'abandoned', by: 's1' });
-      ok('abandoned removed exactly the current-root worktree', !(await exists(underCurrentRoot)));
+      ok('abandoned removed the CURRENT-root worktree', !(await exists(realPath)));
+      ok('the stale pathAbs decoy was NOT touched', await exists(path.join(decoy, 'sentinel.txt')));
     }
 
     // ── Codex P2: git-removal failure aborts BEFORE recording the detach.
@@ -196,18 +210,29 @@ async function main() {
       await spine.append(repo, { type: 'WORKTREE_DETACHED', lane, data: { schemaVersion: 1, attachmentId: a.attachmentId, lane, pathRepoRel: a.relPath, disposition: 'abandoned', branchHead: null, integrationRef: null, integrationHead: null, ancestorCheck: 'skipped', dirtyAtDetach: false, reason: 'test-recovery' } });
     }
 
-    // ── Codex P2: an ORPHANED-but-live attachment (claim gone) is still
-    // dispositionable. Attach, drop the attachment's session/claim from the
-    // picture (no LANE_RELEASED, no WORKTREE_DETACHED), then keep-disposition
-    // it directly via detachLaneWorktree — which works off the attachment, not
-    // the claim.
+    // ── Codex P2: drive the actual `maddu lane release` CLI — the fixed gate
+    // was in the command, which returned "no active claim" BEFORE reaching the
+    // disposition block. Attach (live attachment, NO LANE_CLAIMED → orphaned),
+    // then run the real command with --worktree keep + no claim; it must
+    // disposition the worktree rather than no-op.
     {
       const lane = 'harness';
       const a = await wt.attachLaneWorktree(repo, { lane, session: 'ghost', claimEventId: 'evt_orphan' });
-      ok('orphaned attachment is live before disposition', !!(await wt.liveAttachmentForLane(repo, lane)));
-      const r = await wt.detachLaneWorktree(repo, { lane, disposition: 'keep', by: 'cleaner' });
-      ok('orphaned attachment dispositioned without a claim', r.disposition === 'kept');
-      ok('orphaned attachment no longer live', !(await wt.liveAttachmentForLane(repo, lane)));
+      ok('orphaned attachment is live before CLI disposition', !!(await wt.liveAttachmentForLane(repo, lane)));
+      const BIN = path.resolve(__dirname, '..', '..', 'bin', 'maddu.mjs');
+      const r = await new Promise((resolve) => {
+        let c;
+        try { c = spawn(process.execPath, [BIN, 'lane', 'release', lane, '--worktree', 'keep', '--session', 'cleaner'], { cwd: repo }); }
+        catch (e) { return resolve({ code: -1, out: '', err: e.message }); }
+        let out = '', err = '';
+        c.stdout.on('data', (b) => (out += b));
+        c.stderr.on('data', (b) => (err += b));
+        c.on('close', (code) => resolve({ code, out, err }));
+        c.on('error', (e) => resolve({ code: -1, out: '', err: e.message }));
+      });
+      ok('CLI orphan-disposition exits 0', r.code === 0, (r.err || '').trim().slice(0, 120));
+      ok('CLI dispositioned the orphaned worktree (not a no-op)', /worktree: kept|claim already gone/.test(r.out), r.out.trim().slice(0, 160));
+      ok('orphaned attachment no longer live after CLI', !(await wt.liveAttachmentForLane(repo, lane)));
       await git(['worktree', 'remove', '--force', a.path], repo);
     }
 
