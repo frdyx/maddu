@@ -28,23 +28,27 @@ async function appendToolEvent(spine, repoRoot, type, data, lane, sessionId) {
   } catch {}
 }
 
-async function preflightAdaptiveTest(repoRoot, spine, argv, lane, sessionId) {
+// argv/argvForEvents: this adaptive path emits its own TOOL_REFUSED/INVOKED/
+// COMPLETED events OUTSIDE runTool, so it must scrub raw argv itself. Detection
+// (allowlist, scanArgv) runs on the REAL argv; only what is LOGGED uses the
+// pre-redacted argvForEvents + safeDetail (same discipline as tools.mjs).
+async function preflightAdaptiveTest(repoRoot, spine, argv, argvForEvents, lane, sessionId, secretScan) {
   const tools = await loadTools();
+  const safeDetail = (d) => (typeof d === 'string' ? secretScan.redactText(d).text : d);
   const allowance = await tools.resolveToolAllowance(repoRoot, 'test', lane);
   if (!allowance.allowed) {
     await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_REFUSED || 'TOOL_REFUSED', {
       tool: 'test',
-      argv,
+      argv: argvForEvents,
       lane,
       sessionId,
       reason: allowance.reason,
-      detail: allowance.detail,
+      detail: safeDetail(allowance.detail),
       source: allowance.source,
     }, lane, sessionId);
     console.error(tools.summarize({ refused: true, reason: allowance.reason, detail: allowance.detail }));
     return 2;
   }
-  const secretScan = await loadSecretScan();
   const scan = secretScan.scanArgv(argv);
   if (scan) {
     await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.SECRET_DETECTED_IN_ARGV || 'SECRET_DETECTED_IN_ARGV', {
@@ -75,11 +79,15 @@ export default async function testCmd(argv) {
     const { repoRoot, spine } = await resolveAdaptiveContext();
     const lane = process.env.MADDU_LANE || null;
     const sessionId = process.env.MADDU_SESSION_ID || null;
-    const refused = await preflightAdaptiveTest(repoRoot, spine, argv, lane, sessionId);
+    // Redact argv for EVERY spine event this adaptive path emits (mirrors
+    // runTool). Detection still uses the raw argv; only logging is scrubbed.
+    const secretScan = await loadSecretScan();
+    const argvForEvents = argv.map((a) => (typeof a === 'string' ? secretScan.redactText(a).text : a));
+    const refused = await preflightAdaptiveTest(repoRoot, spine, argv, argvForEvents, lane, sessionId, secretScan);
     if (refused) process.exit(refused);
     await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_INVOKED || 'TOOL_INVOKED', {
       tool: 'test',
-      argv,
+      argv: argvForEvents,
       lane,
       sessionId,
       mode: 'adaptive project-test',
@@ -88,7 +96,7 @@ export default async function testCmd(argv) {
     const code = await runProjectTestCli(argv, { repoRoot });
     await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_COMPLETED || 'TOOL_COMPLETED', {
       tool: 'test',
-      argv,
+      argv: argvForEvents,
       lane,
       sessionId,
       exitCode: code,

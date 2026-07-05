@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES } from './spine.mjs';
-import { scanArgv } from './secret-scan.mjs';
+import { scanArgv, redactText } from './secret-scan.mjs';
 
 // ─── allowlist ─────────────────────────────────────────────────────────
 
@@ -300,6 +300,37 @@ function spawnSafe(cmd, args, opts) {
 export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = null, runner = null, runnerArgs = null, captureOutput = true }) {
   const cleanArgv = Array.isArray(argv) ? argv.slice() : [];
 
+  // 0. Secret scrub of EVERYTHING logged — before any TOOL_REFUSED emit. The
+  // allowlist and dangerous-form refusals below record argv + detail on the
+  // spine, so the scrub has to run up-front: otherwise a tool refused by the
+  // allowlist or a dangerous form (and the operator-override path) could write
+  // a raw secret-shaped value to the spine, because a refusal path bypasses
+  // the redaction the invoke/complete path already gets.
+  //
+  // We derive two things once here:
+  //   - argvForEvents: the argv EVERY event this function emits carries, with
+  //     each string element scrubbed by redactText (the canonical scrubber,
+  //     same PATTERNS as scanArgv). Using redactText — not scanArgv's single
+  //     first-hit index — means ALL secret-shaped values are redacted, even
+  //     when an arg carries several. redactText is a no-op on clean text, so
+  //     ids/paths/summaries stay intact and the mapping is deterministic.
+  //   - safeDetail(): scrubs a refusal `detail` string, which can interpolate
+  //     raw argv (e.g. install echoes the rejected package spec) — the spine
+  //     must never carry that raw value.
+  // DETECTION still runs on the REAL argv (argvForSpawn); only what is LOGGED
+  // is scrubbed (redaction must not flip a dangerous-form verdict — a
+  // `[REDACTED:…]` token would fail install's package-name check). The
+  // secret-specific REFUSAL stays at step 2b so allowlist/dangerous-form keep
+  // priority as refusal reasons. (Returned detail is left raw: it goes to the
+  // same operator who typed the argv, not the durable/shared spine.)
+  const allowSecret = cleanArgv.includes('--allow-secret');
+  const argvForSpawn = cleanArgv.filter((a) => a !== '--allow-secret');
+  const argvForEvents = argvForSpawn.map((a) => (typeof a === 'string' ? redactText(a).text : a));
+  const safeDetail = (d) => (typeof d === 'string' ? redactText(d).text : d);
+  // scanArgv runs on argvForSpawn (post-strip) so the override token itself
+  // can never match; it returns patternType + argvIndex only, never the value.
+  const scan = scanArgv(argvForSpawn);
+
   // 1. Allowlist check.
   const allowance = await resolveToolAllowance(repoRoot, tool, lane);
   if (!allowance.allowed) {
@@ -307,34 +338,28 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
       type: EVENT_TYPES.TOOL_REFUSED,
       actor: sessionId,
       lane,
-      data: { tool, argv: cleanArgv, lane, sessionId, reason: allowance.reason, detail: allowance.detail, source: allowance.source },
+      data: { tool, argv: argvForEvents, lane, sessionId, reason: allowance.reason, detail: safeDetail(allowance.detail), source: allowance.source },
     });
     return { refused: true, reason: allowance.reason, detail: allowance.detail, allowance };
   }
 
-  // 2. Dangerous-form check.
-  const danger = dangerousForm(tool, cleanArgv);
+  // 2. Dangerous-form check (detection on the real argv, logging scrubbed).
+  const danger = dangerousForm(tool, argvForSpawn);
   if (danger) {
     await append(repoRoot, {
       type: EVENT_TYPES.TOOL_REFUSED,
       actor: sessionId,
       lane,
-      data: { tool, argv: cleanArgv, lane, sessionId, reason: danger.reason, detail: danger.detail },
+      data: { tool, argv: argvForEvents, lane, sessionId, reason: danger.reason, detail: safeDetail(danger.detail) },
     });
     return { refused: true, reason: danger.reason, detail: danger.detail };
   }
 
-  // 2b. v1.2.0 Phase 3 — secret detection in argv. Refuses before spawn
-  // when an argv element matches a known-secret pattern. The MATCHED
-  // VALUE IS NEVER LOGGED — only the pattern_type and argv position.
-  // Operator escape hatch: `--allow-secret` records an override event
-  // and proceeds. The token is stripped from argv before spawning.
-  const allowSecret = cleanArgv.includes('--allow-secret');
-  const argvForSpawn = cleanArgv.filter((a) => a !== '--allow-secret');
-  // NOTE: scanArgv is called against argvForSpawn (post-strip) so the
-  // override token itself can never trigger a match. Raw matched values
-  // are never returned — only patternType + argvIndex.
-  const scan = scanArgv(argvForSpawn);
+  // 2b. v1.2.0 Phase 3 — secret detection in argv. Refuses before spawn when
+  // an argv element matches a known-secret pattern (scan computed at step 0).
+  // The MATCHED VALUE IS NEVER LOGGED — only the pattern_type and argv
+  // position. Operator escape hatch: `--allow-secret` records an override
+  // event and proceeds; the token is already stripped from argvForSpawn.
   if (scan) {
     await append(repoRoot, {
       type: EVENT_TYPES.SECRET_DETECTED_IN_ARGV,
@@ -381,7 +406,7 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
           type: EVENT_TYPES.TOOL_REFUSED,
           actor: sessionId,
           lane,
-          data: { tool, argv: argvForSpawn, lane, sessionId, reason: 'no-detector', detail: `no ${tool} runner detected (no package.json scripts or known deps)` },
+          data: { tool, argv: argvForEvents, lane, sessionId, reason: 'no-detector', detail: safeDetail(`no ${tool} runner detected (no package.json scripts or known deps)`) },
         });
         return { refused: true, reason: 'no-detector', detail: `no ${tool} runner detected` };
       }
@@ -390,21 +415,18 @@ export async function runTool(repoRoot, { tool, argv, lane = null, sessionId = n
     }
   }
   // v1.2.0 Phase 3 — argvForSpawn has --allow-secret stripped so the
-  // underlying tool never sees the override token. fullArgv is what
-  // actually reaches the subprocess; argvForEvents redacts the matched
-  // element so the spine never carries a raw secret value, even on the
-  // operator-override path.
+  // underlying tool never sees the override token. fullArgv is what actually
+  // reaches the subprocess; argvForEvents (computed at step 0) redacts the
+  // matched element so the spine never carries a raw secret value, even on
+  // the operator-override path.
   const fullArgv = [...resolvedRunnerArgs, ...argvForSpawn];
-  const argvForEvents = scan
-    ? argvForSpawn.map((a, i) => (i === scan.argvIndex ? `[REDACTED:${scan.patternType}]` : a))
-    : argvForSpawn;
 
   // 4. Emit TOOL_INVOKED.
   await append(repoRoot, {
     type: EVENT_TYPES.TOOL_INVOKED,
     actor: sessionId,
     lane,
-    data: { tool, argv: argvForEvents, lane, sessionId, mode: `${resolvedRunner} ${resolvedRunnerArgs.join(' ')}`.trim() },
+    data: { tool, argv: argvForEvents, lane, sessionId, mode: safeDetail(`${resolvedRunner} ${resolvedRunnerArgs.join(' ')}`.trim()) },
   });
 
   // 5. Spawn.

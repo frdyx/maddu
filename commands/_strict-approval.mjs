@@ -39,14 +39,19 @@ export async function requireStrictApprovalIfNeeded(spineLib, repoRoot, opts) {
   // For now we only key on tool — caller passes the canonical name.
   if (!GATED.has(tool)) return { refused: false };
 
-  // Step 1: emit APPROVAL_REQUESTED.
+  // Step 1: emit APPROVAL_REQUESTED. `action` echoes the argv, which for a
+  // gated tool (install) can carry a secret-shaped value — and this fires
+  // BEFORE runTool, so runTool's own redaction can't help. Scrub it here with
+  // the canonical redactor so no raw secret reaches the append-only spine
+  // (rule #6). redactText is a no-op on clean argv.
+  const redact = await loadRedactor();
   const requestEv = await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.APPROVAL_REQUESTED,
     actor: sessionId,
     lane,
     data: {
       tool,
-      action: `${tool} ${argv.join(' ')}`.trim(),
+      action: redact(`${tool} ${argv.join(' ')}`.trim()),
       summary: `strict-mode pre-spawn approval required for ${tool}`,
       governanceMode: 'strict',
     },
@@ -95,6 +100,18 @@ export async function requireStrictApprovalIfNeeded(spineLib, repoRoot, opts) {
     exitCode: 5,
     detail: `strict-mode: approval ${requestEv.id} timed out after ${Math.round(timeoutMs / 1000)}s. Approve and retry, or switch to \`standard\` via \`maddu governance set standard\`.`,
   };
+}
+
+// Load the canonical secret redactor (same PATTERNS as scanArgv/runTool). If
+// the lib can't be resolved the framework is already broken, but we degrade to
+// a conservative scrub rather than fail-open with the raw string.
+async function loadRedactor() {
+  try {
+    const { loadLib } = await import('./_libroot.mjs');
+    const mod = await loadLib('secret-scan.mjs');
+    if (mod.redactText) return (s) => mod.redactText(s).text;
+  } catch {}
+  return (s) => String(s ?? '').replace(/[A-Za-z0-9+/=_-]{20,}/g, '[REDACTED]');
 }
 
 // Read governance.json via the runtime lib (layout-aware).
