@@ -8,6 +8,7 @@
 // recomputed on each call. Persistence comes in Slice 4 with maddu doctor.
 
 import { readAll, STUCK_THRESHOLD_MS } from './spine.mjs';
+import { readActiveReplicaId } from './spine-append-core.mjs';
 
 // Projection schema version (roadmap #13, compat spine). Stamped into every
 // project() result so a reader can tell which shape it's holding. Bump this when
@@ -17,6 +18,16 @@ export const SCHEMA_VERSION = 1;
 
 export async function project(repoRoot) {
   const events = await readAll(repoRoot);
+  // Roadmap #12c phase 4 — lane-claim reconciliation is SCOPED to team-sync
+  // mode (replica.json present). On the default single-machine path the reducer
+  // runs the EXACT pre-#12c lane logic (last-writer claim, unconditional
+  // release-clear) so the projection is byte-identical for every history —
+  // including the local claim/release races the mutex-free spine can produce.
+  // Reconciliation (earliest-in-total-order holder + read-time contentions) is
+  // the correct convergent semantic for a MERGED multi-writer spine, where a
+  // single-writer append-order LWW is undefined; it activates only once the
+  // operator opts in via `spine sync init`.
+  const syncMode = !!(await readActiveReplicaId(repoRoot));
 
   const sessions = new Map();              // sessionId -> { id, role, label, focus, registeredAt, lastHeartbeatAt, closedAt, status }
   // v0.17 sessionsTree: parent/child provenance for session spawn graphs.
@@ -30,7 +41,19 @@ export async function project(repoRoot) {
   let janitorAutoClosedThisHour = 0;
   let janitorLastRunAt = null;
   const hourMs = 60 * 60 * 1000;
-  const claims = new Map();                // lane -> { lane, sessionId, focus, claimedAt }
+  // Default-path lane claims (pre-#12c behavior): lane -> { lane, sessionId,
+  // focus, claimedAt }. Last-writer-claim, release clears the lane. Used when
+  // NOT in sync mode — byte-identical to the original reducer.
+  const claims = new Map();
+  // Team-sync reconciliation (sync mode only): track EVERY active claim per
+  // lane keyed by owning session. The winner is re-derived every rebuild as the
+  // claim earliest in the k-way-merged total order (first-claimer holds); all
+  // later concurrent claims are computed as superseded and surfaced as a
+  // read-time `contentions` view, and NOTHING is written to the spine (rule #2).
+  // Re-derived from the whole set each rebuild, so a late-arriving earlier claim
+  // wins on the next rebuild — monotonic, no frozen "B won" record.
+  const laneClaims = new Map();            // lane -> Map<sessionId, { lane, sessionId, focus, claimedAt, _order }>
+  let claimSeq = 0;                        // monotonic rank = position in the merged total order
   const sliceStops = [];                   // list of slice-stop events, newest last
   const inbox = [];                        // list of inbox events
 
@@ -181,9 +204,15 @@ export async function project(repoRoot) {
         }
         const t = sessionsTree.get(ev.actor);
         if (t) t.state = 'closed';
-        // Release any claims held by this session.
-        for (const [lane, c] of claims) {
-          if (c.sessionId === ev.actor) claims.delete(lane);
+        // Release any claims held by this session (across every lane).
+        if (syncMode) {
+          for (const [lane, owners] of laneClaims) {
+            if (owners.delete(ev.actor) && owners.size === 0) laneClaims.delete(lane);
+          }
+        } else {
+          for (const [lane, c] of claims) {
+            if (c.sessionId === ev.actor) claims.delete(lane);
+          }
         }
         // Clear from the janitor's stale set — the session is closed
         // by the operator and no longer a janitor concern.
@@ -215,23 +244,62 @@ export async function project(repoRoot) {
         // The cockpit can re-window against Date.now() at display time
         // if it wants a sliding hour.
         janitorAutoClosedThisHour += 1;
-        // Release any claims held by the auto-closed session.
-        for (const [lane, c] of claims) {
-          if (c.sessionId === sid) claims.delete(lane);
+        // Release any claims held by the auto-closed session (across every lane).
+        if (syncMode) {
+          for (const [lane, owners] of laneClaims) {
+            if (owners.delete(sid) && owners.size === 0) laneClaims.delete(lane);
+          }
+        } else {
+          for (const [lane, c] of claims) {
+            if (c.sessionId === sid) claims.delete(lane);
+          }
         }
         break;
       }
-      case 'LANE_CLAIMED':
-        claims.set(ev.lane, {
+      case 'LANE_CLAIMED': {
+        if (!syncMode) {
+          // Pre-#12c default path: last-writer-claim.
+          claims.set(ev.lane, {
+            lane: ev.lane,
+            sessionId: ev.actor,
+            focus: ev.data.focus || null,
+            claimedAt: ev.ts
+          });
+          break;
+        }
+        // Sync mode: track every owner; first-claimer holds.
+        let owners = laneClaims.get(ev.lane);
+        if (!owners) { owners = new Map(); laneClaims.set(ev.lane, owners); }
+        const rank = claimSeq++;
+        const prior = owners.get(ev.actor);
+        owners.set(ev.actor, {
           lane: ev.lane,
           sessionId: ev.actor,
           focus: ev.data.focus || null,
-          claimedAt: ev.ts
+          claimedAt: ev.ts,
+          // A re-claim by the SAME owner updates its data (last-writer-wins
+          // within an owner) but KEEPS its original total-order rank, so
+          // first-claimer semantics hold and a focus refresh never moves the
+          // owner behind a rival.
+          _order: prior ? prior._order : rank,
         });
         break;
-      case 'LANE_RELEASED':
-        claims.delete(ev.lane);
+      }
+      case 'LANE_RELEASED': {
+        if (!syncMode) {
+          // Pre-#12c default path: a release clears the lane unconditionally.
+          claims.delete(ev.lane);
+          break;
+        }
+        // Sync mode: drop ONLY the releasing owner's claim, so a co-claimant's
+        // (or foreign/bogus) release never evicts a surviving holder.
+        const owners = laneClaims.get(ev.lane);
+        if (owners) {
+          owners.delete(ev.actor);
+          if (owners.size === 0) laneClaims.delete(ev.lane);
+        }
         break;
+      }
       case 'SLICE_STOP':
         sliceStops.push({ id: ev.id, ts: ev.ts, actor: ev.actor, lane: ev.lane, ...ev.data });
         break;
@@ -792,13 +860,45 @@ export async function project(repoRoot) {
     }
   }
 
+  // Roadmap #12c phase 4 — resolve the lane-claim state into the emitted holder
+  // list (+ a read-time contention view in sync mode). On the default path this
+  // is just the pre-#12c `claims` map values, byte-identical, contentions [].
+  // In sync mode each lane's active claim set collapses to one deterministic
+  // holder = the claim earliest in the total order (lowest rank; a rank tie
+  // breaks on sessionId so every replica converges on the same holder). Zero
+  // spine writes — pure projection, re-derived every rebuild.
+  let claimsOut;
+  const contentions = [];
+  if (!syncMode) {
+    claimsOut = Array.from(claims.values());
+  } else {
+    claimsOut = [];
+    for (const [lane, owners] of laneClaims) {
+      const active = Array.from(owners.values()).sort(
+        (a, b) => a._order - b._order || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0)
+      );
+      const winner = active[0];
+      claimsOut.push({ lane: winner.lane, sessionId: winner.sessionId, focus: winner.focus, claimedAt: winner.claimedAt });
+      if (active.length > 1) {
+        contentions.push({
+          lane,
+          holder: { sessionId: winner.sessionId, focus: winner.focus, claimedAt: winner.claimedAt },
+          superseded: active.slice(1).map((c) => ({ sessionId: c.sessionId, focus: c.focus, claimedAt: c.claimedAt })),
+        });
+      }
+    }
+  }
+
   return {
     schemaVersion: SCHEMA_VERSION,
     lastEventId,
     eventCount: events.length,
     sessions: Array.from(sessions.values()),
     activeSessions: Array.from(sessions.values()).filter((s) => s.status === 'active'),
-    claims: Array.from(claims.values()),
+    claims: claimsOut,
+    // Roadmap #12c phase 4 — lanes with >1 live claimant (team-sync only;
+    // always [] on the single-machine path). Read-time only; no spine write.
+    contentions,
     sliceStops: sliceStops.slice(-50),         // most recent 50
     inbox: inbox.slice(-200),                  // most recent 200
     approvals: {
@@ -915,7 +1015,7 @@ export function projectionDefaults() {
     schemaVersion: 0, // 0 = legacy/unstamped until normalized
     lastEventId: null,
     eventCount: 0,
-    sessions: [], activeSessions: [], claims: [], sliceStops: [], inbox: [],
+    sessions: [], activeSessions: [], claims: [], contentions: [], sliceStops: [], inbox: [],
     approvals: { open: [], ledger: [], policies: [] },
     tasks: [], workers: [], proposals: [], bossTranscripts: {},
     goal: null, handoff: null, phase: null, autonomy: null, focus: null,
