@@ -203,11 +203,7 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
     // lane branch, deletes it — otherwise a later attach would see
     // branchExists=true, check out that stale branch, yet record the current
     // HEAD as baseHeadAtAttach (wrong base). (Codex P2.)
-    const rollbackGit = async () => {
-      await gitRun(['worktree', 'remove', '--force', path], stateRoot, 10000);
-      try { await rm(path, { recursive: true, force: true }); } catch {}
-      if (created) await gitRun(['branch', '-D', branch], stateRoot, 5000);
-    };
+    const rollbackGit = () => removeWorktreeGit(stateRoot, path, { branch: created ? branch : null, force: true });
 
     // Hide the pointer from git status in the new worktree (Codex P2): write it
     // to the worktree's own info/exclude so the checkout isn't dirtied and a
@@ -287,4 +283,97 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
   } finally {
     try { await rm(lockDir, { recursive: true, force: true }); } catch {}
   }
+}
+
+// Remove the git side of a lane worktree: the checkout, and optionally the
+// branch. Shared by attach-rollback and release. `force` passes
+// `git worktree remove --force` (required when the checkout is dirty). A null
+// `branch` leaves the branch in place (the `keep`/`kept` disposition, or a
+// reused-not-created attachment).
+async function removeWorktreeGit(stateRoot, path, { branch = null, force = false } = {}) {
+  const args = ['worktree', 'remove'];
+  if (force) args.push('--force');
+  args.push(path);
+  await gitRun(args, stateRoot, 10000);
+  try { await rm(path, { recursive: true, force: true }); } catch {}
+  if (branch) await gitRun(['branch', '-D', branch], stateRoot, 5000);
+}
+
+// ── Detach: disposition a lane's live worktree ──
+//
+// disposition:
+//   merged    — verify the lane branch is an ancestor of the integration ref
+//               (default: the recorded baseRef), then remove the worktree +
+//               branch. Refused if not an ancestor, or if the worktree is
+//               dirty unless `reason` records an explicit override.
+//   abandoned — throw the work away: force-remove the worktree + delete branch.
+//   kept      — release the attachment binding but LEAVE the checkout + branch
+//               on disk for the operator to inspect.
+//
+// Emits WORKTREE_DETACHED (frozen schemaVersion-1 shape). Returns the detach
+// summary. Throws (no event) on a refused merged disposition.
+export async function detachLaneWorktree(stateRoot, { lane, disposition, integrationRef = null, reason = null, by = null }) {
+  assertLaneSlug(lane);
+  const norm = disposition === 'keep' ? 'kept' : disposition;
+  if (!['merged', 'abandoned', 'kept'].includes(norm)) {
+    throw new Error(`disposition must be one of merged|abandoned|keep; got ${JSON.stringify(disposition)}`);
+  }
+
+  const att = await liveAttachmentForLane(stateRoot, lane);
+  if (!att) throw new Error(`lane "${lane}" has no live worktree to disposition`);
+
+  const path = att.pathAbs || laneWorktreePath(stateRoot, lane);
+  const branchRef = att.branchRef || laneBranchRef(lane);
+  const branch = laneBranch(lane);
+
+  const branchHead = (await gitRun(['rev-parse', '--verify', '--quiet', branchRef], stateRoot, 3000)).stdout.trim() || null;
+  const dirty = (await gitRun(['-C', path, 'status', '--porcelain'], stateRoot, 5000)).stdout.trim().length > 0;
+
+  let ancestorCheck = 'skipped';
+  let intRef = null;
+  let intHead = null;
+  if (norm === 'merged') {
+    intRef = integrationRef || att.baseRef;
+    if (!intRef) throw new Error(`merged needs an integration ref — none recorded on the attachment; pass --integration-ref <ref>`);
+    intHead = (await gitRun(['rev-parse', '--verify', '--quiet', intRef], stateRoot, 3000)).stdout.trim() || null;
+    if (!intHead) throw new Error(`integration ref "${intRef}" does not resolve`);
+    // merge-base --is-ancestor <branchHead> <intHead>: exit 0 ⇒ the lane branch
+    // is already contained in the integration ref. Máddu never runs the merge
+    // — it only verifies the operator did (cooperative posture).
+    const anc = await gitRun(['merge-base', '--is-ancestor', branchHead, intHead], stateRoot, 5000);
+    ancestorCheck = anc.code === 0 ? 'pass' : 'fail';
+    if (ancestorCheck === 'fail') {
+      throw new Error(`lane branch ${branch} is not merged into ${intRef} — merge it first, or use disposition abandoned|keep`);
+    }
+    if (dirty && !reason) {
+      throw new Error(`worktree for "${lane}" has uncommitted changes — commit them, or record an override with --reason "..."`);
+    }
+  }
+
+  // Git-side unwind. kept leaves everything; merged/abandoned remove the
+  // checkout and delete the branch (merged is safe — it's contained; abandoned
+  // is deliberate discard).
+  if (norm !== 'kept') {
+    await removeWorktreeGit(stateRoot, path, { branch, force: true });
+  }
+
+  const ev = await append(stateRoot, {
+    type: EVENT_TYPES.WORKTREE_DETACHED,
+    actor: by || att.session, lane,
+    data: {
+      schemaVersion: 1,
+      attachmentId: att.attachmentId,
+      lane,
+      pathRepoRel: att.pathRepoRel,
+      disposition: norm,
+      branchHead,
+      integrationRef: intRef,
+      integrationHead: intHead,
+      ancestorCheck,
+      dirtyAtDetach: dirty,
+      reason: reason || null,
+    },
+  });
+
+  return { attachmentId: att.attachmentId, lane, disposition: norm, dirty, ancestorCheck, eventId: ev.id, path: att.pathRepoRel };
 }

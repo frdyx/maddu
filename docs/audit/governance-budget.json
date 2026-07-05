@@ -17,8 +17,8 @@
   },
   "waivers": [],
   "selfTest": {
-    "baselineMs": 48000,
+    "baselineMs": 115000,
     "tolerancePct": 50,
-    "note": "relative self-test latency ceiling. WARN (never FAIL) when the last recorded quick/full run in .maddu/state/self-test-last-run.json exceeds baselineMs * (1 + tolerancePct/100). Raise the baseline deliberately when the suite legitimately grows. Raised 36000→48000 at v1.93.0 (roadmap #12a): added root-resolver, lane-worktree-validation, worktree-events, and the git-spawning worktree-attach integration test."
+    "note": "relative self-test latency ceiling. WARN (never FAIL) when the last recorded quick/full run in .maddu/state/self-test-last-run.json exceeds baselineMs * (1 + tolerancePct/100). Raise the baseline deliberately when the suite legitimately grows. Raised 36000→48000 then →115000 across v1.93.0 (roadmap #12a phases 1-5). Attribution (measured, not laundered): (a) `maddu ci` grew 5.4s→8.7s from the #12 surface additions (2 new event types, 3 new runtime libs, more source for the architecture gates) and the ci-command self-test invokes `maddu ci` 7× sequentially, so that +3.3s amplifies to ~+23s; (b) the two git-spawning integration tests worktree-attach + worktree-detach add ~11s; (c) the suite runs sequentially so per-test costs sum. The dominant driver is ci-command's 7× ci pattern — a candidate to parallelize or thin in a future pass."
   }
 }

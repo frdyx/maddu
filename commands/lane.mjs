@@ -67,6 +67,7 @@ function printLaneHelp() {
     '  claim ... --force                             # pre-empt prior holder',
     '  claim ... --worktree                          # provision an isolated git worktree bound to the claim',
     '  release --lane <id> --session <id>            # release a claim',
+    '  release ... --worktree <merged|abandoned|keep> [--integration-ref <ref>] [--reason "..."]',
     '',
     '  --session falls back to $MADDU_SESSION_ID, then the active session',
     '  set by `maddu register` (no flag/env needed once registered).',
@@ -210,6 +211,40 @@ export default async function lane(argv) {
       console.error(`lane "${lid}" is claimed by ${existing.sessionId}; ${sid} cannot release it`);
       process.exit(3);
     }
+
+    // v1.93.0 (roadmap #12a phase 5) — disposition a live worktree before (or
+    // instead of leaving) the lane release. `--worktree <merged|abandoned|keep>`.
+    // A plain release on a lane that still has a live worktree is REFUSED, so a
+    // checkout with un-integrated work is never silently orphaned.
+    const wtLib = await loadWorktreesLib();
+    const liveAttach = wtLib?.liveAttachmentForLane ? await wtLib.liveAttachmentForLane(repoRoot, lid) : null;
+    const dispRaw = flags.worktree;
+    if (dispRaw !== undefined) {
+      if (!wtLib?.detachLaneWorktree) { console.error('--worktree requires a newer maddu runtime (worktrees.mjs not found)'); process.exit(2); }
+      if (dispRaw === true) { console.error('--worktree needs a disposition: merged | abandoned | keep'); process.exit(2); }
+      if (!liveAttach) {
+        console.error(`lane "${lid}" has no live worktree to disposition`);
+        process.exit(3);
+      }
+      try {
+        const r = await wtLib.detachLaneWorktree(repoRoot, {
+          lane: lid, disposition: dispRaw,
+          integrationRef: typeof flags['integration-ref'] === 'string' ? flags['integration-ref'] : null,
+          reason: typeof flags.reason === 'string' ? flags.reason : null,
+          by: sid,
+        });
+        const kept = r.disposition === 'kept';
+        console.log(`  worktree: ${r.disposition}${r.ancestorCheck === 'pass' ? ' (verified merged)' : ''}${kept ? ` — kept at ${r.path}` : ' — removed'}`);
+      } catch (e) {
+        console.error(`  worktree ${dispRaw} refused: ${e.message}`);
+        process.exit(1);
+      }
+    } else if (liveAttach) {
+      console.error(`lane "${lid}" has a live worktree (${liveAttach.pathRepoRel}) — disposition it first:`);
+      console.error(`  maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
+      process.exit(3);
+    }
+
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LANE_RELEASED,
       actor: sid,
