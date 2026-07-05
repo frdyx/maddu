@@ -109,5 +109,24 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
       triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
     });
   }
-  return { staleEmitted: stale.length, closedEmitted: closed.length };
+
+  // Lane worktrees (roadmap #12a phase 6): auto-closing a session drops its
+  // lane claims, orphaning any worktree it held. The janitor REPORTS these so
+  // the operator can disposition them — it NEVER auto-removes a worktree (that
+  // could discard un-integrated work; removal is always an explicit
+  // `maddu lane release <lane> --worktree ...`). Best-effort + read-only.
+  let orphanedWorktrees = [];
+  if (closed.length) {
+    try {
+      const { readAttachments } = await import('./worktrees.mjs');
+      const closedIds = new Set(closed.map((s) => s.sessionId));
+      for (const att of (await readAttachments(repoRoot)).values()) {
+        if (closedIds.has(att.session)) {
+          orphanedWorktrees.push({ lane: att.lane, path: att.pathRepoRel, session: att.session });
+        }
+      }
+    } catch { /* older install without worktrees lib → nothing to report */ }
+  }
+
+  return { staleEmitted: stale.length, closedEmitted: closed.length, orphanedWorktrees };
 }
