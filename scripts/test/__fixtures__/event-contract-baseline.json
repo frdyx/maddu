@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "fingerprint": "69bae705",
+  "version": "1.1.0",
+  "fingerprint": "926f787b",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -732,6 +732,139 @@
           "kind": "string",
           "reason": "string",
           "supersedes": "string"
+        }
+      },
+      "MODEL_CHECKPOINT_REGISTERED": {
+        "frozen": true,
+        "data": {
+          "checkpoint": "object",
+          "checkpointKey": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "model_id": "string",
+          "run_id": "string?",
+          "schemaVersion": "number"
+        }
+      },
+      "MODEL_DATASET_SNAPSHOT_RECORDED": {
+        "frozen": true,
+        "data": {
+          "dataset_id": "string",
+          "hash": "string",
+          "license": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "schemaVersion": "number",
+          "source": "string",
+          "synthetic": "boolean"
+        }
+      },
+      "MODEL_EVAL_RAN": {
+        "frozen": true,
+        "data": {
+          "benchmark": "string",
+          "checkpointKey": "string",
+          "eval_id": "string",
+          "harness_version": "string?",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "pass_rate": "number",
+          "regressions": "array?",
+          "schemaVersion": "number"
+        }
+      },
+      "MODEL_PROMOTION_APPROVED": {
+        "frozen": true,
+        "data": {
+          "approval_ref": "string",
+          "checkpointKey": "string",
+          "model_id": "string",
+          "proposalId": "string",
+          "schemaVersion": "number",
+          "to_stage": "string"
+        }
+      },
+      "MODEL_PROMOTION_PROPOSED": {
+        "frozen": true,
+        "data": {
+          "approvalRequestId": "string",
+          "checkpointKey": "string",
+          "from_stage": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "model_id": "string",
+          "schemaVersion": "number",
+          "to_stage": "string"
+        }
+      },
+      "MODEL_REGRESSION_ACKNOWLEDGED": {
+        "frozen": true,
+        "data": {
+          "eval_id": "string",
+          "reason": "string",
+          "schemaVersion": "number"
+        }
+      },
+      "MODEL_REGRESSION_FOUND": {
+        "frozen": true,
+        "data": {
+          "checkpointKey": "string",
+          "critical": "boolean",
+          "delta": "number",
+          "eval_id": "string",
+          "metric": "string",
+          "schemaVersion": "number",
+          "vs": "string?"
+        }
+      },
+      "MODEL_RELEASED": {
+        "frozen": true,
+        "data": {
+          "checkpointKey": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "model_id": "string",
+          "rollback_plan": "string",
+          "schemaVersion": "number"
+        }
+      },
+      "MODEL_ROLLED_BACK": {
+        "frozen": true,
+        "data": {
+          "checkpointKey": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "model_id": "string",
+          "reverted_to": "string",
+          "schemaVersion": "number"
+        }
+      },
+      "MODEL_TRAINING_RUN_COMPLETED": {
+        "frozen": true,
+        "data": {
+          "checkpoint": "object",
+          "checkpointKey": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "metrics": "object",
+          "model_id": "string",
+          "run_id": "string",
+          "schemaVersion": "number"
+        }
+      },
+      "MODEL_TRAINING_RUN_STARTED": {
+        "frozen": true,
+        "data": {
+          "base_model": "object",
+          "commit": "string",
+          "dataset_snapshot": "string",
+          "manifestHash": "string",
+          "manifestPath": "string",
+          "method": "string",
+          "model_id": "string",
+          "run_id": "string",
+          "schemaVersion": "number",
+          "seed": "number"
         }
       },
       "PENDING_ACTION_DRAINED": {
