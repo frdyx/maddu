@@ -29,7 +29,10 @@
 // 'array' | 'any'; a trailing '?' marks a field that may be absent; '|null'
 // marks a nullable value (the key is present).
 
-export const EVENT_CONTRACT_VERSION = '1.0.0';
+// 1.1.0 (SLM-governance p2): +11 MODEL_* types — the one deliberate MINOR
+// bump the phase-0 design commits to (docs/research/slm-governance-design.md
+// §5/§11). Additive only; no existing type or field changed.
+export const EVENT_CONTRACT_VERSION = '1.1.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -219,6 +222,24 @@ export const EVENT_SCHEMA = {
   AUTONOMY_RECOMMENDATION: { summary: "An autonomy rung change was recommended (recommend-only).", data: { schemaVersion: 'number', asOf: 'string|null', lane: 'string', fromRung: 'string', toRung: 'string', wilson: 'number', n: 'number', coverage: 'number', recommendation: 'string', muted: 'boolean', mutedReason: 'string|null', configHash: 'string' }, frozen: true },
   WORKTREE_ATTACHED: { summary: "A worktree checkout was attached to a lane claim.", data: { schemaVersion: 'number', attachmentId: 'string', claimEventId: 'string|null', lane: 'string', session: 'string', pathRepoRel: 'string', pathAbs: 'string', branchRef: 'string', baseRef: 'string|null', baseHeadAtAttach: 'string', created: 'boolean', reused: 'boolean', dirty: 'boolean', gitCommonDir: 'string|null', platform: 'string' }, frozen: true },
   WORKTREE_DETACHED: { summary: "A worktree was detached from a lane claim with a disposition.", data: { schemaVersion: 'number', attachmentId: 'string', lane: 'string', pathRepoRel: 'string', disposition: 'string', branchHead: 'string|null', integrationRef: 'string|null', integrationHead: 'string|null', ancestorCheck: 'string', dirtyAtDetach: 'boolean', reason: 'string|null' }, frozen: true },
+  // ── SLM-governance MODEL_ family (contract 1.1.0, plan pln_20260706133422_0f60) ──
+  // Máddu records an SLM factory's manifests + lifecycle; it never trains,
+  // serves, or evaluates. manifestPath/manifestHash are PINNED first-hand at
+  // ingest (lib/model-manifests.mjs); every artifact hash inside a manifest is
+  // the author's DECLARATION recorded verbatim. checkpointKey is the normalized
+  // lowercase sha256:<hex> identity (design §4.5). MODEL_REGRESSION_ACKNOWLEDGED
+  // and MODEL_PROMOTION_APPROVED are verb-emitted (no manifest of their own).
+  MODEL_DATASET_SNAPSHOT_RECORDED: { summary: "A dataset-snapshot manifest was validated, hash-pinned, and recorded.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', dataset_id: 'string', source: 'string', license: 'string', hash: 'string', synthetic: 'boolean' }, frozen: true },
+  MODEL_TRAINING_RUN_STARTED: { summary: "An externally-run training run was recorded as started from its manifest.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', run_id: 'string', model_id: 'string', method: 'string', dataset_snapshot: 'string', base_model: 'object', seed: 'number', commit: 'string' }, frozen: true },
+  MODEL_TRAINING_RUN_COMPLETED: { summary: "A training run's completion (checkpoint + metrics) was recorded.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', run_id: 'string', model_id: 'string', checkpoint: 'object', checkpointKey: 'string', metrics: 'object' }, frozen: true },
+  MODEL_CHECKPOINT_REGISTERED: { summary: "A model checkpoint was registered under its sha256 identity key.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpoint: 'object', checkpointKey: 'string', run_id: 'string?' }, frozen: true },
+  MODEL_EVAL_RAN: { summary: "An externally-run benchmark eval of a checkpoint was recorded.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', eval_id: 'string', checkpointKey: 'string', benchmark: 'string', harness_version: 'string?', pass_rate: 'number', regressions: 'array?' }, frozen: true },
+  MODEL_REGRESSION_FOUND: { summary: "An eval manifest declared a critical regression (one event per regression).", data: { schemaVersion: 'number', eval_id: 'string', checkpointKey: 'string', metric: 'string', delta: 'number', critical: 'boolean', vs: 'string?' }, frozen: true },
+  MODEL_REGRESSION_ACKNOWLEDGED: { summary: "An operator acknowledged an eval's critical regressions with a recorded reason.", data: { schemaVersion: 'number', eval_id: 'string', reason: 'string' }, frozen: true },
+  MODEL_PROMOTION_PROPOSED: { summary: "A stage promotion was proposed; its approval request rides the spine first.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', from_stage: 'string', to_stage: 'string', approvalRequestId: 'string' }, frozen: true },
+  MODEL_PROMOTION_APPROVED: { summary: "A proposed promotion was confirmed against its own allowing approval decision.", data: { schemaVersion: 'number', proposalId: 'string', approval_ref: 'string', model_id: 'string', checkpointKey: 'string', to_stage: 'string' }, frozen: true },
+  MODEL_RELEASED: { summary: "A checkpoint approved to released was recorded as released with a rollback plan.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', rollback_plan: 'string' }, frozen: true },
+  MODEL_ROLLED_BACK: { summary: "A released checkpoint was rolled back to an earlier stage.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', reverted_to: 'string' }, frozen: true },
 };
 
 // Parity + shape validation used by the event-schema-complete gate and the

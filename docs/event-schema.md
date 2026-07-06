@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.0.0` · **Event types:** 162
+**Contract version:** `1.1.0` · **Event types:** 173
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (162)
+## Events (173)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -199,3 +199,14 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `AUTONOMY_RECOMMENDATION` 🔒 | An autonomy rung change was recommended (recommend-only). | `schemaVersion: number`, `asOf: string\|null`, `lane: string`, `fromRung: string`, `toRung: string`, `wilson: number`, `n: number`, `coverage: number`, `recommendation: string`, `muted: boolean`, `mutedReason: string\|null`, `configHash: string` |
 | `WORKTREE_ATTACHED` 🔒 | A worktree checkout was attached to a lane claim. | `schemaVersion: number`, `attachmentId: string`, `claimEventId: string\|null`, `lane: string`, `session: string`, `pathRepoRel: string`, `pathAbs: string`, `branchRef: string`, `baseRef: string\|null`, `baseHeadAtAttach: string`, `created: boolean`, `reused: boolean`, `dirty: boolean`, `gitCommonDir: string\|null`, `platform: string` |
 | `WORKTREE_DETACHED` 🔒 | A worktree was detached from a lane claim with a disposition. | `schemaVersion: number`, `attachmentId: string`, `lane: string`, `pathRepoRel: string`, `disposition: string`, `branchHead: string\|null`, `integrationRef: string\|null`, `integrationHead: string\|null`, `ancestorCheck: string`, `dirtyAtDetach: boolean`, `reason: string\|null` |
+| `MODEL_DATASET_SNAPSHOT_RECORDED` 🔒 | A dataset-snapshot manifest was validated, hash-pinned, and recorded. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `dataset_id: string`, `source: string`, `license: string`, `hash: string`, `synthetic: boolean` |
+| `MODEL_TRAINING_RUN_STARTED` 🔒 | An externally-run training run was recorded as started from its manifest. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `run_id: string`, `model_id: string`, `method: string`, `dataset_snapshot: string`, `base_model: object`, `seed: number`, `commit: string` |
+| `MODEL_TRAINING_RUN_COMPLETED` 🔒 | A training run's completion (checkpoint + metrics) was recorded. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `run_id: string`, `model_id: string`, `checkpoint: object`, `checkpointKey: string`, `metrics: object` |
+| `MODEL_CHECKPOINT_REGISTERED` 🔒 | A model checkpoint was registered under its sha256 identity key. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpoint: object`, `checkpointKey: string`, `run_id: string?` |
+| `MODEL_EVAL_RAN` 🔒 | An externally-run benchmark eval of a checkpoint was recorded. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `eval_id: string`, `checkpointKey: string`, `benchmark: string`, `harness_version: string?`, `pass_rate: number`, `regressions: array?` |
+| `MODEL_REGRESSION_FOUND` 🔒 | An eval manifest declared a critical regression (one event per regression). | `schemaVersion: number`, `eval_id: string`, `checkpointKey: string`, `metric: string`, `delta: number`, `critical: boolean`, `vs: string?` |
+| `MODEL_REGRESSION_ACKNOWLEDGED` 🔒 | An operator acknowledged an eval's critical regressions with a recorded reason. | `schemaVersion: number`, `eval_id: string`, `reason: string` |
+| `MODEL_PROMOTION_PROPOSED` 🔒 | A stage promotion was proposed; its approval request rides the spine first. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpointKey: string`, `from_stage: string`, `to_stage: string`, `approvalRequestId: string` |
+| `MODEL_PROMOTION_APPROVED` 🔒 | A proposed promotion was confirmed against its own allowing approval decision. | `schemaVersion: number`, `proposalId: string`, `approval_ref: string`, `model_id: string`, `checkpointKey: string`, `to_stage: string` |
+| `MODEL_RELEASED` 🔒 | A checkpoint approved to released was recorded as released with a rollback plan. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpointKey: string`, `rollback_plan: string` |
+| `MODEL_ROLLED_BACK` 🔒 | A released checkpoint was rolled back to an earlier stage. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpointKey: string`, `reverted_to: string` |

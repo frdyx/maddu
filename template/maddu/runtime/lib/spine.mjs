@@ -319,7 +319,26 @@ export const EVENT_TYPES = {
   //                        branchHead, integrationRef, integrationHead,
   //                        ancestorCheck: pass|fail|skipped, dirtyAtDetach, reason }
   WORKTREE_ATTACHED:          'WORKTREE_ATTACHED',
-  WORKTREE_DETACHED:          'WORKTREE_DETACHED'
+  WORKTREE_DETACHED:          'WORKTREE_DETACHED',
+  // SLM-governance p2 (plan pln_20260706133422_0f60, contract 1.1.0) — the
+  // MODEL_ family: Máddu governs an SLM factory's record (hash-pinned
+  // manifests via lib/model-manifests.mjs ingest), never the training.
+  // Design: docs/research/slm-governance-design.md §5. All 11 carry
+  // data.schemaVersion:1; manifest-backed ones carry manifestPath +
+  // manifestHash (pinned). Verifier rules in verify.mjs; emitted by
+  // `maddu model` (phase 3) — registered and verifier-covered FIRST so no
+  // unshaped event can ever land on a spine.
+  MODEL_DATASET_SNAPSHOT_RECORDED: 'MODEL_DATASET_SNAPSHOT_RECORDED',
+  MODEL_TRAINING_RUN_STARTED:   'MODEL_TRAINING_RUN_STARTED',
+  MODEL_TRAINING_RUN_COMPLETED: 'MODEL_TRAINING_RUN_COMPLETED',
+  MODEL_CHECKPOINT_REGISTERED:  'MODEL_CHECKPOINT_REGISTERED',
+  MODEL_EVAL_RAN:               'MODEL_EVAL_RAN',
+  MODEL_REGRESSION_FOUND:       'MODEL_REGRESSION_FOUND',
+  MODEL_REGRESSION_ACKNOWLEDGED: 'MODEL_REGRESSION_ACKNOWLEDGED',
+  MODEL_PROMOTION_PROPOSED:     'MODEL_PROMOTION_PROPOSED',
+  MODEL_PROMOTION_APPROVED:     'MODEL_PROMOTION_APPROVED',
+  MODEL_RELEASED:               'MODEL_RELEASED',
+  MODEL_ROLLED_BACK:            'MODEL_ROLLED_BACK'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

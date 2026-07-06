@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.0.0",
+  "x-contractVersion": "1.1.0",
   "type": "object",
   "required": [
     "v",
@@ -189,7 +189,18 @@
         "AUTONOMY_SCORED",
         "AUTONOMY_RECOMMENDATION",
         "WORKTREE_ATTACHED",
-        "WORKTREE_DETACHED"
+        "WORKTREE_DETACHED",
+        "MODEL_DATASET_SNAPSHOT_RECORDED",
+        "MODEL_TRAINING_RUN_STARTED",
+        "MODEL_TRAINING_RUN_COMPLETED",
+        "MODEL_CHECKPOINT_REGISTERED",
+        "MODEL_EVAL_RAN",
+        "MODEL_REGRESSION_FOUND",
+        "MODEL_REGRESSION_ACKNOWLEDGED",
+        "MODEL_PROMOTION_PROPOSED",
+        "MODEL_PROMOTION_APPROVED",
+        "MODEL_RELEASED",
+        "MODEL_ROLLED_BACK"
       ]
     },
     "actor": {
@@ -5730,6 +5741,460 @@
                   "string",
                   "null"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_DATASET_SNAPSHOT_RECORDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A dataset-snapshot manifest was validated, hash-pinned, and recorded.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "dataset_id": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string"
+              },
+              "synthetic": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_TRAINING_RUN_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An externally-run training run was recorded as started from its manifest.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "dataset_snapshot": {
+                "type": "string"
+              },
+              "base_model": {
+                "type": "object"
+              },
+              "seed": {
+                "type": "number"
+              },
+              "commit": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_TRAINING_RUN_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A training run's completion (checkpoint + metrics) was recorded.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "checkpoint": {
+                "type": "object"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "metrics": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_CHECKPOINT_REGISTERED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A model checkpoint was registered under its sha256 identity key.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "checkpoint": {
+                "type": "object"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_EVAL_RAN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An externally-run benchmark eval of a checkpoint was recorded.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "eval_id": {
+                "type": "string"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "benchmark": {
+                "type": "string"
+              },
+              "harness_version": {
+                "type": "string"
+              },
+              "pass_rate": {
+                "type": "number"
+              },
+              "regressions": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_REGRESSION_FOUND"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An eval manifest declared a critical regression (one event per regression).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "eval_id": {
+                "type": "string"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "metric": {
+                "type": "string"
+              },
+              "delta": {
+                "type": "number"
+              },
+              "critical": {
+                "type": "boolean"
+              },
+              "vs": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_REGRESSION_ACKNOWLEDGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An operator acknowledged an eval's critical regressions with a recorded reason.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "eval_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_PROMOTION_PROPOSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A stage promotion was proposed; its approval request rides the spine first.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "from_stage": {
+                "type": "string"
+              },
+              "to_stage": {
+                "type": "string"
+              },
+              "approvalRequestId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_PROMOTION_APPROVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A proposed promotion was confirmed against its own allowing approval decision.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "proposalId": {
+                "type": "string"
+              },
+              "approval_ref": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "to_stage": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_RELEASED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A checkpoint approved to released was recorded as released with a rollback plan.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "rollback_plan": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MODEL_ROLLED_BACK"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A released checkpoint was rolled back to an earlier stage.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "manifestHash": {
+                "type": "string"
+              },
+              "model_id": {
+                "type": "string"
+              },
+              "checkpointKey": {
+                "type": "string"
+              },
+              "reverted_to": {
+                "type": "string"
               }
             }
           }

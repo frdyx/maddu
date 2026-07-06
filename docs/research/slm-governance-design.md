@@ -212,8 +212,11 @@ there is no separate approval id namespace), and
 `MODEL_PROMOTION_APPROVED` and `MODEL_ROLLED_BACK` events in spine order,
 latest wins — an approval sets the stage to its `to_stage`, a rollback sets
 it to the rollback event's `reverted_to` stage (declared in the rollback
-manifest, default `candidate`); no events → `experiment`. A rolled-back
-checkpoint may be re-promoted through the normal ride. `model promote`
+manifest, default `candidate`, and **strictly below the derived stage — a
+rollback can never re-elevate**; the verifier FAILs a non-downward
+`reverted_to` and the derived stage does not move); no events →
+`experiment`. A rolled-back checkpoint may be re-promoted through the
+normal ride. `model promote`
 refuses when the declared `from_stage` disagrees with the derived stage,
 and the §5 stage-skip verifier rule judges against the derived stage too —
 declared adjacency alone (e.g. a manifest claiming `canary → released` for
@@ -269,9 +272,9 @@ manifest path (repo-relative, resolved per §4 step 1), and `manifestHash`
 | `MODEL_REGRESSION_FOUND` | `model eval record` (auto, one per `critical: true` regression in the manifest) | → prior `MODEL_EVAL_RAN` by `eval_id` (**FAIL**) |
 | `MODEL_REGRESSION_ACKNOWLEDGED` | `model regression ack` | → prior `MODEL_REGRESSION_FOUND` by `eval_id` (**FAIL**); requires a non-empty `reason` (**FAIL**). An ack is **eval-level**: one ack covers every critical regression of that eval, and the `no-critical-regression` gate matches by `eval_id` |
 | `MODEL_PROMOTION_PROPOSED` | `model promote` | checkpoint → `MODEL_CHECKPOINT_REGISTERED` (**FAIL**); `from_stage` ≠ the spine-derived stage at proposal time, or a stage skip against the derived stage (**FAIL** — derived, never declared adjacency, per §4.4). `data.approvalRequestId` records the `APPROVAL_REQUESTED` event this proposal appended |
-| `MODEL_PROMOTION_APPROVED` | `model promote --confirm` | → prior `MODEL_PROMOTION_PROPOSED` (**FAIL**); `data.approval_ref` must equal that proposal's recorded `approvalRequestId`, with a matching `APPROVAL_DECIDED` whose `approvalId` equals it and whose decision is allowing (`allow-once`/`allow-always`) (**FAIL** — an allowing decision borrowed from any other proposal is a verifier failure, closing cross-proposal replay); more than one `MODEL_PROMOTION_APPROVED` per proposal (**FAIL**) |
+| `MODEL_PROMOTION_APPROVED` | `model promote --confirm` | → prior `MODEL_PROMOTION_PROPOSED` (**FAIL**); `data.approval_ref` must equal that proposal's recorded `approvalRequestId`, with a matching `APPROVAL_DECIDED` whose `approvalId` equals it and whose decision is allowing (`allow-once`/`allow-always`) (**FAIL** — an allowing decision borrowed from any other proposal is a verifier failure, closing cross-proposal replay); `to_stage` must equal the proposal's own (**FAIL**); more than one `MODEL_PROMOTION_APPROVED` per proposal (**FAIL**) |
 | `MODEL_RELEASED` | `model release` | → prior `MODEL_PROMOTION_APPROVED` to `released` (**FAIL**); missing `rollback_plan` (**FAIL**) |
-| `MODEL_ROLLED_BACK` | `model rollback` | → prior `MODEL_RELEASED` (**FAIL**); carries `reverted_to` (the stage the checkpoint returns to, §4.4) |
+| `MODEL_ROLLED_BACK` | `model rollback` | → prior `MODEL_RELEASED` (**FAIL**); carries `reverted_to` (the stage the checkpoint returns to, §4.4) — must be strictly below the derived stage, a rollback never re-elevates (**FAIL**) |
 
 `verify.mjs` header ledger: ten of the eleven join the CHECKED map;
 `MODEL_DATASET_SNAPSHOT_RECORDED` is the single intentionally-unconstrained
