@@ -38,6 +38,16 @@
 //   WORKTREE_DETACHED                        → live WORKTREE_ATTACHED (attachmentId) (FAIL never-attached, WARN duplicate detach) [#12a]
 //   WORKTREE_ATTACHED missing claimEventId   → orphan attach (no claim ref)        (WARN) [#12a]
 //   WORKTREE_ATTACHED on a still-live pathRepoRel → live-path reuse                (WARN) [#12a]
+//   MODEL_TRAINING_RUN_STARTED               → MODEL_DATASET_SNAPSHOT_RECORDED     (FAIL) [SLM p2]
+//   MODEL_TRAINING_RUN_COMPLETED             → MODEL_TRAINING_RUN_STARTED (run_id) (FAIL) [SLM p2]
+//   MODEL_CHECKPOINT_REGISTERED.run_id (when present) → MODEL_TRAINING_RUN_COMPLETED (WARN) [SLM p2]
+//   MODEL_EVAL_RAN                           → MODEL_CHECKPOINT_REGISTERED (WARN); missing harness_version (WARN) [SLM p2]
+//   MODEL_REGRESSION_FOUND                   → MODEL_EVAL_RAN (eval_id)            (FAIL) [SLM p2]
+//   MODEL_REGRESSION_ACKNOWLEDGED            → MODEL_REGRESSION_FOUND (eval_id) (FAIL); empty reason (FAIL) [SLM p2]
+//   MODEL_PROMOTION_PROPOSED                 → MODEL_CHECKPOINT_REGISTERED (FAIL); from_stage/to_stage vs DERIVED stage (FAIL); unbound approvalRequestId (FAIL) [SLM p2]
+//   MODEL_PROMOTION_APPROVED                 → MODEL_PROMOTION_PROPOSED (FAIL); approval_ref must be that proposal's own request with an allowing decision (allow-once/allow-always exact) (FAIL); to_stage must equal the proposal's (FAIL); duplicate per proposal (FAIL) [SLM p2]
+//   MODEL_RELEASED                           → derived stage released (FAIL); missing rollback_plan (FAIL) [SLM p2]
+//   MODEL_ROLLED_BACK                        → MODEL_RELEASED (checkpointKey) (FAIL); reverted_to must be strictly BELOW the derived stage — a rollback never re-elevates (FAIL) [SLM p2]
 //
 // INTENTIONALLY UNCONSTRAINED — no parent-anchor invariant; flagging would be
 // over-constraining (the "create" may legitimately predate an export/replay
@@ -45,6 +55,7 @@
 //   * remove/disable/rotate lifecycle: TRUST_PIN_REMOVED, MCP_*, AUTH_KEY_*,
 //     SKILL_{UPDATED,DELETED,APPLIED,TRUSTED}, SKILL_CANDIDATE_{APPROVED,REJECTED},
 //     CHECKPOINT_{REMOVED,ROLLBACK_REQUESTED,WORKTREE_CREATED}, *_{DISABLED,ALLOWLIST_SET}.
+//   * MODEL_DATASET_SNAPSHOT_RECORDED — the MODEL_ family's single root anchor [SLM p2].
 //   * standalone records: DOCTOR_REPORT, AUDIT_REPORT, GATE_RAN, TRIGGER_FIRED,
 //     GOVERNANCE_MODE_CHANGED, TOKEN_USAGE_REPORTED, INBOX_MESSAGE, MAILBOX_*,
 //     IMPORT_*, PROPOSAL_*, BOSS_MESSAGE, HANDOFF_SET, BRIEFING_CURATED,
@@ -142,6 +153,27 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   const startedLoops = new Set();         // LOOP_STARTED.data.loopId
   const startedCoordinators = new Set();  // COORDINATOR_STARTED.data.coordinatorId
   const invokedAdvisors = new Set();      // ADVISOR_INVOKED.data.advisorId
+  // SLM-governance MODEL_ family (contract 1.1.0, design §5). The promotion
+  // chain is the load-bearing part: stage is DERIVED here (approved sets
+  // to_stage, rollback sets reverted_to, latest wins) so a manifest's
+  // declared from_stage can never smuggle a stage skip past replay; approval
+  // binding is exact (a proposal's own request id + an allowing decision).
+  const approvalDecisionById = new Map(); // approvalId → decision string (first decision wins)
+  const modelDatasets = new Set();        // MODEL_DATASET_SNAPSHOT_RECORDED.data.dataset_id
+  const modelRunsStarted = new Set();     // MODEL_TRAINING_RUN_STARTED.data.run_id
+  const modelRunsCompleted = new Set();   // MODEL_TRAINING_RUN_COMPLETED.data.run_id
+  const modelCheckpoints = new Set();     // MODEL_CHECKPOINT_REGISTERED.data.checkpointKey
+  const modelEvals = new Set();           // MODEL_EVAL_RAN.data.eval_id
+  const modelRegressionEvals = new Set(); // eval_ids with ≥1 MODEL_REGRESSION_FOUND
+  const modelStages = new Map();          // checkpointKey → derived stage
+  const modelProposals = new Map();       // proposal event id → { approvalRequestId, checkpointKey, to_stage }
+  const modelApprovedProposals = new Set(); // proposal ids with a MODEL_PROMOTION_APPROVED
+  const modelReleased = new Set();        // checkpointKeys with a MODEL_RELEASED
+  const MODEL_STAGE_LADDER = ['experiment', 'candidate', 'canary', 'released'];
+  const MODEL_ALLOWING = new Set(['allow-once', 'allow-always']); // the exact grant vocabulary — never a prefix match
+  // Phase 3 emits checkpointKey pre-normalized (§4.5); lowercasing again at
+  // read costs nothing and keeps lineage intact if an emitter ever regresses.
+  const lcKey = (v) => (typeof v === 'string' ? v.toLowerCase() : v);
   let installedAt = null;                // FRAMEWORK_INSTALLED.ts — lower bound for ts sanity
 
   // Scan ONE independent prev_hash chain — the ordered segments in `dir`. In
@@ -365,6 +397,8 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
               { segment: segName, line: lineNo, eventId: ev.id }));
           } else {
             decidedApprovals.add(aid);
+            // MODEL_PROMOTION_APPROVED binding (design §5): first decision wins.
+            if (typeof ev.data?.decision === 'string') approvalDecisionById.set(aid, ev.data.decision);
           }
           // Migration-event sanity.
           if (ev.triggered_by?.kind === 'policy_migration') {
@@ -754,6 +788,207 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
             push(issue('WARN', 'orphan_advisor_event',
               `${ev.id}: ADVISOR_ARTIFACT_WRITTEN references unknown advisor ${aid} (no prior ADVISOR_INVOKED)`,
               { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        // ── SLM-governance MODEL_ family (contract 1.1.0, design §5) ──
+        case 'MODEL_DATASET_SNAPSHOT_RECORDED':
+          // Root anchor — intentionally unconstrained.
+          if (ev.data?.dataset_id) modelDatasets.add(ev.data.dataset_id);
+          break;
+
+        case 'MODEL_TRAINING_RUN_STARTED': {
+          const ds = ev.data?.dataset_snapshot;
+          if (ds && !modelDatasets.has(ds)) {
+            push(issue('FAIL', 'orphan_model_training_run',
+              `${ev.id}: MODEL_TRAINING_RUN_STARTED references unknown dataset_snapshot ${ds} (no prior MODEL_DATASET_SNAPSHOT_RECORDED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (ev.data?.run_id) modelRunsStarted.add(ev.data.run_id);
+          break;
+        }
+
+        case 'MODEL_TRAINING_RUN_COMPLETED': {
+          const rid = ev.data?.run_id;
+          if (rid && !modelRunsStarted.has(rid)) {
+            push(issue('FAIL', 'orphan_model_run_completed',
+              `${ev.id}: MODEL_TRAINING_RUN_COMPLETED references unknown run_id ${rid} (no prior MODEL_TRAINING_RUN_STARTED)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (rid) modelRunsCompleted.add(rid);
+          break;
+        }
+
+        case 'MODEL_CHECKPOINT_REGISTERED': {
+          // run_id is optional — imported/foreign checkpoints carry none.
+          const rid = ev.data?.run_id;
+          if (rid && !modelRunsCompleted.has(rid)) {
+            push(issue('WARN', 'orphan_model_checkpoint',
+              `${ev.id}: MODEL_CHECKPOINT_REGISTERED references run_id ${rid} with no prior MODEL_TRAINING_RUN_COMPLETED`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (ev.data?.checkpointKey) modelCheckpoints.add(lcKey(ev.data.checkpointKey));
+          break;
+        }
+
+        case 'MODEL_EVAL_RAN': {
+          const ck = lcKey(ev.data?.checkpointKey);
+          if (ck && !modelCheckpoints.has(ck)) {
+            push(issue('WARN', 'orphan_model_eval',
+              `${ev.id}: MODEL_EVAL_RAN references unregistered checkpoint ${ck}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (!ev.data?.harness_version) {
+            push(issue('WARN', 'model_eval_harness_unpinned',
+              `${ev.id}: MODEL_EVAL_RAN has no harness_version — the eval is not reproducible as recorded`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (ev.data?.eval_id) modelEvals.add(ev.data.eval_id);
+          break;
+        }
+
+        case 'MODEL_REGRESSION_FOUND': {
+          const eid = ev.data?.eval_id;
+          if (eid && !modelEvals.has(eid)) {
+            push(issue('FAIL', 'orphan_model_regression',
+              `${ev.id}: MODEL_REGRESSION_FOUND references unknown eval_id ${eid} (no prior MODEL_EVAL_RAN)`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (eid) modelRegressionEvals.add(eid);
+          break;
+        }
+
+        case 'MODEL_REGRESSION_ACKNOWLEDGED': {
+          const eid = ev.data?.eval_id;
+          if (eid && !modelRegressionEvals.has(eid)) {
+            push(issue('FAIL', 'orphan_model_regression_ack',
+              `${ev.id}: MODEL_REGRESSION_ACKNOWLEDGED references eval_id ${eid} with no prior MODEL_REGRESSION_FOUND`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (typeof ev.data?.reason !== 'string' || ev.data.reason.trim() === '') {
+            push(issue('FAIL', 'model_regression_ack_unreasoned',
+              `${ev.id}: MODEL_REGRESSION_ACKNOWLEDGED carries no reason — the recorded judgment is the point`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          break;
+        }
+
+        case 'MODEL_PROMOTION_PROPOSED': {
+          const ck = lcKey(ev.data?.checkpointKey);
+          let flagged = false;
+          if (!ck || !modelCheckpoints.has(ck)) {
+            flagged = true;
+            push(issue('FAIL', 'orphan_model_promotion',
+              `${ev.id}: MODEL_PROMOTION_PROPOSED references unregistered checkpoint ${ck ?? '(none)'}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          // Stage discipline vs the DERIVED stage — declared adjacency alone
+          // is exactly the forgery the design closes (§4.4).
+          const derived = (ck && modelStages.get(ck)) || 'experiment';
+          const from = ev.data?.from_stage;
+          const to = ev.data?.to_stage;
+          if (from !== derived) {
+            flagged = true;
+            push(issue('FAIL', 'model_stage_mismatch',
+              `${ev.id}: MODEL_PROMOTION_PROPOSED declares from_stage ${from ?? '(none)'} but the spine-derived stage of ${ck ?? '(none)'} is ${derived}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          const di = MODEL_STAGE_LADDER.indexOf(derived);
+          if (to !== MODEL_STAGE_LADDER[di + 1]) {
+            flagged = true;
+            push(issue('FAIL', 'model_stage_skip',
+              `${ev.id}: MODEL_PROMOTION_PROPOSED to_stage ${to ?? '(none)'} is not the single forward step from derived stage ${derived}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          const req = ev.data?.approvalRequestId;
+          if (!req || !requestedApprovals.has(req)) {
+            flagged = true;
+            push(issue('FAIL', 'model_promotion_unbound',
+              `${ev.id}: MODEL_PROMOTION_PROPOSED has no resolvable approvalRequestId (${req ?? 'absent'}) — the request must ride the spine first`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          modelProposals.set(ev.id, { approvalRequestId: req ?? null, checkpointKey: ck ?? null, to_stage: to ?? null, flagged });
+          break;
+        }
+
+        case 'MODEL_PROMOTION_APPROVED': {
+          const pid = ev.data?.proposalId;
+          const prop = pid ? modelProposals.get(pid) : null;
+          if (!prop) {
+            push(issue('FAIL', 'orphan_model_promotion_approved',
+              `${ev.id}: MODEL_PROMOTION_APPROVED references unknown proposalId ${pid ?? '(none)'}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+            break;
+          }
+          if (modelApprovedProposals.has(pid)) {
+            push(issue('FAIL', 'duplicate_model_promotion_approved',
+              `${ev.id}: proposal ${pid} already has a MODEL_PROMOTION_APPROVED`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+            break;
+          }
+          const ref = ev.data?.approval_ref;
+          const decision = ref ? approvalDecisionById.get(ref) : undefined;
+          if (!ref || ref !== prop.approvalRequestId) {
+            push(issue('FAIL', 'model_approval_ref_mismatch',
+              `${ev.id}: approval_ref ${ref ?? '(none)'} is not proposal ${pid}'s own approvalRequestId (${prop.approvalRequestId ?? '(none)'}) — cross-proposal replay`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (!MODEL_ALLOWING.has(decision)) {
+            push(issue('FAIL', 'model_promotion_unapproved',
+              `${ev.id}: MODEL_PROMOTION_APPROVED without an allowing APPROVAL_DECIDED for ${ref} (decision: ${decision ?? 'none'})`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (ev.data?.to_stage !== prop.to_stage) {
+            push(issue('FAIL', 'model_approved_stage_mismatch',
+              `${ev.id}: MODEL_PROMOTION_APPROVED to_stage ${ev.data?.to_stage ?? '(none)'} differs from proposal ${pid}'s to_stage ${prop.to_stage ?? '(none)'}`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else {
+            modelApprovedProposals.add(pid);
+            // A flagged proposal (stage lie / skip / unbound) never advances
+            // the derived stage — the spine already carries its FAIL, and the
+            // derived model must not follow the forgery.
+            if (!prop.flagged && prop.checkpointKey && prop.to_stage) modelStages.set(prop.checkpointKey, prop.to_stage);
+          }
+          break;
+        }
+
+        case 'MODEL_RELEASED': {
+          const ck = lcKey(ev.data?.checkpointKey);
+          if (!ck || modelStages.get(ck) !== 'released') {
+            push(issue('FAIL', 'model_release_unapproved',
+              `${ev.id}: MODEL_RELEASED for ${ck ?? '(none)'} whose derived stage is ${(ck && modelStages.get(ck)) || 'experiment'} — no approved promotion to released`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (typeof ev.data?.rollback_plan !== 'string' || ev.data.rollback_plan.trim() === '') {
+            push(issue('FAIL', 'model_release_no_rollback_plan',
+              `${ev.id}: MODEL_RELEASED without a rollback_plan`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          if (ck) modelReleased.add(ck);
+          break;
+        }
+
+        case 'MODEL_ROLLED_BACK': {
+          const ck = lcKey(ev.data?.checkpointKey);
+          if (!ck || !modelReleased.has(ck)) {
+            push(issue('FAIL', 'orphan_model_rollback',
+              `${ev.id}: MODEL_ROLLED_BACK for ${ck ?? '(none)'} with no prior MODEL_RELEASED`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
+          // Rollback only ever moves DOWN the ladder (p2 red-team SF-1):
+          // reverted_to at-or-above the derived stage would re-elevate a
+          // checkpoint without the approval ride — the same forgery class as
+          // a from_stage lie. Absent reverted_to defaults to candidate
+          // (§4.4); present-but-invalid or non-downward is tamper-evident,
+          // and a flagged rollback never moves the derived stage.
+          const cur = (ck && modelStages.get(ck)) || 'experiment';
+          const rt = ev.data?.reverted_to === undefined ? 'candidate' : ev.data.reverted_to;
+          const ri = MODEL_STAGE_LADDER.indexOf(rt);
+          if (ri === -1 || ri >= MODEL_STAGE_LADDER.indexOf(cur)) {
+            push(issue('FAIL', 'model_rollback_not_downward',
+              `${ev.id}: MODEL_ROLLED_BACK reverted_to ${JSON.stringify(ev.data?.reverted_to ?? null)} is not a stage strictly below the derived stage ${cur} — a rollback can never re-elevate`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (ck) {
+            modelStages.set(ck, rt);
           }
           break;
         }

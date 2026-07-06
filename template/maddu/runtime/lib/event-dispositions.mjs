@@ -179,6 +179,21 @@ export const EVENT_DISPOSITIONS = {
   AUTONOMY_RECOMMENDATION: { disp: 'dormant', reason: "fires only on a rung change — a lane's record crossing (or falling from) a trust-ladder threshold" },
   WORKTREE_ATTACHED: { disp: 'dormant', reason: "registered + verifier-covered ahead of the attach flow (roadmap #12a phase 3); emitted once `lane claim --worktree` lands (phase 4)" },
   WORKTREE_DETACHED: { disp: 'dormant', reason: "registered + verifier-covered ahead of the attach flow (roadmap #12a phase 3); emitted once `lane release --worktree` lands (phase 5)" },
+  // SLM-governance MODEL_ family (contract 1.1.0): fires only in repos
+  // running an SLM factory through `maddu model` (plan pln_20260706133422_0f60)
+  // — dormant by design on every ordinary spine, exactly so `maddu insights`
+  // never reads the family as dead surface.
+  MODEL_DATASET_SNAPSHOT_RECORDED: { disp: 'dormant', reason: "fires only in repos governing an SLM factory via `maddu model` (phase 3)" },
+  MODEL_TRAINING_RUN_STARTED: { disp: 'dormant', reason: "fires only in repos governing an SLM factory via `maddu model` (phase 3)" },
+  MODEL_TRAINING_RUN_COMPLETED: { disp: 'dormant', reason: "fires only in repos governing an SLM factory via `maddu model` (phase 3)" },
+  MODEL_CHECKPOINT_REGISTERED: { disp: 'dormant', reason: "fires only in repos governing an SLM factory via `maddu model` (phase 3)" },
+  MODEL_EVAL_RAN: { disp: 'dormant', reason: "fires only in repos governing an SLM factory via `maddu model` (phase 3)" },
+  MODEL_REGRESSION_FOUND: { disp: 'dormant', reason: "fires only when an eval manifest declares a critical regression (`maddu model eval record`, phase 3)" },
+  MODEL_REGRESSION_ACKNOWLEDGED: { disp: 'dormant', reason: "fires only on explicit operator judgment (`maddu model regression ack`, phase 3)" },
+  MODEL_PROMOTION_PROPOSED: { disp: 'dormant', reason: "fires only on `maddu model promote` (phase 3); the paired APPROVAL_REQUESTED rides first" },
+  MODEL_PROMOTION_APPROVED: { disp: 'dormant', reason: "fires only on `maddu model promote --confirm` against an allowing decision (phase 3)" },
+  MODEL_RELEASED: { disp: 'dormant', reason: "fires only on `maddu model release` after an approved promotion to released (phase 3)" },
+  MODEL_ROLLED_BACK: { disp: 'dormant', reason: "fires only on `maddu model rollback` of a released checkpoint (phase 3)" },
 };
 
 export const DISP_KINDS = new Set(['active', 'dormant', 'plugin']);
