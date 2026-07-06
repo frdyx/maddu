@@ -19,6 +19,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
 import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, readAllPartitioned } from './spine-append-core.mjs';
+import { redactDataPayload } from './secret-scan.mjs';
 export { hashLine };
 
 const ROLL_BYTES = 10 * 1024 * 1024;
@@ -470,6 +471,14 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   if (!EVENT_TYPES[type]) {
     throw new Error(`unknown event type: ${type}`);
   }
+  // Write-boundary payload sweep: every emit site funnels through here, so a
+  // secret-shaped value in caller/agent/worker-supplied free text is redacted
+  // BEFORE the line is built — prev_hash chains over the stored (redacted)
+  // bytes on both the flat and partitioned branches, and the ENOENT-retry
+  // reuses the same already-swept `ev`. Clean data passes through by
+  // reference (no clone, identical return value). Scope: `data` only —
+  // actor/lane/triggered_by carry ids by construction.
+  data = redactDataPayload(data);
   const paths = await ensureSpine(repoRoot);
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };

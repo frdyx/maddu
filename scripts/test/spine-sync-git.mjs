@@ -10,13 +10,31 @@
 //
 // Skips cleanly (exit 0) if git is unavailable.
 
-import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gitRun, gitAvailable } from '../../template/maddu/runtime/lib/git-exec.mjs';
 import { syncInit, syncGit } from '../../template/maddu/runtime/lib/spine-sync.mjs';
-import { append, ensureSpine, EVENT_TYPES } from '../../template/maddu/runtime/lib/spine.mjs';
+import { append, ensureSpine, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
 import { project } from '../../template/maddu/runtime/lib/projections.mjs';
+
+// Plant a secret-bearing event as a RAW chain-valid line in a replica's
+// partition, bypassing append() — which redacts every payload at the write
+// boundary (central sweep), so a raw on-spine secret is unreachable through
+// the API. The pre-push refuse gate under test defends exactly these
+// historic/foreign-tool spines.
+async function plantRawPartitionEvent(repo, replicaId, { type, actor = null, lane = null, data }) {
+  const dir = join(repo, '.maddu', 'events', 'by-replica', replicaId);
+  const segs = (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+  const seg = join(dir, segs[segs.length - 1]);
+  const lines = (await readFile(seg, 'utf8')).split('\n').filter((l) => l.trim());
+  const ts = new Date().toISOString();
+  const id = `evt_${ts.replace(/[-:T.Z]/g, '').slice(0, 14)}_${Math.random().toString(16).slice(2, 8)}`;
+  const ev = { v: 1, id, ts, type, actor, lane, data,
+    prev_hash: lines.length ? hashLine(lines[lines.length - 1]) : null };
+  await appendFile(seg, JSON.stringify(ev) + '\n');
+  return ev;
+}
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`); } };
@@ -92,7 +110,9 @@ async function main() {
   ok(pA.claims.length === 2, 'both partitions present (2 claims)');
 
   // Secret gate: an event carrying a secret-shaped value must block the push.
-  await append(repoA, { type: EVENT_TYPES.INBOX_MESSAGE, actor: 'sesA', lane: 'lane-a',
+  // Planted RAW (historic-spine simulation) — append() would redact it first.
+  await plantRawPartitionEvent(repoA, initA.replicaId, { type: EVENT_TYPES.INBOX_MESSAGE,
+    actor: 'sesA', lane: 'lane-a',
     data: { text: 'token ghp_0123456789abcdefghijklmnopqrstuvwxyz' } });
   const syncSecret = await syncGit(repoA);
   ok(!syncSecret.ok && syncSecret.reason === 'secret', `secret in the spine blocks sync (${syncSecret.reason})`);

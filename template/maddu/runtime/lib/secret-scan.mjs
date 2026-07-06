@@ -26,6 +26,7 @@ export const PATTERN_TYPES = [
   'gitlab-token',
   'slack-token',
   'high-entropy-adjacent-to-secret-key',
+  'value-under-sensitive-key',
 ];
 
 // Order matters: more-specific prefixes first so the tightest possible
@@ -152,6 +153,77 @@ function deepRedactLeaves(v) {
     return out;
   }
   return v; // number | boolean | null | undefined
+}
+
+// ── Central spine payload sweep ─────────────────────────────────────────────
+//
+// `spine.append` routes EVERY event's `data` through redactDataPayload before
+// the NDJSON line is built and hashed (the token wrapper's appendTokenUsage
+// does the same on its bypass path) — so all emit sites, present and future,
+// share one write-boundary redaction choke point. The chain hashes the STORED
+// (redacted) bytes; replay/verify see exactly what was written.
+//
+// Two-phase so the clean path is untouched: DETECT first with the precompiled
+// regexes (no allocation, no clone); only on a hit is a redacted copy built.
+// Zero hits → the caller's ORIGINAL reference is returned — append()'s return
+// value and stored bytes stay byte- and identity-identical for clean events
+// (including values with toJSON semantics, e.g. Date, which a clone would
+// flatten to {}).
+//
+// Key-aware rule: a value-only leaf sweep cannot see `{"password": "<v>"}` —
+// the sensitive key name never appears inside the string leaf, and a line-wise
+// regex cannot cross the JSON quotes. So a string value of ≥16 non-whitespace
+// chars sitting under a key matching SENSITIVE_KEY_NAMES is redacted whole
+// (keys are always preserved — see deepRedactLeaves rationale). Short values
+// (`password: "hunter2"`) deliberately don't match — tight + high-confidence,
+// same philosophy as PATTERNS. Framework fields like `checkpointKey` don't
+// match the key list (verified against the live spine: zero hits).
+const SENSITIVE_KEY_RE = new RegExp(SENSITIVE_KEY_NAMES, 'i');
+const SENSITIVE_VALUE_RE = /^\S{16,}$/;
+
+function keyAwareHit(key, val) {
+  return typeof val === 'string' && SENSITIVE_KEY_RE.test(key) && SENSITIVE_VALUE_RE.test(val);
+}
+
+function stringHasSecret(s) {
+  for (const { re } of PATTERNS) if (re.test(s)) return true;
+  return HIGH_ENTROPY_ADJACENT.test(s);
+}
+
+function detectPayloadSecret(v) {
+  if (typeof v === 'string') return stringHasSecret(v);
+  if (Array.isArray(v)) return v.some(detectPayloadSecret);
+  if (v && typeof v === 'object') {
+    for (const [k, val] of Object.entries(v)) {
+      if (keyAwareHit(k, val) || detectPayloadSecret(val)) return true;
+    }
+  }
+  return false;
+}
+
+// Hit path only. Same structure discipline as deepRedactLeaves (null-proto
+// clone, keys preserved, non-string scalars untouched) plus the key-aware
+// rule. A non-plain object (class instance) reached here is cloned by its own
+// enumerable props — acceptable on the hit path; the clean path never clones.
+function applyPayloadRedact(v) {
+  if (typeof v === 'string') return redactText(v).text;
+  if (Array.isArray(v)) return v.map(applyPayloadRedact);
+  if (v && typeof v === 'object') {
+    const out = Object.create(null);
+    for (const [k, val] of Object.entries(v)) {
+      out[k] = keyAwareHit(k, val) ? '[REDACTED:value-under-sensitive-key]' : applyPayloadRedact(val);
+    }
+    return out;
+  }
+  return v;
+}
+
+export function redactDataPayload(data) {
+  if (data == null || typeof data !== 'object') {
+    // append() always passes an object; stay total for direct callers.
+    return typeof data === 'string' && stringHasSecret(data) ? redactText(data).text : data;
+  }
+  return detectPayloadSecret(data) ? applyPayloadRedact(data) : data;
 }
 
 // Operator override helpers. `--allow-secret` is a Máddu-level token —
