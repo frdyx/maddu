@@ -140,6 +140,7 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "architecture drift", "did we break the layering", "diagram the architecture", "import boundaries", "module dependencies" | `/maddu-architecture` |
 | "show my trajectory", "experience ledger", "what did this session actually do", "normalized work record", "trajectories" | `maddu experience list` (then `maddu experience show <id>` / `maddu experience stats` — **read-only** spine→steps projection; step ids are event ids, nothing is written) |
 | "how should we improve", "what should we change", "evolve from experience", "improvement recommendations", "what patterns keep repeating" | `maddu evolve plan` (**recommend-only** — evidence-backed recommendations from the experience projection; NOTHING applies without the operator running `maddu evolve adopt <rec-id>`) |
+| "record the dataset/training run/eval", "register a checkpoint", "promote the model", "model rollback", "model registry", "SLM factory governance" | `maddu model` (records what your ML tools did — `dataset snapshot` / `train start`/`complete` / `checkpoint register` / `eval record` / `promote` (rides approvals) / `release` / `rollback` / `status`; stages are **derived from the spine**, and Máddu never trains, serves, or evaluates) |
 | "I need a tool for …", "connect to <service>", "use the <X> MCP", "the runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
 
 **When a task needs a capability the runtime lacks** (calling an external
@@ -215,7 +216,7 @@ Exceptions:
 
 ## What NOT to touch
 
-- `.maddu/events/` — append-only NDJSON; only via `maddu events append`.
+- `.maddu/events/` — append-only NDJSON; written only by `maddu` verbs — never hand-edit or append directly.
 - `.maddu/state/` — read-only projection of events; never hand-edit.
 - `.maddu/sessions/` — owned by `maddu session register/heartbeat/close`.
 - `.maddu/inbox/` — append-only; only via `maddu mailbox send` or `POST /bridge/inbox`.
