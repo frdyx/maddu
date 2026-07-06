@@ -187,8 +187,9 @@ The cockpit is the operator's view; talk to it via the bridge:
   cockpit's Chats route renders this.
 - `POST /bridge/approvals/request` — request permission before doing
   something the operator may want to gate.
-- `maddu events append --type <T> --payload-json '<json>'` — typed event
-  into the spine; projections rebuild automatically.
+- Every `maddu` verb records its own typed events — there is no raw
+  event-append CLI. The spine is written only by the verbs (`slice-stop`,
+  `mailbox send`, approvals, …); projections rebuild automatically.
 
 ## Useful commands
 
@@ -253,7 +254,7 @@ is a real verb you can call directly. Run `maddu help` for flags.
 
 ## What NOT to touch
 
-- `.maddu/events/` — append-only NDJSON; only via `maddu events append`.
+- `.maddu/events/` — append-only NDJSON; written only by `maddu` verbs — never hand-edit or append directly.
 - `.maddu/state/` — read-only projection of events; never hand-edit.
 - `.maddu/sessions/` — owned by `maddu session register/heartbeat/close`.
 - `.maddu/inbox/` — append-only; only via `maddu mailbox send` or
