@@ -33,6 +33,10 @@
 import { createHash } from 'node:crypto';
 import { wilsonLower } from './autonomy.mjs';
 import { deriveExperience } from './experience.mjs';
+// Phase 4: pair extraction is SHARED with `maddu learn --spine` (learn-spine
+// is the single source of truth), so a recommendation's evidence and a mined
+// learn candidate can never disagree about what the spine says.
+import { mineToolPairs, mineGateArcs } from './learn-spine.mjs';
 
 export const MIN_OCCURRENCES = 3;
 export const MIN_SCOPES = 2;
@@ -102,18 +106,14 @@ function makeRec({ detector, category, summary, evidence, supporting, contradict
 // UNREACHABLE on today's real spines — by design it stays dormant until the
 // tool wrappers attach a session/lane scope, rather than firing on evidence
 // whose independence cannot be established.
-function detectToolCorrections(steps) {
-  const pairs = [];
-  const openRefusals = new Map(); // tool → refusal step
-  for (const s of steps) {
-    if (s.kind !== 'tool' || !s.action?.tool) continue;
-    if (s.meta.type === 'TOOL_REFUSED') openRefusals.set(s.action.tool, s);
-    else if (s.meta.type === 'TOOL_COMPLETED' && openRefusals.has(s.action.tool)) {
-      const ref = openRefusals.get(s.action.tool);
-      pairs.push({ tool: s.action.tool, refusal: ref, completion: s, scope: scopeOf(ref) || scopeOf(s) });
-      openRefusals.delete(s.action.tool);
-    }
-  }
+function detectToolCorrections(events, stepById) {
+  // Extraction shared with `maddu learn --spine` (learn-spine.mjs) — phase 4.
+  const raw = mineToolPairs(events);
+  const pairs = raw.map((p) => {
+    const refStep = stepById.get(p.refusal.id);
+    const cmpStep = stepById.get(p.completion.id);
+    return { tool: p.tool, refusal: refStep, completion: cmpStep, scope: (refStep && scopeOf(refStep)) || (cmpStep && scopeOf(cmpStep)) || null };
+  }).filter((p) => p.refusal && p.completion);
   const byTool = new Map();
   for (const p of pairs) {
     const list = byTool.get(p.tool) || [];
@@ -139,37 +139,35 @@ function detectToolCorrections(steps) {
 }
 
 // D2: GATE_RAN fail → later ok for the same gateId (workflow candidate).
-function detectGateFlaps(steps) {
-  const byGate = new Map(); // gateId → { fails: [step], flaps: [{fail, ok}] }
-  for (const s of steps) {
-    if (s.meta.type !== 'GATE_RAN' || !s.observation?.summary) continue;
-    const gateId = s.observation.summary;
-    const g = byGate.get(gateId) || { openFails: [], flaps: [], fails: 0 };
-    if (s.outcome?.ok === false) { g.openFails.push(s); g.fails++; }
-    else if (s.outcome?.ok === true && g.openFails.length) {
-      g.flaps.push({ fail: g.openFails.shift(), ok: s });
-    }
-    byGate.set(gateId, g);
+function detectGateFlaps(events, stepById) {
+  // Extraction shared with `maddu learn --spine` (learn-spine.mjs) — phase 4.
+  const mined = mineGateArcs(events);
+  const byGate = new Map(); // gateId → [{fail: step, ok: step, scope}]
+  for (const a of mined.arcs) {
+    const failStep = stepById.get(a.fail.id);
+    const okStep = stepById.get(a.ok.id);
+    if (!failStep || !okStep) continue;
+    const list = byGate.get(a.gateId) || [];
+    list.push({ fail: failStep, ok: okStep, scope: scopeOf(failStep) || scopeOf(okStep) });
+    byGate.set(a.gateId, list);
   }
   const candidates = [];
-  let flapTotal = 0;
-  for (const [gateId, g] of byGate) {
-    flapTotal += g.flaps.length;
-    const occ = g.flaps.map((f) => ({ scope: scopeOf(f.fail) || scopeOf(f.ok) }));
-    if (!meetsThreshold(occ)) continue;
-    const evidence = g.flaps.flatMap((f) => [f.fail.stepId, f.ok.stepId]);
+  for (const [gateId, flaps] of byGate) {
+    if (!meetsThreshold(flaps.map((f) => ({ scope: f.scope })))) continue;
+    const evidence = flaps.flatMap((f) => [f.fail.stepId, f.ok.stepId]);
+    const unresolved = mined.perGate[gateId]?.unresolvedFails ?? 0;
     candidates.push(makeRec({
       detector: 'gate-flap',
       category: 'workflow',
-      summary: `gate \`${gateId}\` failed then passed ${g.flaps.length}× — the failure is being fixed reactively each time`,
+      summary: `gate \`${gateId}\` failed then passed ${flaps.length}× — the failure is being fixed reactively each time`,
       evidence,
-      supporting: g.flaps.length,
-      contradicting: g.openFails.length,
+      supporting: flaps.length,
+      contradicting: unresolved,
       draft: `Add the check behind \`${gateId}\` to the pre-slice-stop routine (or a pre-commit step) so it is satisfied BEFORE the gate runs instead of after it fails.`,
-      why: `${g.flaps.length} fail→ok arc(s) on \`${gateId}\`; recurring reactive fixes indicate a missing habitual step in the workflow.`,
+      why: `${flaps.length} fail→ok arc(s) on \`${gateId}\`; recurring reactive fixes indicate a missing habitual step in the workflow.`,
     }));
   }
-  return { candidates, scanned: { gatesSeen: byGate.size, failOkArcs: flapTotal } };
+  return { candidates, scanned: { gatesSeen: mined.gatesSeen, failOkArcs: mined.arcs.length } };
 }
 
 // D3: the same learning recurring across sessions (skill candidate).
@@ -244,8 +242,10 @@ export function planEvolution(events) {
   const exp = deriveExperience(evs);
   const prior = priorArt(evs.filter((e) => e && typeof e === 'object'));
 
-  const d1 = detectToolCorrections(exp.steps);
-  const d2 = detectGateFlaps(exp.steps);
+  const stepById = new Map(exp.steps.map((s) => [s.stepId, s]));
+  const cleanEvents = evs.filter((e) => e && typeof e === 'object' && e.id);
+  const d1 = detectToolCorrections(cleanEvents, stepById);
+  const d2 = detectGateFlaps(cleanEvents, stepById);
   const d3 = detectRecurringLearnings(exp.steps);
   const d4 = detectUncorrectedGates(exp.steps, prior);
 
