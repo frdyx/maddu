@@ -157,15 +157,22 @@ async function main() {
 
   // 7. Bodyless/torn lock (created by open('wx') but the owner record was never
   //    written — the creator died in between) must be RECLAIMED after the grace,
-  //    not hang forever (Codex-found).
+  //    not hang forever (Codex-found). The hang-timeout tracks the CONFIGURED
+  //    grace (MADDU_LOCK_BODYLESS_GRACE_MS is raise-only; CI raises it on slow
+  //    runners), so the assertion stays "reclaimed after the grace" at any
+  //    configured value instead of hard-coding the 2s default.
   {
+    const rawGrace = Number(process.env.MADDU_LOCK_BODYLESS_GRACE_MS);
+    const graceMs = Number.isFinite(rawGrace) && rawGrace > 2000 ? rawGrace : 2000;
     const dir = await mkdtemp(join(tmpdir(), 'maddu-applock-bodyless-'));
     const lockPath = join(dir, '.append.lock');
     await writeFile(lockPath, ''); // empty file = torn/bodyless lock, no owner record
     let acquired = false;
     const lock = await Promise.race([
       acquireAppendLock(lockPath).then((l) => { acquired = true; return l; }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('bodyless lock NOT reclaimed (hung)')), 5000)),
+      // 2× the grace + slack: each of the grace's 25ms polls also does an fs
+      // read, so real elapsed time runs well past the nominal grace.
+      new Promise((_, rej) => setTimeout(() => rej(new Error('bodyless lock NOT reclaimed (hung)')), graceMs * 2 + 5000)),
     ]).catch((e) => { console.error(`  ! ${e.message}`); return null; });
     ok(acquired && lock, 'bodyless/torn lock is reclaimed after the grace (no hang)');
     if (lock) await lock.release();
