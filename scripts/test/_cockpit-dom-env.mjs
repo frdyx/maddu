@@ -268,6 +268,33 @@ const CANNED = {
       ],
     },
   },
+  '/bridge/model': {
+    schemaVersion: 1,
+    stats: { datasets: 1, runs: 1, checkpoints: 2, evals: 1, proposals: 2, releases: 1, rollbacks: 1, unacknowledgedCriticalEvals: 1 },
+    checkpoints: [
+      { checkpointKey: `sha256:${'a'.repeat(64)}`, model_id: 'acme-triage-8b', uri: 's3://bucket/ckpt-a', run_id: 'run-fx-1', registeredAt: FIXED_TS, stage: 'candidate' },
+      { checkpointKey: `sha256:${'b'.repeat(64)}`, model_id: 'acme-triage-8b', uri: null, run_id: null, registeredAt: FIXED_TS, stage: 'experiment' },
+    ],
+    datasets: [
+      { dataset_id: 'tickets-v3', license: 'CC-BY-4.0', synthetic: true, hash: `sha256:${'a'.repeat(64)}`, manifestPath: 'models/ds.json', manifestHash: `sha256:${'c'.repeat(64)}`, at: FIXED_TS, eventId: 'evt_mds1' },
+    ],
+    runs: [
+      { run_id: 'run-fx-1', model_id: 'acme-triage-8b', method: 'SFT', dataset_snapshot: 'tickets-v3', startedAt: FIXED_TS, completedAt: FIXED_TS, checkpointKey: `sha256:${'a'.repeat(64)}` },
+    ],
+    evals: [
+      { eval_id: 'ev-fx-1', checkpointKey: `sha256:${'a'.repeat(64)}`, benchmark: 'swe-bench-verified', harness_version: '1.4.2', pass_rate: 0.31, at: FIXED_TS, criticalRegressions: 1, acknowledged: false },
+    ],
+    proposals: [
+      { proposalId: 'evt_mp1', checkpointKey: `sha256:${'a'.repeat(64)}`, from_stage: 'experiment', to_stage: 'candidate', approvalRequestId: 'evt_ar1', at: FIXED_TS, approved: true, approvalRef: 'evt_ar1' },
+      { proposalId: 'evt_mp2', checkpointKey: `sha256:${'a'.repeat(64)}`, from_stage: 'candidate', to_stage: 'canary', approvalRequestId: 'evt_ar2', at: FIXED_TS, approved: false, approvalRef: null },
+    ],
+    releases: [
+      { checkpointKey: `sha256:${'a'.repeat(64)}`, model_id: 'acme-triage-8b', rollback_plan: 'repoint the serving alias', at: FIXED_TS, eventId: 'evt_mr1' },
+    ],
+    rollbacks: [
+      { checkpointKey: `sha256:${'a'.repeat(64)}`, model_id: 'acme-triage-8b', reverted_to: 'candidate', at: FIXED_TS, eventId: 'evt_mb1' },
+    ],
+  },
 };
 
 function jsonResponse(body) {

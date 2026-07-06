@@ -981,6 +981,37 @@ $ maddu evolve adopt <recId> --to agent-file # correction-class → CLAUDE.md ma
 Nothing auto-applies — the earned-autonomy precedent governs (compute,
 recommend, stop). Full guide: [50-experience-evolve.md](50-experience-evolve.md).
 
+## SLM governance *(SLM)*
+
+### `maddu model`
+
+The SLM-factory governance verb — every write sub-verb validates + sha256-pins
+a host-repo manifest (refuse-on-hit secret gate, **no skip flag**) and appends
+contract-1.1.0 `MODEL_*` events; every verb RECORDS what external tools did
+(`train start` starts nothing, `eval record` runs nothing).
+
+```bash
+$ maddu model dataset snapshot <m.json>    # → MODEL_DATASET_SNAPSHOT_RECORDED
+$ maddu model train start <m.json>         # → MODEL_TRAINING_RUN_STARTED (dataset must be recorded)
+$ maddu model train complete <m.json>      # → MODEL_TRAINING_RUN_COMPLETED (checkpoint + metrics required)
+$ maddu model checkpoint register <m.json> # → MODEL_CHECKPOINT_REGISTERED (sha256 identity key)
+$ maddu model eval record <m.json>         # → MODEL_EVAL_RAN + MODEL_REGRESSION_FOUND per critical regression
+$ maddu model regression ack <eval-id> --reason "…"   # → MODEL_REGRESSION_ACKNOWLEDGED (secret-scanned)
+$ maddu model promote <m.json> [--wait]    # → APPROVAL_REQUESTED first, then MODEL_PROMOTION_PROPOSED
+$ maddu model promote --confirm <proposal-id>          # → MODEL_PROMOTION_APPROVED (exact binding)
+$ maddu model release <m.json>             # → MODEL_RELEASED (requires derived stage released + rollback plan)
+$ maddu model rollback <m.json> [--reverted-to <stage>]  # → MODEL_ROLLED_BACK (strictly downward)
+$ maddu model status [--model <id>] · maddu model list <datasets|runs|checkpoints|evals|promotions>
+$ maddu model gates install [--force-list] # 12-gate operator starter pack into .maddu/gates/
+```
+
+Checkpoint stages (`experiment → candidate → canary → released`) are always
+DERIVED from the spine — a manifest's `from_stage` is checked, never
+trusted. Promotion is an always-on approvals ride; ⚠ standing approval
+policies auto-decide **only** `experiment → candidate` — a policy on the
+canary/released tool keys is deliberately inert (the safety property, not a
+bug). Full guide: [51-slm-governance.md](51-slm-governance.md).
+
 ## Slash commands (v0.18, expanded v0.19.1)
 
 Inside Claude Code or Codex CLI, the operator can dispatch any of the

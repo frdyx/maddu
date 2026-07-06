@@ -170,6 +170,20 @@ All v0.19.2 routes refresh on the bridge event stream with 400 ms debounce — s
 
 The [experience ledger + evolve planner](50-experience-evolve.md), read-only. Two panels: **Experience ledger** — totals strip (events / steps / trajectories / signals / env steps), signal rollups by kind and attachment (trailing unattached gates called out, never dropped), the latest trajectories with **trajectory-level signals surfaced inline** as badges, and recent signal-bearing steps — every trajectory and step row opens in the Inspector with its signal sources linked as related events. **Evolve planner** — the recommend-only plan: recommendation cards with category / detector / confidence / evidence count and the `maddu evolve adopt <recId>` hint, or the honest no-op rendered as a first-class result with its full "why", plus the scanned counters. Reads `GET /bridge/experience` (one fetch feeds both panels); renders nothing it cannot shape-validate; adoption stays a CLI verb — the cockpit never writes.
 
+### `#model` *(SLM)*
+
+The [SLM-factory registry](51-slm-governance.md), read-only. Totals strip
+(datasets / runs / checkpoints / evals / releases) with unacknowledged
+critical regressions called out in red, checkpoints on the promotion ladder
+with their spine-DERIVED stage (foreign checkpoints honestly badged), pending
+promotion proposals (decide + confirm stay CLI verbs — the cockpit never
+advances a stage), and recent releases/rollbacks with their rollback plans.
+Every checkpoint row opens in the Inspector with its evals as evidence and
+the `regression ack` recovery verb named on unacknowledged criticals. Reads
+`GET /bridge/model`; renders nothing it cannot shape-validate; a repo with
+no model events gets a first-class "not governing an SLM factory" card, not
+an error.
+
 ## Common operator flows
 
 - **Triage a new approval.** Stuck banner or badge → click Approvals → decide → return to whatever route you were on.

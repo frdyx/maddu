@@ -3,7 +3,7 @@
 // cockpit.js so view modules can import route data without the render graph.
 // Pure data, no DOM. We assert the shape contract the cockpit + rail rely on.
 // (That every id's render binding still resolves is covered by cockpit-boot,
-// which renders all 44 routes.)
+// which renders all 45 routes.)
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
@@ -17,7 +17,7 @@ function ok(name, cond, extra = '') {
 
 const ids = Object.keys(ROUTE_META);
 ok('ROUTE_META is an object', ROUTE_META && typeof ROUTE_META === 'object');
-ok('has 44 routes', ids.length === 44, `${ids.length}`);
+ok('has 45 routes', ids.length === 45, `${ids.length}`);
 
 // Every entry carries the core metadata fields and NO render binding (the
 // whole point of the split — render lives in cockpit.js).

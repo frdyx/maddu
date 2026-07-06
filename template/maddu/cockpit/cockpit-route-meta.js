@@ -78,6 +78,8 @@ export const ROUTE_META = {
                 keywords: 'trust supply chain audit pin freshness cve provenance secrets worker env' },
   experience: { title: 'Experience', group: 'verify',   rank: 10,                description: 'Experience ledger + evolve planner — the spine as session trajectories of normalized steps with late-bound signals, and the recommend-only evolution plan (the honest no-op is a result). Read-time derivation, zero writes; adoption stays an operator CLI verb.',
                 keywords: 'experience ledger trajectory steps signals evolve plan adopt recommendation no-op atdp export learn spine verification' },
+  model:      { title: 'Model',      group: 'verify',   rank: 11,                description: 'SLM-factory registry — datasets, training runs, checkpoints on the promotion ladder (spine-derived stage), evals with unacknowledged critical regressions, pending proposals, releases/rollbacks. Read-time derivation, zero writes; promotion/release/rollback stay operator CLI verbs behind the approvals ride.',
+                keywords: 'model slm factory dataset training checkpoint eval regression promotion canary release rollback governance manifest' },
   teststatus: { title: 'Test Status', group: 'verify',   rank: 8,                 description: 'Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.',
                 keywords: 'test status stress harness upgrade matrix roundtrip ci recent',
                 // v1.0.3 — framework-source-only. The scripts under
