@@ -180,6 +180,15 @@ export function renderTeams(ctx) {
     const slices = proj.sliceStops || [];
     const sessions = proj.activeSessions || [];
     const sessById = Object.fromEntries(sessions.map((s) => [s.id, s]));
+    // Team-sync (#12c): read-time lane-claim contentions + replica partitions.
+    // Both are ABSENT on a default single-machine repo, so everything below
+    // that consumes them renders nothing there (goldens stay byte-identical).
+    // Shape-validated, not just truthy: the harness nullProxy (and any
+    // malformed payload) must read as "not sync mode", never render.
+    const contentions = Array.isArray(proj.contentions) ? proj.contentions : [];
+    const teamSync = proj.teamSync && typeof proj.teamSync.replicaId === 'string' ? proj.teamSync : null;
+    const contentionByLane = Object.fromEntries(contentions.map((c) => [c.lane, c]));
+    const sessLabel = (id) => { const s = sessById[id]; return s ? (s.label || id) : id; };
 
     // Stats per lane
     const sliceCountByLane = {};
@@ -192,9 +201,44 @@ export function renderTeams(ctx) {
     }
     const claimByLane = Object.fromEntries(claims.map((c) => [c.lane, c]));
 
+    // Team-sync panel (#12c phase 6) — appended ONLY when the bridge reports
+    // sync mode (proj.teamSync) or a contention exists. A default
+    // single-machine repo renders neither branch, so this whole block is
+    // inert there and the route's golden snapshot stays byte-identical.
+    // Defensive on partial records: a contention may lack holder/superseded
+    // (an older or foreign bridge) — render what's there, never throw.
+    const appendSyncPanel = () => {
+      if (!teamSync && !contentions.length) return;
+      const syncBody = el('div', { class: 'team-sync' });
+      if (teamSync) {
+        const parts = teamSync.partitions || [];
+        syncBody.appendChild(el('div', { class: 'team-sync-replicas' }, [
+          el('div', { class: 'panel-aside' }, `replicas on disk (${parts.length})`),
+          ...parts.map((rid) => el('div', { class: 'team-sync-replica' }, [
+            el('span', { class: 'mono' }, rid),
+            rid === teamSync.replicaId
+              ? el('span', { class: 'pill tone-ok' }, 'this checkout')
+              : el('span', { class: 'pill tone-fg-3' }, 'foreign')
+          ]))
+        ]));
+      }
+      if (contentions.length) {
+        syncBody.appendChild(el('div', { class: 'team-sync-contentions' }, [
+          el('div', { class: 'panel-aside' }, `contended lane${contentions.length === 1 ? '' : 's'} (${contentions.length})`),
+          ...contentions.map((c) => el('div', { class: 'team-sync-contention' }, [
+            el('span', { class: 'pill tone-warn' }, c.lane),
+            el('span', { class: 'mono' }, `holder: ${c.holder ? sessLabel(c.holder.sessionId) : '(unknown)'}`),
+            el('span', { class: 'panel-aside mono' }, `superseded: ${(c.superseded || []).map((s) => sessLabel(s.sessionId)).join(' · ')}`)
+          ]))
+        ]));
+      }
+      root.appendChild(panel('Team sync', 'git-synced replicas × read-time lane-claim contentions (earliest claim holds)', syncBody));
+    };
+
     mapBody.innerHTML = '';
     if (!catalog.length) {
       mapBody.appendChild(placeholder('No lanes', 'Add lanes via Settings or .maddu/lanes/catalog.json.'));
+      appendSyncPanel();
       return;
     }
     const list = el('div', { class: 'team-map' });
@@ -202,10 +246,12 @@ export function renderTeams(ctx) {
       const claim = claimByLane[lane.id];
       const lastSlice = lastSliceByLane[lane.id];
       const claimSess = claim ? sessById[claim.sessionId] : null;
+      const contention = contentionByLane[lane.id];
       const card = el('div', { class: 'team-lane-card' + (claim ? ' active' : ''), 'data-focus': lane.id }, [
         el('div', { class: 'team-lane-head' }, [
           el('span', { class: 'pill tone-accent' }, lane.id),
           claim ? el('span', { class: 'pill tone-ok' }, 'held') : el('span', { class: 'pill tone-fg-3' }, 'free'),
+          contention ? el('span', { class: 'pill tone-warn' }, 'contended') : null,
           el('span', { class: 'panel-aside' }, `${sliceCountByLane[lane.id] || 0} slice${(sliceCountByLane[lane.id] || 0) === 1 ? '' : 's'}`)
         ]),
         el('div', { class: 'team-lane-scope' }, lane.scope || '(no scope)'),
@@ -213,6 +259,10 @@ export function renderTeams(ctx) {
           el('span', { class: 'panel-aside' }, 'held by: '),
           el('span', { class: 'mono' }, claimSess ? (claimSess.label || claim.sessionId) : claim.sessionId),
           el('span', { class: 'panel-aside mono' }, `· ${claim.focus || '(no focus)'}`)
+        ]) : null,
+        contention ? el('div', { class: 'team-lane-contention' }, [
+          el('span', { class: 'panel-aside' }, 'superseded: '),
+          el('span', { class: 'mono' }, (contention.superseded || []).map((s) => sessLabel(s.sessionId)).join(' · '))
         ]) : null,
         lastSlice ? el('div', { class: 'team-lane-last panel-aside' }, [
           el('span', {}, 'last slice: '),
@@ -230,12 +280,13 @@ export function renderTeams(ctx) {
             kind: 'lane',
             label: lane.id,
             id: lane.id,
-            raw: { lane, claim, lastSlice },
+            raw: { lane, claim, lastSlice, contention },
             evidence: [
               { label: 'Scope', value: lane.scope },
               { label: 'Held by', value: claim ? claim.sessionId : '(free)' },
+              contention ? { label: 'Contended', value: `${(contention.superseded || []).length} superseded claim(s): ${(contention.superseded || []).map((s) => s.sessionId).join(', ')}` } : null,
               { label: 'Last slice', value: lastSlice ? lastSlice.summary : '(none)' }
-            ],
+            ].filter(Boolean),
             related: []
           });
         }
@@ -243,6 +294,8 @@ export function renderTeams(ctx) {
       list.appendChild(card);
     }
     mapBody.appendChild(list);
+    appendSyncPanel();
+
     const f = ctx.paletteFocus();
     if (f) ctx.focusPanelByKeyword(root, f);
   })();
