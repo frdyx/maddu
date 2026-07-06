@@ -36,7 +36,7 @@ operator and for contributors extending the bootstrap layer.
 
 Four new types reserved in `EVENT_TYPES` (Phase 0), emitted in Phases
 1–5. Full payload schemas in
-[`research/governance-event-taxonomy.md`](research/governance-event-taxonomy.md).
+the internal governance-event taxonomy study.
 
 | Type | Emitted by | Carries |
 |---|---|---|

@@ -2,7 +2,7 @@
 
 When an agent wants to do something the operator should sanction — spawn a subprocess, write outside its lane, hit an external API, run a destructive command — it routes through the **approvals ledger**.
 
-The ledger is an append-only sequence of approval requests and decisions, surfaced in the cockpit `#approvals` route and via the `maddu approval` CLI. It was inspired by Hermes' `permissions_list_open` / `permissions_respond` flow and AionUi's `BaseAgentManager` confirmation queue (see [`research/`](research/)).
+The ledger is an append-only sequence of approval requests and decisions, surfaced in the cockpit `#approvals` route and via the `maddu approval` CLI. It was inspired by Hermes' `permissions_list_open` / `permissions_respond` flow and AionUi's `BaseAgentManager` confirmation queue (from our study of prior agent-orchestration systems).
 
 ## The model
 

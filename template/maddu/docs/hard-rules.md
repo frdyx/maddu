@@ -30,7 +30,7 @@ cockpit), not your application.
 
 ---
 
-These rules are non-negotiable *for the framework* because each one prevents a specific failure mode observed in prior agent-orchestration systems we studied (AionUi, Hermes, and others — see [`research/`](research/)). A repo whose **Máddu layer** violates any of them is not a sound Máddu install.
+These rules are non-negotiable *for the framework* because each one prevents a specific failure mode observed in prior agent-orchestration systems we studied (AionUi, Hermes, and others). A repo whose **Máddu layer** violates any of them is not a sound Máddu install.
 
 ## 1. Files-only state
 

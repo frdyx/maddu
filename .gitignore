@@ -45,3 +45,15 @@ marketing/
 docs/research/*.pdf
 docs/research/competitive-analysis-diff-2026-07.md
 docs/research/competitive-response-proposal.md
+
+# Internal working docs — not published (operator decision 2026-07-06).
+# The three JSON files below the ignore are load-bearing: release-parity /
+# audit-ledger-coherent / governance-budget gates read them on fresh clones.
+docs/audit/*
+!docs/audit/FIXED-IN.json
+!docs/audit/LEDGER.json
+!docs/audit/governance-budget.json
+docs/research/
+docs/sessions/
+docs/releases/
+*.torrent
