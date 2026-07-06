@@ -12,18 +12,26 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, makeId } from './spine.mjs';
+import { redactText } from './secret-scan.mjs';
 
 function briefingsDir(repoRoot) {
   return join(pathsFor(repoRoot).statePrjDir, 'briefings');
 }
 
-// Curate `full` down to `budget` characters, persisting the byte-exact original
-// so it can be retrieved later. Returns { briefingId, curated, dropped }.
+// Curate `full` down to `budget` characters, persisting the original so it can
+// be retrieved later (byte-exact unless a secret was redacted at write — see
+// the sweep below). Returns { briefingId, curated, dropped }.
 export async function curate(repoRoot, { kind, full, budget = 1200, by = null }) {
   const id = makeId('brf');
   const dir = briefingsDir(repoRoot);
   await mkdir(dir, { recursive: true });
   const ts = new Date().toISOString();
+  // Write-boundary sweep: briefing sources are spine-derived (already swept at
+  // append), but this state file persists whatever the composer passed — sweep
+  // it so a secret can't ride in through a non-spine composition path.
+  // redactText is a no-op on clean text, so "byte-exact original" holds in
+  // every case except the one where byte-exactness must lose to redaction.
+  if (typeof full === 'string') full = redactText(full).text;
   await writeFile(join(dir, `${id}.json`), JSON.stringify({ id, kind, ts, full }, null, 2) + '\n');
   const originalRef = join('state', 'briefings', `${id}.json`);
 

@@ -83,7 +83,7 @@ persists the **full original** and shows a truncated view plus a pointer:
 
 ```bash
 maddu orient --curate            # reversible: truncated view + retrieve pointer
-maddu learn retrieve <briefingId>  # the byte-exact full original
+maddu learn retrieve <briefingId>  # the full original (byte-exact unless a secret was redacted at write)
 ```
 
 Each curation emits `BRIEFING_CURATED { briefingId, kind, originalRef, dropped }`.
