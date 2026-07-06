@@ -22,6 +22,7 @@ import { mkdir, readFile, readdir, stat, writeFile, appendFile, unlink } from 'n
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, genSkillId } from './spine.mjs';
+import { redactText } from './secret-scan.mjs';
 
 const SKILL_FIELDS = ['id', 'title', 'when', 'tags', 'provenance', 'created', 'updated'];
 
@@ -135,7 +136,11 @@ export async function saveSkill(repoRoot, skill) {
     created: existing?.created || now,
     updated: now
   };
-  const body = skill.body !== undefined ? skill.body : (existing?.body || '');
+  // Write-boundary sweep: the body is agent-authored free text persisted to a
+  // local file the central spine sweep never sees (the SKILL_* event carries
+  // only id+title) — so this write sweeps itself. No-op on clean text.
+  const rawBody = skill.body !== undefined ? skill.body : (existing?.body || '');
+  const body = typeof rawBody === 'string' ? redactText(rawBody).text : rawBody;
   const text = serializeSkill({ frontmatter: fm, body });
   await writeFile(skillsFile(repoRoot, id), text);
   const eventType = existing ? EVENT_TYPES.SKILL_UPDATED : EVENT_TYPES.SKILL_CREATED;

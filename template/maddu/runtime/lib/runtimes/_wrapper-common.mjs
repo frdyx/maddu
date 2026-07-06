@@ -25,7 +25,7 @@ import { appendFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { resolveWriteReplica, appendPartitioned } from '../spine-append-core.mjs';
-import { redactDataPayload } from '../secret-scan.mjs';
+import { redactDataPayload, redactText } from '../secret-scan.mjs';
 
 const ROLL_BYTES = 10 * 1024 * 1024;
 
@@ -124,7 +124,10 @@ export async function logWrapperError(repoRoot, workerId, msg) {
     const logDir = join(repoRoot, '.maddu', 'state', 'worker-logs');
     await mkdir(logDir, { recursive: true });
     const logPath = join(logDir, `${workerId || 'unknown'}.wrapper-errors.log`);
-    await appendFile(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+    // Today every call site passes err.message templates only — but a future
+    // site that interpolates a provider-stream line must not persist a raw
+    // secret. No-op on clean text.
+    await appendFile(logPath, `[${new Date().toISOString()}] ${redactText(String(msg)).text}\n`);
   } catch {
     // Last-ditch: drop on the floor. We don't have a better escape.
   }

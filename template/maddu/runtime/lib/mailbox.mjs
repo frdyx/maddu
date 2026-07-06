@@ -16,6 +16,7 @@ import { mkdir, readFile, appendFile, writeFile, stat, readdir } from 'node:fs/p
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, makeId } from './spine.mjs';
+import { redactDataPayload } from './secret-scan.mjs';
 
 const MSG_TYPES = ['request', 'info', 'handoff', 'question', 'ack', 'note'];
 
@@ -83,7 +84,11 @@ export async function send(repoRoot, lane, { from = null, type = 'note', subject
   if (!MSG_TYPES.includes(type)) throw new Error(`type must be one of ${MSG_TYPES.join('|')}`);
   await ensureLaneDir(repoRoot, lane);
   const ts = new Date().toISOString();
-  const msg = {
+  // The MAILBOX_SENT spine event omits the body on purpose, but the full body
+  // lands in this lane-local state file — so this write is its own boundary
+  // and sweeps itself (same discipline as spine.append; no-op on clean text,
+  // so the stored message is byte-identical unless a secret is present).
+  const msg = redactDataPayload({
     v: 1,
     id: genMsgId(ts),
     ts,
@@ -93,7 +98,7 @@ export async function send(repoRoot, lane, { from = null, type = 'note', subject
     subject: subject || '',
     summary: summary || '',
     body: body || ''
-  };
+  });
   await appendFile(mailboxFile(repoRoot, lane), JSON.stringify(msg) + '\n');
   // Global visibility event (body omitted on purpose).
   await append(repoRoot, {

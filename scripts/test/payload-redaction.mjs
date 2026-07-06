@@ -27,8 +27,11 @@ import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { append, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
-import { appendTokenUsage } from '../../template/maddu/runtime/lib/runtimes/_wrapper-common.mjs';
+import { appendTokenUsage, logWrapperError } from '../../template/maddu/runtime/lib/runtimes/_wrapper-common.mjs';
 import { redactDataPayload } from '../../template/maddu/runtime/lib/secret-scan.mjs';
+import { send as mailboxSend } from '../../template/maddu/runtime/lib/mailbox.mjs';
+import { curate } from '../../template/maddu/runtime/lib/briefings.mjs';
+import { saveSkill, readSkill } from '../../template/maddu/runtime/lib/skills.mjs';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`); } };
@@ -137,6 +140,36 @@ async function main() {
     ok(tokClean.data.model === 'claude-opus-4-8', 'wrapper: clean model string untouched');
     lines = await readSpineLines(repo);
     ok(!lines.some((l) => l.includes('sk-ant-api03')), 'wrapper: no raw secret stored');
+
+    // ── 8. Residual state stores sweep their own write boundaries ──
+    // Mailbox: the body is omitted from the spine event but stored in the
+    // lane-local file — that file must never hold a raw secret.
+    await mailboxSend(repo, 'lane-x', { from: 'ses_x', type: 'note', subject: 'creds', body: `use ${FAKE.anthropic} for now` });
+    const mbox = await readFile(join(repo, '.maddu', 'lanes', 'lane-x', 'mailbox.ndjson'), 'utf8');
+    ok(!mbox.includes('sk-ant-api03') && mbox.includes('[REDACTED:anthropic-api-key]'), 'mailbox file: body swept at write');
+    const mboxClean = await mailboxSend(repo, 'lane-x', { from: 'ses_x', type: 'note', subject: 's', body: 'plain body' });
+    ok(mboxClean.body === 'plain body', 'mailbox: clean body byte-identical');
+
+    // Briefings: the persisted "byte-exact original" is swept (no-op when clean).
+    const brf = await curate(repo, { kind: 'orient', full: `full briefing with ${FAKE.aws} inside`, budget: 2000 });
+    const brfRaw = await readFile(join(repo, '.maddu', 'state', 'briefings', `${brf.briefingId}.json`), 'utf8');
+    ok(!brfRaw.includes('AKIAIOSFODNN7EXAMPLE') && brfRaw.includes('[REDACTED:aws-access-key]'), 'briefing original: swept at write');
+    const brfClean = await curate(repo, { kind: 'orient', full: 'plain full briefing', budget: 2000 });
+    const brfCleanRaw = await readFile(join(repo, '.maddu', 'state', 'briefings', `${brfClean.briefingId}.json`), 'utf8');
+    ok(brfCleanRaw.includes('plain full briefing'), 'briefing original: clean text byte-identical');
+
+    // Wrapper error log: msg is redacted before persisting.
+    await logWrapperError(repo, 'wrk_test', `splitter threw on line: token ${FAKE.github}`);
+    const wlog = await readFile(join(repo, '.maddu', 'state', 'worker-logs', 'wrk_test.wrapper-errors.log'), 'utf8');
+    ok(!wlog.includes('ghp_A1b2') && wlog.includes('[REDACTED:github-token]'), 'wrapper-errors.log: msg swept at write');
+
+    // Skill bodies: agent-authored free text in .maddu/skills/ the central
+    // sweep never sees (SKILL_* events carry only id+title).
+    const skl = await saveSkill(repo, { title: 'deploy recipe', body: `run with ${FAKE.envLine} exported`, by: 'ses_x' });
+    const sklBack = await readSkill(repo, skl.id);
+    ok(!sklBack.raw.includes('sk-abcdefghijklmnop') && sklBack.body.includes('[REDACTED:'), 'skill body: swept at write');
+    const sklClean = await saveSkill(repo, { title: 'clean recipe', body: 'plain skill body', by: 'ses_x' });
+    ok((await readSkill(repo, sklClean.id)).body.trim() === 'plain skill body', 'skill body: clean text byte-identical');
   } finally {
     await rm(repo, { recursive: true, force: true });
   }

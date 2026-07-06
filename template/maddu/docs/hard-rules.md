@@ -80,6 +80,24 @@ OAuth tokens live in OS-appropriate device-bound paths:
 
 `maddu export` scrubs them from portable bundles. `maddu import` refuses to overwrite existing tokens. There is no "sync tokens across machines" feature, by design.
 
+Beyond tokens, secret-shaped **values** are stopped at every write boundary
+with one canonical redactor (`[REDACTED:<pattern-type>]`, no-op on clean
+text): tool argv, worker-spawn command/args, and — centrally — **every spine
+event's `data`** inside `spine.append` itself (plus the token wrapper's
+bypass path), so no emit site present or future can persist a raw
+pattern-matched secret. A key-aware rule also redacts a long single-token
+value under a sensitive key name (`password`, `apiKey`, `auth_token`, …) —
+note this deliberately over-redacts user-supplied keys like `passwordFile`;
+over-redaction is the safe direction. Lane mailboxes, persisted briefings,
+saved skill bodies, and the wrapper error log sweep their own writes; the
+import gateway refuses secret-bearing payloads outright. Two knowing
+exceptions: `.maddu/state/worker-logs/<id>.log` holds the raw provider
+stream on purpose (local-only, never served, exported, or synced), and
+redaction is write-time only — spine events AND local store entries written
+before their sweep existed stay as-written (for the spine, the export and
+team-sync gates still refuse to share them; the local stores have no such
+backstop but never leave the machine).
+
 **Why:** Tokens are device credentials, not portable identity.
 
 ## 7. Three-layer brand boundary

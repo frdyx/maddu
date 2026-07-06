@@ -191,12 +191,17 @@ re-claim a different lane or coordinate; Máddu records, it does not arbitrate.
 
 ## Secrets
 
-The write boundary is the primary defense: payloads are redacted before they
-ever reach the spine. Team sync adds a **mandatory second gate** — `sync init`
-and every `spine sync` scan the whole spine and refuse to share while any
-secret-shaped value is present. Remember that git history is permanent: a value
-that was committed and later redacted is still in the remote's history —
-rotation, not redaction, is the fix at that point.
+The write boundary is the primary defense: every event's `data` is redacted
+inside `spine.append` itself before the line is built, so a secret-shaped
+value never reaches the stored record. Team sync adds a **mandatory second
+gate** — `sync init` and every `spine sync` scan the whole spine and refuse
+to share while any secret-shaped value is present. The two compose but do
+not substitute: the write-boundary sweep is **append-time only**, so events
+written before it existed keep whatever they held — a dirty historic spine
+still refuses `sync init` until the offending values are dealt with, and
+that refusal is correct, not a bug. Remember that git history is permanent:
+a value that was committed and later redacted is still in the remote's
+history — rotation, not redaction, is the fix at that point.
 
 ## Identity and trust
 
