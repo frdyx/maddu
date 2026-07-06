@@ -25,6 +25,7 @@ import { appendFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { resolveWriteReplica, appendPartitioned } from '../spine-append-core.mjs';
+import { redactDataPayload } from '../secret-scan.mjs';
 
 const ROLL_BYTES = 10 * 1024 * 1024;
 
@@ -81,6 +82,14 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (typeof payload.cacheRead === 'number') ev.data.cacheRead = payload.cacheRead;
   if (typeof payload.cacheCreation === 'number') ev.data.cacheCreation = payload.cacheCreation;
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
+
+  // This append bypasses spine.append(), so it applies the same write-boundary
+  // sweep itself. The fields are numbers by construction EXCEPT `model`, which
+  // is parsed from the provider stream — a malformed frame must not carry a
+  // secret-shaped string onto the spine. Clean data (the normal case, always)
+  // passes through by reference. secret-scan.mjs is stdlib-only pure regex, so
+  // the wrapper's standalone contract holds.
+  ev.data = redactDataPayload(ev.data);
 
   // #12c sync mode: land in the replica's partition on a valid chain (shared,
   // stdlib-only core). Token accounting is best-effort and MUST NOT block the

@@ -25,15 +25,33 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mkdtemp, mkdir, readFile, rm, access, symlink, writeFile as writeFileFs } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, access, symlink, writeFile as writeFileFs, appendFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { append, readAll } from '../../template/maddu/runtime/lib/spine.mjs';
+import { append, readAll, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BIN = join(HERE, '..', '..', 'bin', 'maddu.mjs');
+
+// Simulate a HISTORIC spine: plant a secret-bearing event as a raw stored
+// line, bypassing append() — which redacts every payload at the write
+// boundary (central sweep), so a raw on-spine secret is unreachable through
+// the API. The export refuse-on-hit gate under test defends exactly these
+// pre-sweep spines. Chain-valid so surrounding events replay normally.
+async function plantRawEvent(repo, { type, actor = null, lane = null, data }) {
+  const dir = join(repo, '.maddu', 'events');
+  const segs = (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+  const seg = join(dir, segs[segs.length - 1]);
+  const lines = (await readFile(seg, 'utf8')).split('\n').filter((l) => l.trim());
+  const ts = new Date().toISOString();
+  const id = `evt_${ts.replace(/[-:T.Z]/g, '').slice(0, 14)}_${Math.random().toString(16).slice(2, 8)}`;
+  const ev = { v: 1, id, ts, type, actor, lane, data,
+    prev_hash: lines.length ? hashLine(lines[lines.length - 1]) : null };
+  await appendFile(seg, JSON.stringify(ev) + '\n');
+  return ev;
+}
 
 let passed = 0, failed = 0;
 function ok(name, cond, extra = '') {
@@ -55,8 +73,7 @@ function runFail(repo, args) {
   const repo = await mkdtemp(join(tmpdir(), 'maddu-atdp-secret-'));
   await mkdir(join(repo, '.maddu', 'events'), { recursive: true });
   await append(repo, { type: 'SESSION_AUTO_REGISTERED', actor: 'ses_1', data: { sessionId: 'ses_1', label: 'A', role: 'implementer', source: 'cli' } });
-  await append(repo, { type: 'SLICE_STOP', actor: 'ses_1', data: { summary: 'leaked key AKIAIOSFODNN7EXAMPLE oops', learnings: [], targets: [], gates: [], deliverables: [] } });
-  const dirty = (await readAll(repo)).at(-1);
+  const dirty = await plantRawEvent(repo, { type: 'SLICE_STOP', actor: 'ses_1', data: { summary: 'leaked key AKIAIOSFODNN7EXAMPLE oops', learnings: [], targets: [], gates: [], deliverables: [] } });
   await append(repo, { type: 'SLICE_STOP', actor: 'ses_1', data: { summary: 'clean work after the leak', learnings: [], targets: [], gates: [], deliverables: [] } });
 
   const r = runFail(repo, ['experience', 'export', '--format', 'atdp', '--out', 'x.atdp.json']);
@@ -93,7 +110,7 @@ function runFail(repo, args) {
   const repo = await mkdtemp(join(tmpdir(), 'maddu-atdp-deep-'));
   await mkdir(join(repo, '.maddu', 'events'), { recursive: true });
   await append(repo, { type: 'SESSION_AUTO_REGISTERED', actor: 'ses_1', data: { sessionId: 'ses_1', label: 'A', role: 'implementer', source: 'cli' } });
-  await append(repo, { type: 'SLICE_STOP', actor: 'ses_1', data: { summary: '\tAKIAIOSFODNN7EXAMPLE after a tab', learnings: [], targets: [], gates: [], deliverables: [] } });
+  await plantRawEvent(repo, { type: 'SLICE_STOP', actor: 'ses_1', data: { summary: '\tAKIAIOSFODNN7EXAMPLE after a tab', learnings: [], targets: [], gates: [], deliverables: [] } });
   runIn(repo, ['experience', 'export', '--format', 'atdp', '--out', 'd.atdp.json']);
   const raw = await readFile(join(repo, 'd.atdp.json'), 'utf8');
   ok('scan-invisible leaf never reaches the artifact (deepRedact)', !raw.includes('AKIAIOSFODNN7EXAMPLE') && raw.includes('[REDACTED:aws-access-key]'));
