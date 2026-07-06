@@ -150,24 +150,7 @@ maddu learn scan               # hedged "should work now" claims vs OBSERVED pro
 maddu orient                   # goal progress verified by real commands, not vibes
 ```
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17","clusterBkg":"#050B17","clusterBorder":"#3A5470","titleColor":"#E8E6E3"}}}%%
-flowchart LR
-    subgraph CLAIM["What the agent says"]
-        A["✅ done — tests pass,<br/>secret rotated"]
-    end
-    subgraph RECORD["What the spine shows"]
-        B["GATE_RAN: fail<br/>deliverables: 0<br/>rotation event: none"]
-    end
-    CLAIM -.->|"take it on faith"| X["😬"]
-    RECORD -->|"maddu ci / learn scan / orient"| V["verified ✓ or caught ✗"]
-    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
-    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
-    classDef bad fill:#081426,stroke:#FF5E7A,color:#FF5E7A
-    class B spine
-    class V good
-    class X bad
-```
+<picture><img alt="Verify the agent instead of trusting it — the agent's claim taken on faith vs the spine's evidence checked by maddu ci, learn scan, and orient" src="docs/images/use-case-verify.svg" width="920"></picture>
 
 Every completion claim is joined against *observed* evidence — real gate passes, verified deliverables, actual diffs. A model checking a model is a second opinion; **this is evidence.**
 
@@ -182,21 +165,7 @@ npx github:frdyx/maddu init && maddu hooks install    # once
 maddu orient                                          # morning: the timeline, not a 100k-line transcript
 ```
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
-flowchart LR
-    Y["you:<br/>&quot;ship the login form&quot;"] --> P["pipeline<br/>orient → plan → slice →<br/>test → review → land"]
-    P -->|"every stage = events"| S[("append-only<br/>spine")]
-    S --> G["gates check<br/>each slice"]
-    S --> M["morning review:<br/>maddu orient"]
-    G --> M
-    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
-    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
-    classDef warn fill:#081426,stroke:#F2BD5C,color:#F2BD5C
-    class S spine
-    class G warn
-    class M good
-```
+<picture><img alt="The independent app builder — one request runs the pipeline, every stage lands events on the spine, gates check each slice, the morning review reads the record" src="docs/images/use-case-builder.svg" width="920"></picture>
 
 Overnight autonomous runs become reviewable: pre-compaction checkpoints mark what survived context loss, the focus instrument tags each turn toward/lateral/away from your declared goal, and the morning is a ten-minute skim of slice-stops with gate badges — not an archaeology dig.
 
@@ -210,24 +179,7 @@ maddu spine sync               # commit own segments → pull → validate → a
 maddu status                   # contentions surface BY NAME — never silent double-writes
 ```
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17","clusterBkg":"#050B17","clusterBorder":"#3A5470","titleColor":"#E8E6E3"}}}%%
-flowchart LR
-    subgraph A["checkout A"]
-        SA["by-replica/A/*.ndjson<br/>(single writer)"]
-    end
-    subgraph B["checkout B"]
-        SB["by-replica/B/*.ndjson<br/>(single writer)"]
-    end
-    SA <-->|"plain git<br/>push / pull"| R[("git remote<br/>your ACL")]
-    SB <--> R
-    R --> M["deterministic k-way<br/>merged read — same<br/>history on every machine"]
-    M --> C["concurrent lane claims →<br/>named contentions"]
-    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
-    classDef warn fill:#081426,stroke:#F2BD5C,color:#F2BD5C
-    class R,M spine
-    class C warn
-```
+<picture><img alt="A team sharing one repo — each checkout writes only its own partition, the record syncs through the existing git remote, the deterministic merged read surfaces contentions by name" src="docs/images/use-case-team.svg" width="920"></picture>
 
 Each checkout appends only to its own partition, so git never line-merges the record. Identity rides your remote's own access control. Concurrent claims on the same lane don't corrupt anything — the merged read surfaces them as **contentions** with the superseded sessions named.
 
@@ -241,21 +193,7 @@ maddu lane claim payments --worktree    # isolated checkout, bound to the claim
 maddu lane release payments --worktree merged   # explicit disposition — verified, not asserted
 ```
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
-flowchart TB
-    O["your orchestrator<br/>(Agent Teams · Conductor · scripts)"] --> W1["agent 1<br/>worktree: payments"]
-    O --> W2["agent 2<br/>worktree: auth"]
-    O --> W3["agent 3<br/>worktree: docs"]
-    W1 --> S[("one primary spine<br/>who · what · when · verified")]
-    W2 --> S
-    W3 --> S
-    S --> D["release needs a disposition:<br/>merged? verified. abandoned? recorded.<br/>nothing silently orphaned"]
-    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
-    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
-    class S spine
-    class D good
-```
+<picture><img alt="A swarm of parallel agents — any orchestrator spawns agents into isolated worktree lanes, all append to one primary spine, release requires an explicit verified disposition" src="docs/images/use-case-swarm.svg" width="920"></picture>
 
 One agent per lane is a hard rule, `--worktree` gives each its own checkout on its own branch, and `merged` disposition actually checks `git merge-base` — Máddu never runs your merge, it verifies you did. The dashboards vanish when the run ends; **the record survives it.**
 
@@ -267,22 +205,7 @@ One agent per lane is a hard rule, `--worktree` gives each its own checkout on i
 - run: npx github:frdyx/maddu ci     # gates ran? deliverables real? secrets clean? claims backed?
 ```
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
-flowchart LR
-    PR["agent's PR"] --> CI["maddu ci"]
-    CI --> G1["✓ required gates green"]
-    CI --> G2["✓ secret scan clean"]
-    CI --> G3["✓ completion claims<br/>match observed proof"]
-    G1 & G2 & G3 --> OK["merge"]
-    CI -->|"any required gate red"| NO["blocked — with the<br/>event id that says why"]
-    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
-    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
-    classDef bad fill:#081426,stroke:#FF5E7A,color:#FF5E7A
-    class CI spine
-    class OK good
-    class NO bad
-```
+<picture><img alt="CI for agents — the agent's PR runs maddu ci; required gates, secret scan, and completion-claim checks decide merge or blocked, with the event id that says why" src="docs/images/use-case-ci.svg" width="920"></picture>
 
 You pin which gates are required (`maddu ci pin`), so framework upgrades can never turn your pipeline red without your opt-in. Same exit code drives GitHub Actions, GitLab, or a fully-offline git pre-push hook.
 
@@ -297,24 +220,7 @@ maddu experience export --format atdp --out exp.atdp.json   # the governed bound
 maddu export --otel                   # or: OpenTelemetry logs into the stack you already run
 ```
 
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
-flowchart LR
-    S[("spine")] --> E["experience ledger<br/>trajectories · steps · signals"]
-    E --> GATE{"🔒 secret gate<br/>refuse-on-hit<br/><b>no skip flag exists</b>"}
-    GATE -->|"clean"| ART["deterministic artifact<br/>trainingEligibility: <b>false</b>"]
-    GATE -->|"hit"| REF["refused — offending<br/>event ids named"]
-    ART -->|"operator judgment,<br/>never a default"| T["your curation /<br/>fine-tuning pipeline"]
-    S --> OTEL["OTel logs →<br/>existing observability"]
-    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
-    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
-    classDef warn fill:#081426,stroke:#F2BD5C,color:#F2BD5C
-    classDef bad fill:#081426,stroke:#FF5E7A,color:#FF5E7A
-    class S,OTEL spine
-    class GATE warn
-    class ART good
-    class REF bad
-```
+<picture><img alt="Governed experience data — the spine derives an experience ledger, a mandatory refuse-on-hit secret gate guards the export, the artifact ships trainingEligibility false until the operator judges otherwise, OTel logs feed existing observability" src="docs/images/use-case-export.svg" width="920"></picture>
 
 The export is deterministic (byte-identical re-runs — that *is* the audit trail), refuses outright on any secret-shaped value with **no flag to override**, and ships `trainingEligibility: false` until *you* — not a regex — judge the data. It's the honest on-ramp into trajectory-curation pipelines, not a dataset grab. And if regulation is on your radar: record-keeping regimes like the EU AI Act (Art. 12) push toward automatic, reconstructable logs of AI-assisted decisions — an append-only record you own and retain locally is a building block for that traceability, not a compliance product.
 

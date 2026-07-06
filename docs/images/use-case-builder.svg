@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 330" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="The independent app builder workflow">
+  <title>The independent app builder</title>
+  <desc>One request runs the pipeline; every stage lands events on the spine; gates check each slice; the morning review reads the record.</desc>
+  <defs>
+    <style>
+      .canvas    { fill: #FFFFFF; }
+      .node      { fill: #F8FAFD; stroke: #8298B0; stroke-width: 1.2; }
+      .node.blue { fill: #EAF5FF; stroke: #2489DB; }
+      .node.lime { fill: #F4FFC8; stroke: #A9CC00; }
+      .node.warn { fill: #FFF6E5; stroke: #D99A2B; }
+      .edge      { fill: none; stroke: #7D93AC; stroke-width: 1.5; }
+      .edge.live { stroke: #8FB800; stroke-width: 2; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7D93AC"/>
+    </marker>
+    <marker id="arr-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8FB800"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" width="1480" height="330"/>
+
+  <g transform="translate(40,34)">
+    <text x="0" y="0" class="cond-b" fill="#6C8A00" font-size="11" letter-spacing="0.14em">◈ USE CASE 02 · BUILD</text>
+    <text x="0" y="22" class="cond-b" fill="#06121F" font-size="20">Say it, sleep on it, skim it in the morning</text>
+    <text x="0" y="42" class="mono" fill="#5C6B7E" font-size="11">the discipline loop runs underneath — you never think about it</text>
+  </g>
+
+  <rect class="node" x="40" y="150" width="230" height="64" rx="6"/>
+  <text x="56" y="176" class="cond-b" fill="#06121F" font-size="14">you</text>
+  <text x="56" y="197" class="mono" fill="#5C6B7E" font-size="11">“ship the login form”</text>
+
+  <path d="M 270 182 L 330 182" class="edge" marker-end="url(#arr)"/>
+
+  <rect class="node" x="336" y="150" width="330" height="64" rx="6"/>
+  <text x="352" y="176" class="cond-b" fill="#06121F" font-size="14">pipeline</text>
+  <text x="352" y="197" class="mono" fill="#5C6B7E" font-size="11">orient → plan → slice → test → review → land</text>
+
+  <path d="M 666 182 L 750 182" class="edge live" marker-end="url(#arr-lime)"/>
+  <text x="672" y="170" class="mono" fill="#5C6B7E" font-size="11">every stage = events</text>
+
+  <rect class="node blue" x="756" y="150" width="240" height="64" rx="6"/>
+  <text x="772" y="176" class="cond-b" fill="#1B6FBE" font-size="14">append-only spine</text>
+  <text x="772" y="197" class="mono" fill="#5C6B7E" font-size="11">.maddu/events/*.ndjson</text>
+
+  <path d="M 996 168 C 1060 168, 1060 130, 1120 130" class="edge" marker-end="url(#arr)"/>
+  <path d="M 996 196 C 1060 196, 1060 240, 1120 240" class="edge" marker-end="url(#arr)"/>
+
+  <rect class="node warn" x="1126" y="100" width="300" height="60" rx="6"/>
+  <text x="1142" y="126" class="cond-b" fill="#A06E12" font-size="14">gates check each slice</text>
+  <text x="1142" y="146" class="mono" fill="#5C6B7E" font-size="11">GATE_RAN · pass / fail on the record</text>
+
+  <rect class="node lime" x="1126" y="210" width="300" height="60" rx="6"/>
+  <text x="1142" y="236" class="cond-b" fill="#5F7A00" font-size="14">morning review: maddu orient</text>
+  <text x="1142" y="256" class="mono" fill="#5C6B7E" font-size="11">the timeline, not a 100k-line transcript</text>
+
+  <path d="M 1276 160 L 1276 210" class="edge" marker-end="url(#arr)"/>
+</svg>

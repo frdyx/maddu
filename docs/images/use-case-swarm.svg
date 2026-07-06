@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 340" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="A swarm of parallel agents in isolated worktrees over one spine">
+  <title>A swarm of parallel agents</title>
+  <desc>Any orchestrator spawns agents into isolated worktree lanes; all append to one primary spine; release requires an explicit, verified disposition.</desc>
+  <defs>
+    <style>
+      .canvas    { fill: #FFFFFF; }
+      .node      { fill: #F8FAFD; stroke: #8298B0; stroke-width: 1.2; }
+      .node.blue { fill: #EAF5FF; stroke: #2489DB; }
+      .node.lime { fill: #F4FFC8; stroke: #A9CC00; }
+      .edge      { fill: none; stroke: #7D93AC; stroke-width: 1.5; }
+      .edge.blue { stroke: #2489DB; stroke-width: 2; }
+      .edge.live { stroke: #8FB800; stroke-width: 2; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7D93AC"/>
+    </marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2489DB"/>
+    </marker>
+    <marker id="arr-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8FB800"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" width="1480" height="340"/>
+
+  <g transform="translate(40,34)">
+    <text x="0" y="0" class="cond-b" fill="#6C8A00" font-size="11" letter-spacing="0.14em">◈ USE CASE 04 · SWARM</text>
+    <text x="0" y="22" class="cond-b" fill="#06121F" font-size="20">The record underneath whichever spawner you use</text>
+    <text x="0" y="42" class="mono" fill="#5C6B7E" font-size="11">dashboards vanish when the run ends — the record survives it</text>
+  </g>
+
+  <rect class="node" x="40" y="150" width="270" height="64" rx="6"/>
+  <text x="56" y="176" class="cond-b" fill="#06121F" font-size="14">your orchestrator</text>
+  <text x="56" y="197" class="mono" fill="#5C6B7E" font-size="11">Agent Teams · Conductor · scripts</text>
+
+  <path d="M 310 168 C 380 168, 380 128, 440 128" class="edge" marker-end="url(#arr)"/>
+  <path d="M 310 182 L 440 182" class="edge" marker-end="url(#arr)"/>
+  <path d="M 310 196 C 380 196, 380 236, 440 236" class="edge" marker-end="url(#arr)"/>
+
+  <rect class="node" x="446" y="104" width="280" height="48" rx="6"/>
+  <text x="462" y="124" class="cond-b" fill="#06121F" font-size="13">agent 1</text>
+  <text x="462" y="142" class="mono" fill="#5C6B7E" font-size="11">worktree lane: payments</text>
+
+  <rect class="node" x="446" y="158" width="280" height="48" rx="6"/>
+  <text x="462" y="178" class="cond-b" fill="#06121F" font-size="13">agent 2</text>
+  <text x="462" y="196" class="mono" fill="#5C6B7E" font-size="11">worktree lane: auth</text>
+
+  <rect class="node" x="446" y="212" width="280" height="48" rx="6"/>
+  <text x="462" y="232" class="cond-b" fill="#06121F" font-size="13">agent 3</text>
+  <text x="462" y="250" class="mono" fill="#5C6B7E" font-size="11">worktree lane: docs</text>
+
+  <path d="M 726 128 C 800 128, 800 168, 870 175" class="edge blue" marker-end="url(#arr-blue)"/>
+  <path d="M 726 182 L 870 182" class="edge blue" marker-end="url(#arr-blue)"/>
+  <path d="M 726 236 C 800 236, 800 196, 870 190" class="edge blue" marker-end="url(#arr-blue)"/>
+
+  <rect class="node blue" x="876" y="150" width="270" height="64" rx="6"/>
+  <text x="892" y="176" class="cond-b" fill="#1B6FBE" font-size="14">one primary spine</text>
+  <text x="892" y="197" class="mono" fill="#5C6B7E" font-size="11">who · what · when · verified</text>
+
+  <path d="M 1146 182 L 1220 182" class="edge live" marker-end="url(#arr-lime)"/>
+
+  <rect class="node lime" x="1226" y="130" width="215" height="104" rx="6"/>
+  <text x="1242" y="156" class="cond-b" fill="#5F7A00" font-size="14">release = disposition</text>
+  <text x="1242" y="178" class="mono" fill="#5C6B7E" font-size="11">merged? verified.</text>
+  <text x="1242" y="196" class="mono" fill="#5C6B7E" font-size="11">abandoned? recorded.</text>
+  <text x="1242" y="214" class="mono" fill="#5C6B7E" font-size="11">nothing silently orphaned</text>
+
+  <text x="446" y="296" class="mono" fill="#5C6B7E" font-size="11">one agent per lane is a hard rule · --worktree gives each its own checkout on its own branch</text>
+  <text x="446" y="316" class="mono" fill="#5C6B7E" font-size="11">merged disposition actually checks git merge-base — Máddu never runs your merge, it verifies you did</text>
+</svg>

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 400" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Verify the agent instead of trusting it">
+  <title>Verify the agent instead of trusting it</title>
+  <desc>The agent's claim taken on faith versus the spine's evidence checked by maddu ci, learn scan, and orient.</desc>
+  <defs>
+    <style>
+      .canvas    { fill: #FFFFFF; }
+      .panel     { fill: #F3F7FB; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .node      { fill: #F8FAFD; stroke: #8298B0; stroke-width: 1.2; }
+      .node.blue { fill: #EAF5FF; stroke: #2489DB; }
+      .node.lime { fill: #F4FFC8; stroke: #A9CC00; }
+      .node.bad  { fill: #FFEDF1; stroke: #E0355A; }
+      .edge      { fill: none; stroke: #7D93AC; stroke-width: 1.5; }
+      .edge.live { stroke: #8FB800; stroke-width: 2; }
+      .edge.dash { stroke-dasharray: 5 6; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7D93AC"/>
+    </marker>
+    <marker id="arr-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8FB800"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" width="1480" height="400"/>
+
+  <g transform="translate(40,34)">
+    <text x="0" y="0" class="cond-b" fill="#6C8A00" font-size="11" letter-spacing="0.14em">◈ USE CASE 01 · VERIFY</text>
+    <text x="0" y="22" class="cond-b" fill="#06121F" font-size="20">The record is the witness — not the actor</text>
+    <text x="0" y="42" class="mono" fill="#5C6B7E" font-size="11">an agent's chat summary is the actor grading its own work</text>
+  </g>
+
+  <!-- top lane: the claim, taken on faith -->
+  <rect class="panel" x="40" y="112" width="620" height="110" rx="8"/>
+  <text x="60" y="136" class="cond-b" fill="#5C6B7E" font-size="10" letter-spacing="0.14em">◈ WHAT THE AGENT SAYS</text>
+  <rect class="node" x="60" y="150" width="330" height="52" rx="6"/>
+  <text x="76" y="172" class="cond-b" fill="#06121F" font-size="14">“✅ done — tests pass, secret rotated”</text>
+  <text x="76" y="191" class="mono" fill="#5C6B7E" font-size="11">conversational confidence</text>
+
+  <path d="M 660 177 C 800 177, 900 177, 1030 177" class="edge dash" marker-end="url(#arr)"/>
+  <text x="770" y="165" class="mono" fill="#5C6B7E" font-size="11">taken on faith</text>
+  <rect class="node bad" x="1040" y="150" width="220" height="52" rx="6"/>
+  <text x="1056" y="172" class="cond-b" fill="#C22B4E" font-size="14">unverifiable 😬</text>
+  <text x="1056" y="191" class="mono" fill="#5C6B7E" font-size="11">you find out later</text>
+
+  <!-- bottom lane: the spine, checked -->
+  <rect class="panel" x="40" y="248" width="620" height="110" rx="8"/>
+  <text x="60" y="272" class="cond-b" fill="#5C6B7E" font-size="10" letter-spacing="0.14em">◈ WHAT THE SPINE SHOWS</text>
+  <rect class="node blue" x="60" y="286" width="330" height="52" rx="6"/>
+  <text x="76" y="307" class="mono" fill="#06121F" font-size="12">GATE_RAN: fail · deliverables: 0</text>
+  <text x="76" y="325" class="mono" fill="#06121F" font-size="12">rotation event: none</text>
+
+  <path d="M 660 313 C 800 313, 900 313, 1030 313" class="edge live" marker-end="url(#arr-lime)"/>
+  <text x="720" y="301" class="mono" fill="#5C6B7E" font-size="11">maddu ci · learn scan · orient</text>
+  <rect class="node lime" x="1040" y="286" width="220" height="52" rx="6"/>
+  <text x="1056" y="307" class="cond-b" fill="#5F7A00" font-size="14">verified ✓ or caught ✗</text>
+  <text x="1056" y="326" class="mono" fill="#5C6B7E" font-size="11">evidence, not vibes</text>
+</svg>

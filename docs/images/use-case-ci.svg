@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 340" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="CI for agents — maddu ci as a merge gate that reads the record">
+  <title>CI for agents</title>
+  <desc>An agent's PR runs maddu ci; required gates, secret scan, and completion-claim checks decide merge or blocked — deterministically, with the event id that says why.</desc>
+  <defs>
+    <style>
+      .canvas    { fill: #FFFFFF; }
+      .node      { fill: #F8FAFD; stroke: #8298B0; stroke-width: 1.2; }
+      .node.blue { fill: #EAF5FF; stroke: #2489DB; }
+      .node.lime { fill: #F4FFC8; stroke: #A9CC00; }
+      .node.bad  { fill: #FFEDF1; stroke: #E0355A; }
+      .edge      { fill: none; stroke: #7D93AC; stroke-width: 1.5; }
+      .edge.live { stroke: #8FB800; stroke-width: 2; }
+      .edge.bad  { stroke: #E0355A; stroke-width: 1.5; stroke-dasharray: 5 6; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7D93AC"/>
+    </marker>
+    <marker id="arr-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8FB800"/>
+    </marker>
+    <marker id="arr-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#E0355A"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" width="1480" height="340"/>
+
+  <g transform="translate(40,34)">
+    <text x="0" y="0" class="cond-b" fill="#6C8A00" font-size="11" letter-spacing="0.14em">◈ USE CASE 05 · CI</text>
+    <text x="0" y="22" class="cond-b" fill="#06121F" font-size="20">Agent work held to the same bar as human PRs</text>
+    <text x="0" y="42" class="mono" fill="#5C6B7E" font-size="11">deterministic · no LLM · no network · you pin which gates are required</text>
+  </g>
+
+  <rect class="node" x="40" y="160" width="200" height="60" rx="6"/>
+  <text x="56" y="186" class="cond-b" fill="#06121F" font-size="14">agent's PR</text>
+  <text x="56" y="206" class="mono" fill="#5C6B7E" font-size="11">branch + record</text>
+
+  <path d="M 240 190 L 320 190" class="edge" marker-end="url(#arr)"/>
+
+  <rect class="node blue" x="326" y="160" width="200" height="60" rx="6"/>
+  <text x="342" y="186" class="cond-b" fill="#1B6FBE" font-size="14">maddu ci</text>
+  <text x="342" y="206" class="mono" fill="#5C6B7E" font-size="11">replays the spine</text>
+
+  <path d="M 526 176 C 590 176, 590 122, 650 122" class="edge" marker-end="url(#arr)"/>
+  <path d="M 526 190 L 650 190" class="edge" marker-end="url(#arr)"/>
+  <path d="M 526 204 C 590 204, 590 258, 650 258" class="edge" marker-end="url(#arr)"/>
+
+  <rect class="node" x="656" y="98" width="330" height="48" rx="6"/>
+  <text x="672" y="127" class="mono" fill="#06121F" font-size="12">✓ required gates green</text>
+
+  <rect class="node" x="656" y="166" width="330" height="48" rx="6"/>
+  <text x="672" y="195" class="mono" fill="#06121F" font-size="12">✓ secret scan clean</text>
+
+  <rect class="node" x="656" y="234" width="330" height="48" rx="6"/>
+  <text x="672" y="257" class="mono" fill="#06121F" font-size="12">✓ completion claims match</text>
+  <text x="672" y="273" class="mono" fill="#5C6B7E" font-size="11">  observed proof</text>
+
+  <path d="M 986 122 C 1050 122, 1050 176, 1110 183" class="edge live" marker-end="url(#arr-lime)"/>
+  <path d="M 986 190 L 1110 190" class="edge live" marker-end="url(#arr-lime)"/>
+  <path d="M 986 258 C 1050 258, 1050 204, 1110 197" class="edge live" marker-end="url(#arr-lime)"/>
+
+  <rect class="node lime" x="1116" y="160" width="150" height="60" rx="6"/>
+  <text x="1132" y="186" class="cond-b" fill="#5F7A00" font-size="15">merge ✓</text>
+  <text x="1132" y="206" class="mono" fill="#5C6B7E" font-size="11">record is green</text>
+
+  <path d="M 426 220 C 426 290, 800 296, 1110 296" class="edge bad" marker-end="url(#arr-bad)"/>
+  <text x="560" y="312" class="mono" fill="#C22B4E" font-size="11">any required gate red</text>
+
+  <rect class="node bad" x="1116" y="266" width="320" height="56" rx="6"/>
+  <text x="1132" y="289" class="cond-b" fill="#C22B4E" font-size="14">blocked</text>
+  <text x="1132" y="309" class="mono" fill="#5C6B7E" font-size="11">with the event id that says why</text>
+</svg>
