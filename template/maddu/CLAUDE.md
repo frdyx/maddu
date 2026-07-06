@@ -230,7 +230,7 @@ You usually reach these through slash commands or natural language (see
 [`agent-files/MADDU.md`](agent-files/MADDU.md) §"Intent routing"), but every one
 is a real verb you can call directly. Run `maddu help` for flags.
 
-- **Orient & state:** `maddu orient` · `maddu brief` · `maddu status` · `maddu register` · `maddu insights`
+- **Orient & state:** `maddu orient` · `maddu brief` · `maddu status` · `maddu register` · `maddu insights` · `maddu experience`
 - **Plan & coordinate:** `maddu plan` · `maddu goal` · `maddu phase` · `maddu loop` · `maddu coordinator` · `maddu team` · `maddu pipeline` · `maddu handoff`
 - **Do the work:** `maddu slice` · `maddu slice-stop` · `maddu review` · `maddu advise` · `maddu suggest` · `maddu search` · `maddu task`
 - **Memory & learning:** `maddu memory` · `maddu learn` · `maddu skill` · `maddu blueprint` · `maddu debt`

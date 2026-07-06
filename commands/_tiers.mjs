@@ -49,6 +49,11 @@ export default {
   ci:           { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   doctor:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   events:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  // EXP phase 1 — the experience ledger: pure spine→trajectory projection.
+  // Read-only today; phase 5's `experience export --out` writes an artifact
+  // FILE (never spine/state), the same posture as `export` above — so the
+  // classification mirrors export exactly (read-only + auto-trigger forbidden).
+  experience:   { tier: 'read-only', autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers
   // framework bytes into other repos, so the verb is mutating + auto-trigger
   // forbidden (same convention as trust/mcp/plugin: any write path → mutating).
