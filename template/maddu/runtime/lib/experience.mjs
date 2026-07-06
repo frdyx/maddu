@@ -1,4 +1,5 @@
-// experience.mjs — EXP phase 1: read-only spine → normalized experience steps.
+// experience.mjs — EXP phases 1+2: read-only spine → normalized experience
+// steps + late-bound signals.
 //
 // A PURE derivation (design: docs/research/exp-experience-protocol-design.md):
 //   deriveExperience(events) → { schemaVersion, trajectories, steps, stats }
@@ -18,7 +19,28 @@
 //     defaults dressed up as data. Dormant/unknown types degrade to a generic
 //     observation step and are counted in stats.unmappedTypes, never dropped
 //     silently and never a crash.
-//   • signals[] is EMPTY in phase 1 — late-bound signal derivation is phase 2.
+//   • SIGNALS are READ-TIME derived (phase 2, design §5) — later evidence
+//     attaches to earlier steps with deterministic linkage ONLY:
+//       explicit-ref — the evidence names the step's event id
+//                      (SLICE_REVIEWED.sliceEventId, TRIGGER_FIRED
+//                      .sliceEventId/.sourceEventId, FOCUS_TAGGED.sourceEventId);
+//       gate-window  — GATE_RAN binds FORWARD to the NEXT SLICE_STOP, the
+//                      autonomy.mjs rule mirrored exactly (sliceId-stamped →
+//                      exact match; actor-stamped → same session; unstamped →
+//                      whole window; the window resets at every SLICE_STOP);
+//       derived      — the learn-scan heuristic (reflect.mjs, clock injected
+//                      as null so the result is time-independent) re-run over
+//                      the same events, flagging hedged-completion-without-
+//                      proof SLICE_STOPs.
+//     Signals NEVER alter the step they attach to beyond appending to
+//     signals[] — outcome axes stay what the original event said. Aggregate
+//     evidence with no per-step linkage (AUTONOMY_SCORED lane rows,
+//     DRIFT_FLAGGED) attaches at TRAJECTORY scope via envelope linkage, else
+//     env — never guessed onto individual steps. Zero spine writes; slice 2.2
+//     (an explicit signal event type) remains UNBUILT — read-time derivation
+//     covers every attachment the design's signal table names.
+
+import { scanCompletionClaims } from './reflect.mjs';
 
 export const EXPERIENCE_SCHEMA_VERSION = 1;
 
@@ -247,7 +269,7 @@ export function deriveExperience(events) {
       outcome: outcomeAxis(ev),
       observation: observationAxis(ev),
       state: stateAxis(ev),
-      signals: [], // phase 2
+      signals: [], // populated by the phase-2 signal pass below
       meta: {
         type: ev.type ?? null,
         actor: ev.actor ?? null,
@@ -267,41 +289,165 @@ export function deriveExperience(events) {
     stepsByTrajectory.set(trajectoryId, agg);
   }
 
+  // ── Phase-2 signal pass (design §5) — deterministic linkage only ──────────
+  const stepById = new Map(steps.map((s) => [s.stepId, s]));
+  const signalsByKind = {};
+  const signalsByAttachment = {};
+  let stepSignalCount = 0;
+  const attach = (step, sig) => {
+    step.signals.push(sig);
+    stepSignalCount++;
+    signalsByKind[sig.kind] = (signalsByKind[sig.kind] || 0) + 1;
+    signalsByAttachment[sig.attachedBy] = (signalsByAttachment[sig.attachedBy] || 0) + 1;
+  };
+
+  // 1) Explicit references + 2) the gate window, in ONE ordered walk so the
+  // window semantics mirror autonomy.mjs classifyOutcomes exactly.
+  let windowGates = []; // { step, data, actor } for each GATE_RAN since the previous SLICE_STOP
+  for (const ev of evs) {
+    if (!ev || typeof ev !== 'object' || !ev.id) continue;
+    const d = ev.data || {};
+    if (ev.type === 'GATE_RAN') {
+      windowGates.push({ id: ev.id, data: d, actor: ev.actor || null }); // || not ??: byte-faithful to autonomy.mjs
+      continue;
+    }
+    if (ev.type === 'SLICE_STOP') {
+      const stopStep = stepById.get(ev.id);
+      const sid = ev.actor || null;
+      // The autonomy binding rule, verbatim: sliceId-stamped gates bind
+      // exactly; actor-stamped gates must match this slice's session; legacy
+      // unstamped gates attach by window. The window then RESETS — trailing
+      // gates with no following SLICE_STOP stay unattached (counted below).
+      const bound = windowGates.filter((g) => {
+        if (g.data.sliceId != null) return g.data.sliceId === ev.id;
+        if (g.actor != null && sid != null) return g.actor === sid;
+        return true;
+      });
+      if (stopStep) {
+        for (const g of bound) {
+          attach(stopStep, {
+            signalId: g.id,
+            kind: 'gate',
+            verdict: g.data.ok === true ? 'ok' : (g.data.status ?? 'fail'),
+            attachedBy: 'gate-window',
+            sourceEventId: g.id,
+          });
+        }
+      }
+      windowGates = [];
+      continue;
+    }
+    if (ev.type === 'SLICE_REVIEWED' && typeof d.sliceEventId === 'string') {
+      const target = stepById.get(d.sliceEventId);
+      if (target) attach(target, { signalId: ev.id, kind: 'review', verdict: d.verdict ?? null, attachedBy: 'explicit-ref', sourceEventId: ev.id });
+      continue;
+    }
+    if (ev.type === 'TRIGGER_FIRED') {
+      const ref = typeof d.sliceEventId === 'string' ? d.sliceEventId : typeof d.sourceEventId === 'string' ? d.sourceEventId : null;
+      const target = ref ? stepById.get(ref) : null;
+      if (target) attach(target, { signalId: ev.id, kind: 'trigger', verdict: d.triggerId ?? null, attachedBy: 'explicit-ref', sourceEventId: ev.id });
+      continue;
+    }
+    if (ev.type === 'FOCUS_TAGGED' && typeof d.sourceEventId === 'string') {
+      const target = stepById.get(d.sourceEventId);
+      if (target) attach(target, { signalId: ev.id, kind: 'drift', verdict: d.tag ?? null, attachedBy: 'explicit-ref', sourceEventId: ev.id });
+      continue;
+    }
+  }
+  const unattachedTrailingGates = windowGates.length;
+
+  // 3) Derived: the learn-scan heuristic re-run over the SAME events, clock
+  // injected as null (time-independent → deterministic). Flags attach to the
+  // SLICE_STOP steps the scan itself names.
+  const scan = scanCompletionClaims(evs.filter((e) => e && typeof e === 'object'), { nowMs: null });
+  for (const m of scan.matches || []) {
+    const target = m.sliceId ? stepById.get(m.sliceId) : null;
+    if (target) {
+      attach(target, {
+        signalId: `derived:learn-scan:${m.sliceId}`,
+        kind: 'learn-scan',
+        verdict: 'hedged-without-proof',
+        attachedBy: 'derived',
+        sourceEventId: null,
+      });
+    }
+  }
+
+  // 4) Trajectory-level signals — aggregate evidence with no per-step linkage.
+  // Envelope linkage decides the owning trajectory; no linkage → env.
+  const trajectorySignalsById = new Map(); // trajectoryId → [signal…]
+  const attachTrajectory = (trajectoryId, sig) => {
+    const list = trajectorySignalsById.get(trajectoryId) || [];
+    list.push(sig);
+    trajectorySignalsById.set(trajectoryId, list);
+    signalsByKind[sig.kind] = (signalsByKind[sig.kind] || 0) + 1;
+    signalsByAttachment[sig.attachedBy] = (signalsByAttachment[sig.attachedBy] || 0) + 1;
+  };
+  for (const ev of evs) {
+    if (!ev || typeof ev !== 'object' || !ev.id) continue;
+    const d = ev.data || {};
+    if (ev.type === 'AUTONOMY_SCORED') {
+      attachTrajectory(trajectoryOf(ev, sessionIds), {
+        signalId: ev.id,
+        kind: 'autonomy',
+        verdict: Array.isArray(d.lanes) ? `${d.lanes.length} lane row(s)` : null,
+        attachedBy: 'trajectory-scope',
+        sourceEventId: ev.id,
+      });
+    } else if (ev.type === 'DRIFT_FLAGGED') {
+      attachTrajectory(trajectoryOf(ev, sessionIds), {
+        signalId: ev.id,
+        kind: 'drift',
+        verdict: d.cleared === true ? 'cleared' : (d.choice ?? 'flagged'),
+        attachedBy: 'trajectory-scope',
+        sourceEventId: ev.id,
+      });
+    }
+  }
+
+  // Per-trajectory step-signal counts (spine order preserved throughout).
+  const stepSignalsByTrajectory = new Map();
+  for (const s of steps) {
+    if (s.signals.length) {
+      stepSignalsByTrajectory.set(s.trajectoryId, (stepSignalsByTrajectory.get(s.trajectoryId) || 0) + s.signals.length);
+    }
+  }
+
   // Trajectory manifest: every session (even step-less ones) + env when used.
   const trajectories = [];
+  const manifestFor = (trajectoryId, base) => {
+    const agg = stepsByTrajectory.get(trajectoryId) || { total: 0, byRole: {}, lanes: new Set(), firstTs: null, lastTs: null };
+    const trajectorySignals = trajectorySignalsById.get(trajectoryId) || [];
+    return {
+      ...base,
+      steps: agg.total,
+      stepsByRole: agg.byRole,
+      lanes: [...agg.lanes].sort(),
+      firstTs: agg.firstTs,
+      lastTs: agg.lastTs,
+      signals: (stepSignalsByTrajectory.get(trajectoryId) || 0) + trajectorySignals.length,
+      trajectorySignals,
+    };
+  };
   for (const s of sessions.values()) {
-    const agg = stepsByTrajectory.get(s.trajectoryId) || { total: 0, byRole: {}, lanes: new Set(), firstTs: null, lastTs: null };
-    trajectories.push({
+    trajectories.push(manifestFor(s.trajectoryId, {
       trajectoryId: s.trajectoryId,
       label: s.label,
       role: s.role,
       openedAt: s.openedAt,
       closedAt: s.closedAt,
       status: s.status,
-      steps: agg.total,
-      stepsByRole: agg.byRole,
-      lanes: [...agg.lanes].sort(),
-      firstTs: agg.firstTs,
-      lastTs: agg.lastTs,
-      signals: 0, // phase 2
-    });
+    }));
   }
-  if (stepsByTrajectory.has(ENV_TRAJECTORY)) {
-    const agg = stepsByTrajectory.get(ENV_TRAJECTORY);
-    trajectories.push({
+  if (stepsByTrajectory.has(ENV_TRAJECTORY) || trajectorySignalsById.has(ENV_TRAJECTORY)) {
+    trajectories.push(manifestFor(ENV_TRAJECTORY, {
       trajectoryId: ENV_TRAJECTORY,
       label: '(environment — repo-level events with no session linkage)',
       role: null,
       openedAt: null,
       closedAt: null,
       status: 'ambient',
-      steps: agg.total,
-      stepsByRole: agg.byRole,
-      lanes: [...agg.lanes].sort(),
-      firstTs: agg.firstTs,
-      lastTs: agg.lastTs,
-      signals: 0,
-    });
+    }));
   }
 
   return {
@@ -317,6 +463,12 @@ export function deriveExperience(events) {
       byRole,
       byKind,
       unmappedTypes,
+      signalCount: stepSignalCount + [...trajectorySignalsById.values()].reduce((n, l) => n + l.length, 0),
+      signalsByKind,
+      signalsByAttachment,
+      // Gates that accumulated after the last SLICE_STOP have no forward
+      // target yet — reported, never silently dropped (design §5).
+      unattachedTrailingGates,
       // Axes the paper's schema wants that have NO source in Máddu by design
       // (never inferred): model/reasoning output, prompt text, token-level
       // observations, environment snapshots, scalar rewards.

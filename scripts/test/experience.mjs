@@ -53,6 +53,23 @@ const EVENTS = [
 
   // refusal → outcome refused
   ev('evt_a2_ref',  'TOOL_REFUSED',            'ses_a', null, { tool: 'install', argv: ['left-pad'], reason: 'allowlist', detail: 'nope' }),
+
+  // ── phase-2 signal sources ────────────────────────────────────────────────
+  // Review names evt_a_stop explicitly (explicit-ref).
+  ev('evt_sig_rev',  'SLICE_REVIEWED', null, null, { sliceEventId: 'evt_a_stop', verdict: 'CLEAN', findingsCount: 0, reviewerRuntime: 'codex', reviewPath: 'x.md' }),
+  // Trigger names evt_a_stop via sliceEventId (explicit-ref).
+  ev('evt_sig_trig', 'TRIGGER_FIRED',  null, null, { triggerId: 'post-stop-review', reason: 'slice', sliceEventId: 'evt_a_stop' }),
+  // Focus tag names the tool step (explicit-ref).
+  ev('evt_sig_foc',  'FOCUS_TAGGED',   null, null, { tag: 'toward', distanceScore: 0.2, signals: {}, sourceEventId: 'evt_a_tool2' }),
+  // A hedged, proof-less second slice-stop for session A → learn-scan derived
+  // signal. NOTE: it also closes the open gate window (empty — no gates since
+  // evt_a_stop... except the ones below land AFTER it, staying trailing).
+  ev('evt_a_stop2',  'SLICE_STOP',     'ses_a', 'lane-1', { summary: 'this should work now, done I think', learnings: [], targets: [], gates: [], deliverables: [] }),
+  // Aggregate evidence with no per-step linkage → trajectory-level signals.
+  ev('evt_sig_auto', 'AUTONOMY_SCORED', null, null, { schemaVersion: 1, asOf: 'x', attribution: 'x', configHash: 'x', totalSlices: 2, lanes: [{ lane: 'lane-1' }] }),
+  ev('evt_sig_drift','DRIFT_FLAGGED',  'ses_a', null, { cleared: false, choice: null, reason: '2 away turns', runs: 2, menu: ['swap'], deterministic: true, enriched: false }),
+  // A trailing gate AFTER the last SLICE_STOP — must stay unattached + counted.
+  ev('evt_gate_tail','GATE_RAN',       null, null, { gateId: 'tail-gate', ok: false, severity: 'warn', durationMs: 1, status: 'fail' }),
 ];
 
 const out = deriveExperience(EVENTS);
@@ -84,8 +101,40 @@ ok('GATE_RAN: outcome verdict + gateId as observed subject', byId.evt_a_gate.out
 ok('SLICE_STOP: observation axis verbatim', byId.evt_a_stop.observation.summary === 'built the thing' && byId.evt_a_stop.observation.learnings.length === 1 && byId.evt_a_stop.observation.deliverables[0] === 'a.mjs');
 ok('WORKER_SPAWNED: worker action shape', byId.evt_b_wrk.action.mode === 'worker' && byId.evt_b_wrk.action.tool === 'claude');
 ok('LANE_CLAIMED: state.focus carried', byId.evt_a_lane.state.focus === 'build the thing');
-ok('signals empty everywhere (phase 1)', out.steps.every((s) => Array.isArray(s.signals) && s.signals.length === 0));
 ok('meta keeps raw type + actor', byId.evt_a_gate.meta.type === 'GATE_RAN' && byId.evt_a_tool1.meta.actor === 'ses_a');
+
+// ── phase-2 signals ─────────────────────────────────────────────────────────
+const stopSignals = byId.evt_a_stop.signals;
+ok('gate-window: GATE_RAN binds FORWARD to the next SLICE_STOP',
+  stopSignals.some((s) => s.kind === 'gate' && s.attachedBy === 'gate-window' && s.sourceEventId === 'evt_a_gate' && s.verdict === 'ok'));
+ok('explicit-ref: SLICE_REVIEWED attaches to the named slice',
+  stopSignals.some((s) => s.kind === 'review' && s.attachedBy === 'explicit-ref' && s.verdict === 'CLEAN' && s.sourceEventId === 'evt_sig_rev'));
+ok('explicit-ref: TRIGGER_FIRED attaches via sliceEventId',
+  stopSignals.some((s) => s.kind === 'trigger' && s.sourceEventId === 'evt_sig_trig'));
+ok('explicit-ref: FOCUS_TAGGED attaches to its sourceEventId step',
+  byId.evt_a_tool2.signals.some((s) => s.kind === 'drift' && s.verdict === 'toward' && s.sourceEventId === 'evt_sig_foc'));
+ok('derived: learn-scan flags the hedged proof-less stop (and ONLY it)',
+  byId.evt_a_stop2.signals.some((s) => s.kind === 'learn-scan' && s.attachedBy === 'derived' && s.verdict === 'hedged-without-proof' && s.signalId === 'derived:learn-scan:evt_a_stop2')
+  && !stopSignals.some((s) => s.kind === 'learn-scan'));
+ok('signals never alter the step (outcome axis untouched)', byId.evt_a_stop.outcome === null && byId.evt_a_stop.observation.summary === 'built the thing');
+ok('signal-source steps carry no self-signals', byId.evt_sig_rev.signals.length === 0 && byId.evt_sig_foc.signals.length === 0);
+ok('trailing gate stays unattached + counted', byId.evt_gate_tail.signals.length === 0 && out.stats.unattachedTrailingGates === 1);
+
+// Trajectory-level signals: DRIFT_FLAGGED has actor ses_a → session A;
+// AUTONOMY_SCORED has no linkage → env.
+const trajA2 = out.trajectories.find((t) => t.trajectoryId === 'ses_a');
+const trajEnv = out.trajectories.find((t) => t.trajectoryId === ENV_TRAJECTORY);
+ok('DRIFT_FLAGGED attaches at trajectory scope via envelope linkage',
+  trajA2.trajectorySignals.some((s) => s.kind === 'drift' && s.attachedBy === 'trajectory-scope' && s.sourceEventId === 'evt_sig_drift'));
+ok('AUTONOMY_SCORED with no linkage lands on env trajectory',
+  trajEnv.trajectorySignals.some((s) => s.kind === 'autonomy' && s.sourceEventId === 'evt_sig_auto'));
+ok('trajectory.signals counts step + trajectory signals (exact)', trajA2.signals === 6, String(trajA2.signals));
+ok('stats.signalCount coherent',
+  out.stats.signalCount === out.steps.reduce((n, s) => n + s.signals.length, 0)
+    + out.trajectories.reduce((n, t) => n + t.trajectorySignals.length, 0));
+ok('stats.signalsByAttachment has all three mechanisms',
+  out.stats.signalsByAttachment['explicit-ref'] === 3 && out.stats.signalsByAttachment['gate-window'] === 1
+  && out.stats.signalsByAttachment.derived === 1 && out.stats.signalsByAttachment['trajectory-scope'] === 2);
 
 // ── unknown types degrade ───────────────────────────────────────────────────
 ok('unknown type → observation/other', byId.evt_env_new.role === 'observation' && byId.evt_env_new.kind === 'other');

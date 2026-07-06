@@ -55,6 +55,11 @@ export default async function experience(argv) {
     console.log(`  by kind:  ${Object.entries(s.byKind).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
     const um = Object.entries(s.unmappedTypes);
     console.log(`  unmapped types (default rule applied): ${um.length ? um.map(([t, n]) => `${t}(${n})`).join(' · ') : ANSI.dim + '(none)' + ANSI.reset}`);
+    const sk = Object.entries(s.signalsByKind || {});
+    console.log(`  signals: ${s.signalCount || 0}${sk.length ? ` (${sk.map(([k, n]) => `${k} ${n}`).join(' · ')})` : ''}${s.unattachedTrailingGates ? ` · ${s.unattachedTrailingGates} trailing gate(s) unattached` : ''}`);
+    if (s.signalsByAttachment && Object.keys(s.signalsByAttachment).length) {
+      console.log(`  ${ANSI.dim}attachment: ${Object.entries(s.signalsByAttachment).map(([k, n]) => `${k} ${n}`).join(' · ')}${ANSI.reset}`);
+    }
     console.log(`  ${ANSI.dim}absent by design (never inferred): ${s.absentByDesign.join(', ')}${ANSI.reset}`);
     return;
   }
@@ -99,7 +104,10 @@ export default async function experience(argv) {
           : st.outcome.ok === false ? `${ANSI.fail}${st.outcome.status || 'fail'}${ANSI.reset}`
           : `${ANSI.dim}?${ANSI.reset}`)
         : '';
-      console.log(`  ${ANSI.dim}${fmtTs(st.ts)}${ANSI.reset}  ${tone}${st.role.padEnd(11)}${ANSI.reset} ${st.kind.padEnd(10)} ${String(what).slice(0, 80)}${verdict ? '  ' + verdict : ''}${st.lane ? `  ${ANSI.dim}[${st.lane}]${ANSI.reset}` : ''}`);
+      const sigs = st.signals.length
+        ? `  ${ANSI.warn}⚑${st.signals.length}${ANSI.reset}${ANSI.dim}(${st.signals.map((g) => `${g.kind}${g.verdict ? ':' + g.verdict : ''}`).join(',')})${ANSI.reset}`
+        : '';
+      console.log(`  ${ANSI.dim}${fmtTs(st.ts)}${ANSI.reset}  ${tone}${st.role.padEnd(11)}${ANSI.reset} ${st.kind.padEnd(10)} ${String(what).slice(0, 80)}${verdict ? '  ' + verdict : ''}${sigs}${st.lane ? `  ${ANSI.dim}[${st.lane}]${ANSI.reset}` : ''}`);
     }
     return;
   }
