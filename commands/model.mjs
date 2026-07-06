@@ -36,7 +36,7 @@ import { resolveLibDir } from './_libroot.mjs';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 
-const KNOWN_FLAGS = ['json', 'wait', 'confirm', 'reason', 'reverted-to', 'model', 'session'];
+const KNOWN_FLAGS = ['json', 'wait', 'confirm', 'reason', 'reverted-to', 'model', 'session', 'force-list'];
 const WAIT_POLL_MS = 500;
 const WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -111,6 +111,56 @@ export default async function model(argv) {
     });
     return done({ event: ev.id, proposalId: pid, to_stage: p.to_stage },
       `promotion approved: ${p.checkpointKey} -> ${p.to_stage} (${ev.id})`);
+  }
+
+  // ── gates install (phase 4): the operator starter pack ──
+  if (group === 'gates' && subOrArg === 'install') {
+    const { readdir, readFile, writeFile, mkdir } = await import('node:fs/promises');
+    const { createHash } = await import('node:crypto');
+    const srcDir = join(dir, '..', 'gates', 'model-pack');
+    let files;
+    try { files = (await readdir(srcDir)).filter((f) => f.endsWith('.mjs')).sort(); }
+    catch { refuse(`starter pack source not found at ${srcDir} — is the framework runtime installed?`); }
+    const destDir = join(repoRoot, '.maddu', 'gates');
+    const manifestPath = join(destDir, '.model-pack-manifest.json');
+    let installedHashes = {};
+    try { installedHashes = JSON.parse(await readFile(manifestPath, 'utf8')); } catch {}
+    const sha = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')}`;
+
+    const plan = [];
+    for (const f of files) {
+      const srcBuf = await readFile(join(srcDir, f));
+      const srcHash = sha(srcBuf);
+      let destBuf = null;
+      try { destBuf = await readFile(join(destDir, f)); } catch {}
+      if (destBuf === null) { plan.push({ file: f, action: 'install', srcBuf, srcHash }); continue; }
+      const destHash = sha(destBuf);
+      if (destHash === srcHash) { plan.push({ file: f, action: 'current', srcHash }); continue; }
+      // Differs from the shipped source: only refresh when the on-disk copy
+      // still matches what WE installed (recorded in the pack manifest) —
+      // an operator-edited gate is never overwritten.
+      if (installedHashes[f] && destHash === installedHashes[f]) plan.push({ file: f, action: 'refresh', srcBuf, srcHash });
+      else plan.push({ file: f, action: 'skip-modified', srcHash });
+    }
+
+    if (flags['force-list'] === true) {
+      return done(
+        { dryRun: true, plan: plan.map(({ file, action }) => ({ file, action })) },
+        plan.map((p) => `  ${p.action.padEnd(13)} ${p.file}`).join('\n'),
+      );
+    }
+    await mkdir(destDir, { recursive: true });
+    for (const p of plan) {
+      if (p.action === 'install' || p.action === 'refresh') await writeFile(join(destDir, p.file), p.srcBuf);
+      if (p.action !== 'skip-modified') installedHashes[p.file] = p.srcHash;
+    }
+    await writeFile(manifestPath, JSON.stringify(installedHashes, null, 2) + '\n');
+    const counts = plan.reduce((a, p) => { a[p.action] = (a[p.action] || 0) + 1; return a; }, {});
+    const skipped = plan.filter((p) => p.action === 'skip-modified').map((p) => p.file);
+    return done(
+      { counts, skipped, gatesDir: '.maddu/gates' },
+      `model gate pack: ${counts.install || 0} installed · ${counts.refresh || 0} refreshed · ${counts.current || 0} current · ${counts['skip-modified'] || 0} skipped (operator-edited${skipped.length ? ': ' + skipped.join(', ') : ''})\n  gates live in .maddu/gates/ — YOURS to edit; pin as required with \`maddu ci pin\``,
+    );
   }
 
   if (group === 'dataset' && subOrArg === 'snapshot') {
