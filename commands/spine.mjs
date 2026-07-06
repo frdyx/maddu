@@ -5,6 +5,8 @@
 //   maddu spine show <eventId>             # pretty-print a single event by id
 //   maddu spine sync init [--json]         # opt into #12c team-sync (mint replicaId,
 //                                          #   migrate legacy segment, template gitignore)
+//   maddu spine sync [--json]              # git-transport round-trip: commit → pull →
+//                                          #   import-validate → push (opt-in via sync init)
 //   maddu spine import [--json]            # validate git-synced partitions (read-only)
 
 import { parseFlags } from './_args.mjs';
@@ -40,6 +42,71 @@ export default async function spine(argv) {
   if (!sub) {
     console.error('Usage: maddu spine <verify|show|sync|import> [args]');
     process.exit(2);
+  }
+
+  if (sub === 'sync' && rest[0] !== 'init') {
+    // Bare `maddu spine sync` — the git-transport verb (#12c phase 5): commit
+    // this replica's partition, pull peers', validate, push. `sync init` (below)
+    // is the one-time activation.
+    if (rest[0] !== undefined && !rest[0].startsWith('-')) {
+      console.error('Usage: maddu spine sync [--json]   |   maddu spine sync init [--json]');
+      process.exit(2);
+    }
+    if (!lib.spineSync || !lib.spineSync.syncGit) {
+      console.error('spine-sync.mjs not found in this install. Run `maddu upgrade` to enable team-sync.');
+      process.exit(2);
+    }
+    const { flags } = parseFlags(rest);
+    const res = await lib.spineSync.syncGit(repoRoot);
+    if (flags.json) {
+      process.stdout.write(JSON.stringify(res, null, 2) + '\n');
+      process.exit(res.ok ? 0 : 1);
+    }
+    if (!res.ok) {
+      if (res.reason === 'not-sync-mode') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} not in team-sync mode — run \`maddu spine sync init\` first.`);
+      } else if (res.reason === 'sync-init-in-progress') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} a \`sync init\` is in progress or stalled (pending marker present) — finish it first.`);
+      } else if (res.reason === 'config-invalid') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} replica.json is malformed — ${res.detail || 'fix or re-run sync init'}.`);
+      } else if (res.reason === 'no-git') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} not a git work tree (git is the sync transport).`);
+      } else if (res.reason === 'git-busy') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} git is busy (${res.detail}) — finish or abort it before syncing.`);
+      } else if (res.reason === 'secret') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.hits.length} secret-shaped value(s) would be pushed — redact before syncing:`);
+        for (const h of res.hits.slice(0, 10)) console.error(`  ${ANSI.dim}${h.where}${ANSI.reset}  ${h.patternTypes.join(', ')}`);
+      } else if (res.reason === 'import-failed') {
+        const r = res.import;
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} merged partitions did not validate — NOT pushed.`);
+        if (r.secretHits.length) console.error(`  ${r.secretHits.length} secret-shaped value(s) in partitions`);
+        if (r.forks.length) console.error(`  ${r.forks.length} partition chain fork(s)`);
+        if (r.structuralFails.length) console.error(`  ${r.structuralFails.length} structural error(s)`);
+        if (r.dupWithin.length) console.error(`  ${r.dupWithin.length} within-partition duplicate id(s)`);
+      } else if (res.reason === 'unrelated-commits') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} the branch has unpushed non-spine commit(s) — sync won't publish unrelated work. Push them yourself first:`);
+        for (const c of (res.offending || []).slice(0, 10)) console.error(`  ${ANSI.dim}${c.sha}${ANSI.reset} ${c.subject}${c.paths && c.paths.length ? `  ${ANSI.dim}(${c.paths.join(', ')})${ANSI.reset}` : ''}`);
+      } else if (res.reason === 'pull-conflict') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} git pull conflicted (aborted) — partitions should never conflict; inspect the tree.`);
+        if (res.detail) console.error(`  ${ANSI.dim}${res.detail}${ANSI.reset}`);
+      } else {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.reason}${res.detail ? ` — ${res.detail}` : ''}`);
+      }
+      process.exit(1);
+    }
+    console.log(`${levelTag('PASS')}  spine synced  ${ANSI.dim}(${res.replicaId})${ANSI.reset}`);
+    console.log(`  commit: ${res.committed ? `${ANSI.accent}new events committed${ANSI.reset}` : `${ANSI.dim}nothing to commit${ANSI.reset}`}`);
+    if (!res.hasUpstream) {
+      console.log(`  ${ANSI.warn}WARN${ANSI.reset}  no upstream branch — committed locally, pull/push skipped (set one with \`git push -u\`)`);
+    } else {
+      console.log(`  pull:   ${res.pulled ? `${ANSI.accent}peers merged${ANSI.reset}` : `${ANSI.dim}skipped${ANSI.reset}`}`);
+      console.log(`  push:   ${res.pushed ? `${ANSI.accent}shared${ANSI.reset}` : `${ANSI.dim}skipped${ANSI.reset}`}`);
+    }
+    console.log(`  ${ANSI.dim}${res.import.totalEvents} events across ${res.import.partitions.length} partition${res.import.partitions.length === 1 ? '' : 's'}${res.import.dupAcross.length ? ` · ${res.import.dupAcross.length} tolerated cross-partition dup(s)` : ''}${ANSI.reset}`);
+    if (res.uncommittedMeta && res.uncommittedMeta.length) {
+      console.log(`  ${ANSI.warn}WARN${ANSI.reset}  ${res.uncommittedMeta.join(', ')} has your own untracked rules — sync won't publish it. Commit it yourself to share the partition-tracking block: git add ${res.uncommittedMeta.join(' ')}`);
+    }
+    process.exit(0);
   }
 
   if (sub === 'sync') {

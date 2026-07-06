@@ -17,12 +17,13 @@
 // it is never tracked. No EVENT_CONTRACT change: replicaId lives in the path.
 
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
 import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
+import { gitRun as defaultGitRun, gitAvailable as defaultGitAvailable } from './git-exec.mjs';
 
 const SEG_RE = /^\d{12}\.ndjson$/;
 
@@ -294,6 +295,274 @@ export async function importPartitions(repoRoot) {
     quarantined,
     secretHits,
   };
+}
+
+// The only real spine surface: a NUMERIC partition segment file (a stray
+// non-segment *.ndjson or note.txt under by-replica/ is NOT a segment).
+const SEGMENT_PATH_RE = /^\.maddu\/events\/by-replica\/[^/]+\/\d{12}\.ndjson$/;
+const isSegmentPath = (p) => SEGMENT_PATH_RE.test(p);
+const isMetaPath = (p) => p === '.gitignore' || p === '.gitattributes';
+const syncCommitSubject = (replicaId) => `maddu spine sync (${replicaId})`;
+
+// The exact bytes ensureMarkerBlock writes to a FRESH dotfile (sync created it
+// from nothing) — `${begin}\n${body}\n${end}\n`. A dotfile is first-shareable
+// only if it equals this exactly (modulo line-ending/trailing-whitespace). A
+// stripping approach is spoofable — a user can plant a fake BEGIN marker — so we
+// compare against the whole canonical block instead, which no user content can
+// survive. Never publishes a user's pre-existing untracked .gitignore rules.
+function freshDotfileContent(name) {
+  const [begin, end, body] = name === '.gitignore'
+    ? [GITIGNORE_BEGIN, GITIGNORE_END, GITIGNORE_BODY]
+    : [GITATTR_BEGIN, GITATTR_END, GITATTR_BODY];
+  return `${begin}\n${body}\n${end}\n`;
+}
+function isSyncManagedOnlyDotfile(name, content) {
+  return content.replace(/\r\n/g, '\n').trimEnd() === freshDotfileContent(name).trimEnd();
+}
+
+// `git push` publishes the WHOLE branch, not just our commit — so before pushing
+// we audit EVERY unpushed commit (@{u}..HEAD) COMMIT-BY-COMMIT, purely by PATH +
+// CONTENT (never by commit subject, which a user can spoof). Per commit, via
+// `git show --name-status --no-renames` (rename detection OFF so a rename's
+// non-spine SOURCE is visible as a delete). A non-merge commit is "sync-owned"
+// (safe to publish) iff it is non-empty and EVERY entry is one of:
+//   • a numeric segment file UNDER THIS REPLICA'S OWN partition (a foreign
+//     by-replica/<other>/ segment is a forgery — peers' partitions arrive via
+//     pull, already on the remote, never in our unpushed range), ADDED (A) or
+//     MODIFIED as a pure byte-APPEND (parent blob is a prefix of the new blob —
+//     a truncation/rewrite/type-change is refused, and import can miss a no-gap
+//     truncation), OR
+//   • a sync-managed dotfile ADDED (A) whose blob is EXACTLY the canonical block
+//     (freshDotfileContent) — a first share of a maddu-created dotfile, carrying
+//     no user content; a modify/delete of a tracked dotfile, or any user content,
+//     is refused.
+// A merge is owned iff its --diff-merges=combined diff is empty (a clean disjoint
+// auto-merge introduces nothing; its side commits are audited on their own; an
+// evil merge that introduces any path is refused). Returns { ok, offending }.
+async function auditUnpushed(gitRun, repoRoot, replicaId) {
+  const myPrefix = `.maddu/events/by-replica/${replicaId}/`;
+  const list = await gitRun(['rev-list', '@{u}..HEAD'], repoRoot, 10000);
+  if (list.code !== 0) return { ok: false, error: (list.stderr || list.error || '').trim() };
+  const shas = list.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  const offending = [];
+  for (const sha of shas) {
+    // Every git call is code-checked — an errored/timed-out call returning empty
+    // stdout must NOT fail open into "no paths → vacuously owned".
+    const subjR = await gitRun(['log', '-1', '--format=%s', sha], repoRoot, 5000);
+    if (subjR.code !== 0) return { ok: false, error: (subjR.stderr || subjR.error || 'log failed').trim() };
+    const subj = subjR.stdout.trim();
+    const parR = await gitRun(['rev-list', '--parents', '-n', '1', sha], repoRoot, 5000);
+    if (parR.code !== 0) return { ok: false, error: (parR.stderr || parR.error || 'rev-list failed').trim() };
+    const isMerge = parR.stdout.trim().split(/\s+/).slice(1).length > 1;
+
+    if (isMerge) {
+      const mR = await gitRun(['show', '--format=', '--name-only', '--diff-merges=combined', sha], repoRoot, 10000);
+      if (mR.code !== 0) return { ok: false, error: (mR.stderr || mR.error || 'show failed').trim() };
+      const mNames = [...new Set(mR.stdout.split('\n').map((s) => s.trim()).filter(Boolean))];
+      if (mNames.length > 0) offending.push({ sha: sha.slice(0, 9), subject: subj, paths: mNames.slice(0, 5) });
+      continue;
+    }
+
+    const nsR = await gitRun(['show', '--format=', '--name-status', '--no-renames', sha], repoRoot, 10000);
+    if (nsR.code !== 0) return { ok: false, error: (nsR.stderr || nsR.error || 'show failed').trim() };
+    const entries = nsR.stdout.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+      const tab = l.indexOf('\t');
+      return tab < 0 ? { status: l, path: '' } : { status: l.slice(0, tab).trim(), path: l.slice(tab + 1).trim() };
+    });
+    let bad = null;
+    if (entries.length === 0) bad = '(empty commit)';
+    for (const e of entries) {
+      const st = e.status[0];
+      if (isSegmentPath(e.path) && e.path.startsWith(myPrefix)) {
+        if (st === 'A') {
+          // new segment in our own partition — fine
+        } else if (st === 'M') {
+          // A modification is only sync-owned if it is a pure APPEND: the parent
+          // blob must be a byte-PREFIX of the new blob. A truncation/rewrite
+          // (deleting tail events) leaves a valid shorter chain that import would
+          // pass — this catches it. Compare against the FIRST parent.
+          const oldB = await gitRun(['show', `${sha}^:${e.path}`], repoRoot, 10000);
+          const newB = await gitRun(['show', `${sha}:${e.path}`], repoRoot, 10000);
+          if (oldB.code !== 0 || newB.code !== 0) return { ok: false, error: 'segment blob read failed' };
+          if (!newB.stdout.startsWith(oldB.stdout)) { bad = e.path; break; } // not an append
+        } else { bad = e.path; break; } // D (delete) / T (type-change) / etc.
+      } else if (isMetaPath(e.path)) {
+        // A dotfile is owned ONLY as a first-share ADD of the exact managed block
+        // (no user content). Subject is NOT trusted (spoofable); content is.
+        if (st !== 'A') { bad = e.path; break; }
+        const blob = await gitRun(['show', `${sha}:${e.path}`], repoRoot, 10000);
+        if (blob.code !== 0) return { ok: false, error: 'dotfile blob read failed' };
+        if (blob.stdout.replace(/\r\n/g, '\n').trimEnd() !== freshDotfileContent(e.path).trimEnd()) { bad = e.path; break; }
+      } else { bad = e.path || '(unknown)'; break; } // foreign partition / non-spine
+    }
+    const owned = !bad;
+    if (!owned) offending.push({ sha: sha.slice(0, 9), subject: subj, paths: bad ? [bad] : entries.filter((e) => !isSegmentPath(e.path)).map((e) => e.path).slice(0, 5) });
+  }
+  return { ok: offending.length === 0, offending };
+}
+
+// True (with a reason string) iff the repo is mid-merge / rebase / cherry-pick /
+// revert — an operation the USER started that `spine sync` must not conclude
+// (a bare `git commit` would finish a merge) or abort. Never throws.
+async function gitBusy(gitRun, repoRoot) {
+  for (const [ref, why] of [['MERGE_HEAD', 'merge'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']]) {
+    const r = await gitRun(['rev-parse', '-q', '--verify', ref], repoRoot, 5000);
+    if (r.code === 0 && r.stdout.trim()) return `${why} in progress`;
+  }
+  for (const d of ['rebase-merge', 'rebase-apply']) {
+    const p = await gitRun(['rev-parse', '--git-path', d], repoRoot, 5000);
+    const rel = (p.stdout || '').trim();
+    if (p.code === 0 && rel) {
+      const abs = isAbsolute(rel) ? rel : join(repoRoot, rel);
+      if (await dirExists(abs)) return 'rebase in progress';
+    }
+  }
+  return null;
+}
+
+// `maddu spine sync` — the git-transport verb (roadmap #12c phase 5). Sugar over
+// the dumb-transport model: commit THIS replica's new partition segments, pull
+// peers' partitions, validate the merged set (`spine import`), then push. Author-
+// partitioning + `.gitattributes ... merge=binary` means the pull can never
+// textually conflict — replicas write disjoint dirs — so a clean round-trip needs
+// no manual merge. Every failure short-circuits BEFORE push so a corrupt or
+// secret-bearing set is never shared. Pure orchestration: reconciliation stays a
+// read-time projection; this writes only git objects, never the spine. It commits
+// ONLY this replica's numeric segment files (never a peer's dir, a stray
+// non-segment *.ndjson the secret scan can't see, or unrelated user work) and
+// never bypasses repo hooks.
+//
+// gitRun/gitAvailable are injectable so tests can drive real temp checkouts (the
+// gate) or stub the transport; they default to the shared git-exec runner.
+export async function syncGit(repoRoot, opts = {}) {
+  const gitRun = opts.gitRun || defaultGitRun;
+  const gitAvailable = opts.gitAvailable || defaultGitAvailable;
+  const doPull = opts.pull !== false;
+  const doPush = opts.push !== false;
+  const steps = [];
+
+  // Require a COMMITTED replica.json — a pending/stalled `sync init` is NOT a
+  // syncable state (a half-activation must never be shared). readReplicaId reads
+  // only the committed file and throws on a malformed one (fail-closed). The
+  // pending-marker check comes FIRST so a crashed init (pending but no committed
+  // file) reports 'sync-init-in-progress', not a misleading 'not-sync-mode'.
+  if (await dirExists(pendingReplicaPath(repoRoot))) return { ok: false, reason: 'sync-init-in-progress', steps };
+  let replicaId;
+  try { replicaId = await readReplicaId(repoRoot); }
+  catch (e) { return { ok: false, reason: 'config-invalid', detail: e.message, steps }; }
+  if (!replicaId) return { ok: false, reason: 'not-sync-mode', steps };
+  if (!(await gitAvailable(repoRoot))) return { ok: false, reason: 'no-git', steps };
+
+  // Never conclude or abort a merge/rebase/cherry-pick/revert the user is running.
+  const busy = await gitBusy(gitRun, repoRoot);
+  if (busy) return { ok: false, reason: 'git-busy', detail: busy, steps };
+
+  // Secret gate — refuse if any committable spine line holds a secret-shaped
+  // value (committing exposes the whole data payload). Re-checked here because
+  // events accrue after `sync init`; a peer secret is caught again post-pull.
+  const preHits = await scanSpineForSecrets(repoRoot);
+  if (preHits.length) return { ok: false, reason: 'secret', hits: preHits, steps };
+
+  // 1. Stage ONLY this replica's numeric segment files. Peers' partitions arrive
+  //    already-committed via pull; a stray non-segment *.ndjson (which the secret
+  //    scan does NOT cover) and unrelated user work are never swept in.
+  const myDirRel = `.maddu/events/by-replica/${replicaId}`;
+  const mySegs = await listSegs(join(repoRoot, myDirRel));
+  const stagePaths = mySegs.map((s) => `${myDirRel}/${s}`);
+  // The sync-managed ignore/attr files must land ONCE so peers track partitions —
+  // but only when UNTRACKED, so a user's own edits to a pre-existing (tracked)
+  // .gitignore/.gitattributes are never folded into a spine-sync commit.
+  const uncommittedMeta = [];
+  for (const f of ['.gitignore', '.gitattributes']) {
+    if (!(await dirExists(join(repoRoot, f)))) continue;
+    const tracked = await gitRun(['ls-files', '--error-unmatch', '--', f], repoRoot, 5000);
+    if (tracked.code === 0) continue; // already tracked → not ours to commit
+    // Untracked → first share, but ONLY if the file is the maddu-managed block
+    // and nothing else. A user's pre-existing untracked .gitignore rules must
+    // NOT be published by sync — flag it for the operator to commit themselves.
+    const content = await readFile(join(repoRoot, f), 'utf8').catch(() => '');
+    if (isSyncManagedOnlyDotfile(f, content)) stagePaths.push(f);
+    else uncommittedMeta.push(f);
+  }
+
+  let committed = false;
+  if (stagePaths.length) {
+    const add = await gitRun(['add', '--', ...stagePaths], repoRoot, 20000);
+    if (add.code !== 0) return { ok: false, reason: 'git-add-failed', detail: (add.stderr || add.error || '').trim(), steps };
+    // 0 = our paths have no staged changes; 1 = they do; anything else is a real
+    // git error we surface (never silently skip a commit of pending spine data).
+    const diff = await gitRun(['diff', '--cached', '--quiet', '--', ...stagePaths], repoRoot, 10000);
+    if (diff.code === 1) {
+      // Commit ONLY our pathspec, under the canonical subject the pre-push audit
+      // recognizes as sync-owned — never fold in unrelated staged work. Hooks are
+      // NOT bypassed: repo policy applies and a hook failure surfaces cleanly.
+      const commit = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...stagePaths], repoRoot, 20000);
+      if (commit.code !== 0) return { ok: false, reason: 'git-commit-failed', detail: (commit.stderr || commit.error || '').trim(), steps };
+      committed = true;
+    } else if (diff.code !== 0) {
+      return { ok: false, reason: 'git-status-failed', detail: (diff.stderr || diff.error || '').trim(), steps };
+    }
+  }
+  steps.push({ step: 'commit', committed });
+
+  // Upstream presence gates the network hops — a local-only repo (no tracking
+  // branch) still commits, and reports pull/push as skipped rather than erroring.
+  const upstream = await gitRun(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, 5000);
+  const hasUpstream = upstream.code === 0 && upstream.stdout.trim().length > 0;
+
+  // 2. Pull peers' partitions. Disjoint author dirs + merge=binary → never a
+  //    conflict; if one somehow arises, abort OUR merge (we guaranteed above the
+  //    tree was clean of a user operation) and report it — never push over it.
+  let pulled = false;
+  if (doPull && hasUpstream) {
+    const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
+    if (pull.code !== 0) {
+      await gitRun(['merge', '--abort'], repoRoot, 10000);
+      return { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed, steps };
+    }
+    pulled = true;
+  }
+  steps.push({ step: 'pull', pulled });
+
+  // 3. Validate the merged set before sharing further. A fork / structural fail /
+  //    within-partition dup / secret in ANY partition means we do NOT push.
+  const report = await importPartitions(repoRoot);
+  steps.push({ step: 'import', ok: report.ok });
+  if (!report.ok) return { ok: false, reason: 'import-failed', import: report, committed, pulled, steps };
+
+  // 4. Push. Audit every unpushed commit in @{u}..HEAD COMMIT-BY-COMMIT (see
+  //    auditUnpushed) so nothing but our own append/first-share reaches the
+  //    remote. Then push an EXPLICIT refspec `HEAD:refs/heads/<upstream-branch>`
+  //    to the tracked remote — NEVER a bare `git push`, whose `push.default` /
+  //    `remote.*.push` config could publish OTHER local branches this audit never
+  //    inspected. `--no-follow-tags` closes the annotated-tag side channel.
+  let pushed = false;
+  if (doPush && hasUpstream) {
+    const audit = await auditUnpushed(gitRun, repoRoot, replicaId);
+    if (audit.error) return { ok: false, reason: 'git-range-failed', detail: audit.error, committed, pulled, import: report, steps };
+    if (!audit.ok) return { ok: false, reason: 'unrelated-commits', offending: audit.offending, committed, pulled, import: report, steps };
+    const branchR = await gitRun(['symbolic-ref', '--short', 'HEAD'], repoRoot, 5000);
+    if (branchR.code !== 0) return { ok: false, reason: 'push-failed', detail: 'detached HEAD', committed, pulled, import: report, steps };
+    const branch = branchR.stdout.trim();
+    const remoteR = await gitRun(['config', '--get', `branch.${branch}.remote`], repoRoot, 5000);
+    const mergeR = await gitRun(['config', '--get', `branch.${branch}.merge`], repoRoot, 5000);
+    if (remoteR.code !== 0 || mergeR.code !== 0) return { ok: false, reason: 'push-failed', detail: 'no tracked upstream remote/ref', committed, pulled, import: report, steps };
+    const remote = remoteR.stdout.trim();
+    // The upstream must be a proper branch ref (refs/heads/<name>) — fail closed
+    // on any other tracked ref (e.g. a tag) so we never push HEAD to a mangled
+    // refs/heads/refs/tags/... destination.
+    const merge = mergeR.stdout.trim();
+    if (!merge.startsWith('refs/heads/') || merge === 'refs/heads/') {
+      return { ok: false, reason: 'push-failed', detail: `upstream is not a branch ref (${merge})`, committed, pulled, import: report, steps };
+    }
+    const remoteRef = merge.slice('refs/heads/'.length);
+    const push = await gitRun(['push', '--no-follow-tags', remote, `HEAD:refs/heads/${remoteRef}`], repoRoot, 60000);
+    if (push.code !== 0) return { ok: false, reason: 'push-failed', detail: (push.stderr || push.error || '').trim(), committed, pulled, import: report, steps };
+    pushed = true;
+  }
+  steps.push({ step: 'push', pushed });
+
+  return { ok: true, replicaId, committed, pulled, pushed, hasUpstream, uncommittedMeta, import: report, steps };
 }
 
 export { GITIGNORE_BEGIN, GITIGNORE_END, GITATTR_BEGIN };
