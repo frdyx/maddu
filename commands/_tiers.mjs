@@ -54,6 +54,12 @@ export default {
   // FILE (never spine/state), the same posture as `export` above — so the
   // classification mirrors export exactly (read-only + auto-trigger forbidden).
   experience:   { tier: 'read-only', autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  // EXP phase 3 — recommend-only evolution planner. `plan` is a pure read,
+  // but `adopt` writes (LEARN_CORRECTION_WRITTEN / skill save), so the verb is
+  // mutating + auto-trigger forbidden (the autonomy/fleet convention: any
+  // write path -> mutating). Recommend-never-apply contract: nothing fires
+  // without the operator typing `adopt`.
+  evolve:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers
   // framework bytes into other repos, so the verb is mutating + auto-trigger
   // forbidden (same convention as trust/mcp/plugin: any write path → mutating).

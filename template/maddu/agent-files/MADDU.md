@@ -139,6 +139,7 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "what shortcuts did we take", "technical debt", "deferred work", "what needs upgrading" | `/maddu-debt` |
 | "architecture drift", "did we break the layering", "diagram the architecture", "import boundaries", "module dependencies" | `/maddu-architecture` |
 | "show my trajectory", "experience ledger", "what did this session actually do", "normalized work record", "trajectories" | `maddu experience list` (then `maddu experience show <id>` / `maddu experience stats` — **read-only** spine→steps projection; step ids are event ids, nothing is written) |
+| "how should we improve", "what should we change", "evolve from experience", "improvement recommendations", "what patterns keep repeating" | `maddu evolve plan` (**recommend-only** — evidence-backed recommendations from the experience projection; NOTHING applies without the operator running `maddu evolve adopt <rec-id>`) |
 | "I need a tool for …", "connect to <service>", "use the <X> MCP", "the runtime can't do <external thing>" | `/maddu-mcp` (register/enable the MCP server, then proceed) |
 
 **When a task needs a capability the runtime lacks** (calling an external
