@@ -53,7 +53,22 @@ const POLL_MS = 25;
 // creator DIED between the create and the record write; it is reclaimed. The window
 // is deliberately long so a slow-but-alive holder is never reclaimed (which would let
 // two writers enter), making the reclaim safe without a post-create ownership recheck.
-const BODYLESS_GRACE_POLLS = 80;
+//
+// MADDU_LOCK_BODYLESS_GRACE_MS (RAISE-ONLY): on saturated 2-core CI runners a
+// live holder CAN be descheduled for >2s between the create and the record
+// write, so the reclaim fires on a live holder and two writers fork the chain —
+// the documented long-grace residual manifesting as hardware-dependent false
+// alarms (observed on GitHub runners; never locally). The env can only RAISE
+// the grace above the default: a longer grace is strictly more conservative
+// (it only delays reclaiming a genuinely dead holder — it can never admit a
+// second writer), while lowering it would widen the fork window, so values at
+// or below the default (and garbage) are ignored.
+const DEFAULT_BODYLESS_GRACE_MS = 80 * POLL_MS;
+function bodylessGraceMs() {
+  const raw = Number(process.env.MADDU_LOCK_BODYLESS_GRACE_MS);
+  return Number.isFinite(raw) && raw > DEFAULT_BODYLESS_GRACE_MS ? raw : DEFAULT_BODYLESS_GRACE_MS;
+}
+const BODYLESS_GRACE_POLLS = Math.round(bodylessGraceMs() / POLL_MS);
 // Emit an onWait progress callback roughly once per second so a genuinely stuck
 // holder is visible to the operator rather than silently hanging.
 const WAIT_LOG_EVERY = Math.max(1, Math.round(1000 / POLL_MS));

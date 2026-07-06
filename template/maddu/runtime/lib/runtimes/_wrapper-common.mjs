@@ -88,9 +88,20 @@ export async function appendTokenUsage(repoRoot, payload) {
   // init` migration is pending we DROP this one event rather than block or write
   // into an incomplete partition (nothing written → no chain fork). The caller wraps
   // this in try/catch + logWrapperError. Default mode keeps the flat write below.
-  const w = await resolveWriteReplica(repoRoot, { timeoutMs: 3000 });
+  //
+  // MADDU_WRAPPER_APPEND_WAIT_MS (RAISE-ONLY): on saturated CI runners the 3s
+  // funnel wait can expire under normal (slow) operation, so the designed
+  // drop-on-timeout degradation fires and the ledger legitimately misses rows —
+  // a hardware-dependent false alarm in exact-total tests. The env can only
+  // RAISE the bound (a longer best-effort wait is strictly safer accounting;
+  // shortening it would widen the drop window), so values at or below the
+  // default (and garbage) are ignored.
+  const defaultWaitMs = 3000;
+  const rawWait = Number(process.env.MADDU_WRAPPER_APPEND_WAIT_MS);
+  const waitMs = Number.isFinite(rawWait) && rawWait > defaultWaitMs ? rawWait : defaultWaitMs;
+  const w = await resolveWriteReplica(repoRoot, { timeoutMs: waitMs });
   if (w.pending) return null; // migration in flight — drop this token event
-  if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: 3000 });
+  if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
 
   const seg = await currentSegment(eventsDir);
   await appendFile(join(eventsDir, seg), JSON.stringify(ev) + '\n');
