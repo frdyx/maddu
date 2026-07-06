@@ -60,6 +60,12 @@ export default {
   // write path -> mutating). Recommend-never-apply contract: nothing fires
   // without the operator typing `adopt`.
   evolve:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  // SLM-governance phase 3 (plan pln_20260706133422_0f60) — every write
+  // sub-verb appends MODEL_* events (and promote appends APPROVAL_REQUESTED),
+  // so the verb is mutating; auto-trigger forbidden because promotion must
+  // never fire without a human-attributable invocation (the approval ride is
+  // always-on, and a scheduled promote would defeat its point).
+  model:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers
   // framework bytes into other repos, so the verb is mutating + auto-trigger
   // forbidden (same convention as trust/mcp/plugin: any write path → mutating).

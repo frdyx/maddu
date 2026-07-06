@@ -7,8 +7,8 @@
       "note": "builtin enforcement gates (template/maddu/runtime/gates/builtin/*.mjs). Raised 71→72 (roadmap #12c phase 3): +replica-untracked, which asserts a team-sync checkout's .maddu/config/replica.json is never git-tracked (a committed replicaId duplicates across every clone and resurrects the multi-writer conflict — the single most dangerous sync misconfiguration). A deliberate, attributed raise for a permanent, warranted enforcement surface — not temporary debt (which would be a waiver). Nothing retired: the sync-identity invariant has no existing home. Prior: 70→71 (v1.94.0, #12b phase 7) +event-schema-complete."
     },
     "verbs": {
-      "cap": 71,
-      "note": "top-level CLI verbs (bin/maddu.mjs COMMANDS). Raised 70->71 (EXP roadmap phase 3, 2026-07-06): +evolve, the recommend-only evolution planner (`plan` derives evidence-backed recommendations from the experience projection; `adopt` is the explicit operator apply routed through EXISTING write paths). The companion `experience` verb (EXP phase 1) consumed the last headroom under the old cap, so this raise is attributed to the EXP capability pair as a permanent, warranted surface — flagged in the phase-0 design doc BEFORE the build, not discovered at gate time. Nothing retired: no existing verb covers evidence-backed self-improvement recommendations."
+      "cap": 72,
+      "note": "top-level CLI verbs (bin/maddu.mjs COMMANDS). Raised 71->72 (SLM-governance phase 3, 2026-07-06, plan pln_20260706133422_0f60): +model — the SLM-factory governance verb (hash-pinned manifest ingest -> contract-1.1.0 MODEL_* events; promotion via an always-on stage-keyed approval ride; Maddu records the factory, never trains). Flagged as verb #72 in the phase-0 design doc (docs/research/slm-governance-design.md par.6/par.11) BEFORE the build — the EXP-phase-3 precedent. Nothing retired: no existing verb records ML-lifecycle manifests. Prior: 70->71 (EXP roadmap phase 3): +evolve, the recommend-only evolution planner; the companion experience verb consumed the last headroom under the old cap."
     },
     "audit-checks": {
       "cap": 17,
