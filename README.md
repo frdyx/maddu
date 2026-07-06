@@ -23,7 +23,7 @@ npx github:frdyx/maddu init
 **No cloud. No database. No provider SDKs in your code.**
 Máddu spawns no models, stores no secrets, calls no clouds.
 
-[Homepage](https://maddu.frdyx.com) · [Quickstart](docs/01-getting-started.md) · [Use cases](#six-ways-people-run-it) · [Why Máddu](#why-maddu) · [Slash commands](docs/22-slash-commands.md) · [Hard rules](docs/hard-rules.md)
+[Homepage](https://maddu.frdyx.com) · [Quickstart](docs/01-getting-started.md) · [Use cases](#seven-ways-people-run-it) · [Why Máddu](#why-maddu) · [Slash commands](docs/22-slash-commands.md) · [Hard rules](docs/hard-rules.md)
 
 </div>
 
@@ -134,9 +134,9 @@ Inside Claude Code or Codex CLI, you drive everything from one line:
 
 …and a dozen more (`/maddu-skill`, `/maddu-insights`, `/maddu-debt`, `/maddu-architecture`, `/maddu-handoff`, `/maddu-advise` …). Full reference → [22-slash-commands.md](docs/22-slash-commands.md) + [natural-language routing](docs/23-natural-language-routing.md).
 
-## Six ways people run it
+## Seven ways people run it
 
-Same substrate, six shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
+Same substrate, seven shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
 
 ### 🔍 1. Verify the agent instead of trusting it
 
@@ -223,6 +223,22 @@ maddu export --otel                   # or: OpenTelemetry logs into the stack yo
 <picture><img alt="Governed experience data — the spine derives an experience ledger, a mandatory refuse-on-hit secret gate guards the export, the artifact ships trainingEligibility false until the operator judges otherwise, OTel logs feed existing observability" src="docs/images/use-case-export.svg" width="920"></picture>
 
 The export is deterministic (byte-identical re-runs — that *is* the audit trail), refuses outright on any secret-shaped value with **no flag to override**, and ships `trainingEligibility: false` until *you* — not a regex — judge the data. It's the honest on-ramp into trajectory-curation pipelines, not a dataset grab. And if regulation is on your radar: record-keeping regimes like the EU AI Act (Art. 12) push toward automatic, reconstructable logs of AI-assisted decisions — an append-only record you own and retain locally is a building block for that traceability, not a compliance product.
+
+### 🏭 7. The SLM factory — governing model training
+
+**For teams fine-tuning domain-specific small models.** TRL/PEFT train, vLLM serves, SWE-bench and BFCL evaluate — excellent tools at every step, and none of them is the neutral record of what happened *between* the steps. Máddu is: datasets, training runs, evals, and promotions land as hash-pinned manifests on the spine, and a checkpoint's stage is **derived from the record** — a manifest can't claim its way toward production.
+
+```bash
+maddu model dataset snapshot models/tickets-v3.json  # license, split, provenance — recorded + pinned
+maddu model train complete models/run-42.json        # config of record: base hash, seed, commit
+maddu model eval record models/eval-7.json           # + critical regressions: acknowledged or blocking
+maddu model promote models/promote.json              # the approval ride — no auto-decide near production
+maddu model gates install                            # 12 ML-lifecycle gates in .maddu/gates/ — yours, ci-pinnable
+```
+
+<picture><img alt="The SLM factory — external tools do the curation, training, and benchmarks; their results become hash-pinned manifests that maddu model records as spine events; the 12-gate pack and the approvals ride govern the promotion ladder, whose stages are derived from the record, and rollback only ever moves down" src="docs/images/use-case-slm.svg" width="920"></picture>
+
+Every promotion above candidate waits for an explicit per-request decision — standing approval policies are deliberately inert near production. Rollback is strictly downward and re-promotion goes back through the full ride; the spine verifier holds the whole ladder tamper-evident on replay. And the honesty line is structural: Máddu records what your tools *declared* and pins the bytes of record — it never trains, serves, evaluates, or decides that a model is good. Full guide: [51-slm-governance.md](docs/51-slm-governance.md).
 
 ## What it does for you
 

@@ -118,7 +118,44 @@ and the one Máddu verb that records it:
 | Promote → canary | vLLM serves the canary | `model promote` (the ride) |
 | Release / roll back | your serving infra | `model release` / `model rollback` |
 
+The full sequence, with the gate that holds each hand-off:
+
+1. **Repo intake → dataset of record.** Curate/mine your corpus (SWE-smith
+   for synthetic task generation, or your own tooling); write the
+   dataset-snapshot manifest — license, artifact hash, `synthetic: true` +
+   generator model, frozen train/eval split. `maddu model dataset snapshot`
+   records it. Held by: `dataset-license-known`, `dataset-hash-pinned`,
+   `dataset-synthetic-labeled`, `dataset-manifest-no-secrets`.
+2. **Synthetic task validity.** Task-level validity filtering (execution
+   checks, dedup) is your generator's job — Máddu pins the manifest
+   *declaring* `dedup_policy`/`pii_scan`/`secrets_scan` (any edit breaks the
+   recorded hash) and holds the split freeze
+   (`train-eval-split-frozen`); it never inspects task content.
+3. **Train.** TRL/PEFT/Axolotl run; `train start` / `train complete` record
+   the config of record (base-model hash, seed, commit, recipe pinned by the
+   manifest hash). Held by: `training-config-pinned`.
+4. **Benchmark + regression.** SWE-bench/BFCL/your harness runs;
+   `eval record` lands the result and one `MODEL_REGRESSION_FOUND` per
+   declared critical regression. Held by: `eval-harness-version-pinned`,
+   `benchmark-contamination-check`, `no-critical-regression` (recovery is
+   the recorded `regression ack`).
+5. **Safety eval.** Run it as another benchmark (`eval record` with your
+   safety harness's id, e.g. a refusal/jailbreak suite) — it rides the same
+   record, the same regression machinery, and the same budgets config.
+6. **Model card.** Write it next to the promotion manifest; the
+   checkpoint-registration manifest's `notes` can point at it. Máddu pins
+   the manifests — the card's claims stay the author's.
+7. **Promotion approval → canary → released.** The ride (§above), one step
+   at a time, an explicit decision per step above candidate. Held by:
+   `candidate-promotion-complete`, `rollback-plan-present`, and the spine
+   verifier itself.
+8. **Rollback.** Strictly downward, recorded, and the re-promotion goes
+   back through the full ride.
+
 What Máddu does **not** do in this pipeline: generate tasks, launch
 training, schedule GPUs, serve models, run benchmarks, or decide that a
 model is good — it records who claimed what, pins the bytes of record, and
 blocks the hand-offs that lack their approvals, acknowledgments, or plans.
+Across the entire capability (`maddu model`, the events, the gate pack,
+this doc) the framework gained **zero new dependencies** — Node stdlib
+only, per hard rules 4/5.
