@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **in line** — one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay — instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.93.0](https://img.shields.io/badge/version-1.93.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.94.0](https://img.shields.io/badge/version-1.94.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -23,7 +23,7 @@ npx github:frdyx/maddu init
 **No cloud. No database. No provider SDKs in your code.**
 Máddu spawns no models, stores no secrets, calls no clouds.
 
-[Homepage](https://maddu.frdyx.com) · [Quickstart](docs/01-getting-started.md) · [Why Máddu](#why-maddu) · [Slash commands](docs/22-slash-commands.md) · [Hard rules](docs/hard-rules.md)
+[Homepage](https://maddu.frdyx.com) · [Quickstart](docs/01-getting-started.md) · [Use cases](#six-ways-people-run-it) · [Why Máddu](#why-maddu) · [Slash commands](docs/22-slash-commands.md) · [Hard rules](docs/hard-rules.md)
 
 </div>
 
@@ -52,6 +52,8 @@ Tracing tools observe runs. Memory layers help agents remember. **Máddu governs
 ## The category
 
 **Local-first cooperative agent governance.** Not a control plane, not a gateway, not a proxy — a governance layer the agent itself calls; one NDJSON file you can `tail`; nothing leaves your machine. *Local-first* is operational, not marketing: delete `.maddu/` and Máddu is gone — and `git clone` brings the whole governance history with it. Enterprise platforms govern **which** agents run in your org; **Máddu governs *how* they work** once they're in your repo. The canonical definition — and why every nearby name already means something else — lives in [docs/45-category.md](docs/45-category.md).
+
+Frameworks build the agent. Durable-execution engines keep it running. Observability watches the model. Memory layers feed the agent's future. Orchestrators spawn the swarm. **Máddu is the neutral record your repo owns that lets you *verify* what any of them actually did — and govern what leaves.**
 
 ## The idea
 
@@ -98,7 +100,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.93.0 installed.
+Máddu v1.94.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -132,6 +134,150 @@ Inside Claude Code or Codex CLI, you drive everything from one line:
 
 …and a dozen more (`/maddu-skill`, `/maddu-insights`, `/maddu-debt`, `/maddu-architecture`, `/maddu-handoff`, `/maddu-advise` …). Full reference → [22-slash-commands.md](docs/22-slash-commands.md) + [natural-language routing](docs/23-natural-language-routing.md).
 
+## Six ways people run it
+
+Same substrate, six shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
+
+### 🔍 1. Verify the agent instead of trusting it
+
+**For anyone who's been burned by "done ✅, tests pass" that wasn't.** The 2026 lesson of agentic coding is that generation stopped being the bottleneck — *verification* is. An agent's chat summary is the actor grading its own work. Máddu makes the record the witness instead.
+
+```bash
+maddu hooks install            # sessions auto-register; nothing runs unrecorded
+# … agent works, then:
+maddu slice-stop "…"           # deliverables + gates + learnings → one line on the spine
+maddu learn scan               # hedged "should work now" claims vs OBSERVED proof
+maddu orient                   # goal progress verified by real commands, not vibes
+```
+
+```mermaid
+flowchart LR
+    subgraph CLAIM["What the agent says"]
+        A["✅ done — tests pass,<br/>secret rotated"]
+    end
+    subgraph RECORD["What the spine shows"]
+        B["GATE_RAN: fail<br/>deliverables: 0<br/>rotation event: none"]
+    end
+    CLAIM -.->|"take it on faith"| X["😬"]
+    RECORD -->|"maddu ci / learn scan / orient"| V["verified ✓ or caught ✗"]
+```
+
+Every completion claim is joined against *observed* evidence — real gate passes, verified deliverables, actual diffs. A model checking a model is a second opinion; **this is evidence.**
+
+### 🚀 2. The independent app builder
+
+**For the solo dev shipping a real product with Claude Code or Codex.** You don't want ceremony — you want to say *"ship the login form"*, walk away, and trust what you find when you come back. The discipline loop runs underneath without you thinking about it.
+
+```bash
+npx github:frdyx/maddu init && maddu hooks install    # once
+/maddu-autopilot ship the login form                  # end-to-end pipeline
+# overnight run? every iteration lands as a slice-stop with gate results
+maddu orient                                          # morning: the timeline, not a 100k-line transcript
+```
+
+```mermaid
+flowchart LR
+    Y["you:<br/>&quot;ship the login form&quot;"] --> P["pipeline<br/>orient → plan → slice →<br/>test → review → land"]
+    P -->|"every stage = events"| S[("append-only<br/>spine")]
+    S --> G["gates check<br/>each slice"]
+    S --> M["morning review:<br/>maddu orient"]
+    G --> M
+```
+
+Overnight autonomous runs become reviewable: pre-compaction checkpoints mark what survived context loss, the focus instrument tags each turn toward/lateral/away from your declared goal, and the morning is a ten-minute skim of slice-stops with gate badges — not an archaeology dig.
+
+### 👥 3. A team sharing one repo
+
+**For teams whose agents (and humans) keep stepping on each other.** The record syncs through the git remote you already have — no server, no daemon, no new credentials, no vendor between you and your own history.
+
+```bash
+maddu spine sync init          # opt in; this checkout gets its own partition
+maddu spine sync               # commit own segments → pull → validate → audited push
+maddu status                   # contentions surface BY NAME — never silent double-writes
+```
+
+```mermaid
+flowchart LR
+    subgraph A["checkout A"]
+        SA["by-replica/A/*.ndjson<br/>(single writer)"]
+    end
+    subgraph B["checkout B"]
+        SB["by-replica/B/*.ndjson<br/>(single writer)"]
+    end
+    SA <-->|"plain git<br/>push / pull"| R[("git remote<br/>your ACL")]
+    SB <--> R
+    R --> M["deterministic k-way<br/>merged read — same<br/>history on every machine"]
+    M --> C["concurrent lane claims →<br/>named contentions"]
+```
+
+Each checkout appends only to its own partition, so git never line-merges the record. Identity rides your remote's own access control. Concurrent claims on the same lane don't corrupt anything — the merged read surfaces them as **contentions** with the superseded sessions named.
+
+### 🐝 4. A swarm of parallel agents
+
+**For operators running 3–20 coding agents at once** — with Agent Teams, Conductor, Claude Squad, or your own scripts. Git worktrees became the consensus isolation primitive; Máddu is the durable record *underneath* whichever spawner you use, not a competing one.
+
+```bash
+maddu lane claim payments --worktree    # isolated checkout, bound to the claim
+# … each agent works its own lane, appends to the SAME primary spine …
+maddu lane release payments --worktree merged   # explicit disposition — verified, not asserted
+```
+
+```mermaid
+flowchart TB
+    O["your orchestrator<br/>(Agent Teams · Conductor · scripts)"] --> W1["agent 1<br/>worktree: payments"]
+    O --> W2["agent 2<br/>worktree: auth"]
+    O --> W3["agent 3<br/>worktree: docs"]
+    W1 --> S[("one primary spine<br/>who · what · when · verified")]
+    W2 --> S
+    W3 --> S
+    S --> D["release needs a disposition:<br/>merged? verified. abandoned? recorded.<br/>nothing silently orphaned"]
+```
+
+One agent per lane is a hard rule, `--worktree` gives each its own checkout on its own branch, and `merged` disposition actually checks `git merge-base` — Máddu never runs your merge, it verifies you did. The dashboards vanish when the run ends; **the record survives it.**
+
+### ✅ 5. CI for agents
+
+**For repos that want agent work held to the same bar as human PRs.** One CI step reads the record and exits nonzero when the evidence is missing — deterministic, no LLM, no network.
+
+```yaml
+- run: npx github:frdyx/maddu ci     # gates ran? deliverables real? secrets clean? claims backed?
+```
+
+```mermaid
+flowchart LR
+    PR["agent's PR"] --> CI["maddu ci"]
+    CI --> G1["✓ required gates green"]
+    CI --> G2["✓ secret scan clean"]
+    CI --> G3["✓ completion claims<br/>match observed proof"]
+    G1 & G2 & G3 --> OK["merge"]
+    CI -->|"any required gate red"| NO["blocked — with the<br/>event id that says why"]
+```
+
+You pin which gates are required (`maddu ci pin`), so framework upgrades can never turn your pipeline red without your opt-in. Same exit code drives GitHub Actions, GitLab, or a fully-offline git pre-push hook.
+
+### 🎓 6. Governed experience data — for training pipelines and audits
+
+**For teams fine-tuning small models on their own agent trajectories, and for anyone who owes an auditor an account.** The 2026 training stack standardized the *format* for agent-trajectory data — but the leading protocol's own paper leaves redaction, secrets, and governance explicitly out of scope. That's the part Máddu does.
+
+```bash
+maddu experience                      # the spine as trajectories of typed steps + outcome signals
+maddu evolve plan                     # evidence-gated recommendations — or an honest "change nothing"
+maddu experience export --format atdp --out exp.atdp.json   # the governed boundary
+maddu export --otel                   # or: OpenTelemetry logs into the stack you already run
+```
+
+```mermaid
+flowchart LR
+    S[("spine")] --> E["experience ledger<br/>trajectories · steps · signals"]
+    E --> GATE{"🔒 secret gate<br/>refuse-on-hit<br/><b>no skip flag exists</b>"}
+    GATE -->|"clean"| ART["deterministic artifact<br/>trainingEligibility: <b>false</b>"]
+    GATE -->|"hit"| REF["refused — offending<br/>event ids named"]
+    ART -->|"operator judgment,<br/>never a default"| T["your curation /<br/>fine-tuning pipeline"]
+    S --> OTEL["OTel logs →<br/>existing observability"]
+```
+
+The export is deterministic (byte-identical re-runs — that *is* the audit trail), refuses outright on any secret-shaped value with **no flag to override**, and ships `trainingEligibility: false` until *you* — not a regex — judge the data. It's the honest on-ramp into trajectory-curation pipelines, not a dataset grab. And if regulation is on your radar: record-keeping regimes like the EU AI Act (Art. 12) push toward automatic, reconstructable logs of AI-assisted decisions — an append-only record you own and retain locally is a building block for that traceability, not a compliance product.
+
 ## What it does for you
 
 The spine is the foundation. This is what you actually get standing on top of it — every item is a real command, and every step it takes lands as an event on the spine.
@@ -146,6 +292,11 @@ The spine is the foundation. This is what you actually get standing on top of it
 | 🧾 **Completion claims, verified** | A deterministic check (no LLM) joins hedged "done" claims ("should work now") against *observed* proof — real gate passes, verified deliverables — and a warn-tier gate surfaces any live pattern at every slice-stop. A model checking a model is a second opinion; this is evidence. | `maddu learn scan` |
 | 🧊 **Sterile release phases** | Declare a phase with a governance tier and discipline escalates for exactly that window — stricter approvals, tighter loops — then lifts on `phase clear`. Escalation-only: a phase can never silently weaken your baseline. | `maddu phase set --tier strict` |
 | 🪜 **Earned autonomy** | The same record that catches hollow claims can vouch for a lane: a deterministic Wilson-scored trust ladder over verified slice outcomes **recommends — never applies —** relaxing (or reverting) a lane's governance tier. Trust is earned on the record, not asserted. | `maddu autonomy` |
+| 🤝 **Git-native team sync** | Share the governance record between checkouts through the git remote you already have — no server, no daemon, no new credentials. Author-partitioned segments merge deterministically; concurrent lane claims surface as named **contentions** instead of silent double-writes. | `maddu spine sync` |
+| 🧪 **Parallel agents, isolated worktrees** | `lane claim --worktree` gives each agent an isolated git worktree bound to its lane claim — parallel agents never touch the same checkout, and release requires an explicit merged/abandoned/keep disposition so work is never silently orphaned. | `maddu lane claim <id> --worktree` |
+| 📖 **The experience ledger** | Re-read the spine as session trajectories of typed steps with late-bound outcome signals (gate results, review verdicts) attached to the work they judged — pure read-time derivation, zero writes, step ids ARE event ids. | `maddu experience` |
+| 🌱 **Recommend-only evolution** | Four deterministic detectors mine the ledger for evidence-gated improvements (≥3 occurrences across ≥2 scopes); you adopt through already-audited write paths, or it tells you honestly that changing nothing is the right call. Compute, recommend, stop. | `maddu evolve plan` |
+| 📤 **Governed exports** | Hand the record to the outside world on your terms: OpenTelemetry logs for your existing observability stack, or a deterministic ATDP experience artifact behind a **refuse-on-hit secret gate with no skip flag** and `trainingEligibility: false` until *you* say otherwise. | `maddu export --otel`, `maddu experience export` |
 | ✅ **A real testing harness** | Runs your project's tests with adaptive profiles; `self-test` runs the framework's own suite, backed by a dogfooded multi-layer gate. | `/maddu-test` |
 | 🗂️ **One bridge, every repo** | Mount N repos on one bridge; `/_all/*` fans out reads across all of them, each row tagged by workspace. Each repo's spine stays its own truth. | `/maddu-status` |
 | 🛰️ **Fleet view + staged upgrade** | See every Máddu install on your machine at a glance — version, liveness, how far behind — computed offline without running any of them. Then `fleet upgrade --plan` previews exactly what a delivery would change and which repos are safe to touch, and `--apply` delivers it: snapshot → upgrade → per-repo doctor, **halt-on-red**. | `maddu fleet` |
@@ -261,6 +412,7 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
+| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.0.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-evidence | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
