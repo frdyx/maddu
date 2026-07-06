@@ -87,9 +87,15 @@ Máddu never dictates the layout and never moves the files. What Máddu owns:
 
 - **Spine events** (§5) — the record that a manifest was ingested, with its
   sha256 and validated fields.
-- **`.maddu/state/models.json`** — a rebuildable projection (registry of
-  datasets → runs → checkpoints → evals → promotions, keyed by `model_id`),
-  derived from events like every other projection. Never hand-edited.
+- **The model registry** (datasets → runs → checkpoints → evals →
+  promotions) — derived **read-time** by `lib/model-projection.mjs`
+  (`deriveModels(events)`, pure, mirrors the verifier's derived-stage
+  algorithm). *Build deviation from this doc's original
+  `.maddu/state/models.json` placement (p3, recorded in lockstep):* an
+  unconditional new key in the persisted state file would change projection
+  bytes for every existing repo and break invariant #1 (byte-identical
+  default path), which outranks the placement detail. A persisted
+  `models.json` can ride a deliberate projection schema bump later.
 - **`.maddu/gates/*.mjs`** — the starter pack, installed by
   `maddu model gates install`, then *operator-owned*.
 
