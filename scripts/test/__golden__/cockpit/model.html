@@ -1,0 +1,127 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Model"
+    </h2>
+    <p>
+      "SLM-factory registry — datasets, training runs, checkpoints on the promotion ladder (spine-derived stage), evals with unacknowledged critical regressions, pending proposals, releases/rollbacks. Read-time derivation, zero writes; promotion/release/rollback stay operator CLI verbs behind the approvals ride."
+    </p>
+    <div class="panel" data-focus="model model slm dataset training checkpoint eval regression promotion release rollback governance">
+      <div class="panel-head">
+        <span class="panel-title">
+          "SLM-factory registry"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/model · read-time projection, zero writes · promotion stays a CLI verb"
+        </span>
+      </div>
+      <div>
+        <div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:4px;">
+          <div style="display:flex;flex-direction:column;min-width:74px;">
+            <div style="font-size:22px;font-weight:600;color:var(--m-fg-0);line-height:1.2;">
+              "1"
+            </div>
+            <div style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-fg-3);">
+              "datasets"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;min-width:74px;">
+            <div style="font-size:22px;font-weight:600;color:var(--m-fg-0);line-height:1.2;">
+              "1"
+            </div>
+            <div style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-fg-3);">
+              "runs"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;min-width:74px;">
+            <div style="font-size:22px;font-weight:600;color:var(--m-fg-0);line-height:1.2;">
+              "2"
+            </div>
+            <div style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-fg-3);">
+              "checkpoints"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;min-width:74px;">
+            <div style="font-size:22px;font-weight:600;color:var(--m-fg-0);line-height:1.2;">
+              "1"
+            </div>
+            <div style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-fg-3);">
+              "evals"
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;min-width:74px;">
+            <div style="font-size:22px;font-weight:600;color:var(--m-fg-0);line-height:1.2;">
+              "1"
+            </div>
+            <div style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-fg-3);">
+              "releases"
+            </div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--m-danger);margin-top:6px;">
+          "1 eval(s) carry UNACKNOWLEDGED critical regressions — `maddu model regression ack <eval-id> --reason`."
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:14px 0 6px;">
+          "Checkpoints (2)"
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,6px);margin-bottom:6px;background:var(--m-bg-2);cursor:pointer;">
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-accent);background:var(--m-bg-2);">
+            "candidate"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-0);">
+            "sha256:aaaaaaaaaaa…"
+          </span>
+          <span style="font-size:12px;color:var(--m-fg-2);">
+            "acme-triage-8b"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-fg-2);background:var(--m-bg-2);">
+            "1 eval(s)"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-fg-2);background:var(--m-bg-2);">
+            "run run-fx-1"
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--m-line);border-radius:var(--m-radius-sm,6px);margin-bottom:6px;background:var(--m-bg-2);cursor:pointer;">
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-fg-3);background:var(--m-bg-2);">
+            "experiment"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-0);">
+            "sha256:bbbbbbbbbbb…"
+          </span>
+          <span style="font-size:12px;color:var(--m-fg-2);">
+            "acme-triage-8b"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-fg-2);background:var(--m-bg-2);">
+            "0 eval(s)"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-warn);background:var(--m-bg-2);">
+            "foreign"
+          </span>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:14px 0 6px;">
+          "Pending promotion proposals (1)"
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;border:1px dashed var(--m-line);border-radius:var(--m-radius-sm,6px);margin-bottom:6px;">
+          <span style="font-family:var(--m-font-mono);font-size:10px;padding:2px 8px;border:1px solid var(--m-line);border-radius:999px;color:var(--m-warn);background:var(--m-bg-2);">
+            "candidate → canary"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-2);">
+            "sha256:aaaaaaaaaaa…"
+          </span>
+          <span style="font-size:11px;color:var(--m-fg-3);">
+            "decide + confirm via CLI — the cockpit never advances a stage"
+          </span>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:14px 0 6px;">
+          "Recent releases & rollbacks"
+        </div>
+        <div style="font-size:12px;color:var(--m-fg-2);margin-bottom:3px;">
+          "▲ released sha256:aaaaaaaaaaa… — rollback plan: repoint the serving alias"
+        </div>
+        <div style="font-size:12px;color:var(--m-warn);margin-bottom:3px;">
+          "▼ rolled back sha256:aaaaaaaaaaa… → candidate"
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

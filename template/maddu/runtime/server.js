@@ -37,6 +37,7 @@ import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeD
 import { discoverPlugins } from './lib/plugins.mjs';
 import { deriveExperience } from './lib/experience.mjs';
 import { planEvolution } from './lib/evolve.mjs';
+import { deriveModels } from './lib/model-projection.mjs';
 import { readRegistry, writeRegistry, activateWorkspace, registryExists, registryPath } from './lib/workspaces.mjs';
 // Pure HTTP transport plumbing (response writers, loopback parsing, body reader,
 // static serving) — the first slice of decomposing this file. Bridge state never
@@ -429,6 +430,32 @@ async function handleBridge(req, res, url, ctx) {
           draft: r.draft || null, evidenceCount: Array.isArray(r.evidence) ? r.evidence.length : 0,
         })),
       },
+    });
+  }
+  // ── model — SLM-governance p5 (plan pln_20260706133422_0f60) ──────────
+  // The factory registry, read-only: pure deriveModels over the spine (the
+  // same derivation `maddu model status/list` uses), zero writes. Maps are
+  // shipped as arrays; promotion/release stay CLI verbs (the cockpit never
+  // advances a stage).
+  if (path === '/bridge/model' && req.method === 'GET') {
+    const events = await readAll(repoRoot);
+    const reg = deriveModels(events);
+    const evals = [...reg.evals.values()];
+    return sendJson(res, 200, {
+      schemaVersion: 1,
+      stats: {
+        datasets: reg.datasets.size, runs: reg.runs.size, checkpoints: reg.checkpoints.size,
+        evals: reg.evals.size, proposals: reg.proposals.size,
+        releases: reg.releases.length, rollbacks: reg.rollbacks.length,
+        unacknowledgedCriticalEvals: evals.filter((e) => e.criticalRegressions > 0 && !e.acknowledged).length,
+      },
+      checkpoints: [...reg.checkpoints.values()],
+      datasets: [...reg.datasets.values()],
+      runs: [...reg.runs.values()],
+      evals,
+      proposals: [...reg.proposals.values()].slice(-20),
+      releases: reg.releases.slice(-10),
+      rollbacks: reg.rollbacks.slice(-10),
     });
   }
   // Plugins discovered for this workspace — the cockpit gates plugin-owned

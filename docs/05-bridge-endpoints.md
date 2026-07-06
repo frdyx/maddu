@@ -361,6 +361,25 @@ The experience ledger + recommend-only evolve plan (EXP) — pure read-time deri
 }
 ```
 
+### `GET /bridge/model`
+
+The SLM-factory registry (SLM) — pure read-time `deriveModels` over the spine (the same derivation `maddu model status` uses), zero writes. Maps ship as arrays; proposals/releases/rollbacks are trimmed to the most recent, while `stats` always carries the TOTAL counts — count from `stats`, never from the trimmed arrays. Promotion, release, and rollback stay CLI verbs — nothing on the bridge advances a stage.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "stats": { "datasets": N, "runs": N, "checkpoints": N, "evals": N, "proposals": N,
+             "releases": N, "rollbacks": N, "unacknowledgedCriticalEvals": N },
+  "checkpoints": [ { "checkpointKey": "sha256:…", "model_id": "…", "uri": "…", "run_id": "…", "stage": "candidate" } ],
+  "datasets":    [ { "dataset_id": "…", "license": "…", "synthetic": true, "hash": "sha256:…", "manifestPath": "…", "manifestHash": "sha256:…" } ],
+  "runs":        [ { "run_id": "…", "model_id": "…", "method": "SFT", "dataset_snapshot": "…", "completedAt": "…", "checkpointKey": "sha256:…" } ],
+  "evals":       [ { "eval_id": "…", "checkpointKey": "sha256:…", "benchmark": "…", "harness_version": "…", "pass_rate": 0.31, "criticalRegressions": N, "acknowledged": false } ],
+  "proposals":   [ { "proposalId": "evt_…", "from_stage": "…", "to_stage": "…", "approvalRequestId": "evt_…", "approved": false } ],
+  "releases":    [ { "checkpointKey": "sha256:…", "rollback_plan": "…" } ],
+  "rollbacks":   [ { "checkpointKey": "sha256:…", "reverted_to": "candidate" } ]
+}
+```
+
 ## Auth and CORS
 
 - **Auth tokens.** None required in v0.3 — the bridge binds to `127.0.0.1` only and trusts the local OS. Adding token-based auth is on the roadmap for v0.4.
