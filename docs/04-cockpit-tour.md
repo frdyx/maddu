@@ -134,6 +134,10 @@ Bridge config, lane catalog, provider auth shortcuts, MCP registry shortcuts. Th
 
 Pipeline runs only. Last 10 `PIPELINE_*` runs with stage trail (✓ for completed stages, … for running). Status tag tones: ok / warn / neutral. Reads `GET /bridge/pipelines`. In v0.18 this route bundled teams + pipelines + cost + a cheatsheet into one 4-card grid; v0.19.2 split each into its own route (see below). The slash-command cheatsheet moved to `#conductor` as a small "Slash-command quick reference" card.
 
+### `#teams` *(v0.19.2, team-sync panel #12c)*
+
+Lane-ownership map: one card per catalog lane (held/free, holder session, slice-stop frequency, policy), each opening in the Inspector. Reads `GET /bridge/lanes` + `GET /bridge/projection`. On a repo in [git-native team sync](49-team-sync.md), two additions light up (both absent on a default single-machine repo): a lane with concurrent claims across replicas carries a **contended** pill naming the superseded sessions (the earliest claim in the merged order holds), and a **Team sync** panel lists the replica partitions on disk — this checkout vs foreign — plus every contended lane with holder and superseded claimants. Data rides the projection's read-time `contentions` field and the bridge's sync-mode `teamSync` decoration; nothing is written to the spine.
+
 ### `#cost` *(v0.19.2)*
 
 Token + call rollup per runtime. `TOKEN_USAGE_REPORTED` rolled up with calls + input/output sums and an explicit "unreported" count (never zero-filled). Reads `GET /bridge/cost`. Empty-state hints at the worker minimum schema (`{ runtime, sessionId, model, ts }`) and `maddu cost --unreported-count`.

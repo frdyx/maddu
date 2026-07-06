@@ -90,8 +90,16 @@ async function handleLine(line) {
 // the child dies, and a bare process.exit() there kills pending spine writes
 // — a race Windows teardown timing masked and Linux CI exposed (count=0).
 const pending = new Set();
+// Emissions are SERIALIZED on a promise chain: a stream that reports usage
+// more than once must land its spine rows in STREAM ORDER. Un-chained,
+// concurrent appends race the append funnel and can land out of order under
+// load (observed as ledger-order flakes on slow CI runners). The chain never
+// blocks the tee (stdout passthrough stays synchronous), and `pending` keeps
+// its exit-await semantics.
+let emitTail = Promise.resolve();
 const splitter = lineSplitter((line) => {
-  const p = handleLine(line).catch(() => {});
+  emitTail = emitTail.then(() => handleLine(line)).catch(() => {});
+  const p = emitTail;
   pending.add(p);
   p.finally(() => pending.delete(p));
 });

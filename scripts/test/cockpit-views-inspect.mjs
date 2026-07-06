@@ -126,6 +126,7 @@ const teamCtx = {
     claims: [{ lane: 'harness', sessionId: 's1', focus: 'refactor' }],
     sliceStops: [{ lane: 'harness', ts: '2026-01-01T00:00:00Z', summary: 'extracted teams' }],
     activeSessions: [{ id: 's1', label: 'Claude' }],
+    contentions: [], // real default-mode projections emit [] — inertness must hold on it
   }),
   openInspector: (entity) => { teamInspected = entity; },
   paletteFocus: () => null,
@@ -150,6 +151,112 @@ if (cards.length) {
   }
 }
 ok('no palette focus when paletteFocus() is null', focusCalled === false);
+
+// Default single-machine path (#12c phase 6): no contentions / teamSync in the
+// projection → NO contended pill, NO team-sync panel. This is the inertness
+// half of the sync surfacing — the default Teams DOM must be unchanged.
+ok('default: no contended pill', findByClass(teamRoot, 'pill').every((p) => (p.children[0] && p.children[0].text) !== 'contended'));
+ok('default: no team-sync panel', findByClass(teamRoot, 'team-sync').length === 0);
+ok('default: no contention line on cards', findByClass(teamRoot, 'team-lane-contention').length === 0);
+
+// ── renderTeams in SYNC MODE (#12c phase 6) — contentions + teamSync render ─
+let syncInspected = null;
+const syncCtx = {
+  fetchLanes: async () => ({ catalog: { lanes: [{ id: 'harness', scope: 'maddu/' }] } }),
+  fetchProjection: async () => ({
+    claims: [{ lane: 'harness', sessionId: 's1', focus: 'refactor', claimedAt: '2026-01-01T00:00:00Z' }],
+    sliceStops: [],
+    activeSessions: [{ id: 's1', label: 'Claude A' }, { id: 's2', label: 'Claude B' }],
+    contentions: [{
+      lane: 'harness',
+      holder: { sessionId: 's1', focus: 'refactor', claimedAt: '2026-01-01T00:00:00Z' },
+      superseded: [{ sessionId: 's2', focus: 'same lane', claimedAt: '2026-01-01T00:00:05Z' }],
+    }],
+    teamSync: { replicaId: 'rep_local', partitions: ['rep_local', 'rep_remote'] },
+  }),
+  openInspector: (entity) => { syncInspected = entity; },
+  paletteFocus: () => null,
+  focusPanelByKeyword: () => {},
+};
+const syncRoot = m.renderTeams(syncCtx);
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+
+const syncCards = findByClass(syncRoot, 'team-lane-card');
+ok('sync: renders the lane card', syncCards.length === 1, `${syncCards.length} card(s)`);
+const contendedPills = findByClass(syncRoot, 'pill').filter((p) => (p.children[0] && p.children[0].text) === 'contended');
+ok('sync: lane card carries a contended pill', contendedPills.length === 1, `${contendedPills.length} pill(s)`);
+const contentionLines = findByClass(syncRoot, 'team-lane-contention');
+ok('sync: card shows the superseded session', contentionLines.length === 1
+  && JSON.stringify(contentionLines[0]).includes('Claude B'));
+const syncPanels = findByClass(syncRoot, 'team-sync');
+ok('sync: team-sync panel renders', syncPanels.length === 1, `${syncPanels.length} panel(s)`);
+const replicaRows = findByClass(syncRoot, 'team-sync-replica');
+ok('sync: both partitions listed', replicaRows.length === 2, `${replicaRows.length} row(s)`);
+ok('sync: this-checkout vs foreign marked', replicaRows.length === 2
+  && JSON.stringify(replicaRows[0]).includes('this checkout')
+  && JSON.stringify(replicaRows[1]).includes('foreign'));
+const contentionRows = findByClass(syncRoot, 'team-sync-contention');
+ok('sync: contention row names holder + superseded', contentionRows.length === 1
+  && JSON.stringify(contentionRows[0]).includes('Claude A')
+  && JSON.stringify(contentionRows[0]).includes('Claude B'));
+if (syncCards.length && (syncCards[0]._l.click || []).length) {
+  syncCards[0]._l.click[0]();
+  ok('sync: inspector evidence carries the contention', !!syncInspected
+    && syncInspected.evidence.some((e) => e.label === 'Contended' && String(e.value).includes('s2')),
+    syncInspected ? JSON.stringify(syncInspected.evidence.map((e) => e.label)) : 'not called');
+}
+
+// ── renderTeams robustness (#12c phase 6) — partial records must not throw ──
+// A contention lacking holder/superseded (older or foreign bridge) renders
+// what's there; a synced repo with an EMPTY lane catalog still shows the panel.
+{
+  let threw = false;
+  const partialCtx = {
+    fetchLanes: async () => ({ catalog: { lanes: [{ id: 'harness', scope: 'maddu/' }] } }),
+    fetchProjection: async () => ({
+      claims: [], sliceStops: [], activeSessions: [],
+      contentions: [{ lane: 'harness' }], // no holder, no superseded
+    }),
+    openInspector: () => {},
+    paletteFocus: () => null,
+    focusPanelByKeyword: () => {},
+  };
+  const onRej = () => { threw = true; };
+  process.on('unhandledRejection', onRej);
+  const partialRoot = m.renderTeams(partialCtx);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  process.off('unhandledRejection', onRej);
+  ok('partial contention: render does not throw', threw === false);
+  const pRows = findByClass(partialRoot, 'team-sync-contention');
+  ok('partial contention: row renders with (unknown) holder', pRows.length === 1
+    && JSON.stringify(pRows[0]).includes('(unknown)'));
+  const pCards = findByClass(partialRoot, 'team-lane-card');
+  if (pCards.length && (pCards[0]._l.click || []).length) {
+    let clickThrew = false;
+    try { pCards[0]._l.click[0](); } catch { clickThrew = true; }
+    ok('partial contention: card click does not throw', clickThrew === false);
+  }
+}
+{
+  const emptyCatCtx = {
+    fetchLanes: async () => ({ catalog: { lanes: [] } }),
+    fetchProjection: async () => ({
+      claims: [], sliceStops: [], activeSessions: [],
+      contentions: [],
+      teamSync: { replicaId: 'rep_x', partitions: ['rep_x'] },
+    }),
+    openInspector: () => {},
+    paletteFocus: () => null,
+    focusPanelByKeyword: () => {},
+  };
+  const emptyCatRoot = m.renderTeams(emptyCatCtx);
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  ok('empty catalog + sync mode: team-sync panel still renders',
+    findByClass(emptyCatRoot, 'team-sync').length === 1);
+}
 
 // ── renderWorkflows — SVG node opens the Inspector via ctx.openInspector ────
 let wfInspected = null;

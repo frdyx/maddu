@@ -388,11 +388,14 @@ $ maddu schedule remove <id>
 
 ## `maddu spine`
 
-Verify integrity of the append-only event spine, or look up a single event by id. Read-only — never mutates `.maddu/events/`.
+Verify integrity of the append-only event spine, look up a single event by id, or (opt-in) share the spine with teammates through the repo's git remote.
 
 ```bash
 $ maddu spine verify [--json]
 $ maddu spine show <eventId>
+$ maddu spine sync init [--json]    # opt into git-native team sync (one-time per checkout)
+$ maddu spine sync [--json]         # audited round-trip: commit own segments → pull → validate → push
+$ maddu spine import [--json]       # validate git-synced partitions (read-only)
 ```
 
 `verify` walks every segment under `.maddu/events/` and runs the checks described in the *Verifiable, not just declared* paragraph of [hard-rules.md](hard-rules.md) — parseability, envelope shape, event-id uniqueness, id-format (with exemptions for well-known fixed-suffix events like `evt_…_init00`), timestamp monotonicity within each segment, schema-version consistency, segment continuity, and referential integrity (orphan `APPROVAL_DECIDED`, never-claimed or duplicate `LANE_RELEASED`, unknown-session `SESSION_CLOSED`, etc.).
@@ -404,6 +407,8 @@ Exit code: `0` on a clean run or WARN-only run; `1` if any FAIL. `--json` emits 
 `maddu doctor` calls into the verifier on every run, up to a 50k-event cap (configurable in the verifier's `maxEvents` option). Above the cap, doctor emits a `WARN` pointing at `maddu spine verify` for the full pass — keeps doctor fast on long-running repos without dropping the check entirely.
 
 The verifier is strictly read-only. If it flags an issue, the operator decides remediation (manual edit + slice-stop, `maddu checkpoint rollback`, etc.). There is no `maddu spine repair` — and won't be, by design.
+
+`sync init` *(#12c)* opts this checkout into git-native team sync: secret-gate scan, mint a replicaId, migrate the flat segments into `.maddu/events/by-replica/<replicaId>/`, write the (never-committed) `.maddu/config/replica.json`, template `.gitignore`/`.gitattributes` marker blocks. `sync` runs the audited round-trip — commit own partition segments (explicit pathspec) → pull → `import`-validate → push (explicit refspec, pre-push path+content audit refuses any non-sync-owned commit). `import` is the read-only validator over every partition after a pull: chain forks, structural damage, within-partition duplicate ids, and secret hits are fatal; cross-partition id collisions and quarantined torn lines are tolerated and reported. All three exit `0` on ok, `1` on refusal (`2` when the subcommand itself is malformed or the install predates team-sync); `--json` emits the machine report. See [49-team-sync.md](49-team-sync.md) for the model, the audit, and the failure vocabulary.
 
 ## `maddu search`
 

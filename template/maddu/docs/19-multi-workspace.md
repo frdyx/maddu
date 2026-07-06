@@ -7,6 +7,10 @@ machine-wide service that mounts N repos via a device-bound registry.
 Each repo's `.maddu/` remains the sole source of truth for that repo —
 the registry is just a pointer file on your machine.
 
+*(This page is about many repos on **one machine**. For the converse — one
+repo's spine shared across **many machines/teammates** — see
+[49-team-sync.md](49-team-sync.md).)*
+
 ## Mental model
 
 - **Per-repo spine is still authoritative.** Every `.maddu/events/*.ndjson`

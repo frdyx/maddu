@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { findRepoRoot, pathsFor } from './lib/paths.mjs';
 import { ensureSpine, append, readAll, readSince, EVENT_TYPES } from './lib/spine.mjs';
+import { readActiveReplicaId, listPartitionIds } from './lib/spine-append-core.mjs';
 import { project } from './lib/projections.mjs';
 import { runJanitor } from './lib/janitor.mjs';
 import { buildAgentContext, renderAgentContextText } from './lib/agent-context.mjs';
@@ -736,6 +737,19 @@ async function handleBridge(req, res, url, ctx) {
 
   // ── projection ────────────────────────────────────────────────────────
   if (path === '/bridge/projection' && req.method === 'GET') {
+    // Team-sync surfacing (#12c phase 6): in sync mode, decorate the payload
+    // with this checkout's replicaId + the partition ids on disk so the
+    // cockpit can render foreign replicas alongside proj.contentions.
+    // Read-only (never touches the spine); in default single-machine mode
+    // the field is ABSENT entirely — the payload stays byte-identical.
+    const withTeamSync = async (proj) => {
+      try {
+        const replicaId = await readActiveReplicaId(repoRoot);
+        if (!replicaId) return proj;
+        const partitions = await listPartitionIds(repoRoot);
+        return { ...proj, teamSync: { replicaId, partitions } };
+      } catch { return proj; }
+    };
     // v0.17 Phase 5: inline stale-session janitor. Runs before the read
     // so freshly-emitted SESSION_STALE_DETECTED / SESSION_AUTO_CLOSED
     // events make it into the projection we return. The janitor is
@@ -757,13 +771,13 @@ async function handleBridge(req, res, url, ctx) {
         // Force a re-projection so the response includes the events
         // we just appended.
         const proj = await project(repoRoot);
-        return sendJson(res, 200, proj);
+        return sendJson(res, 200, await withTeamSync(proj));
       }
-      return sendJson(res, 200, preProj);
+      return sendJson(res, 200, await withTeamSync(preProj));
     } catch (err) {
       console.error('janitor tick failed:', err.message);
       const proj = await project(repoRoot);
-      return sendJson(res, 200, proj);
+      return sendJson(res, 200, await withTeamSync(proj));
     }
   }
 

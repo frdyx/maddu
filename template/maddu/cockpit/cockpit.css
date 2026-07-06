@@ -2688,8 +2688,23 @@ input[type="radio"] {
 .team-lane-holder { font-size: 12px; color: var(--m-fg-0); }
 .team-lane-last { font-size: 11px; }
 .team-lane-policy { font-size: 10px; }
+.team-lane-contention { font-size: 12px; color: var(--m-fg-0); }
 
 .pill.tone-fg-3 { background: transparent; border: 1px solid var(--m-bg-3); color: var(--m-fg-3); }
+.pill.tone-warn { background: rgba(255, 184, 0, 0.08); border: 1px solid rgba(255, 184, 0, 0.36); color: var(--m-warn); }
+
+/* ─── Team sync (#12c phase 6) — replicas × contentions panel on Teams ── */
+.team-sync { display: flex; flex-direction: column; gap: 12px; }
+.team-sync-replicas, .team-sync-contentions { display: flex; flex-direction: column; gap: 6px; }
+.team-sync-replica, .team-sync-contention {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--m-bg-2);
+  border-radius: 8px;
+  background: var(--m-bg-1);
+  font-size: 12px;
+}
+.team-sync-contention { border-left: 2px solid var(--m-warn); }
 
 /* ─── Task #13 — Native select brand pass ──────────────────────────────
    Applies to every <select> in the cockpit. Trigger gets appearance:none

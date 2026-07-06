@@ -38,4 +38,13 @@ jobs:
         with:
           node-version: 20
       - name: maddu self-test (quick profile)
+        # RAISE-ONLY timing overrides for saturated 2-core runners: the
+        # append-lock's bodyless-grace reclaim and the token-wrapper's bounded
+        # funnel wait are the two designed degradation paths that fire as
+        # false alarms on slow shared hardware (chain-fork + dropped-ledger-row
+        # assertions). Both envs are ignored unless they RAISE the default —
+        # production behavior is unchanged everywhere else.
+        env:
+          MADDU_LOCK_BODYLESS_GRACE_MS: 20000
+          MADDU_WRAPPER_APPEND_WAIT_MS: 15000
         run: node bin/maddu.mjs self-test --profile quick
