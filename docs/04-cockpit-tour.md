@@ -166,6 +166,10 @@ Last-run timestamps for the stress harness and upgrade matrix. Each row carries 
 
 All v0.19.2 routes refresh on the bridge event stream with 400 ms debounce — same pattern as the Claims map.
 
+### `#experience` *(EXP)*
+
+The [experience ledger + evolve planner](50-experience-evolve.md), read-only. Two panels: **Experience ledger** — totals strip (events / steps / trajectories / signals / env steps), signal rollups by kind and attachment (trailing unattached gates called out, never dropped), the latest trajectories with **trajectory-level signals surfaced inline** as badges, and recent signal-bearing steps — every trajectory and step row opens in the Inspector with its signal sources linked as related events. **Evolve planner** — the recommend-only plan: recommendation cards with category / detector / confidence / evidence count and the `maddu evolve adopt <recId>` hint, or the honest no-op rendered as a first-class result with its full "why", plus the scanned counters. Reads `GET /bridge/experience` (one fetch feeds both panels); renders nothing it cannot shape-validate; adoption stays a CLI verb — the cockpit never writes.
+
 ## Common operator flows
 
 - **Triage a new approval.** Stuck banner or badge → click Approvals → decide → return to whatever route you were on.

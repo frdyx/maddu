@@ -342,6 +342,25 @@ Recent `SLICE_REVIEWED` events, optionally filtered by verdict. Includes `openFo
 }
 ```
 
+### `GET /bridge/experience`
+
+The experience ledger + recommend-only evolve plan (EXP) — pure read-time derivation over the spine, zero writes, nothing minted. Steps are not shipped (the full step list is a CLI/export concern); the cockpit gets the trajectory manifest (which carries trajectory-level signals), stats, the last 20 signal-bearing steps, and the evolve plan trimmed to card fields.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "stats": { "eventCount": N, "stepCount": N, "trajectoryCount": N, "signalCount": N,
+             "signalsByKind": { … }, "signalsByAttachment": { … },
+             "unattachedTrailingGates": N, "absentByDesign": [ "model-output", … ] },
+  "trajectories": [ { "trajectoryId": "ses_…", "label": "…", "role": "…", "status": "open",
+                      "steps": N, "signals": N, "lanes": [ "…" ],
+                      "trajectorySignals": [ { "signalId": "evt_…", "kind": "learn-scan", "verdict": "…", "attachedBy": "trajectory-scope", "sourceEventId": "evt_…" } ] } ],
+  "recentSignalSteps": [ { "stepId": "evt_…", "trajectoryId": "…", "kind": "slice-stop", "signals": [ … ] } ],
+  "evolve": { "noOp": true, "scanned": { … },
+              "recommendations": [ { "recId": "…", "detector": "…", "category": "…", "summary": "…", "confidence": 1, "why": "…", "draft": null, "evidenceCount": N } ] }
+}
+```
+
 ## Auth and CORS
 
 - **Auth tokens.** None required in v0.3 — the bridge binds to `127.0.0.1` only and trusts the local OS. Adding token-based auth is on the roadmap for v0.4.
