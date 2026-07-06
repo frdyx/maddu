@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **in line** — one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay — instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.95.0](https://img.shields.io/badge/version-1.95.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.96.0](https://img.shields.io/badge/version-1.96.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -100,7 +100,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.95.0 installed.
+Máddu v1.96.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
