@@ -35,6 +35,8 @@ import { counts as importsCounts } from './lib/imports.mjs';
 import { check as enforcerCheck, ENFORCER_RULES } from './lib/enforcer.mjs';
 import { appendSliceStop as wikiAppend, listWiki, readPage as wikiRead, computeDrift as wikiDrift, rebuildWiki } from './lib/wiki.mjs';
 import { discoverPlugins } from './lib/plugins.mjs';
+import { deriveExperience } from './lib/experience.mjs';
+import { planEvolution } from './lib/evolve.mjs';
 import { readRegistry, writeRegistry, activateWorkspace, registryExists, registryPath } from './lib/workspaces.mjs';
 // Pure HTTP transport plumbing (response writers, loopback parsing, body reader,
 // static serving) — the first slice of decomposing this file. Bridge state never
@@ -397,6 +399,36 @@ async function handleBridge(req, res, url, ctx) {
       goal: proj.goal ? { objective: proj.goal.objective } : null,
       focus: proj.focus || { lastTag: null, window: [], openFlag: null, updatedAt: null },
       turns,
+    });
+  }
+  // Experience ledger + evolve planner (EXP phase 6) — pure READ-TIME
+  // derivations over the spine (deriveExperience / planEvolution), zero
+  // writes, nothing minted. Steps are NOT shipped (the full step list is a
+  // CLI/export concern); the cockpit gets the trajectory manifest — which
+  // carries trajectory-level signals — stats, recent signal-bearing steps,
+  // and the recommend-only evolve plan (adoption stays an operator CLI verb).
+  if (path === '/bridge/experience' && req.method === 'GET') {
+    const events = await readAll(repoRoot);
+    const exp = deriveExperience(events);
+    const plan = planEvolution(events);
+    const recentSignalSteps = exp.steps
+      .filter((s) => Array.isArray(s.signals) && s.signals.length)
+      .slice(-20)
+      .map((s) => ({ stepId: s.stepId, trajectoryId: s.trajectoryId, kind: s.kind, role: s.role, ts: s.ts ?? null, signals: s.signals }));
+    return sendJson(res, 200, {
+      schemaVersion: exp.schemaVersion,
+      stats: exp.stats,
+      trajectories: exp.trajectories,
+      recentSignalSteps,
+      evolve: {
+        noOp: plan.noOp,
+        scanned: plan.scanned,
+        recommendations: (plan.recommendations || []).map((r) => ({
+          recId: r.recId, detector: r.detector, category: r.category,
+          summary: r.summary, confidence: r.confidence, why: r.why || null,
+          draft: r.draft || null, evidenceCount: Array.isArray(r.evidence) ? r.evidence.length : 0,
+        })),
+      },
     });
   }
   // Plugins discovered for this workspace — the cockpit gates plugin-owned

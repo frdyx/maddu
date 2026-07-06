@@ -835,6 +835,8 @@ $ maddu learn retrieve <briefingId>  # full original of a curated (reversible) b
 $ maddu learn scan                   # read-only: hedged completion claims w/o observed proof
 $ maddu learn sync                   # fleet lesson federation (preview; --adopt writes)
 $ maddu learn sync --from-claude-memory [--adopt]  # import Claude Code auto-memory (v1.90.0)
+$ maddu learn run --spine            # ALSO mine the spine: TOOL_REFUSED→COMPLETED +
+$ maddu learn digest --spine         #   GATE_RAN fail→ok arcs, id-deduped into the digest (EXP)
 ```
 
 `run` mines deterministically, then spawns the configured runtime **CLI** as a
@@ -938,6 +940,46 @@ a rung change, deduped against the spine itself. Relax recommendations are
 live recommendation also surfaces in `maddu orient`, `maddu governance show`,
 and the cockpit. Thresholds: `.maddu/config/autonomy.json` (hashed onto every
 event as `configHash`). Full guide: [47-earned-autonomy.md](47-earned-autonomy.md).
+
+## Experience & evolution *(EXP)*
+
+### `maddu experience`
+
+The spine as a normalized **experience ledger** — session trajectories of
+typed steps with late-bound outcome signals. Pure read-time derivation: zero
+writes, step ids ARE event ids, deterministic for identical spines.
+
+```bash
+$ maddu experience                 # trajectory manifest (one row per session + env)
+$ maddu experience show <id>       # one trajectory's steps (--lane <id>, --limit <n>)
+$ maddu experience stats           # totals, role/kind counts, signals, absent-by-design axes
+$ maddu experience export --format atdp --out exp.atdp.json [--since <id>] [--until <id>]
+```
+
+`export` is the **governed sharing boundary**: refuse-on-hit secret gate over
+the selected range (**no flag to skip it** — unknown flags are hard errors),
+`--out` confined to the repo on the realpath basis (never `.maddu/`, `maddu/`,
+`maddu.json`, never over an existing non-ATDP file), deterministic bytes with
+no clock — `--until <manifest.range.lastEventId>` reproduces a past export
+byte-for-byte — and `trainingEligibility: false` hard on the manifest.
+
+### `maddu evolve`
+
+The **recommend-only** evolution planner over the experience ledger. Four
+deterministic detectors (tool-correction, gate-flap, recurring-learning,
+uncorrected-gate), evidence thresholds (≥3 occurrences across ≥2 scopes),
+prior-art dedup against adopted corrections, content-addressed rec ids. Thin
+evidence → the honest **no-op**, stated with its full why.
+
+```bash
+$ maddu evolve plan                          # detectors → recommendations (or the no-op)
+$ maddu evolve adopt <recId>                 # operator-gated; EXISTING write paths only
+$ maddu evolve adopt <recId> --to memory     # correction-class → memory fact
+$ maddu evolve adopt <recId> --to agent-file # correction-class → CLAUDE.md marker block
+```
+
+Nothing auto-applies — the earned-autonomy precedent governs (compute,
+recommend, stop). Full guide: [50-experience-evolve.md](50-experience-evolve.md).
 
 ## Slash commands (v0.18, expanded v0.19.1)
 

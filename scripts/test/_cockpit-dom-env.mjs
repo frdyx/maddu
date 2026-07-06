@@ -206,6 +206,68 @@ const CANNED = {
       { id: 'evt_ft5', ts: FIXED_TS, tag: 'away', distanceScore: 0.91, signals: { focusText: 'stripe webhook retry', overlap: 0.09, churn: 4 }, sourceEventId: 'evt_ss1' },
     ],
   },
+  '/bridge/experience': {
+    schemaVersion: 1,
+    stats: {
+      schemaVersion: 1, eventCount: 42, stepCount: 30, trajectoryCount: 2, envStepCount: 3,
+      byRole: { action: 12, outcome: 8, observation: 9, signal: 1 },
+      byKind: { tool: 10, gate: 8, 'slice-stop': 6, other: 6 },
+      unmappedTypes: {},
+      signalCount: 5,
+      signalsByKind: { gate: 3, review: 1, 'learn-scan': 1 },
+      signalsByAttachment: { 'gate-window': 3, 'explicit-ref': 1, 'trajectory-scope': 1 },
+      unattachedTrailingGates: 1,
+      absentByDesign: ['model-output', 'prompt-text', 'token-observations', 'environment-snapshots', 'reward'],
+    },
+    trajectories: [
+      {
+        trajectoryId: 'ses_fixture01', label: 'Claude Code — cockpit fixtures', role: 'implementer',
+        openedAt: FIXED_TS, closedAt: null, status: 'open',
+        steps: 18, stepsByRole: { action: 8, outcome: 6, observation: 4 }, lanes: ['cockpit'],
+        firstTs: FIXED_TS, lastTs: FIXED_TS, signals: 4,
+        trajectorySignals: [
+          { signalId: 'evt_ls01', kind: 'learn-scan', verdict: 'clean', attachedBy: 'trajectory-scope', sourceEventId: 'evt_ss1' },
+        ],
+      },
+      {
+        trajectoryId: 'ses_fixture02', label: 'Codex — review pass', role: 'reviewer',
+        openedAt: FIXED_TS, closedAt: FIXED_TS, status: 'closed',
+        steps: 9, stepsByRole: { action: 4, outcome: 3, observation: 2 }, lanes: ['review'],
+        firstTs: FIXED_TS, lastTs: FIXED_TS, signals: 1,
+        trajectorySignals: [],
+      },
+    ],
+    recentSignalSteps: [
+      {
+        stepId: 'evt_ss1', trajectoryId: 'ses_fixture01', kind: 'slice-stop', role: 'observation', ts: FIXED_TS,
+        signals: [
+          { signalId: 'evt_g01', kind: 'gate', verdict: 'pass', attachedBy: 'gate-window', sourceEventId: 'evt_g01' },
+          { signalId: 'evt_rv1', kind: 'review', verdict: 'CLEAN', attachedBy: 'explicit-ref', sourceEventId: 'evt_rv1' },
+        ],
+      },
+    ],
+    evolve: {
+      noOp: true,
+      scanned: {
+        events: 42, steps: 30, trajectories: 2, priorCorrections: 10,
+        thresholds: { minOccurrences: 3, minScopes: 2 },
+        detectors: {
+          'tool-correction': { refusalCompletionPairs: 0 },
+          'gate-flap': { failOkArcs: 2 },
+          'recurring-learning': { recurringLearnings: 0 },
+          'uncorrected-gate': { gatesWithFails: 1 },
+        },
+      },
+      recommendations: [
+        {
+          recId: 'rec_noop_fixture', detector: 'no-op', category: 'no-op',
+          summary: 'no recommendation clears the evidence thresholds — the honest output is: change nothing',
+          confidence: 1, why: 'Scanned 42 event(s) / 30 step(s): 0 refusal→completion pair(s), 2 gate fail→ok arc(s), 0 recurring learning(s), 1 gate(s) with failures — none reached ≥3 occurrences across ≥2 scopes.',
+          draft: null, evidenceCount: 0,
+        },
+      ],
+    },
+  },
 };
 
 function jsonResponse(body) {

@@ -76,6 +76,8 @@ export const ROUTE_META = {
                 keywords: 'model routing modelPreference runtime lane pipeline stage hint' },
   trust:      { title: 'Trust',      group: 'verify',   rank: 9,                 description: 'Supply-chain trust posture — pins, last audit, violations, MCP provenance, worker env policy, skill provenance distribution. (v1.2.0)',
                 keywords: 'trust supply chain audit pin freshness cve provenance secrets worker env' },
+  experience: { title: 'Experience', group: 'verify',   rank: 10,                description: 'Experience ledger + evolve planner — the spine as session trajectories of normalized steps with late-bound signals, and the recommend-only evolution plan (the honest no-op is a result). Read-time derivation, zero writes; adoption stays an operator CLI verb.',
+                keywords: 'experience ledger trajectory steps signals evolve plan adopt recommendation no-op atdp export learn spine verification' },
   teststatus: { title: 'Test Status', group: 'verify',   rank: 8,                 description: 'Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.',
                 keywords: 'test status stress harness upgrade matrix roundtrip ci recent',
                 // v1.0.3 — framework-source-only. The scripts under
