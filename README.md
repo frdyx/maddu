@@ -151,6 +151,7 @@ maddu orient                   # goal progress verified by real commands, not vi
 ```
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17","clusterBkg":"#050B17","clusterBorder":"#3A5470","titleColor":"#E8E6E3"}}}%%
 flowchart LR
     subgraph CLAIM["What the agent says"]
         A["✅ done — tests pass,<br/>secret rotated"]
@@ -160,6 +161,12 @@ flowchart LR
     end
     CLAIM -.->|"take it on faith"| X["😬"]
     RECORD -->|"maddu ci / learn scan / orient"| V["verified ✓ or caught ✗"]
+    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
+    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
+    classDef bad fill:#081426,stroke:#FF5E7A,color:#FF5E7A
+    class B spine
+    class V good
+    class X bad
 ```
 
 Every completion claim is joined against *observed* evidence — real gate passes, verified deliverables, actual diffs. A model checking a model is a second opinion; **this is evidence.**
@@ -176,12 +183,19 @@ maddu orient                                          # morning: the timeline, n
 ```
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
 flowchart LR
     Y["you:<br/>&quot;ship the login form&quot;"] --> P["pipeline<br/>orient → plan → slice →<br/>test → review → land"]
     P -->|"every stage = events"| S[("append-only<br/>spine")]
     S --> G["gates check<br/>each slice"]
     S --> M["morning review:<br/>maddu orient"]
     G --> M
+    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
+    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
+    classDef warn fill:#081426,stroke:#F2BD5C,color:#F2BD5C
+    class S spine
+    class G warn
+    class M good
 ```
 
 Overnight autonomous runs become reviewable: pre-compaction checkpoints mark what survived context loss, the focus instrument tags each turn toward/lateral/away from your declared goal, and the morning is a ten-minute skim of slice-stops with gate badges — not an archaeology dig.
@@ -197,6 +211,7 @@ maddu status                   # contentions surface BY NAME — never silent do
 ```
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17","clusterBkg":"#050B17","clusterBorder":"#3A5470","titleColor":"#E8E6E3"}}}%%
 flowchart LR
     subgraph A["checkout A"]
         SA["by-replica/A/*.ndjson<br/>(single writer)"]
@@ -208,6 +223,10 @@ flowchart LR
     SB <--> R
     R --> M["deterministic k-way<br/>merged read — same<br/>history on every machine"]
     M --> C["concurrent lane claims →<br/>named contentions"]
+    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
+    classDef warn fill:#081426,stroke:#F2BD5C,color:#F2BD5C
+    class R,M spine
+    class C warn
 ```
 
 Each checkout appends only to its own partition, so git never line-merges the record. Identity rides your remote's own access control. Concurrent claims on the same lane don't corrupt anything — the merged read surfaces them as **contentions** with the superseded sessions named.
@@ -223,6 +242,7 @@ maddu lane release payments --worktree merged   # explicit disposition — verif
 ```
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
 flowchart TB
     O["your orchestrator<br/>(Agent Teams · Conductor · scripts)"] --> W1["agent 1<br/>worktree: payments"]
     O --> W2["agent 2<br/>worktree: auth"]
@@ -231,6 +251,10 @@ flowchart TB
     W2 --> S
     W3 --> S
     S --> D["release needs a disposition:<br/>merged? verified. abandoned? recorded.<br/>nothing silently orphaned"]
+    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
+    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
+    class S spine
+    class D good
 ```
 
 One agent per lane is a hard rule, `--worktree` gives each its own checkout on its own branch, and `merged` disposition actually checks `git merge-base` — Máddu never runs your merge, it verifies you did. The dashboards vanish when the run ends; **the record survives it.**
@@ -244,6 +268,7 @@ One agent per lane is a hard rule, `--worktree` gives each its own checkout on i
 ```
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
 flowchart LR
     PR["agent's PR"] --> CI["maddu ci"]
     CI --> G1["✓ required gates green"]
@@ -251,6 +276,12 @@ flowchart LR
     CI --> G3["✓ completion claims<br/>match observed proof"]
     G1 & G2 & G3 --> OK["merge"]
     CI -->|"any required gate red"| NO["blocked — with the<br/>event id that says why"]
+    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
+    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
+    classDef bad fill:#081426,stroke:#FF5E7A,color:#FF5E7A
+    class CI spine
+    class OK good
+    class NO bad
 ```
 
 You pin which gates are required (`maddu ci pin`), so framework upgrades can never turn your pipeline red without your opt-in. Same exit code drives GitHub Actions, GitLab, or a fully-offline git pre-push hook.
@@ -267,6 +298,7 @@ maddu export --otel                   # or: OpenTelemetry logs into the stack yo
 ```
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"IBM Plex Sans, Segoe UI, sans-serif","mainBkg":"#081426","nodeBorder":"#3A5470","lineColor":"#3A5470","textColor":"#E8E6E3","primaryTextColor":"#E8E6E3","edgeLabelBackground":"#050B17"}}}%%
 flowchart LR
     S[("spine")] --> E["experience ledger<br/>trajectories · steps · signals"]
     E --> GATE{"🔒 secret gate<br/>refuse-on-hit<br/><b>no skip flag exists</b>"}
@@ -274,6 +306,14 @@ flowchart LR
     GATE -->|"hit"| REF["refused — offending<br/>event ids named"]
     ART -->|"operator judgment,<br/>never a default"| T["your curation /<br/>fine-tuning pipeline"]
     S --> OTEL["OTel logs →<br/>existing observability"]
+    classDef spine fill:#081426,stroke:#56B8FF,color:#E8E6E3
+    classDef good fill:#081426,stroke:#D0FF00,color:#D0FF00
+    classDef warn fill:#081426,stroke:#F2BD5C,color:#F2BD5C
+    classDef bad fill:#081426,stroke:#FF5E7A,color:#FF5E7A
+    class S,OTEL spine
+    class GATE warn
+    class ART good
+    class REF bad
 ```
 
 The export is deterministic (byte-identical re-runs — that *is* the audit trail), refuses outright on any secret-shaped value with **no flag to override**, and ships `trainingEligibility: false` until *you* — not a regex — judge the data. It's the honest on-ramp into trajectory-curation pipelines, not a dataset grab. And if regulation is on your radar: record-keeping regimes like the EU AI Act (Art. 12) push toward automatic, reconstructable logs of AI-assisted decisions — an append-only record you own and retain locally is a building block for that traceability, not a compliance product.
