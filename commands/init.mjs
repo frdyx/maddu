@@ -265,24 +265,14 @@ export default async function init(argv) {
     console.error(`  (agent-file sync skipped: ${err.message})`);
   }
 
-  // v1.1.0 Phase 8b — seed starter skills into .maddu/skills/. Idempotent.
+  // v1.1.0 Phase 8b — seed starter skills into .maddu/skills/. Idempotent;
+  // single-sourced with upgrade via _config-seed.mjs (the 2026-07-07 template
+  // audit found upgrade never backfilled these — same drift class the config
+  // defaults had before v1.11.0).
   try {
-    const { readdir, copyFile } = await import('node:fs/promises');
-    const starterSrc = join(FRAMEWORK_ROOT, 'template', 'maddu', 'skills', 'starter');
-    const targetDir = join(cwd, '.maddu', 'skills');
-    await mkdir(targetDir, { recursive: true });
-    let entries = [];
-    try { entries = await readdir(starterSrc, { withFileTypes: true }); } catch {}
-    let seeded = 0;
-    for (const e of entries) {
-      if (!e.isFile() || !e.name.endsWith('.md')) continue;
-      const dest = join(targetDir, e.name);
-      if (!(await exists(dest))) {
-        await copyFile(join(starterSrc, e.name), dest);
-        seeded += 1;
-      }
-    }
-    if (seeded > 0) console.log(`  starter skills seeded (${seeded} skill${seeded === 1 ? '' : 's'})`);
+    const { seedStarterSkills } = await import('./_config-seed.mjs');
+    const { skillsSeeded } = await seedStarterSkills(cwd, { templateRoot: TEMPLATE_ROOT });
+    if (skillsSeeded.length > 0) console.log(`  starter skills seeded (${skillsSeeded.length} skill${skillsSeeded.length === 1 ? '' : 's'})`);
   } catch (err) {
     console.error(`  (starter skills skipped: ${err.message})`);
   }
