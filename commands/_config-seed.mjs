@@ -16,7 +16,7 @@
 // allowlist entries (add-missing) but never removes operator additions. An
 // operator-edited config file is never overwritten.
 
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, readdir, copyFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
@@ -148,4 +148,30 @@ export async function seedConfigDefaults(repoRoot, { templateRoot = null } = {})
   }
 
   return { triggersAdded, configsSeeded, pipelinesSeeded };
+}
+
+// Seed the starter skill pack (template/maddu/skills/starter/*.md) into
+// `.maddu/skills/`. Same v1.11.0 lesson as the config defaults above, learned
+// again in the 2026-07-07 template audit: init seeded these since v1.1.0 but
+// upgrade never did, so any repo installed pre-v1.1.0 (or whose .maddu predates
+// the pack) warned "8/8 starter skills missing" forever. Write-if-missing —
+// an operator-edited or deleted skill is never resurrected against a live
+// file, only a missing one. README.md is directory documentation, not a skill.
+export async function seedStarterSkills(repoRoot, { templateRoot = null } = {}) {
+  const seeded = [];
+  if (!templateRoot) return { skillsSeeded: seeded };
+  const starterSrc = join(templateRoot, 'maddu', 'skills', 'starter');
+  const targetDir = join(repoRoot, '.maddu', 'skills');
+  let entries = [];
+  try { entries = await readdir(starterSrc, { withFileTypes: true }); } catch { return { skillsSeeded: seeded }; }
+  await mkdir(targetDir, { recursive: true });
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.md')) continue;
+    if (e.name.toLowerCase() === 'readme.md') continue;
+    const dest = join(targetDir, e.name);
+    if (await exists(dest)) continue;
+    await copyFile(join(starterSrc, e.name), dest);
+    seeded.push(e.name.replace(/\.md$/, ''));
+  }
+  return { skillsSeeded: seeded };
 }

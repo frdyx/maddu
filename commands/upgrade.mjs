@@ -159,12 +159,17 @@ export default async function upgrade(argv) {
   // default-deny-secrets). Write-if-missing; triggers.json merges add-missing;
   // operator edits are never disturbed.
   try {
-    const { seedConfigDefaults } = await import('./_config-seed.mjs');
+    const { seedConfigDefaults, seedStarterSkills } = await import('./_config-seed.mjs');
     const seeded = await seedConfigDefaults(repoRoot, { templateRoot: TEMPLATE_ROOT });
+    // Starter skills got the same backfill treatment in the 2026-07-07 template
+    // audit: init seeded them since v1.1.0 but upgrade never did, so pre-v1.1.0
+    // installs warned "starter skills missing" forever. Write-if-missing.
+    const { skillsSeeded } = await seedStarterSkills(repoRoot, { templateRoot: TEMPLATE_ROOT });
     const parts = [];
     if (seeded.triggersAdded.length) parts.push(`triggers +${seeded.triggersAdded.length}`);
     if (seeded.configsSeeded.length) parts.push(`config ${seeded.configsSeeded.join('/')}`);
     if (seeded.pipelinesSeeded.length) parts.push(`pipelines ${seeded.pipelinesSeeded.length}`);
+    if (skillsSeeded.length) parts.push(`starter skills +${skillsSeeded.length}`);
     if (parts.length) console.log(`  config defaults backfilled: ${parts.join(', ')}`);
   } catch (err) {
     console.error(`  (config defaults backfill skipped: ${err.message})`);
