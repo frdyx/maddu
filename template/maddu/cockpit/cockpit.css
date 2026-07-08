@@ -105,10 +105,16 @@
   --m-space-6: 24px;
   --m-space-8: 32px;
   --m-space-10: 40px;
+  --m-space-12: 48px;
+  --m-space-16: 64px;
+  --m-space-20: 80px;
+  --m-space-24: 96px;
 
-  --m-radius-sm:   2px;
-  --m-radius:      4px;
-  --m-radius-lg:   8px;
+  /* Radii softened to the canonical Máddu navy-noir scale (Claude Design
+   * tokens.css): 4 / 8 / 16 — rounder cards, inputs, chips. Pill unchanged. */
+  --m-radius-sm:   4px;
+  --m-radius:      8px;
+  --m-radius-lg:   16px;
   --m-radius-pill: 999px;
 
   /* ─── TYPOGRAPHY ───────────────────────────────────────────────────────
@@ -133,6 +139,72 @@
   --m-rail-w: 240px;     /* bumped from 220 toward OMC's 268; gives nav labels more air */
   --m-foot-h: 36px;
   --m-head-h: 56px;
+
+  /* ─── MOTION ───────────────────────────────────────────────────────────
+   * From the canonical navy-noir tokens — replaces the ad-hoc 120ms/.15s
+   * scattered through the chrome. Durations + shared easing curves. */
+  --m-dur-fast: 120ms;
+  --m-dur:      200ms;
+  --m-dur-slow: 320ms;
+  --m-ease:     cubic-bezier(.2, .6, .2, 1);
+  --m-ease-out: cubic-bezier(0, .6, .3, 1);
+  --m-ease-in:  cubic-bezier(.5, 0, 1, .5);
+
+  /* ─── Z-INDEX SCALE ────────────────────────────────────────────────────*/
+  --m-z-base: 0;
+  --m-z-raised: 1;
+  --m-z-nav: 100;
+  --m-z-dropdown: 200;
+  --m-z-overlay: 900;
+  --m-z-modal: 1000;
+  --m-z-toast: 1100;
+
+  /* ═══ CANONICAL DESIGN-SYSTEM TOKENS (--s-*) ═══════════════════════════
+   * The cockpit is the dark-noir face of the shared "Máddu navy-noir"
+   * design system (claude.ai/design · tokens.css). Its hand-built --m-*
+   * palette is the source of truth for the DARK theme; here we expose the
+   * canonical --s-* names as aliases onto it, so design-system component
+   * classes (.callout, .chip, .kpi, .btn variants, table.data, .progress,
+   * .spinner, .skeleton …) drop into the cockpit and theme correctly to the
+   * console's dark palette — no second palette, no drift. Components read
+   * --s-* semantic tokens only; never a hard-coded hex, radius, or font. */
+  --s-bg-0: var(--m-bg-0);          /* navy canvas / stage */
+  --s-bg-1: var(--m-bg-3);          /* DS "surface/card" → cockpit nested-card */
+  --s-bg-2: var(--m-bg-2);          /* DS "inset/section" → cockpit panel */
+  --s-fg-0: var(--m-fg-0);
+  --s-fg-1: var(--m-fg-1);
+  --s-fg-2: var(--m-fg-2);
+  --s-fg-3: var(--m-fg-3);
+  --s-primary:    var(--m-accent);      /* lime — the one loud interactive fill */
+  --s-on-primary: #06121F;              /* dark ink on lime (canonical) */
+  --s-accent:     var(--m-accent-2);    /* electric blue — halos, info, links */
+  --s-ok: var(--m-ok);         --s-ok-ink: var(--m-ok);
+  --s-warn: var(--m-warn);     --s-warn-ink: var(--m-warn);
+  --s-danger: var(--m-danger); --s-danger-ink: var(--m-danger);
+  --s-line: var(--m-line);
+  --s-line-soft: var(--m-line-soft);
+  --s-sh-sm: var(--m-shadow-sm);
+  --s-sh-md: var(--m-shadow-md);
+  --s-sh-lg: 0 20px 56px rgba(0, 0, 0, 0.65);
+  --s-halo:  var(--m-glow-accent-2);
+  --s-radius-sm: var(--m-radius-sm);
+  --s-radius:    var(--m-radius);
+  --s-radius-lg: var(--m-radius-lg);
+  --s-radius-pill: var(--m-radius-pill);
+  --s-space-1: var(--m-space-1);   --s-space-2: var(--m-space-2);
+  --s-space-3: var(--m-space-3);   --s-space-4: var(--m-space-4);
+  --s-space-5: var(--m-space-5);   --s-space-6: var(--m-space-6);
+  --s-space-8: var(--m-space-8);   --s-space-10: var(--m-space-10);
+  --s-space-12: var(--m-space-12); --s-space-16: var(--m-space-16);
+  --s-space-20: var(--m-space-20); --s-space-24: var(--m-space-24);
+  --s-font:  var(--m-font-sans);
+  --s-serif: var(--m-font-mono);
+  --s-dur-fast: var(--m-dur-fast); --s-dur: var(--m-dur); --s-dur-slow: var(--m-dur-slow);
+  --s-ease: var(--m-ease); --s-ease-out: var(--m-ease-out); --s-ease-in: var(--m-ease-in);
+  --s-z-base: var(--m-z-base); --s-z-raised: var(--m-z-raised); --s-z-nav: var(--m-z-nav);
+  --s-z-dropdown: var(--m-z-dropdown); --s-z-overlay: var(--m-z-overlay);
+  --s-z-modal: var(--m-z-modal); --s-z-toast: var(--m-z-toast);
+  --s-focus-ring: var(--m-accent);
 }
 
 * { box-sizing: border-box; }
@@ -221,16 +293,17 @@ button, .m-btn {
   color: var(--m-fg-0);
   background: var(--m-bg-2);
   border: 1px solid var(--m-bg-3);
-  border-radius: 4px;
+  border-radius: var(--m-radius);
   padding: 6px 12px;
   cursor: pointer;
   line-height: 1.4;
-  transition: border-color 120ms, color 120ms, background 120ms;
+  transition: border-color var(--m-dur-fast) var(--m-ease), color var(--m-dur-fast) var(--m-ease), background var(--m-dur-fast) var(--m-ease), box-shadow var(--m-dur-fast) var(--m-ease);
 }
 button:hover, .m-btn:hover {
   border-color: var(--m-accent);
   color: var(--m-accent);
   background: var(--m-bg-2);
+  box-shadow: var(--m-glow-accent);   /* R2: DS halo lift on hover */
 }
 button:focus-visible, .m-btn:focus-visible {
   outline: none;
@@ -793,6 +866,10 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   border: 1px solid var(--m-line);
   border-top-color: var(--m-accent-2);
   border-top-width: 1px;
+  /* R2 (DS surface): rounded + lifted — the canonical navy-noir .surface
+   * treatment, keeping the signature glow + electric-blue top hairline. */
+  border-radius: var(--m-radius-lg);
+  box-shadow: var(--m-shadow-sm);
   padding: var(--m-space-5);
   margin-bottom: var(--m-space-5);
 }
@@ -1069,9 +1146,15 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
 .event-type.t-approval   { color: var(--m-event-approval); }
 .event-type.t-doctor     { color: var(--m-event-doctor); }
 .event-type.t-inbox      { color: var(--m-event-inbox); }
-.event-lane { color: var(--m-accent); }
+.event-lane { color: var(--m-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-summary { color: var(--m-fg-1); }
 .event-actor { color: var(--m-fg-4); }
+/* Stream rows stay ONE line — a log, not a wall. The grid cells must be allowed
+ * to shrink (min-width:0) or a long slice-stop summary spills the column
+ * char-by-char (as in a narrow workbench pane). Full detail lives on the
+ * formatted detail views + the inspector. */
+.event-row > * { min-width: 0; }
+.event-row > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* approval cards */
 .approval {
@@ -2565,13 +2648,14 @@ input[type="radio"] {
 .workflow-legend-go { color: var(--m-accent-2); text-align: right; }
 
 /* Roadmap depth */
-.kpi-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.kpi-strip { display: flex; flex-wrap: wrap; gap: var(--m-space-2); }
 .kpi-tile {
   flex: 1 1 140px;
   padding: 10px 12px;
-  border: 1px solid var(--m-bg-2);
-  border-radius: 8px;
+  border: 1px solid var(--m-line);
+  border-radius: var(--m-radius);
   background: var(--m-bg-1);
+  box-shadow: var(--m-shadow-sm);   /* R2: DS surface lift, consistent with panels */
 }
 .kpi-tile.tone-accent { border-color: var(--m-accent); }
 .kpi-tile.tone-ok     { border-color: var(--m-ok); }
@@ -3589,3 +3673,108 @@ select option:hover,
   color: var(--m-fg-2);
   vertical-align: baseline;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Prose formatter (cockpit-prose.js) — turns Máddu's dense structured strings
+ * (slice-stops, handoff bodies, long summaries) into a scannable lead + labeled
+ * sections instead of a wall of text. Reads --s-*/--m-* tokens only.
+ * ════════════════════════════════════════════════════════════════════════ */
+.prose {
+  font-family: var(--m-font-mono); font-size: 12px; line-height: var(--m-line-body); color: var(--m-fg-1);
+  /* Never overflow horizontally — long unbroken tokens (paths, hashes, URLs,
+   * event ids) wrap instead of pushing the container wide. */
+  min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
+}
+.prose * { min-width: 0; }
+.prose-text, .prose-list li, .prose-para, .prose-lead { overflow-wrap: anywhere; word-break: break-word; }
+/* Grid content column must be allowed to shrink below its content width, or a
+ * long token in it forces the whole row to overflow. */
+.prose-sec > * { min-width: 0; }
+/* Lead — the slice's headline. Stronger than the body: accent hairline + heavier
+ * ink so it clearly separates the "what" from the labeled detail below. */
+.prose-lead {
+  color: var(--m-fg-0); font-family: var(--m-font-sans); font-size: 14px; font-weight: 600;
+  line-height: 1.35; margin-bottom: var(--m-space-2);
+  padding-left: var(--m-space-2); border-left: 2px solid var(--m-accent-2);
+}
+.prose-para {
+  margin: 0 0 var(--m-space-2); color: var(--m-fg-1);
+  font-family: var(--m-font-sans); font-size: 13px; line-height: var(--m-line-body);
+}
+.prose-para:last-child { margin-bottom: 0; }
+.prose-subhead {
+  color: var(--m-fg-0); font-family: var(--m-font-sans); font-size: 13px; font-weight: 600;
+  margin: var(--m-space-2) 0 var(--m-space-1); letter-spacing: -0.01em;
+}
+.prose-subhead:first-child { margin-top: 0; }
+.prose-bullet {
+  position: relative; padding-left: 14px; margin-bottom: 2px;
+  font-family: var(--m-font-sans); font-size: 13px; color: var(--m-fg-1); line-height: var(--m-line-body);
+}
+.prose-bullet::before { content: '•'; position: absolute; left: 2px; color: var(--m-accent-2); }
+.prose-code {
+  font-family: var(--m-font-mono); font-size: 11px; background: var(--m-bg-3);
+  border: 1px solid var(--m-line-soft); border-radius: var(--m-radius-sm); padding: 0 4px; color: var(--m-fg-0);
+}
+.prose-para strong, .prose-bullet strong, .prose-lead strong { color: var(--m-fg-0); font-weight: 600; }
+.prose-sections { display: flex; flex-direction: column; }
+.prose-sec {
+  display: grid; grid-template-columns: 58px 1fr; gap: var(--m-space-2);
+  align-items: baseline; padding: 2px 0; border-top: 1px solid var(--m-line-soft);
+}
+.prose-sec:first-child { border-top: 0; }
+.prose-key {
+  font-family: var(--m-font-mono); font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--m-fg-3); padding-top: 1px;
+}
+.prose-text { color: var(--m-fg-1); }
+.prose-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.prose-list li { position: relative; padding-left: 13px; color: var(--m-fg-1); }
+.prose-list li::before { content: '•'; position: absolute; left: 0; color: var(--m-accent-2); }
+/* Clause lines (a broken-up run-on Action/Reason) — no bullet dot, a quiet
+ * left rule instead, so the lines read as continuous prose, just wrapped. */
+.prose-clauses li { padding-left: 10px; }
+.prose-clauses li::before { content: ''; width: 2px; top: 3px; bottom: 3px; height: auto; background: var(--m-line); border-radius: 1px; }
+.prose-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.prose-chip {
+  font-family: var(--m-font-mono); font-size: 10px; color: var(--m-fg-2);
+  background: var(--m-bg-3); border: 1px solid var(--m-line-soft);
+  border-radius: var(--m-radius-pill); padding: 1px 8px; cursor: default;
+}
+.prose-chip:hover { color: var(--m-fg-0); border-color: var(--m-line); }
+.prose-extra { display: none; }
+.prose.prose-open .prose-extra { display: grid; }
+.prose-more {
+  margin-top: var(--m-space-1); font-family: var(--m-font-mono); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--m-accent-2);
+  background: transparent; border: 0; padding: 2px 0; cursor: pointer;
+}
+.prose-more:hover { color: var(--m-accent); box-shadow: none; background: transparent; }
+/* Recent slice-stops trail (goal view) — each item is a formatted prose block. */
+.slice-trail { display: flex; flex-direction: column; }
+.slice-trail-item { padding: 8px 0; border-top: 1px solid var(--m-line-soft); }
+.slice-trail-item:first-child { border-top: 0; }
+/* Overflow safety net — long unbroken tokens wrap instead of scrolling sideways.
+ * Use break-word (not anywhere) so it never shrinks a table's min-content and
+ * collapses a short label column; the aggressive `anywhere` stays scoped to
+ * .prose above. Keep ledger LABELS on one line. */
+.view .panel { overflow-wrap: break-word; }
+.view .panel table.ledger td { overflow-wrap: break-word; }
+.view .panel table.ledger td.event-actor { white-space: nowrap; word-break: normal; overflow-wrap: normal; padding-right: 12px; }
+/* Compact card asides that carry a full summary (team lane cards) clamp to one
+ * line — the full record is on the detail views + the inspector, not crammed here. */
+.team-lane-last { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* Compact CARD summaries (queue, backbone previews) clamp to a few lines so a
+ * verbose summary can't grow the card into a wall; full detail on click. */
+.queue-card-summary, .queue-card-detail, .proposal-summary {
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
+  -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+/* Inspector drawer — the universal detail surface. Never scroll sideways: long
+ * values + raw blocks wrap. */
+.inspector-body { overflow-wrap: anywhere; word-break: break-word; }
+.inspector-body pre, .inspector-body code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+/* Raw source-doc renders (Skills body, Wiki pages, other non-code <pre>) wrap
+ * instead of scrolling sideways. Code blocks (.md-code) keep their intentional
+ * horizontal scroll for source fidelity. */
+.view pre:not(.md-code) { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
