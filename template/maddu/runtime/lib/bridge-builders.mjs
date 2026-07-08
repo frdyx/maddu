@@ -484,6 +484,14 @@ function cleanDigestSummary(s) {
   return String(s || '—').replace(/\s+/g, ' ').replace(/^["'\s]+/, '').trim().slice(0, 120) || '—';
 }
 
+// Slice-stop text for surfaces that render it through the client prose formatter
+// (cockpit-prose.js): collapse whitespace but keep the full labeled structure
+// (Action:/Targets:/Gates:/Learnings:/Next:/Reason:) so it can be parsed into a
+// scannable lead + sections instead of a truncated clump. Capped generously.
+function cleanSliceText(s) {
+  return String(s || '—').replace(/\s+/g, ' ').replace(/^["'\s]+/, '').trim().slice(0, 800) || '—';
+}
+
 // A 2-sentence plain-language headline for the digest. Pure + exported so a
 // fixture can lock the copy. Sentence 1 = what happened in the window; sentence
 // 2 = what (if anything) needs the operator now.
@@ -519,7 +527,7 @@ export async function buildDigest(repoRoot, { sinceId = null } = {}) {
   // from returning an unbounded payload; `*Count` carries the true totals.
   const SLICE_CAP = 12, DRIFT_CAP = 8;
   const sliceRows = since.filter((e) => e.type === 'SLICE_STOP')
-    .map((e) => ({ ts: e.ts, lane: e.lane || null, summary: cleanDigestSummary(e.data?.summary), ageMs: ageMs(e.ts) }))
+    .map((e) => ({ ts: e.ts, lane: e.lane || null, summary: cleanSliceText(e.data?.summary), ageMs: ageMs(e.ts) }))
     .reverse();
   const driftRows = since.filter((e) => e.type === 'DRIFT_FLAGGED' && !e.data?.cleared)
     .map((e) => ({ ts: e.ts, reason: e.data?.reason || null, runs: typeof e.data?.runs === 'number' ? e.data.runs : null, ageMs: ageMs(e.ts) }))
@@ -619,7 +627,7 @@ export async function buildProjectCockpit(repoRoot) {
 
   // ── recent slice trail ──
   const recentSlices = (Array.isArray(proj.sliceStops) ? proj.sliceStops : []).slice(-6).reverse()
-    .map((s) => ({ summary: cleanDigestSummary(s.summary), lane: s.lane || null, ageMs: ageMs(s.ts) }));
+    .map((s) => ({ summary: cleanSliceText(s.summary), lane: s.lane || null, ageMs: ageMs(s.ts) }));
 
   return {
     project: basename(repoRoot),

@@ -13,6 +13,7 @@
 
 import { el, panel, placeholder, loading } from './cockpit-util.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
+import { renderProse } from './cockpit-prose.js';
 
 function eyebrow(text) {
   return el('div', { style: 'font-family:var(--m-font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--m-fg-3);margin:0 0 6px;' }, text);
@@ -140,9 +141,9 @@ export function renderProject(ctx) {
       mount.appendChild(el('div', { style: 'margin-top:16px;' }, [eyebrow('Recent slices')]));
       mount.appendChild(el('div', {}, slices.map((s) => {
         const age = humanAge(s && typeof s.ageMs === 'number' ? s.ageMs : null);
-        return el('div', { style: 'padding:5px 0;border-bottom:1px solid var(--m-line);' }, [
-          el('div', { style: 'font-size:13px;color:var(--m-fg-1);' }, (s && typeof s.summary === 'string') ? s.summary : '—'),
-          age ? el('div', {}, mono(age)) : null,
+        return el('div', { style: 'padding:8px 0;border-bottom:1px solid var(--m-line);' }, [
+          renderProse((s && typeof s.summary === 'string') ? s.summary : '—'),
+          age ? el('div', { style: 'margin-top:2px;' }, mono(age)) : null,
         ]);
       })));
     }

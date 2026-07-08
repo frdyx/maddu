@@ -14,6 +14,7 @@
 
 import { el, panel, placeholder, loading, showToast } from './cockpit-util.js';
 import { ROUTE_META } from './cockpit-route-meta.js';
+import { renderProse } from './cockpit-prose.js';
 
 export function renderGoal(ctx) {
   const root = el('div', { class: 'view' });
@@ -46,11 +47,13 @@ export function renderGoal(ctx) {
       mount.appendChild(cl);
     }
     mount.appendChild(el('h3', {}, '▶ Curated handoff'));
-    mount.appendChild(el('pre', {}, (data.handoff && data.handoff.body) ? data.handoff.body : '(none — set with: maddu handoff set "…")'));
+    mount.appendChild((data.handoff && data.handoff.body)
+      ? renderProse(data.handoff.body)
+      : el('p', { class: 'ink-3' }, '(none — set with: maddu handoff set "…")'));
     if (data.recentSliceStops && data.recentSliceStops.length) {
       mount.appendChild(el('h3', {}, 'Recent slice-stops'));
-      const tl = el('ul', {});
-      for (const t of data.recentSliceStops) tl.appendChild(el('li', {}, t.summary || '—'));
+      const tl = el('div', { class: 'slice-trail' });
+      for (const t of data.recentSliceStops) tl.appendChild(el('div', { class: 'slice-trail-item' }, renderProse(t.summary || '—')));
       mount.appendChild(tl);
     }
   })();

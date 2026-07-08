@@ -350,7 +350,7 @@ const CANNED = {
     },
     fleet: { total: 3, running: 1, stuck: 0, byStatus: { running: 1, exited: 2 }, active: [{ id: 'wrk_demo', lane: 'observability', status: 'running', ageMs: 30000 }] },
     steeredBy: [{ id: 'ses_demo', role: 'implementer', label: 'maddu', focus: 'operator plane p2', source: 'cli', sinceMs: 600000, beatMs: 45000 }],
-    recentSlices: [{ summary: 'SLICE STOP: project cockpit builder + route', lane: 'observability', ageMs: 120000 }],
+    recentSlices: [{ summary: 'SLICE STOP: project cockpit builder + route. Action: fused focus + success + fleet. Targets: bridge-builders.mjs, cockpit-views-project.js. Gates: Playwright 51, audit 16. Learnings: - type-narrow every field - cached success no spawn. Reason: harvest phase 2.', lane: 'observability', ageMs: 120000 }],
     lastEventId: 'evt_00000009',
   },
   '/bridge/_all/portfolio': {
@@ -370,7 +370,7 @@ const CANNED = {
     range: { sinceId: 'evt_00000001', lastEventId: 'evt_00000009', newEventCount: 12 },
     headline: 'While you were away: 2 slices landed, gates green. 1 approval needs you; goal 3/4 met.',
     sliceStops: [
-      { ts: FIXED_TS, lane: 'observability', summary: 'SLICE STOP: digest builder + bridge route', ageMs: 300000 },
+      { ts: FIXED_TS, lane: 'observability', summary: 'SLICE STOP: digest builder + bridge route. Action: added buildDigest + /bridge/digest. Targets: bridge-builders.mjs, server.js. Gates: self-test 144, audit 16. Learnings: - reused readSince - bridge reads cache. Next actions: - project cockpit. Reason: approved plan.', ageMs: 300000 },
       { ts: FIXED_TS, lane: 'cockpit-shell', summary: 'SLICE STOP: digest cockpit view', ageMs: 600000 },
     ],
     sliceStopCount: 2,
