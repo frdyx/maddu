@@ -53,7 +53,17 @@ globalThis.fetch = (url, init) => {
   return new Promise(() => {});
 };
 
-const m = await import('../../template/maddu/cockpit/cockpit-views-live.js');
+// The live cluster was split (v1.71.0 decomposition follow-up, 2026-07-08) from a
+// single cockpit-views-live.js into five nav-group modules. This fixture asserts
+// the whole cluster's interaction wiring, so it merges all five module namespaces
+// into one `m` — every render fn resolves from its owning module.
+const m = Object.assign({},
+  await import('../../template/maddu/cockpit/cockpit-views-live-operate.js'),
+  await import('../../template/maddu/cockpit/cockpit-views-live-verify.js'),
+  await import('../../template/maddu/cockpit/cockpit-views-live-reference.js'),
+  await import('../../template/maddu/cockpit/cockpit-views-live-decide-board.js'),
+  await import('../../template/maddu/cockpit/cockpit-views-live-decide-command.js'),
+);
 
 let passed = 0, failed = 0;
 function ok(name, cond, extra = '') {
