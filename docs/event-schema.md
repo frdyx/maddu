@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.1.0` · **Event types:** 173
+**Contract version:** `1.2.0` · **Event types:** 174
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (173)
+## Events (174)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -146,6 +146,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `ADVISOR_ARTIFACT_WRITTEN` | An advisor wrote its result artifact. | `advisorId: string`, `artifactPath: string`, `exitCode: number\|null`, `status: string` |
 | `TOKEN_USAGE_REPORTED` | Token usage for a session/model was reported to the ledger. | `cacheCreation: number\|null`, `cacheRead: number\|null`, `importHash: string`, `inputTokens: number\|null`, `model: string\|null`, `outputTokens: number\|null`, `runtime: string\|null`, `sessionId: string\|null`, `source: string`, `ts: string`, `unreportedTokens: boolean` |
 | `SKILL_INJECTED` | Skill bodies were auto-injected into an orientation digest. | `sessionId: string\|null`, `skillIds: array`, `tags: array`, `totalBytes: number`, `triggers: array` |
+| `SKILL_INJECTION_REFUSED` | A matching skill was withheld from injection for untrusted provenance. | `reason: string`, `refused: array`, `sessionId: string\|null` |
 | `TOOL_INVOKED` | A default framework tool invocation started. | `argv: array`, `mode: string`, `sessionId: string\|null`, `tool: string`, `lane: string\|null` |
 | `TOOL_COMPLETED` | A default framework tool invocation exited. | `argv: array`, `durationMs: number`, `exitCode: number\|null`, `sessionId: string\|null`, `tool: string`, `lane: string\|null` |
 | `TOOL_REFUSED` | A tool invocation was refused (allowlist or dangerous form). | `argv: array`, `argv_index: number`, `detail: string`, `pattern_type: string`, `reason: string`, `sessionId: string\|null`, `source: string`, `tool: string`, `lane: string\|null` |

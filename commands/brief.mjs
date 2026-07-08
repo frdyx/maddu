@@ -76,8 +76,34 @@ export default async function command(argv) {
     let injected = [];
     if (triggers.length || tags.length) {
       const skillsList = await loadSkillsForInjection(repoRoot);
-      const matched = agentCtxMod.matchSkillsForContext(skillsList, { triggers, tags });
-      injected = matched;
+      // Load-time trust enforcement (docs/34 scenario 5): a skill is injected
+      // only if it is trusted-provenance AND locally resident. A skill is
+      // withheld when its provenance is untrusted (imported without `maddu skill
+      // trust`, or no provenance) OR it points off-box without an
+      // `external_refs: allowed` acknowledgment (the URL-swap surface). Blocked
+      // skills are matched separately purely to witness the refusal on the
+      // spine — they never reach the agent's context, and they never consume an
+      // injection slot from an injectable skill.
+      const skillRefusalReason = (s) =>
+        !s.trusted ? 'untrusted-provenance'
+        : s.hasUnackedExternalRefs ? 'unacknowledged-external-refs'
+        : null;
+      const injectable = skillsList.filter((s) => !skillRefusalReason(s));
+      const blocked = skillsList.filter((s) => skillRefusalReason(s));
+      injected = agentCtxMod.matchSkillsForContext(injectable, { triggers, tags });
+      const refused = agentCtxMod.matchSkillsForContext(blocked, { triggers, tags });
+      if (refused.length > 0 && !flags['dry-run']) {
+        const refusedRows = refused.map((s) => ({ id: s.id, provenance: s.provenance, reason: skillRefusalReason(s) }));
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.SKILL_INJECTION_REFUSED,
+          actor: baseCtx.activeSession?.id || null,
+          data: {
+            sessionId: baseCtx.activeSession?.id || null,
+            reason: [...new Set(refusedRows.map((r) => r.reason))].join(','),
+            refused: refusedRows,
+          },
+        });
+      }
       if (injected.length > 0 && !flags['dry-run']) {
         const totalBytes = injected.reduce((n, s) => n + (s.body || '').length, 0);
         await spine.append(repoRoot, {
@@ -179,14 +205,20 @@ function parseCsv(v) {
 // Load the full skill set from .maddu/skills/, parsing frontmatter
 // triggers/tags. Returns [{ id, title, triggers, tags, body, updated, provenance }].
 //
-// v1.2.0 Phase 4 — skills without a `provenance` field are REFUSED for
-// auto-injection. Pre-v1.2 skills are grandfathered with
-// provenance: 'pre-v1.2-grandfathered' on first read so existing installs
-// keep working.
+// v1.2.0 Phase 4 — every skill carries a computed `trusted` flag from its
+// provenance (framework/operator/grandfathered = trusted; imported = trusted
+// only with `trusted: true`). The caller injects trusted skills and refuses the
+// rest (emitting SKILL_INJECTION_REFUSED); this loader just reports the flag.
+// Pre-v1.2 skills are grandfathered with provenance: 'pre-v1.2-grandfathered'
+// on first read so existing installs keep working.
 async function loadSkillsForInjection(repoRoot) {
   const skillsDir = path.join(repoRoot, '.maddu', 'skills');
   let entries;
   try { entries = await fs.readdir(skillsDir, { withFileTypes: true }); } catch { return []; }
+  // Shared external-reference detector (same lib the skill-no-external-refs gate
+  // uses, so audit-time and inject-time can't disagree). Absent → degrade to
+  // "no external-ref blocking" (the doctor gate still catches it on disk).
+  const skillRefs = await loadSkillRefs(repoRoot);
   const out = [];
   for (const ent of entries) {
     if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
@@ -208,10 +240,27 @@ async function loadSkillsForInjection(repoRoot) {
               || provenance === 'operator'
               || /^operator-trusted/.test(provenance)
               || (provenance === 'imported' && parsed.fm.trusted === true),
+        // URL-swap surface: a non-framework skill pointing off-box without an
+        // `external_refs: allowed` acknowledgment is refused injection.
+        hasUnackedExternalRefs: skillRefs?.skillHasUnacknowledgedExternalRefs
+          ? skillRefs.skillHasUnacknowledgedExternalRefs({ provenance, fm: parsed.fm, body: parsed.body })
+          : false,
       });
     } catch {}
   }
   return out;
+}
+
+async function loadSkillRefs(repoRoot) {
+  const candidates = [
+    path.join(repoRoot, 'maddu', 'runtime', 'lib', 'skill-refs.mjs'),
+    path.resolve(import.meta.dirname || path.dirname(new URL(import.meta.url).pathname),
+                 '..', 'template', 'maddu', 'runtime', 'lib', 'skill-refs.mjs'),
+  ];
+  for (const p of candidates) {
+    try { await fs.stat(p); return await import(pathToFileURL(p).href); } catch {}
+  }
+  return null;
 }
 
 // Minimal frontmatter parser. Mirrors lib/skills.mjs#parseSkill but kept

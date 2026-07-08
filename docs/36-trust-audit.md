@@ -74,6 +74,7 @@ emits.
 | `worker-env-policy-coherent` | critical | `worker-env.json` declares all required deny prefixes. |
 | `secret-scan-active` | critical | `secret-scan.mjs` exports `scanArgv`; `tools.mjs` calls it; the shared `runWrapper` calls `loadSecretScan`/`scanArgv` before `runTool`; every default tool wrapper delegates to `runWrapper`; no `SECRET_DETECTED_IN_ARGV` event payload field exceeds 200 chars. |
 | `skill-provenance-required` | safety | Every skill in `.maddu/skills/` declares a `provenance` field. WARN on imported-pending-trust. |
+| `skill-no-external-refs` | safety | Auto-injectable `operator`/`imported` skill bodies are locally resident. An `imported` skill with an unacknowledged external instruction link (http/https URL, `curl`/`wget`) FAILs; an `operator` one WARNs. Acknowledge a reviewed reference with frontmatter `external_refs: allowed`. Framework-origin skills skipped. Closes the skill URL-swap attack surface. |
 | `strict-mode-approval-active` | critical | In strict mode, every gated `TOOL_INVOKED` has a preceding allow `APPROVAL_DECIDED` in scope. |
 
 ## Cockpit Trust route

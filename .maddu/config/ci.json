@@ -53,6 +53,7 @@
     "self-test-recent",
     "skill-candidates-bounded",
     "skill-injection-bounded",
+    "skill-no-external-refs",
     "skill-provenance-required",
     "skills-starter-pack-installed",
     "slash-command-display-pattern",

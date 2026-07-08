@@ -32,7 +32,10 @@
 // 1.1.0 (SLM-governance p2): +11 MODEL_* types — the one deliberate MINOR
 // bump the phase-0 design commits to (docs/research/slm-governance-design.md
 // §5/§11). Additive only; no existing type or field changed.
-export const EVENT_CONTRACT_VERSION = '1.1.0';
+// 1.2.0 — added SKILL_INJECTION_REFUSED (load-time untrusted-skill refusal is
+// now witnessed on the spine). Additive: a new event type, no existing type or
+// field changed → minor bump.
+export const EVENT_CONTRACT_VERSION = '1.2.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -169,6 +172,7 @@ export const EVENT_SCHEMA = {
   ADVISOR_ARTIFACT_WRITTEN: { summary: "An advisor wrote its result artifact.", data: { advisorId: 'string', artifactPath: 'string', exitCode: 'number|null', status: 'string' } },
   TOKEN_USAGE_REPORTED: { summary: "Token usage for a session/model was reported to the ledger.", data: { cacheCreation: 'number|null', cacheRead: 'number|null', importHash: 'string', inputTokens: 'number|null', model: 'string|null', outputTokens: 'number|null', runtime: 'string|null', sessionId: 'string|null', source: 'string', ts: 'string', unreportedTokens: 'boolean' } },
   SKILL_INJECTED: { summary: "Skill bodies were auto-injected into an orientation digest.", data: { sessionId: 'string|null', skillIds: 'array', tags: 'array', totalBytes: 'number', triggers: 'array' } },
+  SKILL_INJECTION_REFUSED: { summary: "A matching skill was withheld from injection for untrusted provenance.", data: { reason: 'string', refused: 'array', sessionId: 'string|null' } },
   TOOL_INVOKED: { summary: "A default framework tool invocation started.", data: { argv: 'array', mode: 'string', sessionId: 'string|null', tool: 'string', lane: 'string|null' } },
   TOOL_COMPLETED: { summary: "A default framework tool invocation exited.", data: { argv: 'array', durationMs: 'number', exitCode: 'number|null', sessionId: 'string|null', tool: 'string', lane: 'string|null' } },
   TOOL_REFUSED: { summary: "A tool invocation was refused (allowlist or dangerous form).", data: { argv: 'array', argv_index: 'number', detail: 'string', pattern_type: 'string', reason: 'string', sessionId: 'string|null', source: 'string', tool: 'string', lane: 'string|null' } },

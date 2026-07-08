@@ -58,7 +58,8 @@ to a **charter-coherence concern** (keeping the surface honest — the charter's
 - **Supply-chain / trust (rules #4, #6):** `dependency-freshness`,
   `dep-pinning-respected`, `mcp-provenance-verified`, `mcp-template-shape`,
   `secret-scan-active`, `worker-env-policy-coherent`, `skill-provenance-required`,
-  `skill-injection-bounded`, `skill-candidates-bounded`, `tracked-source-drift`,
+  `skill-no-external-refs`, `skill-injection-bounded`, `skill-candidates-bounded`,
+  `tracked-source-drift`,
   `learn-corrections-coherent` (on-disk `maddu learn` block bullets all trace to
   `LEARN_CORRECTION_WRITTEN` spine events — no hand-injected corrections).
 - **Lane / session discipline (rule #8):** `rule-8-no-duplicate-claims`,
