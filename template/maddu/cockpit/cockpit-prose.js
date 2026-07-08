@@ -92,6 +92,22 @@ export function formatProse(text) {
   return { lead, sections, plain: raw };
 }
 
+// Minimal inline markdown → nodes: **bold** and `code`. Everything else stays
+// literal text. Returns an array of strings/nodes el() can take as children.
+function mdInline(text) {
+  const out = [];
+  const re = /\*\*(.+?)\*\*|`([^`]+)`/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1] != null) out.push(el('strong', {}, m[1]));
+    else out.push(el('code', { class: 'prose-code' }, m[2]));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out.length ? out : [text];
+}
+
 function renderSectionContent(sec) {
   if (sec.kind === 'chips') {
     return el('span', { class: 'prose-chips' }, sec.items.map((it) => el('span', { class: 'prose-chip', title: String(it) }, chipLabel(it))));
@@ -112,12 +128,21 @@ export function renderProse(text, opts = {}) {
   const p = formatProse(text);
   const root = el('div', { class: 'prose' });
 
-  // Freeform — no labeled structure. Split into paragraphs on blank lines /
-  // sentence-y breaks; keep it readable, never a single run-on line.
+  // Freeform — no labeled structure (handoff bodies, objectives). Render line by
+  // line with light markdown: '#' → subhead, '- ' → bullet, '**x**'/`x` inline.
   if (!p.sections.length) {
     const blob = p.plain || p.lead || '';
-    const paras = blob.split(/\n{2,}|\n(?=[-•])/).map((s) => s.trim()).filter(Boolean);
-    (paras.length ? paras : [blob]).forEach((para) => root.appendChild(el('div', { class: 'prose-para' }, para)));
+    const lines = blob.split(/\n/).map((s) => s.trim()).filter(Boolean);
+    const src = lines.length ? lines : [blob];
+    for (const line of src) {
+      if (/^#{1,6}\s/.test(line)) {
+        root.appendChild(el('div', { class: 'prose-subhead' }, mdInline(line.replace(/^#{1,6}\s+/, ''))));
+      } else if (/^[-•]\s/.test(line)) {
+        root.appendChild(el('div', { class: 'prose-bullet' }, mdInline(line.replace(/^[-•]\s+/, ''))));
+      } else {
+        root.appendChild(el('div', { class: 'prose-para' }, mdInline(line)));
+      }
+    }
     return root;
   }
 

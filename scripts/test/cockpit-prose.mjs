@@ -12,7 +12,7 @@ globalThis.document = globalThis.document || {
   createTextNode: (t) => ({ text: t }),
 };
 
-const { formatProse } = await import('../../template/maddu/cockpit/cockpit-prose.js');
+const { formatProse, renderProse } = await import('../../template/maddu/cockpit/cockpit-prose.js');
 
 let passed = 0, failed = 0;
 function ok(name, cond, extra = '') {
@@ -58,6 +58,10 @@ ok('freeform → 0 sections, plain kept', free.sections.length === 0 && free.pla
 ok('empty → empty structure', formatProse('').sections.length === 0 && formatProse('').lead === '');
 ok('null-ish → no throw', typeof formatProse(null).plain === 'string' && typeof formatProse(undefined).plain === 'string');
 ok('plain sentence, no labels → freeform', formatProse('just a sentence with no labels').sections.length === 0);
+
+// renderProse must not throw on structured OR markdown-freeform input.
+ok('renderProse structured no throw', (() => { try { renderProse(SLICE); return true; } catch { return false; } })());
+ok('renderProse markdown freeform no throw', (() => { try { renderProse('# Handoff\n**RESUME HERE:** pick up phase 2\n- a bullet with `code`'); return true; } catch { return false; } })());
 
 try {
   console.log('');
