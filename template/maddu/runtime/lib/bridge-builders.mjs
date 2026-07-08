@@ -13,6 +13,8 @@ import { project } from './projections.mjs';
 import { listSchedules } from './schedule.mjs';
 import { totalUnread as mailboxTotalUnread } from './mailbox.mjs';
 import { readAttachments } from './worktrees.mjs';
+import { verifySpine } from './verify.mjs';
+import { plainRefused, EMPTY_STATE } from './oversight-copy.mjs';
 
 // The runtime root (template/maddu/runtime in source, maddu/runtime when
 // installed) — this module lives in runtime/lib, so go up one level. server.js
@@ -402,6 +404,76 @@ export async function readDoc(slug) {
   } catch {
     return null;
   }
+}
+
+// The published, versioned event contract — the third verification leg's
+// "independently checkable" anchor. Read at display time from the docs tree.
+async function readContractVersion() {
+  const dir = await resolveDocsDir();
+  if (!dir) return null;
+  try {
+    const j = JSON.parse(await readFile(join(dir, 'event-schema.json'), 'utf8'));
+    return j['x-contractVersion'] || null;
+  } catch { return null; }
+}
+
+// Oversight surface — the non-coder readout. Fuses three legs a vibe coder can
+// act on WITHOUT reading a skill's code: what was fed vs WITHHELD (and why, in
+// plain language), whether the agent stayed on-goal, and whether the record is
+// intact + independently checkable. Read-only; "how long ago" is computed here
+// at request time (never in the projection), and the reason→plain map is the
+// single source of truth in oversight-copy.mjs. Accountability, not a safety proof.
+export async function buildOversight(repoRoot) {
+  const proj = await project(repoRoot);
+  const now = Date.now();
+  const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
+
+  // ── LEG 1 — skills fed & WITHHELD (the hero) ──
+  const injected = (proj.skillInjections || []).slice().reverse()
+    .map((r) => ({ ...r, ageMs: ageMs(r.ts) }));
+  const refused = (proj.skillRefusals || []).slice().reverse().map((r) => ({
+    ts: r.ts,
+    sessionId: r.sessionId,
+    reason: r.reason,
+    refused: plainRefused(r.refused), // per-item → { id, provenance, reason, plain }
+    ageMs: ageMs(r.ts),
+  }));
+  const withheldCount = refused.reduce((n, r) => n + (r.refused?.length || 0), 0);
+
+  // ── LEG 2 — did it stay on your goal? (Focus Director, already computed) ──
+  const f = proj.focus || {};
+  const focus = {
+    lastTag: f.lastTag || null,
+    openFlag: f.openFlag
+      ? { reason: f.openFlag.reason || null, menu: f.openFlag.menu || ['swap', 'revert', 'continue'] }
+      : null,
+    goal: proj.goal ? proj.goal.objective : null,
+    updatedAt: f.updatedAt || null,
+  };
+
+  // ── LEG 3 — is the record intact + independently checkable? ──
+  // Uncapped: a hash chain must be verified from genesis forward, and capping
+  // would leave the RECENT events (the ones that matter) unchecked. ~3k sha256
+  // hashes is single-digit-to-tens of ms — cheap enough for a page load.
+  const v = await verifySpine(repoRoot);
+  const chainIntact = !v.issues.some((i) => i.kind === 'chain_broken' || i.kind === 'torn_trailing_line');
+  const verify = {
+    events: v.events,
+    chainIntact,
+    counts: v.counts,
+    contractVersion: await readContractVersion(),
+  };
+
+  return {
+    skills: {
+      injected,
+      refused,
+      withheldCount,
+      emptyState: withheldCount === 0 ? EMPTY_STATE : null,
+    },
+    focus,
+    verify,
+  };
 }
 
 // Scan every doc body for [text](other.md[#anchor]) cross-refs and return

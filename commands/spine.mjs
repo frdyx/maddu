@@ -8,6 +8,9 @@
 //   maddu spine sync [--json]              # git-transport round-trip: commit → pull →
 //                                          #   import-validate → push (opt-in via sync init)
 //   maddu spine import [--json]            # validate git-synced partitions (read-only)
+//   maddu spine oversight [--json]         # the non-coder readout — skills fed vs
+//                                          #   WITHHELD (plain-language), on-goal drift,
+//                                          #   record-intact + independently checkable
 
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -40,7 +43,7 @@ export default async function spine(argv) {
   const repoRoot = await resolveRepoRoot(lib.paths);
 
   if (!sub) {
-    console.error('Usage: maddu spine <verify|show|sync|import> [args]');
+    console.error('Usage: maddu spine <verify|show|oversight|sync|import> [args]');
     process.exit(2);
   }
 
@@ -239,6 +242,86 @@ export default async function spine(argv) {
     return;
   }
 
-  console.error(`maddu spine: unknown subcommand "${sub}" (expected: verify | show)`);
+  if (sub === 'oversight') {
+    if (!lib.bridgeBuilders || !lib.bridgeBuilders.buildOversight) {
+      console.error('bridge-builders.mjs not found in this install. Run `maddu upgrade` to enable the oversight readout.');
+      process.exit(2);
+    }
+    const { flags } = parseFlags(rest);
+    const o = await lib.bridgeBuilders.buildOversight(repoRoot);
+    if (flags.json) {
+      process.stdout.write(JSON.stringify(o, null, 2) + '\n');
+      process.exit(0);
+    }
+    renderOversightText(o, repoRoot);
+    process.exit(0);
+  }
+
+  console.error(`maddu spine: unknown subcommand "${sub}" (expected: verify | show | oversight | sync | import)`);
   process.exit(2);
+}
+
+// Human-readable "what did my agent do" readout — the terminal twin of the
+// cockpit Oversight route. Plain language; the reason→copy map already applied
+// server-side (each refused item carries `.plain`). Accountability, not a safety proof.
+function fmtAge(ms) {
+  if (typeof ms !== 'number' || ms < 0) return '';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60); if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+function renderOversightText(o, repoRoot) {
+  const skills = o.skills || {};
+  const injected = Array.isArray(skills.injected) ? skills.injected : [];
+  const refused = Array.isArray(skills.refused) ? skills.refused : [];
+  const withheld = typeof skills.withheldCount === 'number' ? skills.withheldCount : 0;
+
+  console.log(`${ANSI.bold}Máddu oversight${ANSI.reset}  ${repoRoot}`);
+  console.log();
+
+  // ── Skills (hero) ──
+  console.log(`${ANSI.bold}Skills${ANSI.reset}  ${injected.length} fed · ${withheld > 0 ? ANSI.fail : ANSI.pass}${withheld} withheld${ANSI.reset}`);
+  if (withheld > 0) {
+    for (const row of refused) {
+      for (const it of (row.refused || [])) {
+        const age = fmtAge(row.ageMs);
+        console.log(`  ${ANSI.fail}⃠ WITHHELD${ANSI.reset}  ${it.id || '(skill)'}  ${ANSI.dim}—${ANSI.reset} ${it.plain || 'blocked'}`);
+        console.log(`      ${ANSI.dim}${[it.provenance ? `provenance: ${it.provenance}` : null, age].filter(Boolean).join(' · ')}${ANSI.reset}`);
+      }
+    }
+  } else {
+    console.log(`  ${ANSI.pass}✓${ANSI.reset} ${skills.emptyState || '0 withheld — nothing blocked yet'}`);
+  }
+  console.log();
+
+  // ── On goal ──
+  const focus = (o.focus && typeof o.focus === 'object') ? o.focus : {};
+  const tag = typeof focus.lastTag === 'string' ? focus.lastTag : null;
+  const goal = typeof focus.goal === 'string' ? focus.goal : null;
+  const openFlag = (focus.openFlag && typeof focus.openFlag.reason === 'string') ? focus.openFlag : null;
+  const tagColor = tag === 'toward' ? ANSI.pass : tag === 'away' ? ANSI.fail : tag === 'lateral' ? ANSI.warn : ANSI.dim;
+  console.log(`${ANSI.bold}Goal${ANSI.reset}  ${tagColor}${(tag || 'no signal').toUpperCase()}${ANSI.reset}${goal ? `  ${ANSI.dim}${goal}${ANSI.reset}` : ''}`);
+  if (openFlag) {
+    const menu = (Array.isArray(openFlag.menu) && openFlag.menu.length ? openFlag.menu : ['swap', 'revert', 'continue']);
+    console.log(`  ${ANSI.warn}⚑ drift:${ANSI.reset} ${openFlag.reason}`);
+    console.log(`      ${ANSI.dim}resolve: maddu focus resolve <${menu.join('|')}>${ANSI.reset}`);
+  } else {
+    console.log(`  ${ANSI.pass}✓${ANSI.reset} on course — no open drift flag`);
+  }
+  console.log();
+
+  // ── Record ──
+  const v = (o.verify && typeof o.verify === 'object') ? o.verify : {};
+  const events = typeof v.events === 'number' ? v.events : null;
+  const intact = v.chainIntact === true;
+  const contract = typeof v.contractVersion === 'string' ? v.contractVersion : null;
+  if (events === null) {
+    console.log(`${ANSI.bold}Record${ANSI.reset}  ${ANSI.dim}not loaded — run \`maddu spine verify\`${ANSI.reset}`);
+  } else {
+    console.log(`${ANSI.bold}Record${ANSI.reset}  ${intact ? ANSI.pass + '✓' : ANSI.fail + '⚠'}${ANSI.reset} ${events} events · ${intact ? 'chain intact' : 'chain BROKEN'}${contract ? ` · contract ${contract}` : ''}`);
+    console.log(`  ${ANSI.dim}independently checkable — full uncapped check: maddu spine verify${ANSI.reset}`);
+  }
 }

@@ -44,16 +44,24 @@ export function renderSkillInjectionsCard(injections) {
   const wrap = el('div', {});
   const sorted = injections.slice().sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
   for (const inj of sorted.slice(0, 100)) {
+    // Projection shape: { ts, sessionId, skillIds[], triggers[], tags[], totalBytes }.
+    const skillIds = Array.isArray(inj.skillIds) ? inj.skillIds : [];
+    const triggers = Array.isArray(inj.triggers) ? inj.triggers : [];
+    const tags = Array.isArray(inj.tags) ? inj.tags : [];
+    const context = [
+      triggers.length ? `triggers: ${triggers.join(', ')}` : null,
+      tags.length ? `tags: ${tags.join(', ')}` : null,
+    ].filter(Boolean).join(' · ');
     wrap.appendChild(el('div', { class: 'panel-row' }, [
       el('div', { class: 'panel-row-head' }, [
-        el('span', { class: 'mono' }, inj.skillId || inj.skill || '(no skill)'),
-        el('span', { class: 'tag tone-neutral' }, inj.sliceId || '(no slice)'),
+        el('span', { class: 'mono' }, skillIds.length ? skillIds.join(', ') : '(no skill)'),
+        el('span', { class: 'tag tone-neutral' }, `${inj.totalBytes || 0} B`),
       ]),
       el('div', { class: 'panel-row-meta' }, [
         el('span', { class: 'mono' }, inj.sessionId || ''),
         el('span', { class: 'dim' }, inj.ts || ''),
       ]),
-      inj.reason ? el('div', { class: 'panel-row-detail' }, inj.reason) : null,
+      context ? el('div', { class: 'panel-row-detail' }, context) : null,
     ]));
   }
   return wrap;
