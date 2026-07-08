@@ -130,3 +130,50 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
 
   return { staleEmitted: stale.length, closedEmitted: closed.length, orphanedWorktrees };
 }
+
+// Full stale reconciliation — the CLI-side counterpart to the bridge's inline
+// janitor. Two passes, because they catch different leaks:
+//   1. runJanitor: auto-close ACTIVE sessions past the threshold. The
+//      projection's close-cascade releases the claims those sessions hold.
+//   2. Orphan-claim reconcile: release any claim whose holder is NOT a
+//      currently-active session. This catches the leak runJanitor structurally
+//      cannot — a claim held by an already-CLOSED session. It happens when a
+//      `LANE_CLAIMED` lands after that session's `SESSION_CLOSED` in spine order
+//      (a stale MADDU_SESSION_ID claiming a lane post-close), so the close
+//      cascade never saw the claim and the session janitor never revisits a
+//      non-active session. Without this pass such a claim lingers forever.
+//
+// Rule #9: every emitted event carries the allowlisted `janitor:sessions`
+// trigger. Idempotent + best-effort. Returns a structured report.
+export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) {
+  const firedAt = new Date(nowMs).toISOString();
+
+  // Pass 1 — session auto-close (cascades claim release for active sessions).
+  const proj1 = await projections.project(repoRoot);
+  const jan = await runJanitor(repoRoot, proj1, nowMs);
+
+  // Pass 2 — orphan-claim reconcile (re-project so we see pass-1's releases).
+  const proj2 = await projections.project(repoRoot);
+  const activeIds = new Set(
+    (proj2.activeSessions || []).filter((s) => s.status === 'active').map((s) => s.id),
+  );
+  const orphaned = (proj2.claims || []).filter((c) => !activeIds.has(c.sessionId));
+  for (const c of orphaned) {
+    // Release AS the orphaned owner: correct in both the default (delete-by-lane)
+    // and sync (delete-that-owner) projection paths.
+    await append(repoRoot, {
+      type: EVENT_TYPES.LANE_RELEASED,
+      actor: c.sessionId,
+      lane: c.lane,
+      data: { reason: 'orphan-reconcile' },
+      triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
+    });
+  }
+
+  return {
+    staleDetected: jan.staleEmitted,
+    autoClosed: jan.closedEmitted,
+    orphanedClaimsReleased: orphaned.map((c) => ({ lane: c.lane, sessionId: c.sessionId })),
+    orphanedWorktrees: jan.orphanedWorktrees || [],
+  };
+}

@@ -49,6 +49,10 @@ export const MADDU_HOOKS = [
   // No matcher on the group → fires on BOTH manual (/compact) and auto
   // compaction; the payload's `trigger` field records which (v1.89.0).
   { event: 'PreCompact', fire: 'pre-compact' },
+  // Auto-claim a lane before the first mutating edit so agentic work is never
+  // un-laned. The matcher scopes it to the file-mutating tools; the fire
+  // handler is best-effort and fails open (never blocks the tool).
+  { event: 'PreToolUse', fire: 'pre-tool-use', matcher: 'Edit|Write|MultiEdit|NotebookEdit' },
 ];
 
 export function hookCommandFor(fire, bin = HOOK_BIN) {
@@ -71,12 +75,15 @@ function groupHasMaddu(group) {
 export function mergeInstall(settings, { bin = HOOK_BIN } = {}) {
   const next = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
   if (!next.hooks || typeof next.hooks !== 'object') next.hooks = {};
-  for (const { event, fire } of MADDU_HOOKS) {
+  for (const { event, fire, matcher } of MADDU_HOOKS) {
     const arr = Array.isArray(next.hooks[event]) ? next.hooks[event] : [];
     // Drop any prior Máddu group for this event (so re-install refreshes the
-    // command text), keep everything else, then append a fresh group.
+    // command text), keep everything else, then append a fresh group. A matcher
+    // (e.g. PreToolUse) is written on the group so Claude Code scopes the hook.
     const kept = arr.filter((g) => !groupHasMaddu(g));
-    kept.push({ hooks: [{ type: 'command', command: hookCommandFor(fire, bin) }] });
+    const group = { hooks: [{ type: 'command', command: hookCommandFor(fire, bin) }] };
+    if (matcher) group.matcher = matcher;
+    kept.push(group);
     next.hooks[event] = kept;
   }
   return next;

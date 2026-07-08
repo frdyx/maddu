@@ -38,9 +38,28 @@ slice-stop with no flag and no env var, across fresh shells.
 
 | Hook event | What it runs | Effect |
 | --- | --- | --- |
-| `SessionStart` | `maddu hooks fire session-start` | Auto-registers a session (records `SESSION_AUTO_REGISTERED` on the spine) and surfaces a one-line reminder to claim a lane + slice-stop. |
-| `SessionEnd` | `maddu hooks fire session-end` | Closes the active session. |
+| `SessionStart` | `maddu hooks fire session-start` | Auto-registers a session (records `SESSION_AUTO_REGISTERED`), **sweeps stale sessions + orphaned lane claims** (the CLI-side janitor — below), and surfaces a one-line reminder. |
+| `SessionEnd` | `maddu hooks fire session-end` | Closes the active session (releases the lane claims it held). |
 | `PreCompact` | `maddu hooks fire pre-compact` | Writes a `COMPACTION_CHECKPOINT` to the spine just before Claude Code compacts its context (v1.89.0, below). |
+| `PreToolUse` (matcher `Edit\|Write\|MultiEdit\|NotebookEdit`) | `maddu hooks fire pre-tool-use` | **Auto-claims a lane** before the first mutating edit when the session holds none, so agentic work is never un-laned. Fails open. |
+
+## Keeping lanes and sessions self-clean
+
+Two mechanisms keep the record from accumulating stale sessions and lane claims —
+the recurring "the janitor only runs in the bridge" gap:
+
+- **CLI-side sweep.** The bridge's stale-session janitor only runs on
+  `/bridge/projection` reads, so CLI-first work never auto-closed anything. The
+  `SessionStart` hook now runs the same reconciliation (`maddu session sweep`,
+  also runnable by hand): auto-close sessions past the threshold (default 4h) —
+  which releases the claims they held — **and** release *orphaned* claims (a lane
+  held by an already-closed session, the leak the session-centric janitor can't
+  reach). Rule-#9 clean via the allowlisted `janitor:sessions` trigger.
+- **Auto-claim.** The `PreToolUse` hook claims a lane before editing if none is
+  held — inferred from the edited path when the catalog declares `paths`/`globs`,
+  else a session-scoped fallback (`auto/<id>`) that preserves lane disjointness.
+  Gated by the `hook:auto-claim` allowlist entry. A `lane claim` from an
+  already-closed session is refused, so orphans don't regenerate.
 
 Because slice boundaries can't be auto-detected, `slice-stop` stays
 agent-driven — but it is now frictionless (the auto-registered session resolves

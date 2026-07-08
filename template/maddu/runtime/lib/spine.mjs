@@ -104,6 +104,9 @@ export const EVENT_TYPES = {
   FOLLOWUP_OPENED:           'FOLLOWUP_OPENED',
   GATE_RAN:                  'GATE_RAN',
   GOAL_DECLARED:             'GOAL_DECLARED',
+  // A declared goal was marked done (or abandoned). Closes the goal lifecycle so
+  // a finished goal stops lingering as "the current goal". data: { note, outcome }
+  GOAL_COMPLETED:            'GOAL_COMPLETED',
   PENDING_ACTION_DRAINED:    'PENDING_ACTION_DRAINED',
   PENDING_ACTION_ENQUEUED:   'PENDING_ACTION_ENQUEUED',
   PHASE_DECLARED:            'PHASE_DECLARED',

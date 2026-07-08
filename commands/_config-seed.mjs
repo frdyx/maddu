@@ -42,6 +42,10 @@ export const DEFAULT_TRIGGERS = [
   'coordinator:pre-run-checkpoint',
   'slice-stop:auto-handoff',
   'slice-stop:auto-review',
+  // Auto-claim a lane before the first mutating edit (PreToolUse hook). Only
+  // fires when `maddu hooks install` wired the hook AND a session is active; the
+  // allowlist entry just permits it. Closes the "forgot to claim a lane" gap.
+  'hook:auto-claim',
 ];
 
 export const DEFAULT_JANITOR_CONFIG = { staleAfterMs: 1800000, autoCloseAfterMs: 14400000 };

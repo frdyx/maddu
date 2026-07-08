@@ -135,6 +135,18 @@ export default async function lane(argv) {
       process.exit(2);
     }
     const proj = await projections.project(repoRoot);
+    // Prevent orphan claims at the source: a CLOSED session must never hold a
+    // claim. That is exactly how the stale-claim leak arises — a stale
+    // MADDU_SESSION_ID claims a lane after its session closed, so the close
+    // cascade (already past in spine order) never releases it and it lingers
+    // forever. Refuse early; the cure (`maddu session sweep`) handles any that
+    // still slip through (e.g. a session closed concurrently).
+    const claimant = proj.sessions.find((s) => s.id === sid);
+    if (claimant && claimant.status === 'closed') {
+      console.error(`session ${sid} is closed — cannot claim lane "${lid}" (would orphan the claim).`);
+      console.error('  run `maddu register` to start a fresh session, then claim.');
+      process.exit(3);
+    }
     const existing = proj.claims.find((c) => c.lane === lid);
     if (existing && existing.sessionId !== sid) {
       // v1.1.0 Phase 8 — --force pre-empts the prior claim. Emits

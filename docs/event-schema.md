@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.2.0` · **Event types:** 174
+**Contract version:** `1.3.0` · **Event types:** 175
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (174)
+## Events (175)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -115,6 +115,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `FOLLOWUP_OPENED` | A follow-up was opened from a slice review finding. | `draftScope: array`, `fromReviewEventId: string`, `severity: string` |
 | `GATE_RAN` | A verification gate ran and recorded its verdict. | `durationMs: number`, `evidence: object\|null`, `gateId: string`, `ok: boolean`, `severity: string`, `sliceId: string`, `status: string` |
 | `GOAL_DECLARED` | A goal with success conditions and constraints was declared. | `constraints: array`, `objective: string`, `success: array` |
+| `GOAL_COMPLETED` | A declared goal was marked done or abandoned, closing the goal lifecycle. | `note: string\|null`, `objective: string\|null`, `outcome: string` |
 | `PENDING_ACTION_DRAINED` | A queued pending action was drained (executed or resolved). | `actionId: string`, `detail: string`, `kind: string`, `outcome: string`, `payload: object` |
 | `PENDING_ACTION_ENQUEUED` | An action was enqueued for later draining. | `actionId: string`, `kind: string`, `payload: object` |
 | `PHASE_DECLARED` | A plan phase was entered, optionally raising the governance tier. | `name: string`, `notes: string\|null`, `tier: string\|null` |

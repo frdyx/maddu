@@ -95,6 +95,7 @@ export const EVENT_DISPOSITIONS = {
   FOLLOWUP_OPENED: { disp: 'active' },
   GATE_RAN: { disp: 'active' },
   GOAL_DECLARED: { disp: 'active' },
+  GOAL_COMPLETED: { disp: 'active' },
   PENDING_ACTION_DRAINED: { disp: 'dormant', reason: "deferred-action queue; fires only when the queue is drained" },
   PENDING_ACTION_ENQUEUED: { disp: 'dormant', reason: "deferred-action queue; fires only when an action is deferred" },
   PHASE_DECLARED: { disp: 'active' },

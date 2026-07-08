@@ -35,7 +35,9 @@
 // 1.2.0 — added SKILL_INJECTION_REFUSED (load-time untrusted-skill refusal is
 // now witnessed on the spine). Additive: a new event type, no existing type or
 // field changed → minor bump.
-export const EVENT_CONTRACT_VERSION = '1.2.0';
+// 1.3.0 — added GOAL_COMPLETED (goal lifecycle: a finished goal is closed
+// instead of lingering forever). Additive → minor bump.
+export const EVENT_CONTRACT_VERSION = '1.3.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -141,6 +143,7 @@ export const EVENT_SCHEMA = {
   FOLLOWUP_OPENED: { summary: "A follow-up was opened from a slice review finding.", data: { draftScope: 'array', fromReviewEventId: 'string', severity: 'string' } },
   GATE_RAN: { summary: "A verification gate ran and recorded its verdict.", data: { durationMs: 'number', evidence: 'object|null', gateId: 'string', ok: 'boolean', severity: 'string', sliceId: 'string', status: 'string' } },
   GOAL_DECLARED: { summary: "A goal with success conditions and constraints was declared.", data: { constraints: 'array', objective: 'string', success: 'array' } },
+  GOAL_COMPLETED: { summary: "A declared goal was marked done or abandoned, closing the goal lifecycle.", data: { note: 'string|null', objective: 'string|null', outcome: 'string' } },
   PENDING_ACTION_DRAINED: { summary: "A queued pending action was drained (executed or resolved).", data: { actionId: 'string', detail: 'string', kind: 'string', outcome: 'string', payload: 'object' } },
   PENDING_ACTION_ENQUEUED: { summary: "An action was enqueued for later draining.", data: { actionId: 'string', kind: 'string', payload: 'object' } },
   PHASE_DECLARED: { summary: "A plan phase was entered, optionally raising the governance tier.", data: { name: 'string', notes: 'string|null', tier: 'string|null' } },
