@@ -24,7 +24,7 @@ import sessionCmd from './session.mjs';
 
 function printHelp() {
   console.log([
-    'Usage: maddu hooks <install|status|remove> [--dry-run]',
+    'Usage: maddu hooks <install|status|remove> [--statusline] [--dry-run]',
     '',
     '  install     Wire SessionStart (auto-register + stale-sweep) + SessionEnd',
     '              (close) + PreCompact (compaction checkpoint) + PreToolUse',
@@ -32,8 +32,11 @@ function printHelp() {
     '              <repo>/.claude/settings.json so every Claude Code session in',
     '              this repo records to the spine. Idempotent; preserves your',
     '              own hooks.',
+    '              With --statusline, also set the Claude Code statusLine to',
+    '              `maddu status --line` (a one-line on-goal/drift segment). Opt-in;',
+    '              never clobbers a statusLine you already set.',
     '  status      Show which Máddu hooks are installed.',
-    '  remove      Remove only Máddu\'s hook entries.',
+    '  remove      Remove only Máddu\'s hook entries (and its statusLine, if set).',
     '',
     'Once installed, a session auto-registers, the SessionStart sweep clears stale',
     'sessions + orphaned lane claims, and PreToolUse auto-claims a lane before the',
@@ -188,16 +191,41 @@ export default async function hooks(argv) {
       process.exit(1);
     }
     const bin = lib.resolveHookBin ? await lib.resolveHookBin(repoRoot) : undefined;
-    const next = removing ? lib.stripMaddu(settings) : lib.mergeInstall(settings, { bin });
+    // On remove, also strip Máddu's statusLine (if present) — never leave a
+    // dangling `status --line` pointing at removed wiring. On install, only wire
+    // the statusLine when --statusline is passed (opt-in).
+    let statusLineSkipped = false;
+    let next;
+    if (removing) {
+      next = lib.stripMaddu(settings);
+      if (lib.stripStatusLine) next = lib.stripStatusLine(next);
+    } else {
+      next = lib.mergeInstall(settings, { bin });
+      if (flags.statusline && lib.mergeStatusLine) {
+        const merged = lib.mergeStatusLine(next, { bin });
+        next = merged.settings;
+        statusLineSkipped = merged.skipped;
+      }
+    }
     const before = JSON.stringify(settings);
     const after = JSON.stringify(next);
     if (before === after) {
+      if (!removing && flags.statusline && statusLineSkipped) {
+        console.log('\x1b[33mstatusLine already set to your own command\x1b[0m — left untouched. Remove it first to use Máddu\'s.');
+        return;
+      }
       console.log(removing ? 'no Máddu hooks present — nothing to remove.' : '\x1b[32mMáddu hooks already installed\x1b[0m — no changes.');
       return;
     }
     if (flags['dry-run']) {
-      console.log(`(dry-run) would ${removing ? 'remove Máddu hooks from' : 'install Máddu hooks into'}:`);
+      const what = removing
+        ? 'remove Máddu hooks from'
+        : `install Máddu hooks${flags.statusline && !statusLineSkipped ? ' + statusLine' : ''} into`;
+      console.log(`(dry-run) would ${what}:`);
       console.log(`  ${lib.settingsPath(repoRoot)}`);
+      if (!removing && flags.statusline && statusLineSkipped) {
+        console.log(`  ${'\x1b[33m'}(statusLine left untouched — you already set your own)${'\x1b[0m'}`);
+      }
       return;
     }
     const eol = existed && raw && raw.includes('\r\n') ? '\r\n' : '\n';
@@ -209,6 +237,11 @@ export default async function hooks(argv) {
       console.log(`\x1b[32minstalled\x1b[0m Máddu hooks (${installed.join(', ')}) → ${lib.settingsPath(repoRoot)}`);
       console.log(`  Every Claude Code session now auto-registers, sweeps stale sessions + orphaned`);
       console.log(`  claims, auto-claims a lane before the first edit, and checkpoints before compaction.`);
+      if (flags.statusline && lib.statusLineInstalled && lib.statusLineInstalled(next)) {
+        console.log(`  statusLine set to \x1b[1mmaddu status --line\x1b[0m (on-goal / drift, one glance).`);
+      } else if (flags.statusline && statusLineSkipped) {
+        console.log(`  \x1b[33mstatusLine left untouched\x1b[0m — you already set your own.`);
+      }
       console.log(`  Remove with \x1b[1mmaddu hooks remove\x1b[0m.`);
     }
     return;

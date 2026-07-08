@@ -115,6 +115,47 @@ export function summarize(settings) {
   return { installed, allInstalled: installed.length === MADDU_HOOKS.length };
 }
 
+// ── status line (opt-in) ────────────────────────────────────────────────────
+// A one-line `maddu status --line` segment, wired as the Claude Code statusLine
+// ONLY on explicit `maddu hooks install --statusline`. Never clobbers an
+// operator's own statusLine: merge writes ours only when the slot is empty or
+// already ours; strip removes only ours. Identified (like the hook commands) by
+// a sentinel substring in the command.
+export function statusLineCommandFor(bin = HOOK_BIN) {
+  return `${bin} status --line`;
+}
+
+function isMadduStatusLine(sl) {
+  return !!sl && typeof sl === 'object' && typeof sl.command === 'string'
+    && sl.command.includes('maddu.mjs') && sl.command.includes('status --line');
+}
+
+// Pure: ensure Máddu's statusLine. If the operator already set a DIFFERENT
+// statusLine, leave it untouched and report skipped:true so the caller can say
+// so. Returns { settings, skipped }.
+export function mergeStatusLine(settings, { bin = HOOK_BIN } = {}) {
+  const next = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
+  if (next.statusLine && !isMadduStatusLine(next.statusLine)) {
+    return { settings: next, skipped: true };
+  }
+  next.statusLine = { type: 'command', command: statusLineCommandFor(bin) };
+  return { settings: next, skipped: false };
+}
+
+// Pure: remove Máddu's statusLine if present; leave a non-Máddu one intact.
+export function stripStatusLine(settings) {
+  if (!settings || typeof settings !== 'object') return settings || {};
+  if (!isMadduStatusLine(settings.statusLine)) return settings;
+  const next = structuredCloneSafe(settings);
+  delete next.statusLine;
+  return next;
+}
+
+// Pure: is Máddu's statusLine currently installed?
+export function statusLineInstalled(settings) {
+  return isMadduStatusLine(settings && settings.statusLine);
+}
+
 // structuredClone is available on Node ≥ 17; fall back to JSON round-trip for
 // the plain-data settings object on anything older.
 function structuredCloneSafe(obj) {

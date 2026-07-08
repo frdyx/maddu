@@ -8,7 +8,7 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mergeInstall, stripMaddu, summarize, MADDU_HOOKS, hookCommandFor, resolveHookBin, HOOK_BIN, HOOK_BIN_SOURCE } from '../../template/maddu/runtime/lib/claude-hooks.mjs';
+import { mergeInstall, stripMaddu, summarize, MADDU_HOOKS, hookCommandFor, resolveHookBin, HOOK_BIN, HOOK_BIN_SOURCE, mergeStatusLine, stripStatusLine, statusLineInstalled, statusLineCommandFor } from '../../template/maddu/runtime/lib/claude-hooks.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -96,6 +96,34 @@ async function main() {
   ok('PreToolUse Máddu group carries the Edit|Write matcher', a.hooks.PreToolUse?.find((g) => g.hooks?.[0]?.command === hookCommandFor('pre-tool-use'))?.matcher === 'Edit|Write|MultiEdit|NotebookEdit');
   // A user's own PreToolUse hook is preserved alongside ours (merge fixture up top).
   ok('strip removes only our PreToolUse group', (() => { const s = stripMaddu(a); return !s.hooks || !s.hooks.PreToolUse; })());
+
+  // ── statusLine (opt-in, v1.97.0) ──
+  {
+    // fresh install writes ours into an empty slot
+    const s1 = mergeStatusLine({});
+    ok('mergeStatusLine writes ours when slot empty', !s1.skipped && s1.settings.statusLine.command === statusLineCommandFor());
+    ok('statusLineInstalled true after merge', statusLineInstalled(s1.settings));
+
+    // idempotent
+    const s2 = mergeStatusLine(s1.settings);
+    ok('mergeStatusLine idempotent', JSON.stringify(s1.settings) === JSON.stringify(s2.settings) && !s2.skipped);
+
+    // never clobbers the operator's own statusLine
+    const own = { statusLine: { type: 'command', command: 'echo mine' } };
+    const s3 = mergeStatusLine(own);
+    ok('mergeStatusLine skips a non-Máddu statusLine', s3.skipped && s3.settings.statusLine.command === 'echo mine');
+
+    // strip removes only ours
+    ok('stripStatusLine removes ours', !statusLineInstalled(stripStatusLine(s1.settings)));
+    ok('stripStatusLine leaves a non-Máddu statusLine', stripStatusLine(own).statusLine.command === 'echo mine');
+
+    // honors a bin override (source-repo entrypoint)
+    const s4 = mergeStatusLine({}, { bin: HOOK_BIN_SOURCE });
+    ok('mergeStatusLine honors bin override', s4.settings.statusLine.command === `${HOOK_BIN_SOURCE} status --line`);
+
+    // statusLine is orthogonal to hooks — merging hooks doesn't add a statusLine
+    ok('mergeInstall alone adds no statusLine', !statusLineInstalled(mergeInstall({})));
+  }
 }
 
 try {

@@ -40,7 +40,6 @@ const C = {
   bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
   met: '\x1b[32m', pending: '\x1b[36m', unver: '\x1b[33m',
 };
-const VERIFY_TIMEOUT_MS = 120000;
 const RULE = '─'.repeat(54);
 
 function gitBranch(repoRoot) {
@@ -53,18 +52,6 @@ function gitBranch(repoRoot) {
 
 function cleanSummary(s) {
   return String(s || '—').replace(/\s+/g, ' ').replace(/^["'\s]+/, '').trim().slice(0, 100) || '—';
-}
-
-function evalCondition(cond, repoRoot, runVerify) {
-  if (!cond.verify) return { ...cond, state: 'unverifiable' };
-  if (!runVerify) return { ...cond, state: 'skipped' };
-  try {
-    const r = spawnSync(cond.verify, { shell: true, cwd: repoRoot, timeout: VERIFY_TIMEOUT_MS, stdio: 'ignore' });
-    if (r.error || r.status == null) return { ...cond, state: 'pending', note: r.error ? r.error.message : 'no exit code' };
-    return { ...cond, state: r.status === 0 ? 'met' : 'pending', exitCode: r.status };
-  } catch (e) {
-    return { ...cond, state: 'pending', note: e.message };
-  }
 }
 
 const MARK = {
@@ -89,6 +76,7 @@ export default async function orient(argv) {
   const { flags } = parseFlags(argv);
   const runVerify = !flags['no-verify'];
   const { paths, projections, spine } = await loadSpineLib();
+  const { evalSuccess, writeSuccessCache } = await loadLib('success-eval.mjs');
   const repoRoot = await resolveRepoRoot(paths);
   const proj = await projections.project(repoRoot);
   let events = [];
@@ -96,11 +84,13 @@ export default async function orient(argv) {
 
   const goal = proj.goal || null;
   const success = Array.isArray(goal?.success) ? goal.success : [];
-  const evaluated = success.map((c) => evalCondition(c, repoRoot, runVerify));
-  const metCount = evaluated.filter((c) => c.state === 'met').length;
-  const verifiable = evaluated.filter((c) => c.verify).length;
-  const pendingCount = evaluated.filter((c) => c.state === 'pending').length;
-  const allMet = verifiable > 0 && pendingCount === 0;
+  const { evaluated, metCount, verifiable, pendingCount, allMet } = evalSuccess(goal, repoRoot, runVerify);
+  // Cache the freshly-evaluated snapshot so the bridge can render the same
+  // ✓/○/? without ever spawning a verify command on an HTTP GET. Only when
+  // verify actually ran — never overwrite a real result with skipped states.
+  if (runVerify && goal) {
+    try { await writeSuccessCache(repoRoot, { goal, result: { evaluated, metCount, verifiable, pendingCount, allMet }, ts: new Date().toISOString() }); } catch {}
+  }
 
   // Counters from the full spine.
   const countType = (t) => events.reduce((n, e) => n + (e.type === t ? 1 : 0), 0);
