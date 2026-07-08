@@ -1146,9 +1146,15 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
 .event-type.t-approval   { color: var(--m-event-approval); }
 .event-type.t-doctor     { color: var(--m-event-doctor); }
 .event-type.t-inbox      { color: var(--m-event-inbox); }
-.event-lane { color: var(--m-accent); }
+.event-lane { color: var(--m-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-summary { color: var(--m-fg-1); }
 .event-actor { color: var(--m-fg-4); }
+/* Stream rows stay ONE line — a log, not a wall. The grid cells must be allowed
+ * to shrink (min-width:0) or a long slice-stop summary spills the column
+ * char-by-char (as in a narrow workbench pane). Full detail lives on the
+ * formatted detail views + the inspector. */
+.event-row > * { min-width: 0; }
+.event-row > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* approval cards */
 .approval {
@@ -3755,3 +3761,10 @@ select option:hover,
 .view .panel { overflow-wrap: break-word; }
 .view .panel table.ledger td { overflow-wrap: break-word; }
 .view .panel table.ledger td.event-actor { white-space: nowrap; word-break: normal; overflow-wrap: normal; padding-right: 12px; }
+/* Compact card asides that carry a full summary (team lane cards) clamp to one
+ * line — the full record is on the detail views + the inspector, not crammed here. */
+.team-lane-last { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* Inspector drawer — the universal detail surface. Never scroll sideways: long
+ * values + raw blocks wrap. */
+.inspector-body { overflow-wrap: anywhere; word-break: break-word; }
+.inspector-body pre, .inspector-body code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
