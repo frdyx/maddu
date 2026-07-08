@@ -6,7 +6,7 @@
 // mutable state, so they live in runtime-libs (bridge -> runtime-libs is an
 // allowed edge) and are unit-testable without booting the server.
 
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile, stat } from 'node:fs/promises';
 import { project } from './projections.mjs';
@@ -559,6 +559,74 @@ export async function buildDigest(repoRoot, { sinceId = null } = {}) {
   const range = { sinceId, lastEventId: proj.lastEventId || null, newEventCount: since.length };
   const headline = digestHeadline({ sliceStopCount, driftCount, gates, needsYou, goal });
   return { range, headline, sliceStops, sliceStopCount, drift, driftCount, gates, needsYou, goal, focus, empty: since.length === 0 };
+}
+
+// Single-project cockpit — the one-screen "where does this project stand?"
+// readout. Fuses what already ships: goal + % to done (from the cached success
+// eval — no spawn), the Focus Director trajectory, the worker fleet, who is
+// steering, and the recent slice trail. Read-only; every age is display-time.
+export async function buildProjectCockpit(repoRoot) {
+  const proj = await project(repoRoot);
+  const now = Date.now();
+  const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
+  const round2 = (x) => Math.round(x * 100) / 100;
+  const cache = await readSuccessCache(repoRoot);
+
+  // ── goal + % to done (cached ✓/○/?) ──
+  const conditions = cache ? (cache.conditions || []) : ((proj.goal?.success || []).map((c) => ({ text: c.text || null, verify: c.verify || null, state: 'unknown' })));
+  const total = conditions.length;
+  const met = cache && typeof cache.metCount === 'number' ? cache.metCount : 0;
+  const goal = {
+    objective: proj.goal ? proj.goal.objective : null,
+    metCount: cache ? cache.metCount : null,
+    verifiable: cache ? cache.verifiable : null,
+    total,
+    percent: total ? Math.round((met / total) * 100) : null,
+    allMet: cache ? cache.allMet : null,
+    evaluatedAt: cache ? cache.ts : null,
+    conditions,
+  };
+
+  // ── Focus trajectory + current on-goal ──
+  const window = Array.isArray(proj.focus?.window) ? proj.focus.window : [];
+  const trajectory = window.slice(-24).map((w) => ({
+    tag: w.tag || null,
+    onGoal: typeof w.distanceScore === 'number' ? round2(1 - w.distanceScore) : null,
+    ts: w.ts,
+  }));
+  const last = window.length ? window[window.length - 1] : null;
+  const f = proj.focus || {};
+  const focus = {
+    lastTag: f.lastTag || null,
+    onGoal: last && typeof last.distanceScore === 'number' ? round2(1 - last.distanceScore) : null,
+    openFlag: f.openFlag ? { reason: f.openFlag.reason || null, runs: typeof f.openFlag.runs === 'number' ? f.openFlag.runs : null } : null,
+    trajectory,
+  };
+
+  // ── worker fleet ──
+  const workers = Array.isArray(proj.workers) ? proj.workers : [];
+  const byStatus = {};
+  for (const w of workers) { const s = w.status || 'unknown'; byStatus[s] = (byStatus[s] || 0) + 1; }
+  const active = workers.filter((w) => w.status === 'running' || w.status === 'stuck')
+    .map((w) => ({ id: w.id, lane: w.lane || null, status: w.status, ageMs: ageMs(w.lastHeartbeat) }));
+  const fleet = { total: workers.length, running: byStatus.running || 0, stuck: byStatus.stuck || 0, byStatus, active: active.slice(0, 12) };
+
+  // ── who is steering (active sessions) ──
+  const steeredBy = (proj.activeSessions || []).map((s) => ({
+    id: s.id, role: s.role || null, label: s.label || null, focus: s.focus || null,
+    source: s.source || null, sinceMs: ageMs(s.registeredAt), beatMs: ageMs(s.lastHeartbeatAt),
+  }));
+
+  // ── recent slice trail ──
+  const recentSlices = (Array.isArray(proj.sliceStops) ? proj.sliceStops : []).slice(-6).reverse()
+    .map((s) => ({ summary: cleanDigestSummary(s.summary), lane: s.lane || null, ageMs: ageMs(s.ts) }));
+
+  return {
+    project: basename(repoRoot),
+    phase: proj.phase ? (proj.phase.name || proj.phase) : null,
+    goal, focus, fleet, steeredBy, recentSlices,
+    lastEventId: proj.lastEventId || null,
+  };
 }
 
 // Scan every doc body for [text](other.md[#anchor]) cross-refs and return
