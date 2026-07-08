@@ -17,8 +17,9 @@
 // (allow). Only an explicit, deterministic verdict 'block' ever denies a tool.
 
 import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
+import { gitRun } from './git-exec.mjs';
 
 // ── Enforcement + thresholds, keyed by governance mode ──────────────────────
 // enforcement: 'block' (strict — deny at the first threshold), 'graduated'
@@ -168,4 +169,126 @@ export async function readDisciplineConfig(repoRoot, mode) {
     overrides = JSON.parse(await readFile(p, 'utf8'));
   } catch { /* no override file → defaults */ }
   return resolveThresholds(mode, overrides);
+}
+
+// ── Per-session state (counter + Claude→Máddu session binding) ──────────────
+// Kept under .maddu/state/discipline/ — a local, best-effort hook cache (NOT the
+// spine). Per-session files so concurrent Claude sessions don't clobber each
+// other (Codex blocker). Every read/write is fail-safe (errors → empty/no-op).
+function disciplineDir(repoRoot) { return join(pathsFor(repoRoot).statePrjDir, 'discipline'); }
+function counterPath(repoRoot, sid) { return join(disciplineDir(repoRoot), `${String(sid).replace(/[^\w.-]/g, '_')}.json`); }
+function sessionsMapPath(repoRoot) { return join(disciplineDir(repoRoot), 'sessions.json'); }
+
+async function readJson(p, fallback) { try { return JSON.parse(await readFile(p, 'utf8')); } catch { return fallback; } }
+async function writeJson(p, obj) {
+  try { await mkdir(disciplineDirOf(p), { recursive: true }); await writeFile(p, JSON.stringify(obj, null, 2)); return true; }
+  catch { return false; }
+}
+function disciplineDirOf(filePath) { return filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))); }
+
+export async function readCounter(repoRoot, sid) {
+  return readJson(counterPath(repoRoot, sid), { lastSliceStopId: null, editsSinceSlice: 0, dirtyBaseline: [], firstDirtyTs: null, decisions: [] });
+}
+export async function writeCounter(repoRoot, sid, counter) { return writeJson(counterPath(repoRoot, sid), counter); }
+
+// Bind a Claude Code session id to a Máddu session id (called at SessionStart).
+export async function bindClaudeSession(repoRoot, claudeId, madduId) {
+  if (!claudeId || !madduId) return false;
+  const map = await readJson(sessionsMapPath(repoRoot), {});
+  map[claudeId] = { madduId, at: null };
+  return writeJson(sessionsMapPath(repoRoot), map);
+}
+export async function resolveMadduSession(repoRoot, claudeId) {
+  if (!claudeId) return null;
+  const map = await readJson(sessionsMapPath(repoRoot), {});
+  return (map[claudeId] && map[claudeId].madduId) || null;
+}
+
+// ── Git dirty-file read (git-exec; excludes .maddu/ bookkeeping) ─────────────
+export async function dirtyFiles(repoRoot) {
+  try {
+    const r = await gitRun(['status', '--porcelain=v1', '-z'], repoRoot, 5000);
+    if (r.code !== 0) return [];
+    // -z: records are NUL-separated; each record is "XY <path>" (rename adds a
+    // second NUL-separated path we don't need for a count).
+    const out = [];
+    for (const rec of r.stdout.split('\0')) {
+      if (!rec) continue;
+      const path = rec.slice(3).replace(/\\/g, '/'); // strip "XY " status prefix
+      if (!path || path.startsWith('.maddu/') || path === 'maddu.json') continue;
+      out.push(path);
+    }
+    return out;
+  } catch { return []; }
+}
+
+// ── gatherRitualState — impure; reads the world into decide()'s `state` shape ─
+// Fail-safe: any sub-read that throws degrades that ritual to its most-permissive
+// value so the overall verdict can only be softened, never falsely hardened.
+export async function gatherRitualState(repoRoot, sessionId, nowMs, counter) {
+  const [{ project }, plansMod] = await Promise.all([
+    import('./projections.mjs'), import('./plans.mjs'),
+  ]);
+  let proj = {};
+  try { proj = await project(repoRoot); } catch { proj = {}; }
+  let openPlans = [];
+  try { openPlans = (await plansMod.listPlans(repoRoot)).filter((p) => p.status === 'open'); } catch { openPlans = []; }
+
+  const sessions = Array.isArray(proj.activeSessions) ? proj.activeSessions : [];
+  const claims = Array.isArray(proj.claims) ? proj.claims : [];
+  const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
+  const lastStop = stops.length ? stops[stops.length - 1] : null;
+  const goalActive = !!(proj.goal && proj.goal.status === 'active');
+
+  const registered = sessionId ? sessions.some((s) => s.id === sessionId) : sessions.length > 0;
+  const claimed = sessionId ? claims.some((c) => c.sessionId === sessionId) : claims.length > 0;
+
+  const dirty = await dirtyFiles(repoRoot);
+  const baseline = new Set(Array.isArray(counter?.dirtyBaseline) ? counter.dirtyBaseline : []);
+  const newDirty = dirty.filter((p) => !baseline.has(p));
+  const sliceAgeMin = lastStop ? Math.max(0, (nowMs - Date.parse(lastStop.ts)) / 60000) : null;
+  const slicedButDirty = !!(counter && counter.lastSliceStopId && (counter.editsSinceSlice || 0) === 0 && newDirty.length > 0);
+
+  return {
+    session: { registered },
+    lane: { claimed },
+    goalOrPlan: { active: goalActive || openPlans.length > 0 },
+    slice: { ageMin: sliceAgeMin, lastStopId: lastStop ? lastStop.id : null },
+    commit: { newDirtyFiles: newDirty.length, dirtyAgeMin: counter?.firstDirtyTs ? Math.max(0, (nowMs - counter.firstDirtyTs) / 60000) : null, slicedButDirty },
+    _dirty: dirty,
+  };
+}
+
+// ── evaluateDiscipline — the wrapper the hooks call. FAILS OPEN. ─────────────
+// Resolves session + governance, gathers state, applies decide(). laneJustClaimed
+// lets the PreToolUse caller (which auto-claims first) skip a stale "no lane".
+export async function evaluateDiscipline(repoRoot, opts = {}) {
+  try {
+    const { tool, filePath, command, nowMs = 0, laneJustClaimed = false } = opts;
+    let sessionId = opts.madduSessionId || null;
+    if (!sessionId && opts.claudeSessionId) sessionId = await resolveMadduSession(repoRoot, opts.claudeSessionId);
+    if (!sessionId) sessionId = process.env.MADDU_SESSION_ID || null;
+
+    const gov = await import('./governance.mjs');
+    const cfg = await gov.readEffectiveGovernance(repoRoot);
+    const thresholds = await readDisciplineConfig(repoRoot, cfg.mode);
+    thresholds.enforcement = gov.effectiveValue(cfg, 'discipline-enforcement') || thresholds.enforcement;
+
+    // is this tool actually a mutating write?
+    let isMutating = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool);
+    if (tool === 'Bash') {
+      const kind = classifyBashWrite(command);
+      if (kind === 'remedy') return ok();          // remedies are never blocked
+      isMutating = kind === 'write';
+    }
+    if (!isMutating) return ok();
+
+    const counter = sessionId ? await readCounter(repoRoot, sessionId) : { editsSinceSlice: 0, dirtyBaseline: [] };
+    const state = await gatherRitualState(repoRoot, sessionId, nowMs, counter);
+    if (laneJustClaimed) state.lane = { claimed: true };
+
+    return decide({ thresholds, state, counter, toolCtx: { isMutating } });
+  } catch {
+    return ok(); // FAIL-OPEN: any error → allow
+  }
 }

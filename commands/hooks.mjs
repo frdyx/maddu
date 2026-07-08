@@ -86,18 +86,49 @@ export default async function hooks(argv) {
           await jan.reconcileStale(repoRoot, projections);
         }
       } catch { /* sweep is best-effort */ }
+      // Bind this Claude session → the Máddu session and capture the dirty
+      // baseline, so the discipline counter measures only THIS session's new
+      // uncommitted work (Codex: per-session, no cross-session clobber).
+      // Best-effort + fail-safe — never breaks session start or dirties stdout.
+      let disciplineLine = '';
+      try {
+        const disc = await loadLib('discipline.mjs');
+        if (disc && sid) {
+          let claudeId = null;
+          if (!process.stdin.isTTY) {
+            let raw = '';
+            try { for await (const chunk of process.stdin) raw += chunk; } catch {}
+            try { claudeId = raw.trim() ? (JSON.parse(raw).session_id || null) : null; } catch {}
+          }
+          if (claudeId) await disc.bindClaudeSession(repoRoot, claudeId, sid);
+          const dirty = await disc.dirtyFiles(repoRoot);
+          const counter = await disc.readCounter(repoRoot, sid);
+          counter.dirtyBaseline = dirty;
+          await disc.writeCounter(repoRoot, sid, counter);
+          const st = await disc.gatherRitualState(repoRoot, sid, Date.now(), counter);
+          const gaps = [];
+          if (!st.goalOrPlan?.active) gaps.push('no goal or open plan');
+          if (!st.lane?.claimed) gaps.push('no lane claimed');
+          if (gaps.length) disciplineLine = ` Máddu discipline: ${gaps.join('; ')} — declare/claim before editing (enforcement may block otherwise).`;
+        }
+      } catch { /* discipline context is best-effort */ }
       // SessionStart: emit additionalContext so the agent sees the session is
       // live and is reminded of the per-slice discipline the hook can't enforce.
-      const note = sid
+      const note = (sid
         ? `Máddu session ${sid} auto-registered (recorded in the spine). Claim a lane before editing (\`maddu lane claim <lane>\`) and run \`maddu slice-stop\` at each slice boundary — no --session needed, it resolves the active session.`
-        : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.';
+        : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.') + disciplineLine;
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note },
       }) + '\n');
       return;
     }
     if (event === 'session-end') {
-      await quietly(() => sessionCmd(['close', '--focus', 'session ended (auto)']));
+      let focus = 'session ended (auto)';
+      try {
+        const disc = await loadLib('discipline.mjs');
+        if (disc) { const n = (await disc.dirtyFiles(repoRoot)).length; if (n > 0) focus += ` — ${n} uncommitted file(s) at close`; }
+      } catch { /* best-effort */ }
+      await quietly(() => sessionCmd(['close', '--focus', focus]));
       return;
     }
     if (event === 'pre-tool-use') {
@@ -144,6 +175,18 @@ export default async function hooks(argv) {
         const proj = await projections.project(repoRoot);
         const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
         const last = stops.length ? stops[stops.length - 1] : null;
+        // Discipline snapshot (non-load-bearing open fields): don't compact over
+        // undisciplined state silently. Best-effort; fail-safe to nulls.
+        let uncommittedFiles = null, editsSinceSlice = null;
+        try {
+          const disc = await loadLib('discipline.mjs');
+          if (disc) {
+            uncommittedFiles = (await disc.dirtyFiles(repoRoot)).length;
+            const sid2 = process.env.MADDU_SESSION_ID || (payload.session_id ? await disc.resolveMadduSession(repoRoot, payload.session_id) : null);
+            if (sid2) editsSinceSlice = (await disc.readCounter(repoRoot, sid2)).editsSinceSlice || 0;
+            if (uncommittedFiles > 0) process.stderr.write(`[maddu] compacting with ${uncommittedFiles} uncommitted file(s) — consider committing/slice-stopping first.\n`);
+          }
+        } catch { /* discipline snapshot best-effort */ }
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.COMPACTION_CHECKPOINT,
           actor: process.env.MADDU_SESSION_ID || null,
@@ -154,6 +197,8 @@ export default async function hooks(argv) {
             handoffSetAt: proj.handoff?.setAt || null,
             openApprovals: Array.isArray(proj.approvals) ? proj.approvals.filter((a) => a.status === 'requested' || a.status === 'pending').length : 0,
             activeClaims: Array.isArray(proj.claims) ? proj.claims.length : 0,
+            uncommittedFiles,     // discipline: open field, non-load-bearing
+            editsSinceSlice,      // discipline: open field, non-load-bearing
           },
         });
       } catch {}
