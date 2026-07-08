@@ -746,6 +746,46 @@ export async function buildHandoff(repoRoot) {
   };
 }
 
+// Portfolio entry — a single project's one-card summary for the cross-workspace
+// wall. Read-only; cached success (no spawn). Deliberately compact: enough to
+// triage which project needs attention, not the full project cockpit.
+export async function buildPortfolioEntry(repoRoot) {
+  const proj = await project(repoRoot);
+  const now = Date.now();
+  const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
+  const round2 = (x) => Math.round(x * 100) / 100;
+  const cache = await readSuccessCache(repoRoot);
+
+  const total = cache ? (cache.conditions || []).length : (proj.goal?.success?.length ?? 0);
+  const met = cache && typeof cache.metCount === 'number' ? cache.metCount : 0;
+  const window = Array.isArray(proj.focus?.window) ? proj.focus.window : [];
+  const last = window.length ? window[window.length - 1] : null;
+  const workers = Array.isArray(proj.workers) ? proj.workers : [];
+  const running = workers.filter((w) => w.status === 'running').length;
+  const stuck = workers.filter((w) => w.status === 'stuck').length;
+  const lastSlice = (Array.isArray(proj.sliceStops) && proj.sliceStops.length) ? proj.sliceStops[proj.sliceStops.length - 1] : null;
+  const f = proj.focus || {};
+
+  return {
+    project: basename(repoRoot),
+    goal: proj.goal ? proj.goal.objective : null,
+    percent: total ? Math.round((met / total) * 100) : null,
+    metCount: cache ? cache.metCount : null,
+    total,
+    allMet: cache ? cache.allMet : null,
+    onGoal: last && typeof last.distanceScore === 'number' ? round2(1 - last.distanceScore) : null,
+    lastTag: f.lastTag || null,
+    driftFlag: f.openFlag ? { reason: f.openFlag.reason || null, runs: typeof f.openFlag.runs === 'number' ? f.openFlag.runs : null } : null,
+    openApprovals: (proj.approvals?.open || []).length,
+    running,
+    stuck,
+    activeSessions: (proj.activeSessions || []).length,
+    lastSliceAgeMs: lastSlice ? ageMs(lastSlice.ts) : null,
+    lastSliceSummary: lastSlice ? cleanDigestSummary(lastSlice.summary) : null,
+    hasHandoff: !!(proj.handoff && proj.handoff.body),
+  };
+}
+
 // Scan every doc body for [text](other.md[#anchor]) cross-refs and return
 // a { targetSlug: [{ from, fromTitle, anchor }] } map. Used by the cockpit
 // to render "Referenced by" footers without needing to load every page.
