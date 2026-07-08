@@ -719,6 +719,33 @@ export async function buildDecisions(repoRoot, { limit = 100 } = {}) {
   return { decisions: recent, total, shown: recent.length, byCategory, verify };
 }
 
+// Enriched handoff — display-time fusion of the curated HANDOFF_SET note (the
+// operator/agent's "RESUME HERE" narrative) with the live projection: carried
+// goal + cached success %, inherited focus trajectory, fleet, who's steering,
+// recent slices, and how many approvals need the human. NO schema change — the
+// note stays a plain {body} event; everything else is derived here at show time.
+export async function buildHandoff(repoRoot) {
+  const proj = await project(repoRoot);
+  const now = Date.now();
+  const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
+  const cockpit = await buildProjectCockpit(repoRoot);
+  const h = (proj.handoff && proj.handoff.body)
+    ? { body: proj.handoff.body, by: proj.handoff.by || null, setAt: proj.handoff.setAt || null, ageMs: ageMs(proj.handoff.setAt) }
+    : null;
+  const needsYou = (proj.approvals?.open || []).length;
+  return {
+    handoff: h,
+    needsYou,
+    project: cockpit.project,
+    phase: cockpit.phase,
+    goal: cockpit.goal,
+    focus: cockpit.focus,
+    fleet: cockpit.fleet,
+    steeredBy: cockpit.steeredBy,
+    recentSlices: cockpit.recentSlices,
+  };
+}
+
 // Scan every doc body for [text](other.md[#anchor]) cross-refs and return
 // a { targetSlug: [{ from, fromTitle, anchor }] } map. Used by the cockpit
 // to render "Referenced by" footers without needing to load every page.

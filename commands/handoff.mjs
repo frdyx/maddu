@@ -10,6 +10,43 @@
 
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadLib } from './_libroot.mjs';
+
+const C = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', ok: '\x1b[32m', warn: '\x1b[33m', accent: '\x1b[36m' };
+
+// Fused context block below the curated note: carried goal + cached success %,
+// on-goal trajectory, fleet, who's steering, what needs the human. Everything
+// here is derived at show time from the projection — the note itself is unchanged.
+export function renderHandoffContext(fused) {
+  const out = [];
+  const g = fused.goal || {};
+  if (g.objective) {
+    const pct = typeof g.percent === 'number' ? `${g.percent}%` : '—';
+    const met = (typeof g.metCount === 'number' && typeof g.total === 'number') ? ` (${g.metCount}/${g.total})` : '';
+    out.push(`  ${C.dim}goal:${C.reset} ${pct}${met} · ${g.objective.slice(0, 72)}`);
+  }
+  const f = fused.focus || {};
+  if (f.lastTag) {
+    const on = typeof f.onGoal === 'number' ? ` ${f.onGoal.toFixed(2)}` : '';
+    const flag = f.openFlag ? ` ${C.warn}⚠ ${f.openFlag.reason || 'drift'}${C.reset}` : '';
+    out.push(`  ${C.dim}focus:${C.reset} ${f.lastTag}${on}${flag}`);
+  }
+  const fl = fused.fleet || {};
+  if (typeof fl.total === 'number' && fl.total > 0) {
+    out.push(`  ${C.dim}fleet:${C.reset} ${fl.running || 0} running · ${fl.stuck || 0} stuck · ${fl.total} total`);
+  }
+  const steer = Array.isArray(fused.steeredBy) ? fused.steeredBy : [];
+  if (steer.length) out.push(`  ${C.dim}steering:${C.reset} ${steer.map((s) => s.role || s.id).join(', ')}`);
+  if (typeof fused.needsYou === 'number' && fused.needsYou > 0) {
+    out.push(`  ${C.warn}▸ ${fused.needsYou} approval(s) need you${C.reset}`);
+  }
+  const slices = Array.isArray(fused.recentSlices) ? fused.recentSlices : [];
+  if (slices.length) {
+    out.push(`  ${C.dim}recent:${C.reset}`);
+    for (const s of slices.slice(0, 3)) out.push(`    · ${(s.summary || '').slice(0, 76)}`);
+  }
+  return out.join('\n');
+}
 
 export default async function handoff(argv) {
   const sub = argv[0];
@@ -34,18 +71,32 @@ export default async function handoff(argv) {
   }
 
   if (sub === 'show') {
-    const proj = await projections.project(repoRoot);
-    const h = proj.handoff;
+    const { flags } = parseFlags(rest);
+    // Fuse the curated note with live goal/focus/fleet context at display time.
+    // --plain keeps the old body-only behavior; --json emits the fused object.
+    let fused = null;
+    try { const bb = await loadLib('bridge-builders.mjs'); fused = await bb.buildHandoff(repoRoot); }
+    catch { const proj = await projections.project(repoRoot); fused = { handoff: proj.handoff && proj.handoff.body ? { body: proj.handoff.body, by: proj.handoff.by, setAt: proj.handoff.setAt } : null }; }
+
+    if (flags.json) { process.stdout.write(JSON.stringify(fused, null, 2) + '\n'); return; }
+
+    const h = fused.handoff;
     if (!h || !h.body) {
       console.log('(no curated handoff — set one with: maddu handoff set "<RESUME HERE …>")');
       return;
     }
-    if (parseFlags(rest).flags.json) { process.stdout.write(JSON.stringify(h, null, 2) + '\n'); return; }
     console.log(h.body);
-    console.log(`\n(set ${h.setAt}${h.by ? ' by ' + h.by : ''})`);
+    if (!flags.plain) {
+      const ctx = renderHandoffContext(fused);
+      if (ctx) {
+        console.log(`\n${C.dim}─── carried context ───${C.reset}`);
+        console.log(ctx);
+      }
+    }
+    console.log(`\n${C.dim}(set ${h.setAt}${h.by ? ' by ' + h.by : ''})${C.reset}`);
     return;
   }
 
-  console.error('Usage: maddu handoff <set "<markdown>" | show>');
+  console.error('Usage: maddu handoff <set "<markdown>" | show [--plain] [--json]>');
   process.exit(2);
 }
