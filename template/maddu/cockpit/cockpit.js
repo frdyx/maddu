@@ -432,7 +432,7 @@ function setBanner(text, severity = 'info') {
 // related · raw. Render is by-kind; renderers below dispatch on entity kind.
 // No modals — Inspector lives in #inspector-panel and slides in.
 
-// The Inspector (entity-detail drawer) � moved to cockpit-inspector.js (v1.70.0):
+// The Inspector (entity-detail drawer) - moved to cockpit-inspector.js (v1.70.0):
 // inspector singleton + ensureInspector + open/closeInspector + renderInspector +
 // INSPECTOR_TABS/RENDERERS + label/payload/renderInspectorTab. A self-contained
 // drawer (leaves + REASON_CODE_LABEL + DOM only). Route views open it via
@@ -1313,7 +1313,7 @@ function allSubTargets() {
 
 // ─── Workbench (Phase D1) ────────────────────────────────────────────────
 
-// renderWorkbench � moved to cockpit-views-live.js (v1.67.0). The 3-pane operator
+// renderWorkbench - moved to cockpit-views-live.js (v1.67.0). The 3-pane operator
 // cockpit (composer-free): ctx.fetch* reads + ctx.refreshStatus, live via
 // ctx.onSpineEvent, 8s slow-tick setInterval torn down via ctx.onRouteLeave.
 
@@ -1324,10 +1324,10 @@ function allSubTargets() {
 // Score Matrix (per-lane progress + reason codes), and Now/Next/Waiting/Done
 // task board. Everything reflects canonical state — no UI memory.
 
-// renderConductor (+ renderNextCommand/renderConductorBoard/renderScoreMatrix) �
+// renderConductor (+ renderNextCommand/renderConductorBoard/renderScoreMatrix) -
 // moved to cockpit-views-live.js (v1.68.0). Scope-aware (ctx.scopePill/scopedUrl),
 // ctx.panelFocus panels, debounced ctx.onSpineEvent, board/score open the Inspector
-// via ctx.openInspector. REASON_CODE_TONE/LABEL � cockpit-event-rows.js (shared with
+// via ctx.openInspector. REASON_CODE_TONE/LABEL - cockpit-event-rows.js (shared with
 // the Inspector here + BOSS).
 
 
@@ -1343,7 +1343,7 @@ function allSubTargets() {
 // safe next action affordance.
 
 // renderQueueBoard + renderClaimMap (+ private renderQueueColumns/renderQueueCard/
-// renderClaimsTable + QUEUE_/CLAIM_REASON_TONE/LABEL palettes) � moved to
+// renderClaimsTable + QUEUE_/CLAIM_REASON_TONE/LABEL palettes) - moved to
 // cockpit-views-live.js (v1.65.0). Queue scope-aware (ctx.scopePill/scopedUrl);
 // both debounced ctx.onSpineEvent + open Inspector via ctx.openInspector.
 
@@ -1368,7 +1368,7 @@ function allSubTargets() {
 
 // renderBoss (+ renderBossStrip/Sessions/Transcript, renderOperator/Enforcer/Decision
 // Line, renderProposalCard, renderBossComposer + PROPOSAL_RISK_TONE/ENFORCER_ACTION_
-// KINDS/ACTION_FIELDS) � moved to cockpit-views-live.js (v1.69.0)  the FINAL route
+// KINDS/ACTION_FIELDS) - moved to cockpit-views-live.js (v1.69.0) - the FINAL route
 // view. Debounced ctx.onSpineEvent; proposal cards open the Inspector via
 // ctx.openInspector. renderBossComposer is a self-contained form (no ctx). The
 // global composer/slash-command singleton below stays shell-core.
@@ -1385,7 +1385,7 @@ function allSubTargets() {
 // shows just these inputs — pickers populate from live state when possible.
 
 
-// renderDashboard � moved to cockpit-views-live.js (v1.64.0). Headline operator
+// renderDashboard - moved to cockpit-views-live.js (v1.64.0). Headline operator
 // overview: scope-aware (ctx.scopePill/scopedUrl/rerender), paints from the cached
 // bridge snapshot via ctx.bridgeStatus/bridgeOk. No stream sub, no inspector.
 
@@ -1418,13 +1418,13 @@ async function fetchLanes() {
 // (slice ledger entries, wiki body, learning facts).
 // loading / loadingFor → moved to cockpit-util.js (v1.39.0).
 
-// renderOperations + renderSwarm � moved to cockpit-views-live.js (v1.60.0).
+// renderOperations + renderSwarm - moved to cockpit-views-live.js (v1.60.0).
 // Operations: stream-coupled (SLICE_STOP via ctx.onSpineEvent), ctx.panelFocus
 // panels, ctx.fetchProjection/fetchMemory, checkpoint stamps ctx.currentSession().
 // Swarm: static read over ctx.fetchLanes + ctx.fetchProjection (no stream sub).
 
 
-// renderChats � moved to cockpit-views-live.js (v1.66.0). The sessions roster:
+// renderChats - moved to cockpit-views-live.js (v1.66.0). The sessions roster:
 // one ctx.fetchProjection read rendered as session panels. The simplest live view.
 
 // v1.6.0 — Goal panel: objective + measurable success conditions + constraints
@@ -1434,7 +1434,7 @@ async function fetchLanes() {
 // renderGoal → moved to cockpit-views-reference.js (v1.47.0); receives the
 // shell's panelFocus via ctx (self-registers a command-palette sub-target).
 
-// renderRoadmap � moved to cockpit-views-inspect.js (v1.52.0)  KPIs/cadence/
+// renderRoadmap - moved to cockpit-views-inspect.js (v1.52.0) - KPIs/cadence/
 // lane-mix charts (inline) + a slice index whose rows open the Inspector. Shell
 // deps via ctx: panelFocus, fetchProjection, openInspector (no ctx growth).
 
@@ -1446,7 +1446,7 @@ async function fetchLanes() {
 // URL convention: #/docs                 → opens index (first page)
 //                 #/docs?p=<slug>         → opens a specific page
 
-// renderDocs � moved to cockpit-views-docs.js (v1.48.0)  pure move
+// renderDocs - moved to cockpit-views-docs.js (v1.48.0) - pure move
 // (leaves + donut/statusGrid + renderMarkdown + ROUTE_META; route-local
 // hashchange listener self-removes on leaving #/docs).
 
@@ -1463,22 +1463,22 @@ async function fetchApprovals(scopeRoute) {
 
 // postApprovalDecision → moved to cockpit-event-rows.js (v1.41.0).
 
-// renderApprovals � moved to cockpit-views-live.js (v1.62.0). Scope-aware
+// renderApprovals - moved to cockpit-views-live.js (v1.62.0). Scope-aware
 // (ctx.scopePill), ctx.panelFocus palette panels, APPROVAL_* via ctx.onSpineEvent.
 // fetchApprovals STAYS here (shared with the inline renderWorkbench) and is
 // reached via ctx.fetchApprovals.
 
 // classifyEvent / summarize / eventRow → moved to cockpit-event-rows.js (v1.41.0).
 
-// renderEvents � moved to cockpit-views-live.js (v1.61.0). Live event stream:
+// renderEvents - moved to cockpit-views-live.js (v1.61.0). Live event stream:
 // subscribes via ctx.onSpineEvent (appends each matching row), Pause/Resume
 // toggles the shared long-poll flag via ctx.isStreamPaused/toggleStreamPause.
 
 // prepend / makeDecisionButton → moved to cockpit-event-rows.js (v1.41.0).
 
 // renderMailbox/renderTasks/renderSkills (+ private fetchMailbox/fetchMailboxCounts/
-// fetchTasks/fetchSkills/fetchSkill + taskCard) � moved to cockpit-views-live.js
-// (v1.59.0)  first live-cluster slice. Stream-coupled (ctx.onSpineEvent:
+// fetchTasks/fetchSkills/fetchSkill + taskCard) - moved to cockpit-views-live.js
+// (v1.59.0) - first live-cluster slice. Stream-coupled (ctx.onSpineEvent:
 // MAILBOX_/TASK_/SKILL_), stamp by:/createdBy:/sessionId: via ctx.currentSession(),
 // honor ?focus= via ctx.paletteFocus/focusPanelByKeyword.
 
@@ -1489,20 +1489,20 @@ async function fetchApprovals(scopeRoute) {
 
 
 
-// renderImports (+ private fetchImports) � moved to cockpit-views-connect.js
-// (v1.57.0)  stream-coupled (IMPORT_* via ctx.onSpineEvent); submit stamps
+// renderImports (+ private fetchImports) - moved to cockpit-views-connect.js
+// (v1.57.0) - stream-coupled (IMPORT_* via ctx.onSpineEvent); submit stamps
 // by:ctx.currentSession() (narrow composer-pointer accessor).
 
-// renderAuth (+ private fetchAuth/fetchAuthProvider) � moved to
-// cockpit-views-connect.js (v1.56.0)  first stream-coupled view; re-runs on
+// renderAuth (+ private fetchAuth/fetchAuthProvider) - moved to
+// cockpit-views-connect.js (v1.56.0) - first stream-coupled view; re-runs on
 // AUTH_KEY_* spine events via the new ctx.onSpineEvent seam (route-local teardown).
 
 async function fetchSchedules() {
   try { const r = await fetch('/bridge/schedules', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
 }
 
-// renderSchedule + fetchMcp/renderMcp + fetchRuntimes/renderRuntimes � moved to
-// cockpit-views-connect.js (v1.58.0)  the remaining connect infra views.
+// renderSchedule + fetchMcp/renderMcp + fetchRuntimes/renderRuntimes - moved to
+// cockpit-views-connect.js (v1.58.0) - the remaining connect infra views.
 // schedule is scope-aware (ctx.scopePill/scopeIsGlobal/rerender); all three are
 // stream-coupled (ctx.onSpineEvent) and stamp by:/sessionId: via ctx.currentSession().
 
@@ -1511,7 +1511,7 @@ async function fetchSchedules() {
 // supply-chain posture: pin list, last audit, violations, secret-scan
 // refusals, worker env policy, MCP provenance distribution, skill
 // provenance distribution.
-// renderTrust � moved to cockpit-views-connect.js (v1.55.0)  pure-leaf posture
+// renderTrust - moved to cockpit-views-connect.js (v1.55.0) - pure-leaf posture
 // page (keeps its own 15s setInterval refresh, verbatim).
 
 // v1.1.0 Phase 2 — unified Tools cockpit route.
@@ -1519,8 +1519,8 @@ async function fetchSchedules() {
 // (pure-leaf views — leaves + route metadata + global fetch, no ctx needed).
 
 // v1.1.0 Phase 5 — Plans + Kanban cockpit route.
-// renderPlans + openPlanDrawer � moved to cockpit-views-inspect.js (v1.54.0)
-//  kanban + plan table; cards/rows open the plan entity drawer via
+// renderPlans + openPlanDrawer - moved to cockpit-views-inspect.js (v1.54.0)
+// - kanban + plan table; cards/rows open the plan entity drawer via
 // ctx.openEntityDrawer (the drawer singleton). Completes the inspect-heavy cluster.
 
 
@@ -1529,7 +1529,7 @@ async function fetchSchedules() {
 // renderSearch → moved to cockpit-views-reference.js (v1.47.0)
 // (pure-leaf view — leaves + route metadata + global fetch).
 
-// renderSettings � moved to cockpit-views-connect.js (v1.55.0)  registers
+// renderSettings - moved to cockpit-views-connect.js (v1.55.0) - registers
 // command-palette sub-targets via ctx.panelFocus; honors ?focus= via
 // ctx.paletteFocus/ctx.focusPanelByKeyword. Imports comms panels from cockpit-comms.
 
@@ -1539,7 +1539,7 @@ window.addEventListener('hashchange', renderRoute);
 
 // ─── Composer / slash-command palette ────────────────────────────────────
 
-// The slash-command bar (composer + command palette) � moved to
+// The slash-command bar (composer + command palette) - moved to
 // cockpit-command-bar.js (v1.71.0): the composer singleton + COMMANDS + slash
 // parse/dispatch (postJson/fetchJson/runCommand) + Ctrl-K palette (routes +
 // sub-targets + workspaces) + paletteFocus/focusPanelByKeyword. cockpit.js injects
@@ -1572,7 +1572,7 @@ window.addEventListener('hashchange', renderRoute);
 // ─── Slice δ — Learning route ───────────────────────────────────────────
 // laneFromFact → moved to cockpit-util.js (v1.43.0).
 
-// renderLearning � moved to cockpit-views-inspect.js (v1.49.0)  first
+// renderLearning - moved to cockpit-views-inspect.js (v1.49.0) - first
 // inspect-heavy slice; its row-click opens the Inspector via ctx.openInspector
 // (LEARNING_KIND_TONE moved with it as a private const).
 
@@ -1581,18 +1581,18 @@ window.addEventListener('hashchange', renderRoute);
 // (pure-leaf view — leaves + showToast + route metadata + global fetch).
 
 // ─── Slice ε — Workflows blueprint ──────────────────────────────────────
-// renderWorkflows + WORKFLOW_NODES/EDGES/NODE_ROUTE � moved to
-// cockpit-views-inspect.js (v1.51.0)  SVG blueprint graph; each node opens the
+// renderWorkflows + WORKFLOW_NODES/EDGES/NODE_ROUTE - moved to
+// cockpit-views-inspect.js (v1.51.0) - SVG blueprint graph; each node opens the
 // Inspector via ctx.openInspector (with an Open-route action).
 
 // ─── Slice ε — Agents (coworker profile grid) ───────────────────────────
-// renderAgents � moved to cockpit-views-inspect.js (v1.53.0)  coworker grid;
+// renderAgents - moved to cockpit-views-inspect.js (v1.53.0) - coworker grid;
 // cards open the Inspector. Shell deps via ctx: scopePill/scopedUrl + rerender
 // (narrow router alias for scope-toggle re-render) + openInspector/paletteFocus/
 // focusPanelByKeyword.
 
 // ─── Slice ε — Teams (lane ownership map) ───────────────────────────────
-// renderTeams � moved to cockpit-views-inspect.js (v1.50.0)  inspect-heavy;
+// renderTeams - moved to cockpit-views-inspect.js (v1.50.0) - inspect-heavy;
 // lane cards open the Inspector. Shell deps via ctx: fetchLanes/fetchProjection/
 // openInspector + paletteFocus/focusPanelByKeyword (deep-link focus).
 
@@ -1635,8 +1635,8 @@ function flashSliceLine() {
 
 // ─── Governance Phase 6 render functions ──────────────────────────────────
 
-// renderOrientation + renderGates + renderReviews � moved to cockpit-views-live.js
-// (v1.63.0)  three clean read-only ledger views: ctx.panelFocus palette panel +
+// renderOrientation + renderGates + renderReviews - moved to cockpit-views-live.js
+// (v1.63.0) - three clean read-only ledger views: ctx.panelFocus palette panel +
 // debounced ctx.onSpineEvent refresh (no filtering). Leaves + ctx only.
 
 

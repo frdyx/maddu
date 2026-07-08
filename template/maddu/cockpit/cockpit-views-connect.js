@@ -1,4 +1,4 @@
-// M�ddu cockpit  connect-cluster route views (settings + trust posture).
+// Maddu cockpit - connect-cluster route views (settings + trust posture).
 //
 // Extracted from cockpit.js across v1.55.0–v1.58.0 — the complete "connect"
 // cluster (settings, trust, auth, imports, schedule, mcp, runtimes). renderTrust
@@ -553,7 +553,7 @@ export function renderSettings(ctx) {
   return root;
 }
 
-//     Auth route (provider keys, rate-limit state)                          
+// ---- Auth route (provider keys, rate-limit state) ----
 // Stream-coupled connect view: re-runs on AUTH_KEY_* spine events via the
 // ctx.onSpineEvent seam (route-local teardown). fetchAuth/fetchAuthProvider are
 // module-private (renderAuth is their only caller).
@@ -702,7 +702,7 @@ export function renderAuth(ctx) {
   return root;
 }
 
-//     Imports route (guarded payload intake  skill/memory/lane/brief/inbox)   
+// ---- Imports route (guarded payload intake - skill/memory/lane/brief/inbox) ----
 // Stream-coupled connect view: re-runs on IMPORT_* spine events via
 // ctx.onSpineEvent. Submit stamps `by: ctx.currentSession()`. fetchImports is
 // module-private (renderImports is its only caller).
@@ -844,7 +844,7 @@ export function renderImports(ctx) {
   return root;
 }
 
-//    connect-cluster infra views (v1.58.0): schedule + mcp + runtimes   
+// ---- connect-cluster infra views (v1.58.0): schedule + mcp + runtimes ----
 // The remaining three connect route views, extracted as mechanical ctx-swap
 // moves now that every seam they need exists. All three are stream-coupled
 // (SCHEDULE_/MCP_/RUNTIME_+WORKER_) via ctx.onSpineEvent and stamp `by:` /

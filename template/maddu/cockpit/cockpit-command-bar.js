@@ -1,4 +1,4 @@
-// Máddu cockpit  the slash-command bar (composer + command palette).
+// Máddu cockpit - the slash-command bar (composer + command palette).
 //
 // Extracted from cockpit.js (v1.71.0). One cohesive subsystem: the bottom
 // composer input (slash-command parsing + dispatch to the bridge via postJson/
@@ -6,8 +6,8 @@
 // command palette (fuzzy search over routes + view-registered panel sub-targets
 // + workspaces, keyboard nav, ?focus= deep-link writing). Owns the `composer`
 // singleton + the COMMANDS table. The shell injects what stays in the composition
-// root  the route registry, the framework-only filter, the panel sub-target
-// registry, the workspace switcher  via initCommandBar(host). Route views never
+// root - the route registry, the framework-only filter, the panel sub-target
+// registry, the workspace switcher - via initCommandBar(host). Route views never
 // see this; they only read ctx.paletteFocus / focusPanelByKeyword / currentSession,
 // which cockpit.js re-exposes from here.
 //
@@ -18,11 +18,11 @@ import { el, showToast } from './cockpit-util.js';
 
 let host = null;
 
-// Boot entry  cockpit.js calls this once with the shell accessors, which wires
+// Boot entry - cockpit.js calls this once with the shell accessors, which wires
 // the composer input + the palette hotkey/overlay.
 export function initCommandBar(h) { host = h; initComposer(); initPalette(); }
 
-// Narrow read accessor for the composer's sticky session pointer  cockpit.js
+// Narrow read accessor for the composer's sticky session pointer - cockpit.js
 // assigns this onto ctx.currentSession so POST-ing views stamp `by:` with it.
 export function currentSession() { return composer.currentSession; }
 const composer = {
