@@ -613,8 +613,23 @@ export async function project(repoRoot) {
           // v1.6.0 — measurable success conditions [{ text, verify }]. Older
           // GOAL_DECLARED events without it project to [] (forward-compat).
           success: Array.isArray(ev.data.success) ? ev.data.success : [],
-          setAt: ev.ts
+          setAt: ev.ts,
+          // Goal lifecycle: a freshly declared goal is active until GOAL_COMPLETED.
+          status: 'active',
+          completedAt: null,
+          completionNote: null,
         };
+        break;
+      case 'GOAL_COMPLETED':
+        // Close the current goal's lifecycle (latest-declared goal wins, same as
+        // GOAL_DECLARED). A completed goal stays visible (with its outcome) so
+        // `goal show` / orient can prompt for a fresh one instead of silently
+        // re-surfacing a finished objective as "the goal".
+        if (goal && goal.status === 'active') {
+          goal.status = ev.data.outcome === 'abandoned' ? 'abandoned' : 'completed';
+          goal.completedAt = ev.ts;
+          goal.completionNote = ev.data.note || null;
+        }
         break;
       case 'HANDOFF_SET':
         handoff = { body: ev.data.body || '', by: ev.data.by || ev.actor || null, setAt: ev.ts };

@@ -54,12 +54,45 @@ export default async function command(argv) {
     return;
   }
 
-  if (sub === 'show') {
+  // `goal done` — close the goal lifecycle so a finished objective stops
+  // lingering as "the current goal". `--abandon` records it as dropped rather
+  // than achieved. Refuses when there is no active goal to close.
+  if (sub === 'done' || sub === 'complete' || sub === 'abandon') {
+    const { flags } = parseFlags(rest);
     const proj = await projections.project(repoRoot);
-    console.log(JSON.stringify(proj.goal ?? null, null, 2));
+    const g = proj.goal;
+    if (!g || g.status && g.status !== 'active') {
+      console.error(g ? `goal already ${g.status} — set a new one with \`maddu goal set\`.` : 'no goal declared — nothing to complete.');
+      process.exit(3);
+    }
+    const outcome = (sub === 'abandon' || flags.abandon) ? 'abandoned' : 'done';
+    const note = typeof flags.note === 'string' ? flags.note : null;
+    const ev = await spine.append(repoRoot, {
+      type: spine.EVENT_TYPES.GOAL_COMPLETED,
+      actor: process.env.MADDU_SESSION_ID || null,
+      data: { note, objective: g.objective || null, outcome },
+    });
+    console.log(`goal ${outcome}: ${g.objective}`);
+    if (note) console.log(`note: ${note}`);
+    console.log(`event: ${ev.id}`);
     return;
   }
 
-  console.error('Usage: maddu goal <set|show> [--objective "…"] [--constraint "…" …] [--success "<verify-cmd>::<text>" …]');
+  if (sub === 'show') {
+    const { flags } = parseFlags(rest);
+    const proj = await projections.project(repoRoot);
+    const g = proj.goal ?? null;
+    // Surface staleness at DISPLAY time (projections stay wall-clock-free): an
+    // active goal older than 7 days is flagged so a stale objective doesn't sit
+    // unnoticed. Non-JSON view adds the hint; --json stays machine-clean.
+    if (g && !flags.json && g.status === 'active' && g.setAt) {
+      const ageDays = (Date.now() - new Date(g.setAt).getTime()) / 86_400_000;
+      if (ageDays > 7) console.log(`\x1b[33m⚠ goal is ${Math.floor(ageDays)}d old and still open — complete it (\`maddu goal done\`) or set a fresh one.\x1b[0m`);
+    }
+    console.log(JSON.stringify(g, null, 2));
+    return;
+  }
+
+  console.error('Usage: maddu goal <set|show|done> [--objective "…"] [--constraint "…" …] [--success "<verify-cmd>::<text>" …] [--note "…"] [--abandon]');
   process.exit(2);
 }

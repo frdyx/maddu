@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.2.0",
+  "x-contractVersion": "1.3.0",
   "type": "object",
   "required": [
     "v",
@@ -106,6 +106,7 @@
         "FOLLOWUP_OPENED",
         "GATE_RAN",
         "GOAL_DECLARED",
+        "GOAL_COMPLETED",
         "PENDING_ACTION_DRAINED",
         "PENDING_ACTION_ENQUEUED",
         "PHASE_DECLARED",
@@ -2601,6 +2602,41 @@
               },
               "success": {
                 "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "GOAL_COMPLETED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A declared goal was marked done or abandoned, closing the goal lifecycle.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "objective": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": "string"
               }
             }
           }

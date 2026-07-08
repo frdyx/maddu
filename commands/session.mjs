@@ -74,8 +74,34 @@ export default async function session(argv) {
   const repoRoot = await resolveRepoRoot(paths);
 
   if (!sub) {
-    console.error('Usage: maddu session <register|start|heartbeat|close|active|list> [flags]');
+    console.error('Usage: maddu session <register|start|heartbeat|close|active|list|sweep> [flags]');
     process.exit(2);
+  }
+
+  // `session sweep` — CLI-side stale-session janitor. The projection janitor
+  // only runs inside the bridge (on /bridge/projection GET), so CLI-first work
+  // never auto-closes stale sessions or releases the lane claims they leaked.
+  // This runs the same evaluation on demand: auto-close sessions past the
+  // configured threshold (default 4h) and — via the projection's close cascade
+  // — release every claim they held. Best-effort, idempotent, rule-#9 clean
+  // (SESSION_AUTO_CLOSED carries the allowlisted `janitor:sessions` trigger).
+  if (sub === 'sweep') {
+    const { flags } = parseFlags(rest);
+    const janitor = await loadLibOptional('janitor.mjs');
+    if (!janitor || !janitor.reconcileStale) {
+      console.error('janitor lib not present on this install — run "maddu upgrade".');
+      process.exit(2);
+    }
+    const report = await janitor.reconcileStale(repoRoot, projections);
+    if (flags.json) { console.log(JSON.stringify(report, null, 2)); return; }
+    const released = report.orphanedClaimsReleased || [];
+    console.log(`session sweep — ${report.autoClosed} session(s) auto-closed, ${report.staleDetected} newly stale, ${released.length} orphaned claim(s) released`);
+    for (const c of released) console.log(`  released lane ${c.lane} (was held by closed session ${c.sessionId})`);
+    if ((report.orphanedWorktrees || []).length) {
+      console.log(`  \x1b[33m⚠ ${report.orphanedWorktrees.length} orphaned worktree(s)\x1b[0m — disposition with 'maddu lane release <lane> --worktree <merged|abandoned|keep>':`);
+      for (const w of report.orphanedWorktrees) console.log(`    ${w.lane}  ${w.path}`);
+    }
+    return;
   }
 
   if (sub === 'register') {

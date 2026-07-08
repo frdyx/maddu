@@ -26,17 +26,19 @@ function printHelp() {
   console.log([
     'Usage: maddu hooks <install|status|remove> [--dry-run]',
     '',
-    '  install     Wire SessionStart (auto-register) + SessionEnd (close) +',
-    '              PreCompact (compaction checkpoint) into',
+    '  install     Wire SessionStart (auto-register + stale-sweep) + SessionEnd',
+    '              (close) + PreCompact (compaction checkpoint) + PreToolUse',
+    '              (auto-claim a lane before editing) into',
     '              <repo>/.claude/settings.json so every Claude Code session in',
     '              this repo records to the spine. Idempotent; preserves your',
     '              own hooks.',
     '  status      Show which Máddu hooks are installed.',
     '  remove      Remove only Máddu\'s hook entries.',
     '',
-    'Once installed, a single auto-registered session flows into `lane claim`',
-    'and `slice-stop` with no --session/$MADDU_SESSION_ID. Slice boundaries stay',
-    'agent-driven (run `maddu slice-stop` at each); the SessionStart hook nudges.',
+    'Once installed, a session auto-registers, the SessionStart sweep clears stale',
+    'sessions + orphaned lane claims, and PreToolUse auto-claims a lane before the',
+    'first edit — so agentic work is recorded and laned without the agent',
+    'remembering. Slice boundaries stay agent-driven (`maddu slice-stop` at each).',
   ].join('\n'));
 }
 
@@ -68,6 +70,19 @@ export default async function hooks(argv) {
         const a = await sessionActive.readActiveSession(repoRoot);
         sid = a && a.sessionId;
       }
+      // Opportunistic stale-session sweep. The bridge janitor only runs when the
+      // cockpit is open; on a CLI-first workstation stale sessions never
+      // auto-close and the lane claims they leaked linger for days. Running the
+      // same evaluation on every session start keeps the record self-cleaning.
+      // Best-effort + silent — a sweep failure must never break session start,
+      // and it must not write to stdout (parsed as SessionStart context).
+      try {
+        const { projections } = await loadSpineLib();
+        const jan = await loadLib('janitor.mjs');
+        if (jan && jan.reconcileStale) {
+          await jan.reconcileStale(repoRoot, projections);
+        }
+      } catch { /* sweep is best-effort */ }
       // SessionStart: emit additionalContext so the agent sees the session is
       // live and is reminded of the per-slice discipline the hook can't enforce.
       const note = sid
@@ -81,6 +96,31 @@ export default async function hooks(argv) {
     if (event === 'session-end') {
       await quietly(() => sessionCmd(['close', '--focus', 'session ended (auto)']));
       return;
+    }
+    if (event === 'pre-tool-use') {
+      // Auto-claim a lane before the first mutating edit so agentic work is
+      // never un-laned. FAILS OPEN (exit 0 always) — a claim problem must never
+      // block the tool, and this writes nothing to stdout.
+      try {
+        if (!process.stdin.isTTY) {
+          let raw = '';
+          for await (const chunk of process.stdin) raw += chunk;
+          const payload = raw.trim() ? JSON.parse(raw) : {};
+          const filePath = payload?.tool_input?.file_path || payload?.tool_input?.notebook_path || null;
+          const { projections, sessionActive } = await loadSpineLib();
+          let sid = process.env.MADDU_SESSION_ID || null;
+          if (!sid && sessionActive?.readActiveSession) {
+            const a = await sessionActive.readActiveSession(repoRoot);
+            sid = a && a.sessionId;
+          }
+          const auto = await loadLib('auto-claim-trigger.mjs');
+          if (auto && auto.maybeAutoClaim && sid) {
+            const proj = await projections.project(repoRoot);
+            await auto.maybeAutoClaim(repoRoot, { sid, filePath, proj });
+          }
+        }
+      } catch { /* fail open */ }
+      process.exit(0);
     }
     if (event === 'pre-compact') {
       // FAILS OPEN by design: whatever goes wrong, exit 0 so compaction is
@@ -116,7 +156,7 @@ export default async function hooks(argv) {
       } catch {}
       process.exit(0);
     }
-    console.error(`maddu hooks fire: unknown event "${event}". One of: session-start, session-end, pre-compact.`);
+    console.error(`maddu hooks fire: unknown event "${event}". One of: session-start, session-end, pre-compact, pre-tool-use.`);
     process.exit(2);
   }
 
@@ -167,8 +207,8 @@ export default async function hooks(argv) {
     } else {
       const { installed } = lib.summarize(next);
       console.log(`\x1b[32minstalled\x1b[0m Máddu hooks (${installed.join(', ')}) → ${lib.settingsPath(repoRoot)}`);
-      console.log(`  Every Claude Code session in this repo now auto-registers, records to the spine,`);
-      console.log(`  and writes a governance checkpoint before every context compaction.`);
+      console.log(`  Every Claude Code session now auto-registers, sweeps stale sessions + orphaned`);
+      console.log(`  claims, auto-claims a lane before the first edit, and checkpoints before compaction.`);
       console.log(`  Remove with \x1b[1mmaddu hooks remove\x1b[0m.`);
     }
     return;
