@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.1.0",
+  "x-contractVersion": "1.2.0",
   "type": "object",
   "required": [
     "v",
@@ -137,6 +137,7 @@
         "ADVISOR_ARTIFACT_WRITTEN",
         "TOKEN_USAGE_REPORTED",
         "SKILL_INJECTED",
+        "SKILL_INJECTION_REFUSED",
         "TOOL_INVOKED",
         "TOOL_COMPLETED",
         "TOOL_REFUSED",
@@ -3700,6 +3701,38 @@
               },
               "triggers": {
                 "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SKILL_INJECTION_REFUSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A matching skill was withheld from injection for untrusted provenance.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "refused": {
+                "type": "array"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }

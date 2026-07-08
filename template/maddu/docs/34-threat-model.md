@@ -153,9 +153,20 @@ orientation digest; agent dutifully follows.
 
 - Skill frontmatter required field: `provenance:
   framework-starter-pack-vX | operator | imported` (P4).
-- `commands/brief.mjs#loadSkillsForInjection` refuses skills with
-  no provenance, OR `provenance: 'imported'` without `trusted:
-  true`. Emits `SKILL_INJECTION_REFUSED`.
+- Load-time refusal in `commands/brief.mjs`: a skill is injected into
+  the orientation digest only if it is **trusted-provenance AND locally
+  resident**. A skill is withheld when its provenance is untrusted (no
+  provenance, or `provenance: 'imported'` without `trusted: true`)
+  `reason: 'untrusted-provenance'` — OR it points off-box without an
+  `external_refs: allowed` acknowledgment `reason:
+  'unacknowledged-external-refs'` (the inject-time twin of the
+  `skill-no-external-refs` gate, via the shared `skill-refs.mjs`
+  detector). Either way the refusal is **witnessed on the spine** as
+  `SKILL_INJECTION_REFUSED` (`{ reason, refused: [{ id, provenance,
+  reason }] }`), never a silent drop. The refused payload rides the
+  central `spine.append` secret sweep like every event, and the captured
+  refs are query/fragment-stripped so a secret-bearing `?token=…` is
+  never even staged.
 - `maddu skill import <path>` requires explicit `--trust` flag,
   injects `provenance: imported`, `trusted: false`, and computes
   SHA256.
@@ -163,6 +174,18 @@ orientation digest; agent dutifully follows.
   promotion. Emits `SKILL_TRUSTED`.
 - `skill-provenance-required` doctor gate (P4). FAIL on missing
   provenance; WARN on imported-pending-trust.
+- `skill-no-external-refs` doctor gate. The **URL-swap** variant of
+  this attack (cybernews, 2026: a fake "brand landing page" skill
+  hijacked ~26,000 agents) keeps the skill file clean at review time
+  and points its body at an **external** instruction link, then swaps
+  the content behind that link after approval — the reviewed markdown
+  never changes, a dependency it references does. The gate scans each
+  auto-injectable `operator`/`imported` skill body for off-box
+  references (http/https URLs, `curl`/`wget` fetches): an `imported`
+  skill with an unacknowledged external ref FAILs; an `operator` one
+  WARNs. Framework-origin skills are skipped (install-integrity covers
+  tampering). The operator acknowledges a legitimate reference — after
+  reading it — with frontmatter `external_refs: allowed`.
 - Migration: pre-v1.2 skills auto-grandfathered with
   `provenance: 'pre-v1.2-grandfathered'` at load time.
 
@@ -171,6 +194,12 @@ orientation digest; agent dutifully follows.
 - Whether the skill content is actually safe. Trust is an operator
   decision; the gate ensures every auto-injection has an auditable
   lineage but does not semantically inspect the content.
+- Whether the content *behind* an acknowledged external reference is
+  safe. `skill-no-external-refs` makes the off-box surface visible and
+  forces an operator signature on it — it is the *formally-checkable*
+  half (is this skill locally resident?). The *semantic* half (is the
+  remote content malicious?) is unverifiable for natural language and
+  stays an operator + OS-level-egress concern.
 - Operator copy-pasting a skill into a `skill create` invocation.
 
 ### 6. Strict mode says "approvals required" but install ignores it

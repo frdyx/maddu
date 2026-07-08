@@ -151,6 +151,12 @@ export const EVENT_TYPES = {
   // more skill bodies to the orientation digest based on trigger/tag
   // matches. data: { sessionId, triggers, tags, skillIds, totalBytes }.
   SKILL_INJECTED:            'SKILL_INJECTED',
+  // A matching skill was NOT injected because its provenance is untrusted
+  // (imported without `maddu skill trust`, or no provenance). Closes the
+  // load-time half of the imported-skill threat (docs/34 scenario 5): the
+  // refusal is witnessed on the spine, not a silent drop.
+  // data: { sessionId, reason, refused: [{ id, provenance }] }
+  SKILL_INJECTION_REFUSED:   'SKILL_INJECTION_REFUSED',
   // v1.1.0 Phase 1 — default framework tools (git/test/format/lint/install)
   // emit one event per invocation. TOOL_INVOKED at start, TOOL_COMPLETED on
   // exit, TOOL_REFUSED when allowlist or dangerous-form check blocks before
