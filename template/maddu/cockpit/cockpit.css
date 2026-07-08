@@ -3764,7 +3764,17 @@ select option:hover,
 /* Compact card asides that carry a full summary (team lane cards) clamp to one
  * line — the full record is on the detail views + the inspector, not crammed here. */
 .team-lane-last { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* Compact CARD summaries (queue, backbone previews) clamp to a few lines so a
+ * verbose summary can't grow the card into a wall; full detail on click. */
+.queue-card-summary, .queue-card-detail, .proposal-summary {
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
+  -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
 /* Inspector drawer — the universal detail surface. Never scroll sideways: long
  * values + raw blocks wrap. */
 .inspector-body { overflow-wrap: anywhere; word-break: break-word; }
 .inspector-body pre, .inspector-body code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+/* Raw source-doc renders (Skills body, Wiki pages, other non-code <pre>) wrap
+ * instead of scrolling sideways. Code blocks (.md-code) keep their intentional
+ * horizontal scroll for source fidelity. */
+.view pre:not(.md-code) { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; }
