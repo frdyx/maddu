@@ -31,7 +31,7 @@ Máddu spawns no models, stores no secrets, calls no clouds.
 
 <div align="center">
 
-<a href="https://maddu.frdyx.com"><picture><img alt="The Máddu cockpit on the Roadmap route — KPI tiles (slice-stops total, last 7 days, since last slice), a 28-day slice-closure cadence chart, and the slice index, all read live from the append-only spine" src="docs/images/cockpit-hero.png" width="920"></picture></a>
+<a href="https://maddu.frdyx.com"><picture><img alt="The Máddu cockpit on the Events route — a live cursor stream of the append-only spine: an activity chart over the last 60 minutes, the event-type mix (framework, session, lane, approval, slice), and the raw typed stream (FRAMEWORK_BOOTED, SESSION_AUTO_REGISTERED, HANDOFF_SET, SLICE_STOP), with the Verify cluster in the rail" src="docs/images/cockpit-hero.png" width="920"></picture></a>
 
 <sub>*The cockpit, dogfooded on Máddu's own repo — every tile read live from the append-only spine.*</sub>
 
