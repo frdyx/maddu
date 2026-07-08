@@ -3732,7 +3732,10 @@ select option:hover,
 .slice-trail { display: flex; flex-direction: column; }
 .slice-trail-item { padding: 8px 0; border-top: 1px solid var(--m-line-soft); }
 .slice-trail-item:first-child { border-top: 0; }
-/* Overflow safety net — no view panel ever scrolls sideways on long text. Long
- * unbroken tokens wrap; intentional scrollers (code, tables) opt out. */
-.view .panel { overflow-wrap: anywhere; }
-.view .panel table.ledger td { overflow-wrap: anywhere; word-break: break-word; }
+/* Overflow safety net — long unbroken tokens wrap instead of scrolling sideways.
+ * Use break-word (not anywhere) so it never shrinks a table's min-content and
+ * collapses a short label column; the aggressive `anywhere` stays scoped to
+ * .prose above. Keep ledger LABELS on one line. */
+.view .panel { overflow-wrap: break-word; }
+.view .panel table.ledger td { overflow-wrap: break-word; }
+.view .panel table.ledger td.event-actor { white-space: nowrap; word-break: normal; overflow-wrap: normal; padding-right: 12px; }
