@@ -45,7 +45,7 @@ import { readRegistry, writeRegistry, activateWorkspace, registryExists, registr
 import { MIME, send, sendJson, hostnameOf, isLoopbackHostname, readBody, serveStatic } from './lib/http-util.mjs';
 // Cockpit projection builders (conductor / queue / claims / backlinks) — pure
 // repo-root → data, no bridge state. The second server-split slice.
-import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc, buildOversight, buildDigest, buildProjectCockpit } from './lib/bridge-builders.mjs';
+import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc, buildOversight, buildDigest, buildProjectCockpit, buildDecisions } from './lib/bridge-builders.mjs';
 import { fanoutProjection, fanoutConductor, fanoutApprovals, fanoutQueue, fanoutEventsRecent } from './lib/bridge-fanout.mjs';
 import { resolveRepoRoot, detectFrameworkLayout, readVersion, pickPort, probePortIsMaddu, findPidOnPort } from './lib/bridge-bootstrap.mjs';
 import { routeMcp, routeRuntimes } from './lib/bridge-routes-registries.mjs';
@@ -979,6 +979,11 @@ async function handleBridge(req, res, url, ctx) {
   // fused for one project. Read-only (cached success, no spawn).
   if (path === '/bridge/project-cockpit' && req.method === 'GET') {
     return sendJson(res, 200, await buildProjectCockpit(repoRoot));
+  }
+  // Decision ledger — the curated decision-grade spine (intent/decision/gate/
+  // outcome) with a tamper-evident chain badge. Read-only.
+  if (path === '/bridge/decisions' && req.method === 'GET') {
+    return sendJson(res, 200, await buildDecisions(repoRoot));
   }
   if (path === '/bridge/test-status' && req.method === 'GET') {
     // Latest stress/upgrade-matrix run summaries, both optional. Read

@@ -18,7 +18,7 @@ import { renderGoal, renderTools, renderLoops, renderSearch, renderWiki } from '
 import { renderDocs } from './cockpit-views-docs.js';
 import { renderLearning, renderTeams, renderWorkflows, renderRoadmap, renderAgents, renderPlans } from './cockpit-views-inspect.js';
 import { renderTrust, renderSettings, renderAuth, renderImports, renderSchedule, renderMcp, renderRuntimes } from './cockpit-views-connect.js';
-import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench, renderConductor, renderBoss } from './cockpit-views-live.js'; import { renderFocus } from './cockpit-views-focus.js'; import { renderExperience } from './cockpit-views-experience.js'; import { renderModel } from './cockpit-views-model.js'; import { renderOversight } from './cockpit-views-oversight.js'; import { renderDigest } from './cockpit-views-digest.js'; import { renderProject } from './cockpit-views-project.js';
+import { renderMailbox, renderTasks, renderSkills, renderOperations, renderSwarm, renderEvents, renderApprovals, renderOrientation, renderGates, renderReviews, renderDashboard, renderQueueBoard, renderClaimMap, renderChats, renderWorkbench, renderConductor, renderBoss } from './cockpit-views-live.js'; import { renderFocus } from './cockpit-views-focus.js'; import { renderExperience } from './cockpit-views-experience.js'; import { renderModel } from './cockpit-views-model.js'; import { renderOversight } from './cockpit-views-oversight.js'; import { renderDigest } from './cockpit-views-digest.js'; import { renderProject } from './cockpit-views-project.js'; import { renderDecisions } from './cockpit-views-decisions.js';
 
 // ─── Multi-workspace scoping ────────────────────────────────────────────
 // The bridge can mount N repos. Every /bridge/* request carries an
@@ -69,7 +69,7 @@ const RENDERERS = {
   pipelines: renderPipelinesRoute, loops: renderLoops, cost: renderCostRoute,
   advisors: renderAdvisorsRoute, skillinjections: renderSkillInjectionsRoute,
   modelrouting: renderModelRoutingRoute, trust: renderTrust, teststatus: renderTestStatusRoute,
-  dashboard: renderDashboard, roadmap: renderRoadmap, skills: renderSkills, docs: renderDocs, focus: renderFocus, experience: renderExperience, model: renderModel, oversight: renderOversight, digest: renderDigest, project: renderProject,
+  dashboard: renderDashboard, roadmap: renderRoadmap, skills: renderSkills, docs: renderDocs, focus: renderFocus, experience: renderExperience, model: renderModel, oversight: renderOversight, digest: renderDigest, project: renderProject, decisions: renderDecisions,
 };
 const ROUTES = {};
 for (const id of Object.keys(ROUTE_META)) ROUTES[id] = { ...ROUTE_META[id], render: RENDERERS[id] };
