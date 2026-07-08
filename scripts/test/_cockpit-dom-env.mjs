@@ -315,6 +315,32 @@ const CANNED = {
     focus: { lastTag: 'toward', openFlag: null, goal: 'ship the oversight surface', updatedAt: FIXED_TS },
     verify: { events: 3156, chainIntact: true, counts: { WARN: 0, FAIL: 0 }, contractVersion: '1.3.0' },
   },
+  '/bridge/project-cockpit': {
+    project: 'maddu',
+    phase: null,
+    goal: {
+      objective: 'ship the operator plane harvest', metCount: 3, verifiable: 4, total: 4,
+      percent: 75, allMet: false, evaluatedAt: FIXED_TS,
+      conditions: [
+        { text: 'buildProjectCockpit exists', verify: 'node -e 0', state: 'met' },
+        { text: 'route renders', verify: 'node -e 0', state: 'met' },
+        { text: 'golden captured', verify: 'node -e 0', state: 'met' },
+        { text: 'merged to main', verify: 'node -e 0', state: 'pending' },
+      ],
+    },
+    focus: {
+      lastTag: 'toward', onGoal: 0.9, openFlag: null,
+      trajectory: [
+        { tag: 'toward', onGoal: 1, ts: FIXED_TS },
+        { tag: 'lateral', onGoal: 0.5, ts: FIXED_TS },
+        { tag: 'toward', onGoal: 0.9, ts: FIXED_TS },
+      ],
+    },
+    fleet: { total: 3, running: 1, stuck: 0, byStatus: { running: 1, exited: 2 }, active: [{ id: 'wrk_demo', lane: 'observability', status: 'running', ageMs: 30000 }] },
+    steeredBy: [{ id: 'ses_demo', role: 'implementer', label: 'maddu', focus: 'operator plane p2', source: 'cli', sinceMs: 600000, beatMs: 45000 }],
+    recentSlices: [{ summary: 'SLICE STOP: project cockpit builder + route', lane: 'observability', ageMs: 120000 }],
+    lastEventId: 'evt_00000009',
+  },
   '/bridge/digest': {
     range: { sinceId: 'evt_00000001', lastEventId: 'evt_00000009', newEventCount: 12 },
     headline: 'While you were away: 2 slices landed, gates green. 1 approval needs you; goal 3/4 met.',
