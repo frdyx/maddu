@@ -315,6 +315,24 @@ const CANNED = {
     focus: { lastTag: 'toward', openFlag: null, goal: 'ship the oversight surface', updatedAt: FIXED_TS },
     verify: { events: 3156, chainIntact: true, counts: { WARN: 0, FAIL: 0 }, contractVersion: '1.3.0' },
   },
+  '/bridge/digest': {
+    range: { sinceId: 'evt_00000001', lastEventId: 'evt_00000009', newEventCount: 12 },
+    headline: 'While you were away: 2 slices landed, gates green. 1 approval needs you; goal 3/4 met.',
+    sliceStops: [
+      { ts: FIXED_TS, lane: 'observability', summary: 'SLICE STOP: digest builder + bridge route', ageMs: 300000 },
+      { ts: FIXED_TS, lane: 'cockpit-shell', summary: 'SLICE STOP: digest cockpit view', ageMs: 600000 },
+    ],
+    sliceStopCount: 2,
+    drift: [],
+    driftCount: 0,
+    gates: { ran: 4, failed: 0, failing: [] },
+    needsYou: [
+      { approvalId: 'evt_00000007', tool: 'git', action: 'push', summary: 'push feat/operator-plane-p1-digest', ageMs: 90000 },
+    ],
+    goal: { objective: 'ship the operator plane harvest', metCount: 3, total: 4, allMet: false, evaluatedAt: FIXED_TS },
+    focus: { lastTag: 'toward', openFlag: null },
+    empty: false,
+  },
 };
 
 function jsonResponse(body) {
