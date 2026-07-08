@@ -70,6 +70,8 @@ export const ROUTE_META = {
                 keywords: 'pipelines runs stages plan-exec-verify-fix autopilot' },
   loops:      { title: 'Loops',      group: 'operate',   rank: 12,                description: 'Ralph + plan-loops with iteration count, status, stuck-detection. (v1.1.0)',
                 keywords: 'loop loops ralph plan-loop persist iterate stuck' },
+  portfolio:  { title: 'Portfolio',  group: 'operate',   rank: 13,                description: 'Cross-workspace portfolio wall — one card per mounted project (goal % · on-goal · drift · approvals · fleet · last slice) with a "Needs the human" list that bubbles up open approvals, drift flags, and stuck workers across every project. Read-time fan-out over the workspace registry, zero writes.',
+                keywords: 'portfolio wall cross-workspace projects overview needs-the-human approvals drift fleet fan-out multi-repo' },
   cost:       { title: 'Cost',       group: 'operate',   rank: 9,                 description: 'Token / call rollup per session, day, model, runtime. Surfaces unreported-token gaps honestly.',
                 keywords: 'cost tokens ledger usage billing rollup unreported' },
   advisors:   { title: 'Advisors',   group: 'operate',   rank: 10,                description: 'Non-claiming advisor query artifacts. Runtime + session + ts + first-line preview.',

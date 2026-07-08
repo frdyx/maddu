@@ -46,7 +46,7 @@ import { MIME, send, sendJson, hostnameOf, isLoopbackHostname, readBody, serveSt
 // Cockpit projection builders (conductor / queue / claims / backlinks) — pure
 // repo-root → data, no bridge state. The second server-split slice.
 import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc, buildOversight, buildDigest, buildProjectCockpit, buildDecisions, buildHandoff } from './lib/bridge-builders.mjs';
-import { fanoutProjection, fanoutConductor, fanoutApprovals, fanoutQueue, fanoutEventsRecent } from './lib/bridge-fanout.mjs';
+import { fanoutProjection, fanoutConductor, fanoutApprovals, fanoutQueue, fanoutEventsRecent, buildPortfolio } from './lib/bridge-fanout.mjs';
 import { resolveRepoRoot, detectFrameworkLayout, readVersion, pickPort, probePortIsMaddu, findPidOnPort } from './lib/bridge-bootstrap.mjs';
 import { routeMcp, routeRuntimes } from './lib/bridge-routes-registries.mjs';
 import { routeSessions, routeLanes } from './lib/bridge-routes-lanes.mjs';
@@ -291,6 +291,11 @@ async function handleBridge(req, res, url, ctx) {
     if (path === '/bridge/_all/events/recent' && req.method === 'GET') {
       const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '200', 10), 1), 5000);
       const merged = await fanoutEventsRecent(ctx, limit);
+      return sendJson(res, 200, merged);
+    }
+    // Portfolio wall — one card per workspace + an aggregated needs-the-human list.
+    if (path === '/bridge/_all/portfolio' && req.method === 'GET') {
+      const merged = await buildPortfolio(ctx);
       return sendJson(res, 200, merged);
     }
     return sendJson(res, 404, { error: 'unknown _all endpoint', path });

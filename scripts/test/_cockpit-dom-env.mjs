@@ -353,6 +353,19 @@ const CANNED = {
     recentSlices: [{ summary: 'SLICE STOP: project cockpit builder + route', lane: 'observability', ageMs: 120000 }],
     lastEventId: 'evt_00000009',
   },
+  '/bridge/_all/portfolio': {
+    cards: [
+      { workspace_id: 'snyggare', workspace_label: 'snyggare', project: 'snyggare', goal: 'ship the client site', percent: 40, metCount: 2, total: 5, allMet: false, onGoal: 0.3, lastTag: 'away', driftFlag: { reason: '5 turns off-axis', runs: 5 }, openApprovals: 1, running: 1, stuck: 1, activeSessions: 1, lastSliceAgeMs: 300000, lastSliceSummary: 'SLICE STOP: hero section', hasHandoff: true },
+      { workspace_id: 'maddu', workspace_label: 'maddu', project: 'maddu', goal: 'ship the operator plane harvest', percent: 100, metCount: 4, total: 4, allMet: true, onGoal: 1, lastTag: 'toward', driftFlag: null, openApprovals: 0, running: 0, stuck: 0, activeSessions: 1, lastSliceAgeMs: 120000, lastSliceSummary: 'SLICE STOP: portfolio wall', hasHandoff: true },
+    ],
+    needsHuman: [
+      { workspace_id: 'snyggare', workspace_label: 'snyggare', kind: 'drift', detail: '5 turns off-axis', runs: 5 },
+      { workspace_id: 'snyggare', workspace_label: 'snyggare', kind: 'approvals', count: 1, detail: '1 approval(s) pending' },
+      { workspace_id: 'snyggare', workspace_label: 'snyggare', kind: 'stuck', count: 1, detail: '1 stuck worker(s)' },
+    ],
+    workspaceCount: 2,
+    errors: [],
+  },
   '/bridge/digest': {
     range: { sinceId: 'evt_00000001', lastEventId: 'evt_00000009', newEventCount: 12 },
     headline: 'While you were away: 2 slices landed, gates green. 1 approval needs you; goal 3/4 met.',

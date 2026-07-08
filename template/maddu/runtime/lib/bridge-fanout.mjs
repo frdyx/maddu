@@ -12,7 +12,7 @@
 import { readAll } from './spine.mjs';
 import { project } from './projections.mjs';
 import { readRegistry } from './workspaces.mjs';
-import { buildConductor, buildQueueBoard } from './bridge-builders.mjs';
+import { buildConductor, buildQueueBoard, buildPortfolioEntry } from './bridge-builders.mjs';
 
 // Build a {workspaceId → human-readable label} map. Falls back to the id
 // when no registry entry is available (e.g. legacy single-workspace mode,
@@ -171,6 +171,45 @@ export async function fanoutApprovals(ctx) {
   merged.open.sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime());
   merged.ledger.sort((a, b) => new Date(a.ts || 0).getTime() - new Date(b.ts || 0).getTime());
   return merged;
+}
+
+// Portfolio wall — one card per mounted workspace (goal %, on-goal, drift,
+// approvals, fleet, last slice) plus an aggregated "Needs the human" list
+// (open approvals, drift flags, stuck workers across every project). Attention
+// bubbles up: cards needing the human sort first, then by lowest on-goal.
+export async function buildPortfolio(ctx) {
+  const settled = await fanoutBuild(ctx, buildPortfolioEntry);
+  return assemblePortfolio(settled);
+}
+
+// Pure: turn fanoutBuild's settled entries ([{id,label,view}] | {id,label,error})
+// into the portfolio wall — tagged cards (attention-sorted), an aggregated
+// needs-the-human list (drift / approvals / stuck, severity-ordered), and
+// isolated per-workspace errors. Exported so the sort/bubble-up logic unit-tests
+// without spinning up real workspaces.
+export function assemblePortfolio(settled) {
+  const cards = [];
+  const needsHuman = [];
+  const errors = [];
+  for (const r of settled || []) {
+    if (!r) continue;
+    if (r.error) { errors.push({ workspace_id: r.id, workspace_label: r.label, error: r.error }); continue; }
+    const v = r.view || {};
+    cards.push(tagRow(v, r.id, r.label));
+    if (v.driftFlag) needsHuman.push({ workspace_id: r.id, workspace_label: r.label, kind: 'drift', detail: v.driftFlag.reason || 'sustained drift', runs: v.driftFlag.runs ?? null });
+    if (v.openApprovals > 0) needsHuman.push({ workspace_id: r.id, workspace_label: r.label, kind: 'approvals', count: v.openApprovals, detail: `${v.openApprovals} approval(s) pending` });
+    if (v.stuck > 0) needsHuman.push({ workspace_id: r.id, workspace_label: r.label, kind: 'stuck', count: v.stuck, detail: `${v.stuck} stuck worker(s)` });
+  }
+  // Attention score: cards that need the human (drift / approvals / stuck) sort
+  // first; ties broken by lowest on-goal (most drifted), then by name.
+  const attn = (c) => (c.driftFlag ? 4 : 0) + (c.openApprovals > 0 ? 2 : 0) + (c.stuck > 0 ? 1 : 0);
+  cards.sort((a, b) => (attn(b) - attn(a))
+    || ((a.onGoal ?? 1) - (b.onGoal ?? 1))
+    || String(a.project || '').localeCompare(String(b.project || '')));
+  // Order needsHuman by severity: drift, then approvals, then stuck.
+  const kindRank = { drift: 0, approvals: 1, stuck: 2 };
+  needsHuman.sort((a, b) => (kindRank[a.kind] ?? 9) - (kindRank[b.kind] ?? 9));
+  return { cards, needsHuman, workspaceCount: cards.length, errors };
 }
 
 export async function fanoutQueue(ctx) {
