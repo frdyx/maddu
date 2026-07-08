@@ -17,7 +17,7 @@
 // `maddu learn retrieve <id>` pointer (so curation never silently drops detail).
 
 import { spawnSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -52,6 +52,64 @@ function gitBranch(repoRoot) {
 
 function cleanSummary(s) {
   return String(s || '—').replace(/\s+/g, ' ').replace(/^["'\s]+/, '').trim().slice(0, 100) || '—';
+}
+
+// `orient --digest` cursor — the last event id the operator has already seen,
+// so the digest shows only the delta since then. Rebuildable state file (never
+// a spine event); a missing/garbage cursor safely means "since the beginning".
+function digestCursorPath(paths, repoRoot) {
+  return join(paths.pathsFor(repoRoot).statePrjDir, 'digest-cursor.json');
+}
+async function readDigestCursor(paths, repoRoot) {
+  try {
+    let raw = await readFile(digestCursorPath(paths, repoRoot), 'utf8');
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+    const j = JSON.parse(raw);
+    return j && typeof j.lastSeenId === 'string' ? j.lastSeenId : null;
+  } catch { return null; }
+}
+async function writeDigestCursor(paths, repoRoot, lastSeenId, ts) {
+  if (!lastSeenId) return;
+  const dir = paths.pathsFor(repoRoot).statePrjDir;
+  await mkdir(dir, { recursive: true });
+  const dst = digestCursorPath(paths, repoRoot);
+  const tmp = dst + '.tmp';
+  await writeFile(tmp, JSON.stringify({ lastSeenId, at: ts || null }, null, 2) + '\n');
+  await rename(tmp, dst);
+}
+
+// Render the "while you were away" digest (built by bridge-builders.buildDigest).
+function renderDigest(d) {
+  console.log(`${C.bold}═══ MÁDDU DIGEST ═══${C.reset}  ${C.dim}while you were away${C.reset}`);
+  console.log(`  ${d.headline}`);
+  if (d.empty) {
+    console.log(`\n  ${C.dim}(no new events since you last looked)${C.reset}`);
+    return;
+  }
+  const ago = (ms) => ms == null ? '' : `${C.dim} ${Math.round(ms / 60000)}m ago${C.reset}`;
+  if (d.needsYou.length) {
+    console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}NEEDS YOU${C.reset} (${d.needsYou.length})\n${C.dim}${RULE}${C.reset}`);
+    for (const a of d.needsYou) console.log(`  ${C.unver}▸${C.reset} ${a.action || a.tool || 'approval'}${a.summary ? ' — ' + a.summary : ''}${ago(a.ageMs)}`);
+  }
+  if (d.gates.failed) {
+    console.log(`\n  ${C.unver}✗ ${d.gates.failed} gate(s) failing${C.reset}: ${d.gates.failing.map((g) => g.gateId).join(', ')}`);
+  } else if (d.gates.ran) {
+    console.log(`\n  ${C.met}✓ gates green${C.reset}${C.dim} (${d.gates.ran} ran)${C.reset}`);
+  }
+  if (d.driftCount) {
+    const first = d.drift[0];
+    console.log(`\n  ${C.unver}⚠ drift flagged${C.reset}${d.driftCount > 1 ? ` (${d.driftCount})` : ''}: ${first ? (first.reason || `${first.runs} turns off-axis`) : ''}`);
+  }
+  if (d.sliceStopCount) {
+    console.log(`\n${C.dim}${RULE}${C.reset}\n${C.bold}SLICES LANDED${C.reset} (${d.sliceStopCount})\n${C.dim}${RULE}${C.reset}`);
+    for (const s of d.sliceStops) console.log(`  · ${s.summary}${ago(s.ageMs)}`);
+    if (d.sliceStopCount > d.sliceStops.length) console.log(`  ${C.dim}… and ${d.sliceStopCount - d.sliceStops.length} more${C.reset}`);
+  }
+  if (d.goal.objective) {
+    const g = d.goal;
+    const gstr = g.allMet ? `${C.met}all met${C.reset}` : (g.metCount != null && g.total ? `${g.metCount}/${g.total} met` : 'in progress');
+    console.log(`\n  ${C.dim}goal:${C.reset} ${gstr}${C.dim}  ·  ${d.range.newEventCount} new event(s)${C.reset}`);
+  }
 }
 
 const MARK = {
@@ -90,6 +148,17 @@ export default async function orient(argv) {
   // verify actually ran — never overwrite a real result with skipped states.
   if (runVerify && goal) {
     try { await writeSuccessCache(repoRoot, { goal, result: { evaluated, metCount, verifiable, pendingCount, allMet }, ts: new Date().toISOString() }); } catch {}
+  }
+
+  // `--digest` — the "while you were away" delta since the last cursor. Uses the
+  // just-written success cache (no re-spawn) and advances the cursor to the tip.
+  if (flags.digest) {
+    const { buildDigest } = await loadLib('bridge-builders.mjs');
+    const sinceId = await readDigestCursor(paths, repoRoot);
+    const digest = await buildDigest(repoRoot, { sinceId });
+    renderDigest(digest);
+    try { await writeDigestCursor(paths, repoRoot, digest.range.lastEventId, new Date().toISOString()); } catch {}
+    return;
   }
 
   // Counters from the full spine.

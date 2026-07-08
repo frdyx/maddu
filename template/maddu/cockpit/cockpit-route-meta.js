@@ -27,6 +27,8 @@ export const ROUTE_META = {
                 keywords: 'plans plan phases kanban revision multi-phase' },
   focus:      { title: 'Focus',      group: 'decide',    rank: 8,                 description: 'Focus Director — a domain-blind trajectory instrument. Per-turn drift tag (toward/lateral/away) vs the declared goal, with a sustained-drift flag carrying a swap/revert/continue choice. Opt-in: `maddu focus enable`.',
                 keywords: 'focus director drift trajectory toward lateral away goal pilot attention anti-adhd nudge' },
+  digest:     { title: 'Digest',     group: 'decide',    rank: 9,                 description: 'While you were away — the delta since you last looked: slices landed, gates run, drift flagged, plus what needs you now (open approvals, goal ✓/○/? from the cached success eval). Read-time derivation, zero writes. CLI: `maddu orient --digest`.',
+                keywords: 'digest while you were away delta since catch-up approvals needs-you slices gates drift resume' },
 
   workflows:  { title: 'Workflows',  group: 'operate',   anchor: true,  rank: 1,  description: 'Blueprint of how Máddu thinks: operator → BOSS → Enforcer → claims → fleet → gates → reports → learning → wiki.' },
   agents:     { title: 'Agents',     group: 'operate',   rank: 2,                 description: 'Coworker profile grid — every active session with heartbeat, focus, claims held, score, mode, last slice.' },

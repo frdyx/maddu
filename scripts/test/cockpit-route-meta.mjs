@@ -17,7 +17,7 @@ function ok(name, cond, extra = '') {
 
 const ids = Object.keys(ROUTE_META);
 ok('ROUTE_META is an object', ROUTE_META && typeof ROUTE_META === 'object');
-ok('has 46 routes', ids.length === 46, `${ids.length}`);
+ok('has 47 routes', ids.length === 47, `${ids.length}`);
 
 // Every entry carries the core metadata fields and NO render binding (the
 // whole point of the split — render lives in cockpit.js).

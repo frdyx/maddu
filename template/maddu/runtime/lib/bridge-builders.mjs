@@ -10,10 +10,12 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile, stat } from 'node:fs/promises';
 import { project } from './projections.mjs';
+import { readSince } from './spine.mjs';
 import { listSchedules } from './schedule.mjs';
 import { totalUnread as mailboxTotalUnread } from './mailbox.mjs';
 import { readAttachments } from './worktrees.mjs';
 import { verifySpine } from './verify.mjs';
+import { readSuccessCache } from './success-eval.mjs';
 import { plainRefused, EMPTY_STATE } from './oversight-copy.mjs';
 
 // The runtime root (template/maddu/runtime in source, maddu/runtime when
@@ -474,6 +476,89 @@ export async function buildOversight(repoRoot) {
     focus,
     verify,
   };
+}
+
+// One-line summary cleaner (mirrors orient's) — collapse whitespace, trim
+// quotes, cap length. Local so bridge-builders stays free of a CLI import.
+function cleanDigestSummary(s) {
+  return String(s || '—').replace(/\s+/g, ' ').replace(/^["'\s]+/, '').trim().slice(0, 120) || '—';
+}
+
+// A 2-sentence plain-language headline for the digest. Pure + exported so a
+// fixture can lock the copy. Sentence 1 = what happened in the window; sentence
+// 2 = what (if anything) needs the operator now.
+export function digestHeadline({ sliceStopCount, driftCount, gates, needsYou, goal }) {
+  const did = [];
+  if (sliceStopCount) did.push(`${sliceStopCount} slice${sliceStopCount > 1 ? 's' : ''} landed`);
+  if (gates.failed) did.push(`${gates.failed} gate${gates.failed > 1 ? 's' : ''} failing`);
+  else if (gates.ran) did.push('gates green');
+  if (driftCount) did.push('drift flagged');
+  const first = did.length ? `While you were away: ${did.join(', ')}.` : 'Nothing new since you last looked.';
+
+  const now = [];
+  if (needsYou.length) now.push(`${needsYou.length} approval${needsYou.length > 1 ? 's' : ''} need${needsYou.length > 1 ? '' : 's'} you`);
+  if (goal.allMet) now.push('goal conditions all met — consider closing or releasing');
+  else if (goal.metCount != null && goal.total) now.push(`goal ${goal.metCount}/${goal.total} met`);
+  const second = now.length ? `${now.join('; ')}.` : '';
+  return second ? `${first} ${second}` : first;
+}
+
+// Digest — "while you were away". Fuses the DELTA since a cursor event (new
+// slice-stops, drift flags, gate runs) with CURRENT state that needs the
+// operator (open approvals, goal + cached success ✓/○/?, focus tail). Read-only;
+// the success state comes from the cache (no verify spawn on a GET), and every
+// "how long ago" is computed here at request time. `sinceId` null → whole spine.
+export async function buildDigest(repoRoot, { sinceId = null } = {}) {
+  const proj = await project(repoRoot);
+  const now = Date.now();
+  const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
+  const since = await readSince(repoRoot, sinceId);
+
+  // ── DELTA — new milestones in the window (newest first) ──
+  // Caps keep a whole-spine first run (sinceId=null over thousands of events)
+  // from returning an unbounded payload; `*Count` carries the true totals.
+  const SLICE_CAP = 12, DRIFT_CAP = 8;
+  const sliceRows = since.filter((e) => e.type === 'SLICE_STOP')
+    .map((e) => ({ ts: e.ts, lane: e.lane || null, summary: cleanDigestSummary(e.data?.summary), ageMs: ageMs(e.ts) }))
+    .reverse();
+  const driftRows = since.filter((e) => e.type === 'DRIFT_FLAGGED' && !e.data?.cleared)
+    .map((e) => ({ ts: e.ts, reason: e.data?.reason || null, runs: typeof e.data?.runs === 'number' ? e.data.runs : null, ageMs: ageMs(e.ts) }))
+    .reverse();
+  const sliceStops = sliceRows.slice(0, SLICE_CAP);
+  const sliceStopCount = sliceRows.length;
+  const drift = driftRows.slice(0, DRIFT_CAP);
+  const driftCount = driftRows.length;
+  const gateRuns = since.filter((e) => e.type === 'GATE_RAN');
+  const gateFails = gateRuns.filter((e) => e.data && e.data.ok === false)
+    .map((e) => ({ gateId: e.data.gateId || null, severity: e.data.severity || null, ts: e.ts }));
+  const gates = { ran: gateRuns.length, failed: gateFails.length, failing: gateFails.slice(-8).reverse() };
+
+  // ── CURRENT — what needs the operator now ──
+  const needsYou = (proj.approvals?.open || []).map((a) => ({
+    approvalId: a.approvalId, tool: a.tool || null, action: a.action || null,
+    summary: a.summary || null, ageMs: ageMs(a.ts),
+  }));
+
+  // ── goal + cached success (no spawn) ──
+  const cache = await readSuccessCache(repoRoot);
+  const goal = {
+    objective: proj.goal ? proj.goal.objective : null,
+    metCount: cache ? cache.metCount : null,
+    total: cache ? (cache.conditions || []).length : (proj.goal?.success?.length ?? null),
+    allMet: cache ? cache.allMet : null,
+    evaluatedAt: cache ? cache.ts : null,
+  };
+
+  // ── focus tail ──
+  const f = proj.focus || {};
+  const focus = {
+    lastTag: f.lastTag || null,
+    openFlag: f.openFlag ? { reason: f.openFlag.reason || null, runs: typeof f.openFlag.runs === 'number' ? f.openFlag.runs : null } : null,
+  };
+
+  const range = { sinceId, lastEventId: proj.lastEventId || null, newEventCount: since.length };
+  const headline = digestHeadline({ sliceStopCount, driftCount, gates, needsYou, goal });
+  return { range, headline, sliceStops, sliceStopCount, drift, driftCount, gates, needsYou, goal, focus, empty: since.length === 0 };
 }
 
 // Scan every doc body for [text](other.md[#anchor]) cross-refs and return
