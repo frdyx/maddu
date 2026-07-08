@@ -295,6 +295,26 @@ const CANNED = {
       { checkpointKey: `sha256:${'a'.repeat(64)}`, model_id: 'acme-triage-8b', reverted_to: 'candidate', at: FIXED_TS, eventId: 'evt_mb1' },
     ],
   },
+  '/bridge/oversight': {
+    skills: {
+      injected: [
+        { ts: FIXED_TS, sessionId: 'ses_demo', skillIds: ['brand-voice', 'changelog'], triggers: ['brand'], tags: ['docs'], totalBytes: 2048, ageMs: 300000 },
+      ],
+      refused: [
+        {
+          ts: FIXED_TS, sessionId: 'ses_demo', reason: 'unacknowledged-external-refs',
+          refused: [
+            { id: 'brand-landing.md', provenance: 'imported', reason: 'unacknowledged-external-refs', plain: 'blocked — points off-box to an unreviewed link' },
+          ],
+          ageMs: 120000,
+        },
+      ],
+      withheldCount: 1,
+      emptyState: null,
+    },
+    focus: { lastTag: 'toward', openFlag: null, goal: 'ship the oversight surface', updatedAt: FIXED_TS },
+    verify: { events: 3156, chainIntact: true, counts: { WARN: 0, FAIL: 0 }, contractVersion: '1.3.0' },
+  },
 };
 
 function jsonResponse(body) {

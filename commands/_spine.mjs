@@ -40,7 +40,11 @@ export async function loadSpineLib() {
   // global CLI can run other subcommands against an older install.
   let spineSync = null;
   try { spineSync = await import(pathToFileURL(join(dir, 'spine-sync.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync };
+  // bridge-builders.mjs (buildOversight) powers `maddu spine oversight`.
+  // Optional-load so the readout degrades cleanly on an older install.
+  let bridgeBuilders = null;
+  try { bridgeBuilders = await import(pathToFileURL(join(dir, 'bridge-builders.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,

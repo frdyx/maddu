@@ -80,6 +80,8 @@ export const ROUTE_META = {
                 keywords: 'experience ledger trajectory steps signals evolve plan adopt recommendation no-op atdp export learn spine verification' },
   model:      { title: 'Model',      group: 'verify',   rank: 11,                description: 'SLM-factory registry — datasets, training runs, checkpoints on the promotion ladder (spine-derived stage), evals with unacknowledged critical regressions, pending proposals, releases/rollbacks. Read-time derivation, zero writes; promotion/release/rollback stay operator CLI verbs behind the approvals ride.',
                 keywords: 'model slm factory dataset training checkpoint eval regression promotion canary release rollback governance manifest' },
+  oversight:  { title: 'Oversight',  group: 'verify',   rank: 12,                description: 'The non-coder oversight readout — what the agent DID with a skill: fed vs WITHHELD (and why, in plain language), whether it stayed on your goal, on a tamper-evident record you can independently verify. Read-time derivation, zero writes. Accountability substrate, not a safety proof.',
+                keywords: 'oversight skill withheld blocked injection refused provenance drift on-goal focus verify chain intact contract independently checkable accountability translucent operator' },
   teststatus: { title: 'Test Status', group: 'verify',   rank: 8,                 description: 'Last-run timestamps for stress harness, upgrade matrix, projection roundtrip. WARN if older than doctor threshold.',
                 keywords: 'test status stress harness upgrade matrix roundtrip ci recent',
                 // v1.0.3 — framework-source-only. The scripts under

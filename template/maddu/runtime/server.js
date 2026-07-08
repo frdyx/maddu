@@ -45,7 +45,7 @@ import { readRegistry, writeRegistry, activateWorkspace, registryExists, registr
 import { MIME, send, sendJson, hostnameOf, isLoopbackHostname, readBody, serveStatic } from './lib/http-util.mjs';
 // Cockpit projection builders (conductor / queue / claims / backlinks) — pure
 // repo-root → data, no bridge state. The second server-split slice.
-import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc } from './lib/bridge-builders.mjs';
+import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc, buildOversight } from './lib/bridge-builders.mjs';
 import { fanoutProjection, fanoutConductor, fanoutApprovals, fanoutQueue, fanoutEventsRecent } from './lib/bridge-fanout.mjs';
 import { resolveRepoRoot, detectFrameworkLayout, readVersion, pickPort, probePortIsMaddu, findPidOnPort } from './lib/bridge-bootstrap.mjs';
 import { routeMcp, routeRuntimes } from './lib/bridge-routes-registries.mjs';
@@ -963,6 +963,12 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/skill-injections' && req.method === 'GET') {
     const proj = await project(repoRoot);
     return sendJson(res, 200, { skillInjections: proj.skillInjections || [] });
+  }
+  // Oversight — the non-coder readout: skills fed vs WITHHELD (plain-language),
+  // on-goal drift, and record-intact + independently-checkable. Read-only; the
+  // uncapped verify runs at build time. Full uncapped CLI check: `maddu spine verify`.
+  if (path === '/bridge/oversight' && req.method === 'GET') {
+    return sendJson(res, 200, await buildOversight(repoRoot));
   }
   if (path === '/bridge/test-status' && req.method === 'GET') {
     // Latest stress/upgrade-matrix run summaries, both optional. Read

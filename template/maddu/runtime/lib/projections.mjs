@@ -134,6 +134,11 @@ export async function project(repoRoot) {
   // v0.19 Phase 3 — skill auto-injection ledger.
   //   skillInjections: [{ ts, sessionId, skillIds[], triggers[], tags[], totalBytes }]
   const skillInjections = [];
+  // Oversight surface — skill-injection refusals (the URL-swap payoff made visible).
+  //   skillRefusals: [{ ts, sessionId, reason, refused[{ id, provenance, reason }] }]
+  // Raw payload only — no derived strings, no wall-clock math. The bridge/CLI map
+  // each refused[].reason to plain copy and compute "how long ago" at display time.
+  const skillRefusals = [];
 
   let lastEventId = null;
 
@@ -832,6 +837,24 @@ export async function project(repoRoot) {
         });
         break;
       }
+      // Oversight surface — a skill was withheld at inject-time (untrusted
+      // provenance or unacknowledged external refs). Kept raw; the display
+      // layer maps each refused[].reason to plain language.
+      case 'SKILL_INJECTION_REFUSED': {
+        skillRefusals.push({
+          ts: ev.ts,
+          sessionId: ev.data?.sessionId || ev.actor || null,
+          reason: typeof ev.data?.reason === 'string' ? ev.data.reason : '',
+          refused: Array.isArray(ev.data?.refused)
+            ? ev.data.refused.map((r) => ({
+                id: r?.id || null,
+                provenance: r?.provenance || null,
+                reason: r?.reason || null,
+              }))
+            : [],
+        });
+        break;
+      }
       case 'TOKEN_USAGE_REPORTED': {
         // Minimum schema: { runtime, sessionId, model, ts }. Optional:
         // inputTokens, outputTokens, cacheRead, cacheCreation. We keep
@@ -974,6 +997,8 @@ export async function project(repoRoot) {
     tokenLedger: tokenLedger.slice(),
     // v0.19 Phase 3 — skill auto-injection ledger (cap 200 most recent).
     skillInjections: skillInjections.slice(-200),
+    // Oversight surface — skill-injection refusals (cap 200 most recent).
+    skillRefusals: skillRefusals.slice(-200),
   };
 }
 
@@ -1041,6 +1066,7 @@ export function projectionDefaults() {
     openFollowups: [], sessionsTree: {},
     janitor: { lastRunAt: null, staleSessions: [], autoClosedTotal: 0 },
     teams: [], pipelines: [], advisors: [], tokenLedger: [], skillInjections: [],
+    skillRefusals: [],
   };
 }
 
