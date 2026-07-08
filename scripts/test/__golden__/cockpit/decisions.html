@@ -1,0 +1,154 @@
+<section aria-live="polite" class="stage-body fade-in" id="route-view">
+  <div class="view">
+    <h2>
+      "Decisions"
+    </h2>
+    <p>
+      "Decision ledger — the curated decision-grade spine (intent set · approvals + forced claims + drift triggers · failing gates · goal completed), each row carrying actor, provenance (human vs which auto-trigger), and its tamper-evident stored-line SHA that ties back to the verified chain. Read-time derivation, zero writes."
+    </p>
+    <div class="panel" data-focus="decisions decisions ledger audit provenance approval goal gate trigger sha chain">
+      <div class="panel-head">
+        <span class="panel-title">
+          "Decisions"
+        </span>
+        <span class="panel-aside">
+          "GET /bridge/decisions · the decision-grade record · who decided what, tamper-evident"
+        </span>
+      </div>
+      <div>
+        <div style="border:1px solid var(--m-line);border-left:3px solid var(--m-ok);border-radius:var(--m-radius-sm,6px);padding:8px 12px;margin-bottom:14px;">
+          <span style="font-size:13px;color:var(--m-ok);">
+            "✓"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-1);margin-left:8px;">
+            "chain verified · 3241 events · 0 tampered · contract 1.3.0"
+          </span>
+        </div>
+        <div style="margin-bottom:10px;">
+          <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-accent-2);margin-right:14px;">
+            "14 intent"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-accent);margin-right:14px;">
+            "2 decision"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-danger);margin-right:14px;">
+            "2 gate"
+          </span>
+          <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-ok);margin-right:14px;">
+            "1 outcome"
+          </span>
+        </div>
+        <div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--m-line);display:flex;gap:12px;align-items:baseline;">
+            <span style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-ok);min-width:64px;">
+              "outcome"
+            </span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;color:var(--m-fg-0);">
+                "ship the operator plane harvest"
+              </div>
+              <div>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "ses_<ID>"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· sha b156e3d5cf2e"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· 1m ago"
+                </span>
+              </div>
+            </div>
+          </div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--m-line);display:flex;gap:12px;align-items:baseline;">
+            <span style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-accent);min-width:64px;">
+              "decision"
+            </span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;color:var(--m-fg-0);">
+                "allow · git — push"
+              </div>
+              <div>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "ses_<ID>"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· sha 02d12378347a"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· 2m ago"
+                </span>
+              </div>
+            </div>
+          </div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--m-line);display:flex;gap:12px;align-items:baseline;">
+            <span style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-accent);min-width:64px;">
+              "decision"
+            </span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;color:var(--m-fg-0);">
+                "drift-detected"
+              </div>
+              <div>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "⚙ auto:drift-detected"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· sha f75f85af3e7a"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· 4m ago"
+                </span>
+              </div>
+            </div>
+          </div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--m-line);display:flex;gap:12px;align-items:baseline;">
+            <span style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-danger);min-width:64px;">
+              "gate"
+            </span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;color:var(--m-fg-0);">
+                "release-parity fail (delivery)"
+              </div>
+              <div>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "system"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· sha 0d3cf39d7efc"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· 8m ago"
+                </span>
+              </div>
+            </div>
+          </div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--m-line);display:flex;gap:12px;align-items:baseline;">
+            <span style="font-family:var(--m-font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--m-accent-2);min-width:64px;">
+              "intent"
+            </span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;color:var(--m-fg-0);">
+                "ship the operator plane harvest"
+              </div>
+              <div>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "system"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· sha 3d387d9d6f26"
+                </span>
+                <span style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);">
+                  "· 15m ago"
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="font-family:var(--m-font-mono);font-size:11px;color:var(--m-fg-3);margin-top:8px;">
+          "showing 5 of 19 — full history: maddu spine verify"
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

@@ -10,7 +10,7 @@ import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile, stat } from 'node:fs/promises';
 import { project } from './projections.mjs';
-import { readSince } from './spine.mjs';
+import { readSince, readAll, hashLine } from './spine.mjs';
 import { listSchedules } from './schedule.mjs';
 import { totalUnread as mailboxTotalUnread } from './mailbox.mjs';
 import { readAttachments } from './worktrees.mjs';
@@ -627,6 +627,96 @@ export async function buildProjectCockpit(repoRoot) {
     goal, focus, fleet, steeredBy, recentSlices,
     lastEventId: proj.lastEventId || null,
   };
+}
+
+// Decision-grade event classification for the decision ledger. Only moments
+// where intent was set, a choice was made, or an outcome was reached — NOT the
+// routine spine traffic. GATE_RAN is included only when it FAILED (a red gate is
+// a decision point; greens are routine); TRIGGER_FIRED only for drift-related
+// auto-decisions (auto-claims etc. are plumbing, not decisions).
+const DECISION_CLASS = {
+  GOAL_DECLARED:     { category: 'intent',   label: 'goal set' },
+  GOAL_COMPLETED:    { category: 'outcome',  label: 'goal completed' },
+  APPROVAL_DECIDED:  { category: 'decision', label: 'approval decided' },
+  LANE_CLAIM_FORCED: { category: 'decision', label: 'lane claim forced' },
+  TRIGGER_FIRED:     { category: 'decision', label: 'trigger fired' },
+  GATE_RAN:          { category: 'gate',     label: 'gate' },
+};
+
+// Is this event decision-grade (passes the class-specific filter)?
+function isDecisionEvent(ev) {
+  if (!ev || !DECISION_CLASS[ev.type]) return false;
+  if (ev.type === 'GATE_RAN') return ev.data && ev.data.ok === false;      // failing only
+  if (ev.type === 'TRIGGER_FIRED') {
+    const t = `${ev.data?.trigger || ''} ${ev.data?.triggered_by || ev.triggered_by || ''}`.toLowerCase();
+    return /drift|focus/.test(t);                                          // drift-related only
+  }
+  return true;
+}
+
+function decisionSummary(ev) {
+  const d = ev.data || {};
+  switch (ev.type) {
+    case 'GOAL_DECLARED': return cleanDigestSummary(d.objective || 'goal declared');
+    case 'GOAL_COMPLETED': return cleanDigestSummary(d.objective || d.reason || 'goal completed');
+    case 'APPROVAL_DECIDED': return cleanDigestSummary(`${d.decision || 'decided'}${d.tool ? ' · ' + d.tool : ''}${d.reason ? ' — ' + d.reason : ''}`);
+    case 'LANE_CLAIM_FORCED': return cleanDigestSummary(`lane ${d.lane || '?'} forced${d.reason ? ' — ' + d.reason : ''}`);
+    case 'TRIGGER_FIRED': return cleanDigestSummary(d.trigger || d.triggered_by || 'trigger fired');
+    case 'GATE_RAN': return cleanDigestSummary(`${d.gateId || 'gate'} ${d.status || 'fail'}${d.severity ? ' (' + d.severity + ')' : ''}`);
+    default: return cleanDigestSummary(ev.type);
+  }
+}
+
+// Decision ledger — a curated, high-signal log of the spine's decision-grade
+// events (intent / decision / gate / outcome), each with actor, provenance
+// (human vs which auto-trigger), and its tamper-evident stored-line SHA. The
+// header carries the real verifySpine badge (chain intact · N events). The
+// per-row sha IS the chain fingerprint: hashLine(storedLine) = the next event's
+// prev_hash, so a row can be tied back to the verified chain. Read-only.
+export async function buildDecisions(repoRoot, { limit = 100 } = {}) {
+  const events = await readAll(repoRoot);
+  const now = Date.now();
+  const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
+
+  const rows = [];
+  for (const ev of events) {
+    if (!isDecisionEvent(ev)) continue;
+    const cls = DECISION_CLASS[ev.type];
+    const triggeredBy = ev.data?.triggered_by || ev.triggered_by || null;
+    let sha = null;
+    try { sha = hashLine(JSON.stringify(ev)).slice(0, 12); } catch {}
+    rows.push({
+      ts: ev.ts,
+      id: ev.id,
+      type: ev.type,
+      category: cls.category,
+      label: cls.label,
+      actor: ev.actor || null,
+      lane: ev.lane || null,
+      provenance: triggeredBy ? `auto:${triggeredBy}` : (ev.actor || 'system'),
+      auto: !!triggeredBy,
+      summary: decisionSummary(ev),
+      sha,
+      ageMs: ageMs(ev.ts),
+    });
+  }
+  const total = rows.length;
+  const recent = rows.slice(-limit).reverse(); // newest first, capped
+
+  const byCategory = {};
+  for (const r of rows) byCategory[r.category] = (byCategory[r.category] || 0) + 1;
+
+  // Header — the real tamper-evidence: uncapped chain verify + published contract.
+  const v = await verifySpine(repoRoot);
+  const chainIntact = !v.issues.some((i) => i.kind === 'chain_broken' || i.kind === 'torn_trailing_line');
+  const verify = {
+    events: v.events,
+    chainIntact,
+    tampered: chainIntact ? 0 : v.issues.filter((i) => i.kind === 'chain_broken' || i.kind === 'torn_trailing_line').length,
+    contractVersion: await readContractVersion(),
+  };
+
+  return { decisions: recent, total, shown: recent.length, byCategory, verify };
 }
 
 // Scan every doc body for [text](other.md[#anchor]) cross-refs and return

@@ -315,6 +315,18 @@ const CANNED = {
     focus: { lastTag: 'toward', openFlag: null, goal: 'ship the oversight surface', updatedAt: FIXED_TS },
     verify: { events: 3156, chainIntact: true, counts: { WARN: 0, FAIL: 0 }, contractVersion: '1.3.0' },
   },
+  '/bridge/decisions': {
+    decisions: [
+      { ts: FIXED_TS, id: 'evt_00000009', type: 'GOAL_COMPLETED', category: 'outcome', label: 'goal completed', actor: 'ses_demo', lane: null, provenance: 'ses_demo', auto: false, summary: 'ship the operator plane harvest', sha: 'b156e3d5cf2e', ageMs: 60000 },
+      { ts: FIXED_TS, id: 'evt_00000007', type: 'APPROVAL_DECIDED', category: 'decision', label: 'approval decided', actor: 'ses_demo', lane: 'observability', provenance: 'ses_demo', auto: false, summary: 'allow · git — push', sha: '02d12378347a', ageMs: 120000 },
+      { ts: FIXED_TS, id: 'evt_00000005', type: 'TRIGGER_FIRED', category: 'decision', label: 'trigger fired', actor: null, lane: null, provenance: 'auto:drift-detected', auto: true, summary: 'drift-detected', sha: 'f75f85af3e7a', ageMs: 240000 },
+      { ts: FIXED_TS, id: 'evt_00000003', type: 'GATE_RAN', category: 'gate', label: 'gate', actor: null, lane: null, provenance: 'system', auto: false, summary: 'release-parity fail (delivery)', sha: '0d3cf39d7efc', ageMs: 480000 },
+      { ts: FIXED_TS, id: 'evt_00000001', type: 'GOAL_DECLARED', category: 'intent', label: 'goal set', actor: 'system', lane: null, provenance: 'system', auto: false, summary: 'ship the operator plane harvest', sha: '3d387d9d6f26', ageMs: 900000 },
+    ],
+    total: 19, shown: 5,
+    byCategory: { intent: 14, decision: 2, gate: 2, outcome: 1 },
+    verify: { events: 3241, chainIntact: true, tampered: 0, contractVersion: '1.3.0' },
+  },
   '/bridge/project-cockpit': {
     project: 'maddu',
     phase: null,
