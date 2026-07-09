@@ -172,6 +172,7 @@ export const EVENT_DISPOSITIONS = {
   MEMORY_FACT_SUPERSEDED: { disp: 'dormant', reason: "fires only when a memory fact is superseded" },
   BRIEFING_CURATED: { disp: 'dormant', reason: "fires only under a curated (--curate) orient/handoff briefing" },
   BRIDGE_ORIGIN_REJECTED: { disp: 'active' },
+  BRIDGE_CROSS_WORKSPACE: { disp: 'dormant', reason: "fires only when a request targets a non-active workspace (multi-workspace bridge)" },
   BLUEPRINT_DISTILLED: { disp: 'dormant', reason: "blueprint --distill emits it; not exercised in registered projects" },
   DEBT_SCANNED: { disp: 'active' },
   ARCHITECTURE_SCANNED: { disp: 'active' },

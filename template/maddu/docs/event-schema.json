@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.3.0",
+  "x-contractVersion": "1.4.0",
   "type": "object",
   "required": [
     "v",
@@ -183,6 +183,7 @@
         "MEMORY_FACT_SUPERSEDED",
         "BRIEFING_CURATED",
         "BRIDGE_ORIGIN_REJECTED",
+        "BRIDGE_CROSS_WORKSPACE",
         "BLUEPRINT_DISTILLED",
         "DEBT_SCANNED",
         "ARCHITECTURE_SCANNED",
@@ -5332,6 +5333,38 @@
                 "type": "string"
               },
               "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "BRIDGE_CROSS_WORKSPACE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A bridge request selected a workspace other than the active one.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "active": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "workspace": {
                 "type": "string"
               }
             }

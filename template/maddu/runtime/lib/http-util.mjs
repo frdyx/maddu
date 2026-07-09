@@ -70,10 +70,25 @@ export async function readBody(req, maxBytes = 1024 * 1024) {
   catch { throw new Error('invalid JSON body'); }
 }
 
+// Inject `headInject` (a plain HTML string, e.g. a <meta> tag) right before
+// </head> in a served HTML document. Kept generic — http-util has no token
+// semantics; the caller passes whatever markup it wants bootstrapped into the
+// page (server.js passes the bridge capability-token <meta>). Falls back to
+// prepending when there's no </head> so a malformed doc still gets the tag.
+function injectIntoHead(buf, headInject) {
+  if (!headInject) return buf;
+  const html = buf.toString('utf8');
+  const out = html.includes('</head>')
+    ? html.replace('</head>', `${headInject}\n</head>`)
+    : headInject + html;
+  return Buffer.from(out, 'utf8');
+}
+
 // Serve a static cockpit asset, falling back to index.html (SPA routing) then a
 // 404. `cockpitDir` is passed in (the caller knows the runtime layout). The
 // path-traversal guard rejects anything resolving outside cockpitDir.
-export async function serveStatic(res, urlPath, cockpitDir) {
+// `headInject` (optional) is injected into any served HTML document (see above).
+export async function serveStatic(res, urlPath, cockpitDir, headInject = '') {
   const cleanPath = urlPath.split('?')[0].split('#')[0];
   const rel = cleanPath === '/' ? '/index.html' : cleanPath;
   const normalized = normalize(rel).replace(/^[\\/]+/, '');
@@ -85,11 +100,13 @@ export async function serveStatic(res, urlPath, cockpitDir) {
     const st = await stat(absolute);
     if (!st.isFile()) throw new Error('not a file');
     const buf = await readFile(absolute);
-    const mime = MIME[extname(absolute).toLowerCase()] || 'application/octet-stream';
-    return send(res, 200, { 'content-type': mime, 'cache-control': 'no-store' }, buf);
+    const ext = extname(absolute).toLowerCase();
+    const mime = MIME[ext] || 'application/octet-stream';
+    const body = ext === '.html' ? injectIntoHead(buf, headInject) : buf;
+    return send(res, 200, { 'content-type': mime, 'cache-control': 'no-store' }, body);
   } catch {
     try {
-      const buf = await readFile(join(cockpitDir, 'index.html'));
+      const buf = injectIntoHead(await readFile(join(cockpitDir, 'index.html')), headInject);
       return send(res, 200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' }, buf);
     } catch {
       return sendJson(res, 404, { error: 'cockpit_missing' });

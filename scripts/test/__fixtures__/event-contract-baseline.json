@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "fingerprint": "926f787b",
+  "version": "1.4.0",
+  "fingerprint": "129f421f",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -184,6 +184,15 @@
           "reasonCode": "string",
           "role": "string",
           "text": "string"
+        }
+      },
+      "BRIDGE_CROSS_WORKSPACE": {
+        "frozen": false,
+        "data": {
+          "active": "string",
+          "method": "string",
+          "path": "string",
+          "workspace": "string"
         }
       },
       "BRIDGE_ORIGIN_REJECTED": {
@@ -461,6 +470,14 @@
           "severity": "string",
           "sliceId": "string",
           "status": "string"
+        }
+      },
+      "GOAL_COMPLETED": {
+        "frozen": false,
+        "data": {
+          "note": "string|null",
+          "objective": "string|null",
+          "outcome": "string"
         }
       },
       "GOAL_DECLARED": {
@@ -1193,6 +1210,14 @@
           "tags": "array",
           "totalBytes": "number",
           "triggers": "array"
+        }
+      },
+      "SKILL_INJECTION_REFUSED": {
+        "frozen": false,
+        "data": {
+          "reason": "string",
+          "refused": "array",
+          "sessionId": "string|null"
         }
       },
       "SKILL_TRUSTED": {

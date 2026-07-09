@@ -340,13 +340,35 @@ the operator's machine" remit.
 - Stdlib header checks only — zero new dependencies, no proxy, every
   hard rule respected.
 
-**Máddu does NOT enforce:**
+**Capability token on writes (v1.98.0):**
 
-- A non-browser process on the machine talking to the bridge. Requests
-  with no `Host` header (curl, the CLI probe) are allowed by design —
-  the threat is specifically the *browser*, which always sends `Host`.
-  Process-level isolation is the OS's job (see *Integration with
-  OS-level defenses*).
+- Loopback-origin enforcement stops a *browser*, but on its own it let
+  *any* local process POST a mutation (Host-absent requests are allowed
+  by design). So mutating routes (every `POST`/`PUT`/`PATCH`/`DELETE`,
+  plus the two read-path refreshers `GET /bridge/operations` and
+  `GET /bridge/projection`) and any **cross-workspace** request now also
+  require a per-boot capability token (`X-Maddu-Bridge-Token`, else
+  `401`). The token is delivered same-origin into the served cockpit HTML
+  and to a `0600` per-port file the CLI reads. A cross-workspace request
+  that is authorized appends a rate-limited `BRIDGE_CROSS_WORKSPACE`
+  event, so one repo reaching into another's spine is on the record.
+
+**What the capability token is — and is NOT:**
+
+- It is a **loopback CSRF** boundary, and only that: a cross-origin page
+  the operator visits cannot set a custom request header, and CORS blocks
+  it from reading the `GET /` that would leak the token — so it cannot
+  forge a mutation against the bridge.
+- It is **NOT** authentication against another process running as the
+  *same user*, and does not try to be. The token is embedded in the
+  cockpit HTML served over an **unauthenticated `GET /`**, so any local
+  process can fetch the page and read it (the `0600` capability file is
+  likewise same-user-readable, and on Windows is not a per-process ACL).
+  It therefore does **not** block another local process from driving a
+  mutation, and does **not** defend the stored-XSS chain — same-origin
+  XSS reads the token too; escaping the cockpit sinks does that (see
+  scenario 10). Process-level isolation between same-user processes
+  remains the OS's job (see *Integration with OS-level defenses*).
 - The operator deliberately binding the bridge to a non-loopback
   interface. That hostname is then accepted; exposing the bridge to a
   network is an explicit operator choice outside the rebinding model.

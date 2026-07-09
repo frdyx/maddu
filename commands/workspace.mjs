@@ -33,14 +33,24 @@ function printHelp() {
 
 // Best-effort: POST to a running bridge so its in-memory `active` pointer
 // follows the registry update. If no bridge is up (ECONNREFUSED) we fall
-// through silently and print a restart hint instead.
-function postBridgeActivate(id, port = 4177) {
+// through silently and print a restart hint instead. This is a mutating route,
+// so it needs the bridge capability token (audit P0b) — read from the per-port
+// capability file the running bridge published; absent → the bridge 401s and we
+// surface the restart hint just like an ECONNREFUSED.
+async function postBridgeActivate(id, port = 4177) {
+  let token = '';
+  try {
+    const auth = await loadLib('bridge-auth.mjs');
+    token = (await auth.readCapabilityToken(port)) || '';
+  } catch {}
   return new Promise((resolve) => {
     const body = JSON.stringify({ id });
+    const headers = { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) };
+    if (token) headers['x-maddu-bridge-token'] = token;
     const req = request({
       host: '127.0.0.1', port, method: 'POST',
       path: '/bridge/_workspaces/activate',
-      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+      headers,
       timeout: 1500,
     }, (res) => {
       let buf = '';
@@ -164,6 +174,18 @@ export default async function workspace(argv) {
       console.error(`  The new workspace "${id}" was added AFTER \`maddu start\`. The bridge is`);
       console.error('  still rooted in the previously-mounted set. Restart to pick it up:');
       console.error('    \x1b[1mmaddu stop && maddu start\x1b[0m');
+    } else if (result && result.status === 401) {
+      // The registry was already updated on disk, but the live bridge REJECTED
+      // the reroot (missing/stale capability token) — so disk says `id` while
+      // the bridge still serves the old workspace. Never report success here.
+      console.error('');
+      console.error('\x1b[33mWARNING:\x1b[0m registry updated, but the running bridge rejected the reroot (401 unauthorized).');
+      console.error('  The capability token was missing or stale, so the bridge is STILL serving the');
+      console.error(`  previous workspace — disk and bridge now disagree. Restart to reconcile:`);
+      console.error('    \x1b[1mmaddu stop && maddu start\x1b[0m');
+    } else if (result && result.status && result.status !== 200) {
+      console.error('');
+      console.error(`\x1b[33mWARNING:\x1b[0m registry updated, but the bridge signal returned ${result.status} — active pointer may not have followed. Restart if the cockpit shows the wrong workspace.`);
     } else if (result && result.error && result.error !== 'ECONNREFUSED') {
       // ECONNREFUSED = no bridge running; that's fine for this code path.
       console.error(`\x1b[2mbridge signal failed: ${result.error} (workspace registry still updated)\x1b[0m`);

@@ -274,6 +274,12 @@ export const EVENT_TYPES = {
   // limited per offending origin to avoid spine flooding). data:
   //   { reason:'host'|'origin', host, origin, path, method }
   BRIDGE_ORIGIN_REJECTED:     'BRIDGE_ORIGIN_REJECTED',
+  // v1.98.0 (audit P0b) — a bridge request selected a workspace other than the
+  // active one (via the X-Maddu-Workspace header, incl. the `_all` fan-out).
+  // Cross-repo access is authorized by the capability token but always recorded
+  // (rate-limited per workspace+path) so one repo reaching into another's spine
+  // is on the record. data: { workspace, active, method, path }
+  BRIDGE_CROSS_WORKSPACE:     'BRIDGE_CROSS_WORKSPACE',
   // v1.15.0 — `maddu blueprint --distill` spawned a provider CLI (subprocess,
   // hard rule #5) to rewrite the deterministic skeleton into prose. Recorded on
   // success only; an unmet auth gate or worker failure falls back to the
