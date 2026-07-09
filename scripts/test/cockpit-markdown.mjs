@@ -35,5 +35,22 @@ ok('escapes HTML', renderMarkdown('a <b> & c') === '<p>a &lt;b&gt; &amp; c</p>')
 const table = renderMarkdown('| a | b |\n| - | - |\n| 1 | 2 |');
 ok('table → table.md-table', table.startsWith('<table class="md-table">') && table.includes('<th>a</th>') && table.includes('<td>1</td>'));
 
+// Security regression boundary (audit 2026-07-09, Codex-reviewed). These lock
+// the two XSS bypasses fixed in P0a — do not weaken without a security review.
+ok('drops javascript: links', !/href/.test(renderMarkdown('[x](javascript:alert(1))')));
+ok('drops tab-obfuscated javascript: (browsers strip tabs)',
+  !/href/.test(renderMarkdown('[x](java\tscript:alert(1))')));
+ok('drops data:/vbscript: links',
+  !/href/.test(renderMarkdown('[x](data:text/html,<script>1</script>)')) &&
+  !/href/.test(renderMarkdown('[x](vbscript:msgbox)')));
+ok('no href attribute-quote breakout', (() => {
+  const out = renderMarkdown('[x](" onpointerover="alert`1`)');
+  // A raw `"` would open a second attribute; it must be escaped to &quot;.
+  return !/onpointerover="/.test(out) && out.includes('&quot;');
+})());
+ok('keeps safe http(s)/mailto/relative links',
+  /href="https:\/\//.test(renderMarkdown('[o](https://x.com)')) &&
+  /href="\/docs/.test(renderMarkdown('[r](/docs/00)')));
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
