@@ -105,7 +105,15 @@ export function classifyBashWrite(command) {
   // But `git commit -m "… <email>"` / `maddu slice-stop "…>"` carry no UNQUOTED
   // write op, so they still fall through to 'remedy' (the escape hatch stays open).
   const code = stripQuotedArgs(cmd);
-  for (const re of WRITE_RE) if (re.test(code)) return 'write';
+  // An UNQUOTED `sh -c`/`bash -c …` runs its argument AS code, so a write hidden
+  // in that argument is real — scan the original when such a wrapper is present.
+  // Detected on the DEQUOTED code, so a remedy MESSAGE that merely quotes
+  // "bash -c" is blanked and cannot trigger this (no re-introduced deadlock).
+  const execWrapped = /(?:^|\s|;|&|\|)(?:ba|da|k|z)?sh\s+-[a-z]*c\b/.test(code);
+  // When exec-wrapped, scan the original with quotes turned into spaces so a write
+  // verb sitting right after the opening quote (`sh -c "rm …"`) keeps its boundary.
+  const scanForWrite = execWrapped ? cmd.replace(/["']/g, ' ') : code;
+  for (const re of WRITE_RE) if (re.test(scanForWrite)) return 'write';
   for (const re of REMEDY_RE) if (re.test(code)) return 'remedy';
   return 'allow'; // read-only / ambiguous interpreter / build / unknown → allow
 }
@@ -244,6 +252,18 @@ export async function dirtyFiles(repoRoot) {
 // ── gatherRitualState — impure; reads the world into decide()'s `state` shape ─
 // Fail-safe: any sub-read that throws degrades that ritual to its most-permissive
 // value so the overall verdict can only be softened, never falsely hardened.
+// The last slice-stop THIS session recorded (by actor), newest last. Pure so the
+// per-session accounting is unit-testable: a global last slice-stop must never
+// stand in for a session that hasn't stopped, or another session's slice-stop
+// would silently reset this one's edit counter.
+export function lastOwnSliceStop(stops, sessionId) {
+  const list = Array.isArray(stops) ? stops : [];
+  if (!sessionId) return null;
+  let found = null;
+  for (const s of list) if (s && s.actor === sessionId) found = s;
+  return found;
+}
+
 export async function gatherRitualState(repoRoot, sessionId, nowMs, counter) {
   const [{ project }, plansMod] = await Promise.all([
     import('./projections.mjs'), import('./plans.mjs'),
@@ -256,7 +276,10 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter) {
   const sessions = Array.isArray(proj.activeSessions) ? proj.activeSessions : [];
   const claims = Array.isArray(proj.claims) ? proj.claims : [];
   const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
-  const lastStop = stops.length ? stops[stops.length - 1] : null;
+  // Slice-stop freshness is PER SESSION — key on this session's own last
+  // slice-stop, not the global last, or another session slice-stopping would
+  // reset this session's edit counter (Codex: cross-session counter reset).
+  const lastStop = lastOwnSliceStop(stops, sessionId);
   const goalActive = !!(proj.goal && proj.goal.status === 'active');
 
   const registered = sessionId ? sessions.some((s) => s.id === sessionId) : sessions.length > 0;

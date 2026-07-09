@@ -7,7 +7,7 @@
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 const { resolveThresholds, decide, classifyBashWrite, denyReason, DISCIPLINE_DEFAULTS,
-  nextCounter, enforcePreTool } =
+  nextCounter, enforcePreTool, lastOwnSliceStop } =
   await import('../../template/maddu/runtime/lib/discipline.mjs');
 
 let passed = 0, failed = 0;
@@ -51,6 +51,13 @@ ok('remedy: slice-stop message mentioning `cat > f` not a write', R('maddu slice
 ok('remedy: git commit -m with literal > inside message', R('git commit -m "use > redirect in prose"'));
 ok('still write: real redirect outside quotes', W('echo x > f.js'));
 ok('still write: quoted remedy token but real unquoted rm', W('maddu slice-stop "msg"; rm -rf src'));
+
+// exec-wrapper: `bash -c "…"`/`sh -c "…"` runs its arg as code — a write hidden
+// there is real (the dequote must not hide it), but a remedy that merely QUOTES
+// "bash -c" in its message must stay a remedy (no re-introduced deadlock).
+ok('write: bash -c hiding a redirect', W('bash -lc "echo x > f"'));
+ok('write: sh -c hiding rm', W('sh -c "rm -rf src"'));
+ok('remedy: slice-stop message that quotes the text bash -c', R('maddu slice-stop "we used bash -c and cat > f earlier"'));
 
 ok('remedy: bare maddu verbs', R('maddu slice-stop "x"') && R('maddu goal set "g"') && R('maddu plan new "t"') && R('maddu lane claim l') && R('maddu register'));
 ok('remedy: node bin/maddu.mjs form', R('node bin/maddu.mjs slice-stop "x"'));
@@ -137,6 +144,25 @@ ok('nextCounter: goalplanAgeMin derived from anchor',
   Math.round(nextCounter({ goalplanFirstTs: 1000 }, St({ goalOrPlan: { active: false } }), 601000).goalplanAgeMin) === 10);
 ok('nextCounter: firstDirtyTs of 0 is preserved (== null guard, not falsy)',
   nextCounter({ firstDirtyTs: 0 }, St({ commit: { newDirtyFiles: 2 } }), 9000).firstDirtyTs === 0);
+
+// ── lastOwnSliceStop (per-session accounting — Codex cross-session fix) ──────
+{
+  const stops = [
+    { id: 's1', actor: 'A', ts: '1' },
+    { id: 's2', actor: 'B', ts: '2' },   // another session's slice-stop, newest
+  ];
+  ok('lastOwnSliceStop: returns THIS session\'s last, not the global last',
+    lastOwnSliceStop(stops, 'A')?.id === 's1');
+  ok('lastOwnSliceStop: another session\'s stop never counts',
+    lastOwnSliceStop([{ id: 's2', actor: 'B', ts: '2' }], 'A') === null);
+  ok('lastOwnSliceStop: no session → null', lastOwnSliceStop(stops, null) === null);
+  // The bug it prevents: B slice-stopping must NOT reset A's counter. With the
+  // per-session id, A's lastStopId stays 's1' → nextCounter does not reset.
+  const aCounter = { lastSliceStopId: 's1', editsSinceSlice: 11 };
+  const aState = { slice: { lastStopId: lastOwnSliceStop(stops, 'A')?.id ?? null }, commit: {}, goalOrPlan: { active: true } };
+  ok('cross-session: B\'s slice-stop does NOT reset A\'s editsSinceSlice',
+    nextCounter(aCounter, aState, 0).editsSinceSlice === 11);
+}
 
 // ── enforcePreTool (P3 — stateful entry; FAIL-OPEN short-circuits) ───────────
 // These paths return before any git/governance read, so a bogus repoRoot is fine.

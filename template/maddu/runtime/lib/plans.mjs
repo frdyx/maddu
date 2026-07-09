@@ -56,8 +56,12 @@ export async function revisePlan(repoRoot, { planId, diff, by = null }) {
   await refreshPlanArtifacts(repoRoot, planId);
 }
 
-export async function completePlan(repoRoot, { planId, by = null }) {
-  await append(repoRoot, { type: EVENT_TYPES.PLAN_COMPLETED, actor: by, lane: null, data: { planId } });
+export async function completePlan(repoRoot, { planId, by = null, gate = null }) {
+  // gate (optional): the gates-before-done result — recorded as open, non-load-
+  // bearing fields so a --force completion that bypassed red gates leaves evidence.
+  const data = { planId };
+  if (gate) { data.gatesFailed = gate.failCount || 0; data.gatesForced = !!gate.forced; }
+  await append(repoRoot, { type: EVENT_TYPES.PLAN_COMPLETED, actor: by, lane: null, data });
   await refreshPlanArtifacts(repoRoot, planId);
 }
 

@@ -214,7 +214,7 @@ export default async function planCmd(argv) {
     const gate = await checkGatesBeforeDone(repoRoot, { force: !!flags.force });
     const gateInfo = reportGatesBeforeDone(gate, 'plan');
     if (!gateInfo.proceed) process.exit(3);
-    await plans.completePlan(repoRoot, { planId, by: sessionId });
+    await plans.completePlan(repoRoot, { planId, by: sessionId, gate: gateInfo });
     console.log(`${ANSI.pass}completed${ANSI.reset}  ${planId}`);
     return;
   }

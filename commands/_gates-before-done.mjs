@@ -61,13 +61,14 @@ export async function checkGatesBeforeDone(repoRoot, { force = false } = {}) {
     // neutral; recording denials/gate-runs is a separate, deferred concern).
     const res = await gatesLib.runGates(repoRoot, { emitEvents: false });
     const runs = res.runs || [];
-    // Count only BLOCKING failures: pinned-required gates when a profile exists
-    // (matches `maddu ci` — the source checkout's non-required gate fails don't
-    // trap completion), else any non-warn (critical/safety) failure.
+    // Blocking mirrors `maddu ci` EXACTLY: only pinned-required gates block, and a
+    // repo with NO pinned profile blocks on nothing (ci is green there without
+    // --strict). This keeps the source checkout's non-required env fails — and any
+    // unprofiled consumer — from being trapped out of `goal done` / `plan complete`.
     const required = await readRequiredGates(repoRoot);
     const blockingFails = Array.isArray(required)
       ? runs.filter((r) => r.status === 'fail' && required.includes(r.gateId))
-      : runs.filter((r) => r.status === 'fail' && r.severity !== 'warn');
+      : [];
     const failCount = blockingFails.length;
     const post = gateVerdict({ enforcement, force, failCount });
     const failed = blockingFails.map((r) => ({ gateId: r.gateId, message: r.message }));
