@@ -1,34 +1,43 @@
 #!/usr/bin/env node
-// bridge-auth-guard — the P0b regression gate (audit 2026-07-09). Four layers,
-// because green unit assertions on the exported guard are NOT sufficient (Codex
-// review, round 1): they pass even if the guard is never wired into the server,
-// and a regex denylist misses novel mutating helpers.
+// bridge-auth-guard — the P0b regression gate (audit 2026-07-09). Green unit
+// assertions on the exported guard are NOT sufficient (Codex review): they pass
+// even if the guard is never wired into the request pipeline, and a regex
+// denylist misses novel mutating helpers. So four layers:
 //
-//   (A) FUNCTIONAL — enforceBridgeAuth 401s a mutation / mutating-GET /
+//   (A) FUNCTIONAL — enforceBridgeAuth 401s a write / mutating-GET /
 //       cross-workspace request without the token, allows it with the token,
 //       and leaves read-only active-workspace GETs open.
-//   (B) WIRING (structural) — server.js's request handler actually CALLS
-//       enforceBridgeAuth, guards on its result with `return`, and does so
-//       BEFORE handing off to handleBridge. Deleting the call reds this.
-//   (C) WIRING (integration) — boot the real server on an ephemeral port and
-//       confirm a tokenless POST is rejected with 401 THROUGH the real request
-//       pipeline (not the exported function in isolation). This is the check the
-//       unit tests can't fake.
-//   (D) DRIFT — every GET route in handleBridge that calls a mutating primitive
-//       is listed in MUTATING_GET_PATHS. Uses a verb-shape scan (not a fixed
-//       helper denylist) and captures the path whether it precedes or follows
-//       the method, so a newly-added mutating GET (e.g. one calling rebuildWiki)
-//       reds CI instead of silently becoming an unauthenticated write.
+//   (B) WIRING (structural) — the request pipeline (handleRequest) CALLS
+//       enforceBridgeAuth with a `return` short-circuit BEFORE handleBridge.
+//   (C) WIRING (pipeline) — drive the REAL exported handleRequest (not the guard
+//       in isolation) and confirm tokenless writes to SEVERAL distinct routes —
+//       an inline route AND a sub-router route — are all 401, while a read-only
+//       GET passes. This runs the true guard→dispatch path with NO listener,
+//       timers, device registry, or spine writes (findings: an isolated guard
+//       test can't see an unwired call, and narrowing the guard to one route
+//       must not pass). Uses fakes, so it never mutates a real workspace.
+//   (D) DRIFT — every GET route (server.js handleBridge AND the bridge-routes-*
+//       sub-routers) that calls a mutating primitive must be in
+//       MUTATING_GET_PATHS. Verb-shape scan (catches novel helpers, excludes
+//       res.writeHead), path captured before/after the method, window bounded by
+//       the next method-test (so a nested `if (path…) await mutate()` is not
+//       skipped) + a non-vacuous self-check.
+//
+// RESIDUAL GAP (honest claim): plugin server handlers register /bridge/* routes
+// dynamically and are NOT statically enumerable — a plugin that adds a mutating
+// GET is outside this scan's reach and is the plugin author's responsibility.
+// That is exactly why the guard is method-primary (every write verb needs the
+// token regardless of route); only mutating GETs need the explicit list.
 //
 // Exit codes: 0 = OK, 1 = a check failed, 2 = harness error.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import http from 'node:http';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
+const runtimeLib = join(repoRoot, 'template', 'maddu', 'runtime', 'lib');
 const serverPath = join(repoRoot, 'template', 'maddu', 'runtime', 'server.js');
 
 let passed = 0, failed = 0;
@@ -42,32 +51,19 @@ function fakeRes() {
     writeHead(s, h) { this.statusCode = s; this.headers = h; },
     end(b) { try { this.body = b ? JSON.parse(b) : null; } catch { this.body = b; } } };
 }
-function fakeReq(method, headers = {}) {
+function fakeReq(method, pathname, headers = {}) {
   const lower = {};
   for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
-  return { method, headers: lower, url: '/' };
+  return { method, headers: lower, url: pathname };
 }
 const ctx = { active: 'main', workspaces: new Map([['main', repoRoot]]) };
 const TOKEN = 'a'.repeat(64);
 
-// Tiny HTTP client (no deps) for the integration boot.
-function httpRequest(opts, body) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(opts, (res) => {
-      let buf = ''; res.on('data', (c) => buf += c); res.on('end', () => resolve({ status: res.statusCode, body: buf }));
-    });
-    req.on('error', reject);
-    req.setTimeout(4000, () => { req.destroy(new Error('timeout')); });
-    if (body) req.write(body);
-    req.end();
-  });
-}
-
 try {
   const srv = await import('../../template/maddu/runtime/server.js');
-  const { enforceBridgeAuth, bridgeRequestNeedsToken, MUTATING_GET_PATHS, headInjectFor, start } = srv;
+  const { enforceBridgeAuth, bridgeRequestNeedsToken, MUTATING_GET_PATHS, headInjectFor, handleRequest } = srv;
 
-  ok('exports the guard', typeof enforceBridgeAuth === 'function' && typeof bridgeRequestNeedsToken === 'function');
+  ok('exports guard + pipeline', typeof enforceBridgeAuth === 'function' && typeof handleRequest === 'function');
   ok('MUTATING_GET_PATHS is the known 2-entry set',
     MUTATING_GET_PATHS.has('/bridge/operations') && MUTATING_GET_PATHS.has('/bridge/projection') && MUTATING_GET_PATHS.size === 2,
     [...MUTATING_GET_PATHS].join(','));
@@ -75,7 +71,7 @@ try {
   // ── (A) functional ──────────────────────────────────────────────────────
   const call = async (method, pathname, headers) => {
     const res = fakeRes();
-    const rejected = await enforceBridgeAuth(fakeReq(method, headers), res, new URL('http://x' + pathname), ctx, TOKEN);
+    const rejected = await enforceBridgeAuth(fakeReq(method, pathname, headers), res, new URL('http://x' + pathname), ctx, TOKEN);
     return { rejected, res };
   };
   ok('POST without token → 401', (await call('POST', '/bridge/inbox', {})).res.statusCode === 401);
@@ -93,75 +89,86 @@ try {
 
   // ── (B) wiring (structural) ───────────────────────────────────────────────
   const src = await readFile(serverPath, 'utf8');
-  const guardCall = src.indexOf('enforceBridgeAuth(req, res, url, ctx');
-  const dispatch = src.indexOf('handleBridge(req, res, url, ctx)');
-  ok('request handler calls enforceBridgeAuth before handleBridge', guardCall > 0 && dispatch > 0 && guardCall < dispatch);
-  ok('the guard call short-circuits with return',
-    /if \(await enforceBridgeAuth\([^)]*\)\) return;/.test(src));
+  const guardCall = src.indexOf('if (await enforceBridgeAuth(');   // the CALL, not the declaration
+  const dispatch = src.indexOf('return await handleBridge(');
+  ok('pipeline calls enforceBridgeAuth (guarded by return) before handleBridge',
+    guardCall > 0 && dispatch > 0 && guardCall < dispatch && /if \(await enforceBridgeAuth\([^)]*\)\) return;/.test(src));
 
-  // ── (C) wiring (integration): boot the real server, tokenless POST → 401 ──
-  // Proves the guard runs in the actual request pipeline, not just in isolation.
-  const PORT = 41000 + (process.pid % 2000);
-  let server = null;
-  try {
-    server = await start({ port: PORT });
-    const r = await httpRequest({ host: '127.0.0.1', port: PORT, method: 'POST', path: '/bridge/inbox',
-      headers: { 'content-type': 'application/json', 'content-length': 2 } }, '{}');
-    ok('LIVE: tokenless POST /bridge/inbox → 401 (guard wired into pipeline)', r.status === 401, `got ${r.status}`);
-    // sanity: a read-only GET is still open live
-    const g = await httpRequest({ host: '127.0.0.1', port: PORT, method: 'GET', path: '/bridge/health' });
-    ok('LIVE: read-only GET /bridge/health → 200 (no token needed)', g.status === 200, `got ${g.status}`);
-  } finally {
-    if (server) await new Promise((res) => server.close(res));
-    try { const a = await import('../../template/maddu/runtime/lib/bridge-auth.mjs'); await a.clearCapability(PORT); } catch {}
-  }
+  // ── (C) wiring (pipeline): tokenless writes to several routes → 401 ───────
+  // Drives the REAL handleRequest. 401 fires in the guard BEFORE handleBridge,
+  // so no spine write happens; the read-only GET reaches a pure responder. Uses
+  // fakes + no listener → zero pollution of any real workspace.
+  const opts = { host: '127.0.0.1', port: 0, bridgeToken: TOKEN, cockpitDir: repoRoot };
+  const pipe = async (method, pathname, headers = {}) => {
+    const res = fakeRes();
+    await handleRequest(fakeReq(method, pathname, headers), res, ctx, opts);
+    return res.statusCode;
+  };
+  // Distinct routes — an inline handler AND a sub-router handler — so narrowing
+  // the guard to a single path would not pass.
+  ok('PIPELINE: tokenless POST /bridge/inbox → 401', (await pipe('POST', '/bridge/inbox')) === 401);
+  ok('PIPELINE: tokenless POST /bridge/slice-stop → 401', (await pipe('POST', '/bridge/slice-stop')) === 401);
+  ok('PIPELINE: tokenless POST /bridge/lanes/claim (sub-router) → 401', (await pipe('POST', '/bridge/lanes/claim')) === 401);
+  ok('PIPELINE: tokenless DELETE /bridge/mcp/x (sub-router) → 401', (await pipe('DELETE', '/bridge/mcp/x')) === 401);
+  ok('PIPELINE: read-only GET /bridge/health → 200 (no token needed)', (await pipe('GET', '/bridge/health')) === 200);
+  // NOTE: we deliberately do NOT drive a WITH-token write through the pipeline —
+  // that dispatches to handleBridge and would persist to the real spine. The
+  // guard's allow path is covered pollution-free by check (A). Every assertion
+  // here is a 401 (rejected before dispatch → no write) or a pure read.
 
-  // ── (D) drift: no unlisted mutating GET ───────────────────────────────────
-  const lines = src.split('\n');
+  // ── (D) drift: no unlisted mutating GET (server.js + sub-routers) ─────────
   // Verb-shape mutation detector (not a fixed helper list): catches append(),
   // writeFile(), runJanitor(), and novel helpers like rebuildWiki()/saveX()/
   // removeX()/spawnX(). The (?<!res\.) lookbehind excludes response-object
   // transport methods (res.writeHead / res.write), which are not state writes.
   const MUT = /(?<!res\.)\b(append|write\w*|rebuild\w+|save\w+|remove\w+|delete\w*|persist\w+|spawn\w+|activate\w+|unlink|rename|mkdir|setGlobal\w+|runJanitor)\s*\(|ctx\.active\s*=/;
   const GET_ROUTE = /req\.method === 'GET'/;
-  const NEXT_ROUTE = /req\.method === '(GET|POST|PUT|PATCH|DELETE)'|if \(path/;
-  const pathLit = /path (?:===|\.startsWith\() ?['"`](\/bridge\/[^'"`]*)['"`]/;
+  const NEXT_METHOD = /req\.method === '(GET|POST|PUT|PATCH|DELETE)'|^\s*(export )?(async )?function \w/;
+  const pathLit = /path (?:===|\.startsWith\(|\.endsWith\() ?['"`](\/bridge\/[^'"`]*)['"`]/;
 
-  const hbStart = lines.findIndex((l) => /async function handleBridge/.test(l));
-  let hbEnd = lines.length;
-  for (let i = hbStart + 1; i < lines.length; i++) {
-    if (/^(export )?(async )?function \w|^export async function start/.test(lines[i])) { hbEnd = i; break; }
-  }
-  ok('located handleBridge body', hbStart >= 0 && hbEnd > hbStart, `lines ${hbStart + 1}..${hbEnd}`);
-
-  const offenders = [];
-  for (let i = hbStart; i < hbEnd; i++) {
-    if (!GET_ROUTE.test(lines[i])) continue;
-    // Capture the route path whether it precedes OR follows the method: same
-    // line first, then a small lookback, then a small lookahead.
-    let p = (lines[i].match(pathLit) || [])[1] || null;
-    for (let b = i - 1; !p && b >= Math.max(0, i - 3); b--) { const m = lines[b].match(pathLit); if (m) p = m[1]; }
-    for (let f = i + 1; !p && f <= Math.min(lines.length - 1, i + 3); f++) { if (NEXT_ROUTE.test(lines[f])) break; const m = lines[f].match(pathLit); if (m) p = m[1]; }
-    if (!p) continue;
-    for (let j = i + 1; j < hbEnd; j++) {
-      if (j !== i && NEXT_ROUTE.test(lines[j])) break;
-      if (MUT.test(lines[j])) {
-        if (!MUTATING_GET_PATHS.has(p)) offenders.push(`:${i + 1} GET ${p} mutates (line ${j + 1}: ${lines[j].trim().slice(0, 60)}) but is not in MUTATING_GET_PATHS`);
-        break;
+  function scanFile(src) {
+    const lines = src.split('\n');
+    const offenders = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (!GET_ROUTE.test(lines[i])) continue;
+      // path may precede OR follow the method — same line, then lookback, then lookahead
+      let p = (lines[i].match(pathLit) || [])[1] || null;
+      for (let b = i - 1; !p && b >= Math.max(0, i - 3); b--) { const m = lines[b].match(pathLit); if (m) p = m[1]; }
+      for (let f = i + 1; !p && f <= Math.min(lines.length - 1, i + 3); f++) { if (NEXT_METHOD.test(lines[f])) break; const m = lines[f].match(pathLit); if (m) p = m[1]; }
+      if (!p) continue;
+      // scan from the route line to the next method-test (nested `if (path…)`
+      // does NOT bound — so a one-line `if (path.endsWith()) await mutate()`
+      // inside this handler is still seen).
+      for (let j = i; j < lines.length; j++) {
+        if (j !== i && NEXT_METHOD.test(lines[j])) break;
+        if (MUT.test(lines[j])) {
+          if (!MUTATING_GET_PATHS.has(p)) offenders.push(`:${i + 1} GET ${p} mutates (line ${j + 1}: ${lines[j].trim().slice(0, 56)}) — not in MUTATING_GET_PATHS`);
+          break;
+        }
       }
     }
+    return offenders;
   }
-  ok('every mutating GET in server.js is listed in MUTATING_GET_PATHS', offenders.length === 0,
-    offenders.length ? '\n    ' + offenders.join('\n    ') : '');
-  // self-check the detector is not vacuous: it must actually FIND the two known
-  // mutating GETs (writeReceiptLog / runJanitor) in the source.
+
+  const files = [serverPath, ...(await readdir(runtimeLib)).filter((f) => /^bridge-routes-.*\.mjs$/.test(f)).map((f) => join(runtimeLib, f))];
+  const allOffenders = [];
+  for (const f of files) for (const o of scanFile(await readFile(f, 'utf8'))) allOffenders.push(`${f.split(/[\\/]/).pop()}${o}`);
+  ok('no unlisted mutating GET across server.js + sub-routers', allOffenders.length === 0,
+    allOffenders.length ? '\n    ' + allOffenders.join('\n    ') : `${files.length} files scanned`);
+
+  // non-vacuous: the detector must actually locate the two known mutating GETs.
+  const serverLines = src.split('\n');
   const knownFound = ['/bridge/operations', '/bridge/projection'].every((kp) => {
-    const idx = lines.findIndex((l) => l.includes(`path === '${kp}'`) && GET_ROUTE.test(l));
+    const idx = serverLines.findIndex((l) => l.includes(`path === '${kp}'`) && GET_ROUTE.test(l));
     if (idx < 0) return false;
-    for (let j = idx + 1; j < hbEnd; j++) { if (NEXT_ROUTE.test(lines[j])) return false; if (MUT.test(lines[j])) return true; }
+    for (let j = idx; j < serverLines.length; j++) { if (j !== idx && NEXT_METHOD.test(serverLines[j])) return false; if (MUT.test(serverLines[j])) return true; }
     return false;
   });
-  ok('detector actually locates the two known mutating GETs (non-vacuous)', knownFound);
+  ok('detector locates the two known mutating GETs (non-vacuous)', knownFound);
+  // self-test the detector against the exact Codex counterexample shapes.
+  ok('detector flags a nested-if one-line mutating GET (Codex example)',
+    MUT.test(`      if (path.endsWith('x')) await rebuildWiki(repoRoot);`) &&
+    !MUT.test(`    res.writeHead(200, {});`));
 } catch (err) {
   console.error('harness error:', err.stack || err.message);
   process.exit(2);

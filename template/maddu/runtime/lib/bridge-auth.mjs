@@ -87,14 +87,23 @@ export async function readCapabilityToken(port) {
 }
 
 // Remove this bridge's capability file on graceful shutdown — but ONLY if the
-// file still belongs to us (our pid). A successor bridge on the same port may
-// have already replaced it; an unconditional delete would race and remove the
-// successor's live token. Pass our own pid so cleanup is ownership-conditioned.
-export async function clearCapability(port, pid = process.pid) {
+// file still belongs to us (our pid AND our token). A successor bridge on the
+// same port writes a NEW token, so token-matching means we won't delete its
+// file even if it replaced ours between our read and now.
+//
+// A read→rm TOCTOU window remains (a successor could overwrite between our
+// token-check and the rm) and cannot be closed without atomic ops. It is
+// BENIGN: the server authorizes every request against its IN-MEMORY token, never
+// this file — the file is only a hint for CLI/script clients. A spuriously
+// deleted file therefore causes at most a transient client 401 (which prints a
+// restart hint; auth fails closed), never a bypass. Prune-on-start reaps any
+// leftover dead-pid file.
+export async function clearCapability(port, pid = process.pid, token = null) {
   try {
     const parsed = JSON.parse(await readFile(capabilityPath(port), 'utf8'));
-    if (parsed?.pid !== pid) return; // not ours anymore — leave it
-  } catch { return; }               // gone/unreadable — nothing to clear
+    if (parsed?.pid !== pid) return;                    // not our pid — leave it
+    if (token != null && parsed?.token !== token) return; // replaced by a successor — leave it
+  } catch { return; }                                   // gone/unreadable — nothing to clear
   try { await rm(capabilityPath(port), { force: true }); } catch {}
 }
 

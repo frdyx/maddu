@@ -191,12 +191,15 @@ export async function enforceBridgeAuth(req, res, url, ctx, expectedToken) {
   // single target, so it is recorded on the ACTIVE workspace's spine (a defined
   // home) rather than silently omitted.
   if (crossWorkspace) {
-    const targetRoot = wsHeader === '_all'
-      ? ctx?.workspaces?.get(activeId)
-      : ctx?.workspaces?.get(wsHeader);
+    const targetId = wsHeader === '_all' ? activeId : wsHeader;
+    const targetRoot = ctx?.workspaces?.get(targetId);
     if (targetRoot) {
       try {
-        const key = `${wsHeader}|${pathname}`;
+        // Key on the actual audit DESTINATION (targetId) + method + path, not
+        // just the header: for `_all` the destination is the active workspace,
+        // which can change within the cooldown — keying on the header alone
+        // would let A's timestamp suppress B's first `_all` record.
+        const key = `${wsHeader}|${targetId}|${method}|${pathname}`;
         const now = Date.now();
         if (now - (_crossWsLast.get(key) || 0) >= CROSS_WS_COOLDOWN_MS) {
           _crossWsLast.set(key, now);
@@ -210,6 +213,32 @@ export async function enforceBridgeAuth(req, res, url, ctx, expectedToken) {
     }
   }
   return false;
+}
+
+// The full bridge request pipeline, extracted from start()'s createServer
+// callback so it is testable WITHOUT booting a listener, timers, the device
+// registry, or spine writes (the P0b gate calls this directly with fakes to
+// prove the guard is wired ahead of dispatch). `opts` carries the per-boot
+// { host, port, bridgeToken, cockpitDir }. Order is load-bearing: loopback
+// origin → capability-token guard → bridge dispatch; static assets last.
+export async function handleRequest(req, res, ctx, opts) {
+  const { host, port, bridgeToken, cockpitDir } = opts;
+  try {
+    // A3: reject non-loopback Host/Origin before any routing (DNS-rebinding).
+    if (await enforceLoopbackOrigin(req, res, ctx, host)) return;
+    const url = new URL(req.url, `http://${host}:${port}`);
+    if (url.pathname.startsWith('/bridge/')) {
+      // P0b: require the capability token on mutating + cross-workspace routes.
+      if (await enforceBridgeAuth(req, res, url, ctx, bridgeToken)) return;
+      return await handleBridge(req, res, url, ctx);
+    }
+    // Serve the cockpit, injecting the capability token into index.html so the
+    // fetch shim can attach it (same-origin delivery — see cockpit.js).
+    return await serveStatic(res, url.pathname, cockpitDir, headInjectFor(bridgeToken));
+  } catch (err) {
+    console.error('bridge error:', err);
+    return sendJson(res, 500, { error: 'internal', detail: err?.message || String(err) });
+  }
 }
 
 // Resolve the workspace for an incoming request.
@@ -1151,24 +1180,8 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     });
   }
 
-  const server = createServer(async (req, res) => {
-    try {
-      // A3: reject non-loopback Host/Origin before any routing (DNS-rebinding).
-      if (await enforceLoopbackOrigin(req, res, ctx, host)) return;
-      const url = new URL(req.url, `http://${host}:${finalPort}`);
-      if (url.pathname.startsWith('/bridge/')) {
-        // P0b: require the capability token on mutating + cross-workspace routes.
-        if (await enforceBridgeAuth(req, res, url, ctx, bridgeToken)) return;
-        return await handleBridge(req, res, url, ctx);
-      }
-      // Serve the cockpit, injecting the capability token into index.html so the
-      // fetch shim can attach it (same-origin delivery — see cockpit.js).
-      return await serveStatic(res, url.pathname, cockpitDir, headInjectFor(bridgeToken));
-    } catch (err) {
-      console.error('bridge error:', err);
-      return sendJson(res, 500, { error: 'internal', detail: err?.message || String(err) });
-    }
-  });
+  const server = createServer((req, res) =>
+    handleRequest(req, res, ctx, { host, port: finalPort, bridgeToken, cockpitDir }));
 
   // v1.2.1 F1 — wrap listen() with actionable EADDRINUSE detection. If the
   // port is already held, probe /bridge/status to distinguish a foreign
@@ -1287,7 +1300,8 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     // v1.2.1 F2 — clean up our entry in the bridges registry on graceful exit.
     unregisterBridge(process.pid).catch(() => {});
     // P0b — remove our per-port capability file so a stale token can't linger.
-    clearCapability(finalPort).catch(() => {});
+    // Ownership-conditioned (our pid + token) so we never delete a successor's.
+    clearCapability(finalPort, process.pid, bridgeToken).catch(() => {});
     server.close(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);
