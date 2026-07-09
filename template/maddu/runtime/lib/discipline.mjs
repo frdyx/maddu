@@ -86,8 +86,14 @@ const WRITE_RE = [
 export function classifyBashWrite(command) {
   const cmd = String(command == null ? '' : command);
   if (!cmd.trim()) return 'allow';
-  for (const re of REMEDY_RE) if (re.test(cmd)) return 'remedy';
+  // WRITE is checked BEFORE remedy so a write can't ride in on a remedy token:
+  // `maddu register && echo x > f`, `git status && rm -rf src`, `git diff | tee f`
+  // and `maddu slice-stop x; Set-Content f y` all carry a write indicator and
+  // must classify 'write', not short-circuit to 'remedy' (Codex bypass). A clean
+  // remedy (`git commit -m x`, `maddu slice-stop "…"`) carries no write token, so
+  // it still falls through to 'remedy' below.
   for (const re of WRITE_RE) if (re.test(cmd)) return 'write';
+  for (const re of REMEDY_RE) if (re.test(cmd)) return 'remedy';
   return 'allow'; // read-only / ambiguous interpreter / build / unknown → allow
 }
 
@@ -254,7 +260,7 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter) {
     lane: { claimed },
     goalOrPlan: { active: goalActive || openPlans.length > 0 },
     slice: { ageMin: sliceAgeMin, lastStopId: lastStop ? lastStop.id : null },
-    commit: { newDirtyFiles: newDirty.length, dirtyAgeMin: counter?.firstDirtyTs ? Math.max(0, (nowMs - counter.firstDirtyTs) / 60000) : null, slicedButDirty },
+    commit: { newDirtyFiles: newDirty.length, dirtyAgeMin: counter?.firstDirtyTs != null ? Math.max(0, (nowMs - counter.firstDirtyTs) / 60000) : null, slicedButDirty },
     _dirty: dirty,
   };
 }
@@ -290,5 +296,90 @@ export async function evaluateDiscipline(repoRoot, opts = {}) {
     return decide({ thresholds, state, counter, toolCtx: { isMutating } });
   } catch {
     return ok(); // FAIL-OPEN: any error → allow
+  }
+}
+
+// ── Pure per-session counter maintenance (reset + time anchors; NO edit bump) ─
+// Given the previous counter and freshly-gathered `state`, return the counter to
+// evaluate THIS edit against. editsSinceSlice resets to 0 on a new slice-stop id
+// (so the first edit of a fresh slice is never over-threshold); firstDirtyTs
+// anchors the uncommitted-age clock; goalplanFirstTs/AgeMin track how long work
+// has run with no governing goal/plan. The edit-count BUMP happens AFTER decide
+// (only for an allowed mutating edit) so decide sees the PRIOR counts — matching
+// the locked decide() unit contract (editsSinceSlice:6 → block).
+export function nextCounter(prev, state, nowMs) {
+  const c = { ...(prev || {}) };
+  const curSlice = (state && state.slice && state.slice.lastStopId) || null;
+  if (c.lastSliceStopId !== curSlice) { c.editsSinceSlice = 0; c.lastSliceStopId = curSlice; }
+  // uncommitted-age anchor: clear when clean, set on the first dirty observation.
+  // `== null` (not `!`) so a legitimate ts of 0 is never treated as unset.
+  const newDirty = (state && state.commit && state.commit.newDirtyFiles) || 0;
+  if (newDirty === 0) c.firstDirtyTs = null;
+  else if (c.firstDirtyTs == null) c.firstDirtyTs = nowMs;
+  // goal/plan grace anchor: reset while governed, else keep the clock running.
+  if (state && state.goalOrPlan && state.goalOrPlan.active) {
+    c.goalplanFirstTs = null; c.goalplanAgeEdits = 0; c.goalplanAgeMin = 0;
+  } else {
+    if (c.goalplanFirstTs == null) c.goalplanFirstTs = nowMs;
+    c.goalplanAgeMin = Math.max(0, (nowMs - c.goalplanFirstTs) / 60000);
+    c.goalplanAgeEdits = c.goalplanAgeEdits || 0;
+  }
+  return c;
+}
+
+// ── enforcePreTool — the STATEFUL PreToolUse entry (maintains the per-session
+// counter, then decides). FAILS OPEN. Returns { verdict, blocker, reason,
+// remedy, sid, mutating, enforcement }. The caller (commands/hooks.mjs) turns
+// the verdict into the Claude Code PreToolUse output (deny JSON / additional
+// context / none). Unlike evaluateDiscipline (read-only), this PERSISTS the
+// post-decide edit bump — a blocked edit never advances the clocks.
+export async function enforcePreTool(repoRoot, opts = {}) {
+  try {
+    const { tool, filePath, command, nowMs = 0, laneJustClaimed = false } = opts;
+    let sid = opts.madduSessionId || null;
+    if (!sid && opts.claudeSessionId) sid = await resolveMadduSession(repoRoot, opts.claudeSessionId);
+    if (!sid) sid = process.env.MADDU_SESSION_ID || null;
+
+    // Classify the tool → mutating? Remedies (`maddu slice-stop`/`git commit`/…)
+    // are the escape hatch — never gated, or the block would deadlock its own fix.
+    let mutating = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool);
+    if (tool === 'Bash') {
+      const kind = classifyBashWrite(command);
+      if (kind === 'remedy') return { ...ok(), sid, mutating: false, enforcement: 'n/a' };
+      mutating = kind === 'write';
+    }
+    if (!mutating) return { ...ok(), sid, mutating: false, enforcement: 'n/a' };
+
+    const gov = await import('./governance.mjs');
+    const cfg = await gov.readEffectiveGovernance(repoRoot);
+    const thresholds = await readDisciplineConfig(repoRoot, cfg.mode);
+    thresholds.enforcement = gov.effectiveValue(cfg, 'discipline-enforcement') || thresholds.enforcement;
+    if (thresholds.enforcement === 'off') return { ...ok(), sid, mutating, enforcement: 'off' };
+
+    const prev = sid ? await readCounter(repoRoot, sid) : { editsSinceSlice: 0, dirtyBaseline: [] };
+    const state = await gatherRitualState(repoRoot, sid, nowMs, prev);
+    if (laneJustClaimed) state.lane = { claimed: true };
+    const counter = nextCounter(prev, state, nowMs);
+    // Recompute the state fields that depend on the just-maintained counter.
+    // gatherRitualState computed these from `prev` (pre-reset); after a fresh
+    // slice-stop resets editsSinceSlice to 0, "slice-stopped but still dirty" only
+    // becomes true here (Codex bug: it was silently false the edit after a stop).
+    state.commit.dirtyAgeMin = counter.firstDirtyTs != null ? Math.max(0, (nowMs - counter.firstDirtyTs) / 60000) : null;
+    state.commit.slicedButDirty = !!(counter.lastSliceStopId && (counter.editsSinceSlice || 0) === 0 && (state.commit.newDirtyFiles || 0) > 0);
+
+    const decision = decide({ thresholds, state, counter, toolCtx: { isMutating: true } });
+
+    // Persist. Bump the edit clocks ONLY for an allowed edit — a blocked edit did
+    // not happen, so it must not push the slice/goal-plan counters over threshold.
+    if (sid) {
+      if (decision.verdict !== 'block') {
+        counter.editsSinceSlice = (counter.editsSinceSlice || 0) + 1;
+        if (!(state.goalOrPlan && state.goalOrPlan.active)) counter.goalplanAgeEdits = (counter.goalplanAgeEdits || 0) + 1;
+      }
+      await writeCounter(repoRoot, sid, counter);
+    }
+    return { ...decision, sid, mutating, enforcement: thresholds.enforcement };
+  } catch {
+    return { ...ok(), sid: null, mutating: false, enforcement: 'error' }; // FAIL-OPEN
   }
 }

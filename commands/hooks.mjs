@@ -132,26 +132,78 @@ export default async function hooks(argv) {
       return;
     }
     if (event === 'pre-tool-use') {
-      // Auto-claim a lane before the first mutating edit so agentic work is
-      // never un-laned. FAILS OPEN (exit 0 always) — a claim problem must never
-      // block the tool, and this writes nothing to stdout.
+      // Enforce Máddu's session rituals before a mutating edit. First auto-claim
+      // a lane (so agentic work is never un-laned), then evaluate discipline and
+      // either allow, nudge (additionalContext), or block (permissionDecision:
+      // deny). FAILS OPEN — any error exits 0 with no output, never blocking the
+      // tool; only an explicit verdict:'block' emits a deny.
       try {
-        if (!process.stdin.isTTY) {
-          let raw = '';
-          for await (const chunk of process.stdin) raw += chunk;
-          const payload = raw.trim() ? JSON.parse(raw) : {};
-          const filePath = payload?.tool_input?.file_path || payload?.tool_input?.notebook_path || null;
-          const { projections, sessionActive } = await loadSpineLib();
-          let sid = process.env.MADDU_SESSION_ID || null;
-          if (!sid && sessionActive?.readActiveSession) {
-            const a = await sessionActive.readActiveSession(repoRoot);
-            sid = a && a.sessionId;
-          }
+        if (process.stdin.isTTY) process.exit(0); // human at a terminal → no gate
+        let raw = '';
+        for await (const chunk of process.stdin) raw += chunk;
+        const payload = raw.trim() ? JSON.parse(raw) : {};
+        const tool = payload.tool_name || null;
+        const ti = payload.tool_input || {};
+        const filePath = ti.file_path || ti.notebook_path || null;
+        const command = ti.command || null;
+        const claudeSessionId = payload.session_id || null;
+
+        const disc = await loadLib('discipline.mjs');
+        const { projections, sessionActive } = await loadSpineLib();
+
+        // Resolve the CALLER's Máddu session: explicit env → the SessionStart
+        // binding (Claude id → Máddu id) → the active-session cache. The binding
+        // is what keeps concurrent Claude sessions from cross-resetting counters.
+        let sid = process.env.MADDU_SESSION_ID || null;
+        if (!sid && disc && claudeSessionId) { try { sid = await disc.resolveMadduSession(repoRoot, claudeSessionId); } catch { /* fall through */ } }
+        if (!sid && sessionActive?.readActiveSession) {
+          const a = await sessionActive.readActiveSession(repoRoot);
+          sid = a && a.sessionId;
+        }
+
+        // Auto-claim a lane before the first edit (rule-#9 clean via the trigger
+        // gauntlet); note if we just claimed so the eval doesn't race the spine.
+        let laneJustClaimed = false;
+        try {
           const auto = await loadLib('auto-claim-trigger.mjs');
           if (auto && auto.maybeAutoClaim && sid) {
             const proj = await projections.project(repoRoot);
-            await auto.maybeAutoClaim(repoRoot, { sid, filePath, proj });
+            const res = await auto.maybeAutoClaim(repoRoot, { sid, filePath, proj });
+            laneJustClaimed = !!(res && res.claimed);
           }
+        } catch { /* auto-claim best-effort */ }
+
+        // Evaluate discipline (re-projects fresh inside; maintains + persists the
+        // per-session counter). Any internal error → verdict 'ok' (fail-open).
+        let decision = { verdict: 'ok' };
+        if (disc && disc.enforcePreTool) {
+          decision = await disc.enforcePreTool(repoRoot, {
+            madduSessionId: sid, claudeSessionId, tool, filePath, command,
+            nowMs: Date.now(), laneJustClaimed,
+          });
+        }
+
+        if (decision.verdict === 'block') {
+          process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: disc.denyReason(decision),
+            },
+          }) + '\n');
+          process.exit(0);
+        }
+        // 'warn' (graduated: the pre-block reminder) and 'nudge' (relaxed) both
+        // surface as non-blocking context — without this the graduated "warn then
+        // block" ramp would be invisible until the block landed (Codex).
+        if (decision.verdict === 'nudge' || decision.verdict === 'warn') {
+          process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              additionalContext: `Máddu discipline — ${decision.reason}. Consider: ${decision.remedy}`,
+            },
+          }) + '\n');
+          process.exit(0);
         }
       } catch { /* fail open */ }
       process.exit(0);

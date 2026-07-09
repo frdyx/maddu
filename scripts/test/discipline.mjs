@@ -6,7 +6,8 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-const { resolveThresholds, decide, classifyBashWrite, denyReason, DISCIPLINE_DEFAULTS } =
+const { resolveThresholds, decide, classifyBashWrite, denyReason, DISCIPLINE_DEFAULTS,
+  nextCounter, enforcePreTool } =
   await import('../../template/maddu/runtime/lib/discipline.mjs');
 
 let passed = 0, failed = 0;
@@ -32,6 +33,15 @@ ok('allow: >/dev/null is not a repo write', A('cmd >/dev/null'));
 ok('allow: read-only ls/cat/grep', A('ls -la') && A('cat f') && A('grep x f'));
 ok('allow: ambiguous build step', A('npm run build'));
 ok('allow: ambiguous interpreter -c/-e', A('python -c "open(0)"') && A('node -e "x"'));
+
+// WRITE precedence: a write must NOT ride in on a remedy token (Codex bypass).
+ok('bypass closed: `maddu register && echo x > f` → write', W('maddu register && echo x > src/a.js'));
+ok('bypass closed: `git status && rm -rf src` → write', W('git status && rm -rf src'));
+ok('bypass closed: `git diff | tee patch` → write', W('git diff | tee patch.txt'));
+ok('bypass closed: `maddu slice-stop x; Set-Content f` → write', W('maddu slice-stop x; Set-Content f x'));
+// clean remedies (no write token) still short-circuit as remedy
+ok('clean remedy still remedy: git commit', R('git commit -m "fix"'));
+ok('clean remedy still remedy: git add -A && git commit (no write token)', R('git add -A && git commit -m x'));
 
 ok('remedy: bare maddu verbs', R('maddu slice-stop "x"') && R('maddu goal set "g"') && R('maddu plan new "t"') && R('maddu lane claim l') && R('maddu register'));
 ok('remedy: node bin/maddu.mjs form', R('node bin/maddu.mjs slice-stop "x"'));
@@ -94,6 +104,54 @@ ok('denyReason includes the remedy', denyReason(d(strict, { ...good, goalOrPlan:
 
 // off enforcement
 ok('off enforcement → ok', decide({ thresholds: { ...strict, enforcement: 'off' }, state: { ...good, session: { registered: false } }, counter: { editsSinceSlice: 99 }, toolCtx: mut }).verdict === 'ok');
+
+// ── nextCounter (P3 — pure per-session counter maintenance, no edit bump) ────
+const St = (over = {}) => ({
+  session: { registered: true }, lane: { claimed: true }, goalOrPlan: { active: true },
+  slice: { ageMin: 0, lastStopId: 'A' }, commit: { newDirtyFiles: 0 }, ...over,
+});
+ok('nextCounter: new slice-stop id resets editsSinceSlice',
+  (() => { const c = nextCounter({ lastSliceStopId: 'A', editsSinceSlice: 5 }, St({ slice: { lastStopId: 'B' } }), 0); return c.editsSinceSlice === 0 && c.lastSliceStopId === 'B'; })());
+ok('nextCounter: same slice carries editsSinceSlice',
+  nextCounter({ lastSliceStopId: 'A', editsSinceSlice: 5 }, St(), 0).editsSinceSlice === 5);
+ok('nextCounter: does NOT bump editsSinceSlice (bump is post-decide)',
+  nextCounter({ lastSliceStopId: 'A', editsSinceSlice: 2 }, St(), 0).editsSinceSlice === 2);
+ok('nextCounter: firstDirtyTs anchors on first dirty',
+  nextCounter({ firstDirtyTs: null }, St({ commit: { newDirtyFiles: 3 } }), 1000).firstDirtyTs === 1000);
+ok('nextCounter: firstDirtyTs clears when clean',
+  nextCounter({ firstDirtyTs: 1000 }, St({ commit: { newDirtyFiles: 0 } }), 5000).firstDirtyTs === null);
+ok('nextCounter: goal/plan active resets grace anchors',
+  (() => { const c = nextCounter({ goalplanFirstTs: 500, goalplanAgeEdits: 3 }, St(), 0); return c.goalplanFirstTs === null && c.goalplanAgeEdits === 0; })());
+ok('nextCounter: goal/plan inactive anchors the grace clock',
+  nextCounter({ goalplanFirstTs: null }, St({ goalOrPlan: { active: false } }), 600000).goalplanFirstTs === 600000);
+ok('nextCounter: goalplanAgeMin derived from anchor',
+  Math.round(nextCounter({ goalplanFirstTs: 1000 }, St({ goalOrPlan: { active: false } }), 601000).goalplanAgeMin) === 10);
+ok('nextCounter: firstDirtyTs of 0 is preserved (== null guard, not falsy)',
+  nextCounter({ firstDirtyTs: 0 }, St({ commit: { newDirtyFiles: 2 } }), 9000).firstDirtyTs === 0);
+
+// ── enforcePreTool (P3 — stateful entry; FAIL-OPEN short-circuits) ───────────
+// These paths return before any git/governance read, so a bogus repoRoot is fine.
+ok('enforcePreTool: non-mutating tool → ok, mutating:false',
+  (await enforcePreTool('/no/such/repo', { tool: 'Read', filePath: 'x.js' })).verdict === 'ok');
+{
+  const r = await enforcePreTool('/no/such/repo', { tool: 'Bash', command: 'maddu slice-stop "x"' });
+  ok('enforcePreTool: Bash remedy → ok + mutating:false', r.verdict === 'ok' && r.mutating === false);
+}
+{
+  const r = await enforcePreTool('/no/such/repo', { tool: 'Bash', command: 'git commit -m x' });
+  ok('enforcePreTool: git commit remedy → ok', r.verdict === 'ok' && r.mutating === false);
+}
+{
+  const r = await enforcePreTool('/no/such/repo', { tool: 'Bash', command: 'npm run build' });
+  ok('enforcePreTool: ambiguous Bash → non-mutating ok', r.verdict === 'ok');
+}
+{
+  // A mutating Edit against a bogus repo must never THROW — it returns a verdict
+  // (fail-open: an internal error yields ok). The value is not asserted here, only
+  // that the call resolves to a well-formed decision object.
+  const r = await enforcePreTool('/no/such/repo', { tool: 'Edit', filePath: 'x.js', nowMs: 0 });
+  ok('enforcePreTool: mutating on bogus repo never throws (fail-open shape)', typeof r.verdict === 'string');
+}
 
 console.log('');
 console.log(`discipline: ${passed} pass - ${failed} fail`);
