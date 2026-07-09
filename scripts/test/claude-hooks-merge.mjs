@@ -91,9 +91,10 @@ async function main() {
   ok('resolveHookBin: this repo (framework source) → bin/', await resolveHookBin(resolve(HERE, '..', '..')) === HOOK_BIN_SOURCE);
   ok('install wires the PreCompact checkpoint hook', a.hooks.PreCompact?.[0]?.hooks?.[0]?.command === hookCommandFor('pre-compact'));
   ok('PreCompact group has no matcher (fires on manual AND auto)', !('matcher' in (a.hooks.PreCompact?.[0] || { matcher: 1 })));
-  // PreToolUse auto-claim hook: wired, carries the file-mutating-tools matcher.
-  ok('install wires the PreToolUse auto-claim hook', a.hooks.PreToolUse?.some((g) => g.hooks?.[0]?.command === hookCommandFor('pre-tool-use')));
-  ok('PreToolUse Máddu group carries the Edit|Write matcher', a.hooks.PreToolUse?.find((g) => g.hooks?.[0]?.command === hookCommandFor('pre-tool-use'))?.matcher === 'Edit|Write|MultiEdit|NotebookEdit');
+  // PreToolUse discipline hook: wired, carries the mutating-tools matcher (edit
+  // family + Bash; the handler classifies Bash and skips reads/remedies).
+  ok('install wires the PreToolUse discipline hook', a.hooks.PreToolUse?.some((g) => g.hooks?.[0]?.command === hookCommandFor('pre-tool-use')));
+  ok('PreToolUse Máddu group carries the Edit|Write|…|Bash matcher', a.hooks.PreToolUse?.find((g) => g.hooks?.[0]?.command === hookCommandFor('pre-tool-use'))?.matcher === 'Edit|Write|MultiEdit|NotebookEdit|Bash');
   // A user's own PreToolUse hook is preserved alongside ours (merge fixture up top).
   ok('strip removes only our PreToolUse group', (() => { const s = stripMaddu(a); return !s.hooks || !s.hooks.PreToolUse; })());
 

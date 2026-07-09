@@ -149,6 +149,17 @@ export default async function hooks(argv) {
         const claudeSessionId = payload.session_id || null;
 
         const disc = await loadLib('discipline.mjs');
+
+        // Gate only MUTATING tools. Edit-family always mutates; Bash is gated only
+        // when it's a recognized write (classifyBashWrite) — a read/remedy Bash
+        // (ls, git status, maddu slice-stop) exits immediately, so widening the
+        // matcher to Bash never auto-claims a lane on a harmless command.
+        let mutating = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool);
+        if (tool === 'Bash' && disc && disc.classifyBashWrite) {
+          mutating = disc.classifyBashWrite(command) === 'write';
+        }
+        if (!mutating) process.exit(0);
+
         const { projections, sessionActive } = await loadSpineLib();
 
         // Resolve the CALLER's Máddu session: explicit env → the SessionStart

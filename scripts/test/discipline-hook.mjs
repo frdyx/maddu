@@ -72,6 +72,28 @@ try {
     ok('Bash `git commit` remedy → no output', b.out.trim() === '');
   }
 
+  // (c2) Bash reads → not gated (P4: the handler classifies + exits before any
+  // auto-claim, so a harmless read never triggers enforcement).
+  {
+    const r = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'ls -la' } });
+    ok('Bash read (ls) → no output (not gated)', r.out.trim() === '');
+  }
+
+  // (c3) Bash WRITE with no session → deny (P4: the classifier flags the write,
+  // and enforcement blocks it exactly like an Edit).
+  {
+    const { out } = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'echo x > src/a.js' }, session_id: 'claude-hermetic' });
+    let json = null; try { json = JSON.parse(out.trim() || '{}'); } catch {}
+    const hso = json && json.hookSpecificOutput;
+    ok('Bash `echo x > f` + no session → permissionDecision:deny', !!hso && hso.permissionDecision === 'deny', out.trim().slice(0, 80));
+  }
+  // (c4) compound write riding a remedy token is still gated (Codex bypass closed)
+  {
+    const { out } = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'maddu register && echo x > src/a.js' }, session_id: 'claude-hermetic' });
+    let json = null; try { json = JSON.parse(out.trim() || '{}'); } catch {}
+    ok('Bash `maddu register && echo > f` → deny (not a remedy)', !!(json && json.hookSpecificOutput && json.hookSpecificOutput.permissionDecision === 'deny'));
+  }
+
   // (d) always exits 0 (fail-open contract: the hook never crashes the tool)
   {
     const { code } = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'x.js' } });
