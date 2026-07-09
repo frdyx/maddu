@@ -11,14 +11,19 @@
 //   • written to a device-local, per-port capability FILE (0600) that the CLI
 //     and any documented non-cockpit POST client reads to authorize a mutation.
 //
-// HONEST SCOPING (mirrors docs/34-threat-model.md): this is a loopback
-// CSRF/capability boundary, NOT authentication against a same-user process. On
-// Windows a 0600-equivalent file is still readable by the same user's other
-// processes (no per-process ACL), and the cockpit-embedded token is readable by
-// same-origin XSS — so this does NOT, on its own, defend the stored-XSS chain
-// (escaping the sink, P0a/C1, does). Its value: block *other* local processes
-// that don't hold the token from driving mutations, and give CSRF resistance
-// (a cross-origin page can't set a custom header and CORS blocks reading it).
+// HONEST SCOPING (mirrors docs/34-threat-model.md) — this is a LOOPBACK CSRF
+// boundary, nothing more:
+//   • It does NOT authenticate a same-user process. The 0600 capability file is
+//     readable by the same user's other processes (Windows has no per-process
+//     ACL), AND the token is embedded in the cockpit HTML served over an
+//     UNAUTHENTICATED `GET /` — so any local process can simply fetch the page
+//     and read it. Do not claim this blocks other local processes.
+//   • It does NOT defend the stored-XSS chain — same-origin XSS reads the token
+//     too. Escaping the cockpit sinks (P0a/C1) is what stops that.
+// What it DOES buy: CSRF resistance. A cross-origin web page the operator visits
+// cannot set a custom request header, and CORS blocks it from reading the `GET /`
+// that would leak the token — so it cannot forge a mutation against the bridge.
+// The custom-header requirement is the whole mechanism.
 //
 // Node stdlib only (hard rule #4). Leaf module — no spine import.
 
@@ -81,23 +86,38 @@ export async function readCapabilityToken(port) {
   } catch { return null; }
 }
 
-// Remove this bridge's capability file on graceful shutdown.
-export async function clearCapability(port) {
+// Remove this bridge's capability file on graceful shutdown — but ONLY if the
+// file still belongs to us (our pid). A successor bridge on the same port may
+// have already replaced it; an unconditional delete would race and remove the
+// successor's live token. Pass our own pid so cleanup is ownership-conditioned.
+export async function clearCapability(port, pid = process.pid) {
+  try {
+    const parsed = JSON.parse(await readFile(capabilityPath(port), 'utf8'));
+    if (parsed?.pid !== pid) return; // not ours anymore — leave it
+  } catch { return; }               // gone/unreadable — nothing to clear
   try { await rm(capabilityPath(port), { force: true }); } catch {}
 }
 
 // Best-effort cleanup of capability files whose owning pid is gone (a bridge
-// that crashed without clearing). Called at start(), before writing ours.
+// that crashed without clearing). Called at start(), before writing ours. The
+// read → pid-check → delete is re-verified per file so a file rewritten by a
+// live successor between readdir and rm is not clobbered (its pid is alive).
 export async function pruneStaleCapabilities() {
   let entries;
   try { entries = await readdir(tokensDir()); } catch { return 0; }
   let removed = 0;
   for (const name of entries) {
     if (!name.endsWith('.json')) continue;
+    const p = join(tokensDir(), name);
     try {
-      const parsed = JSON.parse(await readFile(join(tokensDir(), name), 'utf8'));
-      if (parsed?.pid && !pidAlive(parsed.pid)) { await rm(join(tokensDir(), name), { force: true }); removed++; }
-    } catch { /* leave unparseable files alone */ }
+      const parsed = JSON.parse(await readFile(p, 'utf8'));
+      if (!parsed?.pid || pidAlive(parsed.pid)) continue; // live or unknown owner → leave
+      // Re-read immediately before delete: if it changed to a live owner in the
+      // race window, skip it.
+      const again = JSON.parse(await readFile(p, 'utf8'));
+      if (again?.pid && pidAlive(again.pid)) continue;
+      await rm(p, { force: true }); removed++;
+    } catch { /* leave unparseable/racing files alone */ }
   }
   return removed;
 }

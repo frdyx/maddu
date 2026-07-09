@@ -185,20 +185,29 @@ export async function enforceBridgeAuth(req, res, url, ctx, expectedToken) {
     }
   }
 
-  // Record authorized cross-workspace access (rate-limited, best-effort).
-  if (crossWorkspace && wsHeader !== '_all' && ctx?.workspaces?.has(wsHeader)) {
-    try {
-      const key = `${wsHeader}|${pathname}`;
-      const now = Date.now();
-      if (now - (_crossWsLast.get(key) || 0) >= CROSS_WS_COOLDOWN_MS) {
-        _crossWsLast.set(key, now);
-        await append(ctx.workspaces.get(wsHeader), {
-          type: EVENT_TYPES.BRIDGE_CROSS_WORKSPACE,
-          actor: null, lane: null,
-          data: { workspace: wsHeader, active: activeId, method, path: pathname },
-        });
-      }
-    } catch {}
+  // Record authorized cross-workspace access (rate-limited, best-effort) so the
+  // "always recorded" contract holds. A specific non-active target is recorded on
+  // THAT workspace's spine; the `_all` fan-out spans every workspace and has no
+  // single target, so it is recorded on the ACTIVE workspace's spine (a defined
+  // home) rather than silently omitted.
+  if (crossWorkspace) {
+    const targetRoot = wsHeader === '_all'
+      ? ctx?.workspaces?.get(activeId)
+      : ctx?.workspaces?.get(wsHeader);
+    if (targetRoot) {
+      try {
+        const key = `${wsHeader}|${pathname}`;
+        const now = Date.now();
+        if (now - (_crossWsLast.get(key) || 0) >= CROSS_WS_COOLDOWN_MS) {
+          _crossWsLast.set(key, now);
+          await append(targetRoot, {
+            type: EVENT_TYPES.BRIDGE_CROSS_WORKSPACE,
+            actor: null, lane: null,
+            data: { workspace: wsHeader, active: activeId, method, path: pathname },
+          });
+        }
+      } catch {}
+    }
   }
   return false;
 }

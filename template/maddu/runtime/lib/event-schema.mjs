@@ -37,7 +37,10 @@
 // field changed → minor bump.
 // 1.3.0 — added GOAL_COMPLETED (goal lifecycle: a finished goal is closed
 // instead of lingering forever). Additive → minor bump.
-export const EVENT_CONTRACT_VERSION = '1.3.0';
+// 1.4.0 (audit P0b) — added BRIDGE_CROSS_WORKSPACE (a bridge request selected a
+// non-active workspace). Additive → minor bump; baseline refreshed so a
+// consumer caching 1.3.0 never sees the extra type under an unchanged version.
+export const EVENT_CONTRACT_VERSION = '1.4.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope

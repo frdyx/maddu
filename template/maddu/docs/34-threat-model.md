@@ -355,17 +355,20 @@ the operator's machine" remit.
 
 **What the capability token is — and is NOT:**
 
-- It is a **loopback CSRF + inter-process capability** boundary: a
-  cross-origin page cannot set a custom header (and CORS blocks reading
-  the GET that would leak it), and another local process cannot drive a
-  mutation without first reading the capability file.
+- It is a **loopback CSRF** boundary, and only that: a cross-origin page
+  the operator visits cannot set a custom request header, and CORS blocks
+  it from reading the `GET /` that would leak the token — so it cannot
+  forge a mutation against the bridge.
 - It is **NOT** authentication against another process running as the
-  *same user*. The capability file is `0600`, but on Windows that is not
-  a per-process ACL, and the cockpit-embedded token is readable by
-  same-origin XSS — so the token does **not**, by itself, defend the
-  stored-XSS chain (escaping the cockpit sinks does; see scenario 10).
-  Process-level isolation between same-user processes remains the OS's
-  job (see *Integration with OS-level defenses*).
+  *same user*, and does not try to be. The token is embedded in the
+  cockpit HTML served over an **unauthenticated `GET /`**, so any local
+  process can fetch the page and read it (the `0600` capability file is
+  likewise same-user-readable, and on Windows is not a per-process ACL).
+  It therefore does **not** block another local process from driving a
+  mutation, and does **not** defend the stored-XSS chain — same-origin
+  XSS reads the token too; escaping the cockpit sinks does that (see
+  scenario 10). Process-level isolation between same-user processes
+  remains the OS's job (see *Integration with OS-level defenses*).
 - The operator deliberately binding the bridge to a non-loopback
   interface. That hostname is then accepted; exposing the bridge to a
   network is an explicit operator choice outside the rebinding model.
