@@ -86,6 +86,10 @@ Severity: **critical**. Verifies every `SKILL_INJECTED` event in the spine:
 
 A skill renamed or deleted after it was injected fails the gate until the operator either restores the file or accepts the drift via a manual edit. The gate is the contract that keeps auto-injection trustworthy.
 
+## Withheld, not silently dropped
+
+Auto-injection is **trusted/local-only**: a skill is injected only when its body is locally resident and its provenance is trusted. When it isn't — an `imported` skill with an unacknowledged external reference, or the **URL-swap** case where a reviewed skill points its body at an off-box link that can change after approval — Máddu **withholds** it and records a `SKILL_INJECTION_REFUSED` event (never a silent drop), guarded by the `skill-no-external-refs` gate at audit time and its inject-time twin at load time. The [oversight surface](52-oversight.md) surfaces every skill **fed vs withheld** with the plain-language reason, so the refusal is visible to the operator, not just the record. Full attack + defense in the [threat model](34-threat-model.md#5-imported-skill-contains-malicious-instructions).
+
 ## Text-only by construction
 
 Skills are read and appended verbatim. Máddu does **not** parse macros, run shell commands, or otherwise execute skill content. If a skill body contains code blocks the agent will read them like any other context — the framework treats them as inert markdown.

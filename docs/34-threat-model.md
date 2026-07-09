@@ -188,6 +188,12 @@ orientation digest; agent dutifully follows.
   reading it — with frontmatter `external_refs: allowed`.
 - Migration: pre-v1.2 skills auto-grandfathered with
   `provenance: 'pre-v1.2-grandfathered'` at load time.
+- **Made visible to the operator (v1.97.0):** a `SKILL_INJECTION_REFUSED`
+  was witnessed on the spine but invisible to a non-technical operator.
+  The [oversight surface](52-oversight.md) now surfaces every skill
+  **fed vs withheld** with a plain-language reason — so a blocked
+  URL-swap skill is something the person on the hook can actually see,
+  not just something the record holds.
 
 **Máddu does NOT enforce:**
 

@@ -46,6 +46,16 @@ Recent `GATE_RAN` events with summary counts (ok / fail / warn / last run). One 
 
 Post-stop reviews. Verdict counts (`CLEAN`/`P1`/`P2`/`P3`/`INFO`), recent `SLICE_REVIEWED` events, open follow-ups. Per-review markdown archived at `.maddu/reviews/<slice-event-id>.md`. Configured via `.maddu/config/review-policy.json`; the reviewer is a runtime with `kind: 'reviewer'`. Non-clean verdicts auto-open `FOLLOWUP_OPENED` events that surface in `#orientation`. Reads `GET /bridge/reviews?limit=N&verdict=P2`. See [20-governance.md](20-governance.md#post-stop-review-lane).
 
+### The Operator Plane routes *(v1.97.0)*
+
+Five read-only routes for the operator on the hook — the person who may not read the code (see [52-oversight.md](52-oversight.md), [53-operator-plane.md](53-operator-plane.md)). Each is a display-time projection; none writes to the spine.
+
+- **`#oversight`** — what a skill was **fed vs withheld**, with a plain-language *why* per item; on-goal drift; record-intact. Reads `GET /bridge/oversight`; mirror of `maddu spine oversight`.
+- **`#digest`** — "while you were away": what changed since you last looked (slices landed, gates failing, goal state). Reads `GET /bridge/digest`; mirror of `maddu orient --digest`.
+- **`#project`** — a single project's state, focused, for the one-repo operator. Reads `GET /bridge/project`.
+- **`#decisions`** — the decision/approval ledger, each row's `sha` tied to the tamper chain (a decision you can prove wasn't back-dated). Reads `GET /bridge/decisions`.
+- **`#portfolio`** — the cross-workspace wall: every registered workspace at once and **which need a human**. Reads `GET /bridge/_all/portfolio` (fans out over all workspaces).
+
 ### `#workbench`
 
 The default landing route. OS-like three-pane shell:

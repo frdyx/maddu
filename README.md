@@ -82,6 +82,8 @@ Every state question reduces to `tail`, `grep`, or `git log` on a file you alrea
 
 What Máddu gives **every** install, from day one, is the always-on core: register a session, claim a lane, run a slice, stop it with a structured summary, let the gates check it — each one line on the spine. That disciplined substrate is the value; it's what makes the history trustworthy. Multi-agent **orchestration** (`coordinator`, `loop`, `pipeline`, `team`) is a powerful **opt-in** layer on top — reach for it when a job fans out across lanes, skip it when it doesn't. Most work just needs the loop, and that's by design. (See the [charter](docs/charter.md#capability-layers--positioning-v1800) for the core-vs-orchestration split.)
 
+And with `maddu hooks install`, the loop stops being advisory: a `PreToolUse` hook **blocks a mutating edit** when the ritual is stale — no session, no lane, no governing goal/plan, an overdue slice-stop, or uncommitted work piling up — so an agent can't silently drift off the record. It's **tier-scaled** by governance (`strict` blocks, `standard` warns then blocks, `relaxed` only nudges), **fails open** (any error allows the edit; it never crashes a tool), and **never gates the remedy** (`maddu slice-stop`, `git commit`…), so the fix is always one command away. Claude Code-specific; every runtime still gets the record. See [Session hooks](docs/44-session-hooks.md#discipline-enforcement-the-pretooluse-gate).
+
 ## How it works
 
 Three moving parts, and nothing else:
@@ -98,10 +100,10 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ### The record is a contract, not just a log
 
-Append-only and hash-chained means the record can't be *changed* unnoticed. Máddu goes one step further: every event conforms to a **published, versioned contract** — 173 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-evident — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
+Append-only and hash-chained means the record can't be *changed* unnoticed. Máddu goes one step further: every event conforms to a **published, versioned contract** — 175 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-evident — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
-docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.1.0)
+docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.3.0)
                            → validate any spine event against it with ajv, check-jsonschema, or any validator
 ```
 
@@ -144,6 +146,8 @@ Inside Claude Code or Codex CLI, you drive everything from one line:
 | `/maddu-blueprint` | Export how a project was built as a portable, variable-driven handoff. |
 
 …and a dozen more (`/maddu-skill`, `/maddu-insights`, `/maddu-debt`, `/maddu-architecture`, `/maddu-handoff`, `/maddu-advise` …). Full reference → [22-slash-commands.md](docs/22-slash-commands.md) + [natural-language routing](docs/23-natural-language-routing.md).
+
+And for the person who **can't read the code** — the one on the hook for what the agent did — there's a read-only **Operator Plane** on top of the same record: `maddu status --line` (a one-line on-goal/drift segment, wireable into the status line), `maddu orient --digest` ("while you were away"), an **oversight** readout of what a skill was *fed vs withheld* and the plain-language why (`maddu spine oversight`), a per-project cockpit, a **decision ledger** whose every row ties to the tamper chain, and a cross-workspace **portfolio wall** that surfaces which repos *need a human*. All read-only projections — nothing new is written to make them. See [Oversight](docs/52-oversight.md) and [the Operator Plane](docs/53-operator-plane.md).
 
 ## Seven ways people run it
 
@@ -385,7 +389,7 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
-| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.1.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
+| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.3.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-evidence | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
