@@ -22,10 +22,21 @@ hard rules remain immutable regardless of mode.
 | approval-required-for-tool-install    | true     | false    | false     |
 | scope-lock-strict                     | true     | false    | false     |
 | slice-stop-required                   | true     | true     | false     |
+| discipline-enforcement                | block    | graduated | nudge    |
 | tool-allowlist-enforced               | true     | true     | warn-only |
 | loop-max-iter-default                 | 3        | 5        | 10        |
 | loop-cooldown-ms                      | 10000    | 5000     | 1000      |
 | force-claim-allowed                   | false    | true     | true      |
+
+**`discipline-enforcement`** scales the `PreToolUse` gate (see
+[Session hooks](44-session-hooks.md#discipline-enforcement-the-pretooluse-gate)): `block`
+(strict) denies a mutating edit at the first stale ritual; `graduated` (standard) hard-blocks
+a missing session/lane immediately but warns-then-blocks on stale slice-stops / uncommitted
+pileup; `nudge` (relaxed) only surfaces reminders. It also scales *gates-before-done*: at
+`block`, `maddu goal done` / `plan complete` refuse to close while a required gate is red.
+Enforcement requires the hook to be installed (`maddu hooks install`); the `discipline-observed`
+doctor gate flags a tier that enforces but has no hook wired. Fails open, and the remedy
+commands are never gated, so it can never trap the work.
 
 ## What stays immutable
 
