@@ -83,17 +83,30 @@ const WRITE_RE = [
   /(?:^|\s)(?:mv|cp|install|rm|dd|truncate)\s/,    // move/copy/install/remove/dd/truncate
   /(?:^|\s)(?:Set-Content|Add-Content|Out-File|New-Item|Move-Item|Copy-Item|Remove-Item)\b/i, // PowerShell
 ];
+// Blank the CONTENTS of quoted spans so a write token that appears INSIDE a
+// quoted argument is not mistaken for a real shell op. This matters because the
+// mandated commit trailer `… <noreply@anthropic.com>` contains a `>` and a
+// `maddu slice-stop "… cat > file …"` message contains a redirect char — neither
+// is a real write, but both would otherwise trip WRITE_RE and (worst case) block
+// the very remedy that clears the block. Real operators live in the unquoted code.
+function stripQuotedArgs(s) {
+  return String(s)
+    .replace(/"([^"\\]|\\.)*"/g, '""')
+    .replace(/'([^'\\]|\\.)*'/g, "''");
+}
+
 export function classifyBashWrite(command) {
   const cmd = String(command == null ? '' : command);
   if (!cmd.trim()) return 'allow';
-  // WRITE is checked BEFORE remedy so a write can't ride in on a remedy token:
-  // `maddu register && echo x > f`, `git status && rm -rf src`, `git diff | tee f`
-  // and `maddu slice-stop x; Set-Content f y` all carry a write indicator and
-  // must classify 'write', not short-circuit to 'remedy' (Codex bypass). A clean
-  // remedy (`git commit -m x`, `maddu slice-stop "…"`) carries no write token, so
-  // it still falls through to 'remedy' below.
-  for (const re of WRITE_RE) if (re.test(cmd)) return 'write';
-  for (const re of REMEDY_RE) if (re.test(cmd)) return 'remedy';
+  // Classify the DEQUOTED code so quoted argument text never reads as a shell op.
+  // WRITE is checked BEFORE remedy so a real write can't ride in on a remedy
+  // token — `maddu register && echo x > f`, `git status && rm -rf src`,
+  // `git diff | tee f`, `slice-stop x; Set-Content f y` all classify 'write'.
+  // But `git commit -m "… <email>"` / `maddu slice-stop "…>"` carry no UNQUOTED
+  // write op, so they still fall through to 'remedy' (the escape hatch stays open).
+  const code = stripQuotedArgs(cmd);
+  for (const re of WRITE_RE) if (re.test(code)) return 'write';
+  for (const re of REMEDY_RE) if (re.test(code)) return 'remedy';
   return 'allow'; // read-only / ambiguous interpreter / build / unknown → allow
 }
 

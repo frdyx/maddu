@@ -43,6 +43,15 @@ ok('bypass closed: `maddu slice-stop x; Set-Content f` → write', W('maddu slic
 ok('clean remedy still remedy: git commit', R('git commit -m "fix"'));
 ok('clean remedy still remedy: git add -A && git commit (no write token)', R('git add -A && git commit -m x'));
 
+// Quoted-arg de-noise (deadlock fix): a write char INSIDE a quoted argument must
+// NOT read as a shell op — else the mandated commit trailer or a slice-stop
+// message could block the very remedy that clears the block.
+ok('remedy: commit trailer <email> in quotes not a redirect', R('git commit -m "x\n\nCo-Authored-By: A <noreply@anthropic.com>"'));
+ok('remedy: slice-stop message mentioning `cat > f` not a write', R('maddu slice-stop "note: cat > tempfile pattern"'));
+ok('remedy: git commit -m with literal > inside message', R('git commit -m "use > redirect in prose"'));
+ok('still write: real redirect outside quotes', W('echo x > f.js'));
+ok('still write: quoted remedy token but real unquoted rm', W('maddu slice-stop "msg"; rm -rf src'));
+
 ok('remedy: bare maddu verbs', R('maddu slice-stop "x"') && R('maddu goal set "g"') && R('maddu plan new "t"') && R('maddu lane claim l') && R('maddu register'));
 ok('remedy: node bin/maddu.mjs form', R('node bin/maddu.mjs slice-stop "x"'));
 ok('remedy: ./maddu/run form', R('./maddu/run slice-stop "x"'));
