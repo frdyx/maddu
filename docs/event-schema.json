@@ -183,6 +183,7 @@
         "MEMORY_FACT_SUPERSEDED",
         "BRIEFING_CURATED",
         "BRIDGE_ORIGIN_REJECTED",
+        "BRIDGE_CROSS_WORKSPACE",
         "BLUEPRINT_DISTILLED",
         "DEBT_SCANNED",
         "ARCHITECTURE_SCANNED",
@@ -5332,6 +5333,38 @@
                 "type": "string"
               },
               "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "BRIDGE_CROSS_WORKSPACE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A bridge request selected a workspace other than the active one.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "active": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "workspace": {
                 "type": "string"
               }
             }

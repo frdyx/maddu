@@ -27,6 +27,7 @@ import { listMcp, mcpHealth } from './lib/mcp.mjs';
 import { readTrustConfig, auditRepo, renderReportMarkdown } from './lib/trust.mjs';
 import { readWorkerEnvConfig } from './lib/worker-env.mjs';
 import { registerBridge, unregisterBridge } from './lib/bridges-registry.mjs';
+import { TOKEN_HEADER, mintToken, tokenEquals, writeCapability, clearCapability, pruneStaleCapabilities } from './lib/bridge-auth.mjs';
 import { listSchedules, tick as scheduleTick, tickGlobal as scheduleTickGlobal, parseNatural } from './lib/schedule.mjs';
 import { listGlobalSchedules, readGlobalSchedule, saveGlobalSchedule, removeGlobalSchedule, setGlobalEnabled, listGlobalPolicies, saveGlobalPolicy, removeGlobalPolicy } from './lib/global.mjs';
 import { listCheckpoints } from './lib/checkpoints.mjs';
@@ -124,6 +125,83 @@ export async function enforceLoopbackOrigin(req, res, ctx, boundHost) {
 
 // readBody / serveStatic → moved to ./lib/http-util.mjs (v1.25.0).
 // serveStatic now takes cockpitDir explicitly (see its call site).
+
+// ── Bridge capability-token guard (v1.98.0 — audit P0b, C2/C3) ──────────────
+// The census proved a per-route allowlist can't be kept complete: plugins add
+// /bridge/* routes dynamically, so their mutating POST/DELETE paths aren't
+// statically enumerable. So the guard is METHOD-primary — every write verb
+// requires the token — PLUS an explicit set of the only two GET routes that
+// mutate (kept honest by scripts/test/bridge-auth-guard.mjs), PLUS the
+// cross-workspace check (C3). Read-only, active-workspace GETs stay open so the
+// existing loopback allowance for the CLI status probe keeps working.
+//
+// The two GET routes below mutate on read (writeReceiptLog / the stale-session
+// janitor append). Requiring the token here closes them as an auth hole; moving
+// the mutation off the read path entirely is deferred to P3 (actor-is-witness).
+export const MUTATING_GET_PATHS = new Set(['/bridge/operations', '/bridge/projection']);
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// The <meta> the cockpit fetch shim reads to attach the token. The token is
+// hex (mintToken) so it needs no attribute escaping; assert that to be safe.
+export function headInjectFor(token) {
+  if (!/^[a-f0-9]+$/i.test(String(token || ''))) return '';
+  return `<meta name="maddu-bridge-token" content="${token}">`;
+}
+
+// True when this request must present the capability token.
+export function bridgeRequestNeedsToken(method, pathname, crossWorkspace) {
+  if (crossWorkspace) return true;                       // C3: any non-active target
+  if (WRITE_METHODS.has(method)) return true;            // C2: every write verb
+  if (method === 'GET' && MUTATING_GET_PATHS.has(pathname)) return true; // mutating GETs
+  return false;
+}
+
+// Rate-limit BRIDGE_CROSS_WORKSPACE like the origin guard so cockpit polling of
+// a foreign workspace doesn't flood the spine.
+const _crossWsLast = new Map(); // `${workspace}|${path}` -> ts(ms)
+const CROSS_WS_COOLDOWN_MS = 10_000;
+
+// Returns true if the request was rejected (401 sent); false to let it proceed.
+// `expectedToken` is the per-boot secret; `activeId` is ctx.active. Never logs
+// the token. Emits BRIDGE_CROSS_WORKSPACE (rate-limited) when a proceeding
+// request targets a non-active workspace, so cross-repo access is on the record.
+export async function enforceBridgeAuth(req, res, url, ctx, expectedToken) {
+  const method = req.method || 'GET';
+  const pathname = url.pathname;
+  const wsHeader = (req.headers['x-maddu-workspace'] || '').toString().trim();
+  const activeId = ctx?.active || null;
+  const crossWorkspace = !!wsHeader && wsHeader !== activeId; // incl. '_all'
+
+  if (bridgeRequestNeedsToken(method, pathname, crossWorkspace)) {
+    const presented = (req.headers[TOKEN_HEADER] || '').toString();
+    if (!expectedToken || !tokenEquals(presented, expectedToken)) {
+      sendJson(res, 401, {
+        error: 'unauthorized',
+        detail: 'this bridge request requires the capability token (' + TOKEN_HEADER +
+          '). The cockpit attaches it automatically; a CLI/script reads it from the ' +
+          'per-port capability file under the maddu config dir. Loopback + capability, not user-level auth.',
+      });
+      return true;
+    }
+  }
+
+  // Record authorized cross-workspace access (rate-limited, best-effort).
+  if (crossWorkspace && wsHeader !== '_all' && ctx?.workspaces?.has(wsHeader)) {
+    try {
+      const key = `${wsHeader}|${pathname}`;
+      const now = Date.now();
+      if (now - (_crossWsLast.get(key) || 0) >= CROSS_WS_COOLDOWN_MS) {
+        _crossWsLast.set(key, now);
+        await append(ctx.workspaces.get(wsHeader), {
+          type: EVENT_TYPES.BRIDGE_CROSS_WORKSPACE,
+          actor: null, lane: null,
+          data: { workspace: wsHeader, active: activeId, method, path: pathname },
+        });
+      }
+    } catch {}
+  }
+  return false;
+}
 
 // Resolve the workspace for an incoming request.
 //   - X-Maddu-Workspace header takes precedence.
@@ -1048,6 +1126,11 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
   const ws = await buildWorkspaceMap();
   const ctx = { workspaces: ws.map, active: ws.active, legacy: ws.legacy };
 
+  // Per-boot capability token (audit P0b, C2/C3). Minted before we listen so
+  // the request handler + served cockpit HTML close over the same secret.
+  const bridgeToken = mintToken();
+  await pruneStaleCapabilities();
+
   // Ensure every mounted workspace has its spine ready + record FRAMEWORK_BOOTED.
   for (const [id, repoRoot] of ctx.workspaces) {
     await ensureSpine(repoRoot);
@@ -1065,9 +1148,13 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
       if (await enforceLoopbackOrigin(req, res, ctx, host)) return;
       const url = new URL(req.url, `http://${host}:${finalPort}`);
       if (url.pathname.startsWith('/bridge/')) {
+        // P0b: require the capability token on mutating + cross-workspace routes.
+        if (await enforceBridgeAuth(req, res, url, ctx, bridgeToken)) return;
         return await handleBridge(req, res, url, ctx);
       }
-      return await serveStatic(res, url.pathname, cockpitDir);
+      // Serve the cockpit, injecting the capability token into index.html so the
+      // fetch shim can attach it (same-origin delivery — see cockpit.js).
+      return await serveStatic(res, url.pathname, cockpitDir, headInjectFor(bridgeToken));
     } catch (err) {
       console.error('bridge error:', err);
       return sendJson(res, 500, { error: 'internal', detail: err?.message || String(err) });
@@ -1110,6 +1197,10 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
   try {
     await registerBridge({ pid: process.pid, port: finalPort, repoRoot: firstRoot, version });
   } catch (err) { console.error('bridges-registry write failed:', err.message); }
+  // P0b: publish the capability token for CLI / documented non-cockpit clients.
+  try {
+    await writeCapability(finalPort, process.pid, bridgeToken);
+  } catch (err) { console.error('bridge capability-file write failed:', err.message); }
   console.log(`Máddu bridge v${version} listening on http://${host}:${finalPort}`);
   console.log(`  workspaces: ${ctx.workspaces.size} mounted (${ctx.legacy ? 'legacy single-repo mode' : `registry: ${registryPath()}`})`);
   for (const [id, root] of ctx.workspaces) {
@@ -1186,6 +1277,8 @@ export async function start({ host = DEFAULT_HOST, port } = {}) {
     clearInterval(scheduleTimer);
     // v1.2.1 F2 — clean up our entry in the bridges registry on graceful exit.
     unregisterBridge(process.pid).catch(() => {});
+    // P0b — remove our per-port capability file so a stale token can't linger.
+    clearCapability(finalPort).catch(() => {});
     server.close(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);

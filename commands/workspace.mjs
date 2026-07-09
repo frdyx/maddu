@@ -33,14 +33,24 @@ function printHelp() {
 
 // Best-effort: POST to a running bridge so its in-memory `active` pointer
 // follows the registry update. If no bridge is up (ECONNREFUSED) we fall
-// through silently and print a restart hint instead.
-function postBridgeActivate(id, port = 4177) {
+// through silently and print a restart hint instead. This is a mutating route,
+// so it needs the bridge capability token (audit P0b) — read from the per-port
+// capability file the running bridge published; absent → the bridge 401s and we
+// surface the restart hint just like an ECONNREFUSED.
+async function postBridgeActivate(id, port = 4177) {
+  let token = '';
+  try {
+    const auth = await loadLib('bridge-auth.mjs');
+    token = (await auth.readCapabilityToken(port)) || '';
+  } catch {}
   return new Promise((resolve) => {
     const body = JSON.stringify({ id });
+    const headers = { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) };
+    if (token) headers['x-maddu-bridge-token'] = token;
     const req = request({
       host: '127.0.0.1', port, method: 'POST',
       path: '/bridge/_workspaces/activate',
-      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+      headers,
       timeout: 1500,
     }, (res) => {
       let buf = '';

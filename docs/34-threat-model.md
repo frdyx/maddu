@@ -340,13 +340,32 @@ the operator's machine" remit.
 - Stdlib header checks only — zero new dependencies, no proxy, every
   hard rule respected.
 
-**Máddu does NOT enforce:**
+**Capability token on writes (v1.98.0):**
 
-- A non-browser process on the machine talking to the bridge. Requests
-  with no `Host` header (curl, the CLI probe) are allowed by design —
-  the threat is specifically the *browser*, which always sends `Host`.
-  Process-level isolation is the OS's job (see *Integration with
-  OS-level defenses*).
+- Loopback-origin enforcement stops a *browser*, but on its own it let
+  *any* local process POST a mutation (Host-absent requests are allowed
+  by design). So mutating routes (every `POST`/`PUT`/`PATCH`/`DELETE`,
+  plus the two read-path refreshers `GET /bridge/operations` and
+  `GET /bridge/projection`) and any **cross-workspace** request now also
+  require a per-boot capability token (`X-Maddu-Bridge-Token`, else
+  `401`). The token is delivered same-origin into the served cockpit HTML
+  and to a `0600` per-port file the CLI reads. A cross-workspace request
+  that is authorized appends a rate-limited `BRIDGE_CROSS_WORKSPACE`
+  event, so one repo reaching into another's spine is on the record.
+
+**What the capability token is — and is NOT:**
+
+- It is a **loopback CSRF + inter-process capability** boundary: a
+  cross-origin page cannot set a custom header (and CORS blocks reading
+  the GET that would leak it), and another local process cannot drive a
+  mutation without first reading the capability file.
+- It is **NOT** authentication against another process running as the
+  *same user*. The capability file is `0600`, but on Windows that is not
+  a per-process ACL, and the cockpit-embedded token is readable by
+  same-origin XSS — so the token does **not**, by itself, defend the
+  stored-XSS chain (escaping the cockpit sinks does; see scenario 10).
+  Process-level isolation between same-user processes remains the OS's
+  job (see *Integration with OS-level defenses*).
 - The operator deliberately binding the bridge to a non-loopback
   interface. That hostname is then accepted; exposing the bridge to a
   network is an explicit operator choice outside the rebinding model.

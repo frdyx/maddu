@@ -31,6 +31,16 @@ let currentWorkspace = (() => {
 })();
 let allWorkspacesMode = false; // when true, /bridge/_all/* gets `_all`.
 
+// The bridge capability token (audit P0b) is bootstrapped into the served page
+// as <meta name="maddu-bridge-token"> (same-origin delivery). Read it lazily so
+// load order doesn't matter, and cache it. Absent in tests / a raw index.html.
+function bridgeToken() {
+  if (bridgeToken._v !== undefined) return bridgeToken._v;
+  try { bridgeToken._v = document.querySelector('meta[name="maddu-bridge-token"]')?.content || ''; }
+  catch { bridgeToken._v = ''; }
+  return bridgeToken._v;
+}
+
 (function installFetchShim() {
   const origFetch = window.fetch;
   window.fetch = function (input, init) {
@@ -43,6 +53,11 @@ let allWorkspacesMode = false; // when true, /bridge/_all/* gets `_all`.
       } else if (currentWorkspace && !headers.has('X-Maddu-Workspace')) {
         headers.set('X-Maddu-Workspace', currentWorkspace);
       }
+      // P0b: attach the capability token so the bridge authorizes mutations +
+      // cross-workspace reads. Read-only active-workspace GETs don't need it,
+      // but sending it on every /bridge/ call is harmless and keeps this simple.
+      const tok = bridgeToken();
+      if (tok && !headers.has('X-Maddu-Bridge-Token')) headers.set('X-Maddu-Bridge-Token', tok);
       init.headers = headers;
     }
     return origFetch(input, init);

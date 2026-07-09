@@ -7,8 +7,27 @@ The bridge is a Node HTTP server in `maddu/runtime/server.js`. It binds to `127.
 - All responses are `application/json; charset=utf-8` with `cache-control: no-store` unless they are static cockpit assets.
 - Request bodies are JSON, up to 1 MB.
 - Errors return `{"error": "<message>", ...}` with a 4xx status.
-- No auth tokens are required — the bridge is bound to `127.0.0.1` and trusts the local OS. CORS is not configured; the cockpit is served from the same origin.
+- **Capability token on writes (v1.98.0).** Mutating requests (every `POST`/`PUT`/`PATCH`/`DELETE`, plus the two read-path routes that refresh state — `GET /bridge/operations` and `GET /bridge/projection`) and **any cross-workspace request** (a non-active `X-Maddu-Workspace`) must present a per-boot capability token in the `X-Maddu-Bridge-Token` header, else `401 {"error":"unauthorized"}`. Read-only, active-workspace `GET`s need no token (so the CLI status probe keeps working). The cockpit and the `maddu` CLI attach it automatically; see *Authorizing a write from a script* below. This is a loopback CSRF/capability boundary, **not** authentication against another same-user process — see [34-threat-model.md](34-threat-model.md). CORS is not configured; the cockpit is served from the same origin.
 - **Loopback-origin enforcement (v1.13.0, DNS-rebinding defense).** Before any routing, the bridge rejects requests whose `Host` hostname — or `Origin` hostname, when an `Origin` header is present — is not loopback (`127.0.0.1` / `localhost` / `::1`, or the explicitly bound host). Rejected requests get `403 {"error":"forbidden_origin","reason":"host"|"origin"}` and append a rate-limited `BRIDGE_ORIGIN_REJECTED` event to the active workspace spine. A browser cannot forge the `Host` hostname, so a page served from another origin (even one that rebinds its DNS to `127.0.0.1`) can never drive these endpoints. Non-browser clients that send no `Host` header (curl, the CLI health probe) are unaffected. See [34-threat-model.md](34-threat-model.md) scenario 10.
+
+## Authorizing a write from a script
+
+The tutorial `curl -X POST …` snippets elsewhere in these docs illustrate the request *shape*; a real write also needs the capability token. Each running bridge publishes its per-boot token to a device-local, `0600` file named by port under the maddu config dir:
+
+- Linux/macOS: `${XDG_CONFIG_HOME:-~/.config}/maddu/bridge-tokens/<port>.json`
+- Windows: `%APPDATA%\maddu\bridge-tokens\<port>.json`
+
+The file is `{ "port", "pid", "token", "startedAt" }`; it is written when the bridge starts and removed on graceful shutdown (stale files whose pid is gone are pruned on next start). Read `token` and send it as `X-Maddu-Bridge-Token`:
+
+```bash
+TOKEN=$(node -e "process.stdout.write(require(require('os').homedir()+'/.config/maddu/bridge-tokens/4177.json').token)")
+curl -s -X POST http://127.0.0.1:4177/bridge/inbox \
+  -H 'content-type: application/json' \
+  -H "X-Maddu-Bridge-Token: $TOKEN" \
+  -d '{"message":"hello from a script"}'
+```
+
+You never do this by hand for normal use — the cockpit reads the token from a `<meta name="maddu-bridge-token">` the bridge injects into its own served HTML, and the `maddu` CLI reads the capability file directly.
 
 ## Status / health
 
