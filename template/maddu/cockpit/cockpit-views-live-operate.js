@@ -53,9 +53,15 @@ export function renderMailbox(ctx) {
         return;
       }
       for (const msg of m.messages.slice().reverse()) {
-        const dot = msg.read ? '' : '<span class="signal live"></span>';
+        // Subject is attacker-writable free text (`maddu mailbox send --subject`,
+        // flows spine → /bridge/mailbox), so it MUST be a text node, never html.
+        // The unread dot is the only markup; keep it as a separate element child.
+        const title = el('span', { class: 'panel-title' }, [
+          msg.read ? null : el('span', { class: 'signal live' }),
+          ` ${msg.subject || '(no subject)'}`
+        ]);
         const head = el('div', { class: 'panel-head' }, [
-          el('span', { class: 'panel-title', html: `${dot} ${msg.subject || '(no subject)'}` }),
+          title,
           el('span', { class: 'panel-aside' }, `${msg.type} · ${msg.ts.replace('T', ' ').replace(/\.\d+Z$/, 'Z')}`)
         ]);
         const meta = el('div', { class: 'approval-meta' }, [
@@ -269,9 +275,11 @@ export function renderChats(ctx) {
     }
     const list = el('div', {});
     for (const s of proj.sessions.slice().reverse()) {
-      const dot = s.status === 'active' ? '<span class="signal live"></span>' : '<span class="signal"></span>';
       const head = el('div', { class: 'panel-head' }, [
-        el('span', { class: 'panel-title', html: `${dot} ${s.id}` }),
+        el('span', { class: 'panel-title' }, [
+          el('span', { class: s.status === 'active' ? 'signal live' : 'signal' }),
+          ` ${s.id}`
+        ]),
         el('span', { class: 'panel-aside' }, s.status)
       ]);
       const kv = el('dl', { class: 'kv' }, [

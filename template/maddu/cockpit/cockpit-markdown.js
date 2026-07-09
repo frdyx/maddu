@@ -7,6 +7,16 @@
 // Handles:
 //   #/##/### headings · paragraphs · bold/italic · `code` · ```fenced``` · - / * lists
 //   1. ordered lists · > blockquotes · [text](url) links · --- horizontal rules · tables (pipe).
+// Only allow http(s)/mailto or relative/anchor hrefs — a `[t](javascript:…)`
+// (or data:/vbscript:) link would otherwise be a clickable script in the cockpit
+// origin. `h` arrives already HTML-escaped, so we test the scheme, not quoting.
+function safeHref(h) {
+  const v = String(h).trim();
+  const scheme = v.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (!scheme) return true; // relative path, anchor, or query — safe
+  return /^(https?|mailto)$/i.test(scheme[1]);
+}
+
 export function renderMarkdown(src) {
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
@@ -18,7 +28,7 @@ export function renderMarkdown(src) {
     s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[\s(])\*([^\s*][^*]*?)\*(?=[\s.,;:!?)]|$)/g, '$1<em>$2</em>');
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => `<a href="${h}">${t}</a>`);
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, h) => safeHref(h) ? `<a href="${h}">${t}</a>` : t);
     return s;
   }
 

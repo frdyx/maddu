@@ -439,8 +439,10 @@ export function renderSettings(ctx) {
           for (const p of providers) {
             const keys = p.keys || [];
             const active = keys.find((k) => k.active);
-            const dot = keys.length > 0 ? '<span class="signal live"></span>' : '<span class="signal"></span>';
-            kv.appendChild(el('dt', { html: `${dot}${p.name}` }));
+            kv.appendChild(el('dt', {}, [
+              el('span', { class: keys.length > 0 ? 'signal live' : 'signal' }),
+              p.name
+            ]));
             kv.appendChild(el('dd', { html:
               keys.length === 0 ? '<span style="color:var(--m-fg-3)">no keys</span>'
                 : `${keys.length} key${keys.length === 1 ? '' : 's'}` +
@@ -536,8 +538,10 @@ export function renderSettings(ctx) {
           const kv = el('dl', { class: 'kv' });
           for (const r of rts) {
             const h = (d.health || {})[r.name];
-            const dot = h?.ok ? '<span class="signal live"></span>' : '<span class="signal"></span>';
-            kv.appendChild(el('dt', { html: `${dot}${r.displayName || r.name}` }));
+            kv.appendChild(el('dt', {}, [
+              el('span', { class: h?.ok ? 'signal live' : 'signal' }),
+              r.displayName || r.name
+            ]));
             kv.appendChild(el('dd', {}, h?.ok ? (h.version || 'detected') : (h?.error || 'not detected')));
           }
           rtMount.appendChild(kv);
@@ -1117,16 +1121,18 @@ export function renderMcp(ctx) {
       for (const r of d.mcp) {
         const h = (d.health || {})[r.name];
         const enabled = r.enabled;
-        const status = h?.ok ? `<span class="signal live"></span>${h.status || h.note || 'ok'}` :
-                       h ? `<span class="signal"></span>${h.error || ('status ' + h.status)}` :
-                       `<span class="signal"></span>${enabled ? 'untested' : 'disabled'}`;
+        // h.status/note/error is foreign MCP-server output — render as a text
+        // node, never html. The signal dot is the only markup.
+        const status = h?.ok ? [el('span', { class: 'signal live' }), `${h.status || h.note || 'ok'}`] :
+                       h ? [el('span', { class: 'signal' }), `${h.error || ('status ' + h.status)}`] :
+                       [el('span', { class: 'signal' }), enabled ? 'untested' : 'disabled'];
         const detailLine = r.transport === 'stdio'
           ? `${r.stdio?.command || '—'}  ${(r.stdio?.args || []).join(' ')}`
           : `${r[r.transport]?.url || '—'}`;
         const card = el('div', { class: 'panel', 'data-focus': r.name, style: enabled ? '' : 'opacity:0.55;' }, [
           el('div', { class: 'panel-head' }, [
             el('span', { class: 'panel-title' }, r.displayName || r.name),
-            el('span', { class: 'panel-aside', html: status })
+            el('span', { class: 'panel-aside' }, status)
           ]),
           el('dl', { class: 'kv' }, [
             el('dt', {}, 'name'),      el('dd', {}, r.name),
@@ -1260,13 +1266,14 @@ export function renderRuntimes(ctx) {
 
       for (const r of d.runtimes) {
         const h = (d.health || {})[r.name];
-        const status = h?.ok ? `<span class="signal live"></span>${h.version || 'detected'}` :
-                       h ? `<span class="signal"></span>${h.error || 'exit ' + h.exitCode}` :
-                       `<span class="signal"></span>not detected`;
+        // h.version/error is foreign runtime-detection output — text node only.
+        const status = h?.ok ? [el('span', { class: 'signal live' }), `${h.version || 'detected'}`] :
+                       h ? [el('span', { class: 'signal' }), `${h.error || 'exit ' + h.exitCode}`] :
+                       [el('span', { class: 'signal' }), 'not detected'];
         const card = el('div', { class: 'panel', 'data-focus': r.name }, [
           el('div', { class: 'panel-head' }, [
             el('span', { class: 'panel-title' }, r.displayName || r.name),
-            el('span', { class: 'panel-aside', html: status })
+            el('span', { class: 'panel-aside' }, status)
           ]),
           el('dl', { class: 'kv' }, [
             el('dt', {}, 'name'),         el('dd', {}, r.name),
