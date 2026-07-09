@@ -67,10 +67,19 @@ export default async function command(argv) {
     }
     const outcome = (sub === 'abandon' || flags.abandon) ? 'abandoned' : 'done';
     const note = typeof flags.note === 'string' ? flags.note : null;
+    // Gates-before-done: a goal marked "done" should pass its gates first. Abandon
+    // is an honest terminal state and is never gated. Tier-scaled + fail-open.
+    let gateInfo = { forced: false, failCount: 0 };
+    if (outcome === 'done') {
+      const { checkGatesBeforeDone, reportGatesBeforeDone } = await import('./_gates-before-done.mjs');
+      const gate = await checkGatesBeforeDone(repoRoot, { force: !!flags.force });
+      gateInfo = reportGatesBeforeDone(gate, 'goal');
+      if (!gateInfo.proceed) process.exit(3);
+    }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.GOAL_COMPLETED,
       actor: process.env.MADDU_SESSION_ID || null,
-      data: { note, objective: g.objective || null, outcome },
+      data: { note, objective: g.objective || null, outcome, gatesFailed: gateInfo.failCount || 0, gatesForced: !!gateInfo.forced },
     });
     console.log(`goal ${outcome}: ${g.objective}`);
     if (note) console.log(`note: ${note}`);

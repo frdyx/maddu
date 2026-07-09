@@ -208,6 +208,12 @@ export default async function planCmd(argv) {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
     if (!planId) { console.error('usage: maddu plan complete <plan-id> [--summary "..."]'); process.exit(2); }
+    // Gates-before-done: completing a plan should pass its gates first (tier-
+    // scaled + fail-open). `cancel` is the honest terminal state and is not gated.
+    const { checkGatesBeforeDone, reportGatesBeforeDone } = await import('./_gates-before-done.mjs');
+    const gate = await checkGatesBeforeDone(repoRoot, { force: !!flags.force });
+    const gateInfo = reportGatesBeforeDone(gate, 'plan');
+    if (!gateInfo.proceed) process.exit(3);
     await plans.completePlan(repoRoot, { planId, by: sessionId });
     console.log(`${ANSI.pass}completed${ANSI.reset}  ${planId}`);
     return;

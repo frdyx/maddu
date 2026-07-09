@@ -24,7 +24,7 @@ import sessionCmd from './session.mjs';
 
 function printHelp() {
   console.log([
-    'Usage: maddu hooks <install|status|remove> [--statusline] [--dry-run]',
+    'Usage: maddu hooks <install|status|remove|uninstall> [--statusline] [--dry-run]',
     '',
     '  install     Wire SessionStart (auto-register + stale-sweep) + SessionEnd',
     '              (close) + PreCompact (compaction checkpoint) + PreToolUse',
@@ -37,6 +37,7 @@ function printHelp() {
     '              never clobbers a statusLine you already set.',
     '  status      Show which Máddu hooks are installed.',
     '  remove      Remove only Máddu\'s hook entries (and its statusLine, if set).',
+    '  uninstall   Alias for `remove` — the fast off-switch for the discipline hook.',
     '',
     'Once installed, a session auto-registers, the SessionStart sweep clears stale',
     'sessions + orphaned lane claims, and PreToolUse auto-claims a lane before the',
@@ -290,9 +291,11 @@ export default async function hooks(argv) {
   }
 
   // ── install / remove ──
-  if (sub === 'install' || sub === 'remove') {
+  if (sub === 'install' || sub === 'remove' || sub === 'uninstall') {
     const { flags } = parseFlags(rest);
-    const removing = sub === 'remove';
+    // `uninstall` is an alias for `remove` — it's the off-switch operators reach
+    // for when the discipline hook needs to come out fast, so both names work.
+    const removing = sub === 'remove' || sub === 'uninstall';
     const { settings, existed, raw } = await lib.loadSettings(repoRoot);
     if (settings === null) {
       console.error(`\x1b[31mrefusing to touch ${lib.settingsPath(repoRoot)} — it exists but is not valid JSON. Fix or remove it first.\x1b[0m`);
