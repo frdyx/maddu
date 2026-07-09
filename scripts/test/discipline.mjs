@@ -162,6 +162,11 @@ ok('nextCounter: firstDirtyTs of 0 is preserved (== null guard, not falsy)',
   const aState = { slice: { lastStopId: lastOwnSliceStop(stops, 'A')?.id ?? null }, commit: {}, goalOrPlan: { active: true } };
   ok('cross-session: B\'s slice-stop does NOT reset A\'s editsSinceSlice',
     nextCounter(aCounter, aState, 0).editsSinceSlice === 11);
+  // Truncation edge (Codex re-review): A's own last stop pushed out of the
+  // recent-50 projection window → lastStopId null → must NOT reset A's counter.
+  const truncated = nextCounter({ lastSliceStopId: 'a-old', editsSinceSlice: 11 }, { slice: { lastStopId: null }, commit: {}, goalOrPlan: { active: true } }, 0);
+  ok('truncated own slice-stop (null) does NOT reset the counter',
+    truncated.editsSinceSlice === 11 && truncated.lastSliceStopId === 'a-old');
 }
 
 // ── enforcePreTool (P3 — stateful entry; FAIL-OPEN short-circuits) ───────────

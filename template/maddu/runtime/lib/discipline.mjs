@@ -346,7 +346,12 @@ export async function evaluateDiscipline(repoRoot, opts = {}) {
 export function nextCounter(prev, state, nowMs) {
   const c = { ...(prev || {}) };
   const curSlice = (state && state.slice && state.slice.lastStopId) || null;
-  if (c.lastSliceStopId !== curSlice) { c.editsSinceSlice = 0; c.lastSliceStopId = curSlice; }
+  // Reset ONLY on a real, newer own slice-stop. A null current id means "no own
+  // slice-stop observed" — which also happens when this session's last stop is
+  // truncated out of the projection's recent-50 window by other sessions — and
+  // must NOT reset the counter (Codex: else a busy fleet resets A's count to 0
+  // and A dodges the block). Keep the counter's own last id and edit count.
+  if (curSlice != null && c.lastSliceStopId !== curSlice) { c.editsSinceSlice = 0; c.lastSliceStopId = curSlice; }
   // uncommitted-age anchor: clear when clean, set on the first dirty observation.
   // `== null` (not `!`) so a legitimate ts of 0 is never treated as unset.
   const newDirty = (state && state.commit && state.commit.newDirtyFiles) || 0;
