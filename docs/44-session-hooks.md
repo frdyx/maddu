@@ -41,7 +41,7 @@ slice-stop with no flag and no env var, across fresh shells.
 | `SessionStart` | `maddu hooks fire session-start` | Auto-registers a session (records `SESSION_AUTO_REGISTERED`), **sweeps stale sessions + orphaned lane claims** (the CLI-side janitor — below), and surfaces a one-line reminder. |
 | `SessionEnd` | `maddu hooks fire session-end` | Closes the active session (releases the lane claims it held). |
 | `PreCompact` | `maddu hooks fire pre-compact` | Writes a `COMPACTION_CHECKPOINT` to the spine just before Claude Code compacts its context (v1.89.0, below). |
-| `PreToolUse` (matcher `Edit\|Write\|MultiEdit\|NotebookEdit`) | `maddu hooks fire pre-tool-use` | **Auto-claims a lane** before the first mutating edit when the session holds none, so agentic work is never un-laned. Fails open. |
+| `PreToolUse` (matcher `Edit\|Write\|MultiEdit\|NotebookEdit\|Bash`) | `maddu hooks fire pre-tool-use` | Before a **mutating** tool call: auto-claims a lane if none is held, then **enforces the rituals** — allow, nudge, or *deny* the edit when a ritual is stale (see [Discipline enforcement](#discipline-enforcement-the-pretooluse-gate)). Bash reads/remedies are classified out and never gated. Fails open. |
 
 ## Keeping lanes and sessions self-clean
 
@@ -65,12 +65,56 @@ Because slice boundaries can't be auto-detected, `slice-stop` stays
 agent-driven — but it is now frictionless (the auto-registered session resolves
 automatically) and the `SessionStart` reminder nudges it.
 
+## Discipline enforcement — the PreToolUse gate
+
+Auto-claim closes the "un-laned work" gap, but it can't make an agent register a
+session, declare a plan, slice-stop, or commit. The `PreToolUse` gate does: before
+every **mutating** tool call it evaluates the session's rituals and, per the
+governance tier, **allows, nudges, or denies** the edit.
+
+- **What's gated.** The edit tools (`Edit`/`Write`/`MultiEdit`/`NotebookEdit`) always,
+  and `Bash` **only when the command is a recognized write** (`>`/`>>` redirects,
+  `sed -i`, `tee`, `mv`/`cp`/`rm`/`dd`/`truncate`, PowerShell `Set-Content`/`Out-File`/…).
+  Reads (`ls`, `cat`) and the **remedy commands** — `maddu register`/`lane claim`/
+  `goal set`/`plan …`/`slice-stop`, and `git status`/`diff`/`add`/`commit`/`log` — are
+  never gated, so the command that fixes a block is always allowed (no deadlock).
+  Write detection ignores tokens inside quoted arguments, so a commit trailer or a
+  slice-stop message that merely *mentions* `>` is not mistaken for a redirect.
+- **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
+  uncommitted pileup. The deny names the first stale ritual and its exact remedy.
+- **Tier-scaled** by the `discipline-enforcement` governance value: `strict` = block at
+  the first threshold; `standard` = *graduated* (block a missing session/lane now, warn
+  then block on stale slice-stop/commit); `relaxed` = nudge only. See
+  [Governance tiers](30-governance-tiers.md).
+- **Fails OPEN.** Any evaluator/git/parse error → allow; the hook never exits `2`, so it
+  can only *deny via a structured decision*, never crash the tool. Only an explicit
+  block denies.
+- **Gates before done.** In enforcing tiers, `maddu goal done` and `maddu plan complete`
+  run the gate suite first and (at strict) refuse to close while a required gate is red
+  (override with `--force`). `abandon`/`cancel` are honest terminal states and are never
+  gated.
+
+The companion `discipline-observed` doctor gate reports whether the rituals are current
+**and whether this hook is actually installed** for the configured tier — a repo can pin
+strict yet never wire the hook, in which case enforcement silently does nothing.
+
+### Recovery — the off-switch
+
+Enforcement is designed so you can always back out with a **Bash** command (never gated):
+
+```bash
+maddu hooks uninstall                                  # remove the hook (alias for `remove`)
+maddu governance set relaxed                            # drop enforcement to nudge-only
+maddu governance set-override discipline-enforcement off   # disable just this gate
+```
+
 ## Commands
 
 ```bash
-maddu hooks install     # wire SessionStart + SessionEnd + PreCompact into .claude/settings.json
+maddu hooks install     # wire SessionStart + SessionEnd + PreCompact + PreToolUse into .claude/settings.json
 maddu hooks status      # show which Máddu hooks are installed
 maddu hooks remove      # strip only Máddu's hook entries (leaves yours intact)
+maddu hooks uninstall   # alias for `remove` — the fast off-switch for the discipline gate
 ```
 
 `install` is **idempotent** and **surgical**: it identifies its own entries by a

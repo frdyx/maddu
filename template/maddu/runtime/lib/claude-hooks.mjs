@@ -49,10 +49,13 @@ export const MADDU_HOOKS = [
   // No matcher on the group → fires on BOTH manual (/compact) and auto
   // compaction; the payload's `trigger` field records which (v1.89.0).
   { event: 'PreCompact', fire: 'pre-compact' },
-  // Auto-claim a lane before the first mutating edit so agentic work is never
-  // un-laned. The matcher scopes it to the file-mutating tools; the fire
-  // handler is best-effort and fails open (never blocks the tool).
-  { event: 'PreToolUse', fire: 'pre-tool-use', matcher: 'Edit|Write|MultiEdit|NotebookEdit' },
+  // Enforce session rituals (auto-claim a lane, then allow/nudge/deny) before a
+  // MUTATING tool call. The matcher scopes it to the file-mutating tools plus
+  // Bash — the fire handler classifies each Bash command (classifyBashWrite) and
+  // exits immediately for reads/remedies, so only recognized Bash writes are
+  // gated. Best-effort and FAILS OPEN — it never exits 2, so it can't block the
+  // tool on an error; only an explicit deny (permissionDecision) stops an edit.
+  { event: 'PreToolUse', fire: 'pre-tool-use', matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash' },
 ];
 
 export function hookCommandFor(fire, bin = HOOK_BIN) {

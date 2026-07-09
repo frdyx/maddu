@@ -24,7 +24,7 @@ import sessionCmd from './session.mjs';
 
 function printHelp() {
   console.log([
-    'Usage: maddu hooks <install|status|remove> [--statusline] [--dry-run]',
+    'Usage: maddu hooks <install|status|remove|uninstall> [--statusline] [--dry-run]',
     '',
     '  install     Wire SessionStart (auto-register + stale-sweep) + SessionEnd',
     '              (close) + PreCompact (compaction checkpoint) + PreToolUse',
@@ -37,6 +37,7 @@ function printHelp() {
     '              never clobbers a statusLine you already set.',
     '  status      Show which Máddu hooks are installed.',
     '  remove      Remove only Máddu\'s hook entries (and its statusLine, if set).',
+    '  uninstall   Alias for `remove` — the fast off-switch for the discipline hook.',
     '',
     'Once installed, a session auto-registers, the SessionStart sweep clears stale',
     'sessions + orphaned lane claims, and PreToolUse auto-claims a lane before the',
@@ -86,41 +87,135 @@ export default async function hooks(argv) {
           await jan.reconcileStale(repoRoot, projections);
         }
       } catch { /* sweep is best-effort */ }
+      // Bind this Claude session → the Máddu session and capture the dirty
+      // baseline, so the discipline counter measures only THIS session's new
+      // uncommitted work (Codex: per-session, no cross-session clobber).
+      // Best-effort + fail-safe — never breaks session start or dirties stdout.
+      let disciplineLine = '';
+      try {
+        const disc = await loadLib('discipline.mjs');
+        if (disc && sid) {
+          let claudeId = null;
+          if (!process.stdin.isTTY) {
+            let raw = '';
+            try { for await (const chunk of process.stdin) raw += chunk; } catch {}
+            try { claudeId = raw.trim() ? (JSON.parse(raw).session_id || null) : null; } catch {}
+          }
+          if (claudeId) await disc.bindClaudeSession(repoRoot, claudeId, sid);
+          const dirty = await disc.dirtyFiles(repoRoot);
+          const counter = await disc.readCounter(repoRoot, sid);
+          counter.dirtyBaseline = dirty;
+          await disc.writeCounter(repoRoot, sid, counter);
+          const st = await disc.gatherRitualState(repoRoot, sid, Date.now(), counter);
+          const gaps = [];
+          if (!st.goalOrPlan?.active) gaps.push('no goal or open plan');
+          if (!st.lane?.claimed) gaps.push('no lane claimed');
+          if (gaps.length) disciplineLine = ` Máddu discipline: ${gaps.join('; ')} — declare/claim before editing (enforcement may block otherwise).`;
+        }
+      } catch { /* discipline context is best-effort */ }
       // SessionStart: emit additionalContext so the agent sees the session is
       // live and is reminded of the per-slice discipline the hook can't enforce.
-      const note = sid
+      const note = (sid
         ? `Máddu session ${sid} auto-registered (recorded in the spine). Claim a lane before editing (\`maddu lane claim <lane>\`) and run \`maddu slice-stop\` at each slice boundary — no --session needed, it resolves the active session.`
-        : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.';
+        : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.') + disciplineLine;
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note },
       }) + '\n');
       return;
     }
     if (event === 'session-end') {
-      await quietly(() => sessionCmd(['close', '--focus', 'session ended (auto)']));
+      let focus = 'session ended (auto)';
+      try {
+        const disc = await loadLib('discipline.mjs');
+        if (disc) { const n = (await disc.dirtyFiles(repoRoot)).length; if (n > 0) focus += ` — ${n} uncommitted file(s) at close`; }
+      } catch { /* best-effort */ }
+      await quietly(() => sessionCmd(['close', '--focus', focus]));
       return;
     }
     if (event === 'pre-tool-use') {
-      // Auto-claim a lane before the first mutating edit so agentic work is
-      // never un-laned. FAILS OPEN (exit 0 always) — a claim problem must never
-      // block the tool, and this writes nothing to stdout.
+      // Enforce Máddu's session rituals before a mutating edit. First auto-claim
+      // a lane (so agentic work is never un-laned), then evaluate discipline and
+      // either allow, nudge (additionalContext), or block (permissionDecision:
+      // deny). FAILS OPEN — any error exits 0 with no output, never blocking the
+      // tool; only an explicit verdict:'block' emits a deny.
       try {
-        if (!process.stdin.isTTY) {
-          let raw = '';
-          for await (const chunk of process.stdin) raw += chunk;
-          const payload = raw.trim() ? JSON.parse(raw) : {};
-          const filePath = payload?.tool_input?.file_path || payload?.tool_input?.notebook_path || null;
-          const { projections, sessionActive } = await loadSpineLib();
-          let sid = process.env.MADDU_SESSION_ID || null;
-          if (!sid && sessionActive?.readActiveSession) {
-            const a = await sessionActive.readActiveSession(repoRoot);
-            sid = a && a.sessionId;
-          }
+        if (process.stdin.isTTY) process.exit(0); // human at a terminal → no gate
+        let raw = '';
+        for await (const chunk of process.stdin) raw += chunk;
+        const payload = raw.trim() ? JSON.parse(raw) : {};
+        const tool = payload.tool_name || null;
+        const ti = payload.tool_input || {};
+        const filePath = ti.file_path || ti.notebook_path || null;
+        const command = ti.command || null;
+        const claudeSessionId = payload.session_id || null;
+
+        const disc = await loadLib('discipline.mjs');
+
+        // Gate only MUTATING tools. Edit-family always mutates; Bash is gated only
+        // when it's a recognized write (classifyBashWrite) — a read/remedy Bash
+        // (ls, git status, maddu slice-stop) exits immediately, so widening the
+        // matcher to Bash never auto-claims a lane on a harmless command.
+        let mutating = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool);
+        if (tool === 'Bash' && disc && disc.classifyBashWrite) {
+          mutating = disc.classifyBashWrite(command) === 'write';
+        }
+        if (!mutating) process.exit(0);
+
+        const { projections, sessionActive } = await loadSpineLib();
+
+        // Resolve the CALLER's Máddu session: explicit env → the SessionStart
+        // binding (Claude id → Máddu id) → the active-session cache. The binding
+        // is what keeps concurrent Claude sessions from cross-resetting counters.
+        let sid = process.env.MADDU_SESSION_ID || null;
+        if (!sid && disc && claudeSessionId) { try { sid = await disc.resolveMadduSession(repoRoot, claudeSessionId); } catch { /* fall through */ } }
+        if (!sid && sessionActive?.readActiveSession) {
+          const a = await sessionActive.readActiveSession(repoRoot);
+          sid = a && a.sessionId;
+        }
+
+        // Auto-claim a lane before the first edit (rule-#9 clean via the trigger
+        // gauntlet); note if we just claimed so the eval doesn't race the spine.
+        let laneJustClaimed = false;
+        try {
           const auto = await loadLib('auto-claim-trigger.mjs');
           if (auto && auto.maybeAutoClaim && sid) {
             const proj = await projections.project(repoRoot);
-            await auto.maybeAutoClaim(repoRoot, { sid, filePath, proj });
+            const res = await auto.maybeAutoClaim(repoRoot, { sid, filePath, proj });
+            laneJustClaimed = !!(res && res.claimed);
           }
+        } catch { /* auto-claim best-effort */ }
+
+        // Evaluate discipline (re-projects fresh inside; maintains + persists the
+        // per-session counter). Any internal error → verdict 'ok' (fail-open).
+        let decision = { verdict: 'ok' };
+        if (disc && disc.enforcePreTool) {
+          decision = await disc.enforcePreTool(repoRoot, {
+            madduSessionId: sid, claudeSessionId, tool, filePath, command,
+            nowMs: Date.now(), laneJustClaimed,
+          });
+        }
+
+        if (decision.verdict === 'block') {
+          process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: disc.denyReason(decision),
+            },
+          }) + '\n');
+          process.exit(0);
+        }
+        // 'warn' (graduated: the pre-block reminder) and 'nudge' (relaxed) both
+        // surface as non-blocking context — without this the graduated "warn then
+        // block" ramp would be invisible until the block landed (Codex).
+        if (decision.verdict === 'nudge' || decision.verdict === 'warn') {
+          process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              additionalContext: `Máddu discipline — ${decision.reason}. Consider: ${decision.remedy}`,
+            },
+          }) + '\n');
+          process.exit(0);
         }
       } catch { /* fail open */ }
       process.exit(0);
@@ -144,6 +239,18 @@ export default async function hooks(argv) {
         const proj = await projections.project(repoRoot);
         const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
         const last = stops.length ? stops[stops.length - 1] : null;
+        // Discipline snapshot (non-load-bearing open fields): don't compact over
+        // undisciplined state silently. Best-effort; fail-safe to nulls.
+        let uncommittedFiles = null, editsSinceSlice = null;
+        try {
+          const disc = await loadLib('discipline.mjs');
+          if (disc) {
+            uncommittedFiles = (await disc.dirtyFiles(repoRoot)).length;
+            const sid2 = process.env.MADDU_SESSION_ID || (payload.session_id ? await disc.resolveMadduSession(repoRoot, payload.session_id) : null);
+            if (sid2) editsSinceSlice = (await disc.readCounter(repoRoot, sid2)).editsSinceSlice || 0;
+            if (uncommittedFiles > 0) process.stderr.write(`[maddu] compacting with ${uncommittedFiles} uncommitted file(s) — consider committing/slice-stopping first.\n`);
+          }
+        } catch { /* discipline snapshot best-effort */ }
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.COMPACTION_CHECKPOINT,
           actor: process.env.MADDU_SESSION_ID || null,
@@ -154,6 +261,8 @@ export default async function hooks(argv) {
             handoffSetAt: proj.handoff?.setAt || null,
             openApprovals: Array.isArray(proj.approvals) ? proj.approvals.filter((a) => a.status === 'requested' || a.status === 'pending').length : 0,
             activeClaims: Array.isArray(proj.claims) ? proj.claims.length : 0,
+            uncommittedFiles,     // discipline: open field, non-load-bearing
+            editsSinceSlice,      // discipline: open field, non-load-bearing
           },
         });
       } catch {}
@@ -182,9 +291,11 @@ export default async function hooks(argv) {
   }
 
   // ── install / remove ──
-  if (sub === 'install' || sub === 'remove') {
+  if (sub === 'install' || sub === 'remove' || sub === 'uninstall') {
     const { flags } = parseFlags(rest);
-    const removing = sub === 'remove';
+    // `uninstall` is an alias for `remove` — it's the off-switch operators reach
+    // for when the discipline hook needs to come out fast, so both names work.
+    const removing = sub === 'remove' || sub === 'uninstall';
     const { settings, existed, raw } = await lib.loadSettings(repoRoot);
     if (settings === null) {
       console.error(`\x1b[31mrefusing to touch ${lib.settingsPath(repoRoot)} — it exists but is not valid JSON. Fix or remove it first.\x1b[0m`);
