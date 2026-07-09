@@ -87,12 +87,23 @@ try {
   ok('headInjectFor emits a meta for a hex token', headInjectFor(TOKEN).includes('maddu-bridge-token'));
   ok('headInjectFor rejects a non-hex token (no injection)', headInjectFor('"><script>') === '');
 
-  // ── (B) wiring (structural) ───────────────────────────────────────────────
+  // ── (B) wiring (structural) — defeat the two named evasions ───────────────
   const src = await readFile(serverPath, 'utf8');
-  const guardCall = src.indexOf('if (await enforceBridgeAuth(');   // the CALL, not the declaration
+  // (B1) the LIVE listener must delegate to the guarded pipeline. Rewiring
+  // createServer straight to handleBridge (bypassing the guard) reds this.
+  ok('createServer delegates to handleRequest (not straight to handleBridge)',
+    /createServer\(\(req, res\) =>\s*\n?\s*handleRequest\(req, res, ctx,/.test(src) &&
+    !/createServer\([^)]*=>\s*\n?\s*handleBridge\(/.test(src));
+  // (B2) inside handleRequest, the guard is the FIRST statement in the /bridge/
+  // branch (only comments may precede it) — so wrapping it in a path condition
+  // that narrows auth to a subset of routes reds this.
+  ok('guard is the first statement in the /bridge/ branch (no narrowing wrapper)',
+    /startsWith\('\/bridge\/'\)\) \{\s*(?:\n\s*\/\/[^\n]*)*\n\s*if \(await enforceBridgeAuth\(req, res, url, ctx, bridgeToken\)\) return;/.test(src));
+  // (B3) the guard runs BEFORE dispatch, guarded by return.
+  const guardCall = src.indexOf('if (await enforceBridgeAuth(req, res, url, ctx, bridgeToken)');
   const dispatch = src.indexOf('return await handleBridge(');
-  ok('pipeline calls enforceBridgeAuth (guarded by return) before handleBridge',
-    guardCall > 0 && dispatch > 0 && guardCall < dispatch && /if \(await enforceBridgeAuth\([^)]*\)\) return;/.test(src));
+  ok('guard call precedes handleBridge dispatch',
+    guardCall > 0 && dispatch > 0 && guardCall < dispatch);
 
   // ── (C) wiring (pipeline): tokenless writes to several routes → 401 ───────
   // Drives the REAL handleRequest. 401 fires in the guard BEFORE handleBridge,
@@ -118,31 +129,43 @@ try {
 
   // ── (D) drift: no unlisted mutating GET (server.js + sub-routers) ─────────
   // Verb-shape mutation detector (not a fixed helper list): catches append(),
-  // writeFile(), runJanitor(), and novel helpers like rebuildWiki()/saveX()/
-  // removeX()/spawnX(). The (?<!res\.) lookbehind excludes response-object
-  // transport methods (res.writeHead / res.write), which are not state writes.
-  const MUT = /(?<!res\.)\b(append|write\w*|rebuild\w+|save\w+|remove\w+|delete\w*|persist\w+|spawn\w+|activate\w+|unlink|rename|mkdir|setGlobal\w+|runJanitor)\s*\(|ctx\.active\s*=/;
+  // writeFile(), runJanitor(), and generic mutation verbs incl. rebuild/save/
+  // remove/mutate/update/persist/store/spawn/activate. The (?<!res\.) lookbehind
+  // excludes response-object transport methods (res.writeHead / res.write).
+  //
+  // HONEST LIMIT: an attacker who aliases a mutating helper to a non-verb name
+  // (e.g. `doThing()`) evades a lexical scan — no static denylist can be
+  // complete. This scan is a REGRESSION TRIPWIRE for the natural shapes, not an
+  // adversarial-committer proof; the real boundary is the method-primary guard
+  // (every write VERB needs the token regardless of route — only mutating GETs
+  // depend on this list, and a mutating GET is a rare, review-visible pattern).
+  // To shrink the blind spot we FAIL-SAFE: a GET handler that mutates but whose
+  // route path we cannot resolve is reported (not silently skipped).
+  const MUT = /(?<!res\.)\b(append\w*|write\w*|rebuild\w+|save\w+|remove\w+|delete\w*|destroy\w*|persist\w+|store\w+|mutate\w*|update\w*|insert\w+|upsert\w+|spawn\w+|activate\w+|unlink|rename|mkdir|setGlobal\w+|runJanitor)\s*\(|ctx\.active\s*=/;
   const GET_ROUTE = /req\.method === 'GET'/;
   const NEXT_METHOD = /req\.method === '(GET|POST|PUT|PATCH|DELETE)'|^\s*(export )?(async )?function \w/;
+  // A route-path anchor: an exact literal, a startsWith/endsWith prefix, or a
+  // dynamic block opener (`path.startsWith('/bridge/x/')`). Tracked as we scan so
+  // a GET nested several lines inside such a block still resolves a path.
   const pathLit = /path (?:===|\.startsWith\(|\.endsWith\() ?['"`](\/bridge\/[^'"`]*)['"`]/;
 
   function scanFile(src) {
     const lines = src.split('\n');
     const offenders = [];
+    let lastPath = null; // most recent /bridge/... anchor seen while scanning
     for (let i = 0; i < lines.length; i++) {
+      const pm = lines[i].match(pathLit);
+      if (pm) lastPath = pm[1];
       if (!GET_ROUTE.test(lines[i])) continue;
-      // path may precede OR follow the method — same line, then lookback, then lookahead
-      let p = (lines[i].match(pathLit) || [])[1] || null;
-      for (let b = i - 1; !p && b >= Math.max(0, i - 3); b--) { const m = lines[b].match(pathLit); if (m) p = m[1]; }
-      for (let f = i + 1; !p && f <= Math.min(lines.length - 1, i + 3); f++) { if (NEXT_METHOD.test(lines[f])) break; const m = lines[f].match(pathLit); if (m) p = m[1]; }
-      if (!p) continue;
-      // scan from the route line to the next method-test (nested `if (path…)`
-      // does NOT bound — so a one-line `if (path.endsWith()) await mutate()`
-      // inside this handler is still seen).
+      // Resolve THIS GET's path: same line, else the enclosing/most-recent
+      // anchor (handles `path.startsWith('/bridge/auth/'){ … if (GET) … }`).
+      const p = (lines[i].match(pathLit) || [])[1] || lastPath;
       for (let j = i; j < lines.length; j++) {
         if (j !== i && NEXT_METHOD.test(lines[j])) break;
         if (MUT.test(lines[j])) {
-          if (!MUTATING_GET_PATHS.has(p)) offenders.push(`:${i + 1} GET ${p} mutates (line ${j + 1}: ${lines[j].trim().slice(0, 56)}) — not in MUTATING_GET_PATHS`);
+          // exact match OR the enclosing prefix is listed → ok; else offender.
+          const listed = p && (MUTATING_GET_PATHS.has(p) || [...MUTATING_GET_PATHS].some((mp) => p.startsWith(mp)));
+          if (!listed) offenders.push(`:${i + 1} GET ${p || '(path UNRESOLVED — classify it)'} mutates (line ${j + 1}: ${lines[j].trim().slice(0, 52)})`);
           break;
         }
       }
@@ -157,18 +180,25 @@ try {
     allOffenders.length ? '\n    ' + allOffenders.join('\n    ') : `${files.length} files scanned`);
 
   // non-vacuous: the detector must actually locate the two known mutating GETs.
-  const serverLines = src.split('\n');
-  const knownFound = ['/bridge/operations', '/bridge/projection'].every((kp) => {
-    const idx = serverLines.findIndex((l) => l.includes(`path === '${kp}'`) && GET_ROUTE.test(l));
-    if (idx < 0) return false;
-    for (let j = idx; j < serverLines.length; j++) { if (j !== idx && NEXT_METHOD.test(serverLines[j])) return false; if (MUT.test(serverLines[j])) return true; }
-    return false;
-  });
-  ok('detector locates the two known mutating GETs (non-vacuous)', knownFound);
-  // self-test the detector against the exact Codex counterexample shapes.
-  ok('detector flags a nested-if one-line mutating GET (Codex example)',
-    MUT.test(`      if (path.endsWith('x')) await rebuildWiki(repoRoot);`) &&
-    !MUT.test(`    res.writeHead(200, {});`));
+  const knownFound = scanFile(
+    "if (path === '/bridge/x' && req.method === 'GET') {\n  await append(r, {});\n}\n"
+  ).length === 1; // an UNLISTED mutating GET must be reported
+  ok('detector reports an unlisted mutating GET (non-vacuous)', knownFound);
+  // self-test against the exact Codex counterexamples: (a) mutation nested deep
+  // inside a path.startsWith block resolves the enclosing path and is flagged;
+  // (b) an aliased-but-verb-shaped mutator is caught; (c) res.writeHead is not.
+  const nestedShape = [
+    "  if (path.startsWith('/bridge/auth/')) {",
+    "    const rest = path.slice(1);",
+    "    if (!sub && req.method === 'GET') {",
+    "      await rebuildWiki(repoRoot);",
+    "    }",
+    "  }",
+  ].join('\n');
+  ok('detector flags a mutating GET nested inside path.startsWith (Codex example)',
+    scanFile(nestedShape).length === 1);
+  ok('detector excludes res.writeHead / includes generic mutate verbs',
+    !MUT.test('    res.writeHead(200, {});') && MUT.test('   await mutateState(x);') && MUT.test('  await updateThing(y);'));
 } catch (err) {
   console.error('harness error:', err.stack || err.message);
   process.exit(2);
