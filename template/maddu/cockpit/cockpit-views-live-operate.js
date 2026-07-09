@@ -129,9 +129,8 @@ export function renderMailbox(ctx) {
       const list = el('div', {});
       for (const lane of Object.keys(c.counts).sort()) {
         const m = c.counts[lane];
-        const dot = m.unread > 0 ? '<span class="signal live"></span>' : '<span class="signal"></span>';
         const row = el('div', { class: 'ledger-row', 'data-focus': lane, style: 'cursor:pointer;' + (selectedLane === lane ? 'background:var(--m-bg-3);' : '') }, [
-          el('span', { html: dot }),
+          el('span', { class: m.unread > 0 ? 'signal live' : 'signal' }),
           el('span', { class: 'event-type' }, lane),
           el('span', { class: m.unread > 0 ? 'event-type t-approval' : 'event-actor' }, m.unread > 0 ? `${m.unread} unread` : 'all read'),
           el('span', { class: 'event-actor' }, `${m.total} total`)

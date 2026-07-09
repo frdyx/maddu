@@ -443,12 +443,14 @@ export function renderSettings(ctx) {
               el('span', { class: keys.length > 0 ? 'signal live' : 'signal' }),
               p.name
             ]));
-            kv.appendChild(el('dd', { html:
-              keys.length === 0 ? '<span style="color:var(--m-fg-3)">no keys</span>'
-                : `${keys.length} key${keys.length === 1 ? '' : 's'}` +
-                  (active ? ` · active …${(active.last4 || '????')}` : '') +
-                  (p.rateLimited ? ' · <span style="color:var(--m-warn)">rate-limited</span>' : '')
-            }));
+            // active.last4 comes from /bridge/auth — render as a text node, not html.
+            kv.appendChild(el('dd', {}, keys.length === 0
+              ? [el('span', { style: 'color:var(--m-fg-3)' }, 'no keys')]
+              : [
+                  `${keys.length} key${keys.length === 1 ? '' : 's'}`,
+                  active ? ` · active …${active.last4 || '????'}` : null,
+                  p.rateLimited ? el('span', { style: 'color:var(--m-warn)' }, ' · rate-limited') : null,
+                ]));
           }
           authMount.appendChild(kv);
         }
