@@ -99,11 +99,19 @@ try {
   // that narrows auth to a subset of routes reds this.
   ok('guard is the first statement in the /bridge/ branch (no narrowing wrapper)',
     /startsWith\('\/bridge\/'\)\) \{\s*(?:\n\s*\/\/[^\n]*)*\n\s*if \(await enforceBridgeAuth\(req, res, url, ctx, bridgeToken\)\) return;/.test(src));
-  // (B3) the guard runs BEFORE dispatch, guarded by return.
-  const guardCall = src.indexOf('if (await enforceBridgeAuth(req, res, url, ctx, bridgeToken)');
-  const dispatch = src.indexOf('return await handleBridge(');
-  ok('guard call precedes handleBridge dispatch',
-    guardCall > 0 && dispatch > 0 && guardCall < dispatch);
+  // (B3) NO handleBridge dispatch is reachable before the guard. Extract the
+  // handleRequest body and require exactly ONE handleBridge(...) call, occurring
+  // AFTER the enforceBridgeAuth guard. A pre-guard `return handleBridge(...)`
+  // (with or without await) adds a second occurrence / precedes the guard → red.
+  const hrStart = src.indexOf('export async function handleRequest(');
+  const hrEnd = src.indexOf('\nasync function handleBridge(', hrStart);
+  const hrBody = hrStart >= 0 && hrEnd > hrStart ? src.slice(hrStart, hrEnd) : '';
+  const dispatchCount = (hrBody.match(/handleBridge\(/g) || []).length;
+  const guardIdx = hrBody.indexOf('enforceBridgeAuth(req, res, url, ctx, bridgeToken)');
+  const dispatchIdx = hrBody.indexOf('handleBridge(');
+  ok('exactly one handleBridge dispatch in handleRequest, after the guard (no pre-guard bypass)',
+    hrBody.length > 0 && dispatchCount === 1 && guardIdx > 0 && dispatchIdx > guardIdx,
+    `dispatches=${dispatchCount}`);
 
   // ── (C) wiring (pipeline): tokenless writes to several routes → 401 ───────
   // Drives the REAL handleRequest. 401 fires in the guard BEFORE handleBridge,
@@ -152,23 +160,39 @@ try {
   function scanFile(src) {
     const lines = src.split('\n');
     const offenders = [];
-    let lastPath = null; // most recent /bridge/... anchor seen while scanning
+    // Enclosing-block stack: a `path.startsWith/=== '/bridge/x'` that OPENS a
+    // block (net `{`) pushes {path, depth}; entries pop as braces close below
+    // their depth. So a GET resolves to its ACTUAL enclosing route block, never
+    // a stale most-recent anchor from a sibling block that already closed.
+    const stack = [];
+    let depth = 0;
     for (let i = 0; i < lines.length; i++) {
-      const pm = lines[i].match(pathLit);
-      if (pm) lastPath = pm[1];
-      if (!GET_ROUTE.test(lines[i])) continue;
-      // Resolve THIS GET's path: same line, else the enclosing/most-recent
-      // anchor (handles `path.startsWith('/bridge/auth/'){ … if (GET) … }`).
-      const p = (lines[i].match(pathLit) || [])[1] || lastPath;
-      for (let j = i; j < lines.length; j++) {
-        if (j !== i && NEXT_METHOD.test(lines[j])) break;
-        if (MUT.test(lines[j])) {
-          // exact match OR the enclosing prefix is listed → ok; else offender.
-          const listed = p && (MUTATING_GET_PATHS.has(p) || [...MUTATING_GET_PATHS].some((mp) => p.startsWith(mp)));
-          if (!listed) offenders.push(`:${i + 1} GET ${p || '(path UNRESOLVED — classify it)'} mutates (line ${j + 1}: ${lines[j].trim().slice(0, 52)})`);
-          break;
+      const line = lines[i];
+      const opens = (line.match(/\{/g) || []).length;
+      const closes = (line.match(/\}/g) || []).length;
+      const pm = line.match(pathLit);
+
+      if (GET_ROUTE.test(line)) {
+        // same-line exact path, else the current enclosing block's path, else
+        // UNRESOLVED (kept unresolved → reported if it mutates: fail-safe).
+        const p = (line.match(pathLit) || [])[1] || (stack.length ? stack[stack.length - 1].path : null);
+        for (let j = i; j < lines.length; j++) {
+          if (j !== i && NEXT_METHOD.test(lines[j])) break;
+          if (MUT.test(lines[j])) {
+            // EXACT membership only — a listed route authorizes itself, never an
+            // arbitrary suffix (`/bridge/projection` ≠ `/bridge/projection-extra`).
+            const listed = p != null && MUTATING_GET_PATHS.has(p);
+            if (!listed) offenders.push(`:${i + 1} GET ${p || '(path UNRESOLVED — classify it)'} mutates (line ${j + 1}: ${lines[j].trim().slice(0, 52)})`);
+            break;
+          }
         }
       }
+
+      // Maintain the enclosing-block stack. A path-anchored line that nets an
+      // open brace begins a block scoped to that path.
+      if (pm && opens > closes) stack.push({ path: pm[1], depth });
+      depth += opens - closes;
+      while (stack.length && depth <= stack[stack.length - 1].depth) stack.pop();
     }
     return offenders;
   }
@@ -179,11 +203,25 @@ try {
   ok('no unlisted mutating GET across server.js + sub-routers', allOffenders.length === 0,
     allOffenders.length ? '\n    ' + allOffenders.join('\n    ') : `${files.length} files scanned`);
 
-  // non-vacuous: the detector must actually locate the two known mutating GETs.
-  const knownFound = scanFile(
-    "if (path === '/bridge/x' && req.method === 'GET') {\n  await append(r, {});\n}\n"
-  ).length === 1; // an UNLISTED mutating GET must be reported
-  ok('detector reports an unlisted mutating GET (non-vacuous)', knownFound);
+  // non-vacuous: an UNLISTED mutating GET must be reported.
+  ok('detector reports an unlisted mutating GET (non-vacuous)',
+    scanFile("if (path === '/bridge/x' && req.method === 'GET') {\n  await append(r, {});\n}\n").length === 1);
+  // round-4: a mutating GET AFTER a now-CLOSED /bridge/projection block, with no
+  // enclosing path, must resolve UNRESOLVED (fail-safe report), NOT inherit the
+  // stale listed anchor.
+  const staleShape = [
+    "if (path === '/bridge/projection' && req.method === 'GET') {",
+    "  await runJanitor(r);",
+    "}",
+    "if (cond && req.method === 'GET') {",
+    "  await rebuildWiki(r);",
+    "}",
+  ].join('\n');
+  ok('detector does not inherit a stale (closed-block) listed anchor',
+    scanFile(staleShape).length === 1 && /UNRESOLVED/.test(scanFile(staleShape)[0]));
+  // round-4: exact membership only — a listed route must not authorize a suffix.
+  ok('detector reports /bridge/projection-extra (exact match, no suffix authorization)',
+    scanFile("if (path === '/bridge/projection-extra' && req.method === 'GET') {\n  await runJanitor(r);\n}\n").length === 1);
   // self-test against the exact Codex counterexamples: (a) mutation nested deep
   // inside a path.startsWith block resolves the enclosing path and is flagged;
   // (b) an aliased-but-verb-shaped mutator is caught; (c) res.writeHead is not.
