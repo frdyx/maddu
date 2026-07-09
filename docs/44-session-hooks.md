@@ -65,7 +65,7 @@ Because slice boundaries can't be auto-detected, `slice-stop` stays
 agent-driven — but it is now frictionless (the auto-registered session resolves
 automatically) and the `SessionStart` reminder nudges it.
 
-## Discipline enforcement — the PreToolUse gate
+## Discipline enforcement: the PreToolUse gate
 
 Auto-claim closes the "un-laned work" gap, but it can't make an agent register a
 session, declare a plan, slice-stop, or commit. The `PreToolUse` gate does: before

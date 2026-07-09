@@ -122,7 +122,10 @@ Print a state snapshot — repo root, spine event count, active sessions, lane c
 
 ```bash
 $ maddu status
+$ maddu status --line     # one-line on-goal/drift + goal progress (v1.97.0) — wire into a status line via `maddu hooks --statusline`
 ```
+
+`--line` emits a single glanceable segment (e.g. `maddu · on goal +1.00 · goal 4/4`) for the [Operator Plane](53-operator-plane.md) — reading the CLI-cached success-eval, never re-running it.
 
 ## `maddu register` *(v0.17)*
 
@@ -393,6 +396,7 @@ Verify integrity of the append-only event spine, look up a single event by id, o
 ```bash
 $ maddu spine verify [--json]
 $ maddu spine show <eventId>
+$ maddu spine oversight [--json]    # non-technical readout: skills fed/withheld + why, on-goal, record-intact (v1.97.0 — see 52-oversight.md)
 $ maddu spine sync init [--json]    # opt into git-native team sync (one-time per checkout)
 $ maddu spine sync [--json]         # audited round-trip: commit own segments → pull → validate → push
 $ maddu spine import [--json]       # validate git-synced partitions (read-only)
@@ -869,6 +873,12 @@ Opt-in reversible briefing: persists the full handoff original and prints a
 budget-bounded view plus a `maddu learn retrieve <id>` pointer (emits
 `BRIEFING_CURATED`). Default `maddu orient` stays read-only.
 
+### `maddu orient --digest` *(v1.97.0)*
+
+The "while you were away" summary — what changed since you last looked (slices
+landed, gates failing, goal state) — for the [Operator Plane](53-operator-plane.md).
+Read-only; also rendered by the cockpit `digest` route.
+
 ## v1.72.0 commands
 
 ### `maddu agents <verb>` *(v1.72.0)*
@@ -903,14 +913,20 @@ and `slice-stop` with no `--session`/`$MADDU_SESSION_ID`.
 ```bash
 $ maddu hooks install        # merge SessionStart(auto-register) + SessionEnd(close)
                              #   + PreCompact(compaction checkpoint, v1.89.0)
+                             #   + PreToolUse(discipline enforcement, v1.97.0)
+$ maddu hooks install --statusline   # also wire `maddu status --line` into the status line (opt-in)
 $ maddu hooks status         # which Máddu hooks are installed
 $ maddu hooks remove         # strip only Máddu's hook entries (keeps yours)
+$ maddu hooks uninstall      # alias for `remove` — the fast off-switch for the discipline gate
 ```
 
 The `PreCompact` hook writes a `COMPACTION_CHECKPOINT` to the spine before
 every context compaction (manual or auto) — `maddu orient` auto-announces the
 latest one, and `maddu doctor` warns when the installed stanza is partial or
-stale. It **fails open** (never blocks compaction).
+stale. It **fails open** (never blocks compaction). The `PreToolUse` hook
+enforces session discipline (allow / nudge / **deny** a mutating edit when a
+ritual is stale), tier-scaled, fail-open, remedies never gated — full detail in
+[44-session-hooks.md](44-session-hooks.md#discipline-enforcement-the-pretooluse-gate).
 
 `install` is idempotent and surgical — it writes the **host** file
 `.claude/settings.json` (outside `.maddu/`), preserves your own hooks/settings,

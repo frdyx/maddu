@@ -34,6 +34,11 @@ instead of fishing fields out of `/bridge/status`.
 | GET | `/bridge/pipelines` | — | `{pipelines[]}` |
 | GET | `/bridge/skill-injections` | — | `{skillInjections[]}` (last 200) |
 | GET | `/bridge/test-status` | — | `{stress, upgradeMatrix}` — reads `.maddu/state/{stress,upgrade-matrix}-last-run.json` |
+| GET | `/bridge/oversight` | — | `{skills:{fed[],withheld[]}, onGoal, recordIntact}` — the [oversight](52-oversight.md) readout (`buildOversight`) |
+| GET | `/bridge/digest` | — | `{digest}` — "while you were away" ([Operator Plane](53-operator-plane.md)) |
+| GET | `/bridge/project` | — | `{project}` — single-project cockpit projection |
+| GET | `/bridge/decisions` | — | `{decisions[]}` — the decision ledger; each row's `sha` ties to the tamper chain |
+| GET | `/bridge/_all/portfolio` | — | `{workspaces[], needsHuman[]}` — cross-workspace portfolio wall (fan-out over every registered workspace) |
 
 ## Sessions
 
