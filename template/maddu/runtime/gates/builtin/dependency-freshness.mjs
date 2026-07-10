@@ -42,8 +42,12 @@ async function loadTrust() {
 
 export default {
   id: 'dependency-freshness',
+  // audit P4 — promoted warn→safety so its designed strict-mode BLOCK actually
+  // reds CI. The gate is already governance-mode-aware: standard mode returns an
+  // explicit status:'warn' (advisory, unchanged), only strict mode returns a
+  // bare ok:false which — now that severity is fail-capable — becomes a real FAIL.
+  severity: 'safety',
   label: 'dependency freshness',
-  severity: 'warn',
   description: 'Direct deps not freshly published (TeamPCP-style attack window). Reads `.maddu/state/trust-cache.json`.',
   run: async (ctx) => {
     const trust = await loadTrust();

@@ -115,8 +115,13 @@ export default async function ciCmd(argv) {
 
   // ── pin ─────────────────────────────────────────────────────────────────--
   if (sub === 'pin') {
-    const green = runs.filter((r) => r.status !== 'fail').map((r) => r.gateId).sort();
-    const excluded = runs.filter((r) => r.status === 'fail').map((r) => r.gateId).sort();
+    // audit P4 — pin ONLY fail-capable gates (severity !== 'warn'). A warn-severity
+    // gate can never red `maddu ci`, so pinning it as "required" is a misnomer that
+    // re-introduces the green-because-wrong-scope hole. Pinning keys on severity,
+    // not this run's status: a fail-capable gate that merely warned this run stays
+    // eligible. (The required-resolution check below enforces the same invariant.)
+    const green = runs.filter((r) => r.status !== 'fail' && r.severity !== 'warn').map((r) => r.gateId).sort();
+    const excluded = runs.filter((r) => r.status === 'fail' || r.severity === 'warn').map((r) => r.gateId).sort();
     const target = await writeCiProfile(repoRoot, green);
     if (flags.json) {
       process.stdout.write(JSON.stringify({ pinned: green, excluded, target }, null, 2) + '\n');
@@ -143,8 +148,28 @@ export default async function ciCmd(argv) {
   const requiredSet = profile.requiredGates ? new Set(profile.requiredGates) : null;
   const failed = runs.filter((r) => r.status === 'fail');
   const failedRequired = requiredSet ? failed.filter((r) => requiredSet.has(r.gateId)) : [];
+
+  // audit P4 — fail-closed required-gate RESOLUTION. A pinned required id that no
+  // longer resolves to exactly one runnable gate (deleted / renamed / a broken
+  // operator override that left nothing runnable), or resolves to a warn-severity
+  // gate that can never red, is itself a RED — otherwise a required guarantee can
+  // silently vanish and CI stays green. Checked against the POST-OVERRIDE resolved
+  // runs (runGates already dedupes by id, operator wins), never raw definitions.
+  const runsById = new Map();
+  for (const r of runs) runsById.set(r.gateId, (runsById.get(r.gateId) || 0) + 1);
+  const requiredIntegrity = [];
+  if (profile.requiredGates) {
+    for (const id of profile.requiredGates) {
+      const count = runsById.get(id) || 0;
+      const run = runs.find((r) => r.gateId === id);
+      if (count === 0) requiredIntegrity.push(`${id} (required but no runnable gate resolves)`);
+      else if (count > 1) requiredIntegrity.push(`${id} (required id resolves to ${count} gates)`);
+      else if (run && run.severity === 'warn') requiredIntegrity.push(`${id} (required but warn-severity — can never fail)`);
+    }
+  }
+
   const red = strict ? failed : failedRequired;
-  const exitCode = red.length ? 1 : 0;
+  const exitCode = (red.length || requiredIntegrity.length) ? 1 : 0;
 
   // ── learn-scan advisory (never affects the exit code in v1) ────────────────
   let scan = null;
@@ -164,9 +189,12 @@ export default async function ciCmd(argv) {
     ? `pinned (${requiredSet.size} required via ${profile.source})`
     : 'unpinned (exit 0 unless --strict)';
   const counts = `${result.summary.ok} ok · ${result.summary.warn} warn · ${result.summary.fail} fail of ${result.summary.total}`;
+  const redReason = red.length
+    ? `${red.length} ${strict ? '' : 'required '}gate(s) failing`
+    : `${requiredIntegrity.length} required gate(s) unresolved/warn-only`;
   const verdictLine = exitCode === 0
     ? `**green** — ${counts} · mode: ${mode}`
-    : `**red** — ${red.length} ${strict ? '' : 'required '}gate(s) failing · ${counts}`;
+    : `**red** — ${redReason} · ${counts}`;
 
   if (flags.json) {
     process.stdout.write(JSON.stringify({
@@ -174,6 +202,7 @@ export default async function ciCmd(argv) {
       requiredGates: profile.requiredGates, profileSource: profile.source,
       summary: result.summary,
       failed: failed.map((r) => ({ gateId: r.gateId, severity: r.severity, required: requiredSet ? requiredSet.has(r.gateId) : null, message: r.message })),
+      requiredIntegrity,
       scan: scan ? { scanned: scan.scanned, hedgedWithoutProof: scan.cumulativeCount, live: scan.crossed } : null,
     }, null, 2) + '\n');
     process.exit(exitCode);
@@ -184,6 +213,9 @@ export default async function ciCmd(argv) {
   for (const r of failed) {
     const tag = requiredSet && requiredSet.has(r.gateId) ? ` ${C.red}[required]${C.reset}` : '';
     console.log(`  ${statusMark(r.status)}  ${r.gateId}${tag}${r.message ? `  ${C.dim}${r.message}${C.reset}` : ''}`);
+  }
+  for (const problem of requiredIntegrity) {
+    console.log(`  ${C.red}✗${C.reset}  ${C.red}[required-integrity]${C.reset} ${C.dim}${problem}${C.reset}`);
   }
   const warns = runs.filter((r) => r.status === 'warn');
   for (const r of warns) console.log(`  ${statusMark(r.status)}  ${r.gateId}${r.message ? `  ${C.dim}${r.message}${C.reset}` : ''}`);
