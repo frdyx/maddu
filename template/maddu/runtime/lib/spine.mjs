@@ -447,7 +447,7 @@ export async function ensureSpine(repoRoot) {
   return paths;
 }
 
-// ── Tamper-evidence: forward `prev_hash` chain (v1.14.0) ──
+// ── Tamper-detection: forward `prev_hash` chain (v1.14.0) ──
 //
 // Each event carries `prev_hash` = the SHA-256 of the EXACT stored line of the
 // immediately-preceding event (the literal NDJSON line, trailing CR stripped so
@@ -515,7 +515,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   if (w.id) return appendPartitioned(repoRoot, w.id, ev);
   if (w.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
 
-  // Tamper-evidence (v1.14.0): link to the prior event by hashing its stored
+  // Tamper-detection (v1.14.0): link to the prior event by hashing its stored
   // line. Since audit P1 the flat write goes through the SHARED locked+chained
   // primitive `appendFlatChained` (spine-append-core.mjs) — prev_hash is computed
   // INSIDE the append funnel, so a concurrent flat writer (bridge + a CLI invocation)
