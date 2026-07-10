@@ -559,6 +559,15 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     if (w.id) return appendPartitioned(repoRoot, w.id, ev);
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
 
+    // Test seam (no-op in production): fired exactly ONCE, after the outer resolve
+    // returned flat and BEFORE appendFlatChained's non-waiting re-resolve — the
+    // window in which a `sync init` marker must be written to deterministically
+    // exercise the pending→retry path. Guarded like the cockpit's
+    // `__MADDU_COCKPIT_TEST__`; unset in every real run.
+    if (attempt === 0 && typeof globalThis.__MADDU_SPINE_SEAM_HOOK__ === 'function') {
+      await globalThis.__MADDU_SPINE_SEAM_HOOK__();
+    }
+
     // Tamper-detection (v1.14.0): link to the prior event by hashing its stored
     // line. Since audit P1 the flat write goes through the SHARED locked+chained
     // primitive `appendFlatChained` — prev_hash is computed INSIDE the funnel, so a
@@ -570,6 +579,9 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
       if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev);
       if (outcome.pending) {                             // migration began in the resolve→lock window → retry
+        // Test seam (no-op in production): acknowledge that the inner re-resolve
+        // observed {pending}, so a deterministic test can act AFTER the retry.
+        if (typeof globalThis.__MADDU_SPINE_PENDING_HOOK__ === 'function') globalThis.__MADDU_SPINE_PENDING_HOOK__();
         if (attempt >= 10000) throw new Error(STALL_MSG); // livelock backstop (never hit in practice)
         continue;
       }

@@ -12,7 +12,6 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { append, readAll, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
 import { readReplicaId, resolveWriteReplica, pendingReplicaPath } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
-import { withAppendLock } from '../../template/maddu/runtime/lib/append-lock.mjs';
 import { verifySpine } from '../../template/maddu/runtime/lib/verify.mjs';
 import { syncInit, scanSpineForSecrets, importPartitions } from '../../template/maddu/runtime/lib/spine-sync.mjs';
 
@@ -196,40 +195,46 @@ async function main() {
   // 3d-seam. audit P4 — the DETERMINISTIC form of the CI failure. A `sync init`
   //   marker that appears in the WINDOW between spine.append()'s outer resolve
   //   (which saw default/flat) and appendFlatChained's non-waiting re-resolve
-  //   under the flat lock makes the primitive return {pending}; spine.append used
-  //   to THROW "pending/stalled" and LOSE the event (green on Windows, red on
-  //   Linux CI where the seam is hit). It must now RETRY and LAND. We force the
-  //   seam without racing the scheduler by HOLDING the flat append lock: the
-  //   append provably blocks on it AFTER its outer resolve, we write the marker,
-  //   release the lock (the re-resolve then sees pending → retry), and abort the
-  //   migration so the retry's outer resolve lands the event. The assertion holds
-  //   regardless of exact timing: a concurrent append during sync init NEVER
-  //   throws and is NEVER lost.
+  //   makes the primitive return {pending}; spine.append used to THROW
+  //   "pending/stalled" and LOSE the event (green on Windows, red on Linux CI
+  //   where the seam is hit). It must now RETRY and LAND. We force the seam with
+  //   NO scheduler race via the `__MADDU_SPINE_SEAM_HOOK__` test seam: it fires
+  //   exactly once, after the outer resolve returned flat and BEFORE the inner
+  //   re-resolve, so the marker written inside it is seen ONLY by the inner
+  //   re-resolve → {pending} → retry. On the PRE-FIX throw this test fails; the
+  //   hook makes it deterministic (no sleeps decide correctness).
   {
     const repo = await mkdtemp(join(tmpdir(), 'maddu-si-seam-'));
     await append(repo, { type: TYPE, data: { seed: 1 } });
-    const lockPath = join(repo, '.maddu', 'events', '.append.lock');
 
-    let release;
-    const held = new Promise((r) => { release = r; });
-    const holding = withAppendLock(lockPath, async () => { await held; }, { maxWaitMs: Infinity });
-    await sleep(80);                       // the harness now holds the flat lock
-
-    const appendResult = append(repo, { type: TYPE, data: { concurrent: 1 } })
-      .then((ev) => ({ ok: true, ev }), (err) => ({ ok: false, err }));
-    await sleep(150);                      // the append clears its outer resolve and blocks on the held lock
-
-    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
-    await writeFile(pendingReplicaPath(repo), JSON.stringify({ replicaId: 'rep_seam01' }) + '\n');
-    release();                             // append acquires the lock → re-resolve sees pending → retry
-    await holding;
-    await sleep(60);
-    await rm(pendingReplicaPath(repo), { force: true }); // migration aborts → retry's outer resolve lands flat
-
-    const r = await appendResult;
-    ok(r.ok, `seam: concurrent append during sync-init LANDS, not thrown${r.ok ? '' : ` (${r.err && r.err.message})`}`);
-    const all = await readAll(repo);
-    ok(all.length === 2, `seam: no event lost (${all.length}/2 in merged read)`);
+    let reachedSeam; const atSeam = new Promise((r) => { reachedSeam = r; });
+    let proceed; const canProceed = new Promise((r) => { proceed = r; });
+    let pendingSeen; const pendingObserved = new Promise((r) => { pendingSeen = r; });
+    globalThis.__MADDU_SPINE_SEAM_HOOK__ = async () => { reachedSeam(); await canProceed; };
+    globalThis.__MADDU_SPINE_PENDING_HOOK__ = () => pendingSeen();
+    try {
+      const appendResult = append(repo, { type: TYPE, data: { concurrent: 1 } })
+        .then((ev) => ({ ok: true, ev }), (err) => ({ ok: false, err }));
+      await atSeam;                        // append is PAST the outer resolve (saw flat), AT the seam
+      // The marker appears strictly between the outer resolve and the inner re-resolve.
+      await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+      await writeFile(pendingReplicaPath(repo), JSON.stringify({ replicaId: 'rep_seam01' }) + '\n');
+      proceed();                           // inner re-resolve now sees pending → {pending} → retry
+      // Wait until the retry PROVABLY observed {pending} (pendingObserved), OR the
+      // append already settled — the pre-fix code throws in the pending branch
+      // WITHOUT the ack, so racing avoids a hang there and still fails the assert.
+      await Promise.race([pendingObserved, appendResult]);
+      // Only now — after {pending} was observed — abort the migration so the retry
+      // lands flat. Determinism no longer depends on any timer.
+      await rm(pendingReplicaPath(repo), { force: true });
+      const r = await appendResult;
+      ok(r.ok, `seam: concurrent append during sync-init LANDS, not thrown${r.ok ? '' : ` (${r.err && r.err.message})`}`);
+      const all = await readAll(repo);
+      ok(all.length === 2, `seam: no event lost (${all.length}/2 in merged read)`);
+    } finally {
+      delete globalThis.__MADDU_SPINE_SEAM_HOOK__;
+      delete globalThis.__MADDU_SPINE_PENDING_HOOK__;
+    }
     await rm(repo, { recursive: true, force: true });
   }
 
