@@ -146,6 +146,12 @@ async function main() {
     !!bannedImportInSource(`<!-- <script>x</script> -->\n<script>req` + `uire("${OAI}")</script>`, 'x.html'));
   ok('a live script mentioning "<!--" as a string value keeps its real import',
     !!bannedImportInSource(`<script>const a="<!--"; imp` + `ort "${OAI}"; const b="-->"</script>`, 'x.html'));
+  ok('an inline on* event-handler import is caught (executable JS)',
+    !!bannedImportInSource(`<button onclick="imp` + `ort(${Q}${OAI}${Q})">x</button>`, 'x.html'));
+  ok('an event handler inside an HTML comment is not flagged',
+    !bannedImportInSource(`<!-- <button onclick="imp` + `ort(${Q}${OAI}${Q})"> -->`, 'x.html'));
+  ok('a non-handler data-* attribute with import text is not flagged',
+    !bannedImportInSource(`<a data-x="imp` + `ort ${OAI}">t</a>`, 'x.html'));
 
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',

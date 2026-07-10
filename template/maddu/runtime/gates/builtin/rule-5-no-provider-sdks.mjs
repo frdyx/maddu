@@ -54,19 +54,26 @@ const SCANNED_EXT = (p) => JS_EXT.test(p) || HTML_EXT.test(p);
 // Return the JS inside every <script>…</script> block (inline scripts only —
 // `<script src=…>` has no body). Everything outside a script block is markup or
 // text, never code.
-function extractScripts(html) {
-  // Single ordered pass: an HTML comment `<!--…-->` only exists OUTSIDE a
-  // <script> (inside a script body, `<!--` is ordinary script text — e.g. a
-  // string value). So a comment is skipped only in HTML context; once a
-  // <script> opens, its whole body is captured verbatim until </script> without
-  // treating an inner `<!--` as a comment. This avoids both extracting a
-  // commented-out block and corrupting a live script that mentions `<!--`.
+// Extract every executable-JS fragment from an HTML source: <script> block
+// bodies AND inline `on*="…"` event-handler attribute values (both are real
+// JavaScript). Single ordered pass so an HTML comment `<!--…-->` (which only
+// exists OUTSIDE a <script>; inside a script body `<!--` is ordinary script
+// text) is skipped in HTML context but never corrupts a live script body, and a
+// commented-out `<!-- <script>…</script> -->` is not extracted. Text nodes and
+// markup are not code. SCOPE: `javascript:` URLs and other exotic HTML-embedded
+// JS are a documented residual (no framework HTML uses them; the cockpit CSP
+// forbids inline execution) — like the regex-vs-division residual, this catches
+// the ordinary case, not every conceivable embedding.
+const EVENT_HANDLER_RE = /\bon\w+\s*=\s*("([^"]*)"|'([^']*)')/gi;
+
+function extractHtmlJs(html) {
   const s = String(html || '');
   const n = s.length;
   const out = [];
+  let markup = '';                   // HTML outside comments + scripts, for handler scan
   let i = 0;
   while (i < n) {
-    if (s[i] !== '<') { i++; continue; }
+    if (s[i] !== '<') { markup += s[i]; i++; continue; }
     if (s.startsWith('<!--', i)) { const e = s.indexOf('-->', i + 4); i = e < 0 ? n : e + 3; continue; }
     const open = /^<script\b[^>]*>/i.exec(s.slice(i, i + 400));
     if (open) {
@@ -79,8 +86,10 @@ function extractScripts(html) {
       i = bodyEnd + (closeTag ? closeTag[0].length : 0);
       continue;
     }
-    i++;
+    markup += s[i]; i++;
   }
+  let m;
+  while ((m = EVENT_HANDLER_RE.exec(markup))) out.push(m[2] ?? m[3] ?? '');
   return out;
 }
 
@@ -88,7 +97,7 @@ function extractScripts(html) {
 // directly; HTML is scanned per <script> block. Returns the first hit, or null.
 export function bannedImportInSource(text, path) {
   if (HTML_EXT.test(path || '')) {
-    for (const js of extractScripts(String(text || ''))) {
+    for (const js of extractHtmlJs(String(text || ''))) {
       const hit = bannedImportHit(js);
       if (hit) return hit;
     }
