@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { append, readAll, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
-import { readReplicaId, resolveWriteReplica } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
+import { readReplicaId, resolveWriteReplica, pendingReplicaPath } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
+import { withAppendLock } from '../../template/maddu/runtime/lib/append-lock.mjs';
 import { verifySpine } from '../../template/maddu/runtime/lib/verify.mjs';
 import { syncInit, scanSpineForSecrets, importPartitions } from '../../template/maddu/runtime/lib/spine-sync.mjs';
 
@@ -19,6 +20,7 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`); } };
 const TYPE = Object.keys(EVENT_TYPES)[0];
 async function exists(p) { try { await access(p); return true; } catch { return false; } }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function segs(dir) { try { return (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { return []; } }
 // audit P1 — these fixtures build PRE-cutover chains (generic events, no marker),
 // so a mismatch now surfaces as chain_fork (WARN), not chain_broken (FAIL). Guard
@@ -189,6 +191,46 @@ async function main() {
     if (legacyWindowForks > 0) {
       console.log(`  (i) ${legacyWindowForks}/6 iteration(s) surfaced a pre-marker-window fork (documented single-machine residual — tolerated, surfaced by verify)`);
     }
+  }
+
+  // 3d-seam. audit P4 — the DETERMINISTIC form of the CI failure. A `sync init`
+  //   marker that appears in the WINDOW between spine.append()'s outer resolve
+  //   (which saw default/flat) and appendFlatChained's non-waiting re-resolve
+  //   under the flat lock makes the primitive return {pending}; spine.append used
+  //   to THROW "pending/stalled" and LOSE the event (green on Windows, red on
+  //   Linux CI where the seam is hit). It must now RETRY and LAND. We force the
+  //   seam without racing the scheduler by HOLDING the flat append lock: the
+  //   append provably blocks on it AFTER its outer resolve, we write the marker,
+  //   release the lock (the re-resolve then sees pending → retry), and abort the
+  //   migration so the retry's outer resolve lands the event. The assertion holds
+  //   regardless of exact timing: a concurrent append during sync init NEVER
+  //   throws and is NEVER lost.
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-si-seam-'));
+    await append(repo, { type: TYPE, data: { seed: 1 } });
+    const lockPath = join(repo, '.maddu', 'events', '.append.lock');
+
+    let release;
+    const held = new Promise((r) => { release = r; });
+    const holding = withAppendLock(lockPath, async () => { await held; }, { maxWaitMs: Infinity });
+    await sleep(80);                       // the harness now holds the flat lock
+
+    const appendResult = append(repo, { type: TYPE, data: { concurrent: 1 } })
+      .then((ev) => ({ ok: true, ev }), (err) => ({ ok: false, err }));
+    await sleep(150);                      // the append clears its outer resolve and blocks on the held lock
+
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(pendingReplicaPath(repo), JSON.stringify({ replicaId: 'rep_seam01' }) + '\n');
+    release();                             // append acquires the lock → re-resolve sees pending → retry
+    await holding;
+    await sleep(60);
+    await rm(pendingReplicaPath(repo), { force: true }); // migration aborts → retry's outer resolve lands flat
+
+    const r = await appendResult;
+    ok(r.ok, `seam: concurrent append during sync-init LANDS, not thrown${r.ok ? '' : ` (${r.err && r.err.message})`}`);
+    const all = await readAll(repo);
+    ok(all.length === 2, `seam: no event lost (${all.length}/2 in merged read)`);
+    await rm(repo, { recursive: true, force: true });
   }
 
   // 3e. Codex's resume-fork race: a crashed init left a marker + seg1 in the

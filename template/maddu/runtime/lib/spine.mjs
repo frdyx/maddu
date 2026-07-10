@@ -553,6 +553,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // `sync init` is never lost (only a genuine >timeoutMs stall, surfaced by the
   // outer resolve, still refuses). The retry cap is a livelock backstop only.
   const STALL_MSG = 'spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry';
+  let enoentRetries = 0;
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);
     if (w.id) return appendPartitioned(repoRoot, w.id, ev);
@@ -575,9 +576,11 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       return outcome.ev;
     } catch (err) {
       // ENOENT backstop: a `sync init` renamed the flat segment between
-      // currentSegment and appendFile. Re-resolve (never in pure default mode);
-      // the retry routes to the now-committed partition or re-creates the flat dir.
-      if (err && err.code === 'ENOENT' && attempt < 10000) continue;
+      // currentSegment and appendFile. The legitimate rename race resolves on the
+      // very next attempt, so a small unbudgeted-by-outer-wait retry limit is
+      // enough — a PERSISTENT ENOENT (a genuinely broken FS, not a migration) then
+      // surfaces the real error instead of hot-spinning.
+      if (err && err.code === 'ENOENT' && ++enoentRetries <= 3) continue;
       throw err;
     }
   }
