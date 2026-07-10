@@ -11,6 +11,14 @@ narrative summary.
 
 ---
 
+## [v1.98.0] · 2026-07-10 · Audit remediation — tamper-detecting spine
+
+**A 2026-07-09 seven-auditor flaw audit (Codex-verified) found several headline guarantees passing for the wrong reason.** This release closes the externally-triggerable compromise chain and makes the spine genuinely tamper-*detecting* rather than merely warn-y — no agent is the sole witness to its own rewrite. Event contract **1.5.0**, **177** typed event types; verbs **72/72**; gates **74**; self-test **157/157**. Each tier's plan *and* diff adversarially reviewed by Codex before self-merge.
+
+- **P0a — cockpit stored-XSS closed** (#266): mailbox-subject + five defense sinks escape to text nodes; markdown `safeHref` rejects `javascript:`/control-char bypasses.
+- **P0b — bridge capability-token auth** (#267): a per-boot secret (timing-safe) gates every mutating route (method-primary) + any cross-workspace request (`BRIDGE_CROSS_WORKSPACE`). Loopback-CSRF boundary — honestly *not* inter-process auth.
+- **P1 — spine tamper-evidence, strict + honest**: a *post-cutover* chain (shows a `FRAMEWORK_INSTALLED`/`FRAMEWORK_UPGRADED` ≥ 1.98.0 or a `SPINE_CUTOVER` anchor) FAILs `spine verify` (nonzero exit; reds the `spine-integrity` gate even when capped) on an interior edit, deletion, insertion, reorder, or `prev_hash`-strip. A single funnel-locked flat-append primitive (`appendFlatChained`) is shared by `spine.append()` and the worker token wrapper, so every flat write carries `prev_hash` and concurrent writers can't fork; the wrapper drops on contention rather than blocking. `init` chains its prefix; a `SPINE_CUTOVER` genesis seeds an empty fresh sync partition. Pre-cutover/legacy history stays lenient (`chain_fork`/`chain_gap` WARN) so existing spines never false-FAIL. **Unkeyed**: a determined actor who recomputes the whole forward chain, truncates the tail, or edits only the last event verifies clean (threat-model scenario 11) — the "tamper-evident" claim is reworded **tamper-detecting** throughout.
+
 ## [v1.97.0] · 2026-07-09 · Operator Plane + self-enforcing discipline
 
 **Máddu's governance stopped being advisory.** This release makes the record *enforce* the rituals it asks for, and makes what the agents did *legible to the person on the hook for it* — without touching the deterministic default path. Thirteen PRs (#251–#263) across four arcs; every one merged green, the enforcement work adversarially reviewed by Codex across three rounds. Event contract **1.3.0**, **175** typed event types; verbs **72/72**; gates **74**; self-test **153/153**.

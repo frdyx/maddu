@@ -68,8 +68,9 @@ The **8+1 hard rules** ([`hard-rules.md`](hard-rules.md)), enforced by
    `TRIGGER_FIRED` event with `triggered_by` provenance.
 
 **Deliberately absent** (architecture, not omission): no scheduler thread, no
-worker queue, no write-ahead log (the spine is the WAL), no mutex layer (lane
-claims are the lock), no websocket (long-poll is enough).
+worker queue, no write-ahead log (the spine is the WAL), no agent-level mutex
+(lane claims coordinate agents; the byte-level append funnel since v1.98.0 is a
+write-serialization detail, not an agent lock), no websocket (long-poll is enough).
 
 ---
 

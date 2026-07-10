@@ -37,7 +37,7 @@ count stays 72/72.
 ## Design
 
 - **Read-only, contract-neutral.** Oversight is a display-time projection over the existing
-  spine — it writes nothing and adds no event type (contract stays 1.3.0). The
+  spine — it writes nothing and adds no event type (contract-neutral). The
   `skillRefusals` projection derives the fed/withheld view from events already recorded.
 - **Reason→plain-language map.** `oversight-copy.mjs` maps each refusal reason to an
   operator-readable sentence, per item — so the *why* is legible without the code.
