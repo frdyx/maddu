@@ -5,7 +5,7 @@
 //   1 (HERO) Skills fed vs WITHHELD — and WHY, in plain English (the URL-swap
 //            payoff made visible: the block nobody could see before).
 //   2        Did it stay on your goal? — the Focus Director's drift readout.
-//   3        Is the record intact? — tamper-evident spine + published contract,
+//   3        Is the record intact? — tamper-detecting spine + published contract,
 //            independently checkable with plain sha256.
 // Data: GET /bridge/oversight. Navy-noir language, existing --m-* tokens only.
 // Accountability substrate — NOT a claim that the skill is "safe."

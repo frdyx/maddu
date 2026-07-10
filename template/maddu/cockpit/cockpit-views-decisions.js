@@ -2,7 +2,7 @@
 //
 // The curated, high-signal log of decision-grade events — where intent was set,
 // a choice was made, a gate failed, or an outcome was reached — each row with
-// actor, provenance (human vs which auto-trigger), and its tamper-evident
+// actor, provenance (human vs which auto-trigger), and its tamper-detecting
 // stored-line SHA (which equals the next event's prev_hash, so it ties back to
 // the verified chain). The header carries the real verifySpine badge.
 // Data: GET /bridge/decisions. Read-only; every age is bridge-computed.
@@ -70,7 +70,7 @@ export function renderDecisions(ctx) {
 
   const mount = el('div', {}, loading('Curating the record…'));
   const body = ctx && ctx.panelFocus
-    ? ctx.panelFocus('Decisions', 'GET /bridge/decisions · the decision-grade record · who decided what, tamper-evident', mount,
+    ? ctx.panelFocus('Decisions', 'GET /bridge/decisions · the decision-grade record · who decided what, tamper-detecting', mount,
         { id: 'decisions', keywords: 'decisions ledger audit provenance approval goal gate trigger sha chain' })
     : panel('Decisions', 'GET /bridge/decisions · the decision ledger', mount);
   root.appendChild(body);
@@ -80,11 +80,11 @@ export function renderDecisions(ctx) {
     try { const r = await fetch('/bridge/decisions', { cache: 'no-store' }); if (r.ok) data = await r.json(); } catch {}
     mount.textContent = '';
     if (!data || typeof data !== 'object' || !Array.isArray(data.decisions)) {
-      mount.appendChild(placeholder('No decisions recorded yet', 'Once goals are set, approvals decided, gates run, and outcomes reached, this shows the curated decision-grade record — who decided what, on a tamper-evident chain.'));
+      mount.appendChild(placeholder('No decisions recorded yet', 'Once goals are set, approvals decided, gates run, and outcomes reached, this shows the curated decision-grade record — who decided what, on a tamper-detecting chain.'));
       return;
     }
 
-    // ── Header — the real tamper-evidence badge ──
+    // ── Header — the real tamper-detection badge ──
     const v = (data.verify && typeof data.verify === 'object') ? data.verify : {};
     const events = typeof v.events === 'number' ? v.events : null;
     const intact = v.chainIntact === true;
