@@ -119,7 +119,7 @@ async function main() {
       ok('ack without reason → model_regression_ack_unreasoned FAIL', count(res, 'model_regression_ack_unreasoned') === 1);
     }
 
-    console.log('model-events-verify: promotion integrity (tamper evidence)');
+    console.log('model-events-verify: promotion integrity (tamper detection)');
     {
       const tmp = await newTmp(); tmps.push(tmp);
       await factoryBase(tmp);
