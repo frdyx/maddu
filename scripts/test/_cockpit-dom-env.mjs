@@ -39,7 +39,10 @@ export async function loadHappyDom() {
     // the missing SPECIFIER exactly ("Cannot find package/module 'happy-dom'"),
     // not just any message that mentions happy-dom.
     const msg = String(err && err.message || '');
-    if (err && err.code === 'ERR_MODULE_NOT_FOUND' && /Cannot find (?:package|module) '?happy-dom'?/.test(msg)) return null;
+    // Require the EXACT specifier (a closing quote / word boundary) so a missing
+    // transitive package with a happy-dom prefix ('happy-dom-helper') is NOT
+    // mistaken for happy-dom itself and downgraded to a skip.
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND' && /Cannot find (?:package|module) ['"]happy-dom['"]/.test(msg)) return null;
     throw err;
   }
 }

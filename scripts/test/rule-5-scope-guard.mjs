@@ -52,6 +52,18 @@ async function main() {
   ok('matcher still catches dynamic import with a comment before the paren',
     !!bannedImportHit(`imp` + `ort /* c */ (${Q}${OAI}${Q})`));
 
+  // ── lexical correctness: comment markers INSIDE strings must not corrupt a
+  //    real import on the same line (no false negative), and an import-looking
+  //    substring inside a string is data (no false positive). ────────────────
+  ok('a "//" string literal does not swallow a following real import',
+    !!bannedImportHit(`const marker = ${Q}//${Q}; imp` + `ort ${Q}${OAI}${Q};`));
+  ok('a "/*" string literal does not swallow a following real import',
+    !!bannedImportHit(`const a = ${Q}/*${Q}; imp` + `ort ${Q}${OAI}${Q}; const b = ${Q}*/${Q};`));
+  ok('an import-looking STRING VALUE is data, not an import (no false pos)',
+    !bannedImportHit('const code = `imp' + `ort ${Q}${OAI}${Q}\`;`));
+  ok('a string whose value is require(pkg) is data (no false pos)',
+    !bannedImportHit(`const s = ${Q}require(${OAI})${Q};`));
+
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',
     !bannedImportHit(`imp` + `ort(${Q}open${Q} + ${Q}ai${Q})`));

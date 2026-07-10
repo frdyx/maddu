@@ -40,47 +40,63 @@ async function walkFiles(dir, predicate) {
 
 const SCANNED_EXT = /\.(m?js|cjs|mts|cts|ts|jsx|tsx|html|css)$/;
 
-// Banned provider packages. A package boundary (a closing quote/backtick OR a
-// `/subpath` then close) is required so near-names like `openai-wrapper` or
-// `@anthropic-ai-tools/x` are NOT matched, while `openai`, `openai/foo`, and
-// `@anthropic-ai/sdk` are.
-const PKGS = ['anthropic', 'openai', '@anthropic-ai', '@google/generative-ai'];
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-const pkgAlt = PKGS.map(esc).join('|');
-const BOUNDARY = `(?:\\/[^'"\`]*)?['"\`]`;
-const OPEN = `['"\`]`;
-const FORMS = [
-  `from\\s+${OPEN}(?:${pkgAlt})${BOUNDARY}`,          // import x from 'pkg' / export … from 'pkg'
-  `import\\s+${OPEN}(?:${pkgAlt})${BOUNDARY}`,         // side-effect: import 'pkg'
-  `import\\s*\\(\\s*${OPEN}(?:${pkgAlt})${BOUNDARY}`,  // dynamic: import('pkg') / await import(`pkg`)
-  `require\\s*\\(\\s*${OPEN}(?:${pkgAlt})${BOUNDARY}`, // require('pkg') / require('pkg/sub')
-];
-const BANNED_RE = new RegExp(FORMS.join('|'));
-
-// Strip comments before matching so a commented-out example
-// (`// import 'openai'`) can't red this critical gate, and so a comment placed
-// BETWEEN the keyword and the specifier (`import /* x */ 'openai'`) can't hide a
-// real import from the matcher. Line comments are only stripped when `//` is not
-// part of a `://` scheme, so a URL inside a string is left intact.
-function stripComments(text) {
-  return String(text || '')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
+// A specifier is banned iff its VALUE is exactly a provider package or a subpath
+// of one. The package boundary is inherent (an exact-or-`/subpath` match), so
+// near-names like `openai-wrapper` or `@anthropic-ai-tools/x` are NOT banned.
+const BANNED_PKG_RE = /^(?:anthropic|openai|@anthropic-ai|@google\/generative-ai)(?:\/.*)?$/;
+// The code immediately preceding a string literal marks it as an import specifier
+// when it ends with an import keyword / dynamic-import or require call opener.
+const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:import|require)\s*\(\s*$/;
 
 // Exported so the self-test can exercise the matcher directly with in-memory
 // strings — no literal banned specifier is ever written into a scanned tree.
-// Returns the offending match text, or null.
+// Returns the offending specifier text, or null.
 //
-// SCOPE (honest claim): this is a guard against ORDINARY, careless provider-SDK
-// imports in framework code — it reads source text, not an AST. A determined
-// author can obfuscate past it (string concatenation `'open'+'ai'`, unicode
-// escapes `'openai'`, computed specifiers). That is out of scope, the same
-// way the spine's tamper-DETECTION is not tamper-PROOFING: the goal is to catch
-// the mistake, not to defeat an adversary who is trying to smuggle an SDK in.
+// Lexically aware (a single-pass string/comment scanner, not a raw regex): a
+// comment can't red the gate, a comment can't hide a real import, and a comment
+// marker or an import-looking substring INSIDE a string literal is data, not
+// code — so neither a false positive nor a false negative arises from string
+// contents. A banned import is a string literal whose VALUE is a provider package
+// AND whose immediately-preceding CODE is an import keyword / require opener.
+//
+// SCOPE (honest claim): this catches ORDINARY, careless provider-SDK imports in
+// framework code — it is a lexer, not an evaluator. A determined author can still
+// obfuscate past it (string concatenation `'open'+'ai'`, unicode escapes,
+// computed specifiers). That is out of scope, the same way the spine's
+// tamper-DETECTION is not tamper-PROOFING: catch the mistake, not defeat an
+// adversary smuggling an SDK in.
 export function bannedImportHit(text) {
-  const m = BANNED_RE.exec(stripComments(text));
-  return m ? m[0] : null;
+  const src = String(text || '');
+  const n = src.length;
+  let i = 0;
+  let prevCode = '';                 // bounded trailing code, for keyword lookbehind
+  const pushCode = (ch) => { prevCode = (prevCode + ch).slice(-48); };
+  while (i < n) {
+    const c = src[i];
+    const c2 = src[i + 1];
+    if (c === '/' && c2 === '/') { while (i < n && src[i] !== '\n') i++; pushCode(' '); continue; }
+    if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; pushCode(' '); continue; }
+    if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      const importCtx = IMPORT_KEYWORD_TAIL.test(prevCode);
+      i++;
+      let val = '';
+      while (i < n) {
+        const s = src[i];
+        if (s === '\\') { val += src[i + 1] || ''; i += 2; continue; }
+        if (s === quote) { i++; break; }
+        val += s; i++;
+      }
+      // A string is opaque data to following code — collapse it to a placeholder
+      // so `require('x')` after it still parses, and its content never leaks in.
+      pushCode('_');
+      if (importCtx && BANNED_PKG_RE.test(val)) return `${prevCode.replace(/_$/, '').trim().slice(-16)} '${val}'`;
+      continue;
+    }
+    pushCode(c);
+    i++;
+  }
+  return null;
 }
 
 // Resolve the framework layout. Installed: <repoRoot>/maddu/ (single merged
