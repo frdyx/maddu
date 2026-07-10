@@ -50,13 +50,32 @@ const SCANNED_EXT = (p) => JS_EXT.test(p) || HTML_EXT.test(p);
 // `<script src=…>` has no body). Everything outside a script block is markup or
 // text, never code.
 function extractScripts(html) {
-  // Strip HTML comments first, so a commented-out `<!-- <script>…</script> -->`
-  // block is not extracted and scanned as live code.
-  const live = String(html || '').replace(/<!--[\s\S]*?-->/g, ' ');
+  // Single ordered pass: an HTML comment `<!--…-->` only exists OUTSIDE a
+  // <script> (inside a script body, `<!--` is ordinary script text — e.g. a
+  // string value). So a comment is skipped only in HTML context; once a
+  // <script> opens, its whole body is captured verbatim until </script> without
+  // treating an inner `<!--` as a comment. This avoids both extracting a
+  // commented-out block and corrupting a live script that mentions `<!--`.
+  const s = String(html || '');
+  const n = s.length;
   const out = [];
-  const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-  let m;
-  while ((m = re.exec(live))) out.push(m[1]);
+  let i = 0;
+  while (i < n) {
+    if (s[i] !== '<') { i++; continue; }
+    if (s.startsWith('<!--', i)) { const e = s.indexOf('-->', i + 4); i = e < 0 ? n : e + 3; continue; }
+    const open = /^<script\b[^>]*>/i.exec(s.slice(i, i + 400));
+    if (open) {
+      const bodyStart = i + open[0].length;
+      const closeRel = s.slice(bodyStart).search(/<\/script\s*>/i);
+      const bodyEnd = closeRel < 0 ? n : bodyStart + closeRel;
+      out.push(s.slice(bodyStart, bodyEnd));
+      if (closeRel < 0) { i = n; break; }
+      const closeTag = /<\/script\s*>/i.exec(s.slice(bodyEnd, bodyEnd + 20));
+      i = bodyEnd + (closeTag ? closeTag[0].length : 0);
+      continue;
+    }
+    i++;
+  }
   return out;
 }
 
