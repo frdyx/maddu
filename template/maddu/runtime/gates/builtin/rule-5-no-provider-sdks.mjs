@@ -65,35 +65,80 @@ const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:im
 // computed specifiers). That is out of scope, the same way the spine's
 // tamper-DETECTION is not tamper-PROOFING: catch the mistake, not defeat an
 // adversary smuggling an SDK in.
+// A `/` starts a regex literal (not division) when the preceding significant
+// token is not a value — an operator, opener, or a statement/expression keyword.
+const REGEX_ALLOWED_AFTER = /[([{,;:=!&|?+\-*%^~<>]$|(?:^|[^.\w$])(?:return|typeof|instanceof|in|of|new|delete|void|do|else|yield|await|case)$/;
+
 export function bannedImportHit(text) {
   const src = String(text || '');
   const n = src.length;
   let i = 0;
-  let prevCode = '';                 // bounded trailing code, for keyword lookbehind
-  const pushCode = (ch) => { prevCode = (prevCode + ch).slice(-48); };
+  let prev = '';                     // bounded trailing CODE (whitespace-collapsed)
+  const push = (ch) => {
+    // Collapse whitespace runs to one space so arbitrary spacing between an
+    // import keyword and its specifier never scrolls the keyword out of the
+    // lookbehind window.
+    if (/\s/.test(ch)) { if (!prev.endsWith(' ')) prev += ' '; }
+    else prev += ch;
+    if (prev.length > 64) prev = prev.slice(-64);
+  };
+  const codeTail = () => prev.replace(/\s+$/, '');
   while (i < n) {
     const c = src[i];
     const c2 = src[i + 1];
-    if (c === '/' && c2 === '/') { while (i < n && src[i] !== '\n') i++; pushCode(' '); continue; }
-    if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; pushCode(' '); continue; }
+    // line / block comments
+    if (c === '/' && c2 === '/') { i += 2; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
+    if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; push(' '); continue; }
+    // regex literal (so quotes / `//` / `from '…'` inside it are neither a false
+    // positive nor a swallowed real import)
+    if (c === '/' && REGEX_ALLOWED_AFTER.test(codeTail())) {
+      i++;
+      let inClass = false;
+      while (i < n) {
+        const s = src[i];
+        if (s === '\\') { i += 2; continue; }
+        if (s === '\n') break;                       // unterminated → bail
+        if (s === '[') inClass = true;
+        else if (s === ']') inClass = false;
+        else if (s === '/' && !inClass) { i++; break; }
+        i++;
+      }
+      push('_'); continue;
+    }
+    // string / template literal
     if (c === "'" || c === '"' || c === '`') {
       const quote = c;
-      const importCtx = IMPORT_KEYWORD_TAIL.test(prevCode);
+      const importCtx = IMPORT_KEYWORD_TAIL.test(prev);
       i++;
       let val = '';
+      let closed = false;
       while (i < n) {
         const s = src[i];
         if (s === '\\') { val += src[i + 1] || ''; i += 2; continue; }
-        if (s === quote) { i++; break; }
+        if (quote === '`' && s === '$' && src[i + 1] === '{') {
+          // template interpolation: scan the inner expression as CODE, so a real
+          // import inside `${…}` is not hidden by the surrounding template.
+          let depth = 1;
+          let j = i + 2;
+          for (; j < n && depth > 0; j++) {
+            if (src[j] === '{') depth++;
+            else if (src[j] === '}' && --depth === 0) break;
+          }
+          const hit = bannedImportHit(src.slice(i + 2, j));
+          if (hit) return hit;
+          i = j + 1;
+          continue;
+        }
+        if (s === quote) { closed = true; i++; break; }
         val += s; i++;
       }
       // A string is opaque data to following code — collapse it to a placeholder
       // so `require('x')` after it still parses, and its content never leaks in.
-      pushCode('_');
-      if (importCtx && BANNED_PKG_RE.test(val)) return `${prevCode.replace(/_$/, '').trim().slice(-16)} '${val}'`;
+      push('_');
+      if (closed && importCtx && BANNED_PKG_RE.test(val)) return `${codeTail().replace(/_$/, '').trim().slice(-16)} '${val}'`;
       continue;
     }
-    pushCode(c);
+    push(c);
     i++;
   }
   return null;

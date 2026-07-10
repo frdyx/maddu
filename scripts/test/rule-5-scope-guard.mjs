@@ -64,6 +64,29 @@ async function main() {
   ok('a string whose value is require(pkg) is data (no false pos)',
     !bannedImportHit(`const s = ${Q}require(${OAI})${Q};`));
 
+  // ── regex literals: quotes / slashes / `from '…'` inside a regex are neither a
+  //    false positive nor a swallowed real import. ─────────────────────────────
+  const BS = String.fromCharCode(92);
+  ok('regex with quotes then a real import is caught',
+    !!bannedImportHit(`const r=/[${Q}"]/; imp` + `ort(${Q}${OAI}${Q})`));
+  ok('regex with escaped slashes then a real import is caught',
+    !!bannedImportHit(`const r=/https?:${BS}/${BS}//; imp` + `ort(${Q}${OAI}${Q})`));
+  ok('a regex whose body reads "from pkg" is not a false positive',
+    !bannedImportHit(`const r=/from ${Q}${OAI}${Q}/;`));
+  ok('division (a / b) is not treated as a regex',
+    !bannedImportHit(`const q = a / b; const s = ${Q}${OAI}${Q};`));
+
+  // ── template interpolation is CODE: a real import inside ${…} is caught, but a
+  //    template that merely contains import-looking TEXT is data. ──────────────
+  ok('a real import inside ${…} template interpolation is caught',
+    !!bannedImportHit('const x = `p ${ await imp' + `ort(${Q}${OAI}${Q}) } s\`;`));
+  ok('import-looking TEXT in a template body is data (no false pos)',
+    !bannedImportHit('const t = `says imp' + `ort ${Q}${OAI}${Q} as text\`;`));
+
+  // ── arbitrary spacing between keyword and specifier is still caught ──────────
+  ok('wide whitespace between import( and specifier is caught',
+    !!bannedImportHit(`imp` + `ort(${' '.repeat(60)}${Q}${OAI}${Q})`));
+
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',
     !bannedImportHit(`imp` + `ort(${Q}open${Q} + ${Q}ai${Q})`));
