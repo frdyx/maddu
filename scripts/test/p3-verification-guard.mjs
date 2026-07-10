@@ -199,6 +199,12 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   ok('short-noun negation ("No bugs, all gates green") → still a claim', reflect.claimsVerification('No bugs, all gates green') === true);
   // R3#3 — a claim nested deeper inside a quote (not immediately quoted) suppresses.
   ok('nested quotation → suppressed', reflect.claimsVerification('quoted "report says all gates green"') === false);
+  // R4#2 — an apostrophe must not corrupt quote-parity.
+  ok('apostrophe inside a real quote → suppressed', reflect.claimsVerification('It\'s quoted: "all gates green"') === false);
+  ok('apostrophe in a plain claim → still a claim', reflect.claimsVerification('It\'s done: all gates green') === true);
+  // R4#3 — a duplicate STARTED id fails the pairing (corrupt).
+  const dupEv = [started('s1', 'project-test', 'quick', iso(-3 * DAY)), started('s1', 'project-test', 'quick', iso(-2 * DAY)), ran('r1', 'project-test', 's1', { profile: 'quick' })];
+  ok('duplicate STARTED id → pairing invalid', vr.pairVerifications(dupEv, 'project-test').valid.length === 0);
   ok('family: tests → test', reflect.claimFamily('tests pass') === 'test');
   ok('family: gates → gate', reflect.claimFamily('all gates green') === 'gate');
 }

@@ -100,8 +100,9 @@ export function claimsVerification(summary) {
     const before = s.slice(0, m.index);
     if (NEGATION_NEAR_RE.test(before)) continue;
     // Inside an open quotation (odd number of quote chars before the match) → a
-    // citation, not a claim ("quoted \"report says all gates green\"").
-    const quoteCount = (before.match(/["'`]/g) || []).length;
+    // citation, not a claim ("quoted \"report says all gates green\""). Count only
+    // double-quotes/backticks — an apostrophe ("It's") is prose, not a citation.
+    const quoteCount = (before.match(/["`]/g) || []).length;
     if (quoteCount % 2 === 1) continue;
     return true;
   }
@@ -278,7 +279,11 @@ export function scanCompletionClaims(events, opts = {}) {
         recent,
       });
     }
+    // Advance this stop's per-lane key AND the GLOBAL '' boundary: any stop (of
+    // any lane) closes a lane-less claim's window, so the '' boundary must track
+    // the most recent stop overall, not only lane-less stops.
     prevSliceIdxByKey.set(key, i);
+    if (key !== '') prevSliceIdxByKey.set('', i);
   }
 
   const cumulativeCount = matches.length;

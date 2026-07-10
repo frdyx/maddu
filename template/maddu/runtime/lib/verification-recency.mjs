@@ -60,11 +60,14 @@ export async function recordVerification(repoRoot, spineLib, { kind, profile = n
 export function pairVerifications(events, kind) {
   const list = Array.isArray(events) ? events : [];
   const startedById = new Map();       // id -> { ev, index }
+  const dupStarted = new Set();        // ids that appear on >1 STARTED (corrupt → fail-close)
   const rans = [];                     // { ev, index }
   list.forEach((e, index) => {
     if (!e || !e.data || e.data.kind !== kind) return;
-    if (e.type === 'VERIFICATION_STARTED') startedById.set(e.id, { ev: e, index });
-    else if (e.type === 'VERIFICATION_RAN') rans.push({ ev: e, index });
+    if (e.type === 'VERIFICATION_STARTED') {
+      if (startedById.has(e.id)) dupStarted.add(e.id);
+      else startedById.set(e.id, { ev: e, index });
+    } else if (e.type === 'VERIFICATION_RAN') rans.push({ ev: e, index });
   });
   // Reference counts span ALL RANs (any kind): a startedId reused across kinds is
   // still a reuse and must fail-close, so count globally, not per-kind.
@@ -77,6 +80,7 @@ export function pairVerifications(events, kind) {
   const valid = [];
   for (const { ev, index } of rans) {
     const sid = ev.data.startedId;
+    if (dupStarted.has(sid)) continue;                 // a reused STARTED id is corrupt → fail-close
     const s = sid ? startedById.get(sid) : null;
     if (!s) continue;                                  // orphan RAN (no STARTED of this kind)
     if (refCount.get(sid) !== 1) continue;             // duplicate-referenced / reused id
