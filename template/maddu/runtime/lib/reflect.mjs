@@ -16,6 +16,8 @@
 // This is the shadow-measurement stage: it reports, it writes nothing. The
 // write/approval/gate path is a deferred v2, earned only if this converts.
 
+import { pairVerifications } from './verification-recency.mjs';
+
 export const BEHAVIOR = 'unverified-completion-claim';
 export const DEFAULT_THRESHOLD = 3;
 export const DEFAULT_RECENT_DAYS = 30;
@@ -68,13 +70,11 @@ const VERIFICATION_ADJACENT_RE = new RegExp(
   'i',
 );
 
-// Negation / prescriptive words that, when they appear IMMEDIATELY before the
-// matched claim (within ~1-2 words), flip it into a non-claim (a denial, a rule,
-// a plan) [F12]. Checked in a tight preceding window so a distant word modifying
-// a DIFFERENT noun ("No regressions, all gates green") does not suppress a real
-// claim. An opening quote right before the claim (citing) also suppresses.
-const NEGATION_NEAR_RE = /\b(no|not|never|without|isn't|aren't|wasn't|weren't|didn't|don't|doesn't|fail(?:s|ed|ing)?|red|should|must|need|needs|ensure|verify)\b[\s,;:()\w]{0,10}$/i;
-const OPEN_QUOTE_RE = /["'`]\s*$/;
+// A negation / prescriptive word suppresses a claim ONLY when it is the token
+// IMMEDIATELY before the matched subject (whitespace-only gap) — so it negates
+// THIS claim ("not all gates green") and not a different noun a few words back
+// ("No bugs, all gates green" / "No regressions, all gates green" still flag) [F12].
+const NEGATION_NEAR_RE = /\b(no|not|never|without|isn't|aren't|wasn't|weren't|didn't|don't|doesn't|fail(?:s|ed|ing)?|red|should|must|need|needs|ensure|verify)\s*$/i;
 
 // True iff the summary reads as a hedged completion claim.
 export function hedgesCompletion(summary) {
@@ -99,7 +99,10 @@ export function claimsVerification(summary) {
   while ((m = re.exec(s)) !== null) {
     const before = s.slice(0, m.index);
     if (NEGATION_NEAR_RE.test(before)) continue;
-    if (OPEN_QUOTE_RE.test(before)) continue;
+    // Inside an open quotation (odd number of quote chars before the match) → a
+    // citation, not a claim ("quoted \"report says all gates green\"").
+    const quoteCount = (before.match(/["'`]/g) || []).length;
+    if (quoteCount % 2 === 1) continue;
     return true;
   }
   return false;
@@ -132,19 +135,32 @@ function gateOk(ev) {
   return ev.data ? ev.data.ok === true : false;
 }
 
-// audit P3 — a passing TEST verification receipt (project/self test). Heavy
-// suites and success-eval are not "test proof" for a completion claim.
-function testVerificationPass(ev) {
-  if (!ev || ev.type !== 'VERIFICATION_RAN' || !ev.data) return false;
-  const k = ev.data.kind;
-  return (k === 'project-test' || k === 'self-test') && ev.data.result === 'pass' && ev.data.complete === true;
+// audit P3 — the ids of VALIDLY-PAIRED, passing, complete TEST receipts
+// (project/self). A lone/orphan VERIFICATION_RAN (a startedId with no matching
+// preceding STARTED) is NOT proof — it must survive the U2 pairing. Computed once
+// per scan (pairVerifications is O(n)), not per slice.
+function validTestReceiptIds(events) {
+  const ids = new Set();
+  for (const kind of ['project-test', 'self-test']) {
+    for (const r of pairVerifications(events, kind).valid) {
+      if (r.data && r.data.result === 'pass' && r.data.complete === true) ids.add(r.id);
+    }
+  }
+  return ids;
+}
+
+// A passing TEST verification receipt that PASSED U2 pairing. Heavy suites and
+// success-eval are not "test proof" for a completion claim.
+function testVerificationPass(ev, validTestIds) {
+  if (!ev || ev.type !== 'VERIFICATION_RAN') return false;
+  return validTestIds ? validTestIds.has(ev.id) : false;
 }
 
 // Does event `ev` satisfy proof of `family` for a claim? [F10]
-function isProofFor(ev, family) {
+function isProofFor(ev, family, validTestIds) {
   if (family === 'gate') return gateOk(ev);
-  if (family === 'test') return testVerificationPass(ev);
-  return gateOk(ev) || testVerificationPass(ev); // 'any'
+  if (family === 'test') return testVerificationPass(ev, validTestIds);
+  return gateOk(ev) || testVerificationPass(ev, validTestIds); // 'any'
 }
 
 // Lane/actor attribution [R4/F11]: prevent one agent from borrowing ANOTHER
@@ -164,9 +180,12 @@ function attributed(ev, claimLane, claimActor) {
 // ANY actor. Using proof-attribution here would skip a same-lane stop by another
 // actor and widen the window, letting an old proof from before that intervening
 // stop be borrowed. Lane-primary (matches scanCompletionClaims' per-lane key).
-function boundaryMatch(ev, claimLane, claimActor) {
+function boundaryMatch(ev, claimLane) {
+  // Lane-set claim: the previous SAME-LANE stop (by any actor) closes the window.
+  // Lane-less claim: ANY previous stop closes it — never fall back to same-actor,
+  // or an intervening stop by another lane-less actor would be skipped and its
+  // window would widen to borrow older proof.
   if (claimLane != null) return ev.lane === claimLane;
-  if (claimActor != null) return ev.actor === claimActor;
   return true;
 }
 
@@ -182,7 +201,7 @@ function tsMs(ev) {
 // it is inversion (a false "unproven"); such claims are not flagged as confident.
 // Hedged detection is unaffected (its proof, GATE_RAN, always existed).
 // Returns { flagged, kind } where kind ∈ 'hedged'|'verification'|null.
-function evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryReady = true) {
+function evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryReady, validTestIds) {
   const ev = list[i];
   const summary = ev && ev.data ? ev.data.summary : '';
   const hedged = hedgesCompletion(summary);
@@ -199,7 +218,7 @@ function evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryRea
       const e = list[j];
       if (!e) continue;
       if (!attributed(e, claimLane, claimActor)) continue;
-      if (isProofFor(e, family)) { proof = true; break; }
+      if (isProofFor(e, family, validTestIds)) { proof = true; break; }
     }
   }
   return { flagged: !proof, kind: hedged ? 'hedged' : 'verification' };
@@ -223,6 +242,7 @@ export function scanCompletionClaims(events, opts = {}) {
     if (t === 'VERIFICATION_STARTED' || t === 'VERIFICATION_RAN') { machineryFromIdx = i; break; }
   }
 
+  const validTestIds = validTestReceiptIds(list);
   const matches = [];
   let scanned = 0;
   let hedgeMatches = 0;
@@ -237,10 +257,13 @@ export function scanCompletionClaims(events, opts = {}) {
     scanned++;
     const claimLane = ev.lane != null ? ev.lane : null;
     const claimActor = ev.actor != null ? ev.actor : null;
-    const key = claimLane != null ? `lane:${claimLane}` : (claimActor != null ? `actor:${claimActor}` : '');
+    // Window boundary key: per-lane when lane-set, else GLOBAL ('') — a lane-less
+    // claim's window is bounded by the previous stop of ANY lane-less actor, so no
+    // cross-agent proof borrow (matches boundaryMatch).
+    const key = claimLane != null ? `lane:${claimLane}` : '';
     const fromIdx = prevSliceIdxByKey.has(key) ? prevSliceIdxByKey.get(key) : -1;
 
-    const { flagged, kind } = evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, i >= machineryFromIdx);
+    const { flagged, kind } = evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, i >= machineryFromIdx, validTestIds);
     if (kind === 'hedged') hedgeMatches++;
     if (kind === 'verification') confidentMatches++;
     if (flagged) {
@@ -304,8 +327,8 @@ export function evaluateStop(events, candidate, opts = {}) {
   let fromIdx = -1;
   for (let j = i - 1; j >= 0; j--) {
     const e = list[j];
-    if (e && e.type === 'SLICE_STOP' && boundaryMatch(e, claimLane, claimActor)) { fromIdx = j; break; }
+    if (e && e.type === 'SLICE_STOP' && boundaryMatch(e, claimLane)) { fromIdx = j; break; }
   }
   const machineryReady = list.some((e) => e && (e.type === 'VERIFICATION_STARTED' || e.type === 'VERIFICATION_RAN'));
-  return evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryReady);
+  return evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryReady, validTestReceiptIds(list));
 }

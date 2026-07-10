@@ -195,6 +195,10 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   ok('negation in a different clause → still a claim', reflect.claimsVerification('No regressions; all gates green') === true);
   ok('comma-clause negation of another noun → still a claim', reflect.claimsVerification('No regressions, all gates green') === true);
   ok('negation right against the claim → suppressed', reflect.claimsVerification('not all gates green') === false);
+  // R3#2 — a short intervening noun must not leak into the negation window.
+  ok('short-noun negation ("No bugs, all gates green") → still a claim', reflect.claimsVerification('No bugs, all gates green') === true);
+  // R3#3 — a claim nested deeper inside a quote (not immediately quoted) suppresses.
+  ok('nested quotation → suppressed', reflect.claimsVerification('quoted "report says all gates green"') === false);
   ok('family: tests → test', reflect.claimFamily('tests pass') === 'test');
   ok('family: gates → gate', reflect.claimFamily('all gates green') === 'gate');
 }
@@ -243,6 +247,25 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   const interposed = { id: 'prev', type: 'SLICE_STOP', lane: 'L', actor: 'b', ts: iso(-2 * DAY), data: { summary: 'other work' } };
   c = reflect.evaluateStop([vstart, gateOk, interposed], { lane: 'L', actor: 'a', summary: 'all gates green' });
   ok('candidate: old proof before an intervening same-lane stop is not borrowed', c.flagged === true);
+
+  // R3#4 — lane-less: an intervening stop by ANOTHER lane-less actor closes the
+  // window, so an old lane-less gate-ok before it is not borrowed.
+  const gOk = { id: 'g2', type: 'GATE_RAN', ts: iso(-3 * DAY), data: { gateId: 'x', status: 'ok' } };
+  const otherStop = { id: 'os', type: 'SLICE_STOP', actor: 'b', ts: iso(-2 * DAY), data: { summary: 'other' } };
+  c = reflect.evaluateStop([vstart, gOk, otherStop], { actor: 'a', summary: 'all gates green' });
+  ok('candidate: lane-less old proof before another actor\'s stop not borrowed', c.flagged === true);
+
+  // R3#5 — an ORPHAN VERIFICATION_RAN (startedId with no matching STARTED) is not
+  // test proof; a validly-paired one is.
+  const orphan = { id: 'orf', type: 'VERIFICATION_RAN', lane: 'L', ts: iso(-DAY), data: { kind: 'self-test', startedId: 'nope', result: 'pass', complete: true } };
+  ok('candidate: orphan RAN is not proof', reflect.evaluateStop([vstart, orphan], { lane: 'L', actor: 'a', summary: 'tests pass' }).flagged === true);
+
+  // R3#1 — a future/invalid-ts dangling STARTED still flags the recency gate.
+  const futStart = [{ id: 'fs', type: 'VERIFICATION_STARTED', ts: iso(60 * 60 * 1000), data: { kind: 'project-test', profile: 'quick' } },
+    { id: 'op', type: 'VERIFICATION_STARTED', ts: iso(-2 * DAY), data: { kind: 'project-test', profile: 'quick' } },
+    { id: 'or', type: 'VERIFICATION_RAN', ts: iso(-1.5 * DAY), data: { kind: 'project-test', startedId: 'op', profile: 'quick', result: 'pass', complete: true } }];
+  const fv = vr.recencyGateVerdict(futStart, 'ok', { kind: 'project-test', ttlMs: 14 * DAY, nowMs: NOW, profileOk: (p) => p === 'quick' || p === 'full', label: 'x', ttlLabel: '14d' });
+  ok('future-dated dangling STARTED → non-green', fv.ok === false && /without a recorded result/.test(fv.message));
 }
 
 console.log(`\np3-verification-guard: ${passed} passed, ${failed} failed`);

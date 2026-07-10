@@ -95,14 +95,16 @@ export function pairVerifications(events, kind) {
 //   { latest, danglingInWindow, hasReceipt, staleReasonForLatest }
 export function recencyFromSpine(events, { kind, ttlMs, nowMs, profileOk = () => true }) {
   const { valid, dangling } = pairVerifications(events, kind);
-  const withinWindow = (ev) => {
-    const t = Date.parse((ev && ev.ts) || '');
-    if (!Number.isFinite(t)) return false;
-    return isStaleTs(ev.ts, nowMs, { ttlMs }) === null; // fresh (not future, not expired, valid ts)
+  const withinWindow = (ev) => isStaleTs((ev && ev.ts) || null, nowMs, { ttlMs }) === null; // fresh (not future, not expired, valid ts)
+  // A dangling STARTED = a run began without a recorded result (crash / append-
+  // failure). It is relevant unless it is clearly EXPIRED — a fresh, a
+  // future-dated, or an invalid/absent-ts dangling attempt all count as non-green
+  // (a future or unparseable ts is itself suspect and must not be ignored).
+  const relevantDangling = (s) => {
+    const r = isStaleTs((s && s.ts) || null, nowMs, { ttlMs });
+    return r === null || r === 'future-ts' || r === 'no-ts';
   };
-  // A dangling STARTED inside the recency window = a run began without a recorded
-  // result (crash / append-failure) → the gate reads that as non-green.
-  const danglingInWindow = dangling.filter(withinWindow);
+  const danglingInWindow = dangling.filter(relevantDangling);
   // The NEWEST valid receipt (by ts — events are pre-sorted) is authoritative,
   // selected BEFORE any freshness filter so a future-dated newest run can't be
   // skipped over to let an older pass win. It goes green ONLY when it is itself
