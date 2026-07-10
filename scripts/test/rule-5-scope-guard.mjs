@@ -134,6 +134,10 @@ async function main() {
     !!bannedImportInSource(`<div>ok</div><script>imp` + `ort x from "${OAI}";</script>`, 'x.html'));
   ok('an HTML file with no <script> is never flagged',
     !bannedImportInSource(`<p>req` + `uire(${Q}${OAI}${Q}) shown as text</p>`, 'x.html'));
+  ok('a commented-out <script> block is not extracted/flagged',
+    !bannedImportInSource(`<!-- <script>imp` + `ort OpenAI from "${OAI}"</script> -->`, 'x.html'));
+  ok('a live <script> next to a commented one is still flagged',
+    !!bannedImportInSource(`<!-- <script>x</script> -->\n<script>req` + `uire("${OAI}")</script>`, 'x.html'));
 
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',

@@ -50,10 +50,13 @@ const SCANNED_EXT = (p) => JS_EXT.test(p) || HTML_EXT.test(p);
 // `<script src=…>` has no body). Everything outside a script block is markup or
 // text, never code.
 function extractScripts(html) {
+  // Strip HTML comments first, so a commented-out `<!-- <script>…</script> -->`
+  // block is not extracted and scanned as live code.
+  const live = String(html || '').replace(/<!--[\s\S]*?-->/g, ' ');
   const out = [];
   const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
   let m;
-  while ((m = re.exec(html))) out.push(m[1]);
+  while ((m = re.exec(live))) out.push(m[1]);
   return out;
 }
 
