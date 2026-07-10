@@ -540,36 +540,46 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // the lock, so the chain cannot fork). A write NEVER touches a partition whose
   // migration hasn't committed: if a `spine sync init` is in progress, resolveWrite-
   // Replica WAITS for it to commit, then writes to the completed partition; if it
-  // stalls, we refuse rather than fork. Absent any replicaId/marker this is a no-op
-  // and the DEFAULT flat path below runs unchanged.
-  const w = await resolveWriteReplica(repoRoot);
-  if (w.id) return appendPartitioned(repoRoot, w.id, ev);
-  if (w.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
-
-  // Tamper-detection (v1.14.0): link to the prior event by hashing its stored
-  // line. Since audit P1 the flat write goes through the SHARED locked+chained
-  // primitive `appendFlatChained` (spine-append-core.mjs) — prev_hash is computed
-  // INSIDE the append funnel, so a concurrent flat writer (bridge + a CLI invocation)
-  // can no longer fork the chain, and the token wrapper shares the exact same path
-  // so every flat event carries prev_hash. O_APPEND framing + one-event-per-line +
-  // no-per-append-fsync durability all live in that primitive now.
+  // stalls (>timeoutMs), we refuse rather than fork. Absent any replicaId/marker
+  // this is a no-op and the DEFAULT flat path runs unchanged.
   //
-  // The primitive re-resolves the replica under the lock and returns a discriminated
-  // outcome; the ENOENT catch stays OUT here as a backstop for a rename that slips
-  // between currentSegment and appendFile (a `spine sync init` migration renaming a
-  // segment out from under us — never happens in pure default mode).
-  try {
-    const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
-    if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev);
-    if (outcome.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
-    return outcome.ev;
-  } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      const w2 = await resolveWriteReplica(repoRoot);
-      if (w2.id) return appendPartitioned(repoRoot, w2.id, ev);
-      if (w2.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+  // A `sync init` marker can appear in the WINDOW between the outer resolve (which
+  // saw default/flat) and appendFlatChained's non-waiting re-resolve under the lock
+  // — the primitive then hands back `{pending}` (it MUST NOT block on a migration
+  // while holding the flat lock; the migration may need that lock). That is not a
+  // stall — it is the documented "retry later" outcome (spine-append-core §
+  // appendFlatChained). So we LOOP: the next outer resolve WAITS for the migration
+  // to commit and routes the event to its partition, so a concurrent append during
+  // `sync init` is never lost (only a genuine >timeoutMs stall, surfaced by the
+  // outer resolve, still refuses). The retry cap is a livelock backstop only.
+  const STALL_MSG = 'spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry';
+  for (let attempt = 0; ; attempt++) {
+    const w = await resolveWriteReplica(repoRoot);
+    if (w.id) return appendPartitioned(repoRoot, w.id, ev);
+    if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
+
+    // Tamper-detection (v1.14.0): link to the prior event by hashing its stored
+    // line. Since audit P1 the flat write goes through the SHARED locked+chained
+    // primitive `appendFlatChained` — prev_hash is computed INSIDE the funnel, so a
+    // concurrent flat writer can't fork the chain, and the token wrapper shares the
+    // exact path so every flat event carries prev_hash. The ENOENT catch is a
+    // backstop for a rename that slips between currentSegment and appendFile (a
+    // migration renaming a segment out from under us — never in pure default mode).
+    try {
+      const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
+      if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev);
+      if (outcome.pending) {                             // migration began in the resolve→lock window → retry
+        if (attempt >= 10000) throw new Error(STALL_MSG); // livelock backstop (never hit in practice)
+        continue;
+      }
+      return outcome.ev;
+    } catch (err) {
+      // ENOENT backstop: a `sync init` renamed the flat segment between
+      // currentSegment and appendFile. Re-resolve (never in pure default mode);
+      // the retry routes to the now-committed partition or re-creates the flat dir.
+      if (err && err.code === 'ENOENT' && attempt < 10000) continue;
+      throw err;
     }
-    throw err;
   }
 }
 
