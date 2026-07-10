@@ -45,8 +45,10 @@ const cls = [
   ['ls -la | grep foo', 'read'],
   ['node -e "console.log(2 > 1)"', 'read'],                    // F12: bare > is not an interp write
   ['node -e "const x = a >> b"', 'read'],
+  ['node -e "console.log(\'writeFileSync is a method\')"', 'read'], // mention, not a call
   ['node -e "require(\'fs\').writeFileSync(\'x\',\'y\')"', 'write'],
   ['python3 -c "open(\'f\',\'w\').write(1)"', 'write'],
+  ['python3 -c "open(\'f\',\'r+\').write(1)"', 'write'],           // r+ can write
   ['perl -i -pe s/a/b/ file', 'write'],                        // in-place always writes
   ['echo hi > out.txt', 'write'],
   ['sed -i s/a/b/ f', 'write'],
@@ -134,6 +136,10 @@ try {
   r = run(tmp, ['governance', 'set-override', 'discipline-enforcement', 'off']);
   ok(r.status === 3, `weakening without --reason refused (exit ${r.status})`);
   ok((await events(tmp)).every((e) => e.type !== 'GOVERNANCE_OVERRIDE_CHANGED'), 'a refused change records nothing');
+
+  // a flag-shaped --reason value is NOT a reason (F: --reason --approve) → still refused
+  r = run(tmp, ['governance', 'set-override', 'discipline-enforcement', 'off', '--reason', '--approve']);
+  ok(r.status === 3, `flag-shaped --reason still refused (exit ${r.status})`);
 
   // weakening with --reason under standard → ok + WRITE-AHEAD event
   r = run(tmp, ['governance', 'set-override', 'discipline-enforcement', 'off', '--reason', 'ci maintenance']);

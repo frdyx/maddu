@@ -97,7 +97,10 @@ const WRITE_RE = [
 // A bare `>` is a SHELL redirect signal ONLY (it lives in WRITE_RE above), NEVER
 // an interpreter write-signal — `node -e "console.log(2 > 1)"` must stay 'read'
 // (audit P2 F12). `open(...)` counts only in write/append mode.
-const INTERP_WRITE_API_RE = /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|mkdirSync|mkdir|makedirs|rmdirSync|rmdir|rmtree|rmSync|unlinkSync|unlink|renameSync|rename|truncateSync|truncate|copyFileSync|copyFile|symlinkSync|symlink)\b|\bos\.remove\b|\bshutil\.(?:rmtree|move|copy\w*)\b|\bopen\s*\([^)]*['"][wax]/;
+// Require a CALL `(` after each API name so a bare mention in a string/comment
+// (`console.log('writeFileSync')`) does NOT read as a write; include the write-
+// capable open modes (w/a/x AND r+/w+/a+ — r+ can write).
+const INTERP_WRITE_API_RE = /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|mkdirSync|mkdir|makedirs|rmdirSync|rmdir|rmtree|rmSync|unlinkSync|unlink|renameSync|rename|truncateSync|truncate|copyFileSync|copyFile|symlinkSync|symlink)\s*\(|\bos\.remove\s*\(|\bshutil\.(?:rmtree|move|copy\w*)\s*\(|\bopen\s*\([^)]*['"](?:[wax]|r\+)/;
 // A launcher running INLINE code (-e/-c). Detected on the dequoted code (the flag
 // is unquoted); the payload write-API scan runs on the ORIGINAL (quotes→spaces).
 const INTERP_INLINE_RE = /(?:^|\s)(?:node|deno|bun|python3?|perl|ruby)\b[^\n]*?\s-[A-Za-z]*[ec]\b/;
@@ -497,9 +500,12 @@ export async function enforcePreTool(repoRoot, opts = {}) {
     const action = disciplineAction(kind, enforcement, approvedDisable).action;
 
     // enforcement OFF: allow, but tell the seam this was a would-be-gated tool so
-    // it emits DISCIPLINE_SKIPPED{enforcement-off} (a disabled enforcement bypass).
+    // it emits DISCIPLINE_SKIPPED{enforcement-off}. PRESERVE a self-disable so the
+    // seam still emits the per-incident self-disable witness (not the latched
+    // enforcement-off one) even while enforcement is off.
     if (enforcement === 'off')
-      return { ...ok(), sid, counterKey, mutating: true, enforcement: 'off', kind, action: 'allow' };
+      return { ...ok(), sid, counterKey, mutating: true, enforcement: 'off', kind,
+        action: kind === 'self-disable' ? 'witness-allow' : 'allow' };
 
     // strict self-disable without --approve → hard block (full shape for denyReason).
     if (action === 'block')
@@ -542,7 +548,10 @@ export async function enforcePreTool(repoRoot, opts = {}) {
         counter.editsSinceSlice = (counter.editsSinceSlice || 0) + 1;
         if (!(state.goalOrPlan && state.goalOrPlan.active)) counter.goalplanAgeEdits = (counter.goalplanAgeEdits || 0) + 1;
       }
-      if (decision.verdict === 'ok' && counter.skipLatch) counter.skipLatch = {};
+      // Reaching the gate path at all means enforcement is ON and not erroring —
+      // a healthy episode — so clear any enforcement-off/error latch regardless of
+      // the ritual verdict (block/nudge/warn are still "enforcement working").
+      if (counter.skipLatch) counter.skipLatch = {};
       await writeCounter(repoRoot, counterKey, counter);
     }
     return { ...decision, sid, counterKey, mutating: true, enforcement, kind, action };

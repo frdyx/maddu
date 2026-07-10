@@ -67,16 +67,18 @@ async function witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterK
   try {
     const enf = decision.enforcement, kind = decision.kind, action = decision.action;
     let type = null, data = null, latchKey = null;
-    if (enf === 'error') {
+    // A self-disable ATTEMPT is checked FIRST (a per-incident witness, never latched)
+    // so it isn't swallowed by the latched enforcement-off branch when both hold.
+    if (kind === 'self-disable' && (action === 'witness-allow' || action === 'block')) {
+      type = 'DISCIPLINE_SKIPPED';
+      data = { reason: 'self-disable-attempt', tool: tool || null, sessionId: sid || null, enforcement: enf || null, blocked: action === 'block' };
+    } else if (enf === 'error') {
       const sig = decision.errorSig || 'unknown';
       type = 'ENFORCEMENT_ERROR'; latchKey = `err:${sig}`;
       data = { reason: sig, tool: tool || null, sessionId: sid || null };
     } else if (enf === 'off' && decision.mutating) {
       type = 'DISCIPLINE_SKIPPED'; latchKey = 'enforcement-off';
       data = { reason: 'enforcement-off', tool: tool || null, sessionId: sid || null, enforcement: 'off' };
-    } else if (kind === 'self-disable' && (action === 'witness-allow' || action === 'block')) {
-      type = 'DISCIPLINE_SKIPPED'; // never latch a disable attempt
-      data = { reason: 'self-disable-attempt', tool: tool || null, sessionId: sid || null, enforcement: enf || null, blocked: action === 'block' };
     } else return; // nothing to witness
 
     if (latchKey && counterKey && disc?.readCounter) {
@@ -85,6 +87,7 @@ async function witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterK
     }
     const { spine } = await loadSpineLib();
     await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data });
+    // Set the latch ONLY after a successful append (an append failure retries).
     if (latchKey && counterKey && disc?.readCounter && disc?.writeCounter) {
       const c = (await disc.readCounter(repoRoot, counterKey)) || {};
       c.skipLatch = { ...(c.skipLatch || {}), [latchKey]: true };
@@ -180,6 +183,9 @@ export default async function hooks(argv) {
       let tool = null, sid = null, counterKey = null, disc = null;
       try {
         if (process.stdin.isTTY) process.exit(0); // human at a terminal → no gate (not a bypass)
+        // Load the discipline lib BEFORE reading/parsing stdin so a malformed-input
+        // throw still lands in the catch with `disc` available to witness (F6).
+        disc = await loadLib('discipline.mjs');
         let raw = '';
         for await (const chunk of process.stdin) raw += chunk;
         const payload = raw.trim() ? JSON.parse(raw) : {};
@@ -188,8 +194,6 @@ export default async function hooks(argv) {
         const filePath = ti.file_path || ti.notebook_path || null;
         const command = ti.command || null;
         const claudeSessionId = payload.session_id || null;
-
-        disc = await loadLib('discipline.mjs');
 
         // Classify for the early-exit. A read/remedy Bash (and any non-mutating tool)
         // has nothing to gate OR witness → exit. Everything else (edit/write/
@@ -259,11 +263,13 @@ export default async function hooks(argv) {
         }
       } catch (e) {
         // The handler itself threw (stdin parse, spine load, …) — fail open, but
-        // leave a witness so a persistent handler bug can't hide (F6).
+        // leave a witness so a persistent handler bug can't hide (F6). Emit even if
+        // `disc` never loaded (a bare append, no latch/counter) so a malformed-input
+        // failure is never silent.
         try {
-          if (disc) await witnessDiscipline(repoRoot, disc, {
-            decision: { enforcement: 'error', errorSig: disc.normErrorSig ? disc.normErrorSig(e) : String(e).slice(0, 120) },
-            tool, sid, counterKey,
+          const errorSig = disc?.normErrorSig ? disc.normErrorSig(e) : String((e && e.message) || e).split('\n')[0].slice(0, 120);
+          await witnessDiscipline(repoRoot, disc, {
+            decision: { enforcement: 'error', errorSig }, tool, sid, counterKey,
           });
         } catch { /* witness best-effort */ }
       }
@@ -394,6 +400,10 @@ export default async function hooks(argv) {
     // (a disable that can't be recorded must not proceed) unless --force, which
     // still records first and only downgrades the abort to a loud warning.
     if (removing && lib.summarize(settings).installed.includes('PreToolUse')) {
+      // NEVER remove the enforcement hook unless the disable is recorded first —
+      // a disable that can't be witnessed must not proceed (no --force bypass of the
+      // write-ahead; the operator can hand-edit .claude/settings.json if the spine
+      // is genuinely broken, which is itself the problem to fix).
       try {
         const { spine } = await loadSpineLib();
         await spine.append(repoRoot, {
@@ -405,12 +415,9 @@ export default async function hooks(argv) {
           },
         });
       } catch (e) {
-        if (!flags.force) {
-          console.error(`\x1b[31mrefusing to uninstall\x1b[0m — could not record the disable on the spine (${String((e && e.message) || e).slice(0, 80)}).`);
-          console.error(`  Disabling enforcement must leave a witness. Fix the spine, or re-run with \x1b[1m--force\x1b[0m to override.`);
-          process.exit(1);
-        }
-        console.error(`\x1b[33mwarning\x1b[0m — the disable could not be recorded (spine append failed); proceeding due to --force.`);
+        console.error(`\x1b[31mrefusing to uninstall\x1b[0m — could not record the disable on the spine (${String((e && e.message) || e).slice(0, 80)}).`);
+        console.error(`  Disabling enforcement must leave a witness. Fix the spine first (a broken spine is the real problem).`);
+        process.exit(1);
       }
     }
     const eol = existed && raw && raw.includes('\r\n') ? '\r\n' : '\n';
