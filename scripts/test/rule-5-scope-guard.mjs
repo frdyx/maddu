@@ -94,6 +94,8 @@ async function main() {
     !bannedImportHit(`export default /from ${Q}${OAI}${Q}/;`));
   ok('throw /regex/ is not a false positive',
     !bannedImportHit(`throw /from ${Q}${OAI}${Q}/;`));
+  ok('a regex at the START of a context (empty tail) then a real import is caught',
+    !!bannedImportHit(`/[${Q}"]/.test(x); await imp` + `ort(${Q}${OAI}${Q})`));
 
   // ── interpolation is scanned string/regex-aware (braces inside a string in the
   //    ${…} body don't desync the delimiter) ───────────────────────────────────

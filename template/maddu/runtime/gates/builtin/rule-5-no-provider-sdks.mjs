@@ -97,8 +97,9 @@ function scanCode(src, start, stopAtBrace) {
     // line / block comments
     if (c === '/' && c2 === '/') { i += 2; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
     if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; push(' '); continue; }
-    // regex literal — but a `/` after a postfix ++/-- is division, not a regex.
-    if (c === '/' && !/(?:\+\+|--)$/.test(codeTail()) && REGEX_ALLOWED_AFTER.test(codeTail())) {
+    // regex literal — a `/` begins one at the start of a context (empty tail) or
+    // after an operator/opener/keyword, but NOT after a value or a postfix ++/--.
+    if (c === '/' && !/(?:\+\+|--)$/.test(codeTail()) && (codeTail() === '' || REGEX_ALLOWED_AFTER.test(codeTail()))) {
       i++;
       let inClass = false;
       while (i < n) {
