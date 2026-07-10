@@ -61,16 +61,26 @@ export function resolveThresholds(mode, overrides = {}) {
   return merged;
 }
 
-// ── The Bash write-classifier ───────────────────────────────────────────────
-// Returns 'remedy' | 'write' | 'allow'.
-//  • 'remedy' — an exact ritual-remedy command; NEVER blocked (belt-and-braces,
-//    even though `git commit` / `maddu slice-stop` do write).
-//  • 'write'  — a recognized DIRECT file write; treated as an edit (subject to
-//    discipline). Conservative: obvious writes only.
-//  • 'allow'  — read-only, ambiguous (interpreter -e/-c, build steps), or
-//    unrecognized → allow ("block obvious writes, fail open on ambiguity").
-// NO blanket maddu/git exemption (that would let `maddu upgrade` / `git checkout
-// -- .` bypass) — only the exact remedy verbs below.
+// ── The Bash write-classifier (audit P2: 5-class) ────────────────────────────
+// Returns 'write' | 'self-disable' | 'remedy' | 'ambiguous' | 'read'.
+//  • 'write'  — a recognized DIRECT file write (redirect, sed -i, tee, mv/cp/rm,
+//    PowerShell verb, OR an inline interpreter `-e/-c/-i` whose payload calls a
+//    filesystem-write API). Treated as a mutating edit (subject to discipline).
+//  • 'self-disable' — a command that turns Máddu's OWN enforcement off
+//    (`maddu hooks uninstall/remove`, `governance set-override
+//    discipline-enforcement off|nudge`). Gated/witnessed per governance mode.
+//  • 'remedy' — an exact ritual-remedy command; NEVER blocked (even though
+//    `git commit` / `maddu slice-stop` do write).
+//  • 'ambiguous' — an opaque executor with no detected write intent (npm/make/
+//    a bare interpreter running a script file). Gated under strict, nudged under
+//    standard, allowed under relaxed (see disciplineAction).
+//  • 'read'   — read-only / unrecognized (default). Allowed.
+// WRITE DOMINATES self-disable so a compound `hooks uninstall && rm -rf x` is
+// gated as a write, not waved through as a bare disable. Detection is
+// deliberately INCOMPLETE (shell-wrapped / opaque writes fall to read/ambiguous)
+// — the real gate for the named CLI disablements is the governance/hooks CLI
+// layer (see commands/governance.mjs + commands/hooks.mjs). NO blanket maddu/git
+// exemption — only the exact remedy verbs below.
 const REMEDY_RE = [
   // strip a leading launcher (maddu / node …maddu.mjs / ./maddu/run) then match verb
   /(?:^|\s)(?:maddu|node\s+\S*maddu\.mjs|\.\/maddu\/run)\s+(register|session\s+start|lane\s+claim|goal\s+set|plan\s+(?:new|add|add-phase|revise)|slice-stop)\b/,
@@ -83,39 +93,115 @@ const WRITE_RE = [
   /(?:^|\s)(?:mv|cp|install|rm|dd|truncate)\s/,    // move/copy/install/remove/dd/truncate
   /(?:^|\s)(?:Set-Content|Add-Content|Out-File|New-Item|Move-Item|Copy-Item|Remove-Item)\b/i, // PowerShell
 ];
-// Blank the CONTENTS of quoted spans so a write token that appears INSIDE a
-// quoted argument is not mistaken for a real shell op. This matters because the
-// mandated commit trailer `… <noreply@anthropic.com>` contains a `>` and a
-// `maddu slice-stop "… cat > file …"` message contains a redirect char — neither
-// is a real write, but both would otherwise trip WRITE_RE and (worst case) block
-// the very remedy that clears the block. Real operators live in the unquoted code.
+// Filesystem-write APIs inside an interpreter payload (node -e / python -c / …).
+// A bare `>` is a SHELL redirect signal ONLY (it lives in WRITE_RE above), NEVER
+// an interpreter write-signal — `node -e "console.log(2 > 1)"` must stay 'read'
+// (audit P2 F12). `open(...)` counts only in write/append mode.
+const INTERP_WRITE_API_RE = /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|mkdirSync|mkdir|makedirs|rmdirSync|rmdir|rmtree|rmSync|unlinkSync|unlink|renameSync|rename|truncateSync|truncate|copyFileSync|copyFile|symlinkSync|symlink)\b|\bos\.remove\b|\bshutil\.(?:rmtree|move|copy\w*)\b|\bopen\s*\([^)]*['"][wax]/;
+// A launcher running INLINE code (-e/-c). Detected on the dequoted code (the flag
+// is unquoted); the payload write-API scan runs on the ORIGINAL (quotes→spaces).
+const INTERP_INLINE_RE = /(?:^|\s)(?:node|deno|bun|python3?|perl|ruby)\b[^\n]*?\s-[A-Za-z]*[ec]\b/;
+// In-place editors always write regardless of payload (perl -i, ruby -i).
+const INPLACE_RE = /(?:^|\s)(?:perl|ruby)\b[^\n]*?\s-[A-Za-z]*i\b/;
+// A command that disables Máddu's own enforcement.
+const SELF_DISABLE_RE = [
+  /(?:^|\s)(?:maddu|node\s+\S*maddu\.mjs|\.\/maddu\/run)\s+hooks\s+(?:uninstall|remove)\b/,
+  /(?:^|\s)(?:maddu|node\s+\S*maddu\.mjs|\.\/maddu\/run)\s+governance\s+set-override\s+discipline-enforcement\s+(?:off|nudge)\b/,
+];
+// Opaque executors with no detected write intent — "might write."
+const AMBIGUOUS_RE = [
+  /(?:^|\s)(?:npm|npx|yarn|pnpm|make|cargo|gradle|mvn)\b/,
+  /(?:^|\s)go\s+run\b/,
+  /(?:^|\s)(?:node|deno|bun|python3?|perl|ruby)\s+(?!-)\S+/,  // interpreter running a SCRIPT FILE (no -flag)
+];
+
+// Blank the CONTENTS of quoted spans so a write token INSIDE a quoted argument
+// is not mistaken for a real shell op (the commit trailer `… <email>` carries a
+// `>`, a slice-stop message may quote `cat > file`). Real operators live in the
+// unquoted code.
 function stripQuotedArgs(s) {
   return String(s)
     .replace(/"([^"\\]|\\.)*"/g, '""')
     .replace(/'([^'\\]|\\.)*'/g, "''");
 }
 
+// Fold shell control operators to spaces so a boundary-anchored `(?:^|\s)` match
+// still catches a verb sitting tight against a separator (`uninstall;rm`,
+// `x&&maddu …`). `>&`/`&1` redirect fds survive because WRITE_RE's redirect
+// pattern already excludes a following digit/`&` (audit P2 F4).
+function normalizeSeparators(s) {
+  return String(s).replace(/(\|\||&&|[;&|\n])/g, ' ');
+}
+
 export function classifyBashWrite(command) {
   const cmd = String(command == null ? '' : command);
-  if (!cmd.trim()) return 'allow';
-  // Classify the DEQUOTED code so quoted argument text never reads as a shell op.
-  // WRITE is checked BEFORE remedy so a real write can't ride in on a remedy
-  // token — `maddu register && echo x > f`, `git status && rm -rf src`,
-  // `git diff | tee f`, `slice-stop x; Set-Content f y` all classify 'write'.
-  // But `git commit -m "… <email>"` / `maddu slice-stop "…>"` carry no UNQUOTED
-  // write op, so they still fall through to 'remedy' (the escape hatch stays open).
-  const code = stripQuotedArgs(cmd);
+  if (!cmd.trim()) return 'read';
+  const code = normalizeSeparators(stripQuotedArgs(cmd));
   // An UNQUOTED `sh -c`/`bash -c …` runs its argument AS code, so a write hidden
-  // in that argument is real — scan the original when such a wrapper is present.
-  // Detected on the DEQUOTED code, so a remedy MESSAGE that merely quotes
-  // "bash -c" is blanked and cannot trigger this (no re-introduced deadlock).
-  const execWrapped = /(?:^|\s|;|&|\|)(?:ba|da|k|z)?sh\s+-[a-z]*c\b/.test(code);
-  // When exec-wrapped, scan the original with quotes turned into spaces so a write
-  // verb sitting right after the opening quote (`sh -c "rm …"`) keeps its boundary.
-  const scanForWrite = execWrapped ? cmd.replace(/["']/g, ' ') : code;
+  // there is real — scan the original (quotes→spaces) when such a wrapper is present.
+  const execWrapped = /(?:^|\s)(?:ba|da|k|z)?sh\s+-[a-z]*c\b/.test(code);
+  const original = normalizeSeparators(cmd.replace(/["']/g, ' '));
+  const scanForWrite = execWrapped ? original : code;
+
+  // 1. WRITE dominates — a real write can't ride in on a remedy/self-disable token.
   for (const re of WRITE_RE) if (re.test(scanForWrite)) return 'write';
+  if (INPLACE_RE.test(code)) return 'write';
+  // Interpreter inline write: the -e/-c FLAG is unquoted (seen in `code`), but the
+  // PAYLOAD lives inside quotes — scan it WITH quotes intact (separators folded only)
+  // so `open('f','w')` is detectable; a bare `>` is NOT an API (F12).
+  if (INTERP_INLINE_RE.test(code) && INTERP_WRITE_API_RE.test(normalizeSeparators(cmd))) return 'write';
+  // 2. self-disable (turns enforcement off).
+  for (const re of SELF_DISABLE_RE) if (re.test(code)) return 'self-disable';
+  // 3. remedy (escape hatch).
   for (const re of REMEDY_RE) if (re.test(code)) return 'remedy';
-  return 'allow'; // read-only / ambiguous interpreter / build / unknown → allow
+  // 4. ambiguous opaque executor.
+  for (const re of AMBIGUOUS_RE) if (re.test(code)) return 'ambiguous';
+  // 5. read (default) — preserves the historic "unknown → allow" behavior.
+  return 'read';
+}
+
+// Enforcement rank for weakening comparisons (audit P2): a lower rank = weaker,
+// so ANY decrease (incl. block→graduated) is a "weakening" that needs a reason /
+// approval. Shared by commands/governance.mjs.
+export const ENFORCEMENT_RANK = { off: 0, nudge: 1, graduated: 2, block: 3 };
+
+// Pure policy: the classifier's `kind` + effective `enforcement` (+ whether a
+// self-disable carries an explicit --approve for the governance off-switch) →
+// ONE action the caller acts on. `enforcement:'off'` is orthogonal (handled +
+// witnessed at the hook seam), so this is only consulted for block/graduated/nudge.
+//   'allow'         — run untouched (read / remedy / relaxed-ambiguous).
+//   'nudge'         — run, surface a reminder, emit NO event (standard-ambiguous).
+//   'gate'          — subject to the ritual checks (decide with isMutating:true).
+//   'block'         — hard deny now (strict self-disable without --approve).
+//   'witness-allow' — run, but the seam emits a DISCIPLINE_SKIPPED witness.
+export function disciplineAction(kind, enforcement, approvedDisable = false) {
+  const strict = enforcement === 'block';
+  switch (kind) {
+    case 'edit':
+    case 'write':       return { action: 'gate' };
+    case 'read':
+    case 'remedy':      return { action: 'allow' };
+    case 'ambiguous':   return { action: strict ? 'gate' : (enforcement === 'graduated' ? 'nudge' : 'allow') };
+    case 'self-disable':
+      if (approvedDisable) return { action: 'witness-allow' };  // sanctioned disable — record, don't block
+      return { action: strict ? 'block' : 'witness-allow' };
+    default:            return { action: 'allow' };
+  }
+}
+
+// True only for the governance off-switch form carrying --approve (F8: the
+// --approve exemption is scoped to that exact command, NOT `hooks uninstall`).
+export function isApprovedOffSwitch(command) {
+  const c = normalizeSeparators(String(command == null ? '' : command));
+  return /(?:^|\s)(?:maddu|node\s+\S*maddu\.mjs|\.\/maddu\/run)\s+governance\s+set-override\s+discipline-enforcement\b/.test(c)
+    && /(?:^|\s)--approve\b/.test(c);
+}
+
+// A stable, path-scrubbed one-line signature of an error, so the seam can latch
+// witnesses per DISTINCT error signature (F6/B) without persisting a raw path/secret.
+export function normErrorSig(e) {
+  const m = e && (e.code || e.message) ? String(e.code || e.message) : String(e);
+  return m.split('\n')[0].replace(/[A-Za-z]:\\[^\s]+|\/[^\s/][^\s]*/g, '<path>').slice(0, 120);
 }
 
 // ── The PURE decision core ──────────────────────────────────────────────────
@@ -282,8 +368,11 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter) {
   const lastStop = lastOwnSliceStop(stops, sessionId);
   const goalActive = !!(proj.goal && proj.goal.status === 'active');
 
-  const registered = sessionId ? sessions.some((s) => s.id === sessionId) : sessions.length > 0;
-  const claimed = sessionId ? claims.some((c) => c.sessionId === sessionId) : claims.length > 0;
+  // audit P2 C6d: an UNBOUND caller (no sessionId) must NOT inherit "any session /
+  // any claim exists = I'm registered/claimed" — it can't prove THIS caller is
+  // bound, so it faces the session/lane gate (fail-open still applies downstream).
+  const registered = sessionId ? sessions.some((s) => s.id === sessionId) : false;
+  const claimed = sessionId ? claims.some((c) => c.sessionId === sessionId) : false;
 
   const dirty = await dirtyFiles(repoRoot);
   const baseline = new Set(Array.isArray(counter?.dirtyBaseline) ? counter.dirtyBaseline : []);
@@ -375,52 +464,90 @@ export function nextCounter(prev, state, nowMs) {
 // context / none). Unlike evaluateDiscipline (read-only), this PERSISTS the
 // post-decide edit bump — a blocked edit never advances the clocks.
 export async function enforcePreTool(repoRoot, opts = {}) {
+  // Hoisted so the catch can witness with whatever context was resolved (F6).
+  let sid = null, counterKey = null, tool = null;
   try {
-    const { tool, filePath, command, nowMs = 0, laneJustClaimed = false } = opts;
-    let sid = opts.madduSessionId || null;
+    ({ tool } = opts);
+    const { filePath, command, nowMs = 0, laneJustClaimed = false } = opts;
+    sid = opts.madduSessionId || null;
     if (!sid && opts.claudeSessionId) sid = await resolveMadduSession(repoRoot, opts.claudeSessionId);
     if (!sid) sid = process.env.MADDU_SESSION_ID || null;
+    // Counter key: the Máddu sid, else a Claude-session-scoped fallback so an
+    // unbound-but-Claude-identified agent's slice clock still advances (audit P2 C6d,
+    // Q4 — NOT a shared bucket). Truly anonymous → no persistence.
+    counterKey = sid || (opts.claudeSessionId ? `claude:${opts.claudeSessionId}` : null);
 
-    // Classify the tool → mutating? Remedies (`maddu slice-stop`/`git commit`/…)
-    // are the escape hatch — never gated, or the block would deadlock its own fix.
-    let mutating = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool);
-    if (tool === 'Bash') {
-      const kind = classifyBashWrite(command);
-      if (kind === 'remedy') return { ...ok(), sid, mutating: false, enforcement: 'n/a' };
-      mutating = kind === 'write';
-    }
-    if (!mutating) return { ...ok(), sid, mutating: false, enforcement: 'n/a' };
+    // Classify → kind. Edit-family always mutates; Bash routes through the 5-class
+    // classifier. Remedies + reads short-circuit (never gated, never witnessed).
+    let kind, approvedDisable = false;
+    if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool)) kind = 'edit';
+    else if (tool === 'Bash') {
+      kind = classifyBashWrite(command);
+      approvedDisable = kind === 'self-disable' && isApprovedOffSwitch(command);
+    } else kind = 'read';
+    if (kind === 'read' || kind === 'remedy')
+      return { ...ok(), sid, counterKey, mutating: false, enforcement: 'n/a', kind, action: 'allow' };
 
     const gov = await import('./governance.mjs');
     const cfg = await gov.readEffectiveGovernance(repoRoot);
     const thresholds = await readDisciplineConfig(repoRoot, cfg.mode);
     thresholds.enforcement = gov.effectiveValue(cfg, 'discipline-enforcement') || thresholds.enforcement;
-    if (thresholds.enforcement === 'off') return { ...ok(), sid, mutating, enforcement: 'off' };
+    const enforcement = thresholds.enforcement;
 
-    const prev = sid ? await readCounter(repoRoot, sid) : { editsSinceSlice: 0, dirtyBaseline: [] };
+    const action = disciplineAction(kind, enforcement, approvedDisable).action;
+
+    // enforcement OFF: allow, but tell the seam this was a would-be-gated tool so
+    // it emits DISCIPLINE_SKIPPED{enforcement-off} (a disabled enforcement bypass).
+    if (enforcement === 'off')
+      return { ...ok(), sid, counterKey, mutating: true, enforcement: 'off', kind, action: 'allow' };
+
+    // strict self-disable without --approve → hard block (full shape for denyReason).
+    if (action === 'block')
+      return { ...mk('block', 'self-disable',
+        'disabling Máddu enforcement requires operator approval',
+        'maddu governance set-override discipline-enforcement off --reason "<why>" --approve'),
+        sid, counterKey, mutating: true, enforcement, kind, action };
+
+    // self-disable that is allowed (non-strict, or --approve) → run + witness.
+    if (action === 'witness-allow')
+      return { ...ok(), sid, counterKey, mutating: false, enforcement, kind, action };
+
+    // ambiguous under standard → surface a nudge, no event, no block.
+    if (action === 'nudge')
+      return { verdict: 'nudge', blocker: 'ambiguous',
+        reason: 'an opaque command that may write ran without a discipline check',
+        remedy: 'run under a claimed lane / declare intent, or slice-stop if work is piling up',
+        sid, counterKey, mutating: false, enforcement, kind, action };
+
+    if (action !== 'gate')
+      return { ...ok(), sid, counterKey, mutating: false, enforcement, kind, action };
+
+    // action === 'gate' → the ritual path (decide's locked contract, unchanged).
+    const prev = counterKey ? await readCounter(repoRoot, counterKey) : { editsSinceSlice: 0, dirtyBaseline: [] };
     const state = await gatherRitualState(repoRoot, sid, nowMs, prev);
     if (laneJustClaimed) state.lane = { claimed: true };
     const counter = nextCounter(prev, state, nowMs);
-    // Recompute the state fields that depend on the just-maintained counter.
-    // gatherRitualState computed these from `prev` (pre-reset); after a fresh
-    // slice-stop resets editsSinceSlice to 0, "slice-stopped but still dirty" only
-    // becomes true here (Codex bug: it was silently false the edit after a stop).
+    // Recompute state fields that depend on the just-maintained counter (a fresh
+    // slice-stop resets editsSinceSlice to 0 → "slice-stopped but still dirty" only
+    // becomes true here).
     state.commit.dirtyAgeMin = counter.firstDirtyTs != null ? Math.max(0, (nowMs - counter.firstDirtyTs) / 60000) : null;
     state.commit.slicedButDirty = !!(counter.lastSliceStopId && (counter.editsSinceSlice || 0) === 0 && (state.commit.newDirtyFiles || 0) > 0);
 
     const decision = decide({ thresholds, state, counter, toolCtx: { isMutating: true } });
 
-    // Persist. Bump the edit clocks ONLY for an allowed edit — a blocked edit did
-    // not happen, so it must not push the slice/goal-plan counters over threshold.
-    if (sid) {
+    // Persist. Bump the edit clocks ONLY for an allowed edit; on a HEALTHY eval
+    // clear any skip-witness latch (F6 — the next off/error episode re-emits).
+    if (counterKey) {
       if (decision.verdict !== 'block') {
         counter.editsSinceSlice = (counter.editsSinceSlice || 0) + 1;
         if (!(state.goalOrPlan && state.goalOrPlan.active)) counter.goalplanAgeEdits = (counter.goalplanAgeEdits || 0) + 1;
       }
-      await writeCounter(repoRoot, sid, counter);
+      if (decision.verdict === 'ok' && counter.skipLatch) counter.skipLatch = {};
+      await writeCounter(repoRoot, counterKey, counter);
     }
-    return { ...decision, sid, mutating, enforcement: thresholds.enforcement };
-  } catch {
-    return { ...ok(), sid: null, mutating: false, enforcement: 'error' }; // FAIL-OPEN
+    return { ...decision, sid, counterKey, mutating: true, enforcement, kind, action };
+  } catch (e) {
+    // FAIL-OPEN, but hand the seam a signature so it can witness ENFORCEMENT_ERROR.
+    return { ...ok(), sid, counterKey, tool, mutating: false, enforcement: 'error', kind: null, action: 'allow', errorSig: normErrorSig(e) };
   }
 }

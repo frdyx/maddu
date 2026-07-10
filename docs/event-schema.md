@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.5.0` · **Event types:** 177
+**Contract version:** `1.6.0` · **Event types:** 180
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (177)
+## Events (180)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -152,6 +152,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `TOOL_COMPLETED` | A default framework tool invocation exited. | `argv: array`, `durationMs: number`, `exitCode: number\|null`, `sessionId: string\|null`, `tool: string`, `lane: string\|null` |
 | `TOOL_REFUSED` | A tool invocation was refused (allowlist or dangerous form). | `argv: array`, `argv_index: number`, `detail: string`, `pattern_type: string`, `reason: string`, `sessionId: string\|null`, `source: string`, `tool: string`, `lane: string\|null` |
 | `GOVERNANCE_MODE_CHANGED` | The workspace governance tier changed. | `by: string\|null`, `from: string`, `reason: string\|null`, `to: string` |
+| `GOVERNANCE_OVERRIDE_CHANGED` | A governance behavior-override key was changed or cleared (recorded write-ahead so the discipline off-switch is always on the record). | `by: string\|null`, `from: string\|null`, `key: string`, `reason: string\|null`, `to: string\|null` |
 | `PLAN_CREATED` | A persisted plan was created. | `goal: string\|null`, `intent: string`, `name: string`, `phases: array`, `planId: string`, `title: string` |
 | `PLAN_PHASE_ADDED` | A phase was added to a plan. | `at: string`, `intent: string`, `name: string`, `planId: string` |
 | `PLAN_PHASE_COMPLETED` | A plan phase was completed. | `name: string`, `planId: string`, `summary: string\|null` |
@@ -194,6 +195,8 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `BRIDGE_ORIGIN_REJECTED` | The bridge rejected a request with a non-loopback Host/Origin. | `host: string\|null`, `method: string`, `origin: string\|null`, `path: string`, `reason: string` |
 | `BRIDGE_CROSS_WORKSPACE` | A bridge request selected a workspace other than the active one. | `active: string`, `method: string`, `path: string`, `workspace: string` |
 | `SPINE_CUTOVER` | A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules). | `version: string` |
+| `DISCIPLINE_SKIPPED` | A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent. | `blocked: boolean?`, `enforcement: string\|null`, `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
+| `ENFORCEMENT_ERROR` | The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open. | `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
 | `BLUEPRINT_DISTILLED` | A blueprint skeleton was distilled into prose by a provider CLI. | `distilledBytes: number`, `outPath: string`, `provider: string`, `runtime: string`, `skeletonBytes: number`, `slug: string` |
 | `DEBT_SCANNED` | The source tree was scanned for deliberate-shortcut debt markers. | `files: number`, `ledgerPath: string\|null`, `markers: number`, `noTrigger: number` |
 | `ARCHITECTURE_SCANNED` | The declared architecture contract was checked against the import graph. | `blocking: boolean`, `cycles: number`, `driftScore: number`, `edges: number`, `failOn: string`, `forbidden: number`, `modules: number`, `newViolations: number`, `uncovered: number`, `undeclared: number` |

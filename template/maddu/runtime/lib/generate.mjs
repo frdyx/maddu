@@ -332,12 +332,17 @@ async function listFiles(dir, accept) {
 // existing EOL so content-equal files stay byte-stable. ALSO emits an `orphan`
 // unit for any target-dir file matching the filter that has no source — so the
 // gate flags a payload doc nobody authored (the coverage docs-in-sync gave
-// beyond byte-equality). Returns null when the source dir is absent (skip the
-// whole generator — e.g. a consumer install).
+// beyond byte-equality). Returns null when the source dir OR the target dir is
+// absent (skip the whole generator): no source means nothing to mirror; no
+// target tree means a consumer install whose HOST project merely happens to own
+// a dir named like sourceDir (e.g. its own docs/) — those files are the
+// project's, not authored framework sources.
 async function mirrorUnits(repoRoot, gen) {
   const accept = gen.filter || ((name) => name.endsWith('.md'));
   const names = await listFiles(join(repoRoot, gen.sourceDir), accept);
   if (names === null) return null;
+  const targetNames = await listFiles(join(repoRoot, gen.targetDir), accept);
+  if (targetNames === null) return null;
   const units = [];
   for (const name of names) {
     const src = await readIfPresent(join(repoRoot, gen.sourceDir, name));
@@ -347,7 +352,6 @@ async function mirrorUnits(repoRoot, gen) {
     units.push({ id: `${gen.id}:${name}`, target: `${gen.targetDir}/${name}`, targetPath, expected: applyEol(src, eol), current });
   }
   const sourceSet = new Set(names);
-  const targetNames = (await listFiles(join(repoRoot, gen.targetDir), accept)) || [];
   for (const name of targetNames) {
     if (sourceSet.has(name)) continue;
     units.push({ id: `${gen.id}:orphan:${name}`, target: `${gen.targetDir}/${name}`, targetPath: join(repoRoot, gen.targetDir, name), orphan: true });

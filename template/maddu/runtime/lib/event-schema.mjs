@@ -43,7 +43,11 @@
 // 1.5.0 (audit P1) — added SPINE_CUTOVER (a chain-local tamper-detection cutover
 // anchor, seeded into a freshly-minted sync partition so verify holds it to the
 // post-cutover strict rules even with no migrated FRAMEWORK marker). Additive.
-export const EVENT_CONTRACT_VERSION = '1.5.0';
+// 1.6.0 (audit P2) — added DISCIPLINE_SKIPPED, ENFORCEMENT_ERROR, and
+// GOVERNANCE_OVERRIDE_CHANGED so a discipline bypass / fail-open / off-switch
+// change always leaves a spine witness (the "actor not sole witness" north star).
+// Additive → minor bump; baseline refreshed at release.
+export const EVENT_CONTRACT_VERSION = '1.6.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -186,6 +190,7 @@ export const EVENT_SCHEMA = {
   TOOL_COMPLETED: { summary: "A default framework tool invocation exited.", data: { argv: 'array', durationMs: 'number', exitCode: 'number|null', sessionId: 'string|null', tool: 'string', lane: 'string|null' } },
   TOOL_REFUSED: { summary: "A tool invocation was refused (allowlist or dangerous form).", data: { argv: 'array', argv_index: 'number', detail: 'string', pattern_type: 'string', reason: 'string', sessionId: 'string|null', source: 'string', tool: 'string', lane: 'string|null' } },
   GOVERNANCE_MODE_CHANGED: { summary: "The workspace governance tier changed.", data: { by: 'string|null', from: 'string', reason: 'string|null', to: 'string' } },
+  GOVERNANCE_OVERRIDE_CHANGED: { summary: "A governance behavior-override key was changed or cleared (recorded write-ahead so the discipline off-switch is always on the record).", data: { by: 'string|null', from: 'string|null', key: 'string', reason: 'string|null', to: 'string|null' } },
   PLAN_CREATED: { summary: "A persisted plan was created.", data: { goal: 'string|null', intent: 'string', name: 'string', phases: 'array', planId: 'string', title: 'string' } },
   PLAN_PHASE_ADDED: { summary: "A phase was added to a plan.", data: { at: 'string', intent: 'string', name: 'string', planId: 'string' } },
   PLAN_PHASE_COMPLETED: { summary: "A plan phase was completed.", data: { name: 'string', planId: 'string', summary: 'string|null' } },
@@ -228,6 +233,8 @@ export const EVENT_SCHEMA = {
   BRIDGE_ORIGIN_REJECTED: { summary: "The bridge rejected a request with a non-loopback Host/Origin.", data: { host: 'string|null', method: 'string', origin: 'string|null', path: 'string', reason: 'string' } },
   BRIDGE_CROSS_WORKSPACE: { summary: "A bridge request selected a workspace other than the active one.", data: { active: 'string', method: 'string', path: 'string', workspace: 'string' } },
   SPINE_CUTOVER: { summary: "A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).", data: { version: 'string' } },
+  DISCIPLINE_SKIPPED: { summary: "A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent.", data: { blocked: 'boolean?', enforcement: 'string|null', reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
+  ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   BLUEPRINT_DISTILLED: { summary: "A blueprint skeleton was distilled into prose by a provider CLI.", data: { distilledBytes: 'number', outPath: 'string', provider: 'string', runtime: 'string', skeletonBytes: 'number', slug: 'string' } },
   DEBT_SCANNED: { summary: "The source tree was scanned for deliberate-shortcut debt markers.", data: { files: 'number', ledgerPath: 'string|null', markers: 'number', noTrigger: 'number' } },
   ARCHITECTURE_SCANNED: { summary: "The declared architecture contract was checked against the import graph.", data: { blocking: 'boolean', cycles: 'number', driftScore: 'number', edges: 'number', failOn: 'string', forbidden: 'number', modules: 'number', newViolations: 'number', uncovered: 'number', undeclared: 'number' } },

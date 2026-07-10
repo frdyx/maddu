@@ -113,8 +113,8 @@ export default async function governanceCmd(argv) {
   if (sub === 'set-override') {
     const key = rest[0];
     const raw = rest[1];
-    if (!key || raw === undefined) {
-      console.error('usage: maddu governance set-override <key> <value>');
+    if (!key || raw === undefined || String(raw).startsWith('--')) {
+      console.error('usage: maddu governance set-override <key> <value> [--reason "<why>"] [--approve] [--force]');
       console.error('       valid keys: ' + lib.listOverrideKeys().join(', '));
       process.exit(2);
     }
@@ -123,18 +123,82 @@ export default async function governanceCmd(argv) {
       console.error('       valid keys: ' + lib.listOverrideKeys().join(', '));
       process.exit(2);
     }
+    const value = coerce(raw);
+    // audit P2 (C6c) — value-domain check: reject an unhandled/typo'd value for a
+    // security-sensitive key rather than silently storing "not off"/"not block".
+    const inDomain = lib.validateOverrideValue ? lib.validateOverrideValue(key, value) : null;
+    if (inDomain === false) {
+      console.error(`${ANSI.fail}refused${ANSI.reset}  ${key} must be one of: ${lib.OVERRIDE_DOMAINS[key].join(' | ')}  (got ${JSON.stringify(value)})`);
+      process.exit(2);
+    }
+    const reasonIdx = rest.indexOf('--reason');
+    const reason = reasonIdx >= 0 ? (rest[reasonIdx + 1] || null) : null;
+    const approve = rest.includes('--approve');
+    const force = rest.includes('--force');
+
     const before = await lib.readGovernance(repoRoot);
-    const overrides = { ...(before.overrides || {}), [key]: coerce(raw) };
+    const from = Object.prototype.hasOwnProperty.call(before.overrides || {}, key) ? before.overrides[key] : null;
+
+    // Weakening the discipline off-switch is the guarded path: require a reason, and
+    // refuse under an EFFECTIVE strict mode unless explicitly --approve'd.
+    let weakening = false;
+    if (key === 'discipline-enforcement' && lib.isEnforcementWeakening) {
+      const eff = await lib.readEffectiveGovernance(repoRoot);
+      const effFrom = lib.effectiveValue(eff, key);   // what enforcement is in force NOW
+      weakening = lib.isEnforcementWeakening(effFrom, value);
+      if (weakening) {
+        if (!reason) {
+          console.error(`${ANSI.fail}refused${ANSI.reset}  weakening enforcement (${effFrom} → ${value}) requires --reason "<why>" (explicit operator intent).`);
+          process.exit(3);
+        }
+        if (eff.mode === 'strict' && !approve) {
+          console.error(`${ANSI.fail}refused${ANSI.reset}  weakening enforcement under ${ANSI.red}strict${ANSI.reset} needs --approve (operator override).`);
+          process.exit(3);
+        }
+      }
+    }
+
+    // Record WRITE-AHEAD: append the change BEFORE writing config so a disable is
+    // never silent. Abort on append failure for the security-sensitive off-switch
+    // (unless --force); other keys downgrade a failure to a warning.
+    const sessionId = process.env.MADDU_SESSION_ID || null;
+    try {
+      await spine.append(repoRoot, {
+        type: spine.EVENT_TYPES.GOVERNANCE_OVERRIDE_CHANGED,
+        actor: sessionId, lane: null,
+        data: { key, from: from === null ? null : String(from), to: String(value), by: sessionId, reason },
+      });
+    } catch (e) {
+      if (key === 'discipline-enforcement' && !force) {
+        console.error(`${ANSI.fail}refused${ANSI.reset}  could not record the change on the spine (${String((e && e.message) || e).slice(0, 80)}). Re-run with --force to override.`);
+        process.exit(1);
+      }
+      console.error(`${ANSI.warn}warning${ANSI.reset}  change not recorded (spine append failed); proceeding${force ? ' due to --force' : ''}.`);
+    }
+
+    const overrides = { ...(before.overrides || {}), [key]: value };
     await lib.writeGovernance(repoRoot, { mode: before.mode, overrides });
-    console.log(`${ANSI.pass}ok${ANSI.reset}  override  ${key} = ${JSON.stringify(coerce(raw))}`);
+    console.log(`${ANSI.pass}ok${ANSI.reset}  override  ${key} = ${JSON.stringify(value)}${weakening ? `  ${ANSI.dim}(weakening — recorded${reason ? `: ${reason}` : ''})${ANSI.reset}` : ''}`);
     return;
   }
 
   if (sub === 'reset') {
     const before = await lib.readGovernance(repoRoot);
+    const sessionId = process.env.MADDU_SESSION_ID || null;
+    // audit P2 (C6c/F9): reset clears overrides. Record a clear of the
+    // discipline-enforcement override (→ null) so the provenance replay stays exact
+    // (an out-of-band re-add would then no longer look "accounted for"). Write-ahead.
+    if (Object.prototype.hasOwnProperty.call(before.overrides || {}, 'discipline-enforcement')) {
+      try {
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.GOVERNANCE_OVERRIDE_CHANGED,
+          actor: sessionId, lane: null,
+          data: { key: 'discipline-enforcement', from: String(before.overrides['discipline-enforcement']), to: null, by: sessionId, reason: 'reset' },
+        });
+      } catch { /* best-effort — reset also records the mode change below */ }
+    }
     await lib.writeGovernance(repoRoot, { mode: 'standard', overrides: {} });
     if (before.mode !== 'standard') {
-      const sessionId = process.env.MADDU_SESSION_ID || null;
       await spine.append(repoRoot, {
         type: spine.EVENT_TYPES.GOVERNANCE_MODE_CHANGED,
         actor: sessionId, lane: null,
