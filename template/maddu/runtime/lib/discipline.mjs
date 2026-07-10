@@ -97,10 +97,15 @@ const WRITE_RE = [
 // A bare `>` is a SHELL redirect signal ONLY (it lives in WRITE_RE above), NEVER
 // an interpreter write-signal — `node -e "console.log(2 > 1)"` must stay 'read'
 // (audit P2 F12). `open(...)` counts only in write/append mode.
-// Require a CALL `(` after each API name so a bare mention in a string/comment
-// (`console.log('writeFileSync')`) does NOT read as a write; include the write-
-// capable open modes (w/a/x AND r+/w+/a+ — r+ can write).
-const INTERP_WRITE_API_RE = /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|mkdirSync|mkdir|makedirs|rmdirSync|rmdir|rmtree|rmSync|unlinkSync|unlink|renameSync|rename|truncateSync|truncate|copyFileSync|copyFile|symlinkSync|symlink)\s*\(|\bos\.remove\s*\(|\bshutil\.(?:rmtree|move|copy\w*)\s*\(|\bopen\s*\([^)]*['"](?:[wax]|r\+)/;
+// Require a CALL `(` after each API name so a bare word in a string/comment
+// (`console.log('writeFileSync')`) does NOT read as a write. `open(...)` counts
+// only with a SECOND quoted-mode arg containing a write-capable flag (w/a/x, or a
+// `+` update flag — so r+/rb+/w+b all count, but 'r'/'rb' do not). The comma+quote
+// requirement keeps a filename that merely contains w/a/x (`open('file.wax')`) read.
+// This heuristic is deliberately INCOMPLETE (see the classifier header): a call
+// embedded in a string/comment can still over-classify as write — the SAFE
+// direction (an extra nudge under standard), never an under-gate.
+const INTERP_WRITE_API_RE = /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|mkdirSync|mkdir|makedirs|rmdirSync|rmdir|rmtree|rmSync|unlinkSync|unlink|renameSync|rename|truncateSync|truncate|copyFileSync|copyFile|symlinkSync|symlink)\s*\(|\bos\.remove\s*\(|\bshutil\.(?:rmtree|move|copy\w*)\s*\(|\bopen\s*\([^)]*,\s*['"][a-z]*[wax+]/;
 // A launcher running INLINE code (-e/-c). Detected on the dequoted code (the flag
 // is unquoted); the payload write-API scan runs on the ORIGINAL (quotes→spaces).
 const INTERP_INLINE_RE = /(?:^|\s)(?:node|deno|bun|python3?|perl|ruby)\b[^\n]*?\s-[A-Za-z]*[ec]\b/;

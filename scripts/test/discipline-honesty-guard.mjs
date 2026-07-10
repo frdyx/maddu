@@ -49,6 +49,9 @@ const cls = [
   ['node -e "require(\'fs\').writeFileSync(\'x\',\'y\')"', 'write'],
   ['python3 -c "open(\'f\',\'w\').write(1)"', 'write'],
   ['python3 -c "open(\'f\',\'r+\').write(1)"', 'write'],           // r+ can write
+  ['python3 -c "open(\'f\',\'rb+\').write(1)"', 'write'],          // rb+ binary update
+  ['python3 -c "open(\'f\',\'r\').read()"', 'read'],               // read mode stays read
+  ['python3 -c "open(\'file.wax\')"', 'read'],                     // filename w/a/x ≠ write mode
   ['perl -i -pe s/a/b/ file', 'write'],                        // in-place always writes
   ['echo hi > out.txt', 'write'],
   ['sed -i s/a/b/ f', 'write'],
