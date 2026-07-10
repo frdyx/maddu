@@ -819,7 +819,10 @@ export async function buildPortfolioEntry(repoRoot) {
   return {
     project: basename(repoRoot),
     goal: proj.goal ? proj.goal.objective : null,
-    percent: (met != null && total) ? Math.round((met / total) * 100) : null,
+    // Withhold the authoritative percent unless integrity 'ok' && !stale (same
+    // gate as allMet), so the portfolio wall can't show a green 100% from an
+    // unverified/stale receipt. Raw metCount/total still render.
+    percent: (met != null && total && sv.integrity === 'ok' && !sv.stale) ? Math.round((met / total) * 100) : null,
     metCount: sv.metCount,
     total,
     allMet: sv.allMet,
