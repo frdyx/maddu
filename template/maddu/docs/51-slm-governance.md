@@ -64,7 +64,7 @@ trusted. Advancing requires the approvals system, in every governance mode:
    safety property working, not a bug.
 3. There is no flag that skips the ride.
 
-The spine verifier holds all of it tamper-evident on replay: promotion
+The spine verifier holds all of it tamper-detecting on replay: promotion
 without its own allowing approval, stage skips vs the derived stage,
 cross-proposal approval reuse, non-downward rollbacks, releases without a
 rollback plan — all FAIL `maddu spine verify`.

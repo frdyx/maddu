@@ -17,7 +17,7 @@ One compromised npm package on one developer's machine got access to
 ("local-first, files-only, no hosted backend, no provider SDKs in
 framework code, device-bound tokens") into enforced gates.
 
-## The 10 attack scenarios
+## The 11 attack scenarios
 
 Each scenario lists the attack, what Máddu enforces, what it does NOT
 enforce, and the concrete gate / spine event family that catches it
@@ -372,6 +372,44 @@ the operator's machine" remit.
 - The operator deliberately binding the bridge to a non-loopback
   interface. That hostname is then accepted; exposing the bridge to a
   network is an explicit operator choice outside the rebinding model.
+
+### 11. An agent (or the operator) edits `.maddu/events/*.ndjson` directly
+
+**Attack:** the spine is plain NDJSON files on disk. A compromised
+worker, a rogue local process, or a careless hand-edit rewrites an
+interior event, deletes one, inserts a forged one, reorders them, or
+strips the `prev_hash` keys — to hide what happened or fabricate a record
+of work that never ran.
+
+**Máddu enforcement (tamper-DETECTING, unkeyed):** every event carries a
+forward `prev_hash` (the sha256 of the previous stored line). A chain is
+held to STRICT rules once it is *post-cutover* — it shows a
+`FRAMEWORK_INSTALLED`/`FRAMEWORK_UPGRADED` at/after v1.98.0 (the release
+that locked the flat append path) or a `SPINE_CUTOVER` anchor. On such a
+chain `maddu spine verify` returns a **FAIL** (nonzero exit; reds the
+`spine-integrity` gate) for an interior edit, deletion, insertion,
+reorder, or `prev_hash`-strip. Pre-cutover history stays a WARN
+(`chain_fork`/`chain_gap`) because the old unlocked flat path could
+legitimately fork and legacy events were written without keys. Nothing is
+ever auto-repaired — the operator decides.
+
+**Máddu does NOT enforce (the unkeyed limit — the OS's job):** the chain
+is a plain hash, not an HMAC/signature, so a **determined local actor who
+recomputes the whole forward chain** after editing (or rewrites the
+`FRAMEWORK`/`SPINE_CUTOVER` anchor) produces a spine that verifies clean.
+Likewise **truncating a contiguous tail** (removing the final event or
+segment) leaves no dangling link, **editing only the last event** (no
+successor to notice), **appending a forged well-linked event** (the
+correct `prev_hash` is publicly computable), **stripping every key from a
+legacy-rooted chain**, and **whole-partition add/delete/replace in sync
+mode** (verify enumerates only present partitions) all pass silently.
+These are the classic limits of an unkeyed, file-enumerating record: it
+catches naive/accidental edits and partial interior tampering, not an
+adversary who rewrites a contiguous whole. Keyed integrity and
+process-level isolation remain the OS's job (see *Integration with
+OS-level defenses*). The point Máddu does guarantee: **the actor is not
+the sole witness** — a naive after-the-fact rewrite leaves a detectable
+break, on the record, that an independent `spine verify` surfaces.
 
 ## Operator responsibilities
 
