@@ -40,7 +40,7 @@
 // 1.4.0 (audit P0b) — added BRIDGE_CROSS_WORKSPACE (a bridge request selected a
 // non-active workspace). Additive → minor bump; baseline refreshed so a
 // consumer caching 1.3.0 never sees the extra type under an unchanged version.
-// 1.5.0 (audit P1) — added SPINE_CUTOVER (a chain-local tamper-evidence cutover
+// 1.5.0 (audit P1) — added SPINE_CUTOVER (a chain-local tamper-detection cutover
 // anchor, seeded into a freshly-minted sync partition so verify holds it to the
 // post-cutover strict rules even with no migrated FRAMEWORK marker). Additive.
 export const EVENT_CONTRACT_VERSION = '1.5.0';

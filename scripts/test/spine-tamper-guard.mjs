@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// audit P1 — spine tamper-evidence gate (strict detection + honest residuals).
+// audit P1 — spine tamper-detection gate (strict detection + honest residuals).
 //
 // The bug this ships against: a hash mismatch was only a WARN (so `maddu spine
 // verify` stayed exit-0 on a tampered spine), and chain-STRIPPING produced zero

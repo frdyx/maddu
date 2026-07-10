@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// v1.14.0 — spine tamper-evidence (forward-only prev_hash chain).
+// v1.14.0 — spine tamper-detection (forward-only prev_hash chain).
 //
 // Asserts:
 //   1. fresh spine — every appended event carries prev_hash; genesis is null;

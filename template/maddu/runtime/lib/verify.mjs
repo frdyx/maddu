@@ -62,7 +62,7 @@
 //     GOAL_DECLARED, PHASE_DECLARED, SLASH_COMMANDS_SYNCED, AGENT_FILE_SYNCED,
 //     SECRET_DETECTED_IN_ARGV, TOOL_{INVOKED,COMPLETED,REFUSED}, WORKER_ENV_FILTERED,
 //     BRIDGE_ORIGIN_REJECTED, LEARN_*, SOURCE_HASH_RECOMPUTED, BRIDGE_CROSS_WORKSPACE,
-//     SPINE_CUTOVER (a chain-local tamper-evidence anchor — no parent invariant).
+//     SPINE_CUTOVER (a chain-local tamper-detection anchor — no parent invariant).
 //   * MEMORY_FACT_SUPERSEDED.supersedes is validated by hindsight's replay, not here.
 
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -1029,7 +1029,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           // reverted_to at-or-above the derived stage would re-elevate a
           // checkpoint without the approval ride — the same forgery class as
           // a from_stage lie. Absent reverted_to defaults to candidate
-          // (§4.4); present-but-invalid or non-downward is tamper-evident,
+          // (§4.4); present-but-invalid or non-downward is tamper-detecting,
           // and a flagged rollback never moves the derived stage.
           const cur = (ck && modelStages.get(ck)) || 'experiment';
           const rt = ev.data?.reverted_to === undefined ? 'candidate' : ev.data.reverted_to;

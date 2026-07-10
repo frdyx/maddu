@@ -12,7 +12,7 @@
 //     orphan_model_checkpoint (WARN) / orphan_model_eval (WARN) /
 //     model_eval_harness_unpinned (WARN) / orphan_model_regression /
 //     orphan_model_regression_ack / model_regression_ack_unreasoned;
-//   • the promotion-integrity rules are tamper-evident: a manifest-declared
+//   • the promotion-integrity rules are tamper-detecting: a manifest-declared
 //     from_stage lie (model_stage_mismatch), a stage skip vs the DERIVED
 //     stage (model_stage_skip), an unbound proposal
 //     (model_promotion_unbound), a forged approve for an unknown proposal

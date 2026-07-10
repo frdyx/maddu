@@ -27,7 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // verify.mjs + spine-sync.mjs so the cutover version can never drift across them.
 export const FLAT_LOCK_VERSION = '1.98.0';
 
-// Canonical tamper-evidence hash of a stored NDJSON line (trailing CR stripped so a
+// Canonical tamper-detection hash of a stored NDJSON line (trailing CR stripped so a
 // CRLF-normalized copy verifies identically). Single source of truth — spine.mjs
 // re-exports this so the verifier and every writer can never drift.
 export function hashLine(line) {

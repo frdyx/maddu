@@ -217,7 +217,7 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   // post-cutover rules — otherwise a markerless modern partition stays lenient
   // forever and a real fork/strip there would only WARN. We seed ONLY when the
   // partition is empty: a NON-empty migration is left byte-identical (its bytes are
-  // the tamper-evidence), and a >=1.98 install's migrated FRAMEWORK marker already
+  // the tamper-detection), and a >=1.98 install's migrated FRAMEWORK marker already
   // makes it strict; a pre-1.98-rooted migration is legitimately lenient (it was
   // written by unlocked writers). appendPartitioned sets prev_hash=null (genesis).
   const pdir = partitionDir(repoRoot, replicaId);

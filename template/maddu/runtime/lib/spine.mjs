@@ -280,7 +280,7 @@ export const EVENT_TYPES = {
   // (rate-limited per workspace+path) so one repo reaching into another's spine
   // is on the record. data: { workspace, active, method, path }
   BRIDGE_CROSS_WORKSPACE:     'BRIDGE_CROSS_WORKSPACE',
-  // audit P1 — chain-local tamper-evidence cutover anchor. Seeded into a
+  // audit P1 — chain-local tamper-detection cutover anchor. Seeded into a
   // freshly-minted sync partition (spine sync init) so the verifier holds that
   // partition to the post-cutover strict rules even without a migrated FRAMEWORK
   // marker. data: { version }

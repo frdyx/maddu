@@ -1102,7 +1102,7 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, await buildProjectCockpit(repoRoot));
   }
   // Decision ledger — the curated decision-grade spine (intent/decision/gate/
-  // outcome) with a tamper-evident chain badge. Read-only.
+  // outcome) with a tamper-detecting chain badge. Read-only.
   if (path === '/bridge/decisions' && req.method === 'GET') {
     return sendJson(res, 200, await buildDecisions(repoRoot));
   }
