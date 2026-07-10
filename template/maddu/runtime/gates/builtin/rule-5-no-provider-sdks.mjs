@@ -38,7 +38,37 @@ async function walkFiles(dir, predicate) {
   return out;
 }
 
-const SCANNED_EXT = /\.(m?js|cjs|mts|cts|ts|jsx|tsx|html|css)$/;
+// The JS lexer only makes sense on JavaScript/TypeScript. HTML is handled by
+// extracting its <script> blocks (its text nodes are NOT code); CSS is excluded
+// entirely (a stylesheet cannot import a JS provider SDK — `@import` is
+// stylesheets, and scanning CSS text as JS only invites false positives).
+const JS_EXT = /\.(m?js|cjs|mts|cts|ts|jsx|tsx)$/;
+const HTML_EXT = /\.html?$/;
+const SCANNED_EXT = (p) => JS_EXT.test(p) || HTML_EXT.test(p);
+
+// Return the JS inside every <script>…</script> block (inline scripts only —
+// `<script src=…>` has no body). Everything outside a script block is markup or
+// text, never code.
+function extractScripts(html) {
+  const out = [];
+  const re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html))) out.push(m[1]);
+  return out;
+}
+
+// The banned-import check for a whole file, honouring its kind: raw JS is scanned
+// directly; HTML is scanned per <script> block. Returns the first hit, or null.
+export function bannedImportInSource(text, path) {
+  if (HTML_EXT.test(path || '')) {
+    for (const js of extractScripts(String(text || ''))) {
+      const hit = bannedImportHit(js);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  return bannedImportHit(text);
+}
 
 // A specifier is banned iff its VALUE is exactly a provider package or a subpath
 // of one. The package boundary is inherent (an exact-or-`/subpath` match), so
@@ -48,7 +78,7 @@ const BANNED_PKG_RE = /^(?:anthropic|openai|@anthropic-ai|@google\/generative-ai
 // when it ends with an import keyword / dynamic-import or require call opener.
 // The call form also accepts an optional `module.` qualifier (CommonJS
 // `module.require('x')`) and an optional-call `?.` (`require?.('x')`).
-const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:module\.require|import|require)\s*(?:\?\.)?\s*\(\s*$/;
+const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:module\s*\.\s*require|import|require)\s*(?:\?\.)?\s*\(\s*$/;
 
 // Exported so the self-test can exercise the matcher directly with in-memory
 // strings — no literal banned specifier is ever written into a scanned tree.
@@ -265,13 +295,13 @@ export default {
     const hits = [];
     const perTree = {};
     for (const t of scan.trees) {
-      const files = await walkFiles(t.abs, (p) => SCANNED_EXT.test(p));
+      const files = await walkFiles(t.abs, SCANNED_EXT);
       perTree[t.rel] = files.length;
       scanned += files.length;
       for (const f of files) {
         let text;
         try { text = await readFile(f, 'utf8'); } catch { continue; }
-        if (bannedImportHit(text)) hits.push(rel(f));
+        if (bannedImportInSource(text, f)) hits.push(rel(f));
       }
     }
     // Efficacy: a positively-recognized layout that scanned zero files verified

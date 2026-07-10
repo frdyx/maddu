@@ -14,7 +14,7 @@
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import gate, { bannedImportHit } from '../../template/maddu/runtime/gates/builtin/rule-5-no-provider-sdks.mjs';
+import gate, { bannedImportHit, bannedImportInSource } from '../../template/maddu/runtime/gates/builtin/rule-5-no-provider-sdks.mjs';
 
 let failures = 0;
 const ok = (name, cond) => { if (!cond) { failures++; console.log(`  [FAIL] ${name}`); } else { console.log(`  [ok] ${name}`); } };
@@ -126,6 +126,14 @@ async function main() {
     !bannedImportHit(`<!-- imp` + `ort ${Q}${OAI}${Q} -->`));
   ok('a real <script> import after an HTML comment is caught',
     !!bannedImportHit(`<!-- x -->\n<script>imp` + `ort ${Q}${OAI}${Q};</script>`));
+
+  // ── HTML is scanned per <script> block; TEXT NODES are not code ─────────────
+  ok('HTML text node with import-looking text is NOT flagged',
+    !bannedImportInSource(`<pre><code>imp` + `ort OpenAI from "${OAI}"</code></pre>`, 'x.html'));
+  ok('a real import inside an HTML <script> block IS flagged',
+    !!bannedImportInSource(`<div>ok</div><script>imp` + `ort x from "${OAI}";</script>`, 'x.html'));
+  ok('an HTML file with no <script> is never flagged',
+    !bannedImportInSource(`<p>req` + `uire(${Q}${OAI}${Q}) shown as text</p>`, 'x.html'));
 
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',
