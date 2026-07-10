@@ -57,11 +57,29 @@ const FORMS = [
 ];
 const BANNED_RE = new RegExp(FORMS.join('|'));
 
+// Strip comments before matching so a commented-out example
+// (`// import 'openai'`) can't red this critical gate, and so a comment placed
+// BETWEEN the keyword and the specifier (`import /* x */ 'openai'`) can't hide a
+// real import from the matcher. Line comments are only stripped when `//` is not
+// part of a `://` scheme, so a URL inside a string is left intact.
+function stripComments(text) {
+  return String(text || '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
 // Exported so the self-test can exercise the matcher directly with in-memory
 // strings — no literal banned specifier is ever written into a scanned tree.
 // Returns the offending match text, or null.
+//
+// SCOPE (honest claim): this is a guard against ORDINARY, careless provider-SDK
+// imports in framework code — it reads source text, not an AST. A determined
+// author can obfuscate past it (string concatenation `'open'+'ai'`, unicode
+// escapes `'openai'`, computed specifiers). That is out of scope, the same
+// way the spine's tamper-DETECTION is not tamper-PROOFING: the goal is to catch
+// the mistake, not to defeat an adversary who is trying to smuggle an SDK in.
 export function bannedImportHit(text) {
-  const m = BANNED_RE.exec(String(text || ''));
+  const m = BANNED_RE.exec(stripComments(text));
   return m ? m[0] : null;
 }
 

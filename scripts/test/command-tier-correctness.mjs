@@ -26,12 +26,16 @@ async function main() {
   ok('syncGit call → signal', !!mutationSignal('const r = await lib.spineSync.syncGit(repoRoot);'));
   ok('syncInit call → signal', !!mutationSignal('await lib.spineSync.syncInit(repoRoot);'));
   ok('git commit argv → signal', !!mutationSignal("await execFile('git', ['commit', '-m', 'x']);"));
-  ok('control-plane write → signal', !!mutationSignal("await writeFile(join(dir, '.maddu/config/governance.json'), body);"));
+  ok('control-plane write (literal path) → signal', !!mutationSignal("await writeFile(join(dir, '.maddu/config/governance.json'), body);"));
+  ok('control-plane write (path segments) → signal', !!mutationSignal("await writeFile(join(dir, '.maddu', 'lanes', 'catalog.json'), body);"));
   ok('curated event append → signal', !!mutationSignal("await spine.append(root, { type: 'LANE_CLAIMED', data });"));
-  // negatives — read-only idioms must NOT signal
+  // negatives — read-only idioms and non-git arrays must NOT signal
   ok('git rev-parse → no signal', !mutationSignal("await execFile('git', ['rev-parse', '--is-inside-work-tree']);"));
   ok('git ls-files → no signal', !mutationSignal("await execFile('git', ['ls-files', '-z', '--', '.maddu']);"));
+  ok('npm init (not git) → no signal', !mutationSignal("await spawn('npm', ['init', '-y']);"));
+  ok('a plain array with a git-verb word → no signal', !mutationSignal("const actions = ['add', 'remove'];"));
   ok('.maddu/state write → no signal', !mutationSignal("await writeFile(join(dir, '.maddu/state/x.json'), body);"));
+  ok('.maddu/state segments → no signal', !mutationSignal("await writeFile(join(dir, '.maddu', 'state', 'x.json'), body);"));
   ok('provenance append → no signal', !mutationSignal("await spine.append(root, { type: 'VERIFICATION_RAN', data });"));
   ok('report append → no signal', !mutationSignal("await spine.append(root, { type: 'DOCTOR_REPORT', data });"));
   ok('naming a mutating type in READ logic → no signal', !mutationSignal("if (e.type === 'LANE_CLAIMED') count++;"));

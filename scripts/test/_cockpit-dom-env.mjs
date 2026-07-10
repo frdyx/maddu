@@ -32,10 +32,14 @@ export async function loadHappyDom() {
   try {
     return await import('happy-dom');
   } catch (err) {
-    // audit P4 — only a GENUINE absence (happy-dom not installed) is a skip;
-    // a corrupt/broken happy-dom must propagate as a real harness error, never
-    // be silently downgraded to "skipped" (which would read as PASS).
-    if (err && err.code === 'ERR_MODULE_NOT_FOUND' && /happy-dom/.test(String(err.message || ''))) return null;
+    // audit P4 — only a GENUINE absence of happy-dom itself is a skip; a corrupt
+    // happy-dom, or a missing TRANSITIVE dependency (whose error is merely
+    // "imported from node_modules/happy-dom/…"), must propagate as a real harness
+    // error, never be downgraded to "skipped" (which would read as PASS). Match
+    // the missing SPECIFIER exactly ("Cannot find package/module 'happy-dom'"),
+    // not just any message that mentions happy-dom.
+    const msg = String(err && err.message || '');
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND' && /Cannot find (?:package|module) '?happy-dom'?/.test(msg)) return null;
     throw err;
   }
 }

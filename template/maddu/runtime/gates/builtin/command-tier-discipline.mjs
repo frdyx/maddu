@@ -35,9 +35,20 @@ async function resolveBin(repoRoot) {
 // (.maddu/state) and provenance/telemetry/report events (VERIFICATION_*,
 // TOKEN_USAGE, *_REPORT, SKILL_INJECTED, GATE_RAN, FOCUS_*) are deliberately NOT
 // signals — read-only verbs legitimately emit those.
-const CONTROL_PLANE_WRITE = /(writeFile|appendFile|mkdir|rename|rm|rmdir|unlink|cp|copyFile)\([^)]*\.maddu[/\\](config|lanes|sessions)[/\\]/;
+const WRITE_FN = 'writeFile|appendFile|mkdir|rename|rm|rmdir|unlink|cp|copyFile';
+// A control-plane write, in either the literal-path form (`'.maddu/config/…'`)
+// or the path-segment form (`join('.maddu','config',…)`) so a segmented path
+// can't slip past. Derived state (`.maddu/state`) is deliberately NOT matched.
+const CONTROL_PLANE_WRITE = new RegExp(
+  `(?:${WRITE_FN})\\([^;]*?` +
+  `(?:\\.maddu[/\\\\](?:config|lanes|sessions)[/\\\\]` +           // '.maddu/config/…'
+  `|['"]\\.maddu['"][^;]*?['"](?:config|lanes|sessions)['"])`,     // join('.maddu', …, 'config', …)
+);
 const GIT_SYNC_HELPER = /\b(syncGit|syncInit)\s*\(/;                 // spine sync git-transport mutations
-const GIT_MUTATING_ARGV = /\[\s*['"](commit|push|pull|fetch|merge|reset|rebase|add|rm|tag|stash|clone|init|checkout)['"]/;
+// A git call whose FIRST argv element is a mutating subcommand — anchored on the
+// `'git'` executable so a non-git array (`spawn('npm', ['init'])`, `['add']`)
+// is not a false positive.
+const GIT_MUTATING_ARGV = /['"]git['"]\s*,\s*\[\s*['"](commit|push|pull|fetch|merge|reset|rebase|add|rm|tag|stash|clone|init|checkout)['"]/;
 // A curated positive set of unquestionably domain-mutating event types. Matched
 // only in an append CONTEXT (`type:` near an `append(`), so a read that merely
 // names the type is not a false positive.

@@ -41,8 +41,20 @@ async function main() {
     bareToken: `const s = ${Q}${OAI}${Q}.length`,
     nodeBuiltin: `imp` + `ort ${Q}node:fs${Q}`,
     localPath: `imp` + `ort x from ${Q}./${OAI}${Q}`,   // relative path, not a package
+    lineComment: `// imp` + `ort ${Q}${OAI}${Q} — an example in a comment`,
+    blockComment: `/* imp` + `ort x from ${Q}${OAI}${Q} */ const y = 1;`,
   };
   for (const [k, s] of Object.entries(neg)) ok(`matcher ignores ${k}`, !bannedImportHit(s));
+
+  // ── comment-in-the-middle must NOT hide a real import (stripped, then caught) ─
+  ok('matcher still catches import with a comment before the specifier',
+    !!bannedImportHit(`imp` + `ort x from /* c */ ${Q}${OAI}${Q}`));
+  ok('matcher still catches dynamic import with a comment before the paren',
+    !!bannedImportHit(`imp` + `ort /* c */ (${Q}${OAI}${Q})`));
+
+  // ── documented residual (out of scope): text scan can't see through obfuscation ─
+  ok('KNOWN residual: string concatenation is not caught (documented scope)',
+    !bannedImportHit(`imp` + `ort(${Q}open${Q} + ${Q}ai${Q})`));
 
   // ── end-to-end gate over a temp INSTALLED-layout tree ─────────────────────
   const base = await mkdtemp(join(tmpdir(), 'maddu-rule5-'));
