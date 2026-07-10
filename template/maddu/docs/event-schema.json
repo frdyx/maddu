@@ -5384,7 +5384,7 @@
       "then": {
         "properties": {
           "data": {
-            "description": "A chain-local tamper-evidence cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).",
+            "description": "A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).",
             "type": "object",
             "additionalProperties": true,
             "properties": {
