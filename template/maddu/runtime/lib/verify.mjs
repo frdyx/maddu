@@ -1119,11 +1119,15 @@ export async function readVerifiedEvents(repoRoot, { maxEvents = Infinity, allow
   const integrity = res.counts.FAIL > 0 ? 'broken' : (res.capped ? 'unknown' : 'ok');
   const trust = integrity === 'ok' || allowUnverifiedEvents;
   const events = trust ? (res.eventList || []) : [];
-  // In sync mode verifySpine scans partitions sequentially, so eventList is
-  // partition-concatenated, NOT globally time-ordered. Consumers that take the
-  // "latest" receipt or rely on STARTED-before-RAN ordering need chronological
-  // order, so sort by ts (stable; a no-op on the already-ordered flat chain).
-  events.sort((a, b) => (Date.parse((a && a.ts) || '') || 0) - (Date.parse((b && b.ts) || '') || 0));
+  // The single flat chain is already in APPEND order — the authoritative "newest"
+  // even if a clock rollback made a later event's ts earlier. Do NOT sort it.
+  // Only in SYNC mode is eventList partition-concatenated (not time-ordered), so
+  // sort by ts there to approximate a cross-partition merge (a documented
+  // sync-mode limitation under clock skew; the k-way merge is `spine import`'s job).
+  const isSync = (res.segments || []).some((s) => s && s.replicaId);
+  if (isSync) {
+    events.sort((a, b) => (Date.parse((a && a.ts) || '') || 0) - (Date.parse((b && b.ts) || '') || 0));
+  }
   return {
     events,
     integrity,

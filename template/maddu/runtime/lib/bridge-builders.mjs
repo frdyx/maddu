@@ -623,9 +623,11 @@ export async function buildProjectCockpit(repoRoot) {
     metCount: sv.metCount,
     verifiable: sv.verifiable,
     total,
-    // A stale/unverified receipt yields met:null → percent stays null rather than
-    // implying progress from an uncorroborated record.
-    percent: (met != null && total) ? Math.round((met / total) * 100) : null,
+    // percent is a "done" signal, so assert it ONLY when integrity is 'ok' (same
+    // gate as allMet). Under 'unknown'/'broken' the raw metCount/total still show
+    // (labelled unverified/stale), but the headline 100%/percent is withheld so a
+    // cockpit can't read an uncorroborated receipt as authoritatively complete.
+    percent: (met != null && total && sv.integrity === 'ok' && !sv.stale) ? Math.round((met / total) * 100) : null,
     allMet: sv.allMet,
     evaluatedAt: sv.evaluatedAt,
     stale: sv.stale,
