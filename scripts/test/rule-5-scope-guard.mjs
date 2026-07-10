@@ -116,6 +116,12 @@ async function main() {
   ok('backtick specifier import is caught',
     !!bannedImportHit('imp' + 'ort(`' + OAI + '`)'));
 
+  // ── in JS, `<!--` is a SINGLE-LINE comment, not a block to `-->` ────────────
+  ok('a real import on a line between <!-- and --> executes and is caught',
+    !!bannedImportHit(`<!-- note\nawait imp` + `ort(${Q}${OAI}${Q});\n-->`));
+  ok('an import on the same line as a JS <!-- line comment is not flagged',
+    !bannedImportHit(`<!-- imp` + `ort ${Q}${OAI}${Q} on this comment line`));
+
   // ── CommonJS / optional-call require forms ──────────────────────────────────
   ok('module.require(pkg) is caught', !!bannedImportHit(`const x = module.require(${Q}${OAI}${Q})`));
   ok('require?.(pkg) optional-call is caught', !!bannedImportHit(`const x = require?.(${Q}${OAI}${Q})`));

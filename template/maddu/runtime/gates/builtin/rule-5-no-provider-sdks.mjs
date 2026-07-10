@@ -158,11 +158,13 @@ function scanCode(src, start, stopAtBrace) {
     if (c === ')') { lastCloseCtl = parenCtl.pop() || false; push(')'); i++; continue; }
     if (c === '{') { brace++; push(c); i++; continue; }
     if (c === '}') { brace--; push(c); i++; continue; }
-    // line / block / HTML comments (the gate scans .html/.css too, so an HTML
-    // `<!-- … -->` comment must not be read as code)
+    // line / block comments. `scanCode` runs on JAVASCRIPT (HTML is handled by
+    // extractScripts before this); the legacy JS HTML-open-comment `<!--` is a
+    // SINGLE-LINE comment (to end of line), NOT a block to `-->` — so an import
+    // on a line between `<!--` and a later `-->` is real code and must be caught.
     if (c === '/' && c2 === '/') { i += 2; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
     if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; push(' '); continue; }
-    if (c === '<' && src.startsWith('<!--', i)) { i += 4; while (i < n && !(src[i] === '-' && src[i + 1] === '-' && src[i + 2] === '>')) i++; i += 3; push(' '); continue; }
+    if (c === '<' && src.startsWith('<!--', i)) { i += 4; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
     // regex literal — a `/` begins one at the start of a context (empty tail),
     // after an operator/opener/keyword, or after a `)` that closed a control-flow
     // header (`if (x) /re/`), but NOT after a value or a postfix ++/--.
