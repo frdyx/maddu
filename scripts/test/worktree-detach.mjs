@@ -64,7 +64,7 @@ async function main() {
   const base = await mkdtemp(path.join(os.tmpdir(), 'maddu-wtdetach-'));
   try {
     const repo = await setupRepo(base, ['git-integration', 'cockpit-shell', 'bridge-server', 'harness']);
-    if (!repo) { console.log('  [SKIP] git unavailable'); console.log('\nworktree-detach: skipped'); process.exit(0); }
+    if (!repo) { console.log('  [SKIP] git unavailable'); console.log('\nworktree-detach: skipped'); process.exit(77); } // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
 
     // ── merged: branch merged into main → verified, worktree+branch removed ──
     {

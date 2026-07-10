@@ -17,7 +17,7 @@ import { loadHappyDom } from './_cockpit-dom-env.mjs';
 const happy = await loadHappyDom();
 if (!happy) {
   console.log('  [SKIP] happy-dom not installed (consumer checkout) — command-bar fixture skipped.');
-  process.exit(0);
+  process.exit(77); // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
 }
 
 const { Window } = happy;

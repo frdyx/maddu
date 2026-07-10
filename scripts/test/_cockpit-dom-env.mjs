@@ -31,8 +31,12 @@ const FROZEN_EPOCH = Date.parse('2026-06-19T12:00:00.000Z'); // 1782216000000
 export async function loadHappyDom() {
   try {
     return await import('happy-dom');
-  } catch {
-    return null;
+  } catch (err) {
+    // audit P4 — only a GENUINE absence (happy-dom not installed) is a skip;
+    // a corrupt/broken happy-dom must propagate as a real harness error, never
+    // be silently downgraded to "skipped" (which would read as PASS).
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND' && /happy-dom/.test(String(err.message || ''))) return null;
+    throw err;
   }
 }
 

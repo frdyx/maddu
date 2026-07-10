@@ -59,7 +59,7 @@ async function main() {
   })())) {
     console.log('  (git unavailable — skipping)');
     console.log('spine-sync-git: 0/0');
-    return;
+    process.exit(77); // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
   }
 
   // A bare "remote" both checkouts share.
