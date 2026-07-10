@@ -39,15 +39,20 @@ export async function recordVerification(repoRoot, spineLib, { kind, profile = n
   // Run regardless of whether the STARTED append succeeded.
   const result = await run();
   if (canAppend && startedId) {
-    try {
-      const payload = derive ? derive(result) : {};
-      await spine.append(repoRoot, {
-        type: T.VERIFICATION_RAN || 'VERIFICATION_RAN',
-        actor: (spineLib && spineLib.actor) || null,
-        lane: (spineLib && spineLib.lane) || null,
-        data: { kind, startedId, profile, complete: true, result: 'pass', counts: null, ...payload },
-      });
-    } catch { /* a dangling STARTED remains → the gate reads it as non-green */ }
+    const payload = derive ? derive(result) : {};
+    // derive returns null/undefined to signal "no real result to record" (e.g. a
+    // --list or a config/usage error that ran nothing) — emit NO receipt. The
+    // STARTED remains, but callers guard those no-run modes before calling here.
+    if (payload != null) {
+      try {
+        await spine.append(repoRoot, {
+          type: T.VERIFICATION_RAN || 'VERIFICATION_RAN',
+          actor: (spineLib && spineLib.actor) || null,
+          lane: (spineLib && spineLib.lane) || null,
+          data: { kind, startedId, profile, complete: true, result: 'pass', counts: null, ...payload },
+        });
+      } catch { /* a dangling STARTED remains → the gate reads it as non-green */ }
+    }
   }
   return { startedId, result };
 }

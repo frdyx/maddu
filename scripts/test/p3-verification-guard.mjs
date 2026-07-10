@@ -73,6 +73,16 @@ const GOAL = { objective: 'G', setAt: 'S1', success: [{ text: 'a' }, { text: 'b'
   const freshEvents = [successReceipt({ ts: iso(-DAY / 4), allMet: false, metCount: 2 })];
   const fview = se.resolveSuccessView(freshEvents, { goal: GOAL, nowMs: NOW, integrity: 'ok' });
   ok('fresh view → renders metCount, no lastKnown', fview.stale === false && fview.metCount === 2 && fview.lastKnown === null);
+
+  // Codex R5#1 — a NEWER unpaired success-eval STARTED (a later eval that didn't
+  // complete) stales the prior receipt.
+  const withDangling = [
+    { id: 'st', type: 'VERIFICATION_STARTED', ts: iso(-DAY / 3), data: { kind: 'success-eval' } },
+    { ...successReceipt({ ts: iso(-DAY / 4), allMet: true }), id: 'r', data: { ...successReceipt({ ts: iso(-DAY / 4), allMet: true }).data, startedId: 'st' } },
+    { id: 'st2', type: 'VERIFICATION_STARTED', ts: iso(-DAY / 8), data: { kind: 'success-eval' } },
+  ];
+  const dview = se.resolveSuccessView(withDangling, { goal: GOAL, nowMs: NOW, integrity: 'ok' });
+  ok('newer unpaired success STARTED → stale (eval-incomplete)', dview.stale === true && dview.allMet === null && dview.staleReasons.includes('eval-incomplete'));
 }
 
 // ── Part 1: resolveGetIntegrity three-state (T1/T2) ──────────────────────────

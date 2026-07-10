@@ -138,6 +138,25 @@ export function latestSuccessReceipt(events) {
   return null;
 }
 
+// True iff a success-eval VERIFICATION_STARTED is NEWER than `receipt` and is not
+// referenced by any success-eval RAN — i.e. a later eval was opened but never
+// completed (crash / append-failure). The prior receipt's "met" is then stale.
+export function hasNewerSuccessDangling(events, receipt) {
+  const list = Array.isArray(events) ? events : [];
+  const rt = receipt ? Date.parse(receipt.ts || '') : -Infinity;
+  const referenced = new Set();
+  for (const e of list) {
+    if (e && e.type === 'VERIFICATION_RAN' && e.data && e.data.kind === 'success-eval' && e.data.startedId) referenced.add(e.data.startedId);
+  }
+  for (const e of list) {
+    if (e && e.type === 'VERIFICATION_STARTED' && e.data && e.data.kind === 'success-eval') {
+      const st = Date.parse(e.ts || '');
+      if (Number.isFinite(st) && st > rt && !referenced.has(e.id)) return true;
+    }
+  }
+  return false;
+}
+
 // Latest spine-integrity gate verdict (GATE_RAN) from an event list (or null).
 export function latestIntegrityVerdict(events) {
   const list = Array.isArray(events) ? events : [];
@@ -209,6 +228,12 @@ export function assessSuccess(receipt, { goal, nowMs, ttlMs = SUCCESS_RECEIPT_TT
 export function resolveSuccessView(events, { goal, nowMs, ttlMs = SUCCESS_RECEIPT_TTL_MS, integrity = 'ok' } = {}) {
   const receipt = latestSuccessReceipt(events);
   const a = assessSuccess(receipt, { goal, nowMs, ttlMs, integrity });
+  // A newer, unpaired success-eval STARTED means a later eval didn't complete →
+  // the prior receipt's "met" is stale (an eval-in-progress supersedes it).
+  if (receipt && hasNewerSuccessDangling(events, receipt) && !a.staleReasons.includes('eval-incomplete')) {
+    a.stale = true;
+    a.staleReasons = [...a.staleReasons, 'eval-incomplete'];
+  }
   const d = (receipt && receipt.data) || {};
   const conditions = Array.isArray(d.conditions) ? d.conditions : [];
   const total = conditions.length || (Array.isArray(goal?.success) ? goal.success.length : null);

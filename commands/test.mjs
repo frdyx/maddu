@@ -108,17 +108,20 @@ export default async function testCmd(argv) {
       const dir = await resolveLibDir();
       ({ recordVerification } = await import(pathToFileURL(join(dir, 'verification-recency.mjs')).href));
     } catch { recordVerification = null; }
+    // --list runs nothing, so it must NOT emit a verification receipt.
+    const isList = argv.includes('--list');
     let code;
-    if (recordVerification && spine) {
+    if (recordVerification && spine && !isList) {
       let captured = null;
       const out = await recordVerification(repoRoot, { spine, actor: sessionId, lane }, {
         kind: 'project-test', profile,
         run: async () => runProjectTestCli(argv, { repoRoot, onResult: (r) => { captured = r; } }),
+        // null → emit no receipt (a config/usage error ran nothing, captured stays null).
         derive: () => captured ? {
           complete: captured.complete !== false,
           result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
           counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
-        } : { complete: false, result: 'fail', counts: null },
+        } : null,
       });
       code = out.result;
     } else {

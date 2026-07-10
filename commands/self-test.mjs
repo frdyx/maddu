@@ -62,16 +62,19 @@ export default async function selfTest(argv) {
     ({ spine } = await import(pathToFileURL(join(dir, 'spine.mjs')).href).then((m) => ({ spine: m })));
   } catch { recordVerification = null; }
 
-  if (recordVerification && spine && spine.append) {
+  // --list runs nothing, so it must NOT emit a verification receipt.
+  const isList = argv.includes('--list');
+  if (recordVerification && spine && spine.append && !isList) {
     let captured = null;
     const out = await recordVerification(frameworkRoot, { spine, actor: process.env.MADDU_SESSION_ID || null, lane: process.env.MADDU_LANE || null }, {
       kind: 'self-test', profile,
       run: async () => runner.runSelfTestCli(argv, { frameworkRoot, onResult: (r) => { captured = r; } }),
+      // null → emit no receipt (a config/usage error ran nothing, captured stays null).
       derive: () => captured ? {
         complete: captured.complete !== false,
         result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
         counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
-      } : { complete: false, result: 'fail', counts: null },
+      } : null,
     });
     process.exit(out.result);
   }

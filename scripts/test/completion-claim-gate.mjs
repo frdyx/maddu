@@ -149,6 +149,20 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
 
+  // audit P3 (Codex R5#2) — recordVerification with a null derive (a --list /
+  // no-run mode) emits NO VERIFICATION_RAN receipt (only the STARTED), so a
+  // no-run invocation can't fabricate a failed receipt that reds recency.
+  {
+    const vr = await import(pathToFileURL(join(LIB_DIR, 'verification-recency.mjs')).href);
+    const root = await tempRepo('maddu-ccg-nullderive-');
+    await vr.recordVerification(root, { spine }, { kind: 'project-test', profile: 'quick', run: async () => 0, derive: () => null });
+    const events = await spine.readAll(root);
+    const rans = events.filter((e) => e.type === 'VERIFICATION_RAN');
+    const starts = events.filter((e) => e.type === 'VERIFICATION_STARTED');
+    ok('null derive → STARTED emitted but no RAN receipt', starts.length === 1 && rans.length === 0);
+    await rm(root, { recursive: true, force: true });
+  }
+
   console.log(`\ncompletion-claim-gate: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
