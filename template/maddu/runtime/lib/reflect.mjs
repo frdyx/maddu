@@ -89,8 +89,16 @@ export function hedgesCompletion(summary) {
 export function claimsVerification(summary) {
   const s = String(summary || '');
   if (!s) return false;
-  if (VERIFICATION_NEGATION_RE.some((re) => re.test(s))) return false;
-  return VERIFICATION_ADJACENT_RE.test(s);
+  // Evaluate per CLAUSE, not globally: a stray negation/quote elsewhere in a long
+  // summary must not suppress a real claim in another clause ("No regressions;
+  // all gates green" is still a claim). A clause with the adjacency AND no
+  // negation/quotation IN THAT CLAUSE is a confident verification claim.
+  for (const clause of s.split(/[.!?;\n]+/)) {
+    if (!VERIFICATION_ADJACENT_RE.test(clause)) continue;
+    if (VERIFICATION_NEGATION_RE.some((re) => re.test(clause))) continue;
+    return true;
+  }
+  return false;
 }
 
 // The proof FAMILY a claim needs [F10]: a claim about tests needs a passing test
@@ -166,8 +174,11 @@ function evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryRea
   const confident = !hedged && machineryReady && claimsVerification(summary);
   if (!hedged && !confident) return { flagged: false, kind: null };
   const family = confident ? claimFamily(summary) : 'any';
-  // Own verified deliverable is proof for any claim.
-  let proof = hasVerifiedDeliverable(ev);
+  // A verified deliverable (a declared file exists) is proof for a HEDGED claim
+  // ("should work" + the file is really there), but NOT for a confident
+  // verification claim: a file existing proves neither "gates green" nor "tests
+  // pass" [F10]. Confident claims need a matching-family gate/test event.
+  let proof = hedged ? hasVerifiedDeliverable(ev) : false;
   if (!proof) {
     for (let j = fromIdx + 1; j < i; j++) {
       const e = list[j];

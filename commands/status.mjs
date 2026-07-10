@@ -47,11 +47,10 @@ export function buildStatusLine(proj, view) {
   // A stale / unverified / goal-mismatched receipt shows "goal stale" rather than
   // an uncorroborated met count. Falls back to "goal set" / "no goal".
   if (view && !view.stale && typeof view.metCount === 'number' && view.total != null) {
-    // The terse line shows the count plain; the GET is non-authoritative, so an
-    // 'unknown' integrity (no live verify on a read) is not nagged here — the
-    // structured bridge output carries `unverified`/`integrity` for richer views.
-    // Only a genuinely STALE record (broken chain / expired / goal-changed) is flagged.
-    parts.push(`goal ${view.metCount}/${view.total}`);
+    // Show the count, but mark it 'unverified' when integrity isn't 'ok' (a GET
+    // never live-verifies) so a met count (e.g. 2/2) isn't read as an authoritative
+    // "all done". A genuinely STALE record renders "goal stale" below instead.
+    parts.push(`goal ${view.metCount}/${view.total}${view.unverified ? ' unverified' : ''}`);
   } else if (view && view.stale && view.evaluatedAt) {
     parts.push('goal stale');
   } else if (proj?.goal) {

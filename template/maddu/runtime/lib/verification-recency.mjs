@@ -66,10 +66,13 @@ export function pairVerifications(events, kind) {
     if (e.type === 'VERIFICATION_STARTED') startedById.set(e.id, { ev: e, index });
     else if (e.type === 'VERIFICATION_RAN') rans.push({ ev: e, index });
   });
-  const refCount = new Map();          // startedId -> number of RANs referencing it
-  for (const { ev } of rans) {
-    const sid = ev.data.startedId;
-    if (sid) refCount.set(sid, (refCount.get(sid) || 0) + 1);
+  // Reference counts span ALL RANs (any kind): a startedId reused across kinds is
+  // still a reuse and must fail-close, so count globally, not per-kind.
+  const refCount = new Map();          // startedId -> number of RANs referencing it (any kind)
+  for (const e of list) {
+    if (e && e.type === 'VERIFICATION_RAN' && e.data && e.data.startedId) {
+      refCount.set(e.data.startedId, (refCount.get(e.data.startedId) || 0) + 1);
+    }
   }
   const valid = [];
   for (const { ev, index } of rans) {
@@ -101,14 +104,13 @@ export function recencyFromSpine(events, { kind, ttlMs, nowMs, profileOk = () =>
   // result (crash / append-failure) → the gate reads that as non-green.
   const danglingInWindow = dangling.filter(withinWindow);
   const freshValid = valid.filter(withinWindow);
-  // The newest valid, complete, passing, profile-qualifying, in-window receipt.
-  const usable = freshValid.filter((r) =>
-    r.data.complete === true && r.data.result === 'pass' && profileOk(r.data.profile ?? null));
-  const latest = usable.length ? usable[usable.length - 1] : null;
-  // The newest valid in-window receipt regardless of outcome/completeness, so a
-  // gate can distinguish "last run FAILED / was partial / wrong profile" from
-  // "no run at all".
+  // The NEWEST valid in-window receipt is authoritative regardless of outcome —
+  // a later fail/partial/wrong-profile run overrides an earlier pass (an older
+  // green must NOT survive a newer failure [F9]).
   const latestAnyValid = freshValid.length ? freshValid[freshValid.length - 1] : null;
+  const qualifies = (r) => r && r.data.complete === true && r.data.result === 'pass' && profileOk(r.data.profile ?? null);
+  // `latest` (green) is set ONLY when the newest valid run itself qualifies.
+  const latest = qualifies(latestAnyValid) ? latestAnyValid : null;
   return { latest, latestAnyValid, danglingInWindow, hasReceipt: valid.length > 0 };
 }
 

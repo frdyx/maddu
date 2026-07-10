@@ -160,8 +160,12 @@ export function resolveGetIntegrity({ parseErrors, integrityVerdict, receiptTs }
   if (parseErrors == null || parseErrors > 0) return 'unknown';
   if (!integrityVerdict) return 'unknown';
   const vd = integrityVerdict.data || {};
-  const ok = vd.status != null ? vd.status === 'ok' : vd.ok === true;
-  if (!ok) return 'broken';
+  // Only an explicit FAIL is 'broken'. A 'warn' verdict (e.g. a pre-cutover
+  // legacy fork) is NOT broken — it must not stale a fresh success receipt.
+  const failed = vd.status != null ? vd.status === 'fail' : vd.ok === false;
+  if (failed) return 'broken';
+  // A capped integrity scan didn't cover the whole chain → can't assert 'ok'.
+  if (vd.capped === true || (vd.evidence && vd.evidence.capped === true)) return 'unknown';
   const vt = Date.parse(integrityVerdict.ts || '');
   const rt = Date.parse(receiptTs || '');
   if (!Number.isFinite(vt)) return 'unknown';
@@ -179,7 +183,10 @@ export function assessSuccess(receipt, { goal, nowMs, ttlMs = SUCCESS_RECEIPT_TT
   const goalMatch = !!(receipt && goal &&
     (d.objective ?? null) === (goal.objective ?? null) &&
     (d.setAt ?? null) === (goal.setAt ?? null));
-  if (receipt && goal && !goalMatch) reasons.push('goal-changed');
+  // A receipt with no CURRENT goal (the goal was cleared) is stale — an old
+  // "met" must not render against a goal that no longer exists.
+  if (receipt && !goal) reasons.push('goal-changed');
+  else if (receipt && goal && !goalMatch) reasons.push('goal-changed');
   // integrity 'broken' (the chain FAILED a live verify, or the last verdict
   // failed) forces STALE — the record can't be trusted. integrity 'unknown' (no
   // integrity verdict has run SINCE this receipt) does NOT force stale: the count

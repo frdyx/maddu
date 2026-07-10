@@ -1118,8 +1118,14 @@ export async function readVerifiedEvents(repoRoot, { maxEvents = Infinity, allow
   const res = await verifySpine(repoRoot, { maxEvents, collectEvents: true });
   const integrity = res.counts.FAIL > 0 ? 'broken' : (res.capped ? 'unknown' : 'ok');
   const trust = integrity === 'ok' || allowUnverifiedEvents;
+  const events = trust ? (res.eventList || []) : [];
+  // In sync mode verifySpine scans partitions sequentially, so eventList is
+  // partition-concatenated, NOT globally time-ordered. Consumers that take the
+  // "latest" receipt or rely on STARTED-before-RAN ordering need chronological
+  // order, so sort by ts (stable; a no-op on the already-ordered flat chain).
+  events.sort((a, b) => (Date.parse((a && a.ts) || '') || 0) - (Date.parse((b && b.ts) || '') || 0));
   return {
-    events: trust ? (res.eventList || []) : [],
+    events,
     integrity,
     capped: res.capped,
     failCount: res.counts.FAIL,

@@ -84,6 +84,16 @@ const GOAL = { objective: 'G', setAt: 'S1', success: [{ text: 'a' }, { text: 'b'
   ok('failed verdict → broken', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(iso(0), false), receiptTs: iso(-DAY) }) === 'broken');
   ok('verdict predates receipt → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(iso(-2 * DAY), true), receiptTs: iso(-DAY) }) === 'unknown');
   ok('passing verdict at/after receipt → ok', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(iso(0), true), receiptTs: iso(-DAY) }) === 'ok');
+  // Codex#3/#4 — a 'warn' verdict is NOT broken; a capped verdict is unknown.
+  ok('warn verdict → not broken (ok)', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: { type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'warn' } }, receiptTs: iso(-DAY) }) === 'ok');
+  ok('capped verdict → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: { type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'ok', evidence: { capped: true } } }, receiptTs: iso(-DAY) }) === 'unknown');
+}
+
+// Codex#5 — clearing the goal stales an old "met" receipt.
+{
+  const events = [successReceipt({ ts: iso(-DAY / 4), allMet: true })];
+  const view = se.resolveSuccessView(events, { goal: null, nowMs: NOW, integrity: 'ok' });
+  ok('goal cleared → stale, allMet null', view.stale === true && view.allMet === null);
 }
 
 // ── Part 2: U2 pairing invariants ────────────────────────────────────────────
@@ -150,6 +160,18 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   // no receipt + legacy present → non-green (legacy not trusted, F8)
   v = vr.recencyGateVerdict([], 'ok', { kind: 'project-test', ttlMs: ttl, nowMs: NOW, profileOk, label: 'x', ttlLabel: '14d', legacyPresent: true });
   ok('no receipt + legacy → non-green (not trusted)', v.ok === false && /not trusted/.test(v.message));
+
+  // Codex#1 — an older PASS must NOT survive a newer FAIL (newest valid wins).
+  ev = [
+    started('s1', 'project-test', 'quick', iso(-3 * DAY)), ran('r1', 'project-test', 's1', { profile: 'quick', result: 'pass', ts: iso(-2 * DAY) }),
+    started('s2', 'project-test', 'quick', iso(-DAY)), ran('r2', 'project-test', 's2', { profile: 'quick', result: 'fail', ts: iso(-DAY / 2) }),
+  ];
+  v = vr.recencyGateVerdict(ev, 'ok', { kind: 'project-test', ttlMs: ttl, nowMs: NOW, profileOk, label: 'x', ttlLabel: '14d' });
+  ok('older pass + newer fail → non-green (newest wins)', v.ok === false && /FAILED/.test(v.message));
+
+  // Codex#2 — a startedId reused across KINDS fails the pairing (global refcount).
+  ev = [started('s1', 'project-test', 'quick', iso(-DAY)), ran('r1', 'project-test', 's1', { profile: 'quick' }), ran('r2', 'self-test', 's1', { profile: 'quick' })];
+  ok('cross-kind reused startedId → project pair invalid', vr.pairVerifications(ev, 'project-test').valid.length === 0);
 }
 
 // ── Part 3: confident verification-claim detection ───────────────────────────
@@ -159,8 +181,22 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   ok('template "Gates: schema 42/0" + "pass" apart → NOT a claim', reflect.claimsVerification('Gates: schema 42/0. Learnings: the pass path works') === false);
   ok('negation "not green" → NOT a claim', reflect.claimsVerification('the gate is not green yet') === false);
   ok('quotation "\'all gates green\'" → NOT a claim', reflect.claimsVerification('quoted "all gates green" from the log') === false);
+  // Codex#7 — negation in ANOTHER clause must not suppress a real claim.
+  ok('negation in a different clause → still a claim', reflect.claimsVerification('No regressions; all gates green') === true);
   ok('family: tests → test', reflect.claimFamily('tests pass') === 'test');
   ok('family: gates → gate', reflect.claimFamily('all gates green') === 'gate');
+}
+
+// Codex#6 — a verified deliverable proves a HEDGED claim but NOT a confident one.
+{
+  const vstart = { id: 'm', type: 'VERIFICATION_STARTED', lane: 'L', ts: iso(-2 * DAY), data: { kind: 'self-test' } };
+  const deliv = { declared: 1, verified: 1, missing: [] };
+  // hedged claim + deliverable → proven (not flagged)
+  let c = reflect.evaluateStop([vstart], { lane: 'L', actor: 'a', data: { summary: 'refactor done, should work', deliverables: deliv } });
+  ok('deliverable proves a hedged claim', c.flagged === false);
+  // confident claim + deliverable but NO gate/test event → still flagged
+  c = reflect.evaluateStop([vstart], { lane: 'L', actor: 'a', data: { summary: 'all gates green', deliverables: deliv } });
+  ok('deliverable does NOT prove a confident claim', c.flagged === true);
 }
 
 // ── Part 3: machinery-gating + lane-bound proof + candidate eval ──────────────
