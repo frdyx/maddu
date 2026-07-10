@@ -17,7 +17,7 @@ import { readAttachments } from './worktrees.mjs';
 import { verifySpine } from './verify.mjs';
 import {
   resolveSuccessView, latestSuccessReceipt,
-  latestIntegrityVerdict, resolveGetIntegrity,
+  latestIntegrityVerdict, resolveGetIntegrity, integrityCoversReceipt,
 } from './success-eval.mjs';
 import { plainRefused, EMPTY_STATE } from './oversight-copy.mjs';
 
@@ -42,10 +42,11 @@ async function successForGet(repoRoot, projGoal) {
     parseErrors = strict.parseErrors;
   } catch { events = []; parseErrors = null; }
   const receipt = latestSuccessReceipt(events);
+  const verdict = latestIntegrityVerdict(events);
   const integrity = resolveGetIntegrity({
     parseErrors,
-    integrityVerdict: latestIntegrityVerdict(events),
-    receiptTs: receipt ? receipt.ts : null,
+    integrityVerdict: verdict,
+    covers: integrityCoversReceipt(events, verdict, receipt),
   });
   const view = resolveSuccessView(events, { goal: projGoal, nowMs: Date.now(), integrity });
   return view;

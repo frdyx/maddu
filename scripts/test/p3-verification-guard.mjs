@@ -104,16 +104,22 @@ const GOAL = { objective: 'G', setAt: 'S1', success: [{ text: 'a' }, { text: 'b'
 
 // ── Part 1: resolveGetIntegrity three-state (T1/T2) ──────────────────────────
 {
-  const verdict = (ts, ok2) => ({ type: 'GATE_RAN', ts, data: { gateId: 'spine-integrity', status: ok2 ? 'ok' : 'fail' } });
-  ok('parse error → unknown', se.resolveGetIntegrity({ parseErrors: 1, integrityVerdict: verdict(iso(0), true), receiptTs: iso(-DAY) }) === 'unknown');
-  ok('null parseErrors (sync mode) → unknown', se.resolveGetIntegrity({ parseErrors: null, integrityVerdict: verdict(iso(0), true), receiptTs: iso(-DAY) }) === 'unknown');
-  ok('no verdict → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: null, receiptTs: iso(-DAY) }) === 'unknown');
-  ok('failed verdict → broken', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(iso(0), false), receiptTs: iso(-DAY) }) === 'broken');
-  ok('verdict predates receipt → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(iso(-2 * DAY), true), receiptTs: iso(-DAY) }) === 'unknown');
-  ok('passing verdict at/after receipt → ok', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(iso(0), true), receiptTs: iso(-DAY) }) === 'ok');
+  const verdict = (ok2) => ({ type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: ok2 ? 'ok' : 'fail' } });
+  ok('parse error → unknown', se.resolveGetIntegrity({ parseErrors: 1, integrityVerdict: verdict(true), covers: true }) === 'unknown');
+  ok('null parseErrors (sync mode) → unknown', se.resolveGetIntegrity({ parseErrors: null, integrityVerdict: verdict(true), covers: true }) === 'unknown');
+  ok('no verdict → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: null, covers: true }) === 'unknown');
+  ok('failed verdict → broken', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(false), covers: true }) === 'broken');
+  ok('verdict does not cover receipt → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(true), covers: false }) === 'unknown');
+  ok('passing verdict covers receipt → ok', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: verdict(true), covers: true }) === 'ok');
   // Codex#3/#4 — a 'warn' verdict is NOT broken; a capped verdict is unknown.
-  ok('warn verdict → not broken (ok)', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: { type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'warn' } }, receiptTs: iso(-DAY) }) === 'ok');
-  ok('capped verdict → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: { type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'ok', evidence: { capped: true } } }, receiptTs: iso(-DAY) }) === 'unknown');
+  ok('warn verdict → not broken (ok)', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: { type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'warn' } }, covers: true }) === 'ok');
+  ok('capped verdict → unknown', se.resolveGetIntegrity({ parseErrors: 0, integrityVerdict: { type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'ok', evidence: { capped: true } } }, covers: true }) === 'unknown');
+  // Codex R7#2 — coverage is by SPINE POSITION, not ts: a same-ts verdict appended
+  // BEFORE the receipt does not cover it.
+  const rcpt = { id: 'r', type: 'VERIFICATION_RAN', ts: iso(0), data: { kind: 'success-eval' } };
+  const vd = { id: 'v', type: 'GATE_RAN', ts: iso(0), data: { gateId: 'spine-integrity', status: 'ok' } };
+  ok('same-ts verdict BEFORE receipt → does not cover', se.integrityCoversReceipt([vd, rcpt], vd, rcpt) === false);
+  ok('same-ts verdict AFTER receipt → covers', se.integrityCoversReceipt([rcpt, vd], vd, rcpt) === true);
 }
 
 // Codex#5 — clearing the goal stales an old "met" receipt.

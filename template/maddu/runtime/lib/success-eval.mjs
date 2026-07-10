@@ -176,7 +176,11 @@ export function latestIntegrityVerdict(events) {
 //   'ok'      — a passing verdict that is at-or-after the receipt.
 // The GET is deliberately NON-authoritative: it reports honest timestamps; the
 // recency/success GATES (gate context) do the live verified read.
-export function resolveGetIntegrity({ parseErrors, integrityVerdict, receiptTs } = {}) {
+// `covers` is a caller-supplied boolean: does the integrity verdict cover the
+// success receipt? The caller computes it by SPINE POSITION (verdict at-or-after
+// the receipt), not timestamp, so a same-millisecond verdict appended BEFORE the
+// receipt does not falsely count as covering it.
+export function resolveGetIntegrity({ parseErrors, integrityVerdict, covers } = {}) {
   if (parseErrors == null || parseErrors > 0) return 'unknown';
   if (!integrityVerdict) return 'unknown';
   const vd = integrityVerdict.data || {};
@@ -186,11 +190,16 @@ export function resolveGetIntegrity({ parseErrors, integrityVerdict, receiptTs }
   if (failed) return 'broken';
   // A capped integrity scan didn't cover the whole chain → can't assert 'ok'.
   if (vd.capped === true || (vd.evidence && vd.evidence.capped === true)) return 'unknown';
-  const vt = Date.parse(integrityVerdict.ts || '');
-  const rt = Date.parse(receiptTs || '');
-  if (!Number.isFinite(vt)) return 'unknown';
-  if (Number.isFinite(rt) && vt < rt) return 'unknown'; // verdict predates the receipt
+  if (!covers) return 'unknown'; // verdict does not cover the receipt (predates it)
   return 'ok';
+}
+
+// Does `integrityVerdict` cover `receipt` by SPINE POSITION (at-or-after it)?
+// Position, not ts, so a same-ms verdict appended before the receipt returns false.
+export function integrityCoversReceipt(events, integrityVerdict, receipt) {
+  if (!integrityVerdict || !receipt) return false;
+  const list = Array.isArray(events) ? events : [];
+  return list.indexOf(integrityVerdict) >= list.indexOf(receipt);
 }
 
 // Pure staleness assessment of a success receipt against the current goal.

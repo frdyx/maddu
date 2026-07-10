@@ -48,10 +48,12 @@ export default async function selfTest(argv) {
   // self-test-recent reads recency from the tamper-detecting spine, not the
   // hand-writable self-test-last-run.json. Best-effort: if the spine libs can't
   // load, the self-test still runs (the gate just reads "no receipt" → non-green).
+  // Parse the profile via the runner's own parser (handles the positional form,
+  // `maddu self-test smoke`) so the receipt records the ACTUAL profile; a parse
+  // failure (invalid args) means nothing runs → emit NO receipt (argsValid=false).
   let profile = 'quick';
-  const pIdx = argv.indexOf('--profile');
-  if (pIdx >= 0 && argv[pIdx + 1]) profile = argv[pIdx + 1];
-  else { const inline = argv.find((a) => a.startsWith('--profile=')); if (inline) profile = inline.slice('--profile='.length); }
+  let argsValid = true;
+  try { profile = runner.parseSelfTestArgs(argv).profile; } catch { argsValid = false; }
 
   let recordVerification = null;
   let spine = null;
@@ -64,7 +66,7 @@ export default async function selfTest(argv) {
 
   // --list runs nothing, so it must NOT emit a verification receipt.
   const isList = argv.includes('--list');
-  if (recordVerification && spine && spine.append && !isList) {
+  if (recordVerification && spine && spine.append && !isList && argsValid) {
     let captured = null;
     const out = await recordVerification(frameworkRoot, { spine, actor: process.env.MADDU_SESSION_ID || null, lane: process.env.MADDU_LANE || null }, {
       kind: 'self-test', profile,

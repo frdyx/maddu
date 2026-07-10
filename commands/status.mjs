@@ -76,10 +76,11 @@ export default async function status(_args) {
       const { spine } = await loadSpineLib();
       const strict = await spine.readAllStrict(repoRoot);
       const receipt = se.latestSuccessReceipt(strict.events);
+      const verdict = se.latestIntegrityVerdict(strict.events);
       const integrity = se.resolveGetIntegrity({
         parseErrors: strict.parseErrors,
-        integrityVerdict: se.latestIntegrityVerdict(strict.events),
-        receiptTs: receipt ? receipt.ts : null,
+        integrityVerdict: verdict,
+        covers: se.integrityCoversReceipt(strict.events, verdict, receipt),
       });
       view = se.resolveSuccessView(strict.events, { goal: proj.goal, nowMs: Date.now(), integrity });
     } catch {}

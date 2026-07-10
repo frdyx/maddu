@@ -98,8 +98,12 @@ export default async function testCmd(argv) {
     // hand-writable last-run.json. The receipt is emitted from the in-process
     // result (never a re-read report). profile is parsed up front so STARTED and
     // RAN carry the same profile (U2 pairing).
+    // Parse the profile (handles the positional form); a parse failure means
+    // invalid args → nothing runs → emit NO receipt (argsValid=false), so a bad
+    // invocation can't leave a dangling STARTED that reds recency.
     let profile = 'quick';
-    try { profile = parseProjectTestArgs(argv).profile; } catch {}
+    let argsValid = true;
+    try { profile = parseProjectTestArgs(argv).profile; } catch { argsValid = false; }
     let recordVerification = null;
     try {
       const { resolveLibDir } = await import('./_libroot.mjs');
@@ -111,7 +115,7 @@ export default async function testCmd(argv) {
     // --list runs nothing, so it must NOT emit a verification receipt.
     const isList = argv.includes('--list');
     let code;
-    if (recordVerification && spine && !isList) {
+    if (recordVerification && spine && !isList && argsValid) {
       let captured = null;
       const out = await recordVerification(repoRoot, { spine, actor: sessionId, lane }, {
         kind: 'project-test', profile,
