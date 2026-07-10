@@ -15,19 +15,15 @@ import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, makeId } from './spine.mjs';
 import { saveSkill } from './skills.mjs';
+import { matchSecretType } from './secret-scan.mjs';
 
-// Patterns we recognize. Each is { name, re }. Names go into rejection logs;
-// the actual matched substring never does.
-const SECRET_PATTERNS = [
-  { name: 'anthropic-key',  re: /sk-ant-[a-zA-Z0-9\-_]{20,}/ },
-  { name: 'openai-key',     re: /sk-[a-zA-Z0-9]{20,}/ },
-  { name: 'github-pat',     re: /ghp_[a-zA-Z0-9]{20,}/ },
-  { name: 'github-fine',    re: /github_pat_[a-zA-Z0-9_]{40,}/ },
-  { name: 'aws-access-key', re: /AKIA[0-9A-Z]{16}/ },
-  { name: 'google-key',     re: /AIza[0-9A-Za-z\-_]{35}/ },
-  { name: 'slack-token',    re: /xox[baprs]-[0-9a-zA-Z\-]+/ },
-  { name: 'bearer-jwt',     re: /eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}/ },
-  { name: 'pem-block',      re: /-----BEGIN ([A-Z ]+) (PRIVATE|ENCRYPTED) (KEY|BLOCK)-----/ }
+// Value-shape detection is delegated to the ONE canonical detector
+// (secret-scan.mjs) so the importer rejects exactly the shapes the
+// write-boundary redactor scrubs — no second, drifting pattern list. The JWT
+// shape (below) is import-specific: a bearer JWT is a reject signal for a
+// foreign artifact but is not a redaction target elsewhere.
+const IMPORT_ONLY_PATTERNS = [
+  { name: 'bearer-jwt', re: /eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}/ },
 ];
 
 // Field names that strongly suggest a secret. Anything > 12 chars in such a
@@ -54,7 +50,11 @@ export function scanForSecrets(value, path = '$') {
   const hits = [];
   if (value === null || value === undefined) return hits;
   if (typeof value === 'string') {
-    for (const p of SECRET_PATTERNS) {
+    // Canonical value shapes (Stripe, all GitHub variants, correct PEM, …) —
+    // the pattern_type name is recorded, never the matched value.
+    const t = matchSecretType(value);
+    if (t) hits.push({ path, pattern: t });
+    for (const p of IMPORT_ONLY_PATTERNS) {
       if (p.re.test(value)) hits.push({ path, pattern: p.name });
     }
     return hits;

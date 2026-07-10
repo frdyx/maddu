@@ -1,5 +1,5 @@
 {
-  "version": "1.98.0",
-  "phase": "spine-tamper-detection-and-audit-remediation",
+  "version": "1.99.0",
+  "phase": "audit-remediation-secret-scrub-and-doc-drift",
   "released": "2026-07-10"
 }

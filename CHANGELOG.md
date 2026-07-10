@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.99.0] · 2026-07-10 · Audit remediation — secret-scrub + doc-drift (P5, final tier)
+
+**The final tier of the 2026-07-09 flaw audit.** The "secrets are redacted at the write boundary" guarantee was aspirational — the redactor covered the spine but ~10 auxiliary state stores wrote caller/agent/subprocess text raw, the detector missed several common secret shapes, and a second stale scanner drifted. This release makes the guarantee real where it's cheap and makes the *claim* precise where it isn't. Verbs **72/72**; gates **74** (no new gate/verb/event type — the new checks are auto-discovered self-tests).
+
+- **One canonical secret detector** (`secret-scan.mjs`) gains GitHub fine-grained (`github_pat_`) + user-to-server (`ghu_`) + refresh (`ghr_`), Google (`AIza…`), Stripe live/test secret+restricted keys, and a **correct PEM private-key matcher** (complete-label backreference block + an unterminated-to-EOF fallback so a truncated key body never survives). Field-name awareness adds `refresh_token`/`client_secret`/`bearer` — bare `token`/`secret` deliberately excluded (the key match is substring-based; they'd eat `sessionToken`/`csrfToken`).
+- **Every discrete state-store write is now scrubbed at the boundary** via a new value-pattern `redactLeaves` (non-breaking on config field names): checkpoint tag message + index, active-session pointer, schedules (repo + global), review archives, memory facts, MCP/runtime descriptors + health, and the lane catalog. The importer (`imports.mjs`) routes through the **same** canonical detector — no second pattern list.
+- **Documented residual:** worker subprocess stdout/stderr **log files** are fd-direct streams and are *not* auto-redacted (a correct fix needs a chunk-boundary-safe streaming redactor); SECURITY.md + the threat model say so plainly.
+- **Doc/count drift:** `version.json`/`package.json`/`package-lock.json` reconciled to **1.99.0** (they had drifted to 1.86.0/1.45.0) and pinned by a new version-parity self-test; governance gate count corrected (10→74) and the enumerated table relabelled a representative selection; the "doctor verifies all nine rules" overclaim corrected (Rules 3 & 7 are enforced by construction); a stale AGENTS.md cockpit note fixed. Plan + diff Codex-reviewed before self-merge.
+
 ## [v1.98.0] · 2026-07-10 · Audit remediation — tamper-detecting spine
 
 **A 2026-07-09 seven-auditor flaw audit (Codex-verified) found several headline guarantees passing for the wrong reason.** This release closes the externally-triggerable compromise chain and makes the spine genuinely tamper-*detecting* rather than merely warn-y — no agent is the sole witness to its own rewrite. Event contract **1.5.0**, **177** typed event types; verbs **72/72**; gates **74**; self-test **157/157**. Each tier's plan *and* diff adversarially reviewed by Codex before self-merge.

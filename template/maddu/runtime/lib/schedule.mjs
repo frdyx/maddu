@@ -13,6 +13,7 @@ import { mkdir, readFile, writeFile, appendFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, makeId } from './spine.mjs';
+import { redactLeaves } from './secret-scan.mjs';
 import { listGlobalSchedules, recordGlobalScheduleFire } from './global.mjs';
 
 function scheduleFile(repoRoot) {
@@ -53,7 +54,9 @@ export async function readSchedule(repoRoot, id) {
 
 async function writeRecord(repoRoot, rec) {
   await ensureFile(repoRoot);
-  await appendFile(scheduleFile(repoRoot), JSON.stringify(rec) + '\n');
+  // Write-boundary redaction: a schedule record persists caller command/natural
+  // text. Value-pattern scrub only; clean records are unchanged.
+  await appendFile(scheduleFile(repoRoot), JSON.stringify(redactLeaves(rec)) + '\n');
 }
 
 export async function saveSchedule(repoRoot, patch, by = null) {

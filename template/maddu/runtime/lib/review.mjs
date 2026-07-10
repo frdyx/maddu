@@ -9,6 +9,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { append, EVENT_TYPES } from './spine.mjs';
 import { readRuntime } from './runtimes.mjs';
+import { redactText } from './secret-scan.mjs';
 
 const VALID_VERDICTS = new Set(['CLEAN', 'P1', 'P2', 'P3', 'INFO']);
 
@@ -86,7 +87,10 @@ export async function writeReviewArchive(repoRoot, sliceEventId, { verdict, find
     : '';
   const out = yaml + (body || `# Review of ${sliceEventId}`) + findingsBlock;
   const rel = path.posix.join('.maddu', 'reviews', `${sliceEventId}.md`);
-  await fs.writeFile(path.join(dir, `${sliceEventId}.md`), out);
+  // Write-boundary redaction: reviewer body/findings are runtime-produced prose
+  // that can echo a secret. Value-pattern scrub of the markdown; clean text is
+  // returned unchanged.
+  await fs.writeFile(path.join(dir, `${sliceEventId}.md`), redactText(out).text);
   return rel;
 }
 

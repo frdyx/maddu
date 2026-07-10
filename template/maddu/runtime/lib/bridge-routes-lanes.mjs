@@ -18,6 +18,7 @@ import { pathsFor } from './paths.mjs';
 import { LANE_SLUG_RE } from './worktrees.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { sendJson, readBody } from './http-util.mjs';
+import { redactLeaves } from './secret-scan.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
 
@@ -122,7 +123,7 @@ export async function routeLanes({ req, res, path, repoRoot }) {
     for (const k of Object.keys(defaults)) if (defaults[k] == null) delete defaults[k];
     if (Object.keys(defaults).length === 0) delete lane.defaults;
     else lane.defaults = defaults;
-    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await writeFile(paths.laneCatalog, JSON.stringify(redactLeaves(catalog), null, 2) + '\n');
     await append(repoRoot, {
       type: 'LANE_DEFAULTS_SET',
       actor: body.by || null,
@@ -147,7 +148,7 @@ export async function routeLanes({ req, res, path, repoRoot }) {
     if (body.defaults && typeof body.defaults === 'object') lane.defaults = body.defaults;
     catalog.lanes = catalog.lanes || [];
     catalog.lanes.push(lane);
-    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await writeFile(paths.laneCatalog, JSON.stringify(redactLeaves(catalog), null, 2) + '\n');
     await append(repoRoot, { type: 'LANE_ADDED', actor: body.by || null, lane: lane.id, data: { lane } });
     return reply(res, 200, { ok: true, lane });
   }
@@ -174,7 +175,7 @@ export async function routeLanes({ req, res, path, repoRoot }) {
     }
     if (Object.keys(policy).length === 0) delete lane.policy;
     else lane.policy = policy;
-    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await writeFile(paths.laneCatalog, JSON.stringify(redactLeaves(catalog), null, 2) + '\n');
     await append(repoRoot, { type: 'LANE_POLICY_SET', actor: body.by || null, lane: id, data: { policy: lane.policy || null } });
     return reply(res, 200, { ok: true, lane });
   }
@@ -210,7 +211,7 @@ export async function routeLanes({ req, res, path, repoRoot }) {
     const before = (catalog.lanes || []).length;
     catalog.lanes = (catalog.lanes || []).filter((l) => l.id !== id);
     if (catalog.lanes.length === before) return reply(res, 404, { error: 'lane not found' });
-    await writeFile(paths.laneCatalog, JSON.stringify(catalog, null, 2) + '\n');
+    await writeFile(paths.laneCatalog, JSON.stringify(redactLeaves(catalog), null, 2) + '\n');
     await append(repoRoot, { type: 'LANE_REMOVED', actor: null, lane: id, data: {} });
     return reply(res, 200, { ok: true });
   }

@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES } from './spine.mjs';
+import { redactLeaves } from './secret-scan.mjs';
 
 // v1.2.0 Phase 2 — compute the canonical SHA256 of a template descriptor.
 // Hash is over the JSON.stringify of the object with `provenance` field
@@ -105,7 +106,10 @@ export async function saveMcp(repoRoot, patch, by = null) {
   const next = mergeDescriptor(existing || defaultDescriptor(patch.name), patch);
   next.updatedAt = new Date().toISOString();
   if (!existing) next.createdAt = next.updatedAt;
-  await writeFile(join(mcpDir(repoRoot), `${next.name}.json`), JSON.stringify(next, null, 2) + '\n');
+  // Write-boundary redaction: a descriptor can carry a secret-shaped value in a
+  // config field. Value-pattern scrub only — config field names + short values
+  // are preserved.
+  await writeFile(join(mcpDir(repoRoot), `${next.name}.json`), JSON.stringify(redactLeaves(next), null, 2) + '\n');
   await append(repoRoot, {
     type: EVENT_TYPES.MCP_REGISTERED,
     actor: by, lane: null,
@@ -143,7 +147,9 @@ async function readHealth(repoRoot) {
 }
 async function writeHealth(repoRoot, h) {
   await ensureDir(pathsFor(repoRoot).statePrjDir);
-  await writeFile(healthFile(repoRoot), JSON.stringify(h, null, 2) + '\n');
+  // Write-boundary redaction: MCP health carries buffered probe output. Value-
+  // pattern scrub only.
+  await writeFile(healthFile(repoRoot), JSON.stringify(redactLeaves(h), null, 2) + '\n');
 }
 
 async function testStdio(r) {

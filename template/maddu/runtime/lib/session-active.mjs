@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { mkdir, readFile, writeFile, unlink, rename } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
 import { readAll } from './spine.mjs';
+import { redactLeaves } from './secret-scan.mjs';
 
 const SCHEMA_VERSION = 1;
 
@@ -51,7 +52,9 @@ export async function writeActiveSession(repoRoot, payload) {
   await mkdir(dir, { recursive: true });
   const dst = activePath(repoRoot);
   const tmp = dst + '.tmp';
-  const record = { _v: SCHEMA_VERSION, ...payload };
+  // Write-boundary redaction: the pointer persists a caller-supplied focus/label.
+  // Value-pattern scrub only; clean records are unchanged.
+  const record = redactLeaves({ _v: SCHEMA_VERSION, ...payload });
   await writeFile(tmp, JSON.stringify(record, null, 2) + '\n');
   await rename(tmp, dst);
   return record;

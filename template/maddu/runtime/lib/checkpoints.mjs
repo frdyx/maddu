@@ -14,6 +14,7 @@ import { mkdir, readFile, writeFile, appendFile, stat, rm } from 'node:fs/promis
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, makeId } from './spine.mjs';
+import { redactText, redactLeaves } from './secret-scan.mjs';
 // v1.93.0 (roadmap #12a phase 4): the low-level git-subprocess idiom moved to
 // git-exec.mjs so worktrees.mjs reuses the exact same runner. gitAvailable is
 // re-exported below so existing importers (coordinator, bridge-routes-
@@ -65,7 +66,10 @@ export async function readCheckpoint(repoRoot, id) {
 
 async function writeRecord(repoRoot, rec) {
   await ensureDir(repoRoot);
-  await appendFile(indexFile(repoRoot), JSON.stringify(rec) + '\n');
+  // Write-boundary redaction: the checkpoint index persists caller/commit text
+  // (title/subject). Value-pattern scrub only — a secret-shaped substring becomes
+  // [REDACTED:…]; clean records are unchanged.
+  await appendFile(indexFile(repoRoot), JSON.stringify(redactLeaves(rec)) + '\n');
 }
 
 export async function createCheckpoint(repoRoot, { lane = null, title = null, by = null, triggeredBy = null } = {}) {
@@ -75,7 +79,14 @@ export async function createCheckpoint(repoRoot, { lane = null, title = null, by
   const head = await currentHead(repoRoot);
   const id = genCheckpointId();
   const tag = TAG_PREFIX + id;
-  const tagRes = await gitRun(['tag', '-a', tag, '-m', title || `Máddu checkpoint ${id}`, head.commit], repoRoot);
+  // Redact the title/subject ONCE, up front, so a secret-shaped commit subject
+  // or caller title never lands in the annotated git TAG MESSAGE (which the
+  // index redaction below would not reach). Reuse the safe values for the tag,
+  // the record, and the event.
+  const safeTagMsg = redactText(title || `Máddu checkpoint ${id}`).text;
+  const safeTitle = redactText(title || head.subject || head.commit.slice(0, 8)).text;
+  const safeSubject = redactText(head.subject || '').text;
+  const tagRes = await gitRun(['tag', '-a', tag, '-m', safeTagMsg, head.commit], repoRoot);
   if (tagRes.code !== 0) {
     throw new Error(`git tag failed: ${(tagRes.stderr || '').trim()}`);
   }
@@ -84,10 +95,10 @@ export async function createCheckpoint(repoRoot, { lane = null, title = null, by
     id,
     ts: new Date().toISOString(),
     lane: lane || null,
-    title: title || head.subject || head.commit.slice(0, 8),
+    title: safeTitle,
     commit: head.commit,
     branch: head.branch,
-    subject: head.subject,
+    subject: safeSubject,
     tag,
     hasWorktree: false,
     createdBy: by
