@@ -611,6 +611,35 @@ export async function readAll(repoRoot) {
   return out;
 }
 
+// audit P3 (T1) — a STRICT read for the bridge GET: unlike readAll (which
+// silently skips a malformed line), this COUNTS parse failures so a caller can
+// downgrade integrity to 'unknown' when a bad line was appended after the last
+// verified snapshot. Flat/default mode parses strictly; sync/partitioned mode
+// returns parseErrors:null ("can't strictly account" → caller treats as unknown).
+// No hashing, no spawn — a single read, safe on a bridge GET.
+export async function readAllStrict(repoRoot) {
+  const paths = await ensureSpine(repoRoot);
+  if (await readActiveReplicaId(repoRoot)) return { events: await readAllPartitioned(repoRoot), parseErrors: null };
+  const segs = await listSegments(paths);
+  if (await readActiveReplicaId(repoRoot)) return { events: await readAllPartitioned(repoRoot), parseErrors: null };
+  const out = [];
+  let parseErrors = 0;
+  for (const seg of segs) {
+    let text;
+    try { text = await readFile(join(paths.events, seg), 'utf8'); }
+    catch (err) {
+      if (err && err.code === 'ENOENT') return { events: await readAllPartitioned(repoRoot), parseErrors: null };
+      throw err;
+    }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line)); }
+      catch { parseErrors++; }
+    }
+  }
+  return { events: out, parseErrors };
+}
+
 export async function readSince(repoRoot, afterId) {
   const all = await readAll(repoRoot);
   if (!afterId) return all;
