@@ -35,14 +35,31 @@ function isLeaked(rel) {
 export default {
   id: 'maddu-state-untracked',
   label: 'maddu state untracked',
-  severity: 'warn',
+  // audit P4 — promoted warn→safety (fail-capable) so a real tracking leak reds
+  // CI, not just warns. The catch below is now fail-closed: only the explicitly
+  // modeled non-applicable state (not a git repo) skips; any OTHER git error
+  // (missing binary / permission / corruption) FAILs — the gate must never pass
+  // by having failed to verify.
+  severity: 'safety',
   description: 'Rebuildable/volatile .maddu state is not git-tracked (tracking it churns the working tree).',
   run: async (ctx) => {
+    // Detect the one modeled non-applicable case explicitly: not inside a git
+    // work tree. "fatal: not a git repository" is the sanctioned skip; every
+    // other git failure is fail-closed for a safety gate.
+    try {
+      const { stdout: inside } = await exec('git', ['-C', ctx.repoRoot, 'rev-parse', '--is-inside-work-tree']);
+      if (inside.trim() !== 'true') return { ok: true, message: 'not inside a git work tree — not applicable' };
+    } catch (err) {
+      if (/not a git repository/i.test(String(err.stderr || err.message || ''))) {
+        return { ok: true, message: 'not a git repository — not applicable' };
+      }
+      return { ok: false, message: `cannot verify .maddu tracking — git error: ${err.code || err.message || 'unknown'}` };
+    }
     let stdout;
     try {
       ({ stdout } = await exec('git', ['-C', ctx.repoRoot, 'ls-files', '-z', '--', '.maddu'], { maxBuffer: 1 << 26 }));
-    } catch {
-      return { ok: true, message: 'not a git repo (or git unavailable) — skipped' };
+    } catch (err) {
+      return { ok: false, message: `cannot list tracked .maddu files — git error: ${err.code || err.message || 'unknown'}` };
     }
     const tracked = stdout.split('\0').filter(Boolean);
     const leaked = tracked.filter(isLeaked);

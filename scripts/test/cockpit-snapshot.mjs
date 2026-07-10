@@ -38,7 +38,7 @@ globalThis.__MADDU_COCKPIT_TEST__ = true;
 const env = await installDom();
 if (!env) {
   console.log('SKIP: happy-dom not installed (dev-only devDependency) — `npm i -D happy-dom` to run this gate.');
-  process.exit(0);
+  process.exit(77); // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
 }
 installFakeBridge(env);
 

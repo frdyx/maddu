@@ -31,7 +31,7 @@ try {
   ({ chromium } = await import('playwright'));
 } catch {
   console.log('SKIP: playwright not installed (dev-only) — `npm i -D playwright` to run this gate.');
-  process.exit(0);
+  process.exit(77); // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
 }
 
 const { ROUTE_META } = await import('../../template/maddu/cockpit/cockpit-route-meta.js');
@@ -116,7 +116,7 @@ try {
 } catch (err) {
   await new Promise((r) => server.close(r));
   console.log(`SKIP: could not launch Chromium (${(err && err.message || err).split('\n')[0]}) — run \`npx playwright install chromium\`.`);
-  process.exit(0);
+  process.exit(77); // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
 }
 
 const pageErrors = [];

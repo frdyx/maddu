@@ -90,7 +90,12 @@ export default {
   slice:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   'slice-stop': { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   sources:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  spine:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
+  // audit P4 — `spine` has mutating subverbs: `spine sync` git-commits/pulls/
+  // pushes this replica's partition and `spine sync init` mints replica metadata
+  // (commands/spine.mjs → lib.spineSync.syncGit/syncInit). Declaring it read-only
+  // let those mutations escape the Rule-9 trigger gauntlet. Any-write-subverb ⇒
+  // the top-level verb is mutating; it is operator-invoked, never auto-fired.
+  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   start:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },

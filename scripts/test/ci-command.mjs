@@ -63,8 +63,14 @@ async function main() {
     const pinJ = parseJson(pin.stdout);
     ok('pin exits 0', pin.code === 0, `got ${pin.code}`);
     ok('pin wrote a required list', Array.isArray(pinJ?.pinned) && pinJ.pinned.length > 0);
-    ok('pin excluded the failing gates', Array.isArray(pinJ?.excluded) &&
-      pinJ.excluded.length === (unJ?.summary?.fail ?? 0), `excluded=${pinJ?.excluded?.length}`);
+    // audit P4 — pin now excludes failing gates AND every warn-severity gate
+    // (a warn gate can never red, so pinning it as "required" is a misnomer). So
+    // `excluded` is a superset of the failing gates, not equal to them.
+    ok('pin excludes every failing gate (plus warn-severity gates)',
+      Array.isArray(pinJ?.excluded)
+      && (unJ?.failed ?? []).every((f) => pinJ.excluded.includes(f.gateId))
+      && pinJ.excluded.length >= (unJ?.summary?.fail ?? 0),
+      `excluded=${pinJ?.excluded?.length}, failing=${unJ?.summary?.fail}`);
     const onDisk = parseJson(await readFile(CI_JSON, 'utf8'));
     ok('profile persisted to .maddu/config/ci.json',
       Array.isArray(onDisk?.requiredGates) && onDisk.requiredGates.length === pinJ.pinned.length);

@@ -9,6 +9,38 @@ const QUICK_EXCLUDED = new Set(['run-all.mjs', 'stress-harness.mjs', 'upgrade-ma
 const INTERNAL_SCRIPT_RE = /^_/;
 const MAX_OUTPUT_TAIL = 8000;
 
+// audit P4 — SKIP honesty. A task in this set is allowed to declare itself
+// non-applicable by exiting with SKIP_EXIT_CODE; the runner records it as
+// `skip` (distinct from `pass`), never as a pass. Any OTHER task that exits 77,
+// and every nonzero/signal/spawn error, is a `fail`. These are the nine
+// whole-task fixtures that need an optional dev dependency (happy-dom /
+// playwright / a browser) or a git worktree that may be absent on a bare runner.
+// Exit 77 is reserved (EX_NOPERM in sysexits) and is NOT used by any maddu verb
+// for refusals (those use 1/2/3), so it cannot collide with a real failure.
+export const SKIP_EXIT_CODE = 77;
+export const SKIPPABLE_TASKS = new Set([
+  'cockpit-boot',
+  'cockpit-snapshot',
+  'cockpit-command-bar',
+  'cockpit-inspector',
+  'cockpit-playwright',
+  'worktree-attach',
+  'worktree-coherence',
+  'worktree-detach',
+  'spine-sync-git',
+]);
+
+// audit P4 — the single source of truth for exit-code → status. Only a
+// SKIPPABLE task exiting with the reserved SKIP code is a `skip`; that code from
+// any other task, and every other nonzero exit / signal / spawn error (-1), is a
+// `fail`. A skip therefore can only ever mean "declared non-applicable", never
+// "something broke". Exported so the honesty guard can pin the classification.
+export function classifyExit(code, skippable) {
+  if (code === 0) return 'pass';
+  if (code === SKIP_EXIT_CODE && skippable) return 'skip';
+  return 'fail';
+}
+
 export class SelfTestConfigError extends Error {
   constructor(message) {
     super(message);
@@ -40,6 +72,7 @@ export function parseSelfTestArgs(argv) {
     bail: false,
     json: false,
     report: true,
+    failOnSkip: false,
   };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
@@ -48,6 +81,7 @@ export function parseSelfTestArgs(argv) {
     else if (arg === '--bail') opts.bail = true;
     else if (arg === '--json') opts.json = true;
     else if (arg === '--no-report') opts.report = false;
+    else if (arg === '--fail-on-skip') opts.failOnSkip = true;
     else if (arg === '--profile') opts.profile = argv[++i];
     else if (arg.startsWith('--profile=')) opts.profile = arg.slice('--profile='.length);
     else if (arg === '--only') opts.only.push(...splitIds(argv[++i]));
@@ -95,6 +129,7 @@ async function discoverScriptTasks(testDir) {
       fileName: e.name,
       args: [join(testDir, e.name)],
       label: `scripts/test/${e.name}`,
+      skippable: SKIPPABLE_TASKS.has(e.name.replace(/\.mjs$/, '')),
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -168,7 +203,7 @@ async function runTask(task, frameworkRoot) {
     child.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message }));
   });
   const durationMs = Date.now() - started;
-  const status = res.code === 0 ? 'pass' : 'fail';
+  const status = classifyExit(res.code, task.skippable);
   return {
     id: task.id,
     label: task.label,
@@ -184,11 +219,17 @@ async function runTask(task, frameworkRoot) {
 function countResults(results, planned, bailed) {
   const pass = results.filter((r) => r.status === 'pass').length;
   const fail = results.filter((r) => r.status === 'fail').length;
+  // audit P4 — `taskSkipped` (deliberate exit-77 skips) is distinct from the
+  // legacy `skipped` field, which stays == planned-minus-attempted (tasks not
+  // reached, e.g. after --bail). Schema v1 back-compatible: `skipped` unchanged,
+  // `taskSkipped` added.
+  const taskSkipped = results.filter((r) => r.status === 'skip').length;
   return {
     total: planned,
     run: results.length,
     pass,
     fail,
+    taskSkipped,
     skipped: planned - results.length,
     bailed: !!bailed,
   };
@@ -222,6 +263,13 @@ export async function runSelfTest(options = {}) {
   }
   const durationMs = Date.now() - started;
   const counts = countResults(results, plan.tasks.length, bailed);
+  // audit P4 — with --fail-on-skip, a deliberately-skipped task makes the suite
+  // RED (CI passes this so a missing dev dep can't green the run). The receipt
+  // `result`/`ok` is derived from THIS final verdict, never from counts.fail
+  // alone, so a fail-on-skip red is recorded as a fail even though no task
+  // literally "failed".
+  const failOnSkip = options.failOnSkip === true;
+  const ok = counts.fail === 0 && !(failOnSkip && counts.taskSkipped > 0);
   const report = {
     schemaVersion: 1,
     ts: new Date().toISOString(),
@@ -234,12 +282,14 @@ export async function runSelfTest(options = {}) {
     report.reportPaths = await writeReports(plan.frameworkRoot, report);
   }
   return {
-    ok: counts.fail === 0,
-    exitCode: counts.fail === 0 ? 0 : 1,
+    ok,
+    exitCode: ok ? 0 : 1,
     profile: plan.profile,
     // audit P3 — a run narrowed by --only/--skip is not a full profile and must
-    // not qualify as recency (carried on the VERIFICATION_RAN receipt).
-    complete: !(((options.only || []).length) || ((options.skip || []).length)),
+    // not qualify as recency (carried on the VERIFICATION_RAN receipt). audit P4
+    // extends this: a run with ANY skipped task is likewise not a complete
+    // profile, so a skipped suite can never satisfy a recency gate.
+    complete: !(((options.only || []).length) || ((options.skip || []).length) || counts.taskSkipped > 0),
     durationMs,
     counts,
     results,
@@ -265,7 +315,7 @@ export function listJson(plan) {
 export function resultText(result) {
   const lines = [`Maddu self-test (${result.profile})`, ''];
   for (const r of result.results) {
-    const tag = r.status === 'pass' ? 'PASS' : 'FAIL';
+    const tag = r.status === 'pass' ? 'PASS' : r.status === 'skip' ? 'SKIP' : 'FAIL';
     lines.push(`  ${tag.padEnd(4)}  ${r.id.padEnd(28)} ${r.durationMs}ms`);
     if (r.status === 'fail') {
       if (r.stdoutTail) lines.push(indentBlock('stdout', r.stdoutTail));
@@ -273,7 +323,9 @@ export function resultText(result) {
     }
   }
   lines.push('');
-  lines.push(`Summary: ${result.counts.pass} pass - ${result.counts.fail} fail - ${result.counts.run}/${result.counts.total} run - ${result.durationMs}ms`);
+  const skipPart = result.counts.taskSkipped ? ` - ${result.counts.taskSkipped} skip` : '';
+  lines.push(`Summary: ${result.counts.pass} pass - ${result.counts.fail} fail${skipPart} - ${result.counts.run}/${result.counts.total} run - ${result.durationMs}ms`);
+  if (result.counts.taskSkipped) lines.push(`${result.counts.taskSkipped} task(s) skipped (optional dependency absent) — SKIP is not PASS.`);
   if (result.counts.bailed) lines.push('Bailed after first failure.');
   if (result.reportPaths?.lastRunPath) lines.push(`Report: ${result.reportPaths.lastRunPath}`);
   return lines.join('\n');

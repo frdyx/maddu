@@ -31,8 +31,19 @@ const FROZEN_EPOCH = Date.parse('2026-06-19T12:00:00.000Z'); // 1782216000000
 export async function loadHappyDom() {
   try {
     return await import('happy-dom');
-  } catch {
-    return null;
+  } catch (err) {
+    // audit P4 — only a GENUINE absence of happy-dom itself is a skip; a corrupt
+    // happy-dom, or a missing TRANSITIVE dependency (whose error is merely
+    // "imported from node_modules/happy-dom/…"), must propagate as a real harness
+    // error, never be downgraded to "skipped" (which would read as PASS). Match
+    // the missing SPECIFIER exactly ("Cannot find package/module 'happy-dom'"),
+    // not just any message that mentions happy-dom.
+    const msg = String(err && err.message || '');
+    // Require the EXACT specifier (a closing quote / word boundary) so a missing
+    // transitive package with a happy-dom prefix ('happy-dom-helper') is NOT
+    // mistaken for happy-dom itself and downgraded to a skip.
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND' && /Cannot find (?:package|module) ['"]happy-dom['"]/.test(msg)) return null;
+    throw err;
   }
 }
 

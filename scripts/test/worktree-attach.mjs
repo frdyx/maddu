@@ -54,7 +54,7 @@ async function main() {
     const repo = path.join(base, 'repo');
     await mkdir(repo, { recursive: true });
     const init = await git(['init', '-b', 'main'], repo);
-    if (init.code !== 0) { console.log('  [SKIP] git unavailable — skipping attach integration test'); console.log('\nworktree-attach: skipped'); process.exit(0); }
+    if (init.code !== 0) { console.log('  [SKIP] git unavailable — skipping attach integration test'); console.log('\nworktree-attach: skipped'); process.exit(77); } // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
     await git(['config', 'user.email', 't@t.t'], repo);
     await git(['config', 'user.name', 'T'], repo);
     await mkdir(path.join(repo, '.maddu', 'lanes'), { recursive: true });

@@ -23,9 +23,10 @@ Flags:
   --list        list selected test ids without running
   --only <ids>  run only comma-separated ids from the selected profile
   --skip <ids>  skip comma-separated ids from the selected profile
-  --bail        stop after first failed test
-  --json        print machine-readable output
-  --no-report   do not write .maddu/state/self-test-last-run.json
+  --bail          stop after first failed test
+  --json          print machine-readable output
+  --no-report     do not write .maddu/state/self-test-last-run.json
+  --fail-on-skip  a skipped task (optional dep absent) makes the suite RED (for CI)
 `);
 }
 
@@ -72,10 +73,16 @@ export default async function selfTest(argv) {
       kind: 'self-test', profile,
       run: async () => runner.runSelfTestCli(argv, { frameworkRoot, onResult: (r) => { captured = r; } }),
       // null → emit no receipt (a config/usage error ran nothing, captured stays null).
+      // audit P4 — derive `result` from the runner's FINAL verdict (captured.ok),
+      // never from counts.fail alone: a --fail-on-skip red has counts.fail===0 but
+      // ok===false, and must be recorded as a fail (and complete:false), so a
+      // skipped suite can never satisfy self-test-recent.
       derive: () => captured ? {
         complete: captured.complete !== false,
-        result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
-        counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
+        result: captured.ok === true ? 'pass' : 'fail',
+        counts: captured.counts
+          ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total, taskSkipped: captured.counts.taskSkipped || 0 }
+          : null,
       } : null,
     });
     process.exit(out.result);

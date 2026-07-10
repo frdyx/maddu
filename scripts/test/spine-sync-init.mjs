@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { append, readAll, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
-import { readReplicaId, resolveWriteReplica } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
+import { readReplicaId, resolveWriteReplica, pendingReplicaPath } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
 import { verifySpine } from '../../template/maddu/runtime/lib/verify.mjs';
 import { syncInit, scanSpineForSecrets, importPartitions } from '../../template/maddu/runtime/lib/spine-sync.mjs';
 
@@ -19,6 +19,7 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`); } };
 const TYPE = Object.keys(EVENT_TYPES)[0];
 async function exists(p) { try { await access(p); return true; } catch { return false; } }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function segs(dir) { try { return (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { return []; } }
 // audit P1 — these fixtures build PRE-cutover chains (generic events, no marker),
 // so a mismatch now surfaces as chain_fork (WARN), not chain_broken (FAIL). Guard
@@ -189,6 +190,52 @@ async function main() {
     if (legacyWindowForks > 0) {
       console.log(`  (i) ${legacyWindowForks}/6 iteration(s) surfaced a pre-marker-window fork (documented single-machine residual — tolerated, surfaced by verify)`);
     }
+  }
+
+  // 3d-seam. audit P4 — the DETERMINISTIC form of the CI failure. A `sync init`
+  //   marker that appears in the WINDOW between spine.append()'s outer resolve
+  //   (which saw default/flat) and appendFlatChained's non-waiting re-resolve
+  //   makes the primitive return {pending}; spine.append used to THROW
+  //   "pending/stalled" and LOSE the event (green on Windows, red on Linux CI
+  //   where the seam is hit). It must now RETRY and LAND. We force the seam with
+  //   NO scheduler race via the `__MADDU_SPINE_SEAM_HOOK__` test seam: it fires
+  //   exactly once, after the outer resolve returned flat and BEFORE the inner
+  //   re-resolve, so the marker written inside it is seen ONLY by the inner
+  //   re-resolve → {pending} → retry. On the PRE-FIX throw this test fails; the
+  //   hook makes it deterministic (no sleeps decide correctness).
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-si-seam-'));
+    await append(repo, { type: TYPE, data: { seed: 1 } });
+
+    let reachedSeam; const atSeam = new Promise((r) => { reachedSeam = r; });
+    let proceed; const canProceed = new Promise((r) => { proceed = r; });
+    let pendingSeen; const pendingObserved = new Promise((r) => { pendingSeen = r; });
+    globalThis.__MADDU_SPINE_SEAM_HOOK__ = async () => { reachedSeam(); await canProceed; };
+    globalThis.__MADDU_SPINE_PENDING_HOOK__ = () => pendingSeen();
+    try {
+      const appendResult = append(repo, { type: TYPE, data: { concurrent: 1 } })
+        .then((ev) => ({ ok: true, ev }), (err) => ({ ok: false, err }));
+      await atSeam;                        // append is PAST the outer resolve (saw flat), AT the seam
+      // The marker appears strictly between the outer resolve and the inner re-resolve.
+      await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+      await writeFile(pendingReplicaPath(repo), JSON.stringify({ replicaId: 'rep_seam01' }) + '\n');
+      proceed();                           // inner re-resolve now sees pending → {pending} → retry
+      // Wait until the retry PROVABLY observed {pending} (pendingObserved), OR the
+      // append already settled — the pre-fix code throws in the pending branch
+      // WITHOUT the ack, so racing avoids a hang there and still fails the assert.
+      await Promise.race([pendingObserved, appendResult]);
+      // Only now — after {pending} was observed — abort the migration so the retry
+      // lands flat. Determinism no longer depends on any timer.
+      await rm(pendingReplicaPath(repo), { force: true });
+      const r = await appendResult;
+      ok(r.ok, `seam: concurrent append during sync-init LANDS, not thrown${r.ok ? '' : ` (${r.err && r.err.message})`}`);
+      const all = await readAll(repo);
+      ok(all.length === 2, `seam: no event lost (${all.length}/2 in merged read)`);
+    } finally {
+      delete globalThis.__MADDU_SPINE_SEAM_HOOK__;
+      delete globalThis.__MADDU_SPINE_PENDING_HOOK__;
+    }
+    await rm(repo, { recursive: true, force: true });
   }
 
   // 3e. Codex's resume-fork race: a crashed init left a marker + seg1 in the

@@ -52,7 +52,7 @@ async function main() {
     await mkdir(path.join(repo, '.maddu', 'lanes'), { recursive: true });
     await mkdir(path.join(repo, '.maddu', 'events'), { recursive: true });
     const init = await git(['init', '-b', 'main'], repo);
-    if (init.code !== 0) { console.log('  [SKIP] git unavailable'); console.log('\nworktree-coherence: skipped'); process.exit(0); }
+    if (init.code !== 0) { console.log('  [SKIP] git unavailable'); console.log('\nworktree-coherence: skipped'); process.exit(77); } // audit P4: reserved SKIP exit (see _self-test-runner SKIP_EXIT_CODE)
     await git(['config', 'user.email', 't@t.t'], repo);
     await git(['config', 'user.name', 'T'], repo);
     const writeCatalog = (ids) => writeFile(path.join(repo, '.maddu', 'lanes', 'catalog.json'),
