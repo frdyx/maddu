@@ -134,7 +134,7 @@ export default async function orient(argv) {
   const { flags } = parseFlags(argv);
   const runVerify = !flags['no-verify'];
   const { paths, projections, spine } = await loadSpineLib();
-  const { evalSuccess, writeSuccessCache, recordSuccessEval } = await loadLib('success-eval.mjs');
+  const { evalSuccess, writeSuccessCache, recordSuccessEvalStart, recordSuccessEvalFinish } = await loadLib('success-eval.mjs');
   const repoRoot = await resolveRepoRoot(paths);
   const proj = await projections.project(repoRoot);
   let events = [];
@@ -142,6 +142,13 @@ export default async function orient(argv) {
 
   const goal = proj.goal || null;
   const success = Array.isArray(goal?.success) ? goal.success : [];
+  const seActor = process.env.MADDU_SESSION_ID || null;
+  const seLane = process.env.MADDU_LANE || null;
+  // audit P3 — open the eval receipt BEFORE evaluating, so a crash DURING
+  // evalSuccess leaves a dangling STARTED (which stales the prior receipt) rather
+  // than letting an old "met" stay silently authoritative.
+  let successStartedId = null;
+  if (runVerify && goal) successStartedId = await recordSuccessEvalStart(repoRoot, spine, { actor: seActor, lane: seLane });
   const { evaluated, metCount, verifiable, pendingCount, allMet } = evalSuccess(goal, repoRoot, runVerify);
   // Cache the freshly-evaluated snapshot so the bridge can render the same
   // ✓/○/? without ever spawning a verify command on an HTTP GET. Only when
@@ -149,14 +156,10 @@ export default async function orient(argv) {
   if (runVerify && goal) {
     const result = { evaluated, metCount, verifiable, pendingCount, allMet };
     try { await writeSuccessCache(repoRoot, { goal, result, ts: new Date().toISOString() }); } catch {}
-    // audit P3 — also append a tamper-detecting VERIFICATION_RAN receipt from
-    // this in-process result, so the bridge/status readouts (which never spawn)
-    // derive "goal met" from the spine, not the hand-writable cache.
-    await recordSuccessEval(repoRoot, spine, {
-      goal, result,
-      actor: process.env.MADDU_SESSION_ID || null,
-      lane: process.env.MADDU_LANE || null,
-    });
+    // Close the receipt (VERIFICATION_RAN) from this in-process result, so the
+    // bridge/status readouts (which never spawn) derive "goal met" from the
+    // tamper-detecting spine, not the hand-writable cache.
+    await recordSuccessEvalFinish(repoRoot, spine, { startedId: successStartedId, goal, result, actor: seActor, lane: seLane });
   }
 
   // `--digest` — the "while you were away" delta since the last cursor. Uses the

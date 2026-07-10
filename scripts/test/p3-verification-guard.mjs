@@ -83,6 +83,23 @@ const GOAL = { objective: 'G', setAt: 'S1', success: [{ text: 'a' }, { text: 'b'
   ];
   const dview = se.resolveSuccessView(withDangling, { goal: GOAL, nowMs: NOW, integrity: 'ok' });
   ok('newer unpaired success STARTED → stale (eval-incomplete)', dview.stale === true && dview.allMet === null && dview.staleReasons.includes('eval-incomplete'));
+
+  // Codex R6#3 — under 'unknown' integrity, the count renders but allMet:true is
+  // WITHHELD (no false "goal conditions all met" from an unverified receipt).
+  const metReceipt = [successReceipt({ ts: iso(-DAY / 4), allMet: true, metCount: 2, conditions: [{ text: 'a', state: 'met' }, { text: 'b', state: 'met' }] })];
+  ok('unknown integrity → allMet withheld, count shown', (() => {
+    const u = se.resolveSuccessView(metReceipt, { goal: GOAL, nowMs: NOW, integrity: 'unknown' });
+    const o = se.resolveSuccessView(metReceipt, { goal: GOAL, nowMs: NOW, integrity: 'ok' });
+    return u.allMet === null && u.metCount === 2 && u.stale === false && o.allMet === true;
+  })());
+
+  // Codex R6#2 — a same-millisecond newer STARTED (by list position) still stales.
+  const sameMs = [
+    { id: 'p', type: 'VERIFICATION_STARTED', ts: iso(-DAY / 4), data: { kind: 'success-eval' } },
+    { ...successReceipt({ ts: iso(-DAY / 4), allMet: true }), id: 'rr', data: { ...successReceipt({ ts: iso(-DAY / 4) }).data, startedId: 'p', allMet: true } },
+    { id: 'p2', type: 'VERIFICATION_STARTED', ts: iso(-DAY / 4), data: { kind: 'success-eval' } },
+  ];
+  ok('same-ms newer unpaired STARTED → stale (by position)', se.resolveSuccessView(sameMs, { goal: GOAL, nowMs: NOW, integrity: 'ok' }).stale === true);
 }
 
 // ── Part 1: resolveGetIntegrity three-state (T1/T2) ──────────────────────────

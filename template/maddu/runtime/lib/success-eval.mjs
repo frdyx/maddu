@@ -138,21 +138,22 @@ export function latestSuccessReceipt(events) {
   return null;
 }
 
-// True iff a success-eval VERIFICATION_STARTED is NEWER than `receipt` and is not
-// referenced by any success-eval RAN — i.e. a later eval was opened but never
-// completed (crash / append-failure). The prior receipt's "met" is then stale.
+// True iff a success-eval VERIFICATION_STARTED occurs AFTER `receipt` in the spine
+// and is not referenced by any success-eval RAN — i.e. a later eval was opened but
+// never completed (crash / append-failure). "After" is by LIST POSITION (append
+// order), not timestamp, so a STARTED sharing the receipt's millisecond still
+// counts. The prior receipt's "met" is then stale.
 export function hasNewerSuccessDangling(events, receipt) {
   const list = Array.isArray(events) ? events : [];
-  const rt = receipt ? Date.parse(receipt.ts || '') : -Infinity;
+  if (!receipt) return false;
+  const receiptIdx = list.indexOf(receipt);
   const referenced = new Set();
   for (const e of list) {
     if (e && e.type === 'VERIFICATION_RAN' && e.data && e.data.kind === 'success-eval' && e.data.startedId) referenced.add(e.data.startedId);
   }
-  for (const e of list) {
-    if (e && e.type === 'VERIFICATION_STARTED' && e.data && e.data.kind === 'success-eval') {
-      const st = Date.parse(e.ts || '');
-      if (Number.isFinite(st) && st > rt && !referenced.has(e.id)) return true;
-    }
+  for (let i = (receiptIdx >= 0 ? receiptIdx + 1 : 0); i < list.length; i++) {
+    const e = list[i];
+    if (e && e.type === 'VERIFICATION_STARTED' && e.data && e.data.kind === 'success-eval' && !referenced.has(e.id)) return true;
   }
   return false;
 }
@@ -260,7 +261,11 @@ export function resolveSuccessView(events, { goal, nowMs, ttlMs = SUCCESS_RECEIP
   }
   return {
     ...base,
-    allMet: d.allMet ?? null,
+    // Assert allMet:true ONLY when integrity is fully 'ok'. Under 'unknown' (no
+    // post-receipt integrity verdict) the count still renders (labelled
+    // unverified) but the strongest claim — "all conditions met" — is withheld,
+    // so a readout never prints "goal conditions all met" from an unverified receipt.
+    allMet: integrity === 'ok' ? (d.allMet ?? null) : null,
     metCount: d.metCount ?? null,
     verifiable: d.verifiable ?? null,
     conditions,
@@ -268,11 +273,14 @@ export function resolveSuccessView(events, { goal, nowMs, ttlMs = SUCCESS_RECEIP
   };
 }
 
-// Append the VERIFICATION_STARTED → VERIFICATION_RAN receipt pair for an
-// in-process success-eval (called by orient after evalSuccess with runVerify).
-// Best-effort: a spine-append failure never breaks orient (the readout just
-// falls back to "unverified"/stale). Returns the started id or null.
-export async function recordSuccessEval(repoRoot, spineLib, { goal, result, actor = null, lane = null }) {
+// audit P3 — the success-eval receipt is a STARTED→RAN pair split across the
+// evaluation so a crash DURING evalSuccess leaves a dangling STARTED (which
+// stales the prior receipt), not a silently-authoritative old "met". orient
+// calls recordSuccessEvalStart BEFORE evalSuccess and recordSuccessEvalFinish
+// AFTER. Both best-effort: a spine failure never breaks orient.
+
+// Open the eval: append VERIFICATION_STARTED, return its id (or null).
+export async function recordSuccessEvalStart(repoRoot, spineLib, { actor = null, lane = null } = {}) {
   const spine = spineLib && spineLib.spine ? spineLib.spine : spineLib;
   if (!spine || !spine.append) return null;
   const T = spine.EVENT_TYPES || {};
@@ -281,10 +289,20 @@ export async function recordSuccessEval(repoRoot, spineLib, { goal, result, acto
       type: T.VERIFICATION_STARTED || 'VERIFICATION_STARTED', actor, lane,
       data: { kind: 'success-eval', profile: null },
     });
+    return (started && started.id) || null;
+  } catch { return null; }
+}
+
+// Close the eval: append the VERIFICATION_RAN receipt referencing `startedId`.
+export async function recordSuccessEvalFinish(repoRoot, spineLib, { startedId, goal, result, actor = null, lane = null }) {
+  const spine = spineLib && spineLib.spine ? spineLib.spine : spineLib;
+  if (!spine || !spine.append || !startedId) return;
+  const T = spine.EVENT_TYPES || {};
+  try {
     await spine.append(repoRoot, {
       type: T.VERIFICATION_RAN || 'VERIFICATION_RAN', actor, lane,
       data: {
-        kind: 'success-eval', startedId: (started && started.id) || null, profile: null,
+        kind: 'success-eval', startedId, profile: null,
         complete: true, result: 'pass',
         allMet: result.allMet, metCount: result.metCount,
         verifiable: result.verifiable, pendingCount: result.pendingCount,
@@ -292,6 +310,5 @@ export async function recordSuccessEval(repoRoot, spineLib, { goal, result, acto
         conditions: (result.evaluated || []).map((c) => ({ text: c.text || null, state: c.state })),
       },
     });
-    return (started && started.id) || null;
-  } catch { return null; }
+  } catch { /* a dangling STARTED remains → the readout stales the prior receipt */ }
 }

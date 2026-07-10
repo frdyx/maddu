@@ -138,6 +138,18 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
 
+  // ── heavy-suites-recent: an upgrade-matrix receipt predating the install → not-ok ──
+  {
+    const root = await tempRepo('maddu-hsr-preinstall-');
+    await appendVerification(root, 'stress', { result: 'pass' });
+    await appendVerification(root, 'upgrade-matrix', { result: 'pass' });
+    // Mark the install as happening AFTER the receipts (installedAt in the future).
+    await writeFile(join(root, 'maddu.json'), JSON.stringify({ installedAt: new Date(Date.now() + 3600000).toISOString() }));
+    const r = await heavySuites.run({ repoRoot: root });
+    ok('heavy-suites: upgrade-matrix ran before current install → not ok', r.ok === false && /predates the current install/.test(r.message), r.message);
+    await rm(root, { recursive: true, force: true });
+  }
+
   // ── heavy-suites-recent: a legacy last-run file is NOT trusted → not-ok ──
   {
     const root = await tempRepo('maddu-hsr-legacy-');
