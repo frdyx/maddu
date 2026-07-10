@@ -67,17 +67,22 @@ const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:im
 // adversary smuggling an SDK in.
 // A `/` starts a regex literal (not division) when the preceding significant
 // token is not a value — an operator, opener, or a statement/expression keyword.
-const REGEX_ALLOWED_AFTER = /[([{,;:=!&|?+\-*%^~<>]$|(?:^|[^.\w$])(?:return|typeof|instanceof|in|of|new|delete|void|do|else|yield|await|case)$/;
+// A postfix `++`/`--` yields a VALUE, so a `/` after it is division, handled
+// separately before this test.
+const REGEX_ALLOWED_AFTER = /[([{,;:=!&|?+\-*%^~<>]$|(?:^|[^.\w$])(?:return|typeof|instanceof|in|of|new|delete|void|do|else|yield|await|case|default|throw)$/;
 
-export function bannedImportHit(text) {
-  const src = String(text || '');
+// Recursive-descent scanner. Walks one code context, correctly skipping strings,
+// template literals (recursing into each `${…}` interpolation as its own code
+// context), comments, and regex literals — so no lexical construct can hide a
+// real import (false negative) or make ordinary code look like one (false
+// positive). `stopAtBrace` is set when scanning a `${…}` body: an unmatched `}`
+// at depth 0 ends that context. Returns { hit, end }.
+function scanCode(src, start, stopAtBrace) {
   const n = src.length;
-  let i = 0;
+  let i = start;
+  let brace = 0;                     // { } depth within THIS context
   let prev = '';                     // bounded trailing CODE (whitespace-collapsed)
   const push = (ch) => {
-    // Collapse whitespace runs to one space so arbitrary spacing between an
-    // import keyword and its specifier never scrolls the keyword out of the
-    // lookbehind window.
     if (/\s/.test(ch)) { if (!prev.endsWith(' ')) prev += ' '; }
     else prev += ch;
     if (prev.length > 64) prev = prev.slice(-64);
@@ -86,12 +91,14 @@ export function bannedImportHit(text) {
   while (i < n) {
     const c = src[i];
     const c2 = src[i + 1];
+    if (stopAtBrace && c === '}' && brace === 0) return { hit: null, end: i + 1 };
+    if (c === '{') { brace++; push(c); i++; continue; }
+    if (c === '}') { brace--; push(c); i++; continue; }
     // line / block comments
     if (c === '/' && c2 === '/') { i += 2; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
     if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; push(' '); continue; }
-    // regex literal (so quotes / `//` / `from '…'` inside it are neither a false
-    // positive nor a swallowed real import)
-    if (c === '/' && REGEX_ALLOWED_AFTER.test(codeTail())) {
+    // regex literal — but a `/` after a postfix ++/-- is division, not a regex.
+    if (c === '/' && !/(?:\+\+|--)$/.test(codeTail()) && REGEX_ALLOWED_AFTER.test(codeTail())) {
       i++;
       let inClass = false;
       while (i < n) {
@@ -105,9 +112,8 @@ export function bannedImportHit(text) {
       }
       push('_'); continue;
     }
-    // string / template literal
-    if (c === "'" || c === '"' || c === '`') {
-      const quote = c;
+    // ordinary string ('/") — opaque data, no interpolation
+    if (c === "'" || c === '"') {
       const importCtx = IMPORT_KEYWORD_TAIL.test(prev);
       i++;
       let val = '';
@@ -115,33 +121,66 @@ export function bannedImportHit(text) {
       while (i < n) {
         const s = src[i];
         if (s === '\\') { val += src[i + 1] || ''; i += 2; continue; }
-        if (quote === '`' && s === '$' && src[i + 1] === '{') {
-          // template interpolation: scan the inner expression as CODE, so a real
-          // import inside `${…}` is not hidden by the surrounding template.
-          let depth = 1;
-          let j = i + 2;
-          for (; j < n && depth > 0; j++) {
-            if (src[j] === '{') depth++;
-            else if (src[j] === '}' && --depth === 0) break;
-          }
-          const hit = bannedImportHit(src.slice(i + 2, j));
-          if (hit) return hit;
-          i = j + 1;
-          continue;
-        }
-        if (s === quote) { closed = true; i++; break; }
+        if (s === c) { closed = true; i++; break; }
         val += s; i++;
       }
-      // A string is opaque data to following code — collapse it to a placeholder
-      // so `require('x')` after it still parses, and its content never leaks in.
       push('_');
-      if (closed && importCtx && BANNED_PKG_RE.test(val)) return `${codeTail().replace(/_$/, '').trim().slice(-16)} '${val}'`;
+      if (closed && importCtx && BANNED_PKG_RE.test(val)) return { hit: `${codeTail().replace(/_$/, '').trim().slice(-16)} '${val}'`, end: i };
+      continue;
+    }
+    // template literal — a real import inside a `${…}` interpolation is CODE and
+    // must be found; import-looking TEXT in the template body is data. A template
+    // used AS a specifier with no interpolation (`import(`openai`)`) is a static
+    // string and is checked like one; with interpolation the value is computed
+    // (out of scope), so only its interpolations are scanned.
+    if (c === '`') {
+      const importCtx = IMPORT_KEYWORD_TAIL.test(prev);
+      i++;
+      let val = '';
+      let interpolated = false;
+      let closed = false;
+      while (i < n) {
+        const s = src[i];
+        if (s === '\\') { val += src[i + 1] || ''; i += 2; continue; }
+        if (s === '`') { closed = true; i++; break; }
+        if (s === '$' && src[i + 1] === '{') {
+          interpolated = true;
+          const r = scanCode(src, i + 2, true);   // scan the interpolation as its own code context
+          if (r.hit) return r;
+          i = r.end;
+          continue;
+        }
+        val += s; i++;
+      }
+      push('_');
+      if (closed && !interpolated && importCtx && BANNED_PKG_RE.test(val)) return { hit: `${codeTail().replace(/_$/, '').trim().slice(-16)} '${val}'`, end: i };
       continue;
     }
     push(c);
     i++;
   }
-  return null;
+  return { hit: null, end: n };
+}
+
+// Exported so the self-test can exercise the matcher directly with in-memory
+// strings — no literal banned specifier is ever written into a scanned tree.
+// Returns the offending specifier text, or null.
+//
+// Lexically aware (a recursive string/comment/regex/template scanner, not a raw
+// regex): a comment can't red the gate, a comment can't hide a real import, and a
+// comment marker or an import-looking substring INSIDE a string literal is data,
+// not code — so neither a false positive nor a false negative arises from string
+// contents. A banned import is a string literal whose VALUE is a provider package
+// AND whose immediately-preceding CODE is an import keyword / require opener.
+//
+// SCOPE (honest claim): this catches ORDINARY, careless provider-SDK imports in
+// framework code — it is a lexer, not an evaluator. A determined author can still
+// obfuscate past it (string concatenation `'open'+'ai'`, unicode escapes,
+// computed specifiers). That is out of scope, the same way the spine's
+// tamper-DETECTION is not tamper-PROOFING: catch the mistake, not defeat an
+// adversary smuggling an SDK in.
+export function bannedImportHit(text) {
+  return scanCode(String(text || ''), 0, false).hit;
 }
 
 // Resolve the framework layout. Installed: <repoRoot>/maddu/ (single merged

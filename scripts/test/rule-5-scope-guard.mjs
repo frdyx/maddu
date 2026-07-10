@@ -87,6 +87,27 @@ async function main() {
   ok('wide whitespace between import( and specifier is caught',
     !!bannedImportHit(`imp` + `ort(${' '.repeat(60)}${Q}${OAI}${Q})`));
 
+  // ── postfix ++/-- yields a value, so a following `/` is division not a regex ─
+  ok('postfix ++ then division does not swallow a real require',
+    !!bannedImportHit(`count++ / total; req` + `uire(${Q}${OAI}${Q})`));
+  ok('export default /regex/ is not a false positive',
+    !bannedImportHit(`export default /from ${Q}${OAI}${Q}/;`));
+  ok('throw /regex/ is not a false positive',
+    !bannedImportHit(`throw /from ${Q}${OAI}${Q}/;`));
+
+  // ── interpolation is scanned string/regex-aware (braces inside a string in the
+  //    ${…} body don't desync the delimiter) ───────────────────────────────────
+  ok('a real import survives a }-containing string inside ${…}',
+    !!bannedImportHit('const x = `p ${ ' + Q + '}' + Q + ' && req' + `uire(${Q}${OAI}${Q}) } s\`;`));
+  ok('a {-containing string inside ${…} does not turn body text into code',
+    !bannedImportHit('const x = `${ "{" } from ' + Q + OAI + Q + ' text`;'));
+  ok('nested template interpolation import is caught',
+    !!bannedImportHit('const x = `a${`b${await imp' + `ort(${Q}${OAI}${Q})}c\`}d\`;`));
+
+  // ── a template used AS a specifier (no interpolation) is a static import ─────
+  ok('backtick specifier import is caught',
+    !!bannedImportHit('imp' + 'ort(`' + OAI + '`)'));
+
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',
     !bannedImportHit(`imp` + `ort(${Q}open${Q} + ${Q}ai${Q})`));
