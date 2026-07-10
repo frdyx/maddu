@@ -28,10 +28,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { append, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
 import { appendTokenUsage, logWrapperError } from '../../template/maddu/runtime/lib/runtimes/_wrapper-common.mjs';
-import { redactDataPayload } from '../../template/maddu/runtime/lib/secret-scan.mjs';
+import { redactDataPayload, redactText, redactLeaves, matchSecretType } from '../../template/maddu/runtime/lib/secret-scan.mjs';
 import { send as mailboxSend } from '../../template/maddu/runtime/lib/mailbox.mjs';
 import { curate } from '../../template/maddu/runtime/lib/briefings.mjs';
 import { saveSkill, readSkill } from '../../template/maddu/runtime/lib/skills.mjs';
+import { writeActiveSession, readActiveSession } from '../../template/maddu/runtime/lib/session-active.mjs';
+import { appendFactIfNew } from '../../template/maddu/runtime/lib/hindsight.mjs';
+import { safeImport } from '../../template/maddu/runtime/lib/imports.mjs';
+import { pathsFor } from '../../template/maddu/runtime/lib/paths.mjs';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`); } };
@@ -43,6 +47,12 @@ const FAKE = {
   aws: 'AKIAIOSFODNN7EXAMPLE',
   envLine: 'OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789',
   longValue: 'c3VwZXJzZWNyZXRwYXlsb2FkdmFsdWU0NGNoYXJz',
+  // v1.99.0 (P5) new shapes
+  githubPat: 'github_pat_' + '1'.repeat(60),
+  ghu: 'ghu_' + 'a'.repeat(36),
+  google: 'AIza' + 'B'.repeat(35),
+  stripe: 'sk_live_' + 'C'.repeat(30),
+  pem: '-----BEGIN PRIVATE KEY-----\nMII' + 'x'.repeat(64) + '\n-----END PRIVATE KEY-----',
 };
 
 async function readSpineLines(repo) {
@@ -170,6 +180,59 @@ async function main() {
     ok(!sklBack.raw.includes('sk-abcdefghijklmnop') && sklBack.body.includes('[REDACTED:'), 'skill body: swept at write');
     const sklClean = await saveSkill(repo, { title: 'clean recipe', body: 'plain skill body', by: 'ses_x' });
     ok((await readSkill(repo, sklClean.id)).body.trim() === 'plain skill body', 'skill body: clean text byte-identical');
+
+    // ── 9. v1.99.0 (P5) extended secret shapes — one canonical detector ──
+    ok(matchSecretType(FAKE.githubPat) === 'github-fine-grained-token', 'shape: github fine-grained PAT');
+    ok(matchSecretType(FAKE.ghu) === 'github-token', 'shape: github user-to-server (ghu_)');
+    ok(matchSecretType(FAKE.google) === 'google-api-key', 'shape: google AIza key');
+    ok(matchSecretType(FAKE.stripe) === 'stripe-secret-key', 'shape: stripe sk_live_');
+    ok(matchSecretType(FAKE.pem) === 'private-key-block', 'shape: PEM private-key block');
+    // PEM body scrubbed whole (complete block), surrounding text kept.
+    const pemR = redactText('lead ' + FAKE.pem + ' trail');
+    ok(!pemR.text.includes('MIIx') && pemR.text.includes('[REDACTED:private-key-block]'), 'PEM: whole block scrubbed');
+    ok(pemR.text.startsWith('lead ') && pemR.text.endsWith(' trail'), 'PEM: surrounding text preserved');
+    // Unterminated PEM (no END) scrubbed to end so the partial body can't survive.
+    ok(!redactText('x -----BEGIN PRIVATE KEY-----\nTRUNC' + 'z'.repeat(50)).text.includes('TRUNC'),
+      'PEM: unterminated key body scrubbed');
+
+    // ── 9b. Field-name calibration: compound sensitive keys redact; framework
+    //        token-ish keys DON'T (bare token/secret excluded on purpose). ──
+    const fld = await append(repo, { type: EVENT_TYPES.TASK_UPDATED, data: {
+      refreshToken: 'R'.repeat(24), clientSecret: 'S'.repeat(24), bearer: 'B'.repeat(24),
+      sessionToken: 'T'.repeat(24), csrfToken: 'U'.repeat(24),
+    } });
+    ok(fld.data.refreshToken.startsWith('[REDACTED:'), 'field: refreshToken redacted');
+    ok(fld.data.clientSecret.startsWith('[REDACTED:'), 'field: clientSecret redacted');
+    ok(fld.data.bearer.startsWith('[REDACTED:'), 'field: bearer redacted');
+    ok(fld.data.sessionToken === 'T'.repeat(24), 'field: sessionToken UNTOUCHED (bare token excluded)');
+    ok(fld.data.csrfToken === 'U'.repeat(24), 'field: csrfToken UNTOUCHED');
+
+    // ── 9c. redactLeaves (value-pattern) is NON-BREAKING on live config: a
+    //        config field NAME keeps its short value; only a literal secret VALUE
+    //        is scrubbed. This is why MCP/runtime descriptors are safe to wrap. ──
+    const cfg = redactLeaves({ clientSecretEnvVar: 'MY_ENV_NAME_1234', refreshTokenUrl: 'https://example/oauth/refresh', apiKeyValue: FAKE.google });
+    ok(cfg.clientSecretEnvVar === 'MY_ENV_NAME_1234', 'redactLeaves: config env-var NAME value preserved');
+    ok(cfg.refreshTokenUrl === 'https://example/oauth/refresh', 'redactLeaves: config URL preserved');
+    ok(cfg.apiKeyValue.startsWith('[REDACTED:'), 'redactLeaves: literal secret in a config value scrubbed');
+
+    // ── 10. Newly-wrapped state stores redact at their OWN write boundary ──
+    // active-session pointer (session.active.json)
+    await writeActiveSession(repo, { sessionId: 'ses_x', focus: `rotate ${FAKE.stripe} today` });
+    const act = await readActiveSession(repo);
+    ok(!JSON.stringify(act).includes(FAKE.stripe) && act.focus.includes('[REDACTED:stripe-secret-key]'),
+      'session-active: focus swept at write');
+    ok(act.sessionId === 'ses_x', 'session-active: non-secret sessionId untouched');
+    // memory facts (memory.ndjson)
+    await appendFactIfNew(repo, { v: 1, id: 'mem_p5_test', ts: '2026-07-10T00:00:00.000Z', kind: 'discovery', text: `saw key ${FAKE.google}`, tags: ['t'], source: {} });
+    const memRaw = await readFile(join(pathsFor(repo).state, 'memory.ndjson'), 'utf8');
+    ok(!memRaw.includes(FAKE.google) && memRaw.includes('[REDACTED:google-api-key]'), 'memory fact: swept at write');
+
+    // ── 11. Importer uses the ONE canonical detector (no second scanner) ──
+    const impStripe = await safeImport(repo, { kind: 'memory-note', payload: { text: `deploy key ${FAKE.stripe}` }, by: 'ses_x' });
+    ok(impStripe.ok === false && impStripe.rejected === true, 'import: Stripe-bearing payload rejected');
+    ok(impStripe.hits.some((h) => h.pattern === 'stripe-secret-key'), 'import: canonical pattern name recorded (never the value)');
+    const impClean = await safeImport(repo, { kind: 'memory-note', payload: { text: 'a plain lesson' }, by: 'ses_x' });
+    ok(impClean.ok === true, 'import: clean payload accepted');
   } finally {
     await rm(repo, { recursive: true, force: true });
   }
