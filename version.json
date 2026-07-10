@@ -1,5 +1,5 @@
 {
-  "version": "1.97.0",
-  "phase": "operator-plane-and-self-enforcement",
-  "released": "2026-07-09"
+  "version": "1.98.0",
+  "phase": "spine-tamper-evidence-and-audit-remediation",
+  "released": "2026-07-10"
 }

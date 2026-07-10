@@ -229,6 +229,43 @@ async function main() {
     } finally { await rm(tmp, { recursive: true, force: true }); }
   }
 
+  // 10c. The WRAPPER end-to-end: with the flat lock held, appendTokenUsage must
+  //      return null (drop) and write NOTHING — it suppresses the timeout rather
+  //      than blocking the worker's exit. (Uses the wrapper's real budget, ~3s.)
+  {
+    const tmp = await newRepo('wrapdrop');
+    try {
+      const eventsDir = path.join(tmp, '.maddu', 'events');
+      await mkdir(eventsDir, { recursive: true });
+      const held = await lock.acquireAppendLock(path.join(eventsDir, '.append.lock'));
+      let out;
+      try { out = await wrapper.appendTokenUsage(tmp, { runtime: 'claude-code', sessionId: 'ses_x', model: 'm', outputTokens: 5 }); }
+      finally { await held.release(); }
+      ok(out === null, `appendTokenUsage drops (returns null) on contention (got ${JSON.stringify(out)})`);
+      let sz = 0; try { sz = (await stat(seg(tmp))).size; } catch {}
+      ok(sz === 0, 'wrapper drop: nothing written to the flat segment');
+    } finally { await rm(tmp, { recursive: true, force: true }); }
+  }
+
+  // 6b. A field-STRIPPED cutover marker must still flip strictChain (marker
+  //     detection runs before the envelope early-return), so a successor tamper is
+  //     FAIL — not a chain_fork WARN that import would quarantine (Codex diff #2).
+  {
+    const tmp = await modernSpine('strippedmarker');
+    try {
+      const lines = await readLines(tmp);
+      // Strip a required field (actor) from the FRAMEWORK_INSTALLED genesis marker.
+      const g = JSON.parse(lines[0]); delete g.actor; lines[0] = JSON.stringify(g);
+      await writeLines(tmp, lines);
+      const r = await verifySpine(tmp);
+      // The stripped marker still flips strict, and its changed bytes break the
+      // successor link → a FAIL is present (chain_broken and/or envelope_missing),
+      // and crucially NOT merely a lone chain_fork WARN.
+      ok(r.counts.FAIL > 0, `field-stripped marker -> a FAIL is raised (got FAIL=${r.counts.FAIL})`);
+      ok(kinds(r, 'chain_broken').length >= 1, 'field-stripped marker: successor is chain_broken FAIL (strict engaged)');
+    } finally { await rm(tmp, { recursive: true, force: true }); }
+  }
+
   // ══ RESIDUALS (CONCEDED): these unkeyed-limit tampering shapes must remain
   //    UNDETECTED. Pinning them here keeps the honest claim honest — if a future
   //    change starts detecting one, this test flips and we revisit the claim. ══

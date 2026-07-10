@@ -324,6 +324,22 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           { segment: segName, line: lineNo, eventId: ev.id }));
       }
 
+      // ─── Cutover-anchor detection (audit P1) ───
+      // Flip strictChain when this event proves the chain is held to post-cutover
+      // rules: a FRAMEWORK_INSTALLED/UPGRADED at/after FLAT_LOCK_VERSION, or a
+      // SPINE_CUTOVER anchor (seeded into a freshly-minted sync partition). Placed
+      // AFTER the chain check (so the marker event itself is graded lenient) but
+      // BEFORE the envelope early-return below — else stripping a required field from
+      // a marker would `continue` past this and leave the chain lenient, letting a
+      // successor tamper grade as chain_fork WARN (which import quarantines). OUTSIDE
+      // the `if (referential)` switch so sync-mode (referential:false) scans see it.
+      // Optional-chained so a malformed marker (missing data) is safe to inspect.
+      if (!strictChain) {
+        if (ev.type === 'SPINE_CUTOVER') strictChain = true;
+        else if (ev.type === 'FRAMEWORK_INSTALLED' && semverGte(ev.data?.version, FLAT_LOCK_VERSION)) strictChain = true;
+        else if (ev.type === 'FRAMEWORK_UPGRADED' && semverGte(ev.data?.to, FLAT_LOCK_VERSION)) strictChain = true;
+      }
+
       // ─── Envelope ───
       const missing = ['v', 'id', 'ts', 'type', 'data'].filter((k) => !(k in ev));
       // actor + lane are allowed to be null but must be PRESENT as keys for shape.
@@ -335,19 +351,6 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           `${ev.id || segName + ':' + lineNo}: missing required field(s): ${missing.join(', ')}`,
           { segment: segName, line: lineNo, eventId: ev.id }));
         continue;
-      }
-
-      // ─── Cutover-anchor detection (audit P1) ───
-      // Flip strictChain when this event proves the chain is held to post-cutover
-      // rules: a FRAMEWORK_INSTALLED/UPGRADED at/after FLAT_LOCK_VERSION, or a
-      // SPINE_CUTOVER anchor (seeded into a freshly-minted sync partition). OUTSIDE
-      // the `if (referential)` switch below so sync-mode (referential:false) scans
-      // still see it. Set AFTER the chain check above, so the marker event itself is
-      // graded under the OLD (lenient) state and only SUBSEQUENT events are strict.
-      if (!strictChain) {
-        if (ev.type === 'SPINE_CUTOVER') strictChain = true;
-        else if (ev.type === 'FRAMEWORK_INSTALLED' && semverGte(ev.data?.version, FLAT_LOCK_VERSION)) strictChain = true;
-        else if (ev.type === 'FRAMEWORK_UPGRADED' && semverGte(ev.data?.to, FLAT_LOCK_VERSION)) strictChain = true;
       }
 
       // ─── Schema version ───
