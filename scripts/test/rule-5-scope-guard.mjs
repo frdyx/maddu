@@ -116,6 +116,17 @@ async function main() {
   ok('backtick specifier import is caught',
     !!bannedImportHit('imp' + 'ort(`' + OAI + '`)'));
 
+  // ── CommonJS / optional-call require forms ──────────────────────────────────
+  ok('module.require(pkg) is caught', !!bannedImportHit(`const x = module.require(${Q}${OAI}${Q})`));
+  ok('require?.(pkg) optional-call is caught', !!bannedImportHit(`const x = require?.(${Q}${OAI}${Q})`));
+  ok('obj.importer(pkg) is NOT a require (no false positive)', !bannedImportHit(`obj.importer(${Q}${OAI}${Q})`));
+
+  // ── HTML comments (the gate scans .html) are not code ───────────────────────
+  ok('an HTML comment with import text is not a false positive',
+    !bannedImportHit(`<!-- imp` + `ort ${Q}${OAI}${Q} -->`));
+  ok('a real <script> import after an HTML comment is caught',
+    !!bannedImportHit(`<!-- x -->\n<script>imp` + `ort ${Q}${OAI}${Q};</script>`));
+
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',
     !bannedImportHit(`imp` + `ort(${Q}open${Q} + ${Q}ai${Q})`));

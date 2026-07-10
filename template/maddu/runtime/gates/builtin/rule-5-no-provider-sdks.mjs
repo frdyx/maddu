@@ -46,7 +46,9 @@ const SCANNED_EXT = /\.(m?js|cjs|mts|cts|ts|jsx|tsx|html|css)$/;
 const BANNED_PKG_RE = /^(?:anthropic|openai|@anthropic-ai|@google\/generative-ai)(?:\/.*)?$/;
 // The code immediately preceding a string literal marks it as an import specifier
 // when it ends with an import keyword / dynamic-import or require call opener.
-const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:import|require)\s*\(\s*$/;
+// The call form also accepts an optional `module.` qualifier (CommonJS
+// `module.require('x')`) and an optional-call `?.` (`require?.('x')`).
+const IMPORT_KEYWORD_TAIL = /(?:^|[^.\w$])(?:from|import)\s*$|(?:^|[^.\w$])(?:module\.require|import|require)\s*(?:\?\.)?\s*\(\s*$/;
 
 // Exported so the self-test can exercise the matcher directly with in-memory
 // strings — no literal banned specifier is ever written into a scanned tree.
@@ -104,9 +106,11 @@ function scanCode(src, start, stopAtBrace) {
     if (c === ')') { lastCloseCtl = parenCtl.pop() || false; push(')'); i++; continue; }
     if (c === '{') { brace++; push(c); i++; continue; }
     if (c === '}') { brace--; push(c); i++; continue; }
-    // line / block comments
+    // line / block / HTML comments (the gate scans .html/.css too, so an HTML
+    // `<!-- … -->` comment must not be read as code)
     if (c === '/' && c2 === '/') { i += 2; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
     if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; push(' '); continue; }
+    if (c === '<' && src.startsWith('<!--', i)) { i += 4; while (i < n && !(src[i] === '-' && src[i + 1] === '-' && src[i + 2] === '>')) i++; i += 3; push(' '); continue; }
     // regex literal — a `/` begins one at the start of a context (empty tail),
     // after an operator/opener/keyword, or after a `)` that closed a control-flow
     // header (`if (x) /re/`), but NOT after a value or a postfix ++/--.
