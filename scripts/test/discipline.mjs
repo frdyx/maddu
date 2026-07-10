@@ -19,7 +19,11 @@ function ok(name, cond, extra = '') {
 // ── classifyBashWrite ───────────────────────────────────────────────────────
 const W = (c) => classifyBashWrite(c) === 'write';
 const R = (c) => classifyBashWrite(c) === 'remedy';
-const A = (c) => classifyBashWrite(c) === 'allow';
+// audit P2: the old catch-all 'allow' split into 'read' (default, allowed) and
+// 'ambiguous' (opaque executor — gated under strict, nudged under standard).
+const RD = (c) => classifyBashWrite(c) === 'read';
+const AM = (c) => classifyBashWrite(c) === 'ambiguous';
+const NW = (c) => classifyBashWrite(c) !== 'write';   // "not a write" invariant
 
 ok('write: redirect > file', W('echo hi > src/a.js'));
 ok('write: append >> file', W('cat x >> out.txt'));
@@ -28,11 +32,17 @@ ok('write: tee', W('cat x | tee f'));
 ok('write: mv/cp/rm/dd/truncate', W('mv a b') && W('cp a b') && W('rm -rf x') && W('dd if=a of=b') && W('truncate -s0 f'));
 ok('write: PowerShell Set-Content/Out-File/Remove-Item', W('Set-Content f x') && W('foo | Out-File f') && W('Remove-Item f'));
 
-ok('allow: 2>&1 is not a file write', A('make 2>&1'));
-ok('allow: >/dev/null is not a repo write', A('cmd >/dev/null'));
-ok('allow: read-only ls/cat/grep', A('ls -la') && A('cat f') && A('grep x f'));
-ok('allow: ambiguous build step', A('npm run build'));
-ok('allow: ambiguous interpreter -c/-e', A('python -c "open(0)"') && A('node -e "x"'));
+ok('not-write: 2>&1 is not a file write', NW('make 2>&1'));
+ok('read: >/dev/null is not a repo write', RD('cmd >/dev/null'));
+ok('read: read-only ls/cat/grep', RD('ls -la') && RD('cat f') && RD('grep x f'));
+ok('ambiguous: build step', AM('npm run build') && AM('make') && AM('node build.js'));
+ok('read: interpreter -c/-e without a write API', RD('python -c "open(0)"') && RD('node -e "x"'));
+// audit P2 — the named holes: interpreter WRITES + self-disable
+ok('write: node -e with a write API', W('node -e "require(\'fs\').writeFileSync(\'x\',\'y\')"'));
+ok('write: python -c open in write mode', W('python3 -c "open(\'f\',\'w\').write(1)"'));
+ok('self-disable: hooks uninstall/remove', classifyBashWrite('maddu hooks uninstall') === 'self-disable' && classifyBashWrite('maddu hooks remove') === 'self-disable');
+ok('self-disable: governance off-switch', classifyBashWrite('maddu governance set-override discipline-enforcement off') === 'self-disable');
+ok('write dominates self-disable: `hooks uninstall && rm -rf x`', W('maddu hooks uninstall && rm -rf x') && W('maddu hooks uninstall;rm -rf x'));
 
 // WRITE precedence: a write must NOT ride in on a remedy token (Codex bypass).
 ok('bypass closed: `maddu register && echo x > f` → write', W('maddu register && echo x > src/a.js'));
@@ -66,7 +76,7 @@ ok('remedy: git status/diff/add/commit/log', R('git status') && R('git commit -F
 ok('remedy beats write: git commit never classed write', classifyBashWrite('git commit -F .maddu/tmp/msg') === 'remedy');
 ok('no blanket maddu: maddu upgrade is NOT a remedy', classifyBashWrite('maddu upgrade') !== 'remedy');
 ok('no blanket git: git checkout -- . is NOT a remedy', classifyBashWrite('git checkout -- .') !== 'remedy');
-ok('empty/nullish → allow', A('') && A('   ') && classifyBashWrite(null) === 'allow' && classifyBashWrite(undefined) === 'allow');
+ok('empty/nullish → read', RD('') && RD('   ') && classifyBashWrite(null) === 'read' && classifyBashWrite(undefined) === 'read');
 
 // ── resolveThresholds ───────────────────────────────────────────────────────
 ok('strict enforcement=block', resolveThresholds('strict').enforcement === 'block');
@@ -183,7 +193,8 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
 }
 {
   const r = await enforcePreTool('/no/such/repo', { tool: 'Bash', command: 'npm run build' });
-  ok('enforcePreTool: ambiguous Bash → non-mutating ok', r.verdict === 'ok');
+  // ambiguous under standard → a nudge (surfaced, non-blocking), never gated as a write.
+  ok('enforcePreTool: ambiguous Bash → non-mutating', r.mutating === false && (r.verdict === 'nudge' || r.verdict === 'ok'));
 }
 {
   // A mutating Edit against a bogus repo must never THROW — it returns a verdict

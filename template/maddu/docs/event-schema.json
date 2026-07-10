@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.5.0",
+  "x-contractVersion": "1.6.0",
   "type": "object",
   "required": [
     "v",
@@ -143,6 +143,7 @@
         "TOOL_COMPLETED",
         "TOOL_REFUSED",
         "GOVERNANCE_MODE_CHANGED",
+        "GOVERNANCE_OVERRIDE_CHANGED",
         "PLAN_CREATED",
         "PLAN_PHASE_ADDED",
         "PLAN_PHASE_COMPLETED",
@@ -185,6 +186,8 @@
         "BRIDGE_ORIGIN_REJECTED",
         "BRIDGE_CROSS_WORKSPACE",
         "SPINE_CUTOVER",
+        "DISCIPLINE_SKIPPED",
+        "ENFORCEMENT_ERROR",
         "BLUEPRINT_DISTILLED",
         "DEBT_SCANNED",
         "ARCHITECTURE_SCANNED",
@@ -3960,6 +3963,53 @@
       "if": {
         "properties": {
           "type": {
+            "const": "GOVERNANCE_OVERRIDE_CHANGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A governance behavior-override key was changed or cleared (recorded write-ahead so the discipline off-switch is always on the record).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "key": {
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
             "const": "PLAN_CREATED"
           }
         }
@@ -5390,6 +5440,85 @@
             "properties": {
               "version": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "DISCIPLINE_SKIPPED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "blocked": {
+                "type": "boolean"
+              },
+              "enforcement": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ENFORCEMENT_ERROR"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }

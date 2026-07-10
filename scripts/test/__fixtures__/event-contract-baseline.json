@@ -1,6 +1,6 @@
 {
-  "version": "1.5.0",
-  "fingerprint": "2d74bf93",
+  "version": "1.6.0",
+  "fingerprint": "9095574b",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -313,6 +313,16 @@
           "noTrigger": "number"
         }
       },
+      "DISCIPLINE_SKIPPED": {
+        "frozen": false,
+        "data": {
+          "blocked": "boolean?",
+          "enforcement": "string|null",
+          "reason": "string",
+          "sessionId": "string|null",
+          "tool": "string|null"
+        }
+      },
       "DISCORD_ALLOWLIST_SET": {
         "frozen": false,
         "data": {
@@ -409,6 +419,14 @@
           "to": "string"
         }
       },
+      "ENFORCEMENT_ERROR": {
+        "frozen": false,
+        "data": {
+          "reason": "string",
+          "sessionId": "string|null",
+          "tool": "string|null"
+        }
+      },
       "FOCUS_TAGGED": {
         "frozen": false,
         "data": {
@@ -495,6 +513,16 @@
           "from": "string",
           "reason": "string|null",
           "to": "string"
+        }
+      },
+      "GOVERNANCE_OVERRIDE_CHANGED": {
+        "frozen": false,
+        "data": {
+          "by": "string|null",
+          "from": "string|null",
+          "key": "string",
+          "reason": "string|null",
+          "to": "string|null"
         }
       },
       "HANDOFF_SET": {

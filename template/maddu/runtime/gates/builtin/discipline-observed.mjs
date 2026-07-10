@@ -51,6 +51,33 @@ export default {
 
     const problems = [];
     if (enforcing && !hookWired) problems.push(`enforcement is "${enforcement}" but the PreToolUse hook is NOT installed — run \`maddu hooks install\` (discipline currently does nothing)`);
+
+    // audit P2 (C6c/F9): out-of-band config provenance. Replay the recorded
+    // governance changes and reconcile STORED config (mode + the discipline-
+    // enforcement override) against them. A mismatch means the config was changed
+    // without a recorded governance command (a possible out-of-band edit that would
+    // silently weaken enforcement). Compares STORED mode (not effective — phase
+    // escalation is effective-only and never tampering). Best-effort; warn-only.
+    try {
+      const spine = await import(lib('spine.mjs'));
+      const events = await spine.readAll(repoRoot);
+      let recMode = 'standard';           // readGovernance's default when unset
+      let recOverride = null;             // no discipline-enforcement override recorded
+      for (const e of events) {
+        if (e.type === 'GOVERNANCE_MODE_CHANGED') recMode = e.data?.to || recMode;
+        else if (e.type === 'GOVERNANCE_OVERRIDE_CHANGED' && e.data?.key === 'discipline-enforcement') {
+          recOverride = e.data.to == null ? null : String(e.data.to);
+        }
+      }
+      const stored = await governance.readGovernance(repoRoot);
+      const storedMode = stored.mode;
+      const storedOverride = stored.overrides && Object.prototype.hasOwnProperty.call(stored.overrides, 'discipline-enforcement')
+        ? String(stored.overrides['discipline-enforcement']) : null;
+      if (storedMode !== recMode || storedOverride !== recOverride) {
+        problems.push(`governance state not accounted for by any recorded change (possible out-of-band config edit): stored{mode:${storedMode}, enf-override:${storedOverride ?? 'none'}} vs recorded{mode:${recMode}, enf-override:${recOverride ?? 'none'}}`);
+      }
+    } catch { /* provenance reconcile is best-effort */ }
+
     if (state) {
       if (!state.session?.registered) problems.push('no active session registered');
       if (!state.lane?.claimed) problems.push('no lane claimed');

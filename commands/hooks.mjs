@@ -55,6 +55,47 @@ async function quietly(fn) {
   finally { console.log = realLog; }
 }
 
+// audit P2 (C6b) — witness a discipline bypass / fail-open on the spine. This is
+// the SEAM that keeps `discipline.mjs` a spine-less leaf: the leaf classifies and
+// decides, and emitting the witness lives HERE where `loadSpineLib` is in scope.
+// Best-effort — a witness failure NEVER blocks the tool. Latched reasons
+// (enforcement-off / err:<sig>) emit ~once per session-episode and re-emit after a
+// healthy eval clears the latch (discipline.enforcePreTool); a self-disable ATTEMPT
+// is NEVER latched (each is a distinct incident). The latch is set ONLY after a
+// successful append, so an append failure retries next time (F6).
+async function witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterKey }) {
+  try {
+    const enf = decision.enforcement, kind = decision.kind, action = decision.action;
+    let type = null, data = null, latchKey = null;
+    // A self-disable ATTEMPT is checked FIRST (a per-incident witness, never latched)
+    // so it isn't swallowed by the latched enforcement-off branch when both hold.
+    if (kind === 'self-disable' && (action === 'witness-allow' || action === 'block')) {
+      type = 'DISCIPLINE_SKIPPED';
+      data = { reason: 'self-disable-attempt', tool: tool || null, sessionId: sid || null, enforcement: enf || null, blocked: action === 'block' };
+    } else if (enf === 'error') {
+      const sig = decision.errorSig || 'unknown';
+      type = 'ENFORCEMENT_ERROR'; latchKey = `err:${sig}`;
+      data = { reason: sig, tool: tool || null, sessionId: sid || null };
+    } else if (enf === 'off' && decision.mutating) {
+      type = 'DISCIPLINE_SKIPPED'; latchKey = 'enforcement-off';
+      data = { reason: 'enforcement-off', tool: tool || null, sessionId: sid || null, enforcement: 'off' };
+    } else return; // nothing to witness
+
+    if (latchKey && counterKey && disc?.readCounter) {
+      const c = await disc.readCounter(repoRoot, counterKey);
+      if (c?.skipLatch?.[latchKey]) return; // already witnessed this episode
+    }
+    const { spine } = await loadSpineLib();
+    await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data });
+    // Set the latch ONLY after a successful append (an append failure retries).
+    if (latchKey && counterKey && disc?.readCounter && disc?.writeCounter) {
+      const c = (await disc.readCounter(repoRoot, counterKey)) || {};
+      c.skipLatch = { ...(c.skipLatch || {}), [latchKey]: true };
+      await disc.writeCounter(repoRoot, counterKey, c);
+    }
+  } catch { /* witness is best-effort — never block the tool */ }
+}
+
 export default async function hooks(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printHelp(); return; }
   const sub = argv[0];
@@ -138,40 +179,38 @@ export default async function hooks(argv) {
       // either allow, nudge (additionalContext), or block (permissionDecision:
       // deny). FAILS OPEN — any error exits 0 with no output, never blocking the
       // tool; only an explicit verdict:'block' emits a deny.
+      // Context hoisted so BOTH the happy path and the outer catch can witness (F6).
+      let tool = null, sid = null, counterKey = null, disc = null;
       try {
-        if (process.stdin.isTTY) process.exit(0); // human at a terminal → no gate
+        if (process.stdin.isTTY) process.exit(0); // human at a terminal → no gate (not a bypass)
+        // Load the discipline lib BEFORE reading/parsing stdin so a malformed-input
+        // throw still lands in the catch with `disc` available to witness (F6).
+        disc = await loadLib('discipline.mjs');
         let raw = '';
         for await (const chunk of process.stdin) raw += chunk;
         const payload = raw.trim() ? JSON.parse(raw) : {};
-        const tool = payload.tool_name || null;
+        tool = payload.tool_name || null;
         const ti = payload.tool_input || {};
         const filePath = ti.file_path || ti.notebook_path || null;
         const command = ti.command || null;
         const claudeSessionId = payload.session_id || null;
 
-        const disc = await loadLib('discipline.mjs');
+        // Classify for the early-exit. A read/remedy Bash (and any non-mutating tool)
+        // has nothing to gate OR witness → exit. Everything else (edit/write/
+        // self-disable/ambiguous) proceeds so it can be gated AND/OR witnessed.
+        const kind = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'edit'
+          : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
+        if (kind === 'read' || kind === 'remedy') process.exit(0);
 
-        // Gate only MUTATING tools. Edit-family always mutates; Bash is gated only
-        // when it's a recognized write (classifyBashWrite) — a read/remedy Bash
-        // (ls, git status, maddu slice-stop) exits immediately, so widening the
-        // matcher to Bash never auto-claims a lane on a harmless command.
-        let mutating = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool);
-        if (tool === 'Bash' && disc && disc.classifyBashWrite) {
-          mutating = disc.classifyBashWrite(command) === 'write';
-        }
-        if (!mutating) process.exit(0);
-
-        const { projections, sessionActive } = await loadSpineLib();
+        const { projections } = await loadSpineLib();
 
         // Resolve the CALLER's Máddu session: explicit env → the SessionStart
-        // binding (Claude id → Máddu id) → the active-session cache. The binding
-        // is what keeps concurrent Claude sessions from cross-resetting counters.
-        let sid = process.env.MADDU_SESSION_ID || null;
+        // binding (Claude id → Máddu id). NO active-session-cache fallback (audit P2
+        // F11): an unbound Claude caller must stay unbound rather than inherit the
+        // cached active session, or it defeats the null-session gate + Claude counter.
+        sid = process.env.MADDU_SESSION_ID || null;
         if (!sid && disc && claudeSessionId) { try { sid = await disc.resolveMadduSession(repoRoot, claudeSessionId); } catch { /* fall through */ } }
-        if (!sid && sessionActive?.readActiveSession) {
-          const a = await sessionActive.readActiveSession(repoRoot);
-          sid = a && a.sessionId;
-        }
+        counterKey = sid || (claudeSessionId ? `claude:${claudeSessionId}` : null);
 
         // Auto-claim a lane before the first edit (rule-#9 clean via the trigger
         // gauntlet); note if we just claimed so the eval doesn't race the spine.
@@ -186,7 +225,8 @@ export default async function hooks(argv) {
         } catch { /* auto-claim best-effort */ }
 
         // Evaluate discipline (re-projects fresh inside; maintains + persists the
-        // per-session counter). Any internal error → verdict 'ok' (fail-open).
+        // per-session counter; resolves ONE action). Any internal error → the
+        // returned decision carries enforcement:'error' (fail-open + witnessable).
         let decision = { verdict: 'ok' };
         if (disc && disc.enforcePreTool) {
           decision = await disc.enforcePreTool(repoRoot, {
@@ -194,6 +234,10 @@ export default async function hooks(argv) {
             nowMs: Date.now(), laneJustClaimed,
           });
         }
+        counterKey = decision.counterKey || counterKey;
+
+        // Witness a bypass / fail-open BEFORE acting on the verdict (best-effort).
+        await witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterKey });
 
         if (decision.verdict === 'block') {
           process.stdout.write(JSON.stringify({
@@ -205,9 +249,9 @@ export default async function hooks(argv) {
           }) + '\n');
           process.exit(0);
         }
-        // 'warn' (graduated: the pre-block reminder) and 'nudge' (relaxed) both
-        // surface as non-blocking context — without this the graduated "warn then
-        // block" ramp would be invisible until the block landed (Codex).
+        // 'warn' (graduated: the pre-block reminder) and 'nudge' (relaxed / an
+        // ambiguous opaque command under standard) both surface as non-blocking
+        // context — without this the graduated ramp would be invisible until block.
         if (decision.verdict === 'nudge' || decision.verdict === 'warn') {
           process.stdout.write(JSON.stringify({
             hookSpecificOutput: {
@@ -217,7 +261,18 @@ export default async function hooks(argv) {
           }) + '\n');
           process.exit(0);
         }
-      } catch { /* fail open */ }
+      } catch (e) {
+        // The handler itself threw (stdin parse, spine load, …) — fail open, but
+        // leave a witness so a persistent handler bug can't hide (F6). Emit even if
+        // `disc` never loaded (a bare append, no latch/counter) so a malformed-input
+        // failure is never silent.
+        try {
+          const errorSig = disc?.normErrorSig ? disc.normErrorSig(e) : String((e && e.message) || e).split('\n')[0].slice(0, 120);
+          await witnessDiscipline(repoRoot, disc, {
+            decision: { enforcement: 'error', errorSig }, tool, sid, counterKey,
+          });
+        } catch { /* witness best-effort */ }
+      }
       process.exit(0);
     }
     if (event === 'pre-compact') {
@@ -338,6 +393,32 @@ export default async function hooks(argv) {
         console.log(`  ${'\x1b[33m'}(statusLine left untouched — you already set your own)${'\x1b[0m'}`);
       }
       return;
+    }
+    // audit P2 (C6c): uninstalling the PreToolUse hook disables Máddu's own
+    // discipline enforcement. Record it WRITE-AHEAD — append the witness BEFORE
+    // stripping the settings so a disable is never silent; abort on append failure
+    // (a disable that can't be recorded must not proceed) unless --force, which
+    // still records first and only downgrades the abort to a loud warning.
+    if (removing && lib.summarize(settings).installed.includes('PreToolUse')) {
+      // NEVER remove the enforcement hook unless the disable is recorded first —
+      // a disable that can't be witnessed must not proceed (no --force bypass of the
+      // write-ahead; the operator can hand-edit .claude/settings.json if the spine
+      // is genuinely broken, which is itself the problem to fix).
+      try {
+        const { spine } = await loadSpineLib();
+        await spine.append(repoRoot, {
+          type: spine.EVENT_TYPES.DISCIPLINE_SKIPPED,
+          actor: process.env.MADDU_SESSION_ID || null,
+          data: {
+            reason: 'enforcement-hook-uninstalled',
+            tool: null, sessionId: process.env.MADDU_SESSION_ID || null, enforcement: null,
+          },
+        });
+      } catch (e) {
+        console.error(`\x1b[31mrefusing to uninstall\x1b[0m — could not record the disable on the spine (${String((e && e.message) || e).slice(0, 80)}).`);
+        console.error(`  Disabling enforcement must leave a witness. Fix the spine first (a broken spine is the real problem).`);
+        process.exit(1);
+      }
     }
     const eol = existed && raw && raw.includes('\r\n') ? '\r\n' : '\n';
     await lib.saveSettings(repoRoot, next, { eol });

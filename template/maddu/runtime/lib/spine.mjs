@@ -173,6 +173,12 @@ export const EVENT_TYPES = {
   // v1.1.0 Phase 3 — workspace governance tier transitions.
   // data: { from, to, by: sessionId|null, reason }
   GOVERNANCE_MODE_CHANGED:   'GOVERNANCE_MODE_CHANGED',
+  // audit P2 — a governance behavior OVERRIDE key was changed (or cleared). The
+  // discipline off-switch (`set-override discipline-enforcement off`) rides this
+  // so disabling enforcement is always on the record; recorded WRITE-AHEAD (before
+  // the config write) so a failed append aborts the change rather than disabling
+  // silently. A cleared override is `to:null`. data: { key, from, to, by, reason }
+  GOVERNANCE_OVERRIDE_CHANGED: 'GOVERNANCE_OVERRIDE_CHANGED',
   // v1.1.0 Phase 5 — plan persistence + revision.
   // PLAN_CREATED:        { planId, title, phases: [{name, intent}], goal }
   // PLAN_PHASE_ADDED:    { planId, name, intent, at }
@@ -285,6 +291,16 @@ export const EVENT_TYPES = {
   // partition to the post-cutover strict rules even without a migrated FRAMEWORK
   // marker. data: { version }
   SPINE_CUTOVER:              'SPINE_CUTOVER',
+  // audit P2 — self-discipline honesty. A mutating tool was let through WITHOUT a
+  // discipline check (enforcement off, a self-disable attempt, or the enforcement
+  // hook uninstalled), so a bypass always leaves a witness. Emitted best-effort at
+  // the hook-handler seam (discipline.mjs stays spine-less). data:
+  //   { reason, tool, sessionId, enforcement, blocked? }
+  DISCIPLINE_SKIPPED:         'DISCIPLINE_SKIPPED',
+  // audit P2 — the discipline enforcement path threw and fell open. Recording the
+  // failure keeps a silent fail-open from hiding a persistent enforcement bug.
+  // data: { reason, tool, sessionId }
+  ENFORCEMENT_ERROR:          'ENFORCEMENT_ERROR',
   // v1.15.0 — `maddu blueprint --distill` spawned a provider CLI (subprocess,
   // hard rule #5) to rewrite the deterministic skeleton into prose. Recorded on
   // success only; an unmet auth gate or worker failure falls back to the

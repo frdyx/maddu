@@ -52,6 +52,34 @@ export const MODE_DEFAULTS = {
 
 const VALID_OVERRIDE_KEYS = new Set(Object.keys(MODE_DEFAULTS.standard));
 
+// audit P2 (C6c) — value domains for security-sensitive override keys, so
+// `set-override discipline-enforcement <garbage>` can't smuggle an unhandled value
+// (or a typo that silently reads as "not off" / "not block"). Keys absent here keep
+// the historic free coercion. Exported for the CLI + the discipline-honesty guard.
+export const OVERRIDE_DOMAINS = {
+  'discipline-enforcement': ['block', 'graduated', 'nudge', 'off'],
+};
+
+// Enforcement rank: lower = weaker. ANY decrease (incl. block→graduated) is a
+// "weakening" that requires an explicit reason and, under strict, approval.
+export const ENFORCEMENT_RANK = { off: 0, nudge: 1, graduated: 2, block: 3 };
+
+// null → the value is not domain-constrained (allow). true/false → in/out of domain.
+export function validateOverrideValue(key, value) {
+  const domain = OVERRIDE_DOMAINS[key];
+  if (!domain) return null;
+  return domain.includes(value);
+}
+
+// Is changing `key` from `from`→`to` a weakening of enforcement? Only meaningful for
+// discipline-enforcement (ranked). `from` null means "was the mode default", but the
+// CALLER passes the effective-from so this stays pure.
+export function isEnforcementWeakening(from, to) {
+  const a = ENFORCEMENT_RANK[from], b = ENFORCEMENT_RANK[to];
+  if (a === undefined || b === undefined) return false;
+  return b < a;
+}
+
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
 function configPath(repoRoot) {
