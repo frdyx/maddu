@@ -47,7 +47,12 @@
 // GOVERNANCE_OVERRIDE_CHANGED so a discipline bypass / fail-open / off-switch
 // change always leaves a spine witness (the "actor not sole witness" north star).
 // Additive → minor bump; baseline refreshed at release.
-export const EVENT_CONTRACT_VERSION = '1.6.0';
+// 1.7.0 (audit P3) — added VERIFICATION_STARTED + VERIFICATION_RAN so a
+// verification outcome (goal success-eval, project/self test, heavy suite) is a
+// tamper-detecting spine RECEIPT appended from the in-process result, read back
+// by the recency/success readouts — not a hand-writable state file the actor
+// re-reads (the "verification, not actor-witness" tier). Additive → minor bump.
+export const EVENT_CONTRACT_VERSION = '1.7.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -235,6 +240,8 @@ export const EVENT_SCHEMA = {
   SPINE_CUTOVER: { summary: "A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).", data: { version: 'string' } },
   DISCIPLINE_SKIPPED: { summary: "A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent.", data: { blocked: 'boolean?', enforcement: 'string|null', reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
+  VERIFICATION_STARTED: { summary: "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.", data: { kind: 'string', profile: 'string|null' } },
+  VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.", data: { allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?' } },
   BLUEPRINT_DISTILLED: { summary: "A blueprint skeleton was distilled into prose by a provider CLI.", data: { distilledBytes: 'number', outPath: 'string', provider: 'string', runtime: 'string', skeletonBytes: 'number', slug: 'string' } },
   DEBT_SCANNED: { summary: "The source tree was scanned for deliberate-shortcut debt markers.", data: { files: 'number', ledgerPath: 'string|null', markers: 'number', noTrigger: 'number' } },
   ARCHITECTURE_SCANNED: { summary: "The declared architecture contract was checked against the import graph.", data: { blocking: 'boolean', cycles: 'number', driftScore: 'number', edges: 'number', failOn: 'string', forbidden: 'number', modules: 'number', newViolations: 'number', uncovered: 'number', undeclared: 'number' } },

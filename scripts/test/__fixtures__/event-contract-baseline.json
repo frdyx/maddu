@@ -1,6 +1,6 @@
 {
-  "version": "1.6.0",
-  "fingerprint": "9095574b",
+  "version": "1.7.0",
+  "fingerprint": "5821a1af",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1566,6 +1566,31 @@
           "fact": "object",
           "factId": "string",
           "file": "string"
+        }
+      },
+      "VERIFICATION_RAN": {
+        "frozen": false,
+        "data": {
+          "allMet": "boolean?",
+          "complete": "boolean",
+          "conditions": "array?",
+          "counts": "object|null",
+          "kind": "string",
+          "metCount": "number?",
+          "objective": "string|null?",
+          "pendingCount": "number?",
+          "profile": "string|null",
+          "result": "string",
+          "setAt": "string|null?",
+          "startedId": "string",
+          "verifiable": "number?"
+        }
+      },
+      "VERIFICATION_STARTED": {
+        "frozen": false,
+        "data": {
+          "kind": "string",
+          "profile": "string|null"
         }
       },
       "WORKER_ENV_FILTERED": {

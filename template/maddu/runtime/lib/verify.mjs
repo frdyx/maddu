@@ -110,7 +110,7 @@ function issue(level, kind, detail, extra = {}) {
 // Options:
 //   maxEvents:  cap on total events scanned (default: unlimited).
 //               Doctor passes 50_000; the CLI passes Infinity.
-export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
+export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvents = false } = {}) {
   const paths = pathsFor(repoRoot);
   const eventsDir = paths.events;
 
@@ -119,7 +119,12 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
     events: 0,
     issues: [],
     counts: { WARN: 0, FAIL: 0 },
-    capped: false
+    capped: false,
+    // audit P3 — when collectEvents, the SAME single forward pass that verifies
+    // the chain also returns the parsed events in order, so a caller
+    // (readVerifiedEvents) trusts exactly the list it just verified: coverage is
+    // inherent, no separate readAll (which silently skips malformed lines).
+    eventList: collectEvents ? [] : null,
   };
   // In sync mode each partition is scanned as its own chain; `currentPartition`
   // stamps every issue/segment with its replicaId so a `000000000001.ndjson`
@@ -1047,6 +1052,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
 
       evCount++;
       result.events++;
+      if (result.eventList) result.eventList.push(ev);
       if (result.events >= maxEvents) {
         result.capped = true;
         // Record the partial segment summary before stopping.
@@ -1096,6 +1102,29 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
   }
 
   return result;
+}
+
+// audit P3 — the verified-read the recency/success GATES use as their authority.
+// A single uncapped, parse-clean forward pass verifies the chain AND returns the
+// exact events it verified (coverage inherent). integrity:
+//   'ok'      — no FAIL and the scan was NOT capped (a WARN, e.g. a pre-cutover
+//               legacy fork, does NOT force non-'ok'; only a FAIL does).
+//   'broken'  — a FAIL issue (unparseable line, hash-chain break, torn trailer…).
+//   'unknown' — the scan was capped (maxEvents hit), so we can't assert the whole
+//               chain is clean; a caller must NOT render green from 'unknown'.
+// `events` is [] when integrity !== 'ok' by default (a caller shouldn't trust
+// events from a chain it couldn't fully verify) unless {allowUnverifiedEvents}.
+export async function readVerifiedEvents(repoRoot, { maxEvents = Infinity, allowUnverifiedEvents = false } = {}) {
+  const res = await verifySpine(repoRoot, { maxEvents, collectEvents: true });
+  const integrity = res.counts.FAIL > 0 ? 'broken' : (res.capped ? 'unknown' : 'ok');
+  const trust = integrity === 'ok' || allowUnverifiedEvents;
+  return {
+    events: trust ? (res.eventList || []) : [],
+    integrity,
+    capped: res.capped,
+    failCount: res.counts.FAIL,
+    warnCount: res.counts.WARN,
+  };
 }
 
 // One-line summary of result.counts for doctor output.
