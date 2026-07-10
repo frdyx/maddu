@@ -301,6 +301,21 @@ export const EVENT_TYPES = {
   // failure keeps a silent fail-open from hiding a persistent enforcement bug.
   // data: { reason, tool, sessionId }
   ENFORCEMENT_ERROR:          'ENFORCEMENT_ERROR',
+  // audit P3 — verification is not actor-witness. A verification run (a goal
+  // success-eval, a project/self test, or a heavy suite) is OPENED here, BEFORE
+  // it runs, so a crash/append-failure leaves a dangling attempt with no receipt
+  // (the recency gates read that as non-green rather than trusting a stale pass).
+  // Its id is the attemptId a paired VERIFICATION_RAN references. data:
+  //   { kind, profile }  kind ∈ success-eval|project-test|self-test|stress|upgrade-matrix
+  VERIFICATION_STARTED:       'VERIFICATION_STARTED',
+  // audit P3 — the verification RECEIPT, appended from the runner's IN-PROCESS
+  // result (never a re-read state file), so the witness is the tamper-detecting
+  // spine, not a hand-writable projection. Every RAN references exactly one
+  // preceding kind+profile-matched VERIFICATION_STARTED. data:
+  //   { kind, startedId, profile, complete, result:'pass'|'fail', counts?,
+  //     // success-eval only: allMet, metCount, verifiable, pendingCount,
+  //     //   objective, setAt, conditions:[{text,state}] }
+  VERIFICATION_RAN:           'VERIFICATION_RAN',
   // v1.15.0 — `maddu blueprint --distill` spawned a provider CLI (subprocess,
   // hard rule #5) to rewrite the deterministic skeleton into prose. Recorded on
   // success only; an unmet auth gate or worker failure falls back to the
@@ -594,6 +609,35 @@ export async function readAll(repoRoot) {
     }
   }
   return out;
+}
+
+// audit P3 (T1) — a STRICT read for the bridge GET: unlike readAll (which
+// silently skips a malformed line), this COUNTS parse failures so a caller can
+// downgrade integrity to 'unknown' when a bad line was appended after the last
+// verified snapshot. Flat/default mode parses strictly; sync/partitioned mode
+// returns parseErrors:null ("can't strictly account" → caller treats as unknown).
+// No hashing, no spawn — a single read, safe on a bridge GET.
+export async function readAllStrict(repoRoot) {
+  const paths = await ensureSpine(repoRoot);
+  if (await readActiveReplicaId(repoRoot)) return { events: await readAllPartitioned(repoRoot), parseErrors: null };
+  const segs = await listSegments(paths);
+  if (await readActiveReplicaId(repoRoot)) return { events: await readAllPartitioned(repoRoot), parseErrors: null };
+  const out = [];
+  let parseErrors = 0;
+  for (const seg of segs) {
+    let text;
+    try { text = await readFile(join(paths.events, seg), 'utf8'); }
+    catch (err) {
+      if (err && err.code === 'ENOENT') return { events: await readAllPartitioned(repoRoot), parseErrors: null };
+      throw err;
+    }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { out.push(JSON.parse(line)); }
+      catch { parseErrors++; }
+    }
+  }
+  return { events: out, parseErrors };
 }
 
 export async function readSince(repoRoot, afterId) {

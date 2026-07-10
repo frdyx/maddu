@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.6.0` · **Event types:** 180
+**Contract version:** `1.7.0` · **Event types:** 182
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (180)
+## Events (182)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -197,6 +197,8 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `SPINE_CUTOVER` | A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules). | `version: string` |
 | `DISCIPLINE_SKIPPED` | A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent. | `blocked: boolean?`, `enforcement: string\|null`, `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
 | `ENFORCEMENT_ERROR` | The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open. | `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
+| `VERIFICATION_STARTED` | A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative. | `kind: string`, `profile: string\|null` |
+| `VERIFICATION_RAN` | A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection. | `allMet: boolean?`, `complete: boolean`, `conditions: array?`, `counts: object\|null`, `kind: string`, `metCount: number?`, `objective: string\|null?`, `pendingCount: number?`, `profile: string\|null`, `result: string`, `setAt: string\|null?`, `startedId: string`, `verifiable: number?` |
 | `BLUEPRINT_DISTILLED` | A blueprint skeleton was distilled into prose by a provider CLI. | `distilledBytes: number`, `outPath: string`, `provider: string`, `runtime: string`, `skeletonBytes: number`, `slug: string` |
 | `DEBT_SCANNED` | The source tree was scanned for deliberate-shortcut debt markers. | `files: number`, `ledgerPath: string\|null`, `markers: number`, `noTrigger: number` |
 | `ARCHITECTURE_SCANNED` | The declared architecture contract was checked against the import graph. | `blocking: boolean`, `cycles: number`, `driftScore: number`, `edges: number`, `failOn: string`, `forbidden: number`, `modules: number`, `newViolations: number`, `uncovered: number`, `undeclared: number` |

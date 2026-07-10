@@ -17,49 +17,57 @@
 // Severity: warn — heavy-suite drift surfaces as a cockpit warning, not a
 // release blocker.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readVerifiedEvents } from '../../lib/verify.mjs';
+import { recencyGateVerdict, pairVerifications, recencyFromSpine } from '../../lib/verification-recency.mjs';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function exists(path) {
+  try { await stat(path); return true; } catch { return false; }
+}
 
 async function readJson(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
 }
 
-function stressVerdict(doc) {
-  if (!doc) return { ok: true, note: 'stress: no runs yet (skipped)' };
-  const ts = doc.ts ? new Date(doc.ts).getTime() : NaN;
-  if (!Number.isFinite(ts) || ts === 0) return { ok: false, note: 'stress: last-run has invalid ts' };
-  const ageMs = Date.now() - ts;
-  if (ageMs > THIRTY_DAYS_MS) return { ok: false, note: `stress: last run ${Math.floor(ageMs / 86400000)}d ago (> 30d)` };
-  return { ok: true, note: `stress: ${Math.floor(ageMs / 3600000)}h ago (${doc.scenarioCount || '?'} scenarios)` };
-}
-
-function upgradeVerdict(doc, madduJson) {
-  if (!doc) return { ok: true, note: 'upgrade-matrix: no runs yet (skipped)' };
-  if (!doc.ts) return { ok: false, note: 'upgrade-matrix: last-run has no ts' };
-  if (doc.failed && doc.failed > 0) return { ok: false, note: `upgrade-matrix: last run had ${doc.failed} failure(s)` };
-  if (madduJson?.installedAt) {
-    const matrixTs = new Date(doc.ts).getTime();
-    const installTs = new Date(madduJson.installedAt).getTime();
-    if (matrixTs < installTs) return { ok: false, note: `upgrade-matrix: ran ${doc.ts}, before current install ${madduJson.installedAt}` };
+// Heavy suites don't run in a fresh install, so "no receipt yet" is a SKIP (ok),
+// not a warn — matching the old skip-if-absent shape. But a broken chain or a
+// dangling/failed/partial receipt is surfaced as not-ok. `installedAtMs`, when
+// given (upgrade-matrix), additionally requires the passing receipt to be NEWER
+// than the current install — a matrix run from before the upgrade is stale.
+function subVerdict(events, integrity, kind, ttlLabel, legacyPresent, installedAtMs) {
+  const { valid, dangling } = pairVerifications(events, kind);
+  if (integrity === 'ok' && valid.length === 0 && dangling.length === 0 && !legacyPresent) {
+    return { ok: true, note: `${kind}: no runs yet (skipped)` };
   }
-  return { ok: true, note: `upgrade-matrix: ${doc.ts} (${doc.passed || 0} pass)` };
+  const v = recencyGateVerdict(events, integrity, {
+    kind, ttlMs: THIRTY_DAYS_MS, nowMs: Date.now(),
+    profileOk: () => true, label: kind, ttlLabel, legacyPresent,
+  });
+  if (v.ok && installedAtMs) {
+    const rec = recencyFromSpine(events, { kind, ttlMs: THIRTY_DAYS_MS, nowMs: Date.now() });
+    const rt = rec.latest ? Date.parse(rec.latest.ts || '') : NaN;
+    if (!Number.isFinite(rt) || rt < installedAtMs) {
+      return { ok: false, note: `${kind}: last passing run predates the current install — re-run since upgrading` };
+    }
+  }
+  return { ok: v.ok, note: v.note || v.message };
 }
 
 export default {
   id: 'heavy-suites-recent',
   label: 'heavy suites recent',
   severity: 'warn',
-  description: 'Heavy test suites are current: stress harness ran within 30 days AND the upgrade-path matrix ran clean since the last install (merges the retired stress-harness-recent + upgrade-matrix-recent pair).',
+  description: 'Heavy test suites are current, proven by verified spine receipts (VERIFICATION_RAN kind:stress|upgrade-matrix): stress harness AND the upgrade-path matrix ran clean within 30 days AND (for the matrix) since the last install (not a hand-writable last-run file).',
   run: async (ctx) => {
+    const { events, integrity } = await readVerifiedEvents(ctx.repoRoot);
     const stateDir = join(ctx.repoRoot, '.maddu', 'state');
-    const stress = stressVerdict(await readJson(join(stateDir, 'stress-last-run.json')));
-    const upgrade = upgradeVerdict(
-      await readJson(join(stateDir, 'upgrade-matrix-last-run.json')),
-      await readJson(join(ctx.repoRoot, 'maddu.json')),
-    );
-    const ok = stress.ok && upgrade.ok;
-    return { ok, message: `${stress.note} · ${upgrade.note}` };
+    const madduJson = await readJson(join(ctx.repoRoot, 'maddu.json'));
+    const installedAtMs = madduJson && madduJson.installedAt ? Date.parse(madduJson.installedAt) : null;
+    const stress = subVerdict(events, integrity, 'stress', '30d', await exists(join(stateDir, 'stress-last-run.json')), null);
+    const upgrade = subVerdict(events, integrity, 'upgrade-matrix', '30d', await exists(join(stateDir, 'upgrade-matrix-last-run.json')), Number.isFinite(installedAtMs) ? installedAtMs : null);
+    return { ok: stress.ok && upgrade.ok, message: `${stress.note} · ${upgrade.note}` };
   },
 };

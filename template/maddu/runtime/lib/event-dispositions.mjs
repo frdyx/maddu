@@ -177,6 +177,8 @@ export const EVENT_DISPOSITIONS = {
   DISCIPLINE_SKIPPED: { disp: 'dormant', reason: "fires only when a discipline bypass is witnessed (enforcement off / self-disable / hook uninstalled) — absent in a healthy disciplined run" },
   ENFORCEMENT_ERROR: { disp: 'dormant', reason: "fires only when the enforcement path throws and falls open — absent unless there's an enforcement bug" },
   GOVERNANCE_OVERRIDE_CHANGED: { disp: 'dormant', reason: "fires only when a governance behavior-override key is changed/cleared (e.g. the discipline off-switch)" },
+  VERIFICATION_STARTED: { disp: 'active' },
+  VERIFICATION_RAN: { disp: 'active' },
   BLUEPRINT_DISTILLED: { disp: 'dormant', reason: "blueprint --distill emits it; not exercised in registered projects" },
   DEBT_SCANNED: { disp: 'active' },
   ARCHITECTURE_SCANNED: { disp: 'active' },

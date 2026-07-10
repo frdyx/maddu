@@ -10,12 +10,15 @@ import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile, stat } from 'node:fs/promises';
 import { project } from './projections.mjs';
-import { readSince, readAll, hashLine } from './spine.mjs';
+import { readSince, readAll, readAllStrict, hashLine } from './spine.mjs';
 import { listSchedules } from './schedule.mjs';
 import { totalUnread as mailboxTotalUnread } from './mailbox.mjs';
 import { readAttachments } from './worktrees.mjs';
 import { verifySpine } from './verify.mjs';
-import { readSuccessCache } from './success-eval.mjs';
+import {
+  resolveSuccessView, latestSuccessReceipt,
+  latestIntegrityVerdict, resolveGetIntegrity, integrityCoversReceipt,
+} from './success-eval.mjs';
 import { plainRefused, EMPTY_STATE } from './oversight-copy.mjs';
 
 // The runtime root (template/maddu/runtime in source, maddu/runtime when
@@ -23,6 +26,31 @@ import { plainRefused, EMPTY_STATE } from './oversight-copy.mjs';
 // computes the same value as its __dirname; buildBacklinks resolves the docs
 // dir relative to it.
 const runtimeRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+// audit P3 — the GET-side success readout. NEVER spawns (hard invariant) and
+// never re-hashes: a STRICT read (counts a malformed line the tolerant read
+// would skip) + the last spine-integrity verdict already on the spine give a
+// three-state integrity, and resolveSuccessView refuses to render "met" from a
+// stale / goal-mismatched / unverified receipt. Returns the same `goal`-shaped
+// object the builders emitted before, plus `stale`/`integrity`/`lastKnown`.
+async function successForGet(repoRoot, projGoal) {
+  let events = [];
+  let parseErrors = null;
+  try {
+    const strict = await readAllStrict(repoRoot);
+    events = strict.events;
+    parseErrors = strict.parseErrors;
+  } catch { events = []; parseErrors = null; }
+  const receipt = latestSuccessReceipt(events);
+  const verdict = latestIntegrityVerdict(events);
+  const integrity = resolveGetIntegrity({
+    parseErrors,
+    integrityVerdict: verdict,
+    covers: integrityCoversReceipt(events, verdict, receipt),
+  });
+  const view = resolveSuccessView(events, { goal: projGoal, nowMs: Date.now(), integrity });
+  return view;
+}
 
 export async function buildConductor(repoRoot) {
   const proj = await project(repoRoot);
@@ -547,14 +575,18 @@ export async function buildDigest(repoRoot, { sinceId = null } = {}) {
     summary: a.summary || null, ageMs: ageMs(a.ts),
   }));
 
-  // ── goal + cached success (no spawn) ──
-  const cache = await readSuccessCache(repoRoot);
+  // ── goal + success from the tamper-detecting spine receipt (no spawn) ──
+  const sv = await successForGet(repoRoot, proj.goal);
   const goal = {
-    objective: proj.goal ? proj.goal.objective : null,
-    metCount: cache ? cache.metCount : null,
-    total: cache ? (cache.conditions || []).length : (proj.goal?.success?.length ?? null),
-    allMet: cache ? cache.allMet : null,
-    evaluatedAt: cache ? cache.ts : null,
+    objective: sv.objective,
+    metCount: sv.metCount,
+    total: sv.total,
+    allMet: sv.allMet,
+    evaluatedAt: sv.evaluatedAt,
+    stale: sv.stale,
+    staleReasons: sv.staleReasons,
+    integrity: sv.integrity,
+    lastKnown: sv.lastKnown,
   };
 
   // ── focus tail ──
@@ -578,21 +610,31 @@ export async function buildProjectCockpit(repoRoot) {
   const now = Date.now();
   const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
   const round2 = (x) => Math.round(x * 100) / 100;
-  const cache = await readSuccessCache(repoRoot);
 
-  // ── goal + % to done (cached ✓/○/?) ──
-  const conditions = cache ? (cache.conditions || []) : ((proj.goal?.success || []).map((c) => ({ text: c.text || null, verify: c.verify || null, state: 'unknown' })));
-  const total = conditions.length;
-  const met = cache && typeof cache.metCount === 'number' ? cache.metCount : 0;
+  // ── goal + % to done — from the tamper-detecting spine receipt (no spawn) ──
+  const sv = await successForGet(repoRoot, proj.goal);
+  const conditions = sv.stale
+    ? ((sv.lastKnown && sv.lastKnown.conditions) || (proj.goal?.success || []).map((c) => ({ text: c.text || null, verify: c.verify || null, state: 'unknown' })))
+    : (sv.conditions || []);
+  const total = sv.total || conditions.length;
+  const met = typeof sv.metCount === 'number' ? sv.metCount : null;
   const goal = {
-    objective: proj.goal ? proj.goal.objective : null,
-    metCount: cache ? cache.metCount : null,
-    verifiable: cache ? cache.verifiable : null,
+    objective: sv.objective,
+    metCount: sv.metCount,
+    verifiable: sv.verifiable,
     total,
-    percent: total ? Math.round((met / total) * 100) : null,
-    allMet: cache ? cache.allMet : null,
-    evaluatedAt: cache ? cache.ts : null,
+    // percent is a "done" signal, so assert it ONLY when integrity is 'ok' (same
+    // gate as allMet). Under 'unknown'/'broken' the raw metCount/total still show
+    // (labelled unverified/stale), but the headline 100%/percent is withheld so a
+    // cockpit can't read an uncorroborated receipt as authoritatively complete.
+    percent: (met != null && total && sv.integrity === 'ok' && !sv.stale) ? Math.round((met / total) * 100) : null,
+    allMet: sv.allMet,
+    evaluatedAt: sv.evaluatedAt,
+    stale: sv.stale,
+    staleReasons: sv.staleReasons,
+    integrity: sv.integrity,
     conditions,
+    lastKnown: sv.lastKnown,
   };
 
   // ── Focus trajectory + current on-goal ──
@@ -762,10 +804,10 @@ export async function buildPortfolioEntry(repoRoot) {
   const now = Date.now();
   const ageMs = (ts) => { const t = new Date(ts || 0).getTime(); return t ? now - t : null; };
   const round2 = (x) => Math.round(x * 100) / 100;
-  const cache = await readSuccessCache(repoRoot);
+  const sv = await successForGet(repoRoot, proj.goal);
 
-  const total = cache ? (cache.conditions || []).length : (proj.goal?.success?.length ?? 0);
-  const met = cache && typeof cache.metCount === 'number' ? cache.metCount : 0;
+  const total = sv.total || 0;
+  const met = typeof sv.metCount === 'number' ? sv.metCount : null;
   const window = Array.isArray(proj.focus?.window) ? proj.focus.window : [];
   const last = window.length ? window[window.length - 1] : null;
   const workers = Array.isArray(proj.workers) ? proj.workers : [];
@@ -777,10 +819,15 @@ export async function buildPortfolioEntry(repoRoot) {
   return {
     project: basename(repoRoot),
     goal: proj.goal ? proj.goal.objective : null,
-    percent: total ? Math.round((met / total) * 100) : null,
-    metCount: cache ? cache.metCount : null,
+    // Withhold the authoritative percent unless integrity 'ok' && !stale (same
+    // gate as allMet), so the portfolio wall can't show a green 100% from an
+    // unverified/stale receipt. Raw metCount/total still render.
+    percent: (met != null && total && sv.integrity === 'ok' && !sv.stale) ? Math.round((met / total) * 100) : null,
+    metCount: sv.metCount,
     total,
-    allMet: cache ? cache.allMet : null,
+    allMet: sv.allMet,
+    stale: sv.stale,
+    integrity: sv.integrity,
     onGoal: last && typeof last.distanceScore === 'number' ? round2(1 - last.distanceScore) : null,
     lastTag: f.lastTag || null,
     driftFlag: f.openFlag ? { reason: f.openFlag.reason || null, runs: typeof f.openFlag.runs === 'number' ? f.openFlag.runs : null } : null,

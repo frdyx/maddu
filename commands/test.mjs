@@ -9,7 +9,7 @@
 import { runWrapper } from './_tools.mjs';
 import { loadSecretScan, loadTools } from './_tools.mjs';
 import { loadSpineLib } from './_spine.mjs';
-import { isAdaptiveProjectTestArgs, runProjectTestCli } from './_project-test-runner.mjs';
+import { isAdaptiveProjectTestArgs, runProjectTestCli, parseProjectTestArgs } from './_project-test-runner.mjs';
 
 async function resolveAdaptiveContext() {
   try {
@@ -93,7 +93,44 @@ export default async function testCmd(argv) {
       mode: 'adaptive project-test',
     }, lane, sessionId);
     const started = Date.now();
-    const code = await runProjectTestCli(argv, { repoRoot });
+    // audit P3 — wrap the run in a VERIFICATION_STARTED → VERIFICATION_RAN pair so
+    // project-test-recent reads recency from the tamper-detecting spine, not the
+    // hand-writable last-run.json. The receipt is emitted from the in-process
+    // result (never a re-read report). profile is parsed up front so STARTED and
+    // RAN carry the same profile (U2 pairing).
+    // Parse the profile (handles the positional form); a parse failure means
+    // invalid args → nothing runs → emit NO receipt (argsValid=false), so a bad
+    // invocation can't leave a dangling STARTED that reds recency.
+    let profile = 'quick';
+    let argsValid = true;
+    try { profile = parseProjectTestArgs(argv).profile; } catch { argsValid = false; }
+    let recordVerification = null;
+    try {
+      const { resolveLibDir } = await import('./_libroot.mjs');
+      const { pathToFileURL } = await import('node:url');
+      const { join } = await import('node:path');
+      const dir = await resolveLibDir();
+      ({ recordVerification } = await import(pathToFileURL(join(dir, 'verification-recency.mjs')).href));
+    } catch { recordVerification = null; }
+    // --list runs nothing, so it must NOT emit a verification receipt.
+    const isList = argv.includes('--list');
+    let code;
+    if (recordVerification && spine && !isList && argsValid) {
+      let captured = null;
+      const out = await recordVerification(repoRoot, { spine, actor: sessionId, lane }, {
+        kind: 'project-test', profile,
+        run: async () => runProjectTestCli(argv, { repoRoot, onResult: (r) => { captured = r; } }),
+        // null → emit no receipt (a config/usage error ran nothing, captured stays null).
+        derive: () => captured ? {
+          complete: captured.complete !== false,
+          result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
+          counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
+        } : null,
+      });
+      code = out.result;
+    } else {
+      code = await runProjectTestCli(argv, { repoRoot });
+    }
     await appendToolEvent(spine, repoRoot, spine?.EVENT_TYPES?.TOOL_COMPLETED || 'TOOL_COMPLETED', {
       tool: 'test',
       argv: argvForEvents,

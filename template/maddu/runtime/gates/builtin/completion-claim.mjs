@@ -41,15 +41,17 @@ export default {
     if (!res.crossed) {
       return {
         ok: true,
-        message: `${res.scanned} slice-stop(s) · ${res.cumulativeCount} hedged-without-proof (${res.recentCount} recent) — below live threshold ${res.threshold}`,
+        message: `${res.scanned} slice-stop(s) · ${res.cumulativeCount} completion-claim(s) without matching proof (${res.hedgeMatches} hedged + ${res.confidentMatches} confident, ${res.recentCount} recent) — below live threshold ${res.threshold}`,
       };
     }
     return {
       ok: false,
-      message: `LIVE pattern: ${res.cumulativeCount} hedged completion claim(s) without observed proof (${res.recentCount} in the last ${res.recentDays}d, threshold ${res.threshold}) — verify outcomes before stating done`,
+      message: `LIVE pattern: ${res.cumulativeCount} completion claim(s) without observed matching-family proof (${res.hedgeMatches} hedged + ${res.confidentMatches} confident verification-claims; ${res.recentCount} in the last ${res.recentDays}d, threshold ${res.threshold}) — verify outcomes before stating done`,
       evidence: {
         behavior: res.behavior,
         cumulativeCount: res.cumulativeCount,
+        hedged: res.hedgeMatches,
+        confident: res.confidentMatches,
         recentCount: res.recentCount,
         sliceIds: res.matches.filter((m) => m.recent).map((m) => m.sliceId).slice(0, 10),
       },

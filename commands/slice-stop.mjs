@@ -224,6 +224,24 @@ export default async function sliceStop(argv) {
     console.error(`  deliverables: ${deliverables.missing.length} declared target(s) not found — ${deliverables.missing.join(', ')}`);
   }
 
+  // audit P3 [S3] — evaluate THIS claim now. A pre-append gate would miss the
+  // final slice-stop; here the stop is already appended, so read the events
+  // BEFORE it and evaluate it as the candidate. A confident verification claim
+  // ("all gates green", "tests pass") with no matching-family, in-lane proof
+  // event surfaces an immediate nudge. Best-effort, non-fatal, never blocks.
+  try {
+    const reflect = await loadLibOptional('reflect.mjs');
+    if (reflect && reflect.evaluateStop) {
+      const all = await spine.readAll(repoRoot);
+      const idx = all.findIndex((e) => e.id === ev.id);
+      const before = idx >= 0 ? all.slice(0, idx) : all;
+      const verdict = reflect.evaluateStop(before, { id: ev.id, lane: ev.lane, actor: sessionId, ts: ev.ts, data: ev.data });
+      if (verdict.flagged && verdict.kind === 'verification') {
+        console.error('  completion-claim: this slice asserts a verification outcome with no matching-family proof event in-lane — run/record the test or gate before stating done');
+      }
+    }
+  } catch { /* non-fatal */ }
+
   // Auto-revise the named plan if triggered_by carries a planId.
   if (triggered_by && triggered_by.planId) {
     try {

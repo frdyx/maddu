@@ -998,6 +998,18 @@ const SCENARIOS = {
 
 const overallStart = Date.now();
 const toRun = onlyScenario ? [onlyScenario] : Object.keys(SCENARIOS);
+
+// audit P3 — open a VERIFICATION_STARTED on the framework spine BEFORE the run,
+// so a crash leaves a dangling attempt (heavy-suites-recent reads that as
+// non-green) rather than a stale pass surviving. Best-effort; targets cwd (the
+// framework root when run via self-test), never the ephemeral scenario repos.
+let __vSpine = null, __vStartedId = null;
+try {
+  __vSpine = await import(pathToFileURL(join(LIB, 'spine.mjs')).href);
+  const st = await __vSpine.append(process.cwd(), { type: 'VERIFICATION_STARTED', data: { kind: 'stress', profile: null } });
+  __vStartedId = (st && st.id) || null;
+} catch { __vSpine = null; }
+
 const results = [];
 for (const name of toRun) {
   if (!SCENARIOS[name]) { console.error(`unknown scenario: ${name}`); process.exit(2); }
@@ -1005,6 +1017,18 @@ for (const name of toRun) {
 }
 
 const totalMs = Date.now() - overallStart;
+
+// audit P3 — the VERIFICATION_RAN receipt from this in-process result. A
+// --scenario run is partial (complete:false) and never qualifies as recency [R2].
+if (__vSpine && __vStartedId) {
+  try {
+    await __vSpine.append(process.cwd(), { type: 'VERIFICATION_RAN', data: {
+      kind: 'stress', startedId: __vStartedId, profile: null, complete: !onlyScenario,
+      result: totalFailed > 0 ? 'fail' : 'pass',
+      counts: { pass: results.filter((r) => r.ok).length, fail: results.filter((r) => !r.ok).length, total: results.length },
+    } });
+  } catch { /* dangling STARTED remains → non-green */ }
+}
 console.log('');
 console.log(`Stress harness summary: ${results.filter((r) => r.ok).length}/${results.length} scenarios passed in ${totalMs}ms`);
 console.log(`Assertions: ${totalPassed} passed · ${totalFailed} failed`);

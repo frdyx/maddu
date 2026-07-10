@@ -1,13 +1,19 @@
 // project-test-recent
 //
-// Warns in consumer repos when adaptive `maddu test --profile quick|full`
-// has not produced a recent green report. Skips the Maddu framework source
-// checkout because source validation is owned by `maddu self-test`.
+// Warns in consumer repos when adaptive `maddu test --profile quick|full` has not
+// produced a recent green run. audit P3: recency now comes from a VERIFIED spine
+// receipt (VERIFICATION_RAN, kind:'project-test'), NOT the hand-writable
+// project-test-last-run.json — writing `{counts:{fail:0},ts:now}` no longer turns
+// this gate green having verified nothing. Skips the Maddu framework source
+// checkout (self-test-recent owns that).
 
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readVerifiedEvents } from '../../lib/verify.mjs';
+import { recencyGateVerdict } from '../../lib/verification-recency.mjs';
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+const profileOk = (p) => p === 'quick' || p === 'full';
 
 async function exists(path) {
   try { await stat(path); return true; } catch { return false; }
@@ -27,35 +33,17 @@ export default {
   id: 'project-test-recent',
   label: 'project test recent',
   severity: 'warn',
-  description: 'Adaptive project test ran recently with a green quick/full profile.',
+  description: 'Adaptive project test ran recently with a green quick/full profile, proven by a verified spine receipt (not a hand-writable last-run file).',
   run: async (ctx) => {
     if (await isFrameworkSourceRepo(ctx.repoRoot)) {
       return { ok: true, message: 'framework source repo - use self-test-recent instead (skipped)' };
     }
-    const p = join(ctx.repoRoot, '.maddu', 'state', 'project-test-last-run.json');
-    let doc = null;
-    try { doc = JSON.parse(await readFile(p, 'utf8')); }
-    catch { return { ok: false, message: 'no adaptive project-test quick/full run recorded yet' }; }
-
-    const failCount = Number(doc.counts?.fail || 0);
-    if (failCount > 0) return { ok: false, message: `last adaptive project-test run had ${failCount} failure(s)` };
-    if (doc.profile !== 'quick' && doc.profile !== 'full') {
-      return { ok: false, message: `last adaptive project-test profile is invalid or incomplete: ${doc.profile || '(missing)'}` };
-    }
-    const ts = doc.ts ? new Date(doc.ts).getTime() : 0;
-    if (!ts || Number.isNaN(ts)) return { ok: false, message: 'project-test-last-run.json has invalid ts' };
-    const ageMs = Date.now() - ts;
-    if (ageMs > FOURTEEN_DAYS_MS) {
-      return {
-        ok: false,
-        message: `last adaptive project-test run ${Math.floor(ageMs / 86400000)}d ago (> 14d)`,
-        evidence: { lastRun: doc.ts, profile: doc.profile, counts: doc.counts },
-      };
-    }
-    return {
-      ok: true,
-      message: `last ${doc.profile} project-test ${Math.floor(ageMs / 3600000)}h ago - ${doc.counts?.pass || 0} pass - ${failCount} fail`,
-    };
+    const { events, integrity } = await readVerifiedEvents(ctx.repoRoot);
+    const legacyPresent = await exists(join(ctx.repoRoot, '.maddu', 'state', 'project-test-last-run.json'));
+    return recencyGateVerdict(events, integrity, {
+      kind: 'project-test', ttlMs: FOURTEEN_DAYS_MS, nowMs: Date.now(),
+      profileOk, label: 'project-test', ttlLabel: '14d', legacyPresent,
+    });
   },
 };
 

@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.6.0",
+  "x-contractVersion": "1.7.0",
   "type": "object",
   "required": [
     "v",
@@ -188,6 +188,8 @@
         "SPINE_CUTOVER",
         "DISCIPLINE_SKIPPED",
         "ENFORCEMENT_ERROR",
+        "VERIFICATION_STARTED",
+        "VERIFICATION_RAN",
         "BLUEPRINT_DISTILLED",
         "DEBT_SCANNED",
         "ARCHITECTURE_SCANNED",
@@ -5519,6 +5521,106 @@
                   "string",
                   "null"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "VERIFICATION_STARTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "profile": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "VERIFICATION_RAN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "allMet": {
+                "type": "boolean"
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "conditions": {
+                "type": "array"
+              },
+              "counts": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": "string"
+              },
+              "metCount": {
+                "type": "number"
+              },
+              "objective": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "pendingCount": {
+                "type": "number"
+              },
+              "profile": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "result": {
+                "type": "string"
+              },
+              "setAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "startedId": {
+                "type": "string"
+              },
+              "verifiable": {
+                "type": "number"
               }
             }
           }

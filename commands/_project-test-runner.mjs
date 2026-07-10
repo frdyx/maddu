@@ -556,6 +556,9 @@ export async function runProjectTest(options = {}) {
   }
   const durationMs = Date.now() - started;
   const counts = countResults(results, plan.tasks.length, bailed);
+  // audit P3 — a run narrowed by --only/--skip/--changed is NOT a full quick/full
+  // profile and must not qualify as recency (the VERIFICATION_RAN carries this).
+  const complete = !(splitIds(options.only).length || splitIds(options.skip).length || options.changed);
   const report = {
     schemaVersion: 1,
     ts: new Date().toISOString(),
@@ -572,6 +575,7 @@ export async function runProjectTest(options = {}) {
     ok: counts.fail === 0,
     exitCode: counts.fail === 0 ? 0 : 1,
     profile: plan.profile,
+    complete,
     durationMs,
     repo: plan.repoRoot,
     counts,
@@ -653,6 +657,7 @@ export async function runProjectTestCli(argv, options = {}) {
       return 0;
     }
     const result = await runProjectTest({ ...parsed, repoRoot });
+    if (typeof options.onResult === 'function') { try { options.onResult(result); } catch {} }
     console.log(parsed.json ? resultJson(result) : resultText(result));
     return result.exitCode;
   } catch (err) {

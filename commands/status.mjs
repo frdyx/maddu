@@ -24,7 +24,7 @@ function head(label) {
 // snapshot. Pure (no IO) so it unit-tests without a repo. Degrades gracefully:
 // no goal, no focus signal, or an absent cache each drop their segment rather
 // than crashing — the line always renders SOMETHING.
-export function buildStatusLine(proj, cache) {
+export function buildStatusLine(proj, view) {
   const parts = [];
 
   // Focus segment — the pilot's current trajectory vs the goal axis.
@@ -43,10 +43,16 @@ export function buildStatusLine(proj, cache) {
     }
   }
 
-  // Goal segment — met/total from the success cache (no spawn). Falls back to
-  // "goal set" / "no goal" when the cache is cold.
-  if (cache && typeof cache.metCount === 'number' && Array.isArray(cache.conditions)) {
-    parts.push(`goal ${cache.metCount}/${cache.conditions.length}`);
+  // Goal segment — met/total from the tamper-detecting spine receipt (no spawn).
+  // A stale / unverified / goal-mismatched receipt shows "goal stale" rather than
+  // an uncorroborated met count. Falls back to "goal set" / "no goal".
+  if (view && !view.stale && typeof view.metCount === 'number' && view.total != null) {
+    // Show the count, but mark it 'unverified' when integrity isn't 'ok' (a GET
+    // never live-verifies) so a met count (e.g. 2/2) isn't read as an authoritative
+    // "all done". A genuinely STALE record renders "goal stale" below instead.
+    parts.push(`goal ${view.metCount}/${view.total}${view.unverified ? ' unverified' : ''}`);
+  } else if (view && view.stale && view.evaluatedAt) {
+    parts.push('goal stale');
   } else if (proj?.goal) {
     parts.push('goal set');
   } else {
@@ -64,12 +70,21 @@ export default async function status(_args) {
   const proj = await projections.project(repoRoot);
 
   if (flags.line) {
-    let cache = null;
+    let view = null;
     try {
       const se = await loadLib('success-eval.mjs');
-      cache = await se.readSuccessCache(repoRoot);
+      const { spine } = await loadSpineLib();
+      const strict = await spine.readAllStrict(repoRoot);
+      const receipt = se.latestSuccessReceipt(strict.events);
+      const verdict = se.latestIntegrityVerdict(strict.events);
+      const integrity = se.resolveGetIntegrity({
+        parseErrors: strict.parseErrors,
+        integrityVerdict: verdict,
+        covers: se.integrityCoversReceipt(strict.events, verdict, receipt),
+      });
+      view = se.resolveSuccessView(strict.events, { goal: proj.goal, nowMs: Date.now(), integrity });
     } catch {}
-    console.log(buildStatusLine(proj, cache));
+    console.log(buildStatusLine(proj, view));
     return;
   }
 

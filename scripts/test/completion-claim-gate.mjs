@@ -93,34 +93,85 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
 
+  // audit P3 — heavy-suites-recent now reads VERIFIED spine receipts, not the
+  // hand-writable state file. Append a STARTED→RAN pair per kind (ts=now → fresh).
+  async function appendVerification(root, kind, { result = 'pass', complete = true, profile = null } = {}) {
+    const st = await spine.append(root, { type: 'VERIFICATION_STARTED', data: { kind, profile } });
+    await spine.append(root, { type: 'VERIFICATION_RAN', data: { kind, startedId: st.id, profile, complete, result, counts: { pass: 5, fail: result === 'pass' ? 0 : 1, total: 5 } } });
+  }
+
   // ── heavy-suites-recent: both absent → ok (skipped) ──
   {
     const root = await tempRepo('maddu-hsr-absent-');
     const r = await heavySuites.run({ repoRoot: root });
-    ok('heavy-suites: no runs recorded → ok (skipped)', r.ok === true, r.message);
+    ok('heavy-suites: no receipts → ok (skipped)', r.ok === true, r.message);
     await rm(root, { recursive: true, force: true });
   }
 
-  // ── heavy-suites-recent: stale stress run → not-ok; current → ok ──
+  // ── heavy-suites-recent: fresh passing receipts (both kinds) → ok ──
   {
-    const root = await tempRepo('maddu-hsr-stale-');
-    await mkdir(join(root, '.maddu', 'state'), { recursive: true });
-    const staleTs = new Date(Date.now() - 45 * 86400000).toISOString();
-    await writeFile(join(root, '.maddu', 'state', 'stress-last-run.json'),
-      JSON.stringify({ ts: staleTs, scenarioCount: 5 }));
-    const stale = await heavySuites.run({ repoRoot: root });
-    ok('heavy-suites: 45d-old stress run → not ok', stale.ok === false, stale.message);
+    const root = await tempRepo('maddu-hsr-fresh-');
+    await appendVerification(root, 'stress', { result: 'pass' });
+    await appendVerification(root, 'upgrade-matrix', { result: 'pass' });
+    const fresh = await heavySuites.run({ repoRoot: root });
+    ok('heavy-suites: fresh passing receipts → ok', fresh.ok === true, fresh.message);
+    await rm(root, { recursive: true, force: true });
+  }
 
+  // ── heavy-suites-recent: a failed upgrade-matrix receipt → not-ok ──
+  {
+    const root = await tempRepo('maddu-hsr-fail-');
+    await appendVerification(root, 'stress', { result: 'pass' });
+    await appendVerification(root, 'upgrade-matrix', { result: 'fail' });
+    const badMatrix = await heavySuites.run({ repoRoot: root });
+    ok('heavy-suites: failed upgrade-matrix receipt → not ok', badMatrix.ok === false, badMatrix.message);
+    await rm(root, { recursive: true, force: true });
+  }
+
+  // ── heavy-suites-recent: a dangling stress STARTED (no RAN) → not-ok ──
+  {
+    const root = await tempRepo('maddu-hsr-dangling-');
+    await spine.append(root, { type: 'VERIFICATION_STARTED', data: { kind: 'stress', profile: null } });
+    await appendVerification(root, 'upgrade-matrix', { result: 'pass' });
+    const dangling = await heavySuites.run({ repoRoot: root });
+    ok('heavy-suites: dangling stress attempt → not ok', dangling.ok === false, dangling.message);
+    await rm(root, { recursive: true, force: true });
+  }
+
+  // ── heavy-suites-recent: an upgrade-matrix receipt predating the install → not-ok ──
+  {
+    const root = await tempRepo('maddu-hsr-preinstall-');
+    await appendVerification(root, 'stress', { result: 'pass' });
+    await appendVerification(root, 'upgrade-matrix', { result: 'pass' });
+    // Mark the install as happening AFTER the receipts (installedAt in the future).
+    await writeFile(join(root, 'maddu.json'), JSON.stringify({ installedAt: new Date(Date.now() + 3600000).toISOString() }));
+    const r = await heavySuites.run({ repoRoot: root });
+    ok('heavy-suites: upgrade-matrix ran before current install → not ok', r.ok === false && /predates the current install/.test(r.message), r.message);
+    await rm(root, { recursive: true, force: true });
+  }
+
+  // ── heavy-suites-recent: a legacy last-run file is NOT trusted → not-ok ──
+  {
+    const root = await tempRepo('maddu-hsr-legacy-');
+    await mkdir(join(root, '.maddu', 'state'), { recursive: true });
     await writeFile(join(root, '.maddu', 'state', 'stress-last-run.json'),
       JSON.stringify({ ts: new Date().toISOString(), scenarioCount: 5 }));
-    const fresh = await heavySuites.run({ repoRoot: root });
-    ok('heavy-suites: fresh stress run → ok', fresh.ok === true, fresh.message);
+    const legacy = await heavySuites.run({ repoRoot: root });
+    ok('heavy-suites: legacy last-run.json not trusted → not ok', legacy.ok === false, legacy.message);
+    await rm(root, { recursive: true, force: true });
+  }
 
-    // failed upgrade-matrix run flips it back to not-ok
-    await writeFile(join(root, '.maddu', 'state', 'upgrade-matrix-last-run.json'),
-      JSON.stringify({ ts: new Date().toISOString(), passed: 3, failed: 1 }));
-    const badMatrix = await heavySuites.run({ repoRoot: root });
-    ok('heavy-suites: failed upgrade-matrix run → not ok', badMatrix.ok === false, badMatrix.message);
+  // audit P3 (Codex R5#2) — recordVerification with a null derive (a --list /
+  // no-run mode) emits NO VERIFICATION_RAN receipt (only the STARTED), so a
+  // no-run invocation can't fabricate a failed receipt that reds recency.
+  {
+    const vr = await import(pathToFileURL(join(LIB_DIR, 'verification-recency.mjs')).href);
+    const root = await tempRepo('maddu-ccg-nullderive-');
+    await vr.recordVerification(root, { spine }, { kind: 'project-test', profile: 'quick', run: async () => 0, derive: () => null });
+    const events = await spine.readAll(root);
+    const rans = events.filter((e) => e.type === 'VERIFICATION_RAN');
+    const starts = events.filter((e) => e.type === 'VERIFICATION_STARTED');
+    ok('null derive → STARTED emitted but no RAN receipt', starts.length === 1 && rans.length === 0);
     await rm(root, { recursive: true, force: true });
   }
 

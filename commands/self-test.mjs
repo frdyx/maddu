@@ -43,6 +43,43 @@ export default async function selfTest(argv) {
     process.exit(2);
   }
   const runner = await import(pathToFileURL(runnerPath).href);
+
+  // audit P3 — wrap the run in a VERIFICATION_STARTED → VERIFICATION_RAN pair so
+  // self-test-recent reads recency from the tamper-detecting spine, not the
+  // hand-writable self-test-last-run.json. Best-effort: if the spine libs can't
+  // load, the self-test still runs (the gate just reads "no receipt" → non-green).
+  // Parse the profile via the runner's own parser (handles the positional form,
+  // `maddu self-test smoke`) so the receipt records the ACTUAL profile; a parse
+  // failure (invalid args) means nothing runs → emit NO receipt (argsValid=false).
+  let profile = 'quick';
+  let argsValid = true;
+  try { profile = runner.parseSelfTestArgs(argv).profile; } catch { argsValid = false; }
+
+  let recordVerification = null;
+  let spine = null;
+  try {
+    const { resolveLibDir } = await import('./_libroot.mjs');
+    const dir = await resolveLibDir();
+    ({ recordVerification } = await import(pathToFileURL(join(dir, 'verification-recency.mjs')).href));
+    ({ spine } = await import(pathToFileURL(join(dir, 'spine.mjs')).href).then((m) => ({ spine: m })));
+  } catch { recordVerification = null; }
+
+  // --list runs nothing, so it must NOT emit a verification receipt.
+  const isList = argv.includes('--list');
+  if (recordVerification && spine && spine.append && !isList && argsValid) {
+    let captured = null;
+    const out = await recordVerification(frameworkRoot, { spine, actor: process.env.MADDU_SESSION_ID || null, lane: process.env.MADDU_LANE || null }, {
+      kind: 'self-test', profile,
+      run: async () => runner.runSelfTestCli(argv, { frameworkRoot, onResult: (r) => { captured = r; } }),
+      // null → emit no receipt (a config/usage error ran nothing, captured stays null).
+      derive: () => captured ? {
+        complete: captured.complete !== false,
+        result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
+        counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
+      } : null,
+    });
+    process.exit(out.result);
+  }
   const exitCode = await runner.runSelfTestCli(argv, { frameworkRoot });
   process.exit(exitCode);
 }

@@ -62,8 +62,11 @@ async function main() {
   // ── buildStatusLine (pure) ──
   ok('no goal → "no goal" segment', buildStatusLine({ goal: null, focus: {} }, null) === 'maddu · no goal');
   ok('goal but cold cache → "goal set"', buildStatusLine({ goal: { objective: 'x' }, focus: {} }, null) === 'maddu · goal set');
-  ok('cache present → met/total segment', buildStatusLine({ goal: { objective: 'x' }, focus: {} }, { metCount: 2, conditions: [1, 2, 3] }) === 'maddu · goal 2/3');
-  ok('on-goal window → +score', buildStatusLine({ goal: { objective: 'x' }, focus: { window: [{ tag: 'toward', distanceScore: 0.1 }] } }, { metCount: 1, conditions: [1] }) === 'maddu · on goal +0.90 · goal 1/1');
+  // P3: buildStatusLine now takes a success VIEW (spine-receipt derived), not the
+  // hand-writable cache. A fresh, non-stale view renders the count; a stale one → "goal stale".
+  ok('fresh view → met/total segment', buildStatusLine({ goal: { objective: 'x' }, focus: {} }, { metCount: 2, total: 3, stale: false }) === 'maddu · goal 2/3');
+  ok('on-goal window → +score', buildStatusLine({ goal: { objective: 'x' }, focus: { window: [{ tag: 'toward', distanceScore: 0.1 }] } }, { metCount: 1, total: 1, stale: false }) === 'maddu · on goal +0.90 · goal 1/1');
+  ok('stale view → "goal stale"', buildStatusLine({ goal: { objective: 'x' }, focus: {} }, { metCount: 2, total: 3, stale: true, evaluatedAt: '2020-01-01T00:00:00.000Z' }) === 'maddu · goal stale');
   ok('away window → off goal', buildStatusLine({ focus: { window: [{ tag: 'away', distanceScore: 0.9 }] } }, null).startsWith('maddu · off goal 0.10'));
   ok('open drift flag → drifting Nt', buildStatusLine({ focus: { openFlag: { runs: 4 } } }, null) === 'maddu · drifting 4t · no goal');
   ok('focus off entirely → line still renders', buildStatusLine({ goal: null, focus: {} }, null).startsWith('maddu · '));
