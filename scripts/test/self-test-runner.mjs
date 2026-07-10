@@ -11,7 +11,6 @@ import {
   resultJson,
   runSelfTest,
 } from './_self-test-runner.mjs';
-import selfTestRecentGate from '../../template/maddu/runtime/gates/builtin/self-test-recent.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -85,24 +84,20 @@ async function main() {
     const listDoc = JSON.parse(listJson(only));
     ok('list JSON is parseable', listDoc.profile === 'quick' && listDoc.tests[0].id === 'pass');
 
-    const noReportGate = await selfTestRecentGate.run({ repoRoot: root });
-    ok('self-test-recent warns before report exists', noReportGate.ok === false && /no self-test/.test(noReportGate.message));
-
-    await runSelfTest({ frameworkRoot: root, profile: 'smoke', report: true });
-    const smokeGate = await selfTestRecentGate.run({ repoRoot: root });
-    ok('self-test-recent warns on smoke-only success', smokeGate.ok === false && /smoke-only/.test(smokeGate.message));
-
-    await runSelfTest({ frameworkRoot: root, profile: 'quick', only: ['fail'], report: true });
-    const failGate = await selfTestRecentGate.run({ repoRoot: root });
-    ok('self-test-recent warns after failed run', failGate.ok === false && /failure/.test(failGate.message));
-
+    // audit P3 — self-test-recent now reads VERIFIED spine receipts, not this
+    // last-run.json (the direct runSelfTest path here doesn't emit one). The gate's
+    // spine-receipt logic is covered in p3-verification-guard (pure) and
+    // completion-claim-gate (real receipts); the runner assertions below verify the
+    // report + counts + complete flag the receipt is built from.
     const passRun = await runSelfTest({ frameworkRoot: root, profile: 'quick', only: ['pass'], report: true });
     ok('passing selection exits 0', passRun.exitCode === 0 && passRun.counts.pass === 1);
+    ok('narrowed (--only) run is marked incomplete for recency', passRun.complete === false);
     const lastRun = JSON.parse(await readFile(join(root, '.maddu', 'state', 'self-test-last-run.json'), 'utf8'));
     ok('report writes last-run JSON', lastRun.profile === 'quick' && lastRun.counts.pass === 1);
     ok('result JSON is parseable', JSON.parse(resultJson(passRun)).ok === true);
-    const passGate = await selfTestRecentGate.run({ repoRoot: root });
-    ok('self-test-recent passes after quick success', passGate.ok === true, passGate.message);
+
+    const fullRun = await runSelfTest({ frameworkRoot: root, profile: 'quick', report: false });
+    ok('un-narrowed run is complete for recency', fullRun.complete === true);
 
     const failRun = await runSelfTest({ frameworkRoot: root, profile: 'quick', only: ['fail'], report: false });
     ok('failing selection exits 1', failRun.exitCode === 1 && failRun.counts.fail === 1);

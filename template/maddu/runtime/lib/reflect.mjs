@@ -135,12 +135,15 @@ function isProofFor(ev, family) {
   return gateOk(ev) || testVerificationPass(ev); // 'any'
 }
 
-// Lane/actor attribution [R4/F11]: a proof event belongs to a claim iff it shares
-// the claim's lane (or, lane-less, the claim's actor). When BOTH the claim and
-// the events carry no lane/actor at all, fall back to positional (legacy spines).
+// Lane/actor attribution [R4/F11]: prevent one agent from borrowing ANOTHER
+// agent's proof, without breaking the normal case where proof (gate runs) is
+// untagged infra. A proof event is rejected ONLY when it is EXPLICITLY tagged to
+// a DIFFERENT actor or a different lane than the claim. Untagged infra proof
+// (lane-null / actor-null, e.g. an audit GATE_RAN) still counts within the
+// claim's lane-bound window; same-actor / same-lane proof always counts.
 function attributed(ev, claimLane, claimActor) {
-  if (claimLane != null) return ev.lane === claimLane;
-  if (claimActor != null) return ev.actor === claimActor;
+  if (ev.actor != null && claimActor != null && ev.actor !== claimActor) return false;
+  if (ev.lane != null && claimLane != null && ev.lane !== claimLane) return false;
   return true;
 }
 

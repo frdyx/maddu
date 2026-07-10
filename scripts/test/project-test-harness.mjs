@@ -155,30 +155,26 @@ async function main() {
     const listDoc = JSON.parse(listJson(only));
     ok('list JSON is parseable', listDoc.profile === 'quick' && listDoc.tests[0].id === 'unit');
 
-    const missingGate = await projectTestRecentGate.run({ repoRoot: root });
-    ok('project-test-recent warns before report exists', missingGate.ok === false && /no adaptive project-test/.test(missingGate.message), missingGate.message);
-
+    // audit P3 — project-test-recent now reads VERIFIED spine receipts, not this
+    // last-run.json (which the direct runProjectTest path here doesn't emit). The
+    // gate's spine-receipt logic is covered adversarially in p3-verification-guard
+    // (pure) and completion-claim-gate (real receipts); the runner assertions below
+    // still verify the report + counts + complete flag the receipt is built from.
     const passRun = await runProjectTest({ repoRoot: root, profile: 'quick', only: ['unit'], report: true });
     ok('passing adaptive run exits 0', passRun.exitCode === 0 && passRun.counts.pass === 1);
+    ok('narrowed (--only) run is marked incomplete for recency', passRun.complete === false);
     const lastRun = JSON.parse(await readFile(join(root, '.maddu', 'state', 'project-test-last-run.json'), 'utf8'));
     ok('adaptive run writes last-run report', lastRun.profile === 'quick' && lastRun.counts.pass === 1);
     ok('result JSON is parseable', JSON.parse(resultJson(passRun)).ok === true);
 
-    const passGate = await projectTestRecentGate.run({ repoRoot: root });
-    ok('project-test-recent passes after quick success', passGate.ok === true, passGate.message);
+    const fullRun = await runProjectTest({ repoRoot: root, profile: 'quick', report: false });
+    ok('un-narrowed run is complete for recency', fullRun.complete === true);
 
     const failRun = await runProjectTest({ repoRoot: root, profile: 'quick', only: ['fail'], report: true });
     ok('failing adaptive run exits 1', failRun.exitCode === 1 && failRun.counts.fail === 1);
-    const failGate = await projectTestRecentGate.run({ repoRoot: root });
-    ok('project-test-recent warns after failed run', failGate.ok === false && /failure/.test(failGate.message), failGate.message);
 
     const bailRun = await runProjectTest({ repoRoot: root, profile: 'quick', only: ['fail', 'unit'], bail: true, report: false });
     ok('--bail stops after first failure', bailRun.counts.bailed === true && bailRun.results.length === 1 && bailRun.results[0].id === 'fail');
-
-    const stale = { schemaVersion: 1, ts: '2001-01-01T00:00:00.000Z', profile: 'quick', counts: { pass: 1, fail: 0 } };
-    await writeJson(join(root, '.maddu', 'state', 'project-test-last-run.json'), stale);
-    const staleGate = await projectTestRecentGate.run({ repoRoot: root });
-    ok('project-test-recent warns on stale report', staleGate.ok === false && /14d/.test(staleGate.message), staleGate.message);
 
     const originalError = console.error;
     console.error = () => {};
