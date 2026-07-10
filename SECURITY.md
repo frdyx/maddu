@@ -4,7 +4,7 @@
 
 Máddu is distributed from this repository and installed directly from `main`
 (`npx github:frdyx/maddu init`, then `maddu upgrade`). **The supported version
-is always the latest `main`** (currently v1.96.0). There is no separate
+is always the latest `main`** (currently v1.99.0). There is no separate
 maintenance branch — fixes land on `main` and ship on the next tag.
 
 ## Reporting a vulnerability
@@ -44,10 +44,21 @@ shouldn't be possible:
   provider SDK; provider calls happen only inside spawned worker subprocesses,
   with credentials handed in at spawn time.
 - **Secrets are not persisted to the record.** Every spine event's payload is
-  redacted at the write boundary (as are tool argv, worker-spawn args, and the
-  local mailbox / briefing / skill / wrapper-log stores). `maddu export` and
-  `maddu spine sync` add a refuse-on-hit secret gate with **no skip flag** — a
-  secret-shaped value blocks the operation rather than shipping.
+  redacted at the write boundary by one canonical detector (AWS, OpenAI,
+  Anthropic, GitHub — classic + fine-grained + user/refresh, GitLab, Slack,
+  Google, Stripe, PEM private-key blocks, and a high-entropy-adjacent fallback).
+  The same detector scrubs tool argv, worker-spawn args, and the auxiliary state
+  stores: the local mailbox / briefing / skill / wrapper-log stores, the
+  checkpoint tag + index, the active-session pointer, schedules (repo + global),
+  review archives, memory facts, MCP/runtime descriptors + health, and the lane
+  catalog. `maddu export` and `maddu spine sync` add a refuse-on-hit secret gate
+  with **no skip flag** — a secret-shaped value blocks the operation rather than
+  shipping. **Not auto-redacted (known limitation):** worker subprocess
+  stdout/stderr **log files** are written by direct file descriptor (a stream), so
+  a secret split across read boundaries can't be scrubbed by the record-level
+  redactor — treat those logs as untrusted and rotate any credential a worker
+  echoed. Redaction is best-effort at write time; a secret already in git history
+  stays there.
 - **Tamper-detecting record.** The event spine is append-only and hash-chained;
   `maddu spine verify` recomputes the chain and reports (never auto-repairs) any
   break. On a post-cutover (v1.98.0+, locked) chain an interior edit, deletion,

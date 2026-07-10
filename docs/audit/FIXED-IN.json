@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "Audit P5: the 'secrets are redacted at the write boundary' claim was aspirational — the central redactor covered the spine but ~10 auxiliary state stores (checkpoint tag+index, active-session pointer, schedule, review archive, memory facts, MCP/runtime descriptors+health, lane catalog) wrote caller/agent/subprocess text raw; the detector missed GitHub fine-grained/user/refresh, Google, Stripe, and PEM private-key shapes and had a second stale scanner (imports.mjs); package.json/package-lock.json (1.86/1.45) drifted 12+ versions behind version.json; and several docs miscounted gates / overclaimed doctor coverage.",
+    "area": "runtime/lib/secret-scan + checkpoints/session-active/schedule/review/hindsight/mcp/runtimes/global/bridge-routes-lanes + imports + docs",
+    "fixed_in": "1.99.0",
+    "consumer_impact": "Canonical detector (secret-scan.mjs) gains github_pat_/ghu_/ghr_, Google AIza, Stripe [rs]k_(live|test)_, and a correct PEM matcher (complete-label backref block + unterminated-to-EOF fallback) + compound field-name awareness (refresh_token|client_secret|bearer; bare token/secret excluded to avoid eating sessionToken). New value-pattern `redactLeaves` (non-breaking on config field names) now scrubs every discrete-write state store at the boundary; imports.mjs routes through the one canonical detector. Documented residual: worker subprocess stdout/stderr LOG files (fd-direct streaming) are NOT auto-redacted. Version parity across version.json/package.json/package-lock.json enforced by a new self-test. Doc drift fixed (gate count, Rule-7 doctor wording, stale AGENTS cockpit fact, threat-model coverage).",
+    "ledger_ref": "audit-2026-07-09-P5"
+  },
+  {
     "symptom": "Token/cost usage is captured (maddu usage import / maddu cost) but nothing flags a runaway session — spend stays invisible until someone looks (F5 symptom).",
     "area": "runtime/lib/cost-budget + gates/cost-budget",
     "fixed_in": "1.86.0",

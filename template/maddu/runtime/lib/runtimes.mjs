@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, genWorkerId, makeId } from './spine.mjs';
 import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
-import { redactSpawn } from './secret-scan.mjs';
+import { redactSpawn, redactLeaves } from './secret-scan.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -230,7 +230,10 @@ export async function saveRuntime(repoRoot, patch, by = null) {
   const next = mergeDescriptor(existing || defaultDescriptor(patch.name), patch);
   next.updatedAt = new Date().toISOString();
   if (!existing) next.createdAt = next.updatedAt;
-  await writeFile(join(runtimesDir(repoRoot), `${next.name}.json`), JSON.stringify(next, null, 2) + '\n');
+  // Write-boundary redaction: a descriptor can carry a secret-shaped value in a
+  // config field. Value-pattern scrub only — config field NAMES + short values
+  // (e.g. `clientSecretEnvVar`) are preserved.
+  await writeFile(join(runtimesDir(repoRoot), `${next.name}.json`), JSON.stringify(redactLeaves(next), null, 2) + '\n');
   await append(repoRoot, {
     type: EVENT_TYPES.RUNTIME_REGISTERED,
     actor: by, lane: null,
@@ -260,7 +263,9 @@ async function readHealth(repoRoot) {
 
 async function writeHealth(repoRoot, h) {
   await ensureDir(pathsFor(repoRoot).statePrjDir);
-  await writeFile(healthFile(repoRoot), JSON.stringify(h, null, 2) + '\n');
+  // Write-boundary redaction: health carries buffered subprocess stdout/stderr
+  // (detectRuntime) which can echo a secret. Value-pattern scrub only.
+  await writeFile(healthFile(repoRoot), JSON.stringify(redactLeaves(h), null, 2) + '\n');
 }
 
 export async function detectRuntime(repoRoot, name, by = null) {

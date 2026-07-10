@@ -39,7 +39,7 @@ The bridge surfaces the same view at `GET /bridge/orientation`. The cockpit's **
 `maddu doctor` is a fan-out runner over a discoverable gate set:
 
 ```
-template/maddu/runtime/gates/builtin/*.mjs    # framework-shipped (10 today)
+template/maddu/runtime/gates/builtin/*.mjs    # framework-shipped (74 today)
 <repoRoot>/.maddu/gates/*.mjs                 # operator-supplied
 ```
 
@@ -72,6 +72,11 @@ maddu doctor --severity critical           # filter by severity
 ```
 
 ### Built-in gates
+
+The framework ships **74 built-in gates today** (`template/maddu/runtime/gates/builtin/*.mjs`
+is the exhaustive, discoverable set — `maddu doctor`/`maddu audit` run them all). The
+table below is a **representative selection**, not the full list; it shows the original
+v0.16.0 core plus a few later additions to convey the range.
 
 | id | severity | what it checks | shipped |
 |---|---|---|---|

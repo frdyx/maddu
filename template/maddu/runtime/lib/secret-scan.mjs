@@ -23,8 +23,12 @@ export const PATTERN_TYPES = [
   'openai-api-key',
   'anthropic-api-key',
   'github-token',
+  'github-fine-grained-token',
   'gitlab-token',
   'slack-token',
+  'google-api-key',
+  'stripe-secret-key',
+  'private-key-block',
   'high-entropy-adjacent-to-secret-key',
   'value-under-sensitive-key',
 ];
@@ -32,6 +36,19 @@ export const PATTERN_TYPES = [
 // Order matters: more-specific prefixes first so the tightest possible
 // classifier wins. Each entry maps to a stable pattern_type string.
 const PATTERNS = [
+  // PEM private-key blocks — FIRST so a complete block is consumed before any
+  // generic pattern can match inside its base64 body. The label is captured
+  // (`(?:[A-Z0-9]+ )*` allows a bare `PRIVATE KEY` or `RSA`/`EC`/`OPENSSH`/
+  // `ENCRYPTED PRIVATE KEY`) and backreferenced so two adjacent blocks can't
+  // cross-merge. The whole body is scrubbed, never just the marker line.
+  { type: 'private-key-block', re: /-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY)-----[\s\S]*?-----END \1-----/ },
+  // Unterminated fallback — a lone BEGIN with no matching END (truncated key):
+  // scrub BEGIN-to-end so a partial body never survives. Runs AFTER the block
+  // form has already consumed every complete block, so only genuinely
+  // unterminated markers remain. Over-redaction of trailing text after an
+  // unterminated key marker is the safe choice.
+  { type: 'private-key-block', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*/ },
+
   // AWS access keys — fixed prefix + 16 uppercase alnum chars.
   { type: 'aws-access-key', re: /\bAKIA[0-9A-Z]{16}\b/ },
   { type: 'aws-access-key', re: /\bASIA[0-9A-Z]{16}\b/ },
@@ -46,27 +63,54 @@ const PATTERNS = [
   // Generic OpenAI `sk-...` form (32+ alnum chars).
   { type: 'openai-api-key', re: /\bsk-[A-Za-z0-9]{32,}\b/ },
 
-  // GitHub — three prefix variants, exact 36 alnum chars.
-  { type: 'github-token', re: /\bghp_[A-Za-z0-9]{36}\b/ },
-  { type: 'github-token', re: /\bghs_[A-Za-z0-9]{36}\b/ },
-  { type: 'github-token', re: /\bgho_[A-Za-z0-9]{36}\b/ },
+  // GitHub fine-grained PAT — `github_pat_` + long alnum/underscore body.
+  { type: 'github-fine-grained-token', re: /\bgithub_pat_[0-9A-Za-z_]{22,}\b/ },
+  // GitHub — classic (ghp/ghs/gho) + user-to-server (ghu) + refresh (ghr),
+  // exact 36 alnum chars.
+  { type: 'github-token', re: /\bgh[psour]_[A-Za-z0-9]{36}\b/ },
 
   // GitLab personal access tokens.
   { type: 'gitlab-token', re: /\bglpat-[A-Za-z0-9_-]{20,}\b/ },
 
   // Slack — bot / user / oauth / app prefixes.
   { type: 'slack-token', re: /\bxox[bpoa]-[A-Za-z0-9-]+/ },
+
+  // Google API key — fixed `AIza` prefix + 35 chars.
+  { type: 'google-api-key', re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+
+  // Stripe — live/test secret + restricted keys (underscore form; no collision
+  // with OpenAI's hyphenated `sk-`).
+  { type: 'stripe-secret-key', re: /\b[rs]k_(?:live|test)_[0-9A-Za-z]{16,}\b/ },
 ];
 
 // High-entropy fallback: a long base64-ish string ONLY when adjacent to
 // a known sensitive key name on the same arg. The "adjacent" check is
 // local to the arg (no cross-argv scanning) — avoids false-positives on
 // bare hashes, build IDs, or commit SHAs that are legitimately long.
-const SENSITIVE_KEY_NAMES = '(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|password|passwd)';
+// Compound-specific forms only. Bare `token`/`secret` are DELIBERATELY excluded:
+// the key match is substring-based (see SENSITIVE_KEY_RE), so a bare `token`
+// would silently redact framework fields like `sessionToken`/`csrfToken`. The
+// actual token VALUES are caught by the prefix PATTERNS regardless of field
+// name, so field-name awareness is only a backstop for an OPAQUE value under an
+// unmistakably-sensitive key.
+const SENSITIVE_KEY_NAMES = '(?:api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token|refresh[_-]?token|client[_-]?secret|bearer|password|passwd)';
 const HIGH_ENTROPY_ADJACENT = new RegExp(
   `${SENSITIVE_KEY_NAMES}\\s*[=:]\\s*['"]?[A-Za-z0-9+/=]{40,}`,
   'i'
 );
+
+// First matching pattern_type for a SINGLE string (the matched VALUE is never
+// returned), or null. Same canonical PATTERNS/HIGH_ENTROPY as scanArgv — one
+// source of truth, so a caller that scans a foreign payload (the importer)
+// honors the exact same shapes as the write-boundary redactor.
+export function matchSecretType(s) {
+  const str = typeof s === 'string' ? s : String(s ?? '');
+  for (const { type, re } of PATTERNS) {
+    if (re.test(str)) return type;
+  }
+  if (HIGH_ENTROPY_ADJACENT.test(str)) return 'high-entropy-adjacent-to-secret-key';
+  return null;
+}
 
 export function scanArgv(argv) {
   if (!Array.isArray(argv)) return null;
@@ -224,6 +268,19 @@ export function redactDataPayload(data) {
     return typeof data === 'string' && stringHasSecret(data) ? redactText(data).text : data;
   }
   return detectPayloadSecret(data) ? applyPayloadRedact(data) : data;
+}
+
+// Public VALUE-PATTERN leaf redactor for auxiliary STATE-store writes outside
+// the spine (checkpoints index, active-session pointer, schedules, review
+// archives, memory facts, MCP/runtime descriptors, lane catalog). It redacts
+// string leaves by VALUE shape only (the canonical PATTERNS + high-entropy-
+// adjacent form) and — unlike redactDataPayload — does NOT apply the key-aware
+// ≥16 rule, so a live-config field such as `clientSecretEnvVar`/`refreshTokenUrl`
+// keeps its (short, non-secret-shaped) value while a literal `sk_live_…`/`AIza…`
+// sitting in a value is still scrubbed. Object structure + keys + non-string
+// scalars are preserved; a clean string leaf is returned unchanged.
+export function redactLeaves(value) {
+  return deepRedactLeaves(value);
 }
 
 // Operator override helpers. `--allow-secret` is a Máddu-level token —

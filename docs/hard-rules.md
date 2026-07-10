@@ -1,6 +1,10 @@
 # Hard rules
 
-Máddu enforces nine invariants. `maddu doctor` verifies them on every install and every upgrade.
+Máddu enforces nine invariants. `maddu doctor` mechanically verifies the seven
+that have an enforcing gate on every install and every upgrade; Rules 3 (no
+hosted backends) and 7 (three-layer brand boundary) are enforced **by
+construction** — there is no project surface for a gate to scan, so no doctor
+gate exists for them (see [39-rule-gate-traceability.md](39-rule-gate-traceability.md)).
 
 ## Scope: these rules govern Máddu, not your product
 

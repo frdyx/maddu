@@ -11,6 +11,7 @@ import { appendFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { readAll, append } from './spine.mjs';
+import { redactLeaves } from './secret-scan.mjs';
 
 // v1.9.0 adds 'correction' — a durable lesson distilled by `maddu learn` from a
 // failed→succeeded tool-call pair (Headroom-style). Unlike the SLICE_STOP-derived
@@ -128,7 +129,9 @@ export async function ensureMemoryFile(repoRoot) {
 export async function appendFacts(repoRoot, facts) {
   if (!facts.length) return 0;
   const p = await ensureMemoryFile(repoRoot);
-  const lines = facts.map((f) => JSON.stringify(f)).join('\n') + '\n';
+  // Write-boundary redaction: memory facts are transcript/repo-derived and can
+  // carry a pasted secret. Value-pattern scrub only; clean facts are unchanged.
+  const lines = facts.map((f) => JSON.stringify(redactLeaves(f))).join('\n') + '\n';
   await appendFile(p, lines);
   return facts.length;
 }

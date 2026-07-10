@@ -119,10 +119,16 @@ GitHub, lives in the repo history forever. The spine also logs
 
 **Máddu enforcement:**
 
-- `template/maddu/runtime/lib/secret-scan.mjs` — pure regex engine
-  for AWS access keys, OpenAI keys, Anthropic keys, GitHub tokens
-  (4 prefix variants), GitLab PATs, Slack tokens, Stripe keys, plus
-  a high-entropy-adjacent-to-secret-key fallback.
+- `template/maddu/runtime/lib/secret-scan.mjs` — one canonical pure-regex
+  detector for AWS access keys, OpenAI keys, Anthropic keys, GitHub tokens
+  (classic `ghp_`/`ghs_`/`gho_` + user-to-server `ghu_` + refresh `ghr_` +
+  fine-grained `github_pat_`), GitLab PATs, Slack tokens, Google API keys
+  (`AIza…`), Stripe live/test secret+restricted keys, PEM private-key blocks
+  (whole block, incl. a truncated/unterminated key), plus a
+  high-entropy-adjacent-to-secret-key fallback and a key-name-aware rule for an
+  opaque value under an unmistakably-sensitive field. The **same** detector
+  backs the spine write-boundary redactor, the argv scanner, and the safe
+  importer — no second, drifting pattern list.
 - Tool wrapper (`runTool` in `tools.mjs`) scans argv before spawn.
   Match → refuse with `TOOL_REFUSED reason: 'secret-detected'`.
   The MATCHED VALUE IS NEVER LOGGED. Only `pattern_type` +
@@ -141,6 +147,13 @@ GitHub, lives in the repo history forever. The spine also logs
 - Operator running `git commit` directly (outside `maddu git`).
 - Secrets in files the operator writes by hand. Argv scan is the
   argv path; file content is the operator's.
+- **Worker subprocess stdout/stderr log files.** Worker output is teed to
+  `.maddu/state/worker-logs/<id>.log` by direct file descriptor (a live stream),
+  so the record-level redactor — which scrubs discrete, fully-buffered writes —
+  cannot see it. A secret a worker prints to its own stdout lands in that log
+  raw. Scrubbing it correctly needs a chunk-boundary-safe streaming redactor
+  (a secret or PEM block can straddle read boundaries); that is future work.
+  Treat worker logs as untrusted and rotate any credential a worker echoed.
 
 ### 5. Imported skill contains malicious instructions
 

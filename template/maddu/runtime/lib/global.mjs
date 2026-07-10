@@ -18,6 +18,7 @@ import { platform } from 'node:os';
 import { configDir } from './workspaces.mjs';
 import { parseNatural, validateCron } from './schedule.mjs';
 import { makeId } from './spine.mjs';
+import { redactLeaves } from './secret-scan.mjs';
 
 export function globalDir() {
   return join(configDir(), 'global');
@@ -76,7 +77,9 @@ export async function readGlobalSchedule(id) {
 
 async function writeScheduleRecord(rec) {
   const p = await ensureSchedulesFile();
-  await appendFile(p, JSON.stringify(rec) + '\n');
+  // Write-boundary redaction: a global schedule record persists caller command/
+  // natural text. Value-pattern scrub only.
+  await appendFile(p, JSON.stringify(redactLeaves(rec)) + '\n');
 }
 
 // `targets`: array of workspace ids; omitted/empty = all currently mounted.
