@@ -77,6 +77,7 @@ function extractHtmlJs(html) {
     if (s.startsWith('<!--', i)) { const e = s.indexOf('-->', i + 4); i = e < 0 ? n : e + 3; continue; }
     const open = /^<script\b[^>]*>/i.exec(s.slice(i, i + 400));
     if (open) {
+      markup += open[0];             // the open tag may carry on*= handlers (e.g. <script src=… onload=…>)
       const bodyStart = i + open[0].length;
       const closeRel = s.slice(bodyStart).search(/<\/script\s*>/i);
       const bodyEnd = closeRel < 0 ? n : bodyStart + closeRel;

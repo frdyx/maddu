@@ -152,6 +152,8 @@ async function main() {
     !bannedImportInSource(`<!-- <button onclick="imp` + `ort(${Q}${OAI}${Q})"> -->`, 'x.html'));
   ok('a non-handler data-* attribute with import text is not flagged',
     !bannedImportInSource(`<a data-x="imp` + `ort ${OAI}">t</a>`, 'x.html'));
+  ok('an on* handler in the <script> OPEN TAG is caught (script src=… onload=…)',
+    !!bannedImportInSource(`<script src="/cockpit.js" onload="imp` + `ort(${Q}${OAI}${Q})"></script>`, 'x.html'));
 
   // ── documented residual (out of scope): text scan can't see through obfuscation ─
   ok('KNOWN residual: string concatenation is not caught (documented scope)',
