@@ -4,7 +4,7 @@
 // Asserts:
 //   DEFAULT mode (no replica.json) — unchanged: append() and appendTokenUsage()
 //   write the flat .maddu/events segment; NO by-replica dir; the token event
-//   keeps its historical no-prev_hash shape.
+//   now carries a chained prev_hash (audit P1 — unified locked flat writer).
 //   SYNC mode (replica.json present) — append() and appendTokenUsage() land in
 //   .maddu/events/by-replica/<replicaId>/ on ONE valid prev_hash chain; the flat
 //   events dir gets no numeric segment.
@@ -56,8 +56,11 @@ async function main() {
     const lines = await linesOf(join(eventsDir, flat[0]));
     ok(lines.length === 3, `DEFAULT: all 3 events in flat segment (got ${lines.length})`);
     const tok = JSON.parse(lines[2]);
-    ok(tok.type === 'TOKEN_USAGE_REPORTED' && !('prev_hash' in tok),
-      'DEFAULT: token event keeps historical no-prev_hash shape (path unchanged)');
+    // audit P1 — the token wrapper's flat path now shares the locked+chained
+    // primitive, so a DEFAULT-mode token event CARRIES prev_hash like every other
+    // flat write (no keyless flat writer remains).
+    ok(tok.type === 'TOKEN_USAGE_REPORTED' && typeof tok.prev_hash === 'string' && tok.prev_hash === hashLine(lines[1]),
+      'DEFAULT: token event now carries a chained prev_hash (unified locked flat writer)');
     await rm(repo, { recursive: true, force: true });
   }
 

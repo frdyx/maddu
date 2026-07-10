@@ -458,7 +458,7 @@ export async function buildOversight(repoRoot) {
   // would leave the RECENT events (the ones that matter) unchecked. ~3k sha256
   // hashes is single-digit-to-tens of ms — cheap enough for a page load.
   const v = await verifySpine(repoRoot);
-  const chainIntact = !v.issues.some((i) => i.kind === 'chain_broken' || i.kind === 'torn_trailing_line');
+  const chainIntact = !v.issues.some((i) => i.kind === 'chain_broken' || i.kind === 'chain_stripped' || i.kind === 'torn_trailing_line');
   const verify = {
     events: v.events,
     chainIntact,
@@ -677,7 +677,7 @@ function decisionSummary(ev) {
 
 // Decision ledger — a curated, high-signal log of the spine's decision-grade
 // events (intent / decision / gate / outcome), each with actor, provenance
-// (human vs which auto-trigger), and its tamper-evident stored-line SHA. The
+// (human vs which auto-trigger), and its tamper-detecting stored-line SHA. The
 // header carries the real verifySpine badge (chain intact · N events). The
 // per-row sha IS the chain fingerprint: hashLine(storedLine) = the next event's
 // prev_hash, so a row can be tied back to the verified chain. Read-only.
@@ -714,13 +714,13 @@ export async function buildDecisions(repoRoot, { limit = 100 } = {}) {
   const byCategory = {};
   for (const r of rows) byCategory[r.category] = (byCategory[r.category] || 0) + 1;
 
-  // Header — the real tamper-evidence: uncapped chain verify + published contract.
+  // Header — the real tamper-detection: uncapped chain verify + published contract.
   const v = await verifySpine(repoRoot);
-  const chainIntact = !v.issues.some((i) => i.kind === 'chain_broken' || i.kind === 'torn_trailing_line');
+  const chainIntact = !v.issues.some((i) => i.kind === 'chain_broken' || i.kind === 'chain_stripped' || i.kind === 'torn_trailing_line');
   const verify = {
     events: v.events,
     chainIntact,
-    tampered: chainIntact ? 0 : v.issues.filter((i) => i.kind === 'chain_broken' || i.kind === 'torn_trailing_line').length,
+    tampered: chainIntact ? 0 : v.issues.filter((i) => i.kind === 'chain_broken' || i.kind === 'chain_stripped' || i.kind === 'torn_trailing_line').length,
     contractVersion: await readContractVersion(),
   };
 

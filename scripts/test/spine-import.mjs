@@ -65,10 +65,12 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
-  // 3. Forked partition → FATAL.
+  // 3. Forked partition → FATAL. repA carries a leading SPINE_CUTOVER anchor (as
+  //    syncInit now seeds), so it is a strict/post-cutover chain where a fork is a
+  //    chain_broken FAIL — collected as a fatal fork by importPartitions (audit P1).
   {
     const repo = await syncRepo();
-    const dirA = await part(repo, 'repA', [{ data: { n: 1 } }]);
+    const dirA = await part(repo, 'repA', [{ type: 'SPINE_CUTOVER', data: { version: '1.98.0' } }, { data: { n: 1 } }]);
     await appendFile(join(dirA, '000000000001.ndjson'),
       JSON.stringify({ v: 1, id: eid(), ts: '2026-01-01T00:00:05Z', type: TYPE, actor: null, lane: null, data: {}, prev_hash: null }) + '\n');
     const r = await importPartitions(repo);

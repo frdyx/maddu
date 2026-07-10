@@ -20,6 +20,11 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`)
 const TYPE = Object.keys(EVENT_TYPES)[0];
 async function exists(p) { try { await access(p); return true; } catch { return false; } }
 async function segs(dir) { try { return (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { return []; } }
+// audit P1 — these fixtures build PRE-cutover chains (generic events, no marker),
+// so a mismatch now surfaces as chain_fork (WARN), not chain_broken (FAIL). Guard
+// on BOTH kinds so a real fork/broken link is still caught (a chain_broken-only
+// check would silently pass a forked pre-cutover chain).
+const chainMismatches = (v) => v.issues.filter((i) => i.kind === 'chain_broken' || i.kind === 'chain_fork');
 
 async function main() {
   console.log('spine-sync-init: team-sync activation');
@@ -43,13 +48,37 @@ async function main() {
     ok((await readReplicaId(repo)) === 'rep_testinit01', 'readReplicaId now reports sync mode');
 
     const v = await verifySpine(repo);
-    ok(v.counts.FAIL === 0 && !v.issues.some((i) => i.kind === 'chain_broken'), 'migrated partition chain verifies clean');
+    ok(v.counts.FAIL === 0 && chainMismatches(v).length === 0, 'migrated partition chain verifies clean');
 
     // A new append now lands in the partition and continues the chain.
     await append(repo, { type: TYPE, data: { n: 3 } });
     ok((await segs(join(repo, '.maddu', 'events', 'by-replica', 'rep_testinit01'))).length >= 1, 'post-init append targets the partition');
     const v2 = await verifySpine(repo);
-    ok(v2.events === 3 && !v2.issues.some((i) => i.kind === 'chain_broken'), 'chain still valid after post-init append');
+    ok(v2.events === 3 && chainMismatches(v2).length === 0, 'chain still valid after post-init append');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // 1b. audit P1 — an EMPTY freshly-minted partition (a new replica joining an
+  //     already-synced repo migrates nothing) is seeded with a SPINE_CUTOVER
+  //     GENESIS, so it is STRICT: a later fork is a chain_broken FAIL and
+  //     importPartitions reports it fatal (closes the markerless-partition gap).
+  //     A NON-empty migration is NOT seeded (byte-identity preserved — test 1).
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-si-empty-'));
+    await mkdir(join(repo, '.maddu', 'events'), { recursive: true });
+    const res = await syncInit(repo, { mintId: () => 'rep_empty01', now: '2026-01-01T00:00:00Z' });
+    ok(res.ok, 'empty-repo sync init ok');
+    const pseg = join(repo, '.maddu', 'events', 'by-replica', 'rep_empty01', '000000000001.ndjson');
+    const evs = (await readFile(pseg, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    ok(evs.length === 1 && evs[0].type === 'SPINE_CUTOVER' && evs[0].prev_hash === null,
+      `empty partition seeded with a SPINE_CUTOVER genesis (got ${JSON.stringify(evs.map((e) => e.type))})`);
+    await append(repo, { type: TYPE, data: { n: 1 } }); // lands in the partition, strict
+    // Hand-append a forked line (wrong prev_hash) → strict chain_broken FAIL.
+    await writeFile(pseg, (await readFile(pseg, 'utf8')) + JSON.stringify({ v: 1, id: 'evt_20260101000009_ffffff', ts: '2026-01-01T00:00:09Z', type: TYPE, actor: null, lane: null, data: { n: 2 }, prev_hash: null }) + '\n');
+    const v = await verifySpine(repo);
+    ok(v.issues.some((i) => i.kind === 'chain_broken' && i.level === 'FAIL'), 'fork in a seeded (strict) partition is chain_broken FAIL');
+    const imp = await importPartitions(repo);
+    ok(imp.ok === false && imp.forks.length >= 1, 'importPartitions reports the seeded-partition fork fatal');
     await rm(repo, { recursive: true, force: true });
   }
 
@@ -104,7 +133,7 @@ async function main() {
     ok(await exists(join(repo, '.maddu', 'config', 'replica.json')), 'replica.json written after migration completed');
     ok(!(await exists(join(repo, '.maddu', 'config', 'replica.pending.json'))), 'pending marker cleared');
     const v = await verifySpine(repo);
-    ok(v.events === 3 && !v.issues.some((i) => i.kind === 'chain_broken'), 'reassembled partition chain is intact (3 events, no fork)');
+    ok(v.events === 3 && chainMismatches(v).length === 0, 'reassembled partition chain is intact (3 events, no fork)');
     await rm(repo, { recursive: true, force: true });
   }
 
@@ -116,16 +145,14 @@ async function main() {
   //       (2) THE FUNNEL ADDS NO FORKS — once init has committed, every subsequent
   //           append goes through the per-partition lock and never breaks the chain.
   //       (3) A FORK, IF PRESENT, IS SURFACED — verify reports it, never silence.
-  //     What the design deliberately does NOT guarantee (this test previously
-  //     over-asserted it): appends that hit the PRE-MARKER window take the DEFAULT
-  //     flat path, which is lock-free BY DESIGN (spine.mjs: byte-atomicity via
-  //     O_APPEND, no chain mutex — "Máddu deliberately has no mutex"). Two such
-  //     appends racing each other can fork the FLAT chain exactly as on any
-  //     single-machine spine, and migration carries that legacy fork into the
-  //     partition — the documented "run sync init while writes are quiescent"
-  //     residual, surfaced by verify + remediated by the operator. On fast dev
-  //     machines the window never hits; on saturated 2-core CI runners it does —
-  //     a timing fact about the runner, not a funnel defect.
+  //     Historically (pre-v1.98.0) appends that hit the PRE-MARKER window took the
+  //     lock-free flat path and two such appends could fork the FLAT chain, which
+  //     migration then carried into the partition — the documented "run sync init
+  //     while writes are quiescent" residual. Since v1.98.0 (audit P1) the flat
+  //     append is funnel-locked too (appendFlatChained), so that window no longer
+  //     forks in practice; either way any residual fork is SURFACED by verify
+  //     (chain_fork on a pre-cutover chain / chain_broken on a strict one), counted
+  //     via chainMismatches() below, and the funnel-adds-no-forks invariant holds.
   {
     let legacyWindowForks = 0;
     for (let iter = 0; iter < 6; iter++) {
@@ -146,12 +173,12 @@ async function main() {
       // counted for visibility), then prove the FUNNEL adds none: two post-commit
       // appends — pure funnel path — must not grow the broken-link set.
       const vAfterInit = await verifySpine(repo);
-      const forksAfterInit = vAfterInit.issues.filter((i) => i.kind === 'chain_broken').length;
+      const forksAfterInit = chainMismatches(vAfterInit).length;
       if (forksAfterInit > 0) legacyWindowForks++;
       await append(repo, { type: TYPE, data: { post: 1 } });
       await append(repo, { type: TYPE, data: { post: 2 } });
       const vFinal = await verifySpine(repo);
-      const forksFinal = vFinal.issues.filter((i) => i.kind === 'chain_broken').length;
+      const forksFinal = chainMismatches(vFinal).length;
       // (2) funnel adds no forks above the committed tail.
       ok(forksFinal === forksAfterInit, `iter ${iter}: funnel adds no forks (before=${forksAfterInit}, after=${forksFinal})`);
       // (3) post-commit appends land in the merged read.
@@ -160,7 +187,7 @@ async function main() {
       await rm(repo, { recursive: true, force: true });
     }
     if (legacyWindowForks > 0) {
-      console.log(`  (i) ${legacyWindowForks}/6 iteration(s) hit the pre-marker lock-free window (documented single-machine residual — tolerated, surfaced by verify)`);
+      console.log(`  (i) ${legacyWindowForks}/6 iteration(s) surfaced a pre-marker-window fork (documented single-machine residual — tolerated, surfaced by verify)`);
     }
   }
 
@@ -186,7 +213,7 @@ async function main() {
     ]);
     ok(res.ok && res.replicaId === 'rep_rr01', 'resume-race: init resumes into the marker replicaId');
     const v = await verifySpine(repo);
-    ok(!v.issues.some((i) => i.kind === 'chain_broken'), 'resume-race: concurrent append did NOT fork the committed chain');
+    ok(chainMismatches(v).length === 0, 'resume-race: concurrent append did NOT fork the committed chain');
     ok((await readAll(repo)).length === 3, 'resume-race: all 3 events present');
     await rm(repo, { recursive: true, force: true });
   }

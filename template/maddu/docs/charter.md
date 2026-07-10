@@ -41,9 +41,13 @@ The **8+1 hard rules** ([`hard-rules.md`](hard-rules.md)), enforced by
 2. **Append-only event spine** — `.maddu/events/*.ndjson` is the single source of
    truth. Projections rebuild from it and are never authoritative. Derived ≠
    projected (auto-decisions append their own event with `triggered_by`).
-   Verifiable, not declared, and **tamper-evident** since v1.14.0 — each event
-   carries a forward `prev_hash`, so `maddu spine verify` detects an after-the-fact
-   rewrite of interior history (no auto-repair, ever).
+   Verifiable, not declared, and **tamper-detecting** since v1.14.0 (strict since
+   v1.98.0) — each event carries a forward `prev_hash`, so on a post-cutover
+   (locked) chain `maddu spine verify` FAILS on an after-the-fact edit, deletion,
+   insertion, or prev_hash-stripping of interior history (no auto-repair, ever). It
+   is UNKEYED, so it detects naive/accidental edits and partial interior tampering,
+   not a determined local actor who recomputes the whole forward chain or truncates
+   a contiguous tail — that is the OS's job, matching the least-trust-shell framing.
 3. **No hosted backends** — provider APIs are called from local subprocess
    workers only. No SaaS, no telemetry, no relay, no "Máddu Cloud."
 4. **No broad new dependencies** — Node stdlib where possible; the `dependencies`
@@ -64,8 +68,9 @@ The **8+1 hard rules** ([`hard-rules.md`](hard-rules.md)), enforced by
    `TRIGGER_FIRED` event with `triggered_by` provenance.
 
 **Deliberately absent** (architecture, not omission): no scheduler thread, no
-worker queue, no write-ahead log (the spine is the WAL), no mutex layer (lane
-claims are the lock), no websocket (long-poll is enough).
+worker queue, no write-ahead log (the spine is the WAL), no agent-level mutex
+(lane claims coordinate agents; the byte-level append funnel since v1.98.0 is a
+write-serialization detail, not an agent lock), no websocket (long-poll is enough).
 
 ---
 

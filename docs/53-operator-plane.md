@@ -4,7 +4,7 @@ Máddu's record is complete and verifiable, but historically it spoke to the *bu
 **Operator Plane** is a set of read-only readouts aimed at the **operator** — the person
 accountable for what the agents did, who may not be watching the terminal and may not read
 code. Every surface here is a **display-time projection** over the same spine: nothing new
-is written to produce them, and the event contract is unchanged (1.3.0).
+is written to produce them, and the event contract is unchanged (contract-neutral).
 
 ## The surfaces
 

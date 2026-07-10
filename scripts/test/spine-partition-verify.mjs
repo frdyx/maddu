@@ -59,12 +59,14 @@ async function main() {
   }
 
   // B. A forked partition (a trailing event with the WRONG prev_hash) → chain_broken
-  //    WARN tagged with that partition's replicaId; the OTHER partition stays clean.
+  //    FAIL (audit P1) tagged with that partition's replicaId; the OTHER partition
+  //    stays clean. repA carries a leading SPINE_CUTOVER anchor (as syncInit now
+  //    seeds), so it is a strict/post-cutover chain where a fork is FATAL, not WARN.
   {
     const repo = await mkdtemp(join(tmpdir(), 'maddu-pv-fork-'));
     await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
     await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
-    const dirA = await writePartition(repo, 'repA', [{ data: { n: 1 } }, { data: { n: 2 } }]);
+    const dirA = await writePartition(repo, 'repA', [{ type: 'SPINE_CUTOVER', data: { version: '1.98.0' } }, { data: { n: 1 } }, { data: { n: 2 } }]);
     await writePartition(repo, 'repB', [{ data: { n: 1 } }]);
     // Append a forked line to repA: prev_hash null instead of the real predecessor.
     const forked = JSON.stringify({ v: 1, id: eid(), ts: '2026-01-01T00:00:05Z', type: TYPE, actor: null, lane: null, data: { n: 3 }, prev_hash: null });
@@ -72,6 +74,7 @@ async function main() {
     const r = await verifySpine(repo);
     const broken = r.issues.filter((i) => i.kind === 'chain_broken');
     ok(broken.length === 1, `fork produces exactly one chain_broken (got ${broken.length})`);
+    ok(broken[0]?.level === 'FAIL', `strict-chain fork is FAIL (got ${broken[0]?.level})`);
     ok(broken[0]?.replicaId === 'repA', `chain_broken tagged replicaId=repA (got ${broken[0]?.replicaId})`);
     ok(!r.issues.some((i) => i.kind === 'chain_broken' && i.replicaId === 'repB'), 'repB chain stays clean (independent)');
     await rm(repo, { recursive: true, force: true });

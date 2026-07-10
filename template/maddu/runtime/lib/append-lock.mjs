@@ -187,10 +187,11 @@ export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = I
     // re-enters. We deliberately do NOT recheck: an extra read of the lockfile under
     // heavy concurrency empirically broke the funnel here (a reproducible chain fork),
     // whereas the long grace already makes the reclaim practically unreachable (a live
-    // holder writes its record microseconds later, never 2s). Consistent with Máddu's
-    // spine model (best-effort concurrency, integrity VERIFY-REPORTED not lock-enforced
-    // — spine.mjs:461-473), any such fork would be surfaced by `spine verify` /
-    // `spine import` (fatal), never silently merged.
+    // holder writes its record microseconds later, never 2s). Since v1.98.0 (audit
+    // P1) this funnel wraps the flat append too (spine-append-core.appendFlatChained),
+    // so the chain is lock-enforced at write on a post-cutover spine — and any residual
+    // fork (a pre-cutover spine, or this theoretical reclaim) is still surfaced by
+    // `spine verify` / `spine import` (fatal on a strict chain), never silently merged.
     return { ownerId, release: () => releaseAppendLock(lockPath, ownerId) };
   }
 }

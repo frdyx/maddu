@@ -2,7 +2,7 @@
 // cockpit-views-decisions — the Decision ledger's pure display helpers.
 //
 // humanAge turns the bridge-stamped ageMs into "Xm ago"; categoryColor maps a
-// decision category to its accent token. Render + the tamper-evidence header are
+// decision category to its accent token. Render + the tamper-detection header are
 // covered byte-exact by cockpit-boot + cockpit-snapshot against the canned
 // /bridge/decisions fixture; this locks the pure mappings.
 //

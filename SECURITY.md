@@ -48,9 +48,13 @@ shouldn't be possible:
   local mailbox / briefing / skill / wrapper-log stores). `maddu export` and
   `maddu spine sync` add a refuse-on-hit secret gate with **no skip flag** — a
   secret-shaped value blocks the operation rather than shipping.
-- **Tamper-evident record.** The event spine is append-only and hash-chained;
+- **Tamper-detecting record.** The event spine is append-only and hash-chained;
   `maddu spine verify` recomputes the chain and reports (never auto-repairs) any
-  break. The event contract is published and versioned
+  break. On a post-cutover (v1.98.0+, locked) chain an interior edit, deletion,
+  insertion, or prev_hash-strip is a **FAIL**, not a warning. It is UNKEYED — it
+  detects naive/accidental edits and partial interior tampering, not a determined
+  local actor who recomputes the whole forward chain or truncates a contiguous
+  tail (the OS's job). The event contract is published and versioned
   ([`docs/event-schema.json`](docs/event-schema.json)).
 
 These protect the **record and the framework** — they do not sanitize the

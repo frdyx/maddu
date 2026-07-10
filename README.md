@@ -100,10 +100,10 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ### The record is a contract, not just a log
 
-Append-only and hash-chained means the record can't be *changed* unnoticed. Máddu goes one step further: every event conforms to a **published, versioned contract** — 175 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-evident — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
+Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 177 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
-docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.3.0)
+docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.5.0)
                            → validate any spine event against it with ajv, check-jsonschema, or any validator
 ```
 
@@ -253,7 +253,7 @@ maddu model gates install                            # 12 ML-lifecycle gates in 
 
 <picture><img alt="The SLM factory — external tools do the curation, training, and benchmarks; their results become hash-pinned manifests that maddu model records as spine events; the 12-gate pack and the approvals ride govern the promotion ladder, whose stages are derived from the record, and rollback only ever moves down" src="docs/images/use-case-slm.svg" width="920"></picture>
 
-Every promotion above candidate waits for an explicit per-request decision — standing approval policies are deliberately inert near production. Rollback is strictly downward and re-promotion goes back through the full ride; the spine verifier holds the whole ladder tamper-evident on replay. And the honesty line is structural: Máddu records what your tools *declared* and pins the bytes of record — it never trains, serves, evaluates, or decides that a model is good. Full guide: [51-slm-governance.md](docs/51-slm-governance.md).
+Every promotion above candidate waits for an explicit per-request decision — standing approval policies are deliberately inert near production. Rollback is strictly downward and re-promotion goes back through the full ride; the spine verifier holds the whole ladder tamper-detecting on replay. And the honesty line is structural: Máddu records what your tools *declared* and pins the bytes of record — it never trains, serves, evaluates, or decides that a model is good. Full guide: [51-slm-governance.md](docs/51-slm-governance.md).
 
 ## What it does for you
 
@@ -337,8 +337,8 @@ Delete `.maddu/state/`, rebuild from the spine on any machine, get the *exact sa
 <tr>
 <td width="50%" valign="top">
 
-### 🛡️ Tamper-evident bedrock
-`maddu spine verify` walks every segment for parseability, id-uniqueness, continuity, monotonicity, referential integrity, torn-line detection, and a forward `prev_hash` chain that pinpoints the first altered line. No `spine repair` exists — *you* decide remediation.
+### 🛡️ Tamper-detecting bedrock
+`maddu spine verify` walks every segment for parseability, id-uniqueness, continuity, monotonicity, referential integrity, torn-line detection, and a forward `prev_hash` chain. On a post-cutover (v1.98.0+, locked) chain an interior edit, deletion, insertion, or prev_hash-strip is a **FAIL**. It's unkeyed — it catches naive/accidental edits and partial tampering, not a determined local actor who recomputes the whole chain (the OS's job). No `spine repair` exists — *you* decide remediation.
 
 </td>
 <td width="50%" valign="top">
@@ -373,7 +373,7 @@ Nine invariants. `maddu doctor` verifies them on every install and every upgrade
 | # | Rule | What it prevents |
 |---|---|---|
 | 1 | Files-only state | SQLite corruption, opaque feature state, schema-migration hazards |
-| 2 | Append-only event spine (tamper-evident) | Mutable history, replay-divergence, silent interior rewrites |
+| 2 | Append-only event spine (tamper-detecting) | Mutable history, replay-divergence, silent interior rewrites |
 | 3 | No hosted backends | Telemetry, vendor lock-in, "Máddu Cloud" |
 | 4 | No broad dependencies | Supply-chain risk, transitive vulnerabilities |
 | 5 | No provider SDKs in app code | Hidden API keys, SDK churn in the orchestrator |
@@ -389,9 +389,9 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
-| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.3.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
+| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.5.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
-| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-evidence | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
+| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-detection | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
 Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Full version history → [CHANGELOG.md](CHANGELOG.md).
 

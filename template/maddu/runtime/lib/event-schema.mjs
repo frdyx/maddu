@@ -40,7 +40,10 @@
 // 1.4.0 (audit P0b) — added BRIDGE_CROSS_WORKSPACE (a bridge request selected a
 // non-active workspace). Additive → minor bump; baseline refreshed so a
 // consumer caching 1.3.0 never sees the extra type under an unchanged version.
-export const EVENT_CONTRACT_VERSION = '1.4.0';
+// 1.5.0 (audit P1) — added SPINE_CUTOVER (a chain-local tamper-detection cutover
+// anchor, seeded into a freshly-minted sync partition so verify holds it to the
+// post-cutover strict rules even with no migrated FRAMEWORK marker). Additive.
+export const EVENT_CONTRACT_VERSION = '1.5.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -224,6 +227,7 @@ export const EVENT_SCHEMA = {
   BRIEFING_CURATED: { summary: "A curated orient/handoff briefing persisted its original for retrieval.", data: { briefingId: 'string', dropped: 'string', handoff: 'object', kind: 'string', orient: 'string', originalRef: 'string' } },
   BRIDGE_ORIGIN_REJECTED: { summary: "The bridge rejected a request with a non-loopback Host/Origin.", data: { host: 'string|null', method: 'string', origin: 'string|null', path: 'string', reason: 'string' } },
   BRIDGE_CROSS_WORKSPACE: { summary: "A bridge request selected a workspace other than the active one.", data: { active: 'string', method: 'string', path: 'string', workspace: 'string' } },
+  SPINE_CUTOVER: { summary: "A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).", data: { version: 'string' } },
   BLUEPRINT_DISTILLED: { summary: "A blueprint skeleton was distilled into prose by a provider CLI.", data: { distilledBytes: 'number', outPath: 'string', provider: 'string', runtime: 'string', skeletonBytes: 'number', slug: 'string' } },
   DEBT_SCANNED: { summary: "The source tree was scanned for deliberate-shortcut debt markers.", data: { files: 'number', ledgerPath: 'string|null', markers: 'number', noTrigger: 'number' } },
   ARCHITECTURE_SCANNED: { summary: "The declared architecture contract was checked against the import graph.", data: { blocking: 'boolean', cycles: 'number', driftScore: 'number', edges: 'number', failOn: 'string', forbidden: 'number', modules: 'number', newViolations: 'number', uncovered: 'number', undeclared: 'number' } },
