@@ -68,13 +68,13 @@ const VERIFICATION_ADJACENT_RE = new RegExp(
   'i',
 );
 
-// Negation / quotation / forward-looking contexts that flip a verification claim
-// into a NON-claim (a rule, a plan, a quote, a denial) — suppress them [F12].
-const VERIFICATION_NEGATION_RE = [
-  /\b(no|not|never|without|isn't|aren't|wasn't|weren't|didn't|don't|doesn't|fail(?:s|ed|ing)?|red)\b/i,
-  /\b(should|must|need|needs|ensure|verify|make\s+sure|before\s+(?:claiming|stating))\b/i, // prescriptive/forward
-  /["'`]/, // a quotation — likely citing, not claiming
-];
+// Negation / prescriptive words that, when they appear IMMEDIATELY before the
+// matched claim (within ~1-2 words), flip it into a non-claim (a denial, a rule,
+// a plan) [F12]. Checked in a tight preceding window so a distant word modifying
+// a DIFFERENT noun ("No regressions, all gates green") does not suppress a real
+// claim. An opening quote right before the claim (citing) also suppresses.
+const NEGATION_NEAR_RE = /\b(no|not|never|without|isn't|aren't|wasn't|weren't|didn't|don't|doesn't|fail(?:s|ed|ing)?|red|should|must|need|needs|ensure|verify)\b[\s,;:()\w]{0,10}$/i;
+const OPEN_QUOTE_RE = /["'`]\s*$/;
 
 // True iff the summary reads as a hedged completion claim.
 export function hedgesCompletion(summary) {
@@ -89,13 +89,17 @@ export function hedgesCompletion(summary) {
 export function claimsVerification(summary) {
   const s = String(summary || '');
   if (!s) return false;
-  // Evaluate per CLAUSE, not globally: a stray negation/quote elsewhere in a long
-  // summary must not suppress a real claim in another clause ("No regressions;
-  // all gates green" is still a claim). A clause with the adjacency AND no
-  // negation/quotation IN THAT CLAUSE is a confident verification claim.
-  for (const clause of s.split(/[.!?;\n]+/)) {
-    if (!VERIFICATION_ADJACENT_RE.test(clause)) continue;
-    if (VERIFICATION_NEGATION_RE.some((re) => re.test(clause))) continue;
+  // Scan each adjacency match and check only the text IMMEDIATELY before it — a
+  // stray negation/quote elsewhere in a long summary (even in the same
+  // comma-delimited clause, "No regressions, all gates green") must not suppress
+  // a real claim; a negation/quote right against the claim ("not all gates
+  // green", a quoted citation) does.
+  const re = new RegExp(VERIFICATION_ADJACENT_RE.source, 'ig');
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const before = s.slice(0, m.index);
+    if (NEGATION_NEAR_RE.test(before)) continue;
+    if (OPEN_QUOTE_RE.test(before)) continue;
     return true;
   }
   return false;
@@ -152,6 +156,17 @@ function isProofFor(ev, family) {
 function attributed(ev, claimLane, claimActor) {
   if (ev.actor != null && claimActor != null && ev.actor !== claimActor) return false;
   if (ev.lane != null && claimLane != null && ev.lane !== claimLane) return false;
+  return true;
+}
+
+// The WINDOW-BOUNDARY predicate (distinct from proof attribution): the prior
+// slice-stop that closes this slice is the previous stop in the SAME LANE — by
+// ANY actor. Using proof-attribution here would skip a same-lane stop by another
+// actor and widen the window, letting an old proof from before that intervening
+// stop be borrowed. Lane-primary (matches scanCompletionClaims' per-lane key).
+function boundaryMatch(ev, claimLane, claimActor) {
+  if (claimLane != null) return ev.lane === claimLane;
+  if (claimActor != null) return ev.actor === claimActor;
   return true;
 }
 
@@ -289,7 +304,7 @@ export function evaluateStop(events, candidate, opts = {}) {
   let fromIdx = -1;
   for (let j = i - 1; j >= 0; j--) {
     const e = list[j];
-    if (e && e.type === 'SLICE_STOP' && attributed(e, claimLane, claimActor)) { fromIdx = j; break; }
+    if (e && e.type === 'SLICE_STOP' && boundaryMatch(e, claimLane, claimActor)) { fromIdx = j; break; }
   }
   const machineryReady = list.some((e) => e && (e.type === 'VERIFICATION_STARTED' || e.type === 'VERIFICATION_RAN'));
   return evaluateSliceStop(list, i, fromIdx, claimLane, claimActor, machineryReady);

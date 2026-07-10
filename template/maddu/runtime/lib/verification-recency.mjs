@@ -103,15 +103,15 @@ export function recencyFromSpine(events, { kind, ttlMs, nowMs, profileOk = () =>
   // A dangling STARTED inside the recency window = a run began without a recorded
   // result (crash / append-failure) → the gate reads that as non-green.
   const danglingInWindow = dangling.filter(withinWindow);
-  const freshValid = valid.filter(withinWindow);
-  // The NEWEST valid in-window receipt is authoritative regardless of outcome —
-  // a later fail/partial/wrong-profile run overrides an earlier pass (an older
-  // green must NOT survive a newer failure [F9]).
-  const latestAnyValid = freshValid.length ? freshValid[freshValid.length - 1] : null;
+  // The NEWEST valid receipt (by ts — events are pre-sorted) is authoritative,
+  // selected BEFORE any freshness filter so a future-dated newest run can't be
+  // skipped over to let an older pass win. It goes green ONLY when it is itself
+  // in-window (not future/expired) AND complete + pass + profile-ok [F9].
+  const newest = valid.length ? valid[valid.length - 1] : null;
+  const newestInWindow = !!(newest && withinWindow(newest));
   const qualifies = (r) => r && r.data.complete === true && r.data.result === 'pass' && profileOk(r.data.profile ?? null);
-  // `latest` (green) is set ONLY when the newest valid run itself qualifies.
-  const latest = qualifies(latestAnyValid) ? latestAnyValid : null;
-  return { latest, latestAnyValid, danglingInWindow, hasReceipt: valid.length > 0 };
+  const latest = (newestInWindow && qualifies(newest)) ? newest : null;
+  return { latest, latestAnyValid: newest, newestInWindow, danglingInWindow, hasReceipt: valid.length > 0 };
 }
 
 // The shared recency-gate verdict from an already-verified event list. Integrity
@@ -135,7 +135,8 @@ export function recencyGateVerdict(events, integrity, { kind, ttlMs, nowMs, prof
   if (rec.latestAnyValid) {
     const d = rec.latestAnyValid.data;
     let why;
-    if (d.result !== 'pass') why = `last run FAILED (${(d.counts && d.counts.fail) || '?'} failure(s))`;
+    if (!rec.newestInWindow) why = 'newest receipt has a future or out-of-window timestamp — not trusted for recency';
+    else if (d.result !== 'pass') why = `last run FAILED (${(d.counts && d.counts.fail) || '?'} failure(s))`;
     else if (d.complete !== true) why = 'last run was partial (--only/--skip/--changed/--scenario) — not a full profile';
     else why = `last run profile "${d.profile || '?'}" does not qualify (need quick/full)`;
     return { ok: false, message: `${label}: ${why}` };

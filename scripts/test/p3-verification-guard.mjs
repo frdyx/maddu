@@ -172,6 +172,15 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   // Codex#2 — a startedId reused across KINDS fails the pairing (global refcount).
   ev = [started('s1', 'project-test', 'quick', iso(-DAY)), ran('r1', 'project-test', 's1', { profile: 'quick' }), ran('r2', 'self-test', 's1', { profile: 'quick' })];
   ok('cross-kind reused startedId → project pair invalid', vr.pairVerifications(ev, 'project-test').valid.length === 0);
+
+  // R2#1 — an older PASS + a newer FUTURE-dated run → non-green (newest selected
+  // before the freshness filter, so the future run isn't skipped over).
+  ev = [
+    started('s1', 'project-test', 'quick', iso(-3 * DAY)), ran('r1', 'project-test', 's1', { profile: 'quick', result: 'pass', ts: iso(-2 * DAY) }),
+    started('s2', 'project-test', 'quick', iso(-DAY)), ran('r2', 'project-test', 's2', { profile: 'quick', result: 'pass', ts: iso(60 * 60 * 1000) }),
+  ];
+  v = vr.recencyGateVerdict(ev, 'ok', { kind: 'project-test', ttlMs: ttl, nowMs: NOW, profileOk, label: 'x', ttlLabel: '14d' });
+  ok('older pass + newer future run → non-green (out-of-window)', v.ok === false && /out-of-window/.test(v.message));
 }
 
 // ── Part 3: confident verification-claim detection ───────────────────────────
@@ -181,8 +190,11 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   ok('template "Gates: schema 42/0" + "pass" apart → NOT a claim', reflect.claimsVerification('Gates: schema 42/0. Learnings: the pass path works') === false);
   ok('negation "not green" → NOT a claim', reflect.claimsVerification('the gate is not green yet') === false);
   ok('quotation "\'all gates green\'" → NOT a claim', reflect.claimsVerification('quoted "all gates green" from the log') === false);
-  // Codex#7 — negation in ANOTHER clause must not suppress a real claim.
+  // Codex#7 / R2#2 — negation modifying a DIFFERENT noun (even same comma-clause)
+  // must not suppress a real claim; a negation right against the claim does.
   ok('negation in a different clause → still a claim', reflect.claimsVerification('No regressions; all gates green') === true);
+  ok('comma-clause negation of another noun → still a claim', reflect.claimsVerification('No regressions, all gates green') === true);
+  ok('negation right against the claim → suppressed', reflect.claimsVerification('not all gates green') === false);
   ok('family: tests → test', reflect.claimFamily('tests pass') === 'test');
   ok('family: gates → gate', reflect.claimFamily('all gates green') === 'gate');
 }
@@ -224,6 +236,13 @@ function ran(id, kind, startedId, { profile = null, result = 'pass', complete = 
   // candidate: gate claim needs GATE proof, a test receipt does NOT satisfy it (F10)
   c = reflect.evaluateStop([vstart, testPass('L')], { lane: 'L', actor: 'a', summary: 'all gates green' });
   ok('candidate: test receipt does not prove "gates green" (family match)', c.flagged === true);
+
+  // R2#3 — an intervening same-lane stop by ANOTHER actor closes the window, so an
+  // old gate-ok before that stop is NOT borrowed (lane-primary boundary).
+  const gateOk = { id: 'g', type: 'GATE_RAN', lane: 'L', ts: iso(-3 * DAY), data: { gateId: 'x', status: 'ok' } };
+  const interposed = { id: 'prev', type: 'SLICE_STOP', lane: 'L', actor: 'b', ts: iso(-2 * DAY), data: { summary: 'other work' } };
+  c = reflect.evaluateStop([vstart, gateOk, interposed], { lane: 'L', actor: 'a', summary: 'all gates green' });
+  ok('candidate: old proof before an intervening same-lane stop is not borrowed', c.flagged === true);
 }
 
 console.log(`\np3-verification-guard: ${passed} passed, ${failed} failed`);
