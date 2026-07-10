@@ -20,6 +20,13 @@ import { withAppendLock } from './append-lock.mjs';
 const ROLL_BYTES = 10 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// audit P1 — the framework version at/after which the flat append path is locked
+// (appendFlatChained below). A chain the verifier sees carrying a
+// FRAMEWORK_INSTALLED/UPGRADED at/after this version — or a SPINE_CUTOVER anchor —
+// is held to strict tamper-FAIL rules. Homed here (with the lock) and imported by
+// verify.mjs + spine-sync.mjs so the cutover version can never drift across them.
+export const FLAT_LOCK_VERSION = '1.98.0';
+
 // Canonical tamper-evidence hash of a stored NDJSON line (trailing CR stripped so a
 // CRLF-normalized copy verifies identically). Single source of truth — spine.mjs
 // re-exports this so the verifier and every writer can never drift.
@@ -358,5 +365,50 @@ export async function appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs = I
       return ev;
     },
     { onWait: onWaitStderr(dir), maxWaitMs }
+  );
+}
+
+// Append a pre-built event into the DEFAULT flat events dir under the SAME append
+// funnel the partitioned path uses, with `prev_hash` computed INSIDE the lock so a
+// concurrent flat writer can never fork the chain (audit P1). This is the single
+// locked+chained flat primitive: both spine.append()'s flat branch AND the worker
+// token wrapper (_wrapper-common.mjs) route through it, so every flat write on a
+// post-lock (>=1.98) install carries prev_hash — no keyless flat writer remains.
+//
+// Because a `spine sync init` migration can commit WHILE we wait for the flat lock,
+// we RE-RESOLVE the write replica once we hold it — NON-WAITING (timeoutMs:0), so a
+// best-effort caller (the token wrapper) is never blocked by a pending migration.
+// The outcome is a discriminated result the caller acts on AFTER the lock releases:
+//   { ev }          — the flat append committed (ev now carries prev_hash)
+//   { reroute: id } — a partition committed under us; caller routes to appendPartitioned
+//   { pending }     — a migration is publishing; caller retries later / drops
+// `maxWaitMs` bounds CONTENTION POLLING for the lock (best-effort, excludes FS
+// latency); acquireAppendLock throws on timeout, so a bounded caller drops without
+// writing and an Infinity caller (spine.append) never trips.
+export async function appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs = Infinity } = {}) {
+  // The lock file lives inside eventsDir, so the dir must exist before withAppendLock
+  // opens it (mirrors appendPartitioned's mkdir). Self-sufficient for the token
+  // wrapper, which may run before ensureSpine on a very fresh repo.
+  await mkdir(eventsDir, { recursive: true });
+  const lockPath = join(eventsDir, '.append.lock');
+  return withAppendLock(
+    lockPath,
+    async () => {
+      // Re-resolve under the lock, non-waiting: if a migration committed while we
+      // waited, DO NOT strand a flat write — hand the caller a reroute/pending.
+      const w = await resolveWriteReplica(repoRoot, { timeoutMs: 0 });
+      if (w.id) return { reroute: w.id };
+      if (w.pending) return { pending: true };
+      const prevLine = await lastEventLineInDir(eventsDir);
+      ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
+      const line = JSON.stringify(ev);
+      if (line.includes('\n')) {
+        throw new Error('spine-append-core.appendFlatChained: serialized event contains a raw newline — NDJSON framing invariant violated');
+      }
+      const seg = await currentSegmentInDir(eventsDir);
+      await appendFile(join(eventsDir, seg), line + '\n', { flag: 'a' });
+      return { ev };
+    },
+    { onWait: onWaitStderr(eventsDir), maxWaitMs }
   );
 }

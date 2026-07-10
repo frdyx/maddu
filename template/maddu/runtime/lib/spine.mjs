@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, readAllPartitioned } from './spine-append-core.mjs';
+import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned } from './spine-append-core.mjs';
 import { redactDataPayload } from './secret-scan.mjs';
 export { hashLine };
 
@@ -280,6 +280,11 @@ export const EVENT_TYPES = {
   // (rate-limited per workspace+path) so one repo reaching into another's spine
   // is on the record. data: { workspace, active, method, path }
   BRIDGE_CROSS_WORKSPACE:     'BRIDGE_CROSS_WORKSPACE',
+  // audit P1 — chain-local tamper-evidence cutover anchor. Seeded into a
+  // freshly-minted sync partition (spine sync init) so the verifier holds that
+  // partition to the post-cutover strict rules even without a migrated FRAMEWORK
+  // marker. data: { version }
+  SPINE_CUTOVER:              'SPINE_CUTOVER',
   // v1.15.0 — `maddu blueprint --distill` spawned a provider CLI (subprocess,
   // hard rule #5) to rewrite the deterministic skeleton into prose. Recorded on
   // success only; an unmet auth gate or worker failure falls back to the
@@ -511,52 +516,24 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   if (w.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
 
   // Tamper-evidence (v1.14.0): link to the prior event by hashing its stored
-  // line. Computed before the append so it reflects the true predecessor;
-  // genesis (empty spine) → null.
+  // line. Since audit P1 the flat write goes through the SHARED locked+chained
+  // primitive `appendFlatChained` (spine-append-core.mjs) — prev_hash is computed
+  // INSIDE the append funnel, so a concurrent flat writer (bridge + a CLI invocation)
+  // can no longer fork the chain, and the token wrapper shares the exact same path
+  // so every flat event carries prev_hash. O_APPEND framing + one-event-per-line +
+  // no-per-append-fsync durability all live in that primitive now.
   //
-  // The flat write is wrapped: a concurrent `spine sync init` can rename these
-  // segments out from under us (ENOENT). That never happens in pure default mode
-  // (no migration ever runs); when it does, re-resolve and route to the now-
-  // committing partition instead of failing. Non-ENOENT errors propagate unchanged.
+  // The primitive re-resolves the replica under the lock and returns a discriminated
+  // outcome; the ENOENT catch stays OUT here as a backstop for a rename that slips
+  // between currentSegment and appendFile (a `spine sync init` migration renaming a
+  // segment out from under us — never happens in pure default mode).
   try {
-    const prevLine = await lastEventLine(paths);
-    ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
-    const seg = await currentSegment(paths);
-
-  // ── Concurrency + framing (A2 / hard rule #2) ──
-  //
-  // There IS a real concurrent-writer path: the long-lived bridge
-  // (runtime/server.js) and a short-lived CLI invocation (`maddu slice-stop`,
-  // `maddu doctor`, …) can both call append() against the same segment at the
-  // same instant. Máddu deliberately has no mutex (lane claims coordinate
-  // AGENTS, not spine bytes). The lock here is the OS: appendFile opens with
-  // flag 'a' (O_APPEND), and an O_APPEND write is positioned at EOF and is
-  // atomic for sizes under PIPE_BUF (4096 on Linux; Windows FILE_APPEND_DATA is
-  // atomic for appends too). A serialized event line is virtually always under
-  // that, so two concurrent appends never interleave bytes — they serialize
-  // into two whole lines. The flag is passed explicitly so this guarantee is
-  // not silently lost if someone later swaps in a positional write.
-  //
-  // Framing invariant: exactly ONE event per physical line. JSON.stringify
-  // escapes any embedded newline to "\\n", so a serialized event can never
-  // contain a raw LF — assert it, because the verifier's torn-trailing-line
-  // detection (and NDJSON itself) depends on one-event-per-line being absolute.
-  //
-  // Durability: we do NOT fsync per append (the spine IS the WAL — see
-  // docs/15-architecture.md). A crash between write() and the OS flushing can
-  // leave a truncated final line; that is detected, not auto-repaired, by
-  // `maddu spine verify` (issue kind `torn_trailing_line`).
-    const line = JSON.stringify(ev);
-    if (line.includes('\n')) {
-      throw new Error('spine.append: serialized event contains a raw newline — NDJSON framing invariant violated');
-    }
-    await appendFile(join(paths.events, seg), line + '\n', { flag: 'a' });
-    return ev;
+    const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
+    if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev);
+    if (outcome.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+    return outcome.ev;
   } catch (err) {
     if (err && err.code === 'ENOENT') {
-      // A `spine sync init` migration began mid-write and renamed a segment. Re-
-      // resolve: it routes to the committed partition (or waits for it). A rename
-      // implies the marker exists, so this never loops back to the flat branch.
       const w2 = await resolveWriteReplica(repoRoot);
       if (w2.id) return appendPartitioned(repoRoot, w2.id, ev);
       if (w2.pending) throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');

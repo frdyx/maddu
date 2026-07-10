@@ -5,7 +5,8 @@
 //   1. fresh spine — every appended event carries prev_hash; genesis is null;
 //      the chain verifies clean.
 //   2. tamper — editing an interior event's stored line (still valid JSON)
-//      breaks the link at the NEXT event → `chain_broken` (WARN).
+//      breaks the link at the NEXT event → `chain_broken` (FAIL, audit P1) on a
+//      strict/post-cutover chain (seeded with a FRAMEWORK_INSTALLED >= 1.98 genesis).
 //   3. forward-only — legacy events written without prev_hash are not flagged;
 //      the chain is checked only from the first prev_hash-bearing event, and the
 //      boundary (first chained event ↔ last legacy line) verifies clean.
@@ -39,6 +40,7 @@ async function main() {
     const tmp = await newTmp();
     try {
       const sid = 'ses_20260609000000_aaaaaa';
+      await spine.append(tmp, { type: 'FRAMEWORK_INSTALLED', data: { version: '1.98.0', files: 0 } });
       await spine.append(tmp, { type: 'SESSION_REGISTERED', actor: sid, data: { role: 'implementer' } });
       for (let i = 0; i < 4; i++) await spine.append(tmp, { type: 'SESSION_HEARTBEAT', actor: sid });
       const lines = (await readFile(segPath(tmp), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -48,7 +50,10 @@ async function main() {
         if (lines[i].prev_hash !== spine.hashLine(JSON.stringify(lines[i - 1]))) fail(`event ${i} prev_hash != hash(prev line)`);
       }
       const res = await verify.verifySpine(tmp);
-      if (countKind(res, 'chain_broken') !== 0 || countKind(res, 'chain_gap') !== 0) fail(`fresh chain should verify clean: ${JSON.stringify(res.issues)}`);
+      // Strict chain, no tamper → clean across ALL chain kinds (audit P1).
+      for (const k of ['chain_broken', 'chain_stripped', 'chain_fork', 'chain_gap']) {
+        if (countKind(res, k) !== 0) fail(`fresh strict chain should verify clean, saw ${k}: ${JSON.stringify(res.issues)}`);
+      }
     } finally { await rm(tmp, { recursive: true, force: true }); }
   }
 
@@ -57,11 +62,14 @@ async function main() {
     const tmp = await newTmp();
     try {
       const sid = 'ses_20260609000000_bbbbbb';
+      // FRAMEWORK_INSTALLED >= 1.98 genesis makes this a strict/post-cutover chain,
+      // so an interior tamper is a chain_broken FAIL (not a pre-cutover WARN).
+      await spine.append(tmp, { type: 'FRAMEWORK_INSTALLED', data: { version: '1.98.0', files: 0 } });
       await spine.append(tmp, { type: 'SESSION_REGISTERED', actor: sid, data: { role: 'implementer' } });
       for (let i = 0; i < 4; i++) await spine.append(tmp, { type: 'INBOX_MESSAGE', actor: null, data: { text: `msg ${i}` } });
       const lines = (await readFile(segPath(tmp), 'utf8')).split('\n').filter(Boolean);
-      // Alter line index 2's data but keep it valid JSON (and keep prev_hash so
-      // it's still a chained event — we're simulating an after-the-fact edit).
+      // Alter array-index 2's data but keep it valid JSON + its own prev_hash — an
+      // after-the-fact interior edit. Lines: [0]FRAMEWORK_INSTALLED [1]SESSION [2]INBOX0 …
       const ev = JSON.parse(lines[2]);
       ev.data.text = 'TAMPERED';
       lines[2] = JSON.stringify(ev);
@@ -69,8 +77,9 @@ async function main() {
       const res = await verify.verifySpine(tmp);
       const broken = res.issues.filter((i) => i.kind === 'chain_broken');
       if (broken.length === 0) fail('tampered interior line was not detected (no chain_broken)');
-      // The break surfaces at the FOLLOWING event (line 4), whose prev_hash now
-      // mismatches the altered line 3.
+      if (!broken.every((b) => b.level === 'FAIL')) fail(`chain_broken on a strict chain must be FAIL, got ${broken.map((b) => b.level)}`);
+      // The break surfaces at the FOLLOWING event (1-based line 4 = array-index 3),
+      // whose prev_hash now mismatches the altered array-index 2 line.
       if (!broken.some((b) => b.line === 4)) fail(`chain_broken expected at line 4, got lines ${broken.map((b) => b.line)}`);
     } finally { await rm(tmp, { recursive: true, force: true }); }
   }

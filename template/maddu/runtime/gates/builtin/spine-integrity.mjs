@@ -12,22 +12,26 @@ export default {
     }
     try {
       const r = await ctx.verify.verifySpine(ctx.repoRoot, { maxEvents: SPINE_CAP });
+      // audit P1 — check FAILs BEFORE the capped early-return: a tampering FAIL found
+      // within the first SPINE_CAP events must red the gate even though the scan
+      // stopped early (previously a capped run returned ok:true and discarded it).
+      if (r.counts.FAIL > 0) {
+        const fails = r.counts.FAIL, warns = r.counts.WARN;
+        const wpart = warns > 0 ? ` · ${warns} warn${warns === 1 ? '' : 's'}` : '';
+        const cpart = r.capped ? ` (within first ${SPINE_CAP.toLocaleString()})` : '';
+        return {
+          ok: false,
+          message: `${fails} fail${fails === 1 ? '' : 's'}${wpart}${cpart} — run \`maddu spine verify\` for detail`,
+          evidence: { counts: r.counts, capped: r.capped },
+        };
+      }
       if (r.capped) {
-        // Capped — surface as ok=true (no fails seen up to cap) with an
+        // Capped with no FAIL in the scanned prefix — surface as ok=true with an
         // evidence note. Severity warn-style messaging happens in doctor.
         return {
           ok: true,
           message: `>${SPINE_CAP.toLocaleString()} events — run \`maddu spine verify\` manually for full check`,
           evidence: { capped: true, examinedEvents: r.events },
-        };
-      }
-      if (r.counts.FAIL > 0) {
-        const fails = r.counts.FAIL, warns = r.counts.WARN;
-        const wpart = warns > 0 ? ` · ${warns} warn${warns === 1 ? '' : 's'}` : '';
-        return {
-          ok: false,
-          message: `${fails} fail${fails === 1 ? '' : 's'}${wpart} — run \`maddu spine verify\` for detail`,
-          evidence: { counts: r.counts },
         };
       }
       if (r.counts.WARN > 0) {

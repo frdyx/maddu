@@ -53,6 +53,30 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
+  // 1b. audit P1 — an EMPTY freshly-minted partition (a new replica joining an
+  //     already-synced repo migrates nothing) is seeded with a SPINE_CUTOVER
+  //     GENESIS, so it is STRICT: a later fork is a chain_broken FAIL and
+  //     importPartitions reports it fatal (closes the markerless-partition gap).
+  //     A NON-empty migration is NOT seeded (byte-identity preserved — test 1).
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-si-empty-'));
+    await mkdir(join(repo, '.maddu', 'events'), { recursive: true });
+    const res = await syncInit(repo, { mintId: () => 'rep_empty01', now: '2026-01-01T00:00:00Z' });
+    ok(res.ok, 'empty-repo sync init ok');
+    const pseg = join(repo, '.maddu', 'events', 'by-replica', 'rep_empty01', '000000000001.ndjson');
+    const evs = (await readFile(pseg, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    ok(evs.length === 1 && evs[0].type === 'SPINE_CUTOVER' && evs[0].prev_hash === null,
+      `empty partition seeded with a SPINE_CUTOVER genesis (got ${JSON.stringify(evs.map((e) => e.type))})`);
+    await append(repo, { type: TYPE, data: { n: 1 } }); // lands in the partition, strict
+    // Hand-append a forked line (wrong prev_hash) → strict chain_broken FAIL.
+    await writeFile(pseg, (await readFile(pseg, 'utf8')) + JSON.stringify({ v: 1, id: 'evt_20260101000009_ffffff', ts: '2026-01-01T00:00:09Z', type: TYPE, actor: null, lane: null, data: { n: 2 }, prev_hash: null }) + '\n');
+    const v = await verifySpine(repo);
+    ok(v.issues.some((i) => i.kind === 'chain_broken' && i.level === 'FAIL'), 'fork in a seeded (strict) partition is chain_broken FAIL');
+    const imp = await importPartitions(repo);
+    ok(imp.ok === false && imp.forks.length >= 1, 'importPartitions reports the seeded-partition fork fatal');
+    await rm(repo, { recursive: true, force: true });
+  }
+
   // 2. Idempotent: second init is a no-op returning the same replicaId.
   {
     const repo = await mkdtemp(join(tmpdir(), 'maddu-si-idem-'));

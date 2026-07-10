@@ -1,6 +1,6 @@
 {
-  "version": "1.4.0",
-  "fingerprint": "129f421f",
+  "version": "1.5.0",
+  "fingerprint": "2d74bf93",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1293,6 +1293,12 @@
         "data": {
           "count": "number",
           "paths": "array"
+        }
+      },
+      "SPINE_CUTOVER": {
+        "frozen": false,
+        "data": {
+          "version": "string"
         }
       },
       "TASK_COMPLETED": {

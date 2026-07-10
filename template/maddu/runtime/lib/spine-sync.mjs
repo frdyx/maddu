@@ -16,10 +16,10 @@
 // git-ignored by construction (.maddu/config/* ignores it) and a doctor gate asserts
 // it is never tracked. No EVENT_CONTRACT change: replicaId lives in the path.
 
-import { readdir, readFile, writeFile, mkdir, rename, access, unlink } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -210,6 +210,33 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   let migrated;
   try { migrated = await migrateFlatInto(repoRoot, replicaId); }
   catch (e) { return { ok: false, reason: 'migrate-conflict', message: e.message }; }
+
+  // audit P1 — seed a chain-local SPINE_CUTOVER anchor as the GENESIS of an EMPTY
+  // freshly-minted partition (a new replica joining an already-synced >=1.98 repo
+  // migrates nothing), so the verifier holds its first real append to the strict
+  // post-cutover rules — otherwise a markerless modern partition stays lenient
+  // forever and a real fork/strip there would only WARN. We seed ONLY when the
+  // partition is empty: a NON-empty migration is left byte-identical (its bytes are
+  // the tamper-evidence), and a >=1.98 install's migrated FRAMEWORK marker already
+  // makes it strict; a pre-1.98-rooted migration is legitimately lenient (it was
+  // written by unlocked writers). appendPartitioned sets prev_hash=null (genesis).
+  const pdir = partitionDir(repoRoot, replicaId);
+  let partHasEvents = false;
+  for (const s of await listSegs(pdir)) {
+    try { if ((await stat(join(pdir, s))).size > 0) { partHasEvents = true; break; } } catch { /* unreadable — treat as absent */ }
+  }
+  if (!partHasEvents) {
+    const cutoverTs = now || new Date().toISOString();
+    await appendPartitioned(repoRoot, replicaId, {
+      v: 1,
+      id: makeId('evt', cutoverTs),
+      ts: cutoverTs,
+      type: 'SPINE_CUTOVER',
+      actor: null,
+      lane: null,
+      data: { version: FLAT_LOCK_VERSION },
+    });
+  }
   const createdAt = now || new Date().toISOString();
   // Publish ATOMICALLY (temp + rename): a concurrent reader/appender must see either
   // no replica.json or a COMPLETE one — never a half-written file it would reject as
@@ -269,8 +296,11 @@ export async function importPartitions(repoRoot) {
 
   // Any OTHER FAIL (segment_gap, malformed structure, etc.) is a corrupt partition
   // and is fatal — a gap or missing genesis must never be reported "safe to merge".
+  // chain_broken is already collected as `forks` above (audit P1 made it a FAIL on
+  // a locked/strict chain); exclude it here so a partition fork isn't double-counted
+  // as both a fork and a structural fail.
   const structuralFails = v.issues.filter(
-    (i) => i.level === 'FAIL' && !quarantineKinds.has(i.kind) && i.kind !== 'duplicate_id'
+    (i) => i.level === 'FAIL' && !quarantineKinds.has(i.kind) && i.kind !== 'duplicate_id' && i.kind !== 'chain_broken'
   );
 
   const byRid = new Map();

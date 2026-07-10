@@ -162,7 +162,14 @@ export default async function init(argv) {
   await writeMadduJson(cwd, madduJson);
   console.log(`  wrote maddu.json (framework_version: ${fwVersion})`);
 
-  // 5. First spine event.
+  // 5. First spine event(s) — CHAINED (audit P1). Install is single-writer, so we
+  //    chain the prefix inline (no lock): genesis prev_hash=null, then the two
+  //    agent-file events below link forward via the canonical hashLine. A >=1.98
+  //    FRAMEWORK_INSTALLED genesis also flips the verifier's strictChain, so these
+  //    prefix events are held to post-cutover strict rules (their edits are caught).
+  const { hashLine } = await import(
+    'file://' + join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'spine-append-core.mjs').replace(/\\/g, '/')
+  );
   const eventsSegment = join(cwd, '.maddu', 'events', '000000000001.ndjson');
   const ts = new Date().toISOString();
   const ev = {
@@ -174,7 +181,9 @@ export default async function init(argv) {
     lane: null,
     data: { version: fwVersion, files: files.length }
   };
-  await writeFile(eventsSegment, JSON.stringify(ev) + '\n');
+  ev.prev_hash = null; // genesis
+  let lastStoredLine = JSON.stringify(ev);
+  await writeFile(eventsSegment, lastStoredLine + '\n');
   console.log(`  spine seeded with FRAMEWORK_INSTALLED event`);
 
   // 6. .gitignore — append only if our block isn't already present.
@@ -234,7 +243,9 @@ export default async function init(argv) {
       lane: null,
       data: { files: result.files, action: result.action, perFile: result.perFile }
     };
-    await appendFile(eventsSegment, JSON.stringify(ev2) + '\n');
+    ev2.prev_hash = hashLine(lastStoredLine);
+    lastStoredLine = JSON.stringify(ev2);
+    await appendFile(eventsSegment, lastStoredLine + '\n');
     const perFileSummary = Object.entries(result.perFile)
       .map(([f, a]) => `${f}:${a}`).join(', ');
     console.log(`  agent files synced (${result.action}) — ${perFileSummary}`);
@@ -256,7 +267,9 @@ export default async function init(argv) {
         reason: slashResult.reason || null,
       }
     };
-    await appendFile(eventsSegment, JSON.stringify(ev3) + '\n');
+    ev3.prev_hash = hashLine(lastStoredLine);
+    lastStoredLine = JSON.stringify(ev3);
+    await appendFile(eventsSegment, lastStoredLine + '\n');
     const slashSummary = slashResult.files.length
       ? `${slashResult.files.length} command(s)`
       : (slashResult.reason || 'no commands');

@@ -61,14 +61,15 @@
 //     IMPORT_*, PROPOSAL_*, BOSS_MESSAGE, HANDOFF_SET, BRIEFING_CURATED,
 //     GOAL_DECLARED, PHASE_DECLARED, SLASH_COMMANDS_SYNCED, AGENT_FILE_SYNCED,
 //     SECRET_DETECTED_IN_ARGV, TOOL_{INVOKED,COMPLETED,REFUSED}, WORKER_ENV_FILTERED,
-//     BRIDGE_ORIGIN_REJECTED, LEARN_*, SOURCE_HASH_RECOMPUTED.
+//     BRIDGE_ORIGIN_REJECTED, LEARN_*, SOURCE_HASH_RECOMPUTED, BRIDGE_CROSS_WORKSPACE,
+//     SPINE_CUTOVER (a chain-local tamper-evidence anchor — no parent invariant).
 //   * MEMORY_FACT_SUPERSEDED.supersedes is validated by hindsight's replay, not here.
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
-import { listPartitionIds, partitionDir } from './spine-append-core.mjs';
+import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -80,6 +81,17 @@ const WELL_KNOWN_ID_SUFFIXES = new Set(['init00', 'upgr00', 'drep00']);
 
 // Default future-clock tolerance: 60 seconds.
 const FUTURE_TS_TOLERANCE_MS = 60 * 1000;
+
+// Minimal stdlib semver ">=" on major.minor.patch (pre-release/build ignored).
+function semverGte(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
 
 function issue(level, kind, detail, extra = {}) {
   return { level, kind, detail, ...extra };
@@ -212,6 +224,9 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
     // prev_hash; everything before it is pre-v1.14.0 legacy and unchecked.
     let prevLineHash = null;
     let chainStarted = false;
+    // audit P1 — flips true once this chain shows a cutover anchor (see below).
+    // Chain-LOCAL like chainStarted: reset per chain (per partition in sync mode).
+    let strictChain = false;
 
   for (const segName of segs) {
     const abs = join(dir, segName);
@@ -272,17 +287,37 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
         continue;
       }
 
-      // ─── Chain integrity (v1.14.0, forward-only prev_hash) ───
-      // WARN, not FAIL: a mismatch is the tamper signal, but the no-mutex
-      // append path means a rare concurrent write can also fork the chain — so
-      // the verifier reports it and the operator decides (never auto-repaired).
+      // ─── Chain integrity (v1.14.0 forward-only prev_hash; audit P1 strict) ───
+      // Severity keys on `strictChain` (flipped by the cutover-anchor detection
+      // below), NOT on chainStarted. A strict chain was written by lock-holding
+      // >=FLAT_LOCK_VERSION writers, so it cannot benignly fork and is fully keyed —
+      // any mismatch or missing key is genuine tampering (FAIL). A pre-cutover chain
+      // could legitimately fork on the old unlocked flat path, and existing on-disk
+      // spines carry legitimate keyed->keyless(TOKEN_USAGE_REPORTED)->keyed histories
+      // from the pre-P1 wrapper — so there a mismatch is only chain_fork WARN and a
+      // missing key only chain_gap WARN. Never auto-repaired; the operator decides.
       if ('prev_hash' in ev) {
         if (ev.prev_hash !== thisPrev) {
-          push(issue('WARN', 'chain_broken',
-            `${ev.id}: prev_hash does not match the preceding event's stored-line hash — history altered, an event inserted/removed, or a concurrent append forked the chain`,
-            { segment: segName, line: lineNo, eventId: ev.id }));
+          if (strictChain) {
+            push(issue('FAIL', 'chain_broken',
+              `${ev.id}: prev_hash does not match the preceding event's stored-line hash on a post-cutover (locked) chain — history altered, or an event inserted/removed/reordered`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else {
+            push(issue('WARN', 'chain_fork',
+              `${ev.id}: prev_hash does not match the preceding event's stored-line hash on a pre-cutover chain — a hand edit, or a concurrent append forked the unlocked flat chain`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          }
         }
         chainStarted = true;
+      } else if (strictChain && ev.type !== 'TOKEN_USAGE_REPORTED') {
+        // Post-cutover the chain is fully keyed, so a missing key is a stripped event.
+        // TOKEN_USAGE_REPORTED is exempt: a straggler pre-P1 wrapper subprocess
+        // surviving the upgrade could still emit one keyless. Its own stripping is
+        // still caught via the SUCCESSOR's mismatch — except a trailing token event
+        // with no keyed successor, a conceded residual (see docs/34-threat-model).
+        push(issue('FAIL', 'chain_stripped',
+          `${ev.id}: event lacks prev_hash on a post-cutover (locked) chain — a prev_hash key was stripped`,
+          { segment: segName, line: lineNo, eventId: ev.id }));
       } else if (chainStarted) {
         push(issue('WARN', 'chain_gap',
           `${ev.id}: event lacks prev_hash after the chain began (a pre-v1.14.0 writer or a hand edit)`,
@@ -300,6 +335,19 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity } = {}) {
           `${ev.id || segName + ':' + lineNo}: missing required field(s): ${missing.join(', ')}`,
           { segment: segName, line: lineNo, eventId: ev.id }));
         continue;
+      }
+
+      // ─── Cutover-anchor detection (audit P1) ───
+      // Flip strictChain when this event proves the chain is held to post-cutover
+      // rules: a FRAMEWORK_INSTALLED/UPGRADED at/after FLAT_LOCK_VERSION, or a
+      // SPINE_CUTOVER anchor (seeded into a freshly-minted sync partition). OUTSIDE
+      // the `if (referential)` switch below so sync-mode (referential:false) scans
+      // still see it. Set AFTER the chain check above, so the marker event itself is
+      // graded under the OLD (lenient) state and only SUBSEQUENT events are strict.
+      if (!strictChain) {
+        if (ev.type === 'SPINE_CUTOVER') strictChain = true;
+        else if (ev.type === 'FRAMEWORK_INSTALLED' && semverGte(ev.data?.version, FLAT_LOCK_VERSION)) strictChain = true;
+        else if (ev.type === 'FRAMEWORK_UPGRADED' && semverGte(ev.data?.to, FLAT_LOCK_VERSION)) strictChain = true;
       }
 
       // ─── Schema version ───

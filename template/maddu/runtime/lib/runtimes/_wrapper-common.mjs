@@ -21,39 +21,16 @@
 // `.maddu/state/worker-logs/<workerId>.wrapper-errors.log` and keeps
 // forwarding stdout untouched. The worker never blocks on bookkeeping.
 
-import { appendFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { resolveWriteReplica, appendPartitioned } from '../spine-append-core.mjs';
+import { resolveWriteReplica, appendPartitioned, appendFlatChained } from '../spine-append-core.mjs';
 import { redactDataPayload, redactText } from '../secret-scan.mjs';
-
-const ROLL_BYTES = 10 * 1024 * 1024;
 
 function genId() {
   const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
   const r = randomBytes(3).toString('hex');
   return `evt_${t}_${r}`;
-}
-
-async function currentSegment(eventsDir) {
-  await mkdir(eventsDir, { recursive: true });
-  let files;
-  try {
-    files = (await readdir(eventsDir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
-  } catch { files = []; }
-  if (files.length === 0) {
-    const name = '000000000001.ndjson';
-    await writeFile(join(eventsDir, name), '');
-    return name;
-  }
-  const last = files[files.length - 1];
-  try {
-    const st = await stat(join(eventsDir, last));
-    if (st.size < ROLL_BYTES) return last;
-  } catch {}
-  const next = String(parseInt(last.split('.')[0], 10) + 1).padStart(12, '0') + '.ndjson';
-  await writeFile(join(eventsDir, next), '');
-  return next;
 }
 
 // Append a TOKEN_USAGE_REPORTED event directly to the spine NDJSON.
@@ -112,9 +89,21 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (w.pending) return null; // migration in flight — drop this token event
   if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
 
-  const seg = await currentSegment(eventsDir);
-  await appendFile(join(eventsDir, seg), JSON.stringify(ev) + '\n');
-  return ev;
+  // Default flat path — through the SHARED locked+chained primitive (audit P1) so
+  // token events carry prev_hash like every other flat write (no keyless flat
+  // writer remains → the verifier's chain-strip detection stays free of false
+  // positives). Best-effort: `maxWaitMs` bounds lock-contention polling; if the
+  // funnel is contended past the budget the acquire throws and we DROP (return
+  // null, write nothing) rather than block the worker's exit. A migration that
+  // committed while we waited surfaces as {reroute|pending}.
+  try {
+    const outcome = await appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs: waitMs });
+    if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev, { maxWaitMs: waitMs });
+    if (outcome.pending) return null;
+    return outcome.ev;
+  } catch {
+    return null; // contention past budget / transient — drop, never block the worker
+  }
 }
 
 // Wrapper-local error log. Failures here are tolerated — we never let a

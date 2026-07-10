@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.4.0` · **Event types:** 176
+**Contract version:** `1.5.0` · **Event types:** 177
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (176)
+## Events (177)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -193,6 +193,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `BRIEFING_CURATED` | A curated orient/handoff briefing persisted its original for retrieval. | `briefingId: string`, `dropped: string`, `handoff: object`, `kind: string`, `orient: string`, `originalRef: string` |
 | `BRIDGE_ORIGIN_REJECTED` | The bridge rejected a request with a non-loopback Host/Origin. | `host: string\|null`, `method: string`, `origin: string\|null`, `path: string`, `reason: string` |
 | `BRIDGE_CROSS_WORKSPACE` | A bridge request selected a workspace other than the active one. | `active: string`, `method: string`, `path: string`, `workspace: string` |
+| `SPINE_CUTOVER` | A chain-local tamper-evidence cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules). | `version: string` |
 | `BLUEPRINT_DISTILLED` | A blueprint skeleton was distilled into prose by a provider CLI. | `distilledBytes: number`, `outPath: string`, `provider: string`, `runtime: string`, `skeletonBytes: number`, `slug: string` |
 | `DEBT_SCANNED` | The source tree was scanned for deliberate-shortcut debt markers. | `files: number`, `ledgerPath: string\|null`, `markers: number`, `noTrigger: number` |
 | `ARCHITECTURE_SCANNED` | The declared architecture contract was checked against the import graph. | `blocking: boolean`, `cycles: number`, `driftScore: number`, `edges: number`, `failOn: string`, `forbidden: number`, `modules: number`, `newViolations: number`, `uncovered: number`, `undeclared: number` |
