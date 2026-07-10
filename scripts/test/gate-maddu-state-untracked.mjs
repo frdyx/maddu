@@ -39,7 +39,8 @@ async function seedRepo(files) {
 }
 
 async function main() {
-  ok('gate id + warn severity', gate.id === 'maddu-state-untracked' && gate.severity === 'warn');
+  // audit P4 — promoted warn→safety (fail-capable) so a real leak reds CI.
+  ok('gate id + safety severity', gate.id === 'maddu-state-untracked' && gate.severity === 'safety');
 
   // ── durable-only tree → PASS ──
   const clean = await seedRepo({
@@ -67,10 +68,16 @@ async function main() {
     && rLeak.evidence.untrackCommand.includes('.maddu/sessions'), rLeak.evidence?.untrackCommand);
   ok('durable config is NOT named in the remediation', rLeak.evidence && !rLeak.evidence.untrackCommand.includes('.maddu/config'), rLeak.evidence?.untrackCommand);
 
-  // ── non-git dir → skip cleanly ──
+  // ── non-git dir → modeled non-applicable (ok) ──
   const plain = await mkdtemp(join(tmpdir(), 'maddu-nogit-'));
   const rPlain = await gate.run({ repoRoot: plain });
-  ok('non-git dir skips cleanly', rPlain.ok === true && /not a git repo/.test(rPlain.message), rPlain.message);
+  ok('non-git dir is not applicable (ok)', rPlain.ok === true && /not a git repo|not applicable/.test(rPlain.message), rPlain.message);
+
+  // audit P4 — fail-closed: a git error we can't interpret as "not a repo"
+  // (here, a non-existent repoRoot) must FAIL, never pass by having failed to
+  // verify.
+  const rBad = await gate.run({ repoRoot: join(plain, 'does-not-exist-xyz') });
+  ok('unresolvable git error → FAIL (fail-closed)', rBad.ok === false && /git error/.test(rBad.message), rBad.message);
 
   await Promise.all([clean, leaky, plain].map((d) => rm(d, { recursive: true, force: true })));
 }

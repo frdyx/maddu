@@ -5,12 +5,13 @@
 # Máddu itself needs no GitHub: the same exit code drives a local pre-push
 # hook or any other CI (docs/46-ci.md, "Local enforcement first").
 #
-# Two checks:
-#   gate-rail  — `maddu ci` against the committed pin (.maddu/config/ci.json):
-#                red iff a pinned required gate fails. Annotations + job
-#                summary come from the verb itself (GITHUB_ACTIONS detected).
-#   self-test  — the framework's full quick suite in a bare runner: the
-#                clean-environment evidence the v1.87.0 release owed.
+# audit P4 — the jobs now `npm ci` first, so the cockpit gates (happy-dom) and
+# the browser smoke (playwright) actually RUN instead of SKIP→PASS. self-test
+# runs with --fail-on-skip so a missing dep reds CI instead of greening it. The
+# `ci` aggregate job is the SINGLE required status check on main: it needs every
+# leaf job and — via `if: always()` + an explicit all-success assertion — turns
+# any failure, cancellation, or skip of a leaf into a red aggregate (a plain
+# required leaf can be silently "skipped but required"; the aggregate cannot).
 name: maddu ci
 
 on:
@@ -27,6 +28,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: npm ci (dev deps so gates can actually run)
+        run: npm ci
       - name: maddu ci (pinned required gates)
         run: node bin/maddu.mjs ci
 
@@ -37,7 +40,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: maddu self-test (quick profile)
+      - name: npm ci (installs happy-dom so the cockpit gates run, not skip)
+        run: npm ci
+      - name: maddu self-test (quick profile, skips are red)
         # RAISE-ONLY timing overrides for saturated 2-core runners: the
         # append-lock's bodyless-grace reclaim and the token-wrapper's bounded
         # funnel wait are the two designed degradation paths that fire as
@@ -47,4 +52,42 @@ jobs:
         env:
           MADDU_LOCK_BODYLESS_GRACE_MS: 20000
           MADDU_WRAPPER_APPEND_WAIT_MS: 15000
-        run: node bin/maddu.mjs self-test --profile quick
+        # --fail-on-skip: with happy-dom + git present, none of the nine
+        # skippable fixtures should skip; if one does (a dep failed to install),
+        # CI reds instead of silently greening a skipped gate.
+        run: node bin/maddu.mjs self-test --profile quick --fail-on-skip
+
+  cockpit-e2e:
+    # The fifth cockpit gate (cockpit-playwright) is full-profile only and needs
+    # a real browser. Give it a dedicated job with a Chromium install so it RUNS
+    # in CI — `npm ci` alone covers only the four happy-dom cockpit gates.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm ci
+        run: npm ci
+      - name: install Chromium for playwright
+        run: npx playwright install --with-deps chromium
+      - name: cockpit real-browser smoke
+        # A raw fixture: exit 0 = passed, 1 = route/page error, 77 = SKIP (dep or
+        # browser absent). Any nonzero fails the step — and here we WANT it to
+        # run, so a skip is correctly a failure (the browser was just installed).
+        run: node scripts/test/cockpit-playwright.mjs
+
+  ci:
+    # The single required status check on `main`. Waits for every leaf job and
+    # reds unless all three succeeded — so a failed/cancelled/skipped leaf can
+    # never be treated as a passing required check.
+    needs: [gate-rail, self-test, cockpit-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: assert all leaf jobs succeeded
+        run: |
+          echo "gate-rail=${{ needs.gate-rail.result }} self-test=${{ needs.self-test.result }} cockpit-e2e=${{ needs.cockpit-e2e.result }}"
+          test "${{ needs.gate-rail.result }}" = "success" \
+            && test "${{ needs.self-test.result }}" = "success" \
+            && test "${{ needs.cockpit-e2e.result }}" = "success"
