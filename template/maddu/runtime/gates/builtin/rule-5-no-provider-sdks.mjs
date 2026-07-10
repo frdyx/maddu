@@ -77,7 +77,7 @@ const REGEX_ALLOWED_AFTER = /[([{,;:=!&|?+\-*%^~<>]$|(?:^|[^.\w$])(?:return|type
 // real import (false negative) or make ordinary code look like one (false
 // positive). `stopAtBrace` is set when scanning a `${…}` body: an unmatched `}`
 // at depth 0 ends that context. Returns { hit, end }.
-const CONTROL_HEADER = /(?:^|[^.\w$])(?:if|while|for|switch|with|catch)\s*$/;
+const CONTROL_HEADER = /(?:^|[^.\w$])(?:if|while|for|switch|with|catch)\s*$|(?:^|[^.\w$])for\s+await\s*$/;
 
 function scanCode(src, start, stopAtBrace) {
   const n = src.length;

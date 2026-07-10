@@ -100,6 +100,8 @@ async function main() {
     !!bannedImportHit(`if (src) /from ${Q}${OAI}${Q}/.test(src); imp` + `ort(${Q}${OAI}${Q});`));
   ok('value-expression )/  ( (a+b)/c ) stays division, no false positive',
     !bannedImportHit(`const z = (a + b) / c; const s = ${Q}${OAI}${Q};`));
+  ok('for await (…) body regex is not division (no false positive)',
+    !bannedImportHit(`for await (const l of xs)\n  /import ${Q}${OAI}${Q}/.test(l);`));
 
   // ── interpolation is scanned string/regex-aware (braces inside a string in the
   //    ${…} body don't desync the delimiter) ───────────────────────────────────
