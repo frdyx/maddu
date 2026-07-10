@@ -96,6 +96,10 @@ async function main() {
     !bannedImportHit(`throw /from ${Q}${OAI}${Q}/;`));
   ok('a regex at the START of a context (empty tail) then a real import is caught',
     !!bannedImportHit(`/[${Q}"]/.test(x); await imp` + `ort(${Q}${OAI}${Q})`));
+  ok('a regex after a control-header )( if (x) /re/ ) is not division, no false pos + no swallow',
+    !!bannedImportHit(`if (src) /from ${Q}${OAI}${Q}/.test(src); imp` + `ort(${Q}${OAI}${Q});`));
+  ok('value-expression )/  ( (a+b)/c ) stays division, no false positive',
+    !bannedImportHit(`const z = (a + b) / c; const s = ${Q}${OAI}${Q};`));
 
   // ── interpolation is scanned string/regex-aware (braces inside a string in the
   //    ${…} body don't desync the delimiter) ───────────────────────────────────

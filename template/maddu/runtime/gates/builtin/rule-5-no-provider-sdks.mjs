@@ -77,11 +77,19 @@ const REGEX_ALLOWED_AFTER = /[([{,;:=!&|?+\-*%^~<>]$|(?:^|[^.\w$])(?:return|type
 // real import (false negative) or make ordinary code look like one (false
 // positive). `stopAtBrace` is set when scanning a `${…}` body: an unmatched `}`
 // at depth 0 ends that context. Returns { hit, end }.
+const CONTROL_HEADER = /(?:^|[^.\w$])(?:if|while|for|switch|with|catch)\s*$/;
+
 function scanCode(src, start, stopAtBrace) {
   const n = src.length;
   let i = start;
   let brace = 0;                     // { } depth within THIS context
   let prev = '';                     // bounded trailing CODE (whitespace-collapsed)
+  // Paren-context stack: whether each `(` opened a control-flow header. A `)` that
+  // closes a control header (`if (x)`) is followed by a REGEX; a `)` that closes a
+  // value expression (`(a+b)`) is followed by DIVISION. `lastCloseCtl` records the
+  // most recent `)` so the regex test can disambiguate `)`-then-`/`.
+  const parenCtl = [];
+  let lastCloseCtl = false;
   const push = (ch) => {
     if (/\s/.test(ch)) { if (!prev.endsWith(' ')) prev += ' '; }
     else prev += ch;
@@ -92,14 +100,19 @@ function scanCode(src, start, stopAtBrace) {
     const c = src[i];
     const c2 = src[i + 1];
     if (stopAtBrace && c === '}' && brace === 0) return { hit: null, end: i + 1 };
+    if (c === '(') { parenCtl.push(CONTROL_HEADER.test(codeTail())); push('('); i++; continue; }
+    if (c === ')') { lastCloseCtl = parenCtl.pop() || false; push(')'); i++; continue; }
     if (c === '{') { brace++; push(c); i++; continue; }
     if (c === '}') { brace--; push(c); i++; continue; }
     // line / block comments
     if (c === '/' && c2 === '/') { i += 2; while (i < n && src[i] !== '\n') i++; push(' '); continue; }
     if (c === '/' && c2 === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; push(' '); continue; }
-    // regex literal — a `/` begins one at the start of a context (empty tail) or
-    // after an operator/opener/keyword, but NOT after a value or a postfix ++/--.
-    if (c === '/' && !/(?:\+\+|--)$/.test(codeTail()) && (codeTail() === '' || REGEX_ALLOWED_AFTER.test(codeTail()))) {
+    // regex literal — a `/` begins one at the start of a context (empty tail),
+    // after an operator/opener/keyword, or after a `)` that closed a control-flow
+    // header (`if (x) /re/`), but NOT after a value or a postfix ++/--.
+    const tail = codeTail();
+    if (c === '/' && !/(?:\+\+|--)$/.test(tail)
+        && (tail === '' || REGEX_ALLOWED_AFTER.test(tail) || (/\)$/.test(tail) && lastCloseCtl))) {
       i++;
       let inClass = false;
       while (i < n) {
@@ -177,9 +190,13 @@ function scanCode(src, start, stopAtBrace) {
 // SCOPE (honest claim): this catches ORDINARY, careless provider-SDK imports in
 // framework code — it is a lexer, not an evaluator. A determined author can still
 // obfuscate past it (string concatenation `'open'+'ai'`, unicode escapes,
-// computed specifiers). That is out of scope, the same way the spine's
-// tamper-DETECTION is not tamper-PROOFING: catch the mistake, not defeat an
-// adversary smuggling an SDK in.
+// computed specifiers). And the JS regex-vs-division `/` disambiguation is
+// provably undecidable without a full parser: the common contexts are handled
+// (start-of-context, after an operator/keyword, after a control-header `)`), but
+// a regex placed exactly where division is also grammatical AND whose body
+// contains literal provider-import syntax is the residual. All out of scope, the
+// same way the spine's tamper-DETECTION is not tamper-PROOFING: catch the
+// mistake, not defeat an adversary smuggling an SDK in.
 export function bannedImportHit(text) {
   return scanCode(String(text || ''), 0, false).hit;
 }
