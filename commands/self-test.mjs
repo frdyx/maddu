@@ -43,6 +43,38 @@ export default async function selfTest(argv) {
     process.exit(2);
   }
   const runner = await import(pathToFileURL(runnerPath).href);
+
+  // audit P3 — wrap the run in a VERIFICATION_STARTED → VERIFICATION_RAN pair so
+  // self-test-recent reads recency from the tamper-detecting spine, not the
+  // hand-writable self-test-last-run.json. Best-effort: if the spine libs can't
+  // load, the self-test still runs (the gate just reads "no receipt" → non-green).
+  let profile = 'quick';
+  const pIdx = argv.indexOf('--profile');
+  if (pIdx >= 0 && argv[pIdx + 1]) profile = argv[pIdx + 1];
+  else { const inline = argv.find((a) => a.startsWith('--profile=')); if (inline) profile = inline.slice('--profile='.length); }
+
+  let recordVerification = null;
+  let spine = null;
+  try {
+    const { resolveLibDir } = await import('./_libroot.mjs');
+    const dir = await resolveLibDir();
+    ({ recordVerification } = await import(pathToFileURL(join(dir, 'verification-recency.mjs')).href));
+    ({ spine } = await import(pathToFileURL(join(dir, 'spine.mjs')).href).then((m) => ({ spine: m })));
+  } catch { recordVerification = null; }
+
+  if (recordVerification && spine && spine.append) {
+    let captured = null;
+    const out = await recordVerification(frameworkRoot, { spine, actor: process.env.MADDU_SESSION_ID || null, lane: process.env.MADDU_LANE || null }, {
+      kind: 'self-test', profile,
+      run: async () => runner.runSelfTestCli(argv, { frameworkRoot, onResult: (r) => { captured = r; } }),
+      derive: () => captured ? {
+        complete: captured.complete !== false,
+        result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
+        counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
+      } : { complete: false, result: 'fail', counts: null },
+    });
+    process.exit(out.result);
+  }
   const exitCode = await runner.runSelfTestCli(argv, { frameworkRoot });
   process.exit(exitCode);
 }

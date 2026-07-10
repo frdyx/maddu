@@ -140,11 +140,33 @@ const TARGETS = [
 
 const start = Date.now();
 const onlyScenario = value('scenario');
+
+// audit P3 — open a VERIFICATION_STARTED on the framework spine BEFORE the run so
+// a crash leaves a dangling attempt (heavy-suites-recent reads non-green) rather
+// than a stale pass. Best-effort; targets SRC_ROOT (the framework spine).
+let __vSpine = null, __vStartedId = null;
+try {
+  const { pathToFileURL } = await import('node:url');
+  __vSpine = await import(pathToFileURL(join(SRC_ROOT, 'template', 'maddu', 'runtime', 'lib', 'spine.mjs')).href);
+  const st = await __vSpine.append(SRC_ROOT, { type: 'VERIFICATION_STARTED', data: { kind: 'upgrade-matrix', profile: null } });
+  __vStartedId = (st && st.id) || null;
+} catch { __vSpine = null; }
+
 for (const [name, fn] of TARGETS) {
   if (onlyScenario && name !== onlyScenario) continue;
   await fn();
 }
 const totalMs = Date.now() - start;
+
+// audit P3 — the VERIFICATION_RAN receipt. A --scenario run is partial [R2].
+if (__vSpine && __vStartedId) {
+  try {
+    await __vSpine.append(SRC_ROOT, { type: 'VERIFICATION_RAN', data: {
+      kind: 'upgrade-matrix', startedId: __vStartedId, profile: null, complete: !onlyScenario,
+      result: failed > 0 ? 'fail' : 'pass', counts: { pass: passed, fail: failed, total: passed + failed },
+    } });
+  } catch { /* dangling STARTED remains → non-green */ }
+}
 
 const lastRunPath = join(SRC_ROOT, '.maddu', 'state', 'upgrade-matrix-last-run.json');
 try {

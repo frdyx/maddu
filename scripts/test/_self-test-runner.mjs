@@ -237,6 +237,9 @@ export async function runSelfTest(options = {}) {
     ok: counts.fail === 0,
     exitCode: counts.fail === 0 ? 0 : 1,
     profile: plan.profile,
+    // audit P3 — a run narrowed by --only/--skip is not a full profile and must
+    // not qualify as recency (carried on the VERIFICATION_RAN receipt).
+    complete: !(((options.only || []).length) || ((options.skip || []).length)),
     durationMs,
     counts,
     results,
@@ -295,6 +298,7 @@ export async function runSelfTestCli(argv, options = {}) {
       return 0;
     }
     const result = await runSelfTest({ ...parsed, frameworkRoot: options.frameworkRoot });
+    if (typeof options.onResult === 'function') { try { options.onResult(result); } catch {} }
     console.log(parsed.json ? resultJson(result) : resultText(result));
     return result.exitCode;
   } catch (err) {
