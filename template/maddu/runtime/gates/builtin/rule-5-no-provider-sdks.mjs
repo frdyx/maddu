@@ -42,7 +42,12 @@ async function walkFiles(dir, predicate) {
 // extracting its <script> blocks (its text nodes are NOT code); CSS is excluded
 // entirely (a stylesheet cannot import a JS provider SDK — `@import` is
 // stylesheets, and scanning CSS text as JS only invites false positives).
-const JS_EXT = /\.(m?js|cjs|mts|cts|ts|jsx|tsx)$/;
+// Plain JS/TS module files, which the JS lexer scans directly. JSX/TSX are
+// deliberately EXCLUDED: their markup (`<p>don't</p>` — an ASCII apostrophe that
+// is not a string, tags that are not code) needs a JSX-aware scanner, and the
+// framework ships none (it is vanilla .mjs/.js modules). If JSX is ever added,
+// this gate needs a JSX lexer, not a plain-JS one.
+const JS_EXT = /\.(m?js|cjs|mts|cts|ts)$/;
 const HTML_EXT = /\.html?$/;
 const SCANNED_EXT = (p) => JS_EXT.test(p) || HTML_EXT.test(p);
 
