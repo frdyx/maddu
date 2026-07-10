@@ -391,7 +391,7 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
 | [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.5.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
-| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-evidence | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
+| [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-detection | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
 Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Full version history → [CHANGELOG.md](CHANGELOG.md).
 
