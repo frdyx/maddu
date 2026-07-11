@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#050b17" />
+<meta name="color-scheme" content="dark" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Máddu" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23050b17'/%3E%3Ctext x='32' y='42' font-family='monospace' font-size='30' font-weight='700' fill='%23d0ff00' text-anchor='middle'%3EM%3C/text%3E%3Ccircle cx='50' cy='16' r='5' fill='%23d0ff00'/%3E%3C/svg%3E" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23050b17'/%3E%3Ctext x='32' y='42' font-family='monospace' font-size='30' font-weight='700' fill='%23d0ff00' text-anchor='middle'%3EM%3C/text%3E%3Ccircle cx='50' cy='16' r='5' fill='%23d0ff00'/%3E%3C/svg%3E" />
+<title>Máddu — fusklapp</title>
+<style>
+  :root {
+    --navy:#050b17; --navy-2:#0b1526; --line:rgba(86,128,184,.22); --line-strong:rgba(86,128,184,.4);
+    --lime:#d0ff00; --blue:#56b8ff; --fg-0:#f2f6ff; --fg-1:#dbe5f7; --fg-2:#9fb2d4; --fg-3:#6d81a6;
+    --radius:.5rem;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    color-scheme:dark;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+  body {
+    margin:0;
+    background:
+      radial-gradient(120% 80% at 15% -5%, rgba(86,184,255,.08), transparent 55%),
+      radial-gradient(130% 90% at 100% 0%, rgba(208,255,0,.05), transparent 50%),
+      var(--navy);
+    color:var(--fg-1); font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased;
+    min-height:100dvh;
+  }
+  .wrap {
+    max-width:460px; margin:0 auto;
+    padding:calc(28px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+    display:flex; flex-direction:column; gap:16px;
+  }
+  header { display:flex; flex-direction:column; gap:10px; }
+  .kicker { font-family:var(--mono); font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--lime); display:flex; align-items:center; gap:8px; }
+  .kicker::before { content:""; width:6px; height:6px; background:var(--lime); border-radius:50%; box-shadow:0 0 8px var(--lime); }
+  .brand { font-size:15px; font-weight:700; letter-spacing:.02em; color:var(--fg-2); font-family:var(--mono); }
+  .hero-line { margin:2px 0 0; font-size:25px; line-height:1.18; font-weight:800; color:var(--fg-0); text-wrap:balance; letter-spacing:-.01em; }
+  .hero-line em { color:var(--lime); font-style:normal; }
+  .hero-sub { margin:0; font-size:13.5px; color:var(--fg-2); }
+  .card { position:relative; background:linear-gradient(180deg,var(--navy-2),var(--navy)); border:1px solid var(--line); border-top:1px solid var(--line-strong); border-radius:var(--radius); padding:15px 16px 16px; display:flex; flex-direction:column; gap:11px; overflow:hidden; }
+  .card::before { content:""; position:absolute; inset:0 0 auto 0; height:1px; background:linear-gradient(90deg,transparent,var(--blue),transparent); opacity:.55; }
+  .card::after { content:""; position:absolute; top:-40px; right:-40px; width:90px; height:90px; background:radial-gradient(circle,rgba(86,184,255,.16),transparent 70%); pointer-events:none; }
+  .card-title { font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--lime); margin:0; }
+  .pitch { font-size:15px; color:var(--fg-0); margin:0; line-height:1.5; }
+  .pitch strong { color:var(--blue); font-weight:600; }
+  ul.tight { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:9px; }
+  ul.tight li { font-size:13.5px; color:var(--fg-1); padding-left:16px; position:relative; }
+  ul.tight li::before { content:""; position:absolute; left:0; top:8px; width:6px; height:6px; border:1px solid var(--blue); border-radius:1px; transform:rotate(45deg); }
+  ul.tight li b { color:var(--fg-0); font-weight:650; }
+  .cmp { display:flex; flex-direction:column; gap:12px; }
+  .cmp-row { display:flex; flex-direction:column; gap:5px; padding-bottom:12px; border-bottom:1px dashed var(--line); }
+  .cmp-row:last-child { border-bottom:0; padding-bottom:0; }
+  .cmp-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .cmp-name { font-size:13px; font-weight:700; color:var(--fg-0); }
+  .cmp-verdict { font-family:var(--mono); font-size:10px; letter-spacing:.06em; color:var(--lime); text-align:right; white-space:nowrap; flex-shrink:0; }
+  .cmp-body { font-size:12.5px; color:var(--fg-2); line-height:1.45; }
+  .cmp-body b { color:var(--fg-1); font-weight:600; }
+  .qa { display:flex; flex-direction:column; gap:12px; }
+  .qa-item { display:flex; flex-direction:column; gap:3px; }
+  .q { font-size:13px; font-weight:700; color:var(--blue); }
+  .a { font-size:12.5px; color:var(--fg-2); line-height:1.45; }
+  .a b { color:var(--fg-1); font-weight:600; }
+  .card--accent { border-color:color-mix(in srgb,var(--lime) 32%,var(--line)); border-top-color:var(--lime); background:linear-gradient(180deg,color-mix(in srgb,var(--lime) 5%,var(--navy-2)),var(--navy)); }
+  .card--accent::before { background:linear-gradient(90deg,transparent,var(--lime),transparent); opacity:.6; }
+  .card--accent::after { background:radial-gradient(circle,rgba(208,255,0,.14),transparent 70%); }
+  ol.remember { margin:0; padding:0; list-style:none; counter-reset:r; display:flex; flex-direction:column; gap:11px; }
+  ol.remember li { counter-increment:r; position:relative; padding-left:34px; font-size:13.5px; color:var(--fg-1); min-height:24px; display:flex; align-items:center; }
+  ol.remember li::before { content:counter(r); position:absolute; left:0; top:0; width:24px; height:24px; display:grid; place-items:center; font-family:var(--mono); font-size:12px; font-weight:700; color:var(--navy); background:var(--lime); border-radius:5px; box-shadow:0 0 12px rgba(208,255,0,.3); }
+  ol.remember li b { color:var(--fg-0); font-weight:750; }
+  footer { text-align:center; font-family:var(--mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--fg-3); padding-top:4px; }
+  footer span { color:var(--blue); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="kicker">Fusklapp</span>
+    <span class="brand">MÁDDU</span>
+    <h1 class="hero-line">Låt inte den som utför jobbet vara sitt <em>enda vittne</em>.</h1>
+    <p class="hero-sub">Kan du den meningen kan du Máddu. Säg den med ett leende.</p>
+  </header>
+
+  <section class="card">
+    <p class="card-title">10-sek pitch</p>
+    <p class="pitch">Ett kontrollsystem för AI-agenter. När en AI gör jobb åt dig för Máddu ett <strong>manipuleringssäkert protokoll</strong> över vad som faktiskt gjordes — och <strong>verifierar</strong> det.</p>
+  </section>
+
+  <section class="card">
+    <p class="card-title">Vad det är</p>
+    <ul class="tight">
+      <li><b>Lokalt &amp; filbaserat</b> — allt i ditt eget git. Inget moln, ingen som äger din data.</li>
+      <li><b>Utför inte jobbet</b> — det står bredvid, sätter grindar och för protokoll.</li>
+      <li><b>Neutralt</b> — tränar, kör eller dömer inga modeller. Bevisar bara vad som hände.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <p class="card-title">Jämförelser · "och, inte eller"</p>
+    <div class="cmp">
+      <div class="cmp-row">
+        <div class="cmp-head"><span class="cmp-name">Copilot · Cursor · ChatGPT</span><span class="cmp-verdict">OVANPÅ, EJ EMOT</span></div>
+        <div class="cmp-body">De <b>skriver koden</b>. Máddu <b>intygar att den testades</b>. Sitter inte i vägen — kompletterar.</div>
+      </div>
+      <div class="cmp-row">
+        <div class="cmp-head"><span class="cmp-name">LangGraph · orkestrering</span><span class="cmp-verdict">EN ANNAN FRÅGA</span></div>
+        <div class="cmp-body">De bestämmer <b>hur agenterna jobbar</b>. Máddu <b>om man kan lita på resultatet</b>.</div>
+      </div>
+      <div class="cmp-row">
+        <div class="cmp-head"><span class="cmp-name">Langfuse · observability</span><span class="cmp-verdict">MEDVETNA ICKE-MÅL</span></div>
+        <div class="cmp-body">De <b>observerar</b>. Máddu <b>grindar</b> och gör registret manipuleringssäkert.</div>
+      </div>
+      <div class="cmp-row">
+        <div class="cmp-head"><span class="cmp-name">Temporal · durable exec</span><span class="cmp-verdict">RECORD, EJ EXEC</span></div>
+        <div class="cmp-body">De ser till att <b>jobbet blir klart</b>. Máddu att man kan <b>bevisa att det blev rätt</b>.</div>
+      </div>
+      <div class="cmp-row">
+        <div class="cmp-head"><span class="cmp-name">Enterprise-plattformar</span><span class="cmp-verdict">INGET HOSTAT PLAN</span></div>
+        <div class="cmp-body">De <b>äger din data</b>. Med Máddu <b>äger du beviset själv</b> — bara filer i ditt repo.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <p class="card-title">Snabbsvar när någon petar</p>
+    <div class="qa">
+      <div class="qa-item">
+        <span class="q">"Är det inte bara loggning?"</span>
+        <span class="a">Nej — en logg kan skrivas om. Máddus register är <b>hash-kedjat</b> så manipulation syns, och det <b>verifierar mot bevis</b>, inte bara antecknar.</span>
+      </div>
+      <div class="qa-item">
+        <span class="q">"Vem är det för?"</span>
+        <span class="a">Den som låter AI göra <b>viktigt jobb</b> och måste kunna <b>visa och intyga</b> vad som gjordes.</span>
+      </div>
+      <div class="qa-item">
+        <span class="q">"Byggde du det själv?"</span>
+        <span class="a">Ja — <b>mitt eget ramverk.</b> 😄 Äg den.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card--accent">
+    <p class="card-title">Minns tre saker</p>
+    <ol class="remember">
+      <li><span><b>Och, inte eller</b> — ersätter inte verktygen, håller dem ärliga.</span></li>
+      <li><span><b>Ett annat lager</b> — de gör jobbet; Máddu verifierar.</span></li>
+      <li><span><b>Du äger beviset</b> — lokalt, filbaserat, manipuleringssäkert.</span></li>
+    </ol>
+  </section>
+
+  <footer>maddu.frdyx.com · <span>verifierat, inte bara påstått</span></footer>
+</div>
+</body>
+</html>
