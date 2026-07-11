@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **honest**: one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay and check, instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.97.0](https://img.shields.io/badge/version-1.97.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.99.0](https://img.shields.io/badge/version-1.99.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -100,10 +100,10 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ### The record is a contract, not just a log
 
-Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 177 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
+Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 182 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
-docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.5.0)
+docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.7.0)
                            → validate any spine event against it with ajv, check-jsonschema, or any validator
 ```
 
@@ -113,7 +113,7 @@ That's the point of *don't let the actor be the sole witness*: the witness is a 
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.97.0 installed.
+Máddu v1.99.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -389,7 +389,7 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
-| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.5.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
+| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.7.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-detection | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
