@@ -75,7 +75,9 @@ export function deriveStage(tallies) {
 export async function deriveFunnel(repoRoot) {
   try { await stat(join(repoRoot, '.maddu')); } catch { return null; }
   const tallies = { healthyDoctor: false, sessions: 0, claims: 0, sliceStops: 0 };
-  const shards = await listSpineShards(join(repoRoot, '.maddu', 'events'));
+  // null = events dir unreadable/absent — with .maddu/ present that is an
+  // installed repo with no readable history: honestly 'installed'.
+  const shards = (await listSpineShards(join(repoRoot, '.maddu', 'events'))) || [];
   for (const shard of shards) {
     let text;
     try { text = await readFile(shard, 'utf8'); } catch { continue; }

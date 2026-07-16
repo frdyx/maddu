@@ -55,23 +55,34 @@ export async function definedEventTypes(spineLib) {
 
 // ── Spine harvest (UTILIZED) ────────────────────────────────────────────────
 
-// Every spine shard file for a repo: flat `.maddu/events/*.ndjson` segments
-// PLUS sync-mode `by-replica/<id>/*.ndjson` partitions (roadmap #12c) — a
-// migrated team-sync repo keeps its history in partitions, and a reader that
-// only saw flat segments would report an active repo as near-empty (Codex
-// Tier-3 review round 1). Deliberately NOT spine.readAll: that routes through
+// Every spine shard file for a repo: flat `.maddu/events/` segments PLUS
+// sync-mode `by-replica/<id>/` partitions (roadmap #12c) — a migrated
+// team-sync repo keeps its history in partitions, and a reader that only saw
+// flat segments would report an active repo as near-empty (Codex Tier-3
+// review round 1). Deliberately NOT spine.readAll: that routes through
 // ensureSpine, which WRITES dirs + a default catalog — a fleet/insights scan
 // must stay read-only on repos it merely observes. Events live in exactly one
 // shard by construction (migration RENAMES segments into a partition), so a
 // flat+partition union never double-counts; a rename racing this listing at
 // worst hides a shard for one scan (counting reads re-run; nothing is cursor-
 // based here).
+//
+// Contract details (Codex round 2):
+//   - Returns NULL when the events dir itself is unreadable/absent — callers
+//     must distinguish "no readable spine" (skip the project) from "readable
+//     but empty" (a real zero-event repo), or an IO error would silently
+//     count as an empty project and distort presence rates.
+//   - Only CANONICAL segment names count (the same /^\d{12}\.ndjson$/ every
+//     spine reader uses) — a stray backup/copy .ndjson in events/ or a
+//     partition dir is not spine data and must not inflate counts or advance
+//     the activation funnel.
+const SEGMENT_NAME_RE = /^\d{12}\.ndjson$/;
 export async function listSpineShards(evDir) {
+  let entries;
+  try { entries = await readdir(evDir, { withFileTypes: true }); } catch { return null; }
   const out = [];
-  let entries = [];
-  try { entries = await readdir(evDir, { withFileTypes: true }); } catch { return out; }
   for (const ent of entries) {
-    if (ent.isFile() && ent.name.endsWith('.ndjson')) out.push(join(evDir, ent.name));
+    if (ent.isFile() && SEGMENT_NAME_RE.test(ent.name)) out.push(join(evDir, ent.name));
   }
   try {
     const parts = await readdir(join(evDir, 'by-replica'), { withFileTypes: true });
@@ -79,7 +90,7 @@ export async function listSpineShards(evDir) {
       if (!p.isDirectory()) continue;
       try {
         for (const f of await readdir(join(evDir, 'by-replica', p.name))) {
-          if (f.endsWith('.ndjson')) out.push(join(evDir, 'by-replica', p.name, f));
+          if (SEGMENT_NAME_RE.test(f)) out.push(join(evDir, 'by-replica', p.name, f));
         }
       } catch {}
     }
@@ -93,9 +104,10 @@ export async function listSpineShards(evDir) {
 // audited repo's volume) can't masquerade as activity. `includeImported: true`
 // restores the merged pre-Tier-1 behavior for callers that want raw volume.
 async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
-  const evDir = join(repoRoot, '.maddu', 'events');
-  try { await stat(evDir); } catch { return null; } // no spine — not a Máddu repo (or never run)
-  const shards = await listSpineShards(evDir); // flat segments + sync-mode partitions
+  // null = no readable spine → SKIP the project (never count an IO error as
+  // a zero-event repo); [] = readable-but-empty → a real project with 0 events.
+  const shards = await listSpineShards(join(repoRoot, '.maddu', 'events'));
+  if (shards === null) return null;
   const counts = new Map(), importedCounts = new Map();
   let total = 0, importedTotal = 0, lastTs = null, firstTs = null;
   const gateOutcomes = { ok: 0, warn: 0, fail: 0, other: 0 };

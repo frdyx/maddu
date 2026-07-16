@@ -116,6 +116,22 @@ try {
   const [hSync] = await insights.harvestSpines([{ id: 'sync', label: 'sync', path: rSync }]);
   ok(hSync.counts.get('SLICE_STOP') === 3 && hSync.counts.get('DOCTOR_REPORT') === 1,
     `insights harvest reads partitions too (got ${hSync.counts.get('SLICE_STOP')}/${hSync.counts.get('DOCTOR_REPORT')})`);
+  // Only CANONICAL segment names count (Codex round 2): stray backup/copy
+  // .ndjson files — flat or inside a partition — are not spine data and must
+  // neither inflate counts nor advance the funnel.
+  await writeFile(join(rSync, '.maddu', 'events', 'backup.ndjson'), evLine('SLICE_STOP', {}).repeat(5));
+  await writeFile(join(partDir, 'copy-of-segment.ndjson'), evLine('SLICE_STOP', {}));
+  const fnStray = await funnel.deriveFunnel(rSync);
+  ok(fnStray.tallies.sliceStops === 3, `non-canonical .ndjson files are ignored (got ${fnStray.tallies.sliceStops} slice-stops)`);
+  // null-vs-empty contract: unreadable/absent events dir → null (caller skips
+  // the project); readable-but-empty → [] (a real zero-event repo).
+  ok((await insights.listSpineShards(join(tmp, 'nope', 'events'))) === null, 'absent events dir → null');
+  const rEmpty = join(tmp, 'empty-events');
+  await mkdir(join(rEmpty, '.maddu', 'events'), { recursive: true });
+  const emptyShards = await insights.listSpineShards(join(rEmpty, '.maddu', 'events'));
+  ok(Array.isArray(emptyShards) && emptyShards.length === 0, 'readable-but-empty events dir → []');
+  ok((await insights.harvestSpines([{ id: 'gone', label: 'gone', path: join(tmp, 'nope') }])).length === 0,
+    'unreadable spine skips the project instead of counting a zero-event repo');
 
   // deriveStage pure edges.
   ok(funnel.deriveStage({}) === 'installed', 'empty tallies → installed');
