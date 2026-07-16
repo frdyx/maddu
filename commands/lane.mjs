@@ -144,6 +144,10 @@ export default async function lane(argv) {
       try {
         const r = await obs.pruneLane(repoRoot, flags.prune, { by: sid });
         console.log(`pruned  ${flags.prune}  from the catalog (never claimed; event ${r.event})`);
+        if (r.racedClaim) {
+          console.error(`  \x1b[33m⚠ a claim on "${flags.prune}" landed DURING the prune\x1b[0m — the claim stays valid (the lane now reads as ad-hoc),`);
+          console.error(`    but a concurrent \`claim --worktree\` attach may have refused; re-adopt with \`maddu lane suggest --adopt\` if intended.`);
+        }
       } catch (e) { console.error(`prune refused: ${e.message}`); process.exit(3); }
       return;
     }
@@ -154,7 +158,11 @@ export default async function lane(argv) {
     if (!report.claimsComplete) console.log(`  \x1b[33m⚠ spine scan INCOMPLETE (unreadable shard) — counts are a floor; (unused)/prune withheld\x1b[0m`);
     console.log(`\n  catalog (${report.catalog.length}; ${report.unusedCatalog.length} never claimed)`);
     for (const l of report.catalog) {
-      console.log(`    ${l.id.padEnd(22)} ${String(l.claims).padStart(4)} claim(s)${l.claims === 0 ? '  \x1b[2m(unused — prune with: maddu lane suggest --prune ' + l.id + ')\x1b[0m' : ''}`);
+      // The (unused)/prune hint is only assertable from a COMPLETE scan —
+      // must match unusedCatalog, not raw zero counts (Codex round 2).
+      const unusedHint = report.claimsComplete && l.claims === 0
+        ? '  \x1b[2m(unused — prune with: maddu lane suggest --prune ' + l.id + ')\x1b[0m' : '';
+      console.log(`    ${l.id.padEnd(22)} ${String(l.claims).padStart(4)} claim(s)${unusedHint}`);
     }
     const realAdHoc = report.adHoc.filter((a) => !a.ephemeral);
     const eph = report.adHoc.length - realAdHoc.length;

@@ -99,6 +99,18 @@ try {
   const repNoSpine = await obs.laneReport(rNoSpine);
   ok(repNoSpine.claimsComplete === false && repNoSpine.unusedCatalog.length === 0,
     'incomplete harvest never brands a lane unused');
+  // A PARTITION-level failure (by-replica present but unreadable — here a
+  // FILE where a dir is expected) must also read as incomplete: the same
+  // fail-open-becomes-destructive class one level down (Codex round 2).
+  const rBadPart = join(tmp, 'bad-partition');
+  await mkdir(join(rBadPart, '.maddu', 'events'), { recursive: true });
+  await mkdir(join(rBadPart, '.maddu', 'lanes'), { recursive: true });
+  await writeFile(join(rBadPart, '.maddu', 'lanes', 'catalog.json'), JSON.stringify({ lanes: [{ id: 'ghost2', scope: 'x' }] }));
+  await writeFile(join(rBadPart, '.maddu', 'events', 'by-replica'), 'not a directory');
+  const hBadPart = await obs.harvestLaneClaims(rBadPart);
+  ok(hBadPart.complete === false, 'unreadable by-replica reads as incomplete, not as zero partitions');
+  ok(/scan incomplete/.test(await refused(() => obs.pruneLane(rBadPart, 'ghost2', {}))),
+    'prune refuses on a partition-level scan failure');
   // Malformed catalog → mutations refuse instead of clobbering; report flags.
   const rBadCat = join(tmp, 'bad-cat');
   await mkdir(join(rBadCat, '.maddu', 'lanes'), { recursive: true });
@@ -123,7 +135,7 @@ try {
 
   // ── 3. Prune ───────────────────────────────────────────────────────────────
   const pr = await obs.pruneLane(repo, 'frontend', { by: 'ses_t' });
-  ok(!!pr.event, 'prune succeeds for a never-claimed catalog entry');
+  ok(!!pr.event && pr.racedClaim === false, 'prune succeeds for a never-claimed catalog entry (no raced claim detected)');
   const cat2 = JSON.parse(await readFile(join(repo, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
   ok(!cat2.lanes.some((l) => l.id === 'frontend'), 'pruned lane removed from catalog.json');
   ok(/lifetime claim/.test(await refused(() => obs.pruneLane(repo, 'general', {}))), 'prune of a claimed entry refused');
@@ -139,6 +151,12 @@ try {
     `LANE_REMOVED carries the documented { ok: boolean } (got ${JSON.stringify(removed[0]?.data)})`);
   ok(EVENT_SCHEMA.LANE_REMOVED?.data?.ok === 'boolean' && EVENT_SCHEMA.LANE_ADDED?.data?.lane === 'object',
     'documented schema shapes are what this test asserted against (parity guard)');
+
+  // Atomic-write hygiene: no stray temp files left behind by any adopt/prune
+  // (successful or rolled back) — each write uses a unique temp + cleanup.
+  const { readdir } = await import('node:fs/promises');
+  const laneFiles = await readdir(join(repo, '.maddu', 'lanes'));
+  ok(!laneFiles.some((f) => f.includes('.tmp')), `no stray catalog temp files (got ${laneFiles.join(', ')})`);
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }

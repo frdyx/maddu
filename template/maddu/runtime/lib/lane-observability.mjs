@@ -26,11 +26,12 @@
 // partition-aware via the shared listSpineShards. Pure lib — no console
 // output, no process.exit. Node stdlib only (rule #4).
 
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES } from './spine.mjs';
-import { isImportedEvent, listSpineShards } from './insights.mjs';
+import { isImportedEvent, listSpineShardsDetailed } from './insights.mjs';
 import { redactLeaves } from './secret-scan.mjs';
 
 export const SUGGEST_MIN_CLAIMS = 3;
@@ -51,9 +52,12 @@ export function isEphemeralLaneId(id) {
 // (Codex Tier-4a round 1 — fail-open must never become destructive).
 export async function harvestLaneClaims(repoRoot) {
   const claims = new Map();
-  const shards = await listSpineShards(join(repoRoot, '.maddu', 'events'));
-  if (shards === null) return { claims, complete: false };
-  let complete = true;
+  // Detailed listing: a swallowed PARTITION-dir error must also read as
+  // incomplete, or prune could miss a partition's claims (Codex round 2).
+  const listing = await listSpineShardsDetailed(join(repoRoot, '.maddu', 'events'));
+  if (listing.files === null) return { claims, complete: false };
+  const shards = listing.files;
+  let complete = listing.complete;
   for (const shard of shards) {
     let text;
     try { text = await readFile(shard, 'utf8'); } catch { complete = false; continue; }
@@ -93,16 +97,19 @@ async function readCatalogStrict(repoRoot) {
   return { catalog: t.catalog, raw: t.raw };
 }
 
-// Atomic write (temp + rename; Node's rename replaces on every platform) so
-// a concurrent reader never sees torn/malformed JSON. Concurrent ADMIN
-// writers (another adopt/prune, the bridge admin route) remain last-writer-
-// wins — same as the pre-existing bridge behavior; catalog admin is a rare,
-// operator-confirmed action and the spine records every mutation.
+// Atomic write (UNIQUE temp per write + rename; Node's rename replaces on
+// every platform) so a concurrent reader never sees torn/malformed JSON and
+// two concurrent writers can never race on a shared temp file (Codex round
+// 2 — a shared `.tmp` could pair one mutation's catalog with another's
+// event). Concurrent ADMIN writers remain last-writer-wins on the FINAL
+// rename — same as the pre-existing bridge behavior; catalog admin is a
+// rare, operator-confirmed action and the spine records every mutation.
 async function writeCatalogAtomic(repoRoot, body) {
   const p = pathsFor(repoRoot).laneCatalog;
-  const tmp = `${p}.tmp`;
+  const tmp = `${p}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(tmp, body);
-  await rename(tmp, p);
+  try { await rename(tmp, p); }
+  catch (e) { try { await rm(tmp, { force: true }); } catch {} throw e; }
 }
 function serializeCatalog(catalog) {
   return JSON.stringify(redactLeaves(catalog), null, 2) + '\n';
@@ -147,13 +154,26 @@ export async function laneReport(repoRoot) {
 // `_testFailAppend` is a GUARDED TEST-ONLY hook (no-op in production) that
 // forces the append to throw so the rollback path is provable.
 async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, _testFailAppend }) {
-  await writeCatalogAtomic(repoRoot, serializeCatalog(nextCatalog));
+  const nextRaw = serializeCatalog(nextCatalog);
+  await writeCatalogAtomic(repoRoot, nextRaw);
   try {
     if (_testFailAppend) throw new Error('injected append failure (test hook)');
     return await append(repoRoot, event);
   } catch (e) {
-    try { await writeCatalogAtomic(repoRoot, prevRaw); } catch {}
-    throw new Error(`spine append failed — catalog restored, nothing adopted/pruned (${e.message})`);
+    // Restore ONLY if the file still holds OUR bytes — if a concurrent
+    // writer already replaced them, restoring prevRaw would clobber THEIR
+    // successful mutation with stale content (Codex round 2). And never
+    // claim restoration that didn't happen: the message states the actual
+    // outcome, because "restored" over a still-mutated catalog is exactly
+    // the refusal-over-a-completed-mutation lie this path exists to prevent.
+    let restored = false;
+    try {
+      const current = await readFile(pathsFor(repoRoot).laneCatalog, 'utf8');
+      if (current === nextRaw) { await writeCatalogAtomic(repoRoot, prevRaw); restored = true; }
+    } catch {}
+    throw new Error(restored
+      ? `spine append failed — catalog restored, nothing adopted/pruned (${e.message})`
+      : `spine append failed and the catalog was NOT rolled back (concurrent write or restore failure) — reconcile .maddu/lanes/catalog.json by hand (${e.message})`);
   }
 }
 
@@ -182,9 +202,17 @@ export async function adoptLane(repoRoot, id, { by = null, _testFailAppend = fal
 // not a general remove (history referenced the lane; keep it addressable).
 // Requires a COMPLETE claim harvest: an unreadable shard reading as "zero
 // claims" must never delete a historically-claimed lane (Codex round 1).
-// Residual TOCTOU (a claim landing between this harvest and the write) is
-// BENIGN by design: claims are not catalog-bound — a lane pruned while
-// being claimed simply reads as ad-hoc thereafter and can re-graduate.
+//
+// Residual TOCTOU — a claim landing between this harvest and the catalog
+// write — is NOT universally benign (Codex round 2 corrected the round-1
+// claim): plain claims are catalog-unbound (a pruned-while-claimed lane
+// just reads as ad-hoc thereafter), but `lane claim --worktree` RE-ASSERTS
+// catalog membership inside attachLaneWorktree AFTER its claim lands, so a
+// prune inside that window leaves an active claim whose worktree attach
+// refuses. Files-only means the window can't be locked away; instead a
+// POST-WRITE recheck detects it and reports `racedClaim: true` so the
+// caller can surface the recovery (re-adopt the lane, or release + reclaim
+// without --worktree). The claim itself is never invalidated.
 export async function pruneLane(repoRoot, id, { by = null, _testFailAppend = false } = {}) {
   const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
   if (!cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is not in the catalog`);
@@ -197,5 +225,10 @@ export async function pruneLane(repoRoot, id, { by = null, _testFailAppend = fal
     prevRaw, nextCatalog: next, _testFailAppend,
     event: { type: EVENT_TYPES.LANE_REMOVED, actor: by, lane: id, data: { ok: true } },
   });
-  return { id, event: ev.id };
+  let racedClaim = false;
+  try {
+    const after = await harvestLaneClaims(repoRoot);
+    racedClaim = (after.claims.get(id) || 0) > 0;
+  } catch {}
+  return { id, event: ev.id, racedClaim };
 }

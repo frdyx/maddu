@@ -76,26 +76,38 @@ export async function definedEventTypes(spineLib) {
 //     spine reader uses) — a stray backup/copy .ndjson in events/ or a
 //     partition dir is not spine data and must not inflate counts or advance
 //     the activation funnel.
+//   - Detailed variant: `complete` is false when any PARTITION directory
+//     read failed (an absent by-replica dir is fine — that's just "no
+//     partitions"). A caller whose decision is DESTRUCTIVE (lane prune)
+//     must require complete=true: a swallowed partition-dir error would
+//     otherwise omit claimed lanes and re-open the fail-open-becomes-
+//     destructive hole one level down (Codex Tier-4a round 2).
 const SEGMENT_NAME_RE = /^\d{12}\.ndjson$/;
-export async function listSpineShards(evDir) {
+export async function listSpineShardsDetailed(evDir) {
   let entries;
-  try { entries = await readdir(evDir, { withFileTypes: true }); } catch { return null; }
-  const out = [];
+  try { entries = await readdir(evDir, { withFileTypes: true }); } catch { return { files: null, complete: false }; }
+  let complete = true;
+  const files = [];
   for (const ent of entries) {
-    if (ent.isFile() && SEGMENT_NAME_RE.test(ent.name)) out.push(join(evDir, ent.name));
+    if (ent.isFile() && SEGMENT_NAME_RE.test(ent.name)) files.push(join(evDir, ent.name));
   }
-  try {
-    const parts = await readdir(join(evDir, 'by-replica'), { withFileTypes: true });
+  let parts = null;
+  try { parts = await readdir(join(evDir, 'by-replica'), { withFileTypes: true }); }
+  catch (e) { if (e && e.code !== 'ENOENT') complete = false; }
+  if (parts) {
     for (const p of parts) {
       if (!p.isDirectory()) continue;
       try {
         for (const f of await readdir(join(evDir, 'by-replica', p.name))) {
-          if (SEGMENT_NAME_RE.test(f)) out.push(join(evDir, 'by-replica', p.name, f));
+          if (SEGMENT_NAME_RE.test(f)) files.push(join(evDir, 'by-replica', p.name, f));
         }
-      } catch {}
+      } catch { complete = false; }
     }
-  } catch {}
-  return out.sort();
+  }
+  return { files: files.sort(), complete };
+}
+export async function listSpineShards(evDir) {
+  return (await listSpineShardsDetailed(evDir)).files;
 }
 
 // Harvest one repo's spine. By default (Tier 1) counts/total/first/last
