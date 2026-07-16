@@ -127,16 +127,21 @@ async function readCatalogTolerant(repoRoot) {
 // (b) removing the lock while its operation is STILL running voids the
 //     serialization guarantee for that operation. Usually the displaced
 //     holder safe-aborts at its next assertOwned; but a removal PLUS
-//     re-acquisition landing inside the sub-millisecond window between a
-//     holder's assertOwned and its catalog rename can produce overlapping
-//     writes (last-writer-wins) — assertOwned is adjacent to the write,
-//     not atomically bound to it. That is why the removal instruction
-//     warns against removing a live operation's lock at all;
+//     re-acquisition landing inside the window between a holder's
+//     assertOwned and its catalog rename completing can produce
+//     overlapping writes (last-writer-wins). That window is narrow but
+//     I/O-BOUND, not sub-millisecond — it contains the awaited temp-file
+//     write of the atomic catalog write, which under load can take
+//     arbitrarily long. assertOwned is adjacent to the write, never
+//     atomically bound to it; that is why the removal instruction warns
+//     against removing a live operation's lock at all;
 // (c) leftover locks arise from a crashed operation OR from a release
 //     that failed to remove its own lock (e.g. a permission error on the
 //     rename — release never fails a successful operation over it). Both
-//     look identical and both surface at the NEXT acquisition, which
-//     refuses with the holder's identity and the removal instruction.
+//     surface at the NEXT acquisition, which refuses with the removal
+//     instruction — plus the holder's pid/timestamp when owner.json
+//     exists (a crash between mkdir and the token write leaves an
+//     ANONYMOUS leftover: same refusal, no identity to show).
 const LOCK_WAIT_MS = 5_000;
 function lockPaths(repoRoot) {
   const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
