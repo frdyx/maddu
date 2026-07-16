@@ -1,5 +1,5 @@
 {
-  "version": "1.100.0",
-  "phase": "usage-audit-instrument-truth",
+  "version": "1.101.0",
+  "phase": "usage-audit-execution-telemetry",
   "released": "2026-07-16"
 }

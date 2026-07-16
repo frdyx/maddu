@@ -50,8 +50,10 @@ shouldn't be possible:
   The same detector scrubs tool argv, worker-spawn args, and the auxiliary state
   stores: the local mailbox / briefing / skill / wrapper-log stores, the
   checkpoint tag + index, the active-session pointer, schedules (repo + global),
-  review archives, memory facts, MCP/runtime descriptors + health, and the lane
-  catalog. `maddu export` and `maddu spine sync` add a refuse-on-hit secret gate
+  review archives, memory facts, MCP/runtime descriptors + health, the lane
+  catalog, and the invocation-receipts telemetry corpus
+  (`.maddu/state/invocation-receipts.ndjson` — additionally, the CLI never
+  persists an unknown command's raw text or non-token-shaped arguments there). `maddu export` and `maddu spine sync` add a refuse-on-hit secret gate
   with **no skip flag** — a secret-shaped value blocks the operation rather than
   shipping. **Not auto-redacted (known limitation):** worker subprocess
   stdout/stderr **log files** are written by direct file descriptor (a stream), so

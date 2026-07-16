@@ -64,6 +64,24 @@ export default {
 
 Each run emits one `GATE_RAN` event per gate. The cockpit's **Gates** route and `GET /bridge/gates?limit=N` surface recent history.
 
+### GATE_RAN outcome states (v1.101.0)
+
+The event data carries `{ gateId, ok, status, severity, durationMs, evidence }`.
+`status` is the resolved verdict — the pass/non-pass states are, exhaustively:
+
+| status | how it arises |
+| --- | --- |
+| `ok` | the gate returned `ok: true` (and no explicit status override) |
+| `warn` | `ok: false` on a `severity: 'warn'` gate, **or** an explicit `result.status = 'warn'` soft pass (e.g. install-integrity's locally-modified-but-present) — `ok` may be true here |
+| `fail` | `ok: false` on a `critical`/`safety` gate — including a gate that **threw** (the runner catches, sets `ok: false`, message `gate threw: …`) |
+
+Legacy events written before `status` was persisted derive it read-side from
+`ok × severity`; events with neither field are counted apart as `other`, never
+guessed. `maddu insights` renders the fleet-wide tally (`Gate outcomes`), and
+the `gate-fail-path` self-test forces failing fixture gates and asserts the
+non-pass events actually land on the spine — so "all green" is provably
+distinguishable from "the fail path never writes".
+
 ### Filter at the CLI
 
 ```bash

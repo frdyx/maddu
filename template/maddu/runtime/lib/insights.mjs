@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { dormantByDesignMap } from './event-dispositions.mjs';
 import { resolveInstalledVersion, isSourceCheckout } from './installed-version.mjs';
+import { readReceiptStats } from './invocation-receipts.mjs';
 
 // ── Imported-event discriminator (Tier 1, 2026-07-16 audit) ────────────────
 // A spine event is IMPORTED (backfilled from an external corpus, not native
@@ -66,6 +67,7 @@ async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
   catch { return null; } // no spine — not a Máddu repo (or never run)
   const counts = new Map(), importedCounts = new Map();
   let total = 0, importedTotal = 0, lastTs = null, firstTs = null;
+  const gateOutcomes = { ok: 0, warn: 0, fail: 0, other: 0 };
   for (const shard of shards) {
     let text;
     try { text = await readFile(join(evDir, shard), 'utf8'); } catch { continue; }
@@ -82,6 +84,10 @@ async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
       counts.set(e.type, (counts.get(e.type) || 0) + 1);
       total++;
       if (e.ts) { lastTs = e.ts; if (!firstTs) firstTs = e.ts; }
+      // Gate OUTCOME discrimination (Tier 2): the audit could only say
+      // "10,229 pass / 0 fail / 104 other" fleet-wide — pass/non-pass states
+      // weren't enumerated anywhere. Tally by resolved status.
+      if (e.type === 'GATE_RAN') gateOutcomes[gateStatusOf(e.data)]++;
     }
   }
   // Version from the shared SSOT resolver — NOT the spine's FRAMEWORK_INSTALLED
@@ -90,9 +96,23 @@ async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
   const ver = await resolveInstalledVersion(repoRoot);
   return {
     name, repoRoot, counts, total, firstTs, lastTs,
-    importedCounts, importedTotal,
+    importedCounts, importedTotal, gateOutcomes,
     installedVersion: ver.version, versionSource: ver.source,
   };
+}
+
+// Resolve one GATE_RAN event's outcome. Mirrors the runner's status logic
+// (gates.mjs): explicit `status` wins (persisted since the verdict-ledger
+// work — it alone can express a soft warn on a non-warn gate); legacy events
+// without it derive from ok×severity; events with neither are 'other'
+// (pre-schema history), counted apart rather than guessed.
+export function gateStatusOf(data) {
+  if (data && (data.status === 'ok' || data.status === 'warn' || data.status === 'fail')) return data.status;
+  if (data && typeof data.ok === 'boolean') {
+    if (data.ok) return 'ok';
+    return data.severity === 'warn' ? 'warn' : 'fail';
+  }
+  return 'other';
 }
 
 // Harvest every registered workspace. `workspaces` is [{id,label,path,role}].
@@ -104,6 +124,25 @@ export async function harvestSpines(workspaces, opts = {}) {
     if (p) { p.role = await workspaceRole(w); projects.push(p); }
   }
   return projects;
+}
+
+// ── Invocation-receipt harvest (Tier 2) ─────────────────────────────────────
+// Per-workspace execution telemetry from `.maddu/state/invocation-receipts.
+// ndjson` (see invocation-receipts.mjs for the corpus + honesty contract).
+// Every entry carries its retention window and dropped-line count — callers
+// must render those alongside the counts (observed window, never lifetime
+// totals). A workspace with no corpus yet (pre-v1.101 install, or never ran
+// a verb since upgrading) reports count 0 with window null — an honest "no
+// telemetry", not "never used".
+export async function harvestReceipts(workspaces) {
+  const out = [];
+  for (const w of workspaces) {
+    if (!w?.path) continue;
+    let stats;
+    try { stats = await readReceiptStats(w.path); } catch { continue; }
+    out.push({ name: w.label || w.id || w.path, path: w.path, role: await workspaceRole(w), ...stats });
+  }
+  return out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
 // ── Role segmentation (Tier 1) ──────────────────────────────────────────────
