@@ -1,6 +1,6 @@
 {
-  "version": "1.7.0",
-  "fingerprint": "5821a1af",
+  "version": "1.8.0",
+  "fingerprint": "08cea7ec",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -562,6 +562,7 @@
           "reason": "string",
           "scheduleId": "string",
           "scope": "string",
+          "source": "string?",
           "text": "string",
           "to": "string"
         }

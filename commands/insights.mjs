@@ -107,7 +107,15 @@ export default async function insights(argv) {
       const binPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'maddu.mjs');
       commandSet = extractCommandSet(await readFile(binPath, 'utf8'));
     } catch {}
-    transcripts = await lib.scanTranscripts(commandSet);
+    // --role scopes the transcript scan to the matching workspaces' session
+    // dirs (path-encoded, case-insensitive) — without this, `--role consumer`
+    // verb counts would still include framework self-dev sessions.
+    let dirAllow = null;
+    if (roleFilter && lib.transcriptDirName) {
+      const allowedPaths = new Set(projects.map((p) => p.repoRoot));
+      dirAllow = new Set(workspaces.filter((w) => w?.path && allowedPaths.has(w.path)).map((w) => lib.transcriptDirName(w.path)));
+    }
+    transcripts = await lib.scanTranscripts(commandSet, { dirAllow });
   }
 
   if (json) {
@@ -166,7 +174,8 @@ export default async function insights(argv) {
     if (matrix.partition) {
       const b = matrix.partition.buckets;
       const eq = `${b.fired.length} fired + ${b['imported-only'].length} imported-only + ${b['dormant-by-design'].length} dormant-by-design + ${b['plugin-owned'].length} plugin-owned + ${b.dead.length} dead = ${matrix.partition.sum}/${matrix.definedTotal}`;
-      console.log(`  ${matrix.partition.complete ? ANSI.dim : ANSI.dead}partition: ${eq}${matrix.partition.complete ? '' : '  ← INCOMPLETE'}${ANSI.reset}`);
+      const undecl = matrix.undeclaredCount ? ` · ${matrix.undeclaredCount} undeclared type(s) counted apart (spine drift, outside the defined partition)` : '';
+      console.log(`  ${matrix.partition.complete ? ANSI.dim : ANSI.dead}partition: ${eq}${matrix.partition.complete ? '' : '  ← INCOMPLETE'}${undecl}${ANSI.reset}`);
     }
     for (const cls of ['load-bearing', 'occasional', 'single-project', 'dormant', 'imported-only']) {
       const items = matrix.rows.filter((r) => r.cls === cls);
@@ -201,7 +210,8 @@ export default async function insights(argv) {
   }
 
   if ((sub === 'verbs' || !sub) && transcripts) {
-    console.log(`\n  ${ANSI.bold}Verb invocations${ANSI.reset}  ${ANSI.dim}(${transcripts.filesScanned} transcript files; includes framework self-dev)${ANSI.reset}`);
+    const scanScope = roleFilter ? `scoped to role=${roleFilter} workspaces` : 'includes framework self-dev';
+    console.log(`\n  ${ANSI.bold}Verb invocations${ANSI.reset}  ${ANSI.dim}(${transcripts.filesScanned} transcript files; ${scanScope}; mentions, not executions)${ANSI.reset}`);
     const rows = [...transcripts.verbCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, sub === 'verbs' ? 999 : 15);
     for (const [v, c] of rows) {
       console.log(`      ${v.padEnd(14)} ${String(c).padStart(5)}×  ${ANSI.dim}${transcripts.verbDirs.get(v)?.size || 0} session-dir(s)${ANSI.reset}`);

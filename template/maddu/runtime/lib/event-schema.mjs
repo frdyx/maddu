@@ -52,7 +52,12 @@
 // tamper-detecting spine RECEIPT appended from the in-process result, read back
 // by the recency/success readouts — not a hand-writable state file the actor
 // re-reads (the "verification, not actor-witness" tier). Additive → minor bump.
-export const EVENT_CONTRACT_VERSION = '1.7.0';
+// 1.8.0 (usage-audit Tier 1) — INBOX_MESSAGE gains optional `source` so
+// `import submit --kind inbox-note` stamps its imported content the same way
+// `usage import` stamps TOKEN_USAGE_REPORTED, letting insights' import/native
+// segmentation key on one data field. Added field to an existing type →
+// minor bump; baseline refreshed with this release.
+export const EVENT_CONTRACT_VERSION = '1.8.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -95,7 +100,7 @@ export const EVENT_SCHEMA = {
   LANE_DEFAULTS_SET: { summary: "Default lane assignments were configured.", data: { defaults: 'object' } },
   LANE_POLICY_SET: { summary: "A per-lane governance policy was set.", data: { policy: 'object' } },
   SLICE_STOP: { summary: "A slice boundary was recorded with its summary, deliverables, and next step.", data: { action: 'string|null', gates: 'array', learnings: 'array', next: 'array', paths: 'array', reason: 'string|null', summary: 'string', targets: 'array', risk: 'object|null', deliverables: 'object|null' } },
-  INBOX_MESSAGE: { summary: "A message was written to a session inbox.", data: { kind: 'string', message: 'string', reason: 'string', scheduleId: 'string', scope: 'string', text: 'string', to: 'string' } },
+  INBOX_MESSAGE: { summary: "A message was written to a session inbox.", data: { kind: 'string', message: 'string', reason: 'string', scheduleId: 'string', scope: 'string', source: 'string?', text: 'string', to: 'string' } },
   APPROVAL_REQUESTED: { summary: "An action was submitted for operator approval.", data: { action: 'string|null', payload: 'object|null', summary: 'string|null', tool: 'string' } },
   APPROVAL_DECIDED: { summary: "A pending approval was approved or denied.", data: { approvalId: 'string', decision: 'string', reason: 'string|null', tool: 'string|null' } },
   APPROVAL_POLICY_SET: { summary: "A standing approval policy for a tool was set.", data: { decision: 'string', tool: 'string', lane: 'string|null' } },

@@ -88,10 +88,9 @@ export default async function fleet(argv) {
   for (const r of rows) {
     const live = LIVENESS[r.liveness] || LIVENESS.abandoned;
     const ver = r.version ? `v${r.version}` : 'v?';
-    // Version source per the Tier-1 SSOT contract (fleet and insights share
-    // one resolver; each surface says where its answer came from). The default
-    // source is silent to keep the table quiet; anything else is called out.
-    const verSrc = r.versionSource && r.versionSource !== 'maddu/version.json' ? ` ${C.dim}· ver from ${r.versionSource}${C.reset}` : '';
+    // Version source per the Tier-1 SSOT contract: fleet and insights share
+    // one resolver and each surface always says where its answer came from.
+    const verSrc = ` ${C.dim}· ver from ${r.versionSource || 'unknown'}${C.reset}`;
     const behindTag = r.behind ? `${C.yellow}↓ behind${C.reset}` : (r.version === latest ? `${C.dim}latest${C.reset}` : '');
     const ageD = ageDaysFrom(r.lastActivity, now);
     const ageStr = ageD == null ? `${C.dim}—${C.reset}` : `${ageD}d`;

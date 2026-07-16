@@ -24,18 +24,19 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { dormantByDesignMap } from './event-dispositions.mjs';
-import { resolveInstalledVersion } from './installed-version.mjs';
+import { resolveInstalledVersion, isSourceCheckout } from './installed-version.mjs';
 
 // ── Imported-event discriminator (Tier 1, 2026-07-16 audit) ────────────────
 // A spine event is IMPORTED (backfilled from an external corpus, not native
-// activity) iff its data.source carries one of these markers. The only writer
-// today is `maddu usage import --from claude-code` (commands/usage.mjs stamps
-// 'claude-code-transcript'); native emitters (_wrapper-common.mjs) omit the
-// field entirely, so absence = native — verified across the 2026-07-16 fleet
-// (snyggare: 53,668 stamped import rows, 0 unstamped). Cross-machine `maddu
-// import` never replays foreign events onto the spine (it appends its own
-// IMPORT_* receipt types), so those receipts are native by definition.
-export const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript']);
+// activity) iff its data.source carries one of these markers. Writers:
+// `maddu usage import --from claude-code` stamps 'claude-code-transcript'
+// (commands/usage.mjs), and `maddu import submit --kind inbox-note` stamps
+// 'import-submit' on the INBOX_MESSAGE it appends (imports.mjs — the one
+// import path that puts imported CONTENT on the spine; its IMPORT_* receipts
+// witness a local operation and stay native). Native emitters omit the field
+// entirely, so absence = native — verified across the 2026-07-16 fleet
+// (snyggare: 53,668 stamped import rows, 0 unstamped).
+export const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript', 'import-submit']);
 
 export function isImportedEvent(e) {
   return !!(e && e.data && typeof e.data.source === 'string' && IMPORTED_DATA_SOURCES.has(e.data.source));
@@ -68,10 +69,12 @@ async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
-      if (isImportedEvent(e) && !includeImported) {
+      if (isImportedEvent(e)) {
+        // Always tallied apart so the native/imported split stays honest in
+        // JSON even under includeImported (Codex diff-review round 1).
         importedCounts.set(e.type, (importedCounts.get(e.type) || 0) + 1);
         importedTotal++;
-        continue; // imported rows never move activity/recency/volume
+        if (!includeImported) continue; // imported rows never move activity/recency/volume
       }
       counts.set(e.type, (counts.get(e.type) || 0) + 1);
       total++;
@@ -103,16 +106,13 @@ export async function harvestSpines(workspaces, opts = {}) {
 // ── Role segmentation (Tier 1) ──────────────────────────────────────────────
 // 'self' = the framework's own source checkout (template/maddu + bin/maddu.mjs
 // on disk — a deterministic file test, not a name match), 'fixture' = the
-// registry says so, 'consumer' = everything else. Insights can then answer
-// "is this feature fleet-proven or just self-dev?" — the audit found self-dev
-// usage masquerading as adoption in every transcript-based metric.
+// registry says so, 'consumer' = everything else. The self test runs FIRST:
+// the framework repo is self-dev even if someone registers it as a fixture
+// (roadmap: "framework repo = self, registry role fields for the rest").
 export async function workspaceRole(workspace) {
+  if (await isSourceCheckout(workspace?.path || '')) return 'self';
   if (workspace?.role === 'fixture') return 'fixture';
-  try {
-    await stat(join(workspace.path, 'template', 'maddu'));
-    await stat(join(workspace.path, 'bin', 'maddu.mjs'));
-    return 'self';
-  } catch { return 'consumer'; }
+  return 'consumer';
 }
 
 // ── Aggregate + classify ────────────────────────────────────────────────────
@@ -168,14 +168,16 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
     let cls = classify(proj, n);
     const owner = pluginOwners.get(t) || null;
     const dormantReason = DORMANT_BY_DESIGN.get(t) || null;
+    // Never fired natively but present via imported backfill: honest middle
+    // ground (Tier 1) — not activity, but not "nothing invokes it" either.
+    // Checked FIRST so row cls and partitionDefined share one precedence:
+    // fired > imported-only > dormant-by-design/plugin > dead.
+    if (cls === 'dead' && (importedCount.get(t) || 0) > 0) cls = 'imported-only';
     // A plugin-owned type that never fired is dormant (plugin off here), not dead.
-    if (cls === 'dead' && owner) cls = 'dormant';
+    else if (cls === 'dead' && owner) cls = 'dormant';
     // A core type that fires only under a specific posture/edge is dormant
     // by design, not a gap (v1.7.0). Plugin ownership takes precedence.
     else if (cls === 'dead' && dormantReason) cls = 'dormant';
-    // Never fired natively but present via imported backfill: honest middle
-    // ground (Tier 1) — not activity, but not "nothing invokes it" either.
-    else if (cls === 'dead' && (importedCount.get(t) || 0) > 0) cls = 'imported-only';
     return {
       type: t,
       defined: definedSet.has(t),
@@ -198,6 +200,11 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
   return {
     n, rows, counts, deadDefined, dormantByDesign,
     definedTotal: definedSet.size, everFired: seen.size,
+    // Undeclared drift (seen in spines, absent from EVENT_TYPES) is counted
+    // apart: it participates in `counts` rows but never in the defined
+    // partition, so the two totals must be reconciled by the caller's render
+    // (headline counts may exceed definedTotal by exactly this number).
+    undeclaredCount: rows.filter((r) => r.undeclared).length,
     partition: partitionDefined(rows, definedSet),
   };
 }
@@ -231,11 +238,26 @@ export function partitionDefined(rows, definedSet) {
 // ── Transcript scan (verb + slash BEHAVIOR) — best-effort, host-specific ─────
 // Reads ~/.claude/projects/*/*.jsonl for `maddu <verb>` invocations and
 // `/maddu-*` slash usage. Returns null if the transcripts root is absent.
-export async function scanTranscripts(commandSet) {
+
+// Claude Code encodes a workspace path into its transcript dir name by
+// replacing every non-alphanumeric character with '-' (e.g.
+// C:\Users\X\proj → C--Users-X-proj). Lowercased for comparison: observed
+// transcript dirs vary in case for the same workspace (Windows paths are
+// case-insensitive). Used to scope the transcript scan to a role-filtered
+// workspace set so --role consumer can't be polluted by framework self-dev
+// sessions (Codex diff-review round 1).
+export function transcriptDirName(workspacePath) {
+  return String(workspacePath || '').replace(/[^A-Za-z0-9]/g, '-').toLowerCase();
+}
+
+// `dirAllow` (optional Set of lowercased transcriptDirName strings) scopes the
+// scan; omitted = all session dirs (the pre-Tier-1 behavior, labeled as such).
+export async function scanTranscripts(commandSet, { dirAllow = null } = {}) {
   const root = join(homedir(), '.claude', 'projects');
   let dirs;
   try { dirs = (await readdir(root, { withFileTypes: true })).filter((d) => d.isDirectory()); }
   catch { return null; }
+  if (dirAllow) dirs = dirs.filter((d) => dirAllow.has(d.name.toLowerCase()));
   const verbCount = new Map(), verbDirs = new Map(), slashCount = new Map();
   let filesScanned = 0;
   const reMaddu = /\bmaddu(?:\/run|\s+run)?\s+([a-z][a-z-]+)/g;

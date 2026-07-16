@@ -69,6 +69,20 @@ try {
   const v3 = await resolveInstalledVersion(rBare);
   ok(v3.version === null && v3.source === 'unknown', `resolver reports unknown honestly, never guesses (got ${v3.version}/${v3.source})`);
 
+  // Codex diff-review round 1 (HIGH): a consumer app's OWN root version.json
+  // must never be misread as Máddu's version — root version.json is only
+  // consulted on the framework source checkout (bin/maddu.mjs + template/maddu).
+  const rApp = join(tmp, 'app-with-own-versionjson');
+  await makeRepo(rApp, { spineLines: [evLine('FRAMEWORK_BOOTED')] });
+  await writeFile(join(rApp, 'version.json'), JSON.stringify({ version: '3.2.1' }));
+  const vApp = await resolveInstalledVersion(rApp);
+  ok(vApp.version === null && vApp.source === 'unknown', `consumer app version.json is never misread as Máddu's (got ${vApp.version}/${vApp.source})`);
+  const rAppLegacy = join(tmp, 'app-legacy');
+  await makeRepo(rAppLegacy, { version: '1.7.0', legacyMadduJsonOnly: true });
+  await writeFile(join(rAppLegacy, 'version.json'), JSON.stringify({ version: '3.2.1' }));
+  const vAppLegacy = await resolveInstalledVersion(rAppLegacy);
+  ok(vAppLegacy.version === '1.7.0' && vAppLegacy.source === 'maddu.json', `maddu.json beats an app's root version.json (got ${vAppLegacy.version}/${vAppLegacy.source})`);
+
   // Both surfaces agree on every fixture — including that the spine's stale
   // FRAMEWORK_INSTALLED version (0.19.0) no longer leaks into insights.
   for (const [label, root] of [['installed', rInstalled], ['legacy', rLegacy], ['bare', rBare]]) {
@@ -96,7 +110,8 @@ try {
   ok(mixDefault.importedCounts.get('TOKEN_USAGE_REPORTED') === 1, 'imported row tallied apart');
   ok(mixDefault.lastTs === '2026-07-11T00:00:00.000Z', `recency ignores imported rows (lastTs ${mixDefault.lastTs})`);
   const [mixAll] = await insights.harvestSpines([{ id: 'mix', path: rMix }], { includeImported: true });
-  ok(mixAll.total === 3 && (mixAll.importedTotal || 0) === 0, `--include-imported restores merged behavior (total ${mixAll.total})`);
+  ok(mixAll.total === 3, `--include-imported restores merged totals (total ${mixAll.total})`);
+  ok(mixAll.importedTotal === 1, `importedTotal stays honest under includeImported, never falsely zero (got ${mixAll.importedTotal})`);
   ok(mixAll.counts.get('TOKEN_USAGE_REPORTED') === 2, 'merged count includes both rows');
 
   // imported-only classification: a repo whose ONLY row of a type is imported
@@ -122,10 +137,29 @@ try {
   ok(part.buckets['plugin-owned'].length > 0, 'plugin-owned types are named, not folded into dormant (the 19-unexplained fix)');
   ok(part.buckets['dormant-by-design'].includes('SKILL_INJECTION_REFUSED'), 'SKILL_INJECTION_REFUSED reclassified dormant-by-design (Tier-1 decision)');
 
+  // Precedence coherence (Codex round 1): a DORMANT-annotated type whose only
+  // rows are imported must read imported-only in BOTH the row cls and the
+  // partition — one precedence, no contradictory classifications.
+  const rDormImp = join(tmp, 'dormimp');
+  await makeRepo(rDormImp, { version: '1.99.0', spineLines: [evLine('INBOX_MESSAGE', { message: 'x', kind: 'imported', source: 'import-submit' })] });
+  const dormImpProjects = await insights.harvestSpines([{ id: 'dormimp', path: rDormImp }]);
+  const dormImpMatrix = insights.buildMatrix(dormImpProjects, definedSet);
+  const dormImpRow = dormImpMatrix.rows.find((r) => r.type === 'INBOX_MESSAGE');
+  ok(dormImpRow.cls === 'imported-only', `dormant-annotated + imported-only type: row cls agrees with partition (got ${dormImpRow.cls})`);
+  ok(dormImpMatrix.partition.buckets['imported-only'].includes('INBOX_MESSAGE'), 'partition places it imported-only too');
+
+  // Undeclared drift is counted apart, never silently folded into the partition.
+  const rUndecl = join(tmp, 'undecl');
+  await makeRepo(rUndecl, { version: '1.99.0', spineLines: [evLine('TOTALLY_UNKNOWN_TYPE', { x: 1 })] });
+  const undeclMatrix = insights.buildMatrix(await insights.harvestSpines([{ id: 'undecl', path: rUndecl }]), definedSet);
+  ok(undeclMatrix.undeclaredCount === 1 && undeclMatrix.partition.complete, `undeclared type counted apart while partition stays complete (${undeclMatrix.undeclaredCount}, ${undeclMatrix.partition.complete})`);
+
   // ── 4. Role detection ──────────────────────────────────────────────────────
   ok(await insights.workspaceRole({ path: REPO, role: 'project' }) === 'self', 'framework source checkout detects as self');
-  ok(await insights.workspaceRole({ path: rMix, role: 'fixture' }) === 'fixture', 'registry fixture role wins');
+  ok(await insights.workspaceRole({ path: REPO, role: 'fixture' }) === 'self', 'self file-test beats a fixture registry label (Codex round 1)');
+  ok(await insights.workspaceRole({ path: rMix, role: 'fixture' }) === 'fixture', 'registry fixture role wins for non-source repos');
   ok(await insights.workspaceRole({ path: rMix, role: 'project' }) === 'consumer', 'plain project detects as consumer');
+  ok(insights.transcriptDirName('C:\\Users\\X\\My_Proj.v2') === 'c--users-x-my-proj-v2', `transcript dir encoding (got ${insights.transcriptDirName('C:\\Users\\X\\My_Proj.v2')})`);
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }
