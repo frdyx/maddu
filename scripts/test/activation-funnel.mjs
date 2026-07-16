@@ -29,6 +29,7 @@ const toUrl = (p) => new URL(`file:///${p.replace(/\\/g, '/')}`);
 
 const funnel = await import(toUrl(join(LIB, 'activation-funnel.mjs')));
 const fleetLib = await import(toUrl(join(LIB, 'fleet.mjs')));
+const insights = await import(toUrl(join(LIB, 'insights.mjs')));
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error(`  ✗ ${msg}`); } };
@@ -98,20 +99,49 @@ try {
   const fnOrphan = await funnel.deriveFunnel(rOrphan);
   ok(fnOrphan.stage === 'repeating', `4 slice-stops without doctor/session/claim still read repeating (got ${fnOrphan.stage})`);
 
+  // Sync-mode repos: ritual markers living in by-replica partitions count —
+  // a migrated team-sync repo must not regress to 'installed' (Codex Tier-3
+  // round 1). Same shard listing feeds the insights harvest.
+  const rSync = join(tmp, 'synced');
+  await makeRepo(rSync, [DOCTOR_GREEN]); // residual flat segment
+  const partDir = join(rSync, '.maddu', 'events', 'by-replica', 'replica-a');
+  await mkdir(partDir, { recursive: true });
+  await writeFile(join(partDir, '000000000001.ndjson'), [
+    evLine('SESSION_REGISTERED', {}), evLine('LANE_CLAIMED', {}),
+    evLine('SLICE_STOP', {}), evLine('SLICE_STOP', {}), evLine('SLICE_STOP', {}),
+  ].join(''));
+  const fnSync = await funnel.deriveFunnel(rSync);
+  ok(fnSync.stage === 'repeating', `partitioned markers merge with residual flat (got ${fnSync.stage})`);
+  ok(fnSync.tallies.sliceStops === 3 && fnSync.tallies.healthyDoctor === true, 'tallies span flat + partition shards');
+  const [hSync] = await insights.harvestSpines([{ id: 'sync', label: 'sync', path: rSync }]);
+  ok(hSync.counts.get('SLICE_STOP') === 3 && hSync.counts.get('DOCTOR_REPORT') === 1,
+    `insights harvest reads partitions too (got ${hSync.counts.get('SLICE_STOP')}/${hSync.counts.get('DOCTOR_REPORT')})`);
+
   // deriveStage pure edges.
   ok(funnel.deriveStage({}) === 'installed', 'empty tallies → installed');
   ok(funnel.deriveStage({ healthyDoctor: true }) === 'healthy', 'healthy tally → healthy');
   ok(funnel.deriveStage({ sliceStops: 2, claims: 5, sessions: 5, healthyDoctor: true }) === 'slice', '2 slices → slice, not repeating');
-  ok(funnel.nextActionFor('healthy').includes('hooks install'), 'healthy next action points at the activation lever');
+  ok(funnel.nextActionFor('healthy').includes('hooks install') && !funnel.nextActionFor('healthy').includes(' — or '),
+    'healthy next action is ONE action, not a menu');
   ok(funnel.nextActionFor('repeating').includes('nothing'), 'repeating next action is a no-op');
 
   // ── 5. Fleet integration ───────────────────────────────────────────────────
+  // The third fixture's events carry OLD ids (2026-01-01) so its liveness is
+  // NOT active — proving the funnel rollup spans ALL repos, not just active
+  // ones (the funnel never decays; Codex Tier-3 round 1 flagged the earlier
+  // fixtures as same-liveness and therefore not proving this).
+  const rOld = join(tmp, 'old-active');
+  await makeRepo(rOld, [
+    JSON.stringify({ v: 1, id: 'evt_20260101000000_000001', ts: '2026-01-01T00:00:00.000Z', type: 'SESSION_REGISTERED', actor: null, lane: null, data: {} }) + '\n',
+  ]);
   const dParked = await fleetLib.digestRepo({ id: 'passive', label: 'passive', path: rPassive });
   const dActive = await fleetLib.digestRepo({ id: 'orphan', label: 'orphan', path: rOrphan });
+  const dOld = await fleetLib.digestRepo({ id: 'old', label: 'old', path: rOld });
   ok(dParked.funnel?.stage === 'installed' && dActive.funnel?.stage === 'repeating', 'digestRepo carries the funnel');
-  const agg = fleetLib.aggregate([dParked, dActive], Date.now());
-  ok(agg.funnel && agg.funnel.installed === 1 && agg.funnel.repeating === 1 && agg.funnel.session === 0,
-    `aggregate rolls up per-stage counts (got ${JSON.stringify(agg.funnel)})`);
+  ok(dOld.liveness !== 'active' && dOld.funnel?.stage === 'session', `old repo is non-active yet funnel-staged (got ${dOld.liveness}/${dOld.funnel?.stage})`);
+  const agg = fleetLib.aggregate([dParked, dActive, dOld], Date.now());
+  ok(agg.funnel && agg.funnel.installed === 1 && agg.funnel.repeating === 1 && agg.funnel.session === 1 && agg.funnel.claimed === 0,
+    `aggregate rolls up per-stage counts over ALL liveness tiers (got ${JSON.stringify(agg.funnel)})`);
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }

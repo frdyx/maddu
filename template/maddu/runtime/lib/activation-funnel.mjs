@@ -30,9 +30,9 @@
 // funnel column). Pure lib: no console output, no process.exit. Node stdlib
 // only (rule #4).
 
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isImportedEvent } from './insights.mjs';
+import { isImportedEvent, listSpineShards } from './insights.mjs';
 
 export const FUNNEL_STAGES = ['installed', 'healthy', 'session', 'claimed', 'slice', 'repeating'];
 
@@ -43,7 +43,7 @@ export const REPEATING_MIN_SLICES = 3;
 // audit are the hooked ones), so the healthy→session step points there.
 const NEXT_ACTION = {
   installed: 'run `maddu doctor` to verify the install',
-  healthy: 'wire the ritual in: `maddu hooks install` (sessions auto-register; one-time) — or `maddu register` manually',
+  healthy: 'wire the ritual in: `maddu hooks install` (one-time; sessions then auto-register)',
   session: 'claim a lane before editing: `maddu lane claim <lane>`',
   claimed: 'end the working slice on the record: `maddu slice-stop "SLICE STOP: …"`',
   slice: `keep the ritual: ${REPEATING_MIN_SLICES}+ lifetime slice-stops = repeating`,
@@ -66,19 +66,19 @@ export function deriveStage(tallies) {
 }
 
 // Scan one repo's spine for the ritual markers. Same corpus rules as the
-// insights harvest: flat `.maddu/events/*.ndjson` segments, native events
-// only. Returns null when the repo has no .maddu/ at all (not installed —
-// there is no funnel to be on); an installed repo with no readable events
-// is honestly 'installed'.
+// insights harvest: every shard via listSpineShards — flat segments PLUS
+// sync-mode by-replica partitions (a migrated team-sync repo must not regress
+// to 'installed'; Codex Tier-3 round 1) — native events only, read-only (no
+// ensureSpine, which writes). Returns null when the repo has no .maddu/ at
+// all (not installed — there is no funnel to be on); an installed repo with
+// no readable events is honestly 'installed'.
 export async function deriveFunnel(repoRoot) {
   try { await stat(join(repoRoot, '.maddu')); } catch { return null; }
   const tallies = { healthyDoctor: false, sessions: 0, claims: 0, sliceStops: 0 };
-  const evDir = join(repoRoot, '.maddu', 'events');
-  let shards = [];
-  try { shards = (await readdir(evDir)).filter((f) => f.endsWith('.ndjson')).sort(); } catch {}
+  const shards = await listSpineShards(join(repoRoot, '.maddu', 'events'));
   for (const shard of shards) {
     let text;
-    try { text = await readFile(join(evDir, shard), 'utf8'); } catch { continue; }
+    try { text = await readFile(shard, 'utf8'); } catch { continue; }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }

@@ -55,6 +55,38 @@ export async function definedEventTypes(spineLib) {
 
 // ── Spine harvest (UTILIZED) ────────────────────────────────────────────────
 
+// Every spine shard file for a repo: flat `.maddu/events/*.ndjson` segments
+// PLUS sync-mode `by-replica/<id>/*.ndjson` partitions (roadmap #12c) — a
+// migrated team-sync repo keeps its history in partitions, and a reader that
+// only saw flat segments would report an active repo as near-empty (Codex
+// Tier-3 review round 1). Deliberately NOT spine.readAll: that routes through
+// ensureSpine, which WRITES dirs + a default catalog — a fleet/insights scan
+// must stay read-only on repos it merely observes. Events live in exactly one
+// shard by construction (migration RENAMES segments into a partition), so a
+// flat+partition union never double-counts; a rename racing this listing at
+// worst hides a shard for one scan (counting reads re-run; nothing is cursor-
+// based here).
+export async function listSpineShards(evDir) {
+  const out = [];
+  let entries = [];
+  try { entries = await readdir(evDir, { withFileTypes: true }); } catch { return out; }
+  for (const ent of entries) {
+    if (ent.isFile() && ent.name.endsWith('.ndjson')) out.push(join(evDir, ent.name));
+  }
+  try {
+    const parts = await readdir(join(evDir, 'by-replica'), { withFileTypes: true });
+    for (const p of parts) {
+      if (!p.isDirectory()) continue;
+      try {
+        for (const f of await readdir(join(evDir, 'by-replica', p.name))) {
+          if (f.endsWith('.ndjson')) out.push(join(evDir, 'by-replica', p.name, f));
+        }
+      } catch {}
+    }
+  } catch {}
+  return out.sort();
+}
+
 // Harvest one repo's spine. By default (Tier 1) counts/total/first/last
 // reflect NATIVE activity only — imported backfill rows are tallied apart in
 // `importedCounts`/`importedTotal` so a one-time transcript import (97% of one
@@ -62,15 +94,14 @@ export async function definedEventTypes(spineLib) {
 // restores the merged pre-Tier-1 behavior for callers that want raw volume.
 async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
   const evDir = join(repoRoot, '.maddu', 'events');
-  let shards;
-  try { shards = (await readdir(evDir)).filter((f) => f.endsWith('.ndjson')).sort(); }
-  catch { return null; } // no spine — not a Máddu repo (or never run)
+  try { await stat(evDir); } catch { return null; } // no spine — not a Máddu repo (or never run)
+  const shards = await listSpineShards(evDir); // flat segments + sync-mode partitions
   const counts = new Map(), importedCounts = new Map();
   let total = 0, importedTotal = 0, lastTs = null, firstTs = null;
   const gateOutcomes = { ok: 0, warn: 0, fail: 0, other: 0 };
   for (const shard of shards) {
     let text;
-    try { text = await readFile(join(evDir, shard), 'utf8'); } catch { continue; }
+    try { text = await readFile(shard, 'utf8'); } catch { continue; }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
@@ -83,7 +114,12 @@ async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
       }
       counts.set(e.type, (counts.get(e.type) || 0) + 1);
       total++;
-      if (e.ts) { lastTs = e.ts; if (!firstTs) firstTs = e.ts; }
+      // min/max by comparison, not iteration order — partitioned shards
+      // (by-replica) don't interleave chronologically on the path sort.
+      if (e.ts) {
+        if (!firstTs || e.ts < firstTs) firstTs = e.ts;
+        if (!lastTs || e.ts > lastTs) lastTs = e.ts;
+      }
       // Gate OUTCOME discrimination (Tier 2): the audit could only say
       // "10,229 pass / 0 fail / 104 other" fleet-wide — pass/non-pass states
       // weren't enumerated anywhere. Tally by resolved status.
