@@ -125,10 +125,15 @@ export default async function insights(argv) {
     }
     const scope = roleFilter ? ` · role=${roleFilter}` : '';
     console.log(`${ANSI.bold}Máddu insights — lanes${ANSI.reset}  ${ANSI.dim}catalog vs observed claims (lifetime, native only${scope})${ANSI.reset}`);
-    const dead = rows.reduce((a, r) => a + r.deadCatalog, 0);
-    const defined = rows.reduce((a, r) => a + r.defined, 0);
-    const adhocTotal = rows.reduce((a, r) => a + r.adHoc, 0);
-    console.log(`  ${ANSI.dim}${defined} catalog placements · ${dead} never claimed (${defined ? Math.round((dead / defined) * 100) : 0}%) · ${adhocTotal} distinct ad-hoc ids in real use${ANSI.reset}\n`);
+    // Aggregates sum ONLY healthy-catalog rows — a broken catalog makes the
+    // catalog-vs-ad-hoc split unknowable, so its counts must not ride the
+    // headline while the row itself says "unknowable" (Codex round 5).
+    const okRows = rows.filter((r) => r.catalogState === 'ok');
+    const broken = rows.length - okRows.length;
+    const dead = okRows.reduce((a, r) => a + r.deadCatalog, 0);
+    const defined = okRows.reduce((a, r) => a + r.defined, 0);
+    const adhocTotal = okRows.reduce((a, r) => a + r.adHoc, 0);
+    console.log(`  ${ANSI.dim}${defined} catalog placements · ${dead} never claimed (${defined ? Math.round((dead / defined) * 100) : 0}%) · ${adhocTotal} distinct ad-hoc ids in real use${broken ? ` · ${broken} repo(s) with broken catalogs excluded from these sums` : ''}${ANSI.reset}\n`);
     for (const r of rows) {
       const roleTag = r.role !== 'consumer' ? ` ${ANSI.dim}[${r.role}]${ANSI.reset}` : '';
       // A broken catalog makes the catalog-vs-ad-hoc CLASSIFICATION

@@ -121,6 +121,17 @@ function lockPaths(repoRoot) {
   const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
   return { lockDir, ownerFile: join(lockDir, 'owner.json') };
 }
+// Atomically DETACH the lock dir by renaming it to a private name — rename
+// is atomic, so of N racing processes exactly one wins; the losers see
+// ENOENT and re-loop. This is what makes stale-eviction and release safe
+// against each other (Codex round 5: bare check-then-rm could delete a
+// freshly REPLACED lock). Returns the detached path, or null if someone
+// else took it first.
+async function detachLock(lockDir) {
+  const taken = `${lockDir}.take-${process.pid}-${randomBytes(4).toString('hex')}`;
+  try { await rename(lockDir, taken); return taken; } catch { return null; }
+}
+
 export async function withCatalogLock(repoRoot, fn) {
   const { lockDir, ownerFile } = lockPaths(repoRoot);
   const token = `${process.pid}-${randomBytes(8).toString('hex')}`;
@@ -128,29 +139,52 @@ export async function withCatalogLock(repoRoot, fn) {
   while (true) {
     try {
       await mkdir(lockDir, { recursive: false });
-      await writeFile(ownerFile, JSON.stringify({ token, pid: process.pid, ts: new Date().toISOString() }));
+      // Never leak an OWNERLESS lock: if the token write fails (disk full,
+      // permissions), tear the fresh dir down before rethrowing — otherwise
+      // it could only be reclaimed via the 30s stale timeout (round 5).
+      try { await writeFile(ownerFile, JSON.stringify({ token, pid: process.pid, ts: new Date().toISOString() })); }
+      catch (e) { try { await rm(lockDir, { recursive: true, force: true }); } catch {} throw e; }
       break;
     } catch (e) {
       if (!e || e.code !== 'EEXIST') throw e;
       try {
         const st = await stat(lockDir);
-        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) { await rm(lockDir, { recursive: true, force: true }); continue; }
+        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
+          const taken = await detachLock(lockDir); // atomic: one evictor wins
+          if (taken) { try { await rm(taken, { recursive: true, force: true }); } catch {} }
+          continue;
+        }
       } catch {}
       if (Date.now() - t0 > LOCK_WAIT_MS) throw new Error('lane catalog is locked by another admin operation — retry shortly');
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  const ownsLock = async () => {
-    try { return JSON.parse(await readFile(ownerFile, 'utf8')).token === token; } catch { return false; }
-  };
   const assertOwned = async () => {
-    if (!(await ownsLock())) {
-      throw new Error('lane catalog lock lost (stale-broken by another process) — aborting WITHOUT writing; retry the operation');
-    }
+    let owned = false;
+    try { owned = JSON.parse(await readFile(ownerFile, 'utf8')).token === token; } catch {}
+    if (!owned) throw new Error('lane catalog lock lost (stale-broken by another process) — aborting WITHOUT writing; retry the operation');
   };
   try { return await fn(assertOwned); }
   finally {
-    try { if (await ownsLock()) await rm(lockDir, { recursive: true, force: true }); } catch {}
+    // Release via atomic detach: rename whatever lock exists to a private
+    // name, THEN inspect. Ours → remove. Not ours (we were evicted and a
+    // successor acquired) → rename it back; if even that races (a second
+    // acquisition landed in the same microseconds), drop it — the displaced
+    // holder's next assertOwned fails and it SAFE-ABORTS. Kill criterion
+    // for this lock: residual races may only ever cause a spurious
+    // abort/retry, never a lost update or corruption.
+    try {
+      const taken = await detachLock(lockDir);
+      if (taken) {
+        let ours = false;
+        try { ours = JSON.parse(await readFile(join(taken, 'owner.json'), 'utf8')).token === token; } catch {}
+        if (ours) await rm(taken, { recursive: true, force: true });
+        else {
+          try { await rename(taken, lockDir); }
+          catch { try { await rm(taken, { recursive: true, force: true }); } catch {} }
+        }
+      }
+    } catch {}
   }
 }
 // Exposed for tests only: age a lock so the stale-break path is provable.
