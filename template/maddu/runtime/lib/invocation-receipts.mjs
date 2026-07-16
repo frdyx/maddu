@@ -130,6 +130,12 @@ export function recordInvocationSync({
       } catch {}
     }
 
+    // EVERY string field is length-capped (verb/sub 64, sessionId 128,
+    // workspace 512) so one receipt line has a hard ~1KB maximum — the
+    // rotation/ceiling disk bounds below assume it (Codex round 3: an
+    // uncapped env/cache-sourced sessionId could otherwise blow one append
+    // past the documented bound on the paths where the ceiling is skipped).
+    // sessionId is env/cache-sourced text, so it is also redacted.
     const receipt = {
       v: 1,
       ts: now || new Date().toISOString(),
@@ -137,8 +143,8 @@ export function recordInvocationSync({
       sub: sub == null ? null : redactText(String(sub)).text.slice(0, 64),
       exit: Number.isInteger(exitCode) ? exitCode : 1,
       ms: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0,
-      sessionId: sid,
-      workspace: stateRoot,
+      sessionId: sid == null ? null : redactText(String(sid)).text.slice(0, 128),
+      workspace: String(stateRoot).slice(0, 512),
     };
 
     const file = receiptsPath(stateRoot);
@@ -167,8 +173,9 @@ export function recordInvocationSync({
       // includes the candidate line's own bytes, so a rotation-blocked file
       // can NEVER exceed 2× the cap — an exact bound, not "2× plus one
       // receipt" (round 2). Scoped to the failed-rotation state: after a
-      // SUCCESSFUL rotation the file is fresh and a single receipt line
-      // (verb/sub capped at 64 chars) can never approach the bound.
+      // SUCCESSFUL rotation the file is fresh, and a single receipt line
+      // cannot approach the bound because every string field is
+      // length-capped at construction (~1KB hard max per line; round 3).
       let after = 0;
       try { after = statSync(file).size; } catch {}
       if (after >= rotateBytes && after + Buffer.byteLength(line, 'utf8') > rotateBytes * 2) return false;

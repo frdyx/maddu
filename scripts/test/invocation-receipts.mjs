@@ -79,6 +79,14 @@ try {
   ok(receipts.at(-2).sessionId === 'ses_env' && receipts.at(-1).sessionId === 'ses_cache',
     'sessionId precedence: env > raw active-session cache');
 
+  // Field caps: every string field is length-capped at construction so one
+  // line has a hard ~1KB max — the disk-bound argument depends on it. An
+  // env-sourced sessionId is the attacker-shaped field (Codex round 3).
+  ir.recordInvocationSync({ stateRoot: rA, verb: 'status', env: { MADDU_SESSION_ID: 'S'.repeat(10000) } });
+  ({ receipts } = await ir.readReceipts(rA));
+  ok(receipts.at(-1).sessionId.length === 128, `oversized sessionId capped at 128 (got ${receipts.at(-1).sessionId.length})`);
+  ok(receipts.at(-1).workspace.length <= 512, 'workspace capped at 512');
+
   // Write-boundary scrub: a secret-shaped sub never lands raw.
   ir.recordInvocationSync({ stateRoot: rA, verb: 'lane', sub: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmn', env: {} });
   const rawText = await readFile(join(rA, '.maddu', 'state', ir.RECEIPTS_FILE), 'utf8');
