@@ -120,13 +120,23 @@ async function readCatalogTolerant(repoRoot) {
 //     writing;
 //   - release detaches via atomic rename and inspects the token — another
 //     holder's lock is never torn down.
-// Residuals, stated plainly: (a) the bridge admin route and operator
-// hand-edits do NOT take this lock (atomic write + conditional rollback
-// are best-effort there; the spine is the reconciliation source);
+// Residuals, stated plainly (Codex round 7 precision):
+// (a) the bridge admin route and operator hand-edits do NOT take this
+//     lock (atomic write + conditional rollback are best-effort there;
+//     the spine is the reconciliation source);
 // (b) removing the lock while its operation is STILL running voids the
-// serialization guarantee for that operation — the removal instruction
-// says exactly that; worst case thereafter is a safe abort at the next
-// assertOwned.
+//     serialization guarantee for that operation. Usually the displaced
+//     holder safe-aborts at its next assertOwned; but a removal PLUS
+//     re-acquisition landing inside the sub-millisecond window between a
+//     holder's assertOwned and its catalog rename can produce overlapping
+//     writes (last-writer-wins) — assertOwned is adjacent to the write,
+//     not atomically bound to it. That is why the removal instruction
+//     warns against removing a live operation's lock at all;
+// (c) leftover locks arise from a crashed operation OR from a release
+//     that failed to remove its own lock (e.g. a permission error on the
+//     rename — release never fails a successful operation over it). Both
+//     look identical and both surface at the NEXT acquisition, which
+//     refuses with the holder's identity and the removal instruction.
 const LOCK_WAIT_MS = 5_000;
 function lockPaths(repoRoot) {
   const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
@@ -135,7 +145,10 @@ function lockPaths(repoRoot) {
 // Atomically DETACH the lock dir by renaming it to a private name — rename
 // is atomic, so of N racing processes exactly one wins (Codex round 5:
 // bare check-then-rm could delete a freshly replaced lock). Used by RELEASE
-// only; returns the detached path, or null if the lock is already gone.
+// only; returns the detached path, or null when the rename failed — which
+// means "already gone" OR "undetachable" (e.g. EACCES; round 7): release
+// treats both as not-removable-now, never fails the completed operation,
+// and any lock left behind surfaces at the next acquisition's refusal.
 async function detachLock(lockDir) {
   const taken = `${lockDir}.take-${process.pid}-${randomBytes(4).toString('hex')}`;
   try { await rename(lockDir, taken); return taken; } catch { return null; }
@@ -180,9 +193,11 @@ export async function withCatalogLock(repoRoot, fn) {
     // Release via atomic detach: rename whatever lock exists to a private
     // name, THEN inspect. Ours → remove. Not ours (only possible after a
     // MANUAL removal + re-acquisition) → rename it back; if even that
-    // races, drop it — the displaced holder's next assertOwned fails and
-    // it SAFE-ABORTS. All release-side races require the documented manual
-    // removal first and bottom out in abort/retry, never a lost update.
+    // races, drop it — the displaced holder aborts at its next assertOwned
+    // (subject to residual (b) above: an assertOwned already passed with
+    // the write in flight is the one manual-removal shape that can still
+    // overlap). A failed detach (already gone, or undetachable — residual
+    // (c)) never fails the completed operation.
     try {
       const taken = await detachLock(lockDir);
       if (taken) {
