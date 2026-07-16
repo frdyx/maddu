@@ -315,7 +315,9 @@ export default async function init(argv) {
   console.log(`  ./maddu/run agents register   # add the install stanza to ~/.claude, ~/.codex, …`);
   console.log(`  (asks which agents; idempotent; touches only its own marker block)`);
 
-  console.log(`\nNever start building unrecorded — wire session discipline into Claude Code:`);
+  console.log(`\nHooks are NOT installed yet — until they are, sessions won't auto-register`);
+  console.log(`and this install stays parked at the bottom of the activation funnel.`);
+  console.log(`Wiring them is the proven activation lever (one-time):`);
   console.log(`  ./maddu/run hooks install   # SessionStart auto-registers + records to the spine`);
   console.log(`  (writes .claude/settings.json; one register then flows into lane/slice-stop)`);
 }
