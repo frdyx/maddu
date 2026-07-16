@@ -1,29 +1,33 @@
-// Generic default lane catalog shipped to every `maddu init` install.
+// Default lane catalog shipped to every `maddu init` install: `general`
+// ONLY (usage-audit roadmap Tier 4b, v1.104.0).
 //
-// Lanes are the unit of mutually-exclusive work — pick or add ones that fit
-// YOUR project, not Máddu's internal development. Operators are expected to
-// edit `.maddu/lanes/catalog.json` to match the actual surfaces they edit
-// (frontend / backend / infra / etc.). This seed is intentionally minimal
-// and generic — opinions about what your project's lanes should be don't
-// belong in the framework default.
+// The 2026-07-16 fleet usage audit measured the previous generic 7-lane
+// seed (architecture/frontend/backend/infra/tests/docs/general) at 76%
+// DEAD fleet-wide — 112/147 placements never claimed — while 64% of
+// consumer claims were ad-hoc ids invented at claim time. Work is
+// feature/phase-shaped, not directory-shaped: a prescribed taxonomy just
+// sits there. So the default stopped prescribing: new installs get the
+// one claim-anything fallback, and the catalog GROWS from observed
+// reality — `maddu lane suggest` proposes ad-hoc ids that earned ≥3
+// lifetime claims, `--adopt` graduates them (Tier 4a).
 //
-// v1.0.4 — replaced the prior Máddu-internal catalog (lanes like
-// `cockpit-shell`, `bridge-server`, `runtime-integration`, plus "Phase X"
-// markers from the depth-upgrade slice plan) which was leaking framework
-// development structure into every consumer install. Máddu's own
-// contributors maintain their internal catalog locally in `.maddu/lanes/`
-// (gitignored) — same as any other operator.
+// Deliberately `general`-only rather than the audit's suggested EMPTY
+// catalog: a claimable catalog lane must exist for the discipline/claim
+// flows (`lane claim --worktree` asserts catalog membership at attach,
+// and a fresh agent needs one obvious lane to start the ritual on).
+//
+// Existing installs are untouched — this seed is written only by a fresh
+// `maddu init` (or ensureSpine on a repo with no catalog at all);
+// `maddu upgrade` never rewrites an operator-owned catalog.
+//
+// (History: v1.0.4 replaced a Máddu-internal catalog that leaked framework
+// development structure into consumer installs; v1.104.0 shrank the generic
+// seed to `general` per the audit above.)
 
 export const DEFAULT_LANE_CATALOG = {
   schemaVersion: 1,
   framework: 'maddu',
   lanes: [
-    { id: 'architecture', scope: 'Design, planning, architectural briefs. Reads everything; writes plans and roadmaps.' },
-    { id: 'frontend',     scope: 'User-facing UI — components, styles, client-side logic.' },
-    { id: 'backend',      scope: 'Server-side code, APIs, data layer.' },
-    { id: 'infra',        scope: 'Build, deploy, CI, ops, configuration.' },
-    { id: 'tests',        scope: 'Test code, fixtures, harnesses.' },
-    { id: 'docs',         scope: 'Project documentation, READMEs, contributor guides.' },
-    { id: 'general',      scope: 'Catch-all for changes that do not fit another lane. Use sparingly — split into a real lane when patterns emerge.' }
+    { id: 'general', scope: 'The claim-anything fallback. Work here until patterns emerge, then let `maddu lane suggest` graduate the ad-hoc lane ids you actually repeat (≥3 claims) into this catalog.' }
   ]
 };

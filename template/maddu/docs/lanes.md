@@ -2,21 +2,35 @@
 
 A **lane** is the unit of mutually-exclusive work in Máddu. Before an agent edits files, it claims a lane. While the lane is claimed, no other agent may edit the same area. Coordination across lanes happens through the mailbox bus, never through shared mutation.
 
-## Default lanes
+## Default lanes (v1.104.0: `general` only)
 
-Installed on `maddu init`. Listed in `.maddu/lanes/catalog.json`. Each lane has an id and a one-line scope description. The default catalog is intentionally generic — edit it to match your project's actual surfaces.
+Installed on `maddu init`. Listed in `.maddu/lanes/catalog.json`. Each lane has an id and a one-line scope description.
 
 | Lane id | Scope |
 |---|---|
-| `architecture` | Design, planning, architectural briefs. Reads everything; writes plans and roadmaps. |
-| `frontend` | User-facing UI — components, styles, client-side logic. |
-| `backend` | Server-side code, APIs, data layer. |
-| `infra` | Build, deploy, CI, ops, configuration. |
-| `tests` | Test code, fixtures, harnesses. |
-| `docs` | Project documentation, READMEs, contributor guides. |
-| `general` | Catch-all for changes that don't fit another lane. Use sparingly — split into a real lane when patterns emerge. |
+| `general` | The claim-anything fallback. Work here until patterns emerge, then let `maddu lane suggest` graduate the ad-hoc lane ids you actually repeat into the catalog. |
 
-Edit `.maddu/lanes/catalog.json` directly to add, remove, or rename lanes. `maddu upgrade` never touches operator-edited catalogs (only the seed at first `maddu init`).
+**Why so small?** The 2026-07-16 fleet usage audit measured the previous
+generic 7-lane seed at **76% dead** (112/147 placements never claimed) while
+64% of real claims were ad-hoc ids invented at claim time — work is
+feature-shaped, not directory-shaped, so a prescribed taxonomy just sits
+there. The catalog now **grows from observed reality** instead:
+
+- claim any ad-hoc lane id freely (`maddu lane claim payments-flow …`);
+- once an id earns ≥3 lifetime claims, `maddu lane suggest` proposes it and
+  `--adopt` graduates it into the catalog (emitting `LANE_ADDED`);
+- `maddu lane list` marks never-claimed catalog entries `(unused)`, and
+  `maddu lane suggest --prune` removes them.
+
+`general` is kept (rather than an empty catalog) because a claimable catalog
+lane must exist for the discipline/claim flows — `lane claim --worktree`
+asserts catalog membership, and a fresh agent needs one obvious lane to
+start the ritual on.
+
+You can still edit `.maddu/lanes/catalog.json` directly to add, remove, or
+rename lanes. `maddu upgrade` never touches operator-edited catalogs (only
+the seed at first `maddu init`) — **existing installs keep their catalogs
+unchanged**.
 
 ## Claiming a lane
 
@@ -59,4 +73,13 @@ When the lane B owner picks up the message, it acknowledges by appending a `mail
 
 ## Adding a project-specific lane
 
-Projects may add their own lanes under `.maddu/lanes/project/<lane-id>.json`. `maddu upgrade` will never overwrite or remove these. The framework-default lanes are owned by Máddu; project lanes are owned by the project.
+The whole catalog is **operator-owned** from the moment `maddu init` seeds
+it — there is no Máddu-owned tier of lanes. Add lanes by:
+
+- claiming an ad-hoc id and letting it graduate: `maddu lane suggest --adopt <id>`
+  once it has earned ≥3 lifetime claims (the observed-reality path), or
+- editing `.maddu/lanes/catalog.json` directly.
+
+`maddu upgrade` never rewrites the catalog, and `maddu init` (including
+`--force`) preserves an existing one — the seed is written on first install
+only.

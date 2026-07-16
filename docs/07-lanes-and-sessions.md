@@ -55,11 +55,21 @@ $ maddu session close --session ses_... --handoff "Approvals route shipped; ledg
 
 ```bash
 $ maddu lane list
-LANES  (19)
-  architecture           High-level design, planning, architecture briefs.
-  cockpit-shell          The Máddu cockpit HTML, tokens, routes.   claimed by ses_...
-  bridge-server          maddu/runtime/server.js and harness wiring.
-  …
+LANES  (1)
+  general                The claim-anything fallback. Work here until patterns emerge…
+```
+
+New installs seed a single `general` lane (v1.104.0 — see
+[lanes.md](lanes.md) for why); ad-hoc lane ids can be claimed freely, and
+`maddu lane suggest` graduates the ones you actually repeat into the
+catalog. A grown catalog looks like:
+
+```bash
+$ maddu lane list
+LANES  (3)
+  general                The claim-anything fallback…
+  payments-flow          Adopted from 5 observed ad-hoc claim(s)…   claimed by ses_...
+  onboarding             Adopted from 3 observed ad-hoc claim(s)…   (unused — never claimed; `maddu lane suggest` to review)
 ```
 
 `lane list` marks catalog entries that were **never claimed in the repo's

@@ -282,5 +282,12 @@
     "fixed_in": "1.103.0",
     "consumer_impact": "maddu lane suggest: catalog-vs-observed-claims report (lifetime, native-only, partition-aware) with suggestions from CLAIM COUNTS ONLY (>=3 of the same non-ephemeral ad-hoc id; auto/<x>, auto-<x>, numeric excluded; imported claims never count) — no repo-structure inference. --adopt graduates a suggestion into catalog.json + emits the dormant LANE_ADDED { lane } (schema-fit verified); --prune removes a NEVER-claimed entry + emits LANE_REMOVED { ok: true } (both emitters now conform to the long-documented shape). lane list marks never-claimed entries (unused). maddu insights lanes reproduces the audit dead-catalog/ad-hoc table across the fleet (live: 166 placements, 118 never claimed = 71%). Suggestions only — the operator confirms every catalog mutation; no new verbs/gates/event types.",
     "ledger_ref": "docs/audit/fleet-usage-audit-2026-07-16.md (rec #2) — usage-audit roadmap Tier 4a"
+  },
+  {
+    "symptom": "Usage-audit Tier 4b: every new install seeded a generic 7-lane catalog that the fleet audit measured 76% dead (112/147 placements never claimed) while 64% of consumer claims were ad-hoc — the default prescribed a taxonomy work never followed.",
+    "area": "runtime/lib/defaults.mjs + docs (lanes.md, 07-lanes-and-sessions, 01-getting-started)",
+    "fixed_in": "1.104.0",
+    "consumer_impact": "NEW installs seed a single general lane (the claim-anything fallback) and the catalog grows from observed reality via maddu lane suggest --adopt (Tier 4a). Deliberate deviation from the audit's \"empty\" suggestion: a claimable catalog lane must exist for the discipline/claim flows (claim --worktree asserts catalog membership; a fresh agent needs one obvious lane to start the ritual on). EXISTING installs are untouched — the seed is written only by fresh init/ensureSpine, and catalog.json is not a framework-managed file so upgrade can never rewrite it (asserted by test). Compat evidence in-PR: a real init → hooks install → register → claim general → slice-stop → release → ad-hoc claim → slice-stop ritual passes end-to-end through bin/maddu.mjs on the minimal catalog; blocker hunt found no flow that hard-assumes a default lane id (suggest reads the live catalog). Docs swept (lanes.md rationale + graduation path; stale harness examples fixed).",
+    "ledger_ref": "docs/audit/fleet-usage-audit-2026-07-16.md (rec #2) — usage-audit roadmap Tier 4b"
   }
 ]

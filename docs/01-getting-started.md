@@ -106,7 +106,7 @@ Pick any lane from the catalog:
 
 ```bash
 $ maddu lane list
-$ maddu lane claim --lane harness --session ses_2026...01 --focus "hello world"
+$ maddu lane claim --lane general --session ses_2026...01 --focus "hello world"
 ```
 
 While the claim is held, no other session may claim the same lane. See [07-lanes-and-sessions.md](07-lanes-and-sessions.md) for the full lifecycle.
@@ -136,9 +136,9 @@ The slice-stop is the structured "I am done with this slice of work" ritual. It 
 ```bash
 $ maddu slice-stop \
     --session ses_2026...01 \
-    --lane harness \
+    --lane general \
     --summary "Hello-world walkthrough finished" \
-    --action "Installed Máddu, registered a session, claimed harness, sent an inbox message" \
+    --action "Installed Máddu, registered a session, claimed general, sent an inbox message" \
     --learnings "The slice-stop payload is the only path into hindsight memory;Doctor PASSes on a fresh install" \
     --next "Read 02-concepts.md;Try the cockpit Approvals route" \
     --reason "First-time setup"
@@ -153,7 +153,7 @@ $ maddu memory list --limit 10
 ## 8. Close the session
 
 ```bash
-$ ./maddu/run lane release --lane harness --session ses_2026...01
+$ ./maddu/run lane release --lane general --session ses_2026...01
 $ ./maddu/run session close --handoff "Done with hello-world"     # uses cached session id
 ```
 

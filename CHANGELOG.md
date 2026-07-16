@@ -11,6 +11,14 @@ narrative summary.
 
 ---
 
+## [v1.104.0] · 2026-07-16 · Usage-audit Tier 4b — minimal default catalog
+
+**Tier 4b of the 2026-07-16 usage-audit roadmap** (second of Tier 4's two PRs): new installs stop prescribing a lane taxonomy. The audit measured the generic 7-lane seed **76% dead** fleet-wide while 64% of consumer claims were ad-hoc — work is feature-shaped, not directory-shaped. Verbs **72/72**; gates **74**; no new event type.
+
+- **New installs seed a single `general` lane** — the claim-anything fallback — and the catalog **grows from observed reality** via Tier 4a's `maddu lane suggest --adopt`. Deliberate deviation from the audit's "empty catalog": a claimable catalog lane must exist for the discipline/claim flows (`claim --worktree` asserts catalog membership; a fresh agent needs one obvious lane to start the ritual on).
+- **Existing installs untouched**: the seed is written only by a fresh `maddu init` (or `ensureSpine` on a repo with no catalog); `catalog.json` is not a framework-managed file, so `maddu upgrade` can never rewrite it (asserted by test).
+- **Compat evidence** (roadmap-required, in-PR): the new `minimal-catalog-ritual` self-test runs a REAL `init → hooks install → register → lane claim general → slice-stop → release → ad-hoc claim → slice-stop` end-to-end through `bin/maddu.mjs` on a fresh fixture; the blocker hunt found no flow that hard-assumes a default lane id (`suggest` reads the live catalog with a `lanes[0]` fallback). Docs swept: [lanes.md](docs/lanes.md) carries the rationale + graduation path; stale `harness` examples in getting-started fixed.
+
 ## [v1.103.0] · 2026-07-16 · Usage-audit Tier 4a — lane catalog: observed, not prescribed
 
 **Tier 4a of the 2026-07-16 usage-audit roadmap** (first of Tier 4's two PRs): the audit found the default 7-lane catalog **76% dead** fleet-wide (112/147 placements never claimed) while **64% of consumer claims were ad-hoc** — the catalog prescribes and reality routes around it. This PR makes the gap observable and lets repeated reality graduate; the default catalog itself is untouched (that's PR 4b). Verbs **72/72**; gates **74**; no new event type — two dormant types wake instead. All new checks are auto-discovered self-tests.
