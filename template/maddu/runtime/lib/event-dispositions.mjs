@@ -127,7 +127,12 @@ export const EVENT_DISPOSITIONS = {
   ADVISOR_ARTIFACT_WRITTEN: { disp: 'active' },
   TOKEN_USAGE_REPORTED: { disp: 'active' },
   SKILL_INJECTED: { disp: 'dormant', reason: "skill lifecycle — skills are hand-authored (`maddu skill create`/`from-slice`); the auto-detector was retired (#5/F2, v1.81.0)" },
-  SKILL_INJECTION_REFUSED: { disp: 'active' },
+  // Tier-1 classification decision (2026-07-16 audit rec #10): the emitter is
+  // live (commands/brief.mjs injection path) but fires only when a MATCHING
+  // skill is withheld for untrusted provenance — a security refusal witness,
+  // absent in healthy fleets by design. Dormant, not dead; never remove it for
+  // silence alone (its silence is the good outcome).
+  SKILL_INJECTION_REFUSED: { disp: 'dormant', reason: "security refusal witness; fires only when a matching skill is withheld from injection for untrusted provenance" },
   TOOL_INVOKED: { disp: 'active' },
   TOOL_COMPLETED: { disp: 'active' },
   TOOL_REFUSED: { disp: 'active' },

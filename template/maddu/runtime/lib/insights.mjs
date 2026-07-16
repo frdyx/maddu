@@ -24,6 +24,26 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { dormantByDesignMap } from './event-dispositions.mjs';
+import { resolveInstalledVersion, isSourceCheckout } from './installed-version.mjs';
+
+// ── Imported-event discriminator (Tier 1, 2026-07-16 audit) ────────────────
+// A spine event is IMPORTED (backfilled from an external corpus, not native
+// activity) iff its data.source carries one of these markers. Writers:
+// `maddu usage import --from claude-code` stamps 'claude-code-transcript'
+// (commands/usage.mjs); `maddu import submit` stamps 'import-submit' on the
+// spine events its accepted kinds produce — the INBOX_MESSAGE content row
+// (kind=inbox-note) and the SKILL_CREATED/SKILL_UPDATED lifecycle receipts
+// (kind=skill, via saveSkill's trusted-caller opts). The IMPORT_* receipts
+// witness the local accept/reject operation itself and stay native; the
+// remaining kinds (memory-note/lane/brief) write files, not spine events.
+// Native emitters omit the field entirely, so absence = native — verified
+// across the 2026-07-16 fleet (snyggare: 53,668 stamped import rows, 0
+// unstamped).
+export const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript', 'import-submit']);
+
+export function isImportedEvent(e) {
+  return !!(e && e.data && typeof e.data.source === 'string' && IMPORTED_DATA_SOURCES.has(e.data.source));
+}
 
 // ── DEFINED surface ─────────────────────────────────────────────────────────
 
@@ -34,37 +54,68 @@ export async function definedEventTypes(spineLib) {
 
 // ── Spine harvest (UTILIZED) ────────────────────────────────────────────────
 
-async function harvestOne(name, repoRoot) {
+// Harvest one repo's spine. By default (Tier 1) counts/total/first/last
+// reflect NATIVE activity only — imported backfill rows are tallied apart in
+// `importedCounts`/`importedTotal` so a one-time transcript import (97% of one
+// audited repo's volume) can't masquerade as activity. `includeImported: true`
+// restores the merged pre-Tier-1 behavior for callers that want raw volume.
+async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
   const evDir = join(repoRoot, '.maddu', 'events');
   let shards;
   try { shards = (await readdir(evDir)).filter((f) => f.endsWith('.ndjson')).sort(); }
   catch { return null; } // no spine — not a Máddu repo (or never run)
-  const counts = new Map();
-  let total = 0, installedVersion = null, lastTs = null, firstTs = null;
+  const counts = new Map(), importedCounts = new Map();
+  let total = 0, importedTotal = 0, lastTs = null, firstTs = null;
   for (const shard of shards) {
     let text;
     try { text = await readFile(join(evDir, shard), 'utf8'); } catch { continue; }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
+      if (isImportedEvent(e)) {
+        // Always tallied apart so the native/imported split stays honest in
+        // JSON even under includeImported (Codex diff-review round 1).
+        importedCounts.set(e.type, (importedCounts.get(e.type) || 0) + 1);
+        importedTotal++;
+        if (!includeImported) continue; // imported rows never move activity/recency/volume
+      }
       counts.set(e.type, (counts.get(e.type) || 0) + 1);
       total++;
       if (e.ts) { lastTs = e.ts; if (!firstTs) firstTs = e.ts; }
-      if (e.type === 'FRAMEWORK_INSTALLED' && e.data?.version) installedVersion = e.data.version;
     }
   }
-  return { name, repoRoot, counts, total, installedVersion, firstTs, lastTs };
+  // Version from the shared SSOT resolver — NOT the spine's FRAMEWORK_INSTALLED
+  // event, which is frozen at install time and made insights disagree with
+  // fleet on every since-upgraded repo (the 2026-07-16 audit's 0.19.0-vs-1.15.0).
+  const ver = await resolveInstalledVersion(repoRoot);
+  return {
+    name, repoRoot, counts, total, firstTs, lastTs,
+    importedCounts, importedTotal,
+    installedVersion: ver.version, versionSource: ver.source,
+  };
 }
 
-// Harvest every registered workspace. `workspaces` is [{id,label,path}].
-export async function harvestSpines(workspaces) {
+// Harvest every registered workspace. `workspaces` is [{id,label,path,role}].
+export async function harvestSpines(workspaces, opts = {}) {
   const projects = [];
   for (const w of workspaces) {
     if (!w?.path) continue;
-    const p = await harvestOne(w.label || w.id || w.path, w.path);
-    if (p) projects.push(p);
+    const p = await harvestOne(w.label || w.id || w.path, w.path, opts);
+    if (p) { p.role = await workspaceRole(w); projects.push(p); }
   }
   return projects;
+}
+
+// ── Role segmentation (Tier 1) ──────────────────────────────────────────────
+// 'self' = the framework's own source checkout (template/maddu + bin/maddu.mjs
+// on disk — a deterministic file test, not a name match), 'fixture' = the
+// registry says so, 'consumer' = everything else. The self test runs FIRST:
+// the framework repo is self-dev even if someone registers it as a fixture
+// (roadmap: "framework repo = self, registry role fields for the rest").
+export async function workspaceRole(workspace) {
+  if (await isSourceCheckout(workspace?.path || '')) return 'self';
+  if (workspace?.role === 'fixture') return 'fixture';
+  return 'consumer';
 }
 
 // ── Aggregate + classify ────────────────────────────────────────────────────
@@ -101,23 +152,32 @@ export const DORMANT_BY_DESIGN = dormantByDesignMap();
 // never fired count toward `deadDefined`.
 export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
   const n = projects.length;
-  const globalCount = new Map(); // type -> total occurrences
-  const presence = new Map();    // type -> # projects it fired in
+  const globalCount = new Map();    // type -> total NATIVE occurrences
+  const importedCount = new Map();  // type -> total IMPORTED occurrences (Tier 1)
+  const presence = new Map();       // type -> # projects it natively fired in
   for (const p of projects) {
     for (const [t, c] of p.counts) {
       globalCount.set(t, (globalCount.get(t) || 0) + c);
       presence.set(t, (presence.get(t) || 0) + 1);
     }
+    for (const [t, c] of p.importedCounts || []) {
+      importedCount.set(t, (importedCount.get(t) || 0) + c);
+    }
   }
   const seen = new Set(globalCount.keys());
-  const allTypes = new Set([...definedSet, ...seen]);
+  const allTypes = new Set([...definedSet, ...seen, ...importedCount.keys()]);
   const rows = [...allTypes].map((t) => {
     const proj = presence.get(t) || 0;
     let cls = classify(proj, n);
     const owner = pluginOwners.get(t) || null;
     const dormantReason = DORMANT_BY_DESIGN.get(t) || null;
+    // Never fired natively but present via imported backfill: honest middle
+    // ground (Tier 1) — not activity, but not "nothing invokes it" either.
+    // Checked FIRST so row cls and partitionDefined share one precedence:
+    // fired > imported-only > dormant-by-design/plugin > dead.
+    if (cls === 'dead' && (importedCount.get(t) || 0) > 0) cls = 'imported-only';
     // A plugin-owned type that never fired is dormant (plugin off here), not dead.
-    if (cls === 'dead' && owner) cls = 'dormant';
+    else if (cls === 'dead' && owner) cls = 'dormant';
     // A core type that fires only under a specific posture/edge is dormant
     // by design, not a gap (v1.7.0). Plugin ownership takes precedence.
     else if (cls === 'dead' && dormantReason) cls = 'dormant';
@@ -125,6 +185,7 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
       type: t,
       defined: definedSet.has(t),
       count: globalCount.get(t) || 0,
+      importedCount: importedCount.get(t) || 0,
       projects: proj,
       cls,
       owner: owner ? `plugin:${owner}` : (dormantReason ? 'dormant-by-design' : 'core'),
@@ -134,22 +195,72 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
     };
   }).sort((a, b) => b.projects - a.projects || b.count - a.count);
 
-  const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dormant: 0, dead: 0 };
+  const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dormant: 0, 'imported-only': 0, dead: 0 };
   for (const r of rows) counts[r.cls]++;
   const deadDefined = rows.filter((r) => r.cls === 'dead' && r.defined).map((r) => r.type);
   const dormantByDesign = rows.filter((r) => r.cls === 'dormant' && r.owner === 'dormant-by-design').map((r) => r.type);
 
-  return { n, rows, counts, deadDefined, dormantByDesign, definedTotal: definedSet.size, everFired: seen.size };
+  return {
+    n, rows, counts, deadDefined, dormantByDesign,
+    definedTotal: definedSet.size, everFired: seen.size,
+    // Undeclared drift (seen in spines, absent from EVENT_TYPES) is counted
+    // apart: it participates in `counts` rows but never in the defined
+    // partition, so the two totals must be reconciled by the caller's render
+    // (headline counts may exceed definedTotal by exactly this number).
+    undeclaredCount: rows.filter((r) => r.undeclared).length,
+    partition: partitionDefined(rows, definedSet),
+  };
+}
+
+// ── Exhaustive taxonomy partition (Tier 1) ──────────────────────────────────
+// Every DEFINED type lands in exactly one bucket — the audit found the summary
+// line (92 fired + 70 dormant-by-design + 1 dead = 163) leaving 19 types
+// unexplained (they were plugin-owned, silently folded into "dormant").
+// Buckets, in precedence order:
+//   fired             — natively fired somewhere (dormant annotation or not)
+//   imported-only     — never fired natively; only imported backfill rows exist
+//   dormant-by-design — never fired; disposition registry carries a reason
+//   plugin-owned      — never fired; owned by an optional plugin
+//   dead              — never fired, no excuse on file
+// The `insights-partition` self-test asserts the buckets are disjoint and sum
+// to definedTotal, so the taxonomy can never silently leak types again.
+export function partitionDefined(rows, definedSet) {
+  const buckets = { fired: [], 'imported-only': [], 'dormant-by-design': [], 'plugin-owned': [], dead: [] };
+  for (const r of rows) {
+    if (!definedSet.has(r.type)) continue; // undeclared drift is reported apart
+    if (r.count > 0) buckets.fired.push(r.type);
+    else if (r.importedCount > 0) buckets['imported-only'].push(r.type);
+    else if (r.owner === 'dormant-by-design') buckets['dormant-by-design'].push(r.type);
+    else if (String(r.owner).startsWith('plugin:')) buckets['plugin-owned'].push(r.type);
+    else buckets.dead.push(r.type);
+  }
+  const sum = Object.values(buckets).reduce((a, b) => a + b.length, 0);
+  return { buckets, sum, complete: sum === definedSet.size };
 }
 
 // ── Transcript scan (verb + slash BEHAVIOR) — best-effort, host-specific ─────
 // Reads ~/.claude/projects/*/*.jsonl for `maddu <verb>` invocations and
 // `/maddu-*` slash usage. Returns null if the transcripts root is absent.
-export async function scanTranscripts(commandSet) {
+
+// Claude Code encodes a workspace path into its transcript dir name by
+// replacing every non-alphanumeric character with '-' (e.g.
+// C:\Users\X\proj → C--Users-X-proj). Lowercased for comparison: observed
+// transcript dirs vary in case for the same workspace (Windows paths are
+// case-insensitive). Used to scope the transcript scan to a role-filtered
+// workspace set so --role consumer can't be polluted by framework self-dev
+// sessions (Codex diff-review round 1).
+export function transcriptDirName(workspacePath) {
+  return String(workspacePath || '').replace(/[^A-Za-z0-9]/g, '-').toLowerCase();
+}
+
+// `dirAllow` (optional Set of lowercased transcriptDirName strings) scopes the
+// scan; omitted = all session dirs (the pre-Tier-1 behavior, labeled as such).
+export async function scanTranscripts(commandSet, { dirAllow = null } = {}) {
   const root = join(homedir(), '.claude', 'projects');
   let dirs;
   try { dirs = (await readdir(root, { withFileTypes: true })).filter((d) => d.isDirectory()); }
   catch { return null; }
+  if (dirAllow) dirs = dirs.filter((d) => dirAllow.has(d.name.toLowerCase()));
   const verbCount = new Map(), verbDirs = new Map(), slashCount = new Map();
   let filesScanned = 0;
   const reMaddu = /\bmaddu(?:\/run|\s+run)?\s+([a-z][a-z-]+)/g;

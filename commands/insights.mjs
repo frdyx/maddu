@@ -33,8 +33,9 @@ const ANSI = {
   dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m',
 };
 const CLS_COLOR = {
-  'load-bearing': ANSI.lb, occasional: ANSI.occ, 'single-project': ANSI.sp, dormant: ANSI.dormant, dead: ANSI.dead,
+  'load-bearing': ANSI.lb, occasional: ANSI.occ, 'single-project': ANSI.sp, dormant: ANSI.dormant, 'imported-only': ANSI.sp, dead: ANSI.dead,
 };
+const ROLES = new Set(['consumer', 'fixture', 'self']);
 function clsTag(cls) { return `${CLS_COLOR[cls] || ''}${cls}${ANSI.reset}`; }
 
 const SUBCOMMANDS = new Set(['events', 'dead', 'verbs', 'slashes']);
@@ -53,7 +54,7 @@ function extractCommandSet(binSource) {
 
 export default async function insights(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('Usage: maddu insights [events|dead|verbs|slashes] [--json] [--no-transcripts]');
+    console.log('Usage: maddu insights [events|dead|verbs|slashes] [--json] [--no-transcripts] [--include-imported] [--role consumer|fixture|self]');
     return;
   }
   const { flags, positional } = parseFlags(argv);
@@ -61,6 +62,12 @@ export default async function insights(argv) {
   const json = !!flags.json;
   if (sub && !SUBCOMMANDS.has(sub)) {
     console.error(`maddu insights: unknown subcommand "${sub}". One of: ${[...SUBCOMMANDS].join(', ')} (or none for all).`);
+    process.exit(2);
+  }
+  const includeImported = !!flags['include-imported'];
+  const roleFilter = flags.role ? String(flags.role) : null;
+  if (roleFilter && !ROLES.has(roleFilter)) {
+    console.error(`maddu insights: unknown --role "${roleFilter}". One of: ${[...ROLES].join(', ')}.`);
     process.exit(2);
   }
 
@@ -74,7 +81,8 @@ export default async function insights(argv) {
 
   const workspaces = reg.workspaces || [];
   const definedSet = await lib.definedEventTypes(spineLib);
-  const projects = await lib.harvestSpines(workspaces);
+  let projects = await lib.harvestSpines(workspaces, { includeImported });
+  if (roleFilter && lib.workspaceRole) projects = projects.filter((p) => p.role === roleFilter);
 
   // Plugin-owned event types (manifests are bundled, identical across installs)
   // so a would-be-dead type owned by a plugin reads as dormant, not dead.
@@ -99,18 +107,40 @@ export default async function insights(argv) {
       const binPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'maddu.mjs');
       commandSet = extractCommandSet(await readFile(binPath, 'utf8'));
     } catch {}
-    transcripts = await lib.scanTranscripts(commandSet);
+    // --role scopes the transcript scan to the matching workspaces' session
+    // dirs (path-encoded, case-insensitive) — without this, `--role consumer`
+    // verb counts would still include framework self-dev sessions. Derived
+    // from the REGISTRY (role-checked per workspace), not from harvested
+    // spines, so a registered repo whose .maddu/events is absent still
+    // contributes its transcript dirs.
+    let dirAllow = null;
+    if (roleFilter && lib.transcriptDirName && lib.workspaceRole) {
+      dirAllow = new Set();
+      for (const w of workspaces) {
+        if (w?.path && (await lib.workspaceRole(w)) === roleFilter) dirAllow.add(lib.transcriptDirName(w.path));
+      }
+    }
+    transcripts = await lib.scanTranscripts(commandSet, { dirAllow });
   }
 
   if (json) {
     process.stdout.write(JSON.stringify({
       registryPath,
+      filters: { role: roleFilter, includeImported },
       projects: projects.map((p) => ({
-        name: p.name, total: p.total, distinctTypes: p.counts.size,
-        installedVersion: p.installedVersion, lastTs: p.lastTs,
+        name: p.name, role: p.role || null, total: p.total, distinctTypes: p.counts.size,
+        importedTotal: p.importedTotal || 0,
+        installedVersion: p.installedVersion, versionSource: p.versionSource || 'unknown',
+        lastTs: p.lastTs,
       })),
       eventMatrix: {
         definedTotal: matrix.definedTotal, everFired: matrix.everFired, counts: matrix.counts,
+        undeclaredCount: matrix.undeclaredCount || 0,
+        partition: matrix.partition ? {
+          complete: matrix.partition.complete, sum: matrix.partition.sum,
+          bucketSizes: Object.fromEntries(Object.entries(matrix.partition.buckets).map(([k, v]) => [k, v.length])),
+          buckets: matrix.partition.buckets,
+        } : null,
         rows: matrix.rows, deadDefined: matrix.deadDefined,
         dormantByDesign: matrix.dormantByDesign || [],
       },
@@ -135,22 +165,33 @@ export default async function insights(argv) {
   }
 
   if (!sub || sub === 'events' || sub === 'dead') {
-    console.log(`\n  ${ANSI.bold}Projects (${matrix.n} with a spine)${ANSI.reset}`);
+    const scope = roleFilter ? ` · role=${roleFilter}` : '';
+    console.log(`\n  ${ANSI.bold}Projects (${matrix.n} with a spine${scope})${ANSI.reset}${includeImported ? `  ${ANSI.dim}(imported backfill INCLUDED in totals)${ANSI.reset}` : ''}`);
     for (const p of [...projects].sort((a, b) => b.total - a.total)) {
-      console.log(`    ${p.name.padEnd(18)} ${String(p.total).padStart(7)} events  ${String(p.counts.size).padStart(3)} types  ${ANSI.dim}v${p.installedVersion || '?'} · last ${p.lastTs?.slice(0, 10) || '?'}${ANSI.reset}`);
+      const imp = p.importedTotal ? `  ${ANSI.dim}(+${p.importedTotal} imported)${ANSI.reset}` : '';
+      const role = p.role && p.role !== 'consumer' ? ` ${ANSI.dim}[${p.role}]${ANSI.reset}` : '';
+      console.log(`    ${p.name.padEnd(18)} ${String(p.total).padStart(7)} events  ${String(p.counts.size).padStart(3)} types  ${ANSI.dim}v${p.installedVersion || '?'} (${p.versionSource || 'unknown'}) · last ${p.lastTs?.slice(0, 10) || '?'}${ANSI.reset}${imp}${role}`);
     }
   }
 
   if (!sub || sub === 'events') {
-    console.log(`\n  ${ANSI.bold}Event-type utilization${ANSI.reset}  ${ANSI.dim}defined ${matrix.definedTotal} · ever-fired ${matrix.everFired} · ${matrix.counts['load-bearing']} load-bearing / ${matrix.counts.occasional} occasional / ${matrix.counts['single-project']} single-project / ${matrix.counts.dormant} dormant / ${matrix.counts.dead} dead${ANSI.reset}`);
-    for (const cls of ['load-bearing', 'occasional', 'single-project', 'dormant']) {
+    console.log(`\n  ${ANSI.bold}Event-type utilization${ANSI.reset}  ${ANSI.dim}defined ${matrix.definedTotal} · ever-fired ${matrix.everFired} · ${matrix.counts['load-bearing']} load-bearing / ${matrix.counts.occasional} occasional / ${matrix.counts['single-project']} single-project / ${matrix.counts.dormant} dormant / ${matrix.counts['imported-only']} imported-only / ${matrix.counts.dead} dead${ANSI.reset}`);
+    // Exhaustive partition (Tier 1): every defined type in exactly one bucket.
+    if (matrix.partition) {
+      const b = matrix.partition.buckets;
+      const eq = `${b.fired.length} fired + ${b['imported-only'].length} imported-only + ${b['dormant-by-design'].length} dormant-by-design + ${b['plugin-owned'].length} plugin-owned + ${b.dead.length} dead = ${matrix.partition.sum}/${matrix.definedTotal}`;
+      const undecl = matrix.undeclaredCount ? ` · ${matrix.undeclaredCount} undeclared type(s) counted apart (spine drift, outside the defined partition)` : '';
+      console.log(`  ${matrix.partition.complete ? ANSI.dim : ANSI.dead}partition: ${eq}${matrix.partition.complete ? '' : '  ← INCOMPLETE'}${undecl}${ANSI.reset}`);
+    }
+    for (const cls of ['load-bearing', 'occasional', 'single-project', 'dormant', 'imported-only']) {
       const items = matrix.rows.filter((r) => r.cls === cls);
       if (!items.length) continue;
       console.log(`\n    ${clsTag(cls)} (${items.length})`);
       for (const r of items) {
         const flag = r.undeclared ? `  ${ANSI.dead}[not in EVENT_TYPES]${ANSI.reset}`
           : (r.owner !== 'core' ? `  ${ANSI.dormant}[${r.owner}]${ANSI.reset}` : '');
-        console.log(`      ${r.type.padEnd(32)} ${String(r.count).padStart(7)}×  ${r.projects}/${matrix.n} proj${flag}`);
+        const imp = r.importedCount ? `  ${ANSI.dim}(+${r.importedCount} imported)${ANSI.reset}` : '';
+        console.log(`      ${r.type.padEnd(32)} ${String(r.count).padStart(7)}×  ${r.projects}/${matrix.n} proj${imp}${flag}`);
       }
     }
   }
@@ -175,7 +216,8 @@ export default async function insights(argv) {
   }
 
   if ((sub === 'verbs' || !sub) && transcripts) {
-    console.log(`\n  ${ANSI.bold}Verb invocations${ANSI.reset}  ${ANSI.dim}(${transcripts.filesScanned} transcript files; includes framework self-dev)${ANSI.reset}`);
+    const scanScope = roleFilter ? `scoped to role=${roleFilter} workspaces` : 'includes framework self-dev';
+    console.log(`\n  ${ANSI.bold}Verb invocations${ANSI.reset}  ${ANSI.dim}(${transcripts.filesScanned} transcript files; ${scanScope}; mentions, not executions)${ANSI.reset}`);
     const rows = [...transcripts.verbCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, sub === 'verbs' ? 999 : 15);
     for (const [v, c] of rows) {
       console.log(`      ${v.padEnd(14)} ${String(c).padStart(5)}×  ${ANSI.dim}${transcripts.verbDirs.get(v)?.size || 0} session-dir(s)${ANSI.reset}`);
@@ -183,7 +225,8 @@ export default async function insights(argv) {
   }
 
   if ((sub === 'slashes' || !sub) && transcripts) {
-    console.log(`\n  ${ANSI.bold}Slash usage${ANSI.reset}`);
+    const slashScope = roleFilter ? `scoped to role=${roleFilter} workspaces` : 'includes framework self-dev';
+    console.log(`\n  ${ANSI.bold}Slash usage${ANSI.reset}  ${ANSI.dim}(${transcripts.filesScanned} transcript files; ${slashScope}; mentions, not executions)${ANSI.reset}`);
     const rows = [...transcripts.slashCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, sub === 'slashes' ? 999 : 15);
     for (const [s, c] of rows) console.log(`      /${s.padEnd(24)} ${String(c).padStart(5)}×`);
   }

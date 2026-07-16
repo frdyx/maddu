@@ -88,6 +88,9 @@ export default async function fleet(argv) {
   for (const r of rows) {
     const live = LIVENESS[r.liveness] || LIVENESS.abandoned;
     const ver = r.version ? `v${r.version}` : 'v?';
+    // Version source per the Tier-1 SSOT contract: fleet and insights share
+    // one resolver and each surface always says where its answer came from.
+    const verSrc = ` ${C.dim}· ver from ${r.versionSource || 'unknown'}${C.reset}`;
     const behindTag = r.behind ? `${C.yellow}↓ behind${C.reset}` : (r.version === latest ? `${C.dim}latest${C.reset}` : '');
     const ageD = ageDaysFrom(r.lastActivity, now);
     const ageStr = ageD == null ? `${C.dim}—${C.reset}` : `${ageD}d`;
@@ -96,7 +99,7 @@ export default async function fleet(argv) {
     const gate = r.gatePassRate;
     const gateStr = gate ? `${gate.ok}/${gate.total} gates` : `${C.dim}no gates${C.reset}`;
     const caught = r.caught && r.caught.total ? `${C.cyan}⚿ ${r.caught.total}${C.reset}` : `${C.dim}⚿ 0${C.reset}`;
-    console.log(`  ${live.dot} ${pad(r.label, 22)} ${pad(ver, 9)} ${pad(behindTag, 18)} ${pad(curStr, 14)} ${pad(ageStr, 6)} ${pad(gateStr, 12)} ${C.dim}·${C.reset} ${caught}`);
+    console.log(`  ${live.dot} ${pad(r.label, 22)} ${pad(ver, 9)} ${pad(behindTag, 18)} ${pad(curStr, 14)} ${pad(ageStr, 6)} ${pad(gateStr, 12)} ${C.dim}·${C.reset} ${caught}${verSrc}`);
     if (r.lastSlice && r.lastSlice.summary) {
       console.log(`     ${C.dim}↳ ${r.lastSlice.summary.replace(/^SLICE STOP:\s*/i, '')}${C.reset}`);
     }

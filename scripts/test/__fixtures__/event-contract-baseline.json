@@ -1,6 +1,6 @@
 {
-  "version": "1.7.0",
-  "fingerprint": "5821a1af",
+  "version": "1.8.0",
+  "fingerprint": "30a23214",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -562,6 +562,7 @@
           "reason": "string",
           "scheduleId": "string",
           "scope": "string",
+          "source": "string?",
           "text": "string",
           "to": "string"
         }
@@ -1212,6 +1213,7 @@
       "SKILL_CREATED": {
         "frozen": false,
         "data": {
+          "source": "string?",
           "title": "string"
         }
       },
@@ -1256,7 +1258,9 @@
       },
       "SKILL_UPDATED": {
         "frozen": false,
-        "data": {}
+        "data": {
+          "source": "string?"
+        }
       },
       "SLASH_COMMANDS_SYNCED": {
         "frozen": false,

@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.7.0",
+  "x-contractVersion": "1.8.0",
   "type": "object",
   "required": [
     "v",
@@ -723,6 +723,9 @@
               "scope": {
                 "type": "string"
               },
+              "source": {
+                "type": "string"
+              },
               "text": {
                 "type": "string"
               },
@@ -1008,6 +1011,9 @@
             "type": "object",
             "additionalProperties": true,
             "properties": {
+              "source": {
+                "type": "string"
+              },
               "title": {
                 "type": "string"
               }
@@ -1029,7 +1035,12 @@
           "data": {
             "description": "An existing skill was edited.",
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "string"
+              }
+            }
           }
         }
       }

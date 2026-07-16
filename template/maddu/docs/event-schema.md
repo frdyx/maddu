@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.7.0` · **Event types:** 182
+**Contract version:** `1.8.0` · **Event types:** 182
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -52,7 +52,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `LANE_DEFAULTS_SET` | Default lane assignments were configured. | `defaults: object` |
 | `LANE_POLICY_SET` | A per-lane governance policy was set. | `policy: object` |
 | `SLICE_STOP` | A slice boundary was recorded with its summary, deliverables, and next step. | `action: string\|null`, `gates: array`, `learnings: array`, `next: array`, `paths: array`, `reason: string\|null`, `summary: string`, `targets: array`, `risk: object\|null`, `deliverables: object\|null` |
-| `INBOX_MESSAGE` | A message was written to a session inbox. | `kind: string`, `message: string`, `reason: string`, `scheduleId: string`, `scope: string`, `text: string`, `to: string` |
+| `INBOX_MESSAGE` | A message was written to a session inbox. | `kind: string`, `message: string`, `reason: string`, `scheduleId: string`, `scope: string`, `source: string?`, `text: string`, `to: string` |
 | `APPROVAL_REQUESTED` | An action was submitted for operator approval. | `action: string\|null`, `payload: object\|null`, `summary: string\|null`, `tool: string` |
 | `APPROVAL_DECIDED` | A pending approval was approved or denied. | `approvalId: string`, `decision: string`, `reason: string\|null`, `tool: string\|null` |
 | `APPROVAL_POLICY_SET` | A standing approval policy for a tool was set. | `decision: string`, `tool: string`, `lane: string\|null` |
@@ -61,8 +61,8 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `TASK_CREATED` | A task was created on the dependency-aware board. | `id: string`, `blockedBy: array`, `description: string`, `metadata: object`, `owner: string\|null`, `status: string`, `tags: array`, `title: string` |
 | `TASK_UPDATED` | A task's fields or status were updated. | `id: string`, `by: string` |
 | `TASK_COMPLETED` | A task was marked complete. | `id: string` |
-| `SKILL_CREATED` | A skill was authored and added to the gallery. | `title: string` |
-| `SKILL_UPDATED` | An existing skill was edited. | — |
+| `SKILL_CREATED` | A skill was authored and added to the gallery. | `source: string?`, `title: string` |
+| `SKILL_UPDATED` | An existing skill was edited. | `source: string?` |
 | `SKILL_DELETED` | A skill was removed from the gallery. | `id: string` |
 | `SKILL_APPLIED` | A skill body was applied during a session. | `id: string`, `sessionId: string`, `title: string` |
 | `WORKER_SPAWNED` | A sub-worker subprocess was launched. | `id: string`, `args: array`, `command: string\|null`, `error: string\|null`, `log: string`, `modelHint: string\|null`, `pid: number\|null`, `runtime: string`, `sessionId: string\|null`, `stage: string\|null`, `wrapper: string\|null` |
