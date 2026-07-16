@@ -111,11 +111,16 @@ counts must carry the retention window (oldest→newest receipt ts) and the
 dropped/unparseable-line count alongside them.
 
 **Retention** is size-capped rotation: 5MB per file with one previous
-generation kept (total ≤ ~10MB per repo). Deliberately size-only — an age
-check on the hot write path would cost a file read, and a low-volume repo
+generation kept (normal total ≤ ~10MB per repo). Deliberately size-only — an
+age check on the hot write path would cost a file read, and a low-volume repo
 keeping a long window is more telemetry, not staleness (the window readout
-makes age visible). If rotation itself keeps failing, a hard ceiling at 2×
-the cap **drops** the receipt rather than growing the file unboundedly.
+makes age visible). If rotation itself keeps failing (e.g. the prev file is
+locked), a hard ceiling **drops** receipts rather than growing the current
+file past 2× the cap — the ceiling check includes the candidate line's own
+bytes, so that bound is exact. Absolute worst case while rotation is
+persistently blocked: current ≤ 2× cap and a later rotation can move such a
+file into prev, so disk is hard-bounded at ≤ ~4× the cap (~20MB) even in
+pathological states.
 
 ```bash
 maddu log --window          # declare the corpus: window, counts, dropped, cap

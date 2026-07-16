@@ -106,9 +106,16 @@ export function resolveStateRootSync(startDir = process.cwd(), env = process.env
 // liveness-verified read (_spine.mjs:resolveSessionId) replays the spine,
 // which has no place on a hot exit path. A stale cache id mislabels
 // telemetry attribution at worst; it authorizes nothing.
+// `_testBeforeRename` is a GUARDED TEST-ONLY hook (no-op in production —
+// nothing outside scripts/test/ passes it): it runs between the size check
+// and the rotation rename, letting a test deterministically simulate the
+// concurrent-rotation race (current file vanishing mid-rotation) that cannot
+// be triggered from outside the seam (Codex diff-review round 2: the prior
+// race test never actually entered the rotation branch).
 export function recordInvocationSync({
   stateRoot, verb, sub = null, exitCode = 0, durationMs = 0,
   sessionId = null, env = process.env, rotateBytes = ROTATE_BYTES, now = null,
+  _testBeforeRename = null,
 } = {}) {
   try {
     if (!stateRoot || !verb) return false;
@@ -136,9 +143,11 @@ export function recordInvocationSync({
 
     const file = receiptsPath(stateRoot);
     const prev = prevPath(stateRoot);
+    const line = JSON.stringify(receipt) + '\n';
     let size = 0;
     try { size = statSync(file).size; } catch {}
     if (size >= rotateBytes) {
+      if (typeof _testBeforeRename === 'function') { try { _testBeforeRename(); } catch {} }
       // Rename FIRST (atomic replace on POSIX). Only if that fails — Windows
       // refuses an existing destination — drop the old generation and retry,
       // and only while the SOURCE still exists: if it's gone, another process
@@ -151,15 +160,20 @@ export function recordInvocationSync({
           try { rmSync(prev, { force: true }); renameSync(file, prev); } catch {}
         }
       }
-      // Hard ceiling: if rotation keeps failing (e.g. prev is locked), the
-      // append must not grow the file unboundedly past the declared cap —
-      // at 2× the cap we DROP the receipt instead (fail-open means dropped
-      // telemetry is fine; unbounded disk is not; Codex round 1).
+      // Hard ceiling: if rotation FAILED to clear the file (e.g. prev is
+      // locked — `after` still ≥ cap), the append must not grow it
+      // unboundedly — receipts are DROPPED instead (fail-open means dropped
+      // telemetry is fine; unbounded disk is not; Codex round 1). The check
+      // includes the candidate line's own bytes, so a rotation-blocked file
+      // can NEVER exceed 2× the cap — an exact bound, not "2× plus one
+      // receipt" (round 2). Scoped to the failed-rotation state: after a
+      // SUCCESSFUL rotation the file is fresh and a single receipt line
+      // (verb/sub capped at 64 chars) can never approach the bound.
       let after = 0;
       try { after = statSync(file).size; } catch {}
-      if (after >= rotateBytes * 2) return false;
+      if (after >= rotateBytes && after + Buffer.byteLength(line, 'utf8') > rotateBytes * 2) return false;
     }
-    appendFileSync(file, JSON.stringify(receipt) + '\n');
+    appendFileSync(file, line);
     return true;
   } catch { return false; }
 }
@@ -181,10 +195,19 @@ export async function readReceipts(stateRoot) {
       if (!line.trim()) continue;
       try {
         const r = JSON.parse(line);
-        // Full shape check: a record missing `exit` would otherwise
-        // contaminate the failure tally (undefined !== 0 reads as a failed
-        // invocation; Codex round 1). Partial records count as dropped.
-        if (r && typeof r.verb === 'string' && typeof r.ts === 'string' && Number.isInteger(r.exit) && Number.isFinite(r.ms)) out.receipts.push(r);
+        // FULL writer-shape check — every field the writer emits, exactly:
+        // a record missing `exit` would contaminate the failure tally
+        // (undefined !== 0 reads as a failed invocation; Codex round 1),
+        // a non-string truthy `sub` would corrupt the verb rollup key, and
+        // anything else off-shape is outside this reader's contract
+        // (round 2). Off-shape records count as dropped, never guessed.
+        const valid = r && r.v === 1
+          && typeof r.verb === 'string' && typeof r.ts === 'string'
+          && (r.sub === null || typeof r.sub === 'string')
+          && Number.isInteger(r.exit) && Number.isFinite(r.ms)
+          && (r.sessionId === null || typeof r.sessionId === 'string')
+          && typeof r.workspace === 'string';
+        if (valid) out.receipts.push(r);
         else out.dropped++;
       } catch { out.dropped++; }
     }

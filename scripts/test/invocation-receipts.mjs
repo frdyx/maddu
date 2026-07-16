@@ -106,19 +106,30 @@ try {
     `window spans rotated + current (got ${JSON.stringify(stats1.window)})`);
   ok(stats1.failures === 1 && stats1.verbs.find((v) => v.verb === 'doctor')?.fail === 1, 'non-zero exits tallied per verb and in total');
   ok(stats1.rotateBytes === ir.ROTATE_BYTES, 'stats declare the rotation cap');
-  // Unparseable AND partial lines are counted, never silently skipped —
+  // Unparseable AND off-shape lines are counted, never silently skipped —
   // a record missing `exit` must not contaminate the failure tally
-  // (undefined !== 0; Codex round 1).
-  const { appendFileSync, mkdirSync, writeFileSync } = await import('node:fs');
+  // (undefined !== 0; Codex round 1), and the reader enforces the FULL
+  // writer shape (a truthy non-string `sub` would corrupt the verb rollup
+  // key; Codex round 2).
+  const { appendFileSync, mkdirSync, rmSync, statSync, writeFileSync } = await import('node:fs');
+  const fullReceipt = (over = {}) => JSON.stringify({
+    v: 1, ts: '2026-07-11T00:00:00.000Z', verb: 'status', sub: null, exit: 0, ms: 1, sessionId: null, workspace: rB, ...over,
+  }) + '\n';
   appendFileSync(join(rB, '.maddu', 'state', ir.RECEIPTS_FILE),
-    'not json at all\n{"v":1}\n' + JSON.stringify({ v: 1, ts: '2026-07-11T00:00:00.000Z', verb: 'status' }) + '\n');
+    'not json at all\n{"v":1}\n'
+    + JSON.stringify({ v: 1, ts: '2026-07-11T00:00:00.000Z', verb: 'status' }) + '\n'
+    + fullReceipt({ sub: 42 })
+    + fullReceipt({ workspace: undefined })
+    + fullReceipt({ v: 2 }));
   const stats2 = await ir.readReceiptStats(rB);
-  ok(stats2.dropped === 3 && stats2.count === 2, `garbage + shape-invalid + partial lines all dropped (got dropped=${stats2.dropped}, count=${stats2.count})`);
-  ok(stats2.failures === 1, `partial record without exit never counts as a failure (got ${stats2.failures})`);
+  ok(stats2.dropped === 6 && stats2.count === 2, `garbage/partial/bad-sub/no-workspace/wrong-v lines all dropped (got dropped=${stats2.dropped}, count=${stats2.count})`);
+  ok(stats2.failures === 1, `off-shape records never count as failures (got ${stats2.failures})`);
+  ok(!stats2.verbs.some((v) => v.verb.includes('42')), 'non-string sub cannot corrupt the verb rollup');
 
   // Rotation hard ceiling: when rotation keeps failing (prev is an unremovable
-  // non-empty DIRECTORY), the append is DROPPED at 2× the cap instead of
-  // growing the file unboundedly (Codex round 1).
+  // non-empty DIRECTORY), the append is DROPPED instead of growing the file
+  // (Codex round 1); the ceiling includes the candidate line's own bytes so
+  // the 2×-cap bound is EXACT, never "2× plus one receipt" (round 2).
   const rHard = join(tmp, 'repoHard');
   await mkdir(join(rHard, '.maddu', 'state'), { recursive: true });
   mkdirSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_PREV_FILE));
@@ -126,24 +137,49 @@ try {
   writeFileSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_FILE), 'x'.repeat(200));
   ok(ir.recordInvocationSync({ stateRoot: rHard, verb: 'status', env: {}, rotateBytes: 100 }) === false,
     'rotation-blocked file at 2× cap drops the receipt (returns false)');
-  const { statSync } = await import('node:fs');
   ok(statSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_FILE)).size === 200, 'blocked corpus did not grow past the hard ceiling');
-  // Concurrent-rotation guard: when the CURRENT file is already gone (another
-  // process rotated it), a failed rename must NOT delete the prev generation.
+  // Exact-bound edge: file just UNDER 2× cap, but the candidate line would
+  // cross it → still dropped, size unchanged.
+  writeFileSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_FILE), 'x'.repeat(195));
+  ok(ir.recordInvocationSync({ stateRoot: rHard, verb: 'status', env: {}, rotateBytes: 100 }) === false,
+    'line that would cross the 2× bound is dropped even below the pre-append ceiling');
+  ok(statSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_FILE)).size === 195, 'exact bound: corpus never exceeds 2× the cap');
+
+  // Concurrent-rotation guard, exercised FOR REAL via the guarded test-only
+  // hook (production passes nothing): the rotation branch is entered (size ≥
+  // cap), then the current file vanishes mid-rotation — as if another process
+  // rotated it first — and the fallback must NOT delete the prev generation
+  // that other process just created (Codex rounds 1+2).
   const rRace = join(tmp, 'repoRace');
   await mkdir(join(rRace, '.maddu', 'state'), { recursive: true });
-  writeFileSync(join(rRace, '.maddu', 'state', ir.RECEIPTS_PREV_FILE), JSON.stringify({ v: 1, ts: '2026-07-01T00:00:00.000Z', verb: 'doctor', exit: 0, ms: 1 }) + '\n');
-  ok(ir.recordInvocationSync({ stateRoot: rRace, verb: 'status', env: {}, rotateBytes: 100 }) === true,
-    'missing current + existing prev: write proceeds');
+  const prevLine = JSON.stringify({ v: 1, ts: '2026-07-01T00:00:00.000Z', verb: 'doctor', sub: null, exit: 0, ms: 1, sessionId: null, workspace: rRace }) + '\n';
+  writeFileSync(join(rRace, '.maddu', 'state', ir.RECEIPTS_PREV_FILE), prevLine);
+  writeFileSync(join(rRace, '.maddu', 'state', ir.RECEIPTS_FILE), 'y'.repeat(150));
+  ok(ir.recordInvocationSync({
+    stateRoot: rRace, verb: 'status', env: {}, rotateBytes: 100,
+    _testBeforeRename: () => rmSync(join(rRace, '.maddu', 'state', ir.RECEIPTS_FILE)),
+  }) === true, 'race: rotation branch entered, current vanished mid-rotation, write still proceeds');
   const race = await ir.readReceipts(rRace);
-  ok(race.receipts.some((r) => r.verb === 'doctor'), 'prev generation survives when current was already rotated away');
+  ok(race.receipts.some((r) => r.verb === 'doctor'), 'race: prev generation SURVIVES a failed rename whose source is gone');
+  ok(race.receipts.some((r) => r.verb === 'status'), 'race: the new receipt landed in a fresh current file');
+
+  // Normal rotation replaces prev (rename-first on POSIX; rm+retry fallback
+  // on Windows — same observable outcome on both).
+  const rRot = join(tmp, 'repoRot');
+  await mkdir(join(rRot, '.maddu', 'state'), { recursive: true });
+  writeFileSync(join(rRot, '.maddu', 'state', ir.RECEIPTS_PREV_FILE), prevLine);
+  writeFileSync(join(rRot, '.maddu', 'state', ir.RECEIPTS_FILE), fullReceipt({ verb: 'old-current' }).repeat(3));
+  ok(ir.recordInvocationSync({ stateRoot: rRot, verb: 'status', env: {}, rotateBytes: 100 }) === true, 'rotation with existing prev file succeeds');
+  const rot = await ir.readReceipts(rRot);
+  ok(!rot.receipts.some((r) => r.verb === 'doctor') && rot.receipts.filter((r) => r.verb === 'old-current').length === 3 && rot.receipts.some((r) => r.verb === 'status'),
+    'rotation replaced prev with the old current; new receipt starts the fresh current');
 
   // insights.harvestReceipts: per-workspace rollup with role + honesty fields.
   const harvested = await insights.harvestReceipts([
     { id: 'b', label: 'repoB', path: rB, role: 'project' },
     { id: 'none', label: 'no-corpus', path: join(tmp, 'repoC-nothere') },
   ]);
-  ok(harvested.length === 2 && harvested[0].name === 'repoB' && harvested[0].count === 2 && harvested[0].dropped === 3,
+  ok(harvested.length === 2 && harvested[0].name === 'repoB' && harvested[0].count === 2 && harvested[0].dropped === 6,
     'harvestReceipts rolls up counts + dropped per workspace');
   ok(harvested[1].count === 0 && harvested[1].window === null, 'workspace without a corpus reports 0 receipts, window null — honest no-telemetry');
 
