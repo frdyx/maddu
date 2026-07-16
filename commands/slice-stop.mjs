@@ -267,6 +267,39 @@ export default async function sliceStop(argv) {
     console.error(`  hindsight failed (non-fatal): ${err.message}`);
   }
 
+  // Learn candidate detection (usage-audit Tier 5): preview what `maddu
+  // learn` would harvest from THIS slice's window, at the moment the
+  // operator/agent is already looking. Containment contract (see
+  // learn-slice-trigger.mjs): runs only AFTER the stop event is appended,
+  // inside try/catch — no detection outcome can affect the stop; bounded
+  // input; 1500ms cooperative deadline raced so this print never stalls the
+  // ritual. READ-ONLY (previews + one-liners onto existing learn verbs, no
+  // auto-writing) — which is why it carries no rule-#9 gauntlet entry.
+  // MADDU_TEST_LEARN_DETECTOR is a test-only hook ('throw'|'slow'), honored
+  // ONLY under MADDU_SELF_TEST=1 (Codex round 1: without the gate it would
+  // be a live switch in ordinary production invocations) — it exists so the
+  // isolation and deadline-race acceptance tests exercise the REAL failure
+  // paths through this exact call site.
+  try {
+    const lt = await loadLibOptional('learn-slice-trigger.mjs');
+    if (lt?.runDetectionPreview) {
+      const hook = process.env.MADDU_SELF_TEST === '1' ? (process.env.MADDU_TEST_LEARN_DETECTOR || null) : null;
+      const res = await lt.runDetectionPreview(repoRoot, {
+        sessionId, stopEventId: ev.id,
+        _testThrow: hook === 'throw', _testDelayMs: hook === 'slow' ? 5000 : 0,
+      });
+      if (res.timedOut) {
+        console.log(`  learn: detection passed its ${lt.DETECT_DEADLINE_MS}ms budget — skipped this stop (straggler abandoned)`);
+      } else if (res.candidates.length) {
+        console.log(`  learn: ${res.candidates.length} candidate(s) in this slice's window${res.truncated ? ' (window capped)' : ''}${res.skippedOversize ? ` (${res.skippedOversize} oversize line(s) skipped)` : ''}`);
+        for (const c of res.candidates.slice(0, 3)) {
+          console.log(`    - [${c.category}] ${String(c.failure || '').slice(0, 70)}`);
+        }
+        console.log(`    review: maddu learn digest --spine   · accept: maddu learn run --spine   · nothing is written until you run it`);
+      }
+    }
+  } catch { /* isolation contract: never affects the stop */ }
+
   // Rule-#9 gauntlet (shared): a single allowlist read for every auto-trigger
   // below. Prefers the gauntlet helper; falls back to an inline read if an
   // older install predates it. Either way it fails CLOSED on an unreadable file.

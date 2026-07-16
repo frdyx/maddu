@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.105.0] · 2026-07-16 · Usage-audit Tier 5 — learn as a measured trial
+
+**Final tier of the 2026-07-16 usage-audit roadmap.** The audit found `maddu learn` self-dev-only: 11 accepted corrections in the framework repo, **0 across all 21 consumers** — including repos with dozens of slice-stops. The verbs exist; nothing surfaced them where the work happens. Verbs **72/72**; gates **74**; **no new event type / no contract bump** (the `LEARN_RETRIEVED` bump was considered at kickoff and not taken — recorded, not silent).
+
+- **Detection at the ritual boundary**: `slice-stop` (and `session close`) run a READ-ONLY learn candidate detection pass (`learn-slice-trigger.mjs`) and preview what `maddu learn` would harvest — accept one-liners point at the existing verbs (`learn digest --spine` / `learn run --spine`). **Nothing is auto-written**, so no rule-#9 gauntlet entry.
+- **Containment contract, each property proven through the real CLI**: post-append try/catch isolation (a deliberately-throwing detector still stops green); bounded session window (back to the previous slice-stop, 500 lines AND 256KB total, >64KB lines skipped unparsed + counted); 1500ms cooperative deadline raced with an abandoned straggler (a slow detector never stalls the ritual — tested).
+- **No new heuristics**: detection reuses the existing deterministic `learn-spine` miners (tool refusal→completion pairs, gate fail→ok arcs, non-clean review findings).
+- **Measured trial with a pre-authorized demotion**: adoption metric = accepted corrections (`LEARN_CORRECTION_WRITTEN`); 4-week window, cohort ≥3 non-fixture consumer repos ×≥10 slice-stops, **12-week hard backstop** (a cohort that never forms IS the verdict); on failure the demotion PR removes the hook-in and reclassifies learn as expert/self-dev — binding. Tracked as a `maddu plan`.
+
 ## [v1.104.0] · 2026-07-16 · Usage-audit Tier 4b — minimal default catalog
 
 **Tier 4b of the 2026-07-16 usage-audit roadmap** (second of Tier 4's two PRs): new installs stop prescribing a lane taxonomy. The audit measured the generic 7-lane seed **76% dead** fleet-wide while 64% of consumer claims were ad-hoc — work is feature-shaped, not directory-shaped. Verbs **72/72**; gates **74**; no new event type.

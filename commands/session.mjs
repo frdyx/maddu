@@ -200,6 +200,29 @@ export default async function session(argv) {
     });
     if (sessionActive) await sessionActive.clearActiveSession(repoRoot);
     if (process.stdout.isTTY) console.log(`closed  ${sessionId}`);
+    // Learn candidate detection at the session boundary (usage-audit Tier 5)
+    // — same containment contract as the slice-stop hook-in (post-append,
+    // try/catch isolated, bounded window, raced deadline, READ-ONLY preview;
+    // see learn-slice-trigger.mjs). A close is often the last chance to
+    // surface what this session's failures taught before the context is gone.
+    try {
+      const lt = await loadLibOptional('learn-slice-trigger.mjs');
+      if (lt?.runDetectionPreview) {
+        // Same MADDU_SELF_TEST-gated test hook as slice-stop, so the
+        // isolation test exercises THIS call site too (Codex round 1).
+        const hook = process.env.MADDU_SELF_TEST === '1' ? (process.env.MADDU_TEST_LEARN_DETECTOR || null) : null;
+        const res = await lt.runDetectionPreview(repoRoot, {
+          sessionId,
+          _testThrow: hook === 'throw', _testDelayMs: hook === 'slow' ? 5000 : 0,
+        });
+        // Not TTY-gated (Codex round 2): agents pipe everything, and an
+        // observable line is what lets the isolation test PROVE the
+        // throwing path executed (throw → line absent; clean → present).
+        if (!res.timedOut && res.candidates.length) {
+          console.log(`  learn: ${res.candidates.length} candidate(s) from this session — review: maddu learn digest --spine · accept: maddu learn run --spine`);
+        }
+      }
+    } catch { /* isolation contract: never affects the close */ }
     return;
   }
 
