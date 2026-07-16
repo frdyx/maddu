@@ -193,13 +193,37 @@ try {
     _testAfterMutate: () => appendFile(join(rRace, '.maddu', 'events', '000000000001.ndjson'), claimLine('doomed')),
   });
   ok(prRace.racedClaim === true, 'a claim landing during the prune is positively detected (racedClaim)');
-  // catalogState: missing vs malformed vs ok are distinguishable, so the
-  // fleet report can surface malformed without flagging lane-less repos.
+  // catalogState: missing vs malformed vs unreadable vs ok are
+  // distinguishable, so the fleet report can surface failures without
+  // flagging genuinely lane-less repos (Codex rounds 3+4).
   const rNoCat = join(tmp, 'no-catalog');
   await mkdir(join(rNoCat, '.maddu', 'events'), { recursive: true });
   ok((await obs.laneReport(rNoCat)).catalogState === 'missing', 'absent catalog reads as missing');
   ok((await obs.laneReport(rBadCat)).catalogState === 'malformed', 'unparseable catalog reads as malformed');
   ok(report.catalogState === 'ok', 'healthy catalog reads as ok');
+  // Non-ENOENT read failure (catalog.json is a DIRECTORY → EISDIR) is
+  // 'unreadable', never bucketed with missing (Codex round 4).
+  const rDirCat = join(tmp, 'dir-catalog');
+  await mkdir(join(rDirCat, '.maddu', 'lanes', 'catalog.json'), { recursive: true });
+  ok((await obs.laneReport(rDirCat)).catalogState === 'unreadable', `I/O-failed catalog reads as unreadable (got ${(await obs.laneReport(rDirCat)).catalogState})`);
+
+  // ── Lock ownership (Codex round 4) ────────────────────────────────────────
+  // An evicted (stale-broken) holder: detects ownership loss via
+  // assertOwned, and its release NEVER deletes the successor's lock.
+  await obs.withCatalogLock(rConc, async (assertOwned) => {
+    await assertOwned(); // healthy while owned
+    // Simulate a stale-break + takeover: replace the lock with a foreign one.
+    await rm(join(rConc, '.maddu', 'lanes', 'catalog.lock'), { recursive: true, force: true });
+    await mkdir(join(rConc, '.maddu', 'lanes', 'catalog.lock'));
+    await writeFile(join(rConc, '.maddu', 'lanes', 'catalog.lock', 'owner.json'), JSON.stringify({ token: 'foreign-successor' }));
+    let threw = false;
+    try { await assertOwned(); } catch { threw = true; }
+    ok(threw, 'evicted holder detects ownership loss and aborts instead of writing');
+  });
+  const { stat: statFs } = await import('node:fs/promises');
+  ok(await statFs(join(rConc, '.maddu', 'lanes', 'catalog.lock')).then(() => true, () => false),
+    "evictee's release spares the successor's lock");
+  await rm(join(rConc, '.maddu', 'lanes', 'catalog.lock'), { recursive: true, force: true });
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }

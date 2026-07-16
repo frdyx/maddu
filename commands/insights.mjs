@@ -98,11 +98,11 @@ export default async function insights(argv) {
       if (roleFilter && role !== roleFilter) continue;
       let r;
       try { r = await obs.laneReport(w.path); } catch { continue; }
-      // Skip only genuinely lane-less repos (no catalog file, no claims,
-      // clean scan). A MALFORMED catalog or an incomplete spine scan is a
-      // failure the fleet table must surface, never silently hide (Codex
-      // round 3).
-      if (!r.catalog.length && !r.adHoc.length && r.catalogState !== 'malformed' && r.claimsComplete) continue;
+      // Skip only genuinely lane-less repos (catalog MISSING — never had
+      // lanes — with no claims and a clean scan). A malformed OR unreadable
+      // catalog and an incomplete spine scan are failures the fleet table
+      // must surface, never silently hide (Codex rounds 3+4).
+      if (!r.catalog.length && !r.adHoc.length && r.catalogState === 'missing' && r.claimsComplete) continue;
       const claimedCatalog = r.catalog.filter((l) => l.claims > 0).length;
       const realAdHoc = r.adHoc.filter((a) => !a.ephemeral);
       rows.push({
@@ -114,7 +114,8 @@ export default async function insights(argv) {
         ephemeral: r.adHoc.length - realAdHoc.length,
         suggestions: r.suggestions.map((s) => s.id),
         totalClaims: r.totalClaims,
-        incomplete: !r.claimsComplete || !r.catalogReadable,
+        catalogState: r.catalogState || (r.catalogReadable ? 'ok' : 'malformed'),
+        claimsComplete: !!r.claimsComplete,
       });
     }
     rows.sort((a, b) => b.totalClaims - a.totalClaims || a.name.localeCompare(b.name));
@@ -129,9 +130,16 @@ export default async function insights(argv) {
     const adhocTotal = rows.reduce((a, r) => a + r.adHoc, 0);
     console.log(`  ${ANSI.dim}${defined} catalog placements · ${dead} never claimed (${defined ? Math.round((dead / defined) * 100) : 0}%) · ${adhocTotal} distinct ad-hoc ids in real use${ANSI.reset}\n`);
     for (const r of rows) {
-      const sug = r.suggestions.length ? `  ${ANSI.lb}suggest: ${r.suggestions.join(', ')}${ANSI.reset}` : '';
       const roleTag = r.role !== 'consumer' ? ` ${ANSI.dim}[${r.role}]${ANSI.reset}` : '';
-      const inc = r.incomplete ? `  ${ANSI.sp}(incomplete scan — counts are a floor)${ANSI.reset}` : '';
+      // A broken catalog makes the catalog-vs-ad-hoc CLASSIFICATION
+      // unknowable — render the failure, never a table row that presents
+      // claimed ids as classified ad-hoc/suggestions (Codex round 4).
+      if (r.catalogState !== 'ok') {
+        console.log(`    ${r.name.padEnd(18)} ${ANSI.dead}catalog ${r.catalogState.toUpperCase()}${ANSI.reset} — lane classification unknowable ${ANSI.dim}(${r.totalClaims} lifetime claim(s) observed; fix .maddu/lanes/catalog.json)${ANSI.reset}${roleTag}`);
+        continue;
+      }
+      const sug = r.suggestions.length ? `  ${ANSI.lb}suggest: ${r.suggestions.join(', ')}${ANSI.reset}` : '';
+      const inc = !r.claimsComplete ? `  ${ANSI.sp}(incomplete spine scan — counts are a floor; dead withheld)${ANSI.reset}` : '';
       console.log(`    ${r.name.padEnd(18)} ${String(r.defined).padStart(3)} defined · ${String(r.claimedCatalog).padStart(3)} claimed · ${ANSI.dead}${String(r.deadCatalog).padStart(3)} dead${ANSI.reset} · ${String(r.adHoc).padStart(3)} ad-hoc${r.ephemeral ? ` ${ANSI.dim}(+${r.ephemeral} ephemeral)${ANSI.reset}` : ''}${roleTag}${sug}${inc}`);
     }
     console.log(`\n  ${ANSI.dim}adopt observed reality per repo: maddu lane suggest (inside the repo)${ANSI.reset}`);

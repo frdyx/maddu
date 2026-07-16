@@ -82,7 +82,14 @@ export async function harvestLaneClaims(repoRoot) {
 async function readCatalogTolerant(repoRoot) {
   const p = pathsFor(repoRoot).laneCatalog;
   let raw;
-  try { raw = await readFile(p, 'utf8'); } catch { return { catalog: { lanes: [] }, raw: null, readable: false, state: 'missing' }; }
+  try { raw = await readFile(p, 'utf8'); }
+  catch (e) {
+    // Only a genuine ENOENT is 'missing' (never had lanes). A permission or
+    // I/O error is 'unreadable' — a FAILURE the fleet must surface, never
+    // silently bucket with lane-less repos (Codex round 4).
+    const state = e && e.code === 'ENOENT' ? 'missing' : 'unreadable';
+    return { catalog: { lanes: [] }, raw: null, readable: false, state };
+  }
   try {
     const catalog = JSON.parse(raw);
     if (!catalog || !Array.isArray(catalog.lanes)) return { catalog: { lanes: [] }, raw, readable: false, state: 'malformed' };
@@ -91,23 +98,39 @@ async function readCatalogTolerant(repoRoot) {
 }
 
 // Serialize maddu-side catalog mutations with an atomic lock DIRECTORY
-// (mkdir fails EEXIST — the worktrees-lib pattern). This is what actually
-// closes the CLI-writer-vs-CLI-writer races (Codex round 3: the byte-
-// equality rollback guard was itself a non-atomic check-then-act): inside
-// the lock, read → guard → write → append → rollback run without another
-// LOCK-HONORING writer interleaving. Residual, stated plainly: the bridge
-// admin route and operator hand-edits do NOT take this lock — for those
-// the atomic write + conditional rollback remain best-effort, and the
-// spine record is the reconciliation source. Stale locks (crashed holder)
-// are broken after 30s; acquisition gives up at 5s with a retry hint.
+// (mkdir fails EEXIST — the worktrees-lib pattern) carrying an OWNER TOKEN
+// (Codex round 4: without one, a stale-broken slow holder's `finally`
+// would delete the SUCCESSOR's lock and reopen the lost-update window).
+// Inside the lock, read → guard → write → append → rollback run without
+// another LOCK-HONORING writer interleaving. Ownership semantics:
+//   - the holder's callback receives `assertOwned()`; mutateCatalog calls
+//     it immediately before the catalog write, so an evicted holder ABORTS
+//     instead of writing over the successor (the residual check→write gap
+//     is sub-ms against a 30s eviction threshold);
+//   - release deletes the lock ONLY while it still carries our token — a
+//     successor's lock is never torn down by the evictee.
+// Residuals, stated plainly: the bridge admin route and operator hand-
+// edits do NOT take this lock (atomic write + conditional rollback are
+// best-effort there; the spine is the reconciliation source), and a
+// legitimate holder stalled >30s is evicted by design — it aborts at its
+// next assertOwned rather than corrupting. Acquisition gives up at 5s
+// with a retry hint.
 const LOCK_STALE_MS = 30_000;
 const LOCK_WAIT_MS = 5_000;
-async function withCatalogLock(repoRoot, fn) {
+function lockPaths(repoRoot) {
   const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
+  return { lockDir, ownerFile: join(lockDir, 'owner.json') };
+}
+export async function withCatalogLock(repoRoot, fn) {
+  const { lockDir, ownerFile } = lockPaths(repoRoot);
+  const token = `${process.pid}-${randomBytes(8).toString('hex')}`;
   const t0 = Date.now();
   while (true) {
-    try { await mkdir(lockDir, { recursive: false }); break; }
-    catch (e) {
+    try {
+      await mkdir(lockDir, { recursive: false });
+      await writeFile(ownerFile, JSON.stringify({ token, pid: process.pid, ts: new Date().toISOString() }));
+      break;
+    } catch (e) {
       if (!e || e.code !== 'EEXIST') throw e;
       try {
         const st = await stat(lockDir);
@@ -117,8 +140,18 @@ async function withCatalogLock(repoRoot, fn) {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  try { return await fn(); }
-  finally { try { await rm(lockDir, { recursive: true, force: true }); } catch {} }
+  const ownsLock = async () => {
+    try { return JSON.parse(await readFile(ownerFile, 'utf8')).token === token; } catch { return false; }
+  };
+  const assertOwned = async () => {
+    if (!(await ownsLock())) {
+      throw new Error('lane catalog lock lost (stale-broken by another process) — aborting WITHOUT writing; retry the operation');
+    }
+  };
+  try { return await fn(assertOwned); }
+  finally {
+    try { if (await ownsLock()) await rm(lockDir, { recursive: true, force: true }); } catch {}
+  }
 }
 // Exposed for tests only: age a lock so the stale-break path is provable.
 export async function _testAgeLock(repoRoot, ageMs) {
@@ -194,8 +227,11 @@ export async function laneReport(repoRoot) {
 // admin action (the catalog diff is still visible in git/status surfaces).
 // `_testFailAppend` is a GUARDED TEST-ONLY hook (no-op in production) that
 // forces the append to throw so the rollback path is provable.
-async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, _testFailAppend }) {
+async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, assertOwned = null, _testFailAppend }) {
   const nextRaw = serializeCatalog(nextCatalog);
+  // Ownership check immediately before the dangerous action: an evicted
+  // (stale-broken) holder aborts here instead of writing over its successor.
+  if (assertOwned) await assertOwned();
   await writeCatalogAtomic(repoRoot, nextRaw);
   try {
     if (_testFailAppend) throw new Error('injected append failure (test hook)');
@@ -210,7 +246,10 @@ async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, _testFailA
     let restored = false;
     try {
       const current = await readFile(pathsFor(repoRoot).laneCatalog, 'utf8');
-      if (current === nextRaw) { await writeCatalogAtomic(repoRoot, prevRaw); restored = true; }
+      if (current === nextRaw && (!assertOwned || (await assertOwned(), true))) {
+        await writeCatalogAtomic(repoRoot, prevRaw);
+        restored = true;
+      }
     } catch {}
     throw new Error(restored
       ? `spine append failed — catalog restored, nothing adopted/pruned (${e.message})`
@@ -219,7 +258,7 @@ async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, _testFailA
 }
 
 export async function adoptLane(repoRoot, id, { by = null, _testFailAppend = false } = {}) {
-  return withCatalogLock(repoRoot, async () => {
+  return withCatalogLock(repoRoot, async (assertOwned) => {
     const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
     const report = await laneReport(repoRoot);
     if (cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is already in the catalog`);
@@ -233,7 +272,7 @@ export async function adoptLane(repoRoot, id, { by = null, _testFailAppend = fal
     const lane = { id, scope: `Adopted from ${s.claims} observed ad-hoc claim(s) via \`maddu lane suggest\`. Edit this scope to describe the surface.` };
     const next = { ...cat, lanes: [...cat.lanes, lane] };
     const ev = await mutateCatalog(repoRoot, {
-      prevRaw, nextCatalog: next, _testFailAppend,
+      prevRaw, nextCatalog: next, assertOwned, _testFailAppend,
       event: { type: EVENT_TYPES.LANE_ADDED, actor: by, lane: id, data: { lane } },
     });
     return { lane, event: ev.id, claims: s.claims };
@@ -261,7 +300,7 @@ export async function adoptLane(repoRoot, id, { by = null, _testFailAppend = fal
 // positive-detection path is provable (Codex round 3: only the negative
 // path was tested).
 export async function pruneLane(repoRoot, id, { by = null, _testFailAppend = false, _testAfterMutate = null } = {}) {
-  return withCatalogLock(repoRoot, async () => {
+  return withCatalogLock(repoRoot, async (assertOwned) => {
     const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
     if (!cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is not in the catalog`);
     const { claims, complete } = await harvestLaneClaims(repoRoot);
@@ -270,7 +309,7 @@ export async function pruneLane(repoRoot, id, { by = null, _testFailAppend = fal
     if (used > 0) throw new Error(`lane "${id}" has ${used} lifetime claim(s) — prune is only for never-claimed entries`);
     const next = { ...cat, lanes: cat.lanes.filter((l) => l.id !== id) };
     const ev = await mutateCatalog(repoRoot, {
-      prevRaw, nextCatalog: next, _testFailAppend,
+      prevRaw, nextCatalog: next, assertOwned, _testFailAppend,
       event: { type: EVENT_TYPES.LANE_REMOVED, actor: by, lane: id, data: { ok: true } },
     });
     if (typeof _testAfterMutate === 'function') { try { await _testAfterMutate(); } catch {} }
