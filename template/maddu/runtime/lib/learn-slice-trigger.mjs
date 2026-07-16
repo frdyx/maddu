@@ -25,7 +25,10 @@
 //   (c) COOPERATIVE DEADLINE — the deadline (1500ms) is checked between
 //       per-event parse steps, AND the caller-facing runDetectionPreview
 //       races detection against a timer and returns without awaiting the
-//       straggler; process exit reaps leftover work. Synchronous preemption
+//       straggler. The straggler is ABANDONED logically, not cancelled —
+//       Node has no fs-read cancellation, so its run-out is bounded by one
+//       in-flight file read plus one parse step before the cooperative
+//       check terminates it (both finite). Synchronous preemption
 //       of a single parse step is NOT claimed — with the 64KB/256KB caps the
 //       residual overrun is bounded by one ≤64KB line parse.
 //
@@ -44,7 +47,7 @@
 //
 // Pure lib — no console output, no process.exit. Node stdlib only (rule #4).
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { listSpineShards } from './insights.mjs';
 import { spineCandidates } from './learn-spine.mjs';
@@ -66,7 +69,18 @@ export const MAX_TOTAL_BYTES = 256 * 1024;
 // the window (safe direction); without the probe an oversize prior stop
 // would silently widen it (round 1).
 async function collectWindow(repoRoot, { sessionId }) {
-  const shards = (await listSpineShards(join(repoRoot, '.maddu', 'events'))) || [];
+  const shardPaths = (await listSpineShards(join(repoRoot, '.maddu', 'events'))) || [];
+  // Walk shards in RECENCY order (mtime desc), not path order: on a
+  // partitioned repo a lexically-first OLD partition must not burn the
+  // caps before the newer events / the session boundary in another
+  // partition are even reached (Codex round 2). mtime is the filesystem's
+  // own answer to "which shard was appended to last"; on flat repos it
+  // coincides with segment-number order.
+  const shards = [];
+  for (const p of shardPaths) {
+    try { shards.push({ p, mtime: (await stat(p)).mtimeMs }); } catch {}
+  }
+  shards.sort((a, b) => a.mtime - b.mtime); // oldest first; walked backwards below
   const collected = [];
   let skippedOversize = 0;
   let truncated = false;
@@ -75,7 +89,7 @@ async function collectWindow(repoRoot, { sessionId }) {
   outer:
   for (let s = shards.length - 1; s >= 0; s--) {
     let text;
-    try { text = await readFile(shards[s], 'utf8'); } catch { continue; }
+    try { text = await readFile(shards[s].p, 'utf8'); } catch { continue; }
     const lines = text.split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
@@ -97,12 +111,15 @@ async function collectWindow(repoRoot, { sessionId }) {
   return { lines: collected, skippedOversize, truncated };
 }
 
-// Chronological sort key: the 14-digit wall-clock embedded in every event id
-// (evt_YYYYMMDDHHMMSS_<rand>). The random suffix is NOT ordered, so within
-// the same second the collection index (reverse-walk position) breaks ties —
-// exact file order for flat repos; bounded-arbitrary only across partitions
-// within one second.
-function idClock(e) {
+// Chronological sort key: the event's ISO `ts` (millisecond resolution,
+// lexically sortable — Codex round 2: the id's embedded wall-clock is
+// seconds-only and its random suffix is unordered), falling back to the
+// id's 14-digit clock when ts is missing. Same-timestamp ties break on the
+// collection index (reverse-walk position, larger = older) — exact file
+// order for flat repos; bounded-arbitrary only across partitions within
+// one millisecond.
+function clockKey(e) {
+  if (typeof e?.ts === 'string' && e.ts) return e.ts;
   const id = String(e?.id || '');
   return id.startsWith('evt_') ? id.slice(4, 18) : '';
 }
@@ -134,11 +151,10 @@ export async function detectCandidates(repoRoot, {
   let candidates = [];
   if (!timedOut) {
     // Restore CHRONOLOGICAL order (round 1: shard-path order is meaningless
-    // across partitions): wall-clock prefix from the event id, collection
-    // index (reverse-walk position, larger = older) breaking same-second
+    // across partitions): millisecond ts primary, collection index breaking
     // ties so flat repos keep exact file order.
     parsed.sort((a, b) => {
-      const ca = idClock(a.e), cb = idClock(b.e);
+      const ca = clockKey(a.e), cb = clockKey(b.e);
       if (ca !== cb) return ca < cb ? -1 : 1;
       return b.idx - a.idx;
     });
@@ -150,12 +166,14 @@ export async function detectCandidates(repoRoot, {
     const windowEvents = parsed.slice(boundary + 1)
       .map((p) => p.e)
       .filter((e) => e && e.id !== stopEventId)
-      // Cross-session honesty (round 1): events ATTRIBUTED to another
-      // session never leak into this session's preview. Null-actor events
-      // (the TOOL_* census — live tool events carry no session linkage)
-      // stay in: they cannot be attributed and the miners need them; that
-      // residual is documented, not hidden.
-      .filter((e) => e.actor == null || e.actor === sessionId);
+      // Cross-session honesty (rounds 1+2): events ATTRIBUTED to another
+      // session never leak into this session's preview, and the null-actor
+      // allowance is EXACTLY the documented residual — TOOL_* census events
+      // only (live tool events carry no session linkage; the tool-pair
+      // miner needs them). Null-actor GATE_RAN / SLICE_REVIEWED etc. are
+      // excluded: they are repo-global or carry their own linkage and
+      // cannot be claimed for this session.
+      .filter((e) => e.actor === sessionId || (e.actor == null && String(e.type || '').startsWith('TOOL_')));
     candidates = spineCandidates(windowEvents);
   }
   return { candidates, skippedOversize, truncated, linesScanned: parsed.length, timedOut, raced: false };
@@ -164,8 +182,9 @@ export async function detectCandidates(repoRoot, {
 // Caller-facing wrapper: races detection against the deadline (+100ms grace
 // over the cooperative check) and returns WITHOUT awaiting a straggler —
 // the ritual's print happens within budget no matter what detection does;
-// process exit reaps leftover work. The timer is unref'd so it never holds
-// the process open.
+// the straggler's run-out is bounded (one fs read + one parse step to the
+// next cooperative check). The deadline timer is REF'd so the race always
+// resolves, and cleared the moment detection wins.
 export async function runDetectionPreview(repoRoot, opts = {}) {
   const deadlineMs = opts.deadlineMs ?? DETECT_DEADLINE_MS;
   let timer = null;

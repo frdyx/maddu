@@ -215,7 +215,10 @@ export default async function session(argv) {
           sessionId,
           _testThrow: hook === 'throw', _testDelayMs: hook === 'slow' ? 5000 : 0,
         });
-        if (!res.timedOut && res.candidates.length && process.stdout.isTTY) {
+        // Not TTY-gated (Codex round 2): agents pipe everything, and an
+        // observable line is what lets the isolation test PROVE the
+        // throwing path executed (throw → line absent; clean → present).
+        if (!res.timedOut && res.candidates.length) {
           console.log(`  learn: ${res.candidates.length} candidate(s) from this session — review: maddu learn digest --spine · accept: maddu learn run --spine`);
         }
       }

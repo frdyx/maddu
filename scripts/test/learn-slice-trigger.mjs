@@ -51,9 +51,11 @@ try {
   await writeFile(join(rUnit, '.maddu', 'events', '000000000001.ndjson'), [
     refusedLine('git'), completedLine('git'),                       // BEFORE the boundary — must not leak in
     evLine('SLICE_STOP', { summary: 'prior stop' }, { actor: 'ses_t', id: 'evt_20260716090000_prior0' }),
-    refusedLine('npm'), completedLine('npm'),                        // in-window tool pair
-    evLine('GATE_RAN', { gateId: 'g1', ok: false, status: 'fail', severity: 'critical' }),
-    evLine('GATE_RAN', { gateId: 'g1', ok: true, status: 'ok', severity: 'critical' }), // in-window gate arc
+    refusedLine('npm'), completedLine('npm'),                        // in-window tool pair (null-actor census)
+    // Gate events carry session attribution (as slice-stop-run gates do) —
+    // null-actor GATE_RAN is deliberately outside the window residual.
+    evLine('GATE_RAN', { gateId: 'g1', ok: false, status: 'fail', severity: 'critical' }, { actor: 'ses_t' }),
+    evLine('GATE_RAN', { gateId: 'g1', ok: true, status: 'ok', severity: 'critical' }, { actor: 'ses_t' }), // in-window gate arc
   ].join(''));
   const det = await lt.detectCandidates(rUnit, { sessionId: 'ses_t' });
   ok(det.candidates.length === 2, `seeded window yields exactly the in-window candidates (got ${det.candidates.length}: ${det.candidates.map((c) => c.category).join(',')})`);
@@ -149,7 +151,9 @@ try {
   // like every spine fixture in this suite family).
   await appendFile(join(fixture, '.maddu', 'events', '000000000001.ndjson'), refusedLine('pytest') + completedLine('pytest'));
 
+  const tBase = Date.now();
   const s1 = run(['slice-stop', 'SLICE STOP: t5 preview slice. Action: fixture. Reason: test.']);
+  const baseElapsed = Date.now() - tBase; // spawn + normal-stop baseline for the relative deadline bound
   ok(s1.status === 0, `slice-stop exits 0 (got ${s1.status}: ${(s1.stderr || '').slice(0, 200)})`);
   ok(/learn: 1 candidate\(s\)/.test(s1.stdout) && /spine-tool-recovery/.test(s1.stdout),
     `slice-stop PREVIEWS the seeded candidate (stdout: ${s1.stdout.split('\n').filter((l) => l.includes('learn')).join(' | ')})`);
@@ -182,13 +186,27 @@ try {
   const slowElapsed = Date.now() - tSlow;
   ok(s3.status === 0 && /passed its 1500ms budget/.test(s3.stdout),
     `slow detector: stop green + budget note printed (got ${s3.status}; ${s3.stdout.split('\n').filter((l) => l.includes('learn')).join(' ')})`);
-  ok(slowElapsed < 12_000, `slow detector never stalls the ritual or holds exit (elapsed ${slowElapsed}ms)`);
+  // RELATIVE bound (Codex round 2: a flat <12s would hide the old 5s
+  // straggler stall): the slow run may cost only the ~1.6s race + slack
+  // over a normal stop — never the straggler's 5s delay chain.
+  ok(slowElapsed < baseElapsed + 3500,
+    `slow run = baseline + race only, straggler never holds exit (slow ${slowElapsed}ms vs base ${baseElapsed}ms)`);
 
-  // Session close: same isolation contract at the other boundary — the hook
-  // is forwarded there too, so this genuinely exercises a throwing detector
-  // through the close call site.
+  // Session close: same isolation contract at the other boundary, proven
+  // OBSERVABLY (Codex round 2): with a fresh candidate seeded, a clean
+  // close prints the learn line; a close with a throwing detector prints
+  // none — both exit 0. Exit code alone can't distinguish; the line does.
+  await appendFile(join(fixture, '.maddu', 'events', '000000000001.ndjson'),
+    freshLine('TOOL_REFUSED', { tool: 'gradle', argv: ['gradle', '--bad'], reason: 'refused' }, 3)
+    + freshLine('TOOL_COMPLETED', { tool: 'gradle', argv: ['gradle', '--good'] }, 4));
   const c1 = run(['session', 'close'], { MADDU_SELF_TEST: '1', MADDU_TEST_LEARN_DETECTOR: 'throw' });
-  ok(c1.status === 0, `session close with a throwing detector exits 0 (got ${c1.status}: ${(c1.stderr || '').slice(0, 200)})`);
+  ok(c1.status === 0 && !/learn:/.test(c1.stdout),
+    `close with a throwing detector: exit 0, learn line ABSENT (got ${c1.status}; stdout: ${c1.stdout.trim().slice(0, 120)})`);
+  ok(run(['register']).status === 0, 're-register for the clean-close baseline');
+  const c2 = run(['session', 'close']);
+  ok(c2.status === 0 && /learn: \d+ candidate/.test(c2.stdout),
+    `clean close prints the learn line — proving the throw path was really exercised above (got: ${c2.stdout.trim().slice(0, 160)})`);
+  ok(run(['register']).status === 0, 're-register for the accept-path steps');
 
   // ── 2: accept path — fake judge writes correction + LEARN event ───────────
   const fakeJudge = join(fixture, 'fake-judge.mjs');
