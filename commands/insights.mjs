@@ -38,7 +38,7 @@ const CLS_COLOR = {
 const ROLES = new Set(['consumer', 'fixture', 'self']);
 function clsTag(cls) { return `${CLS_COLOR[cls] || ''}${cls}${ANSI.reset}`; }
 
-const SUBCOMMANDS = new Set(['events', 'dead', 'verbs', 'slashes']);
+const SUBCOMMANDS = new Set(['events', 'dead', 'verbs', 'slashes', 'lanes']);
 
 async function loadWorkspaces() {
   const ws = await loadLib('workspaces.mjs');
@@ -54,7 +54,7 @@ function extractCommandSet(binSource) {
 
 export default async function insights(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('Usage: maddu insights [events|dead|verbs|slashes] [--json] [--no-transcripts] [--include-imported] [--role consumer|fixture|self]');
+    console.log('Usage: maddu insights [events|dead|verbs|slashes|lanes] [--json] [--no-transcripts] [--include-imported] [--role consumer|fixture|self]');
     return;
   }
   const { flags, positional } = parseFlags(argv);
@@ -80,6 +80,76 @@ export default async function insights(argv) {
   const { reg, registryPath } = await loadWorkspaces();
 
   const workspaces = reg.workspaces || [];
+
+  // `insights lanes` (Tier 4a) — the audit's dead-catalog/ad-hoc table, per
+  // repo: lanes defined vs distinct ids actually claimed, dead catalog
+  // placements, ad-hoc share. Early branch: it needs no event matrix or
+  // transcript scan.
+  if (sub === 'lanes') {
+    const obs = await loadLibOptional('lane-observability.mjs');
+    if (!obs?.laneReport) {
+      console.error('maddu insights lanes: runtime lib not found. Run `maddu upgrade` to get v1.103.0+.');
+      process.exit(2);
+    }
+    const rows = [];
+    for (const w of workspaces) {
+      if (!w?.path) continue;
+      const role = lib.workspaceRole ? await lib.workspaceRole(w) : (w.role || 'consumer');
+      if (roleFilter && role !== roleFilter) continue;
+      let r;
+      try { r = await obs.laneReport(w.path); } catch { continue; }
+      // Skip only genuinely lane-less repos (catalog MISSING — never had
+      // lanes — with no claims and a clean scan). A malformed OR unreadable
+      // catalog and an incomplete spine scan are failures the fleet table
+      // must surface, never silently hide (Codex rounds 3+4).
+      if (!r.catalog.length && !r.adHoc.length && r.catalogState === 'missing' && r.claimsComplete) continue;
+      const claimedCatalog = r.catalog.filter((l) => l.claims > 0).length;
+      const realAdHoc = r.adHoc.filter((a) => !a.ephemeral);
+      rows.push({
+        name: w.label || w.id || w.path, role,
+        defined: r.catalog.length,
+        claimedCatalog,
+        deadCatalog: r.unusedCatalog.length,
+        adHoc: realAdHoc.length,
+        ephemeral: r.adHoc.length - realAdHoc.length,
+        suggestions: r.suggestions.map((s) => s.id),
+        totalClaims: r.totalClaims,
+        catalogState: r.catalogState || (r.catalogReadable ? 'ok' : 'malformed'),
+        claimsComplete: !!r.claimsComplete,
+      });
+    }
+    rows.sort((a, b) => b.totalClaims - a.totalClaims || a.name.localeCompare(b.name));
+    if (json) {
+      process.stdout.write(JSON.stringify({ registryPath, filters: { role: roleFilter }, lanes: rows }, null, 2) + '\n');
+      return;
+    }
+    const scope = roleFilter ? ` · role=${roleFilter}` : '';
+    console.log(`${ANSI.bold}Máddu insights — lanes${ANSI.reset}  ${ANSI.dim}catalog vs observed claims (lifetime, native only${scope})${ANSI.reset}`);
+    // Aggregates sum ONLY healthy-catalog rows — a broken catalog makes the
+    // catalog-vs-ad-hoc split unknowable, so its counts must not ride the
+    // headline while the row itself says "unknowable" (Codex round 5).
+    const okRows = rows.filter((r) => r.catalogState === 'ok');
+    const broken = rows.length - okRows.length;
+    const dead = okRows.reduce((a, r) => a + r.deadCatalog, 0);
+    const defined = okRows.reduce((a, r) => a + r.defined, 0);
+    const adhocTotal = okRows.reduce((a, r) => a + r.adHoc, 0);
+    console.log(`  ${ANSI.dim}${defined} catalog placements · ${dead} never claimed (${defined ? Math.round((dead / defined) * 100) : 0}%) · ${adhocTotal} distinct ad-hoc ids in real use${broken ? ` · ${broken} repo(s) with broken catalogs excluded from these sums` : ''}${ANSI.reset}\n`);
+    for (const r of rows) {
+      const roleTag = r.role !== 'consumer' ? ` ${ANSI.dim}[${r.role}]${ANSI.reset}` : '';
+      // A broken catalog makes the catalog-vs-ad-hoc CLASSIFICATION
+      // unknowable — render the failure, never a table row that presents
+      // claimed ids as classified ad-hoc/suggestions (Codex round 4).
+      if (r.catalogState !== 'ok') {
+        console.log(`    ${r.name.padEnd(18)} ${ANSI.dead}catalog ${r.catalogState.toUpperCase()}${ANSI.reset} — lane classification unknowable ${ANSI.dim}(${r.totalClaims} lifetime claim(s) observed; fix .maddu/lanes/catalog.json)${ANSI.reset}${roleTag}`);
+        continue;
+      }
+      const sug = r.suggestions.length ? `  ${ANSI.lb}suggest: ${r.suggestions.join(', ')}${ANSI.reset}` : '';
+      const inc = !r.claimsComplete ? `  ${ANSI.sp}(incomplete spine scan — counts are a floor; dead withheld)${ANSI.reset}` : '';
+      console.log(`    ${r.name.padEnd(18)} ${String(r.defined).padStart(3)} defined · ${String(r.claimedCatalog).padStart(3)} claimed · ${ANSI.dead}${String(r.deadCatalog).padStart(3)} dead${ANSI.reset} · ${String(r.adHoc).padStart(3)} ad-hoc${r.ephemeral ? ` ${ANSI.dim}(+${r.ephemeral} ephemeral)${ANSI.reset}` : ''}${roleTag}${sug}${inc}`);
+    }
+    console.log(`\n  ${ANSI.dim}adopt observed reality per repo: maddu lane suggest (inside the repo)${ANSI.reset}`);
+    return;
+  }
   const definedSet = await lib.definedEventTypes(spineLib);
   let projects = await lib.harvestSpines(workspaces, { includeImported });
   if (roleFilter && lib.workspaceRole) projects = projects.filter((p) => p.role === roleFilter);

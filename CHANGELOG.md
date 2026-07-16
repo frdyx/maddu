@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.103.0] · 2026-07-16 · Usage-audit Tier 4a — lane catalog: observed, not prescribed
+
+**Tier 4a of the 2026-07-16 usage-audit roadmap** (first of Tier 4's two PRs): the audit found the default 7-lane catalog **76% dead** fleet-wide (112/147 placements never claimed) while **64% of consumer claims were ad-hoc** — the catalog prescribes and reality routes around it. This PR makes the gap observable and lets repeated reality graduate; the default catalog itself is untouched (that's PR 4b). Verbs **72/72**; gates **74**; no new event type — two dormant types wake instead. All new checks are auto-discovered self-tests.
+
+- **`maddu lane suggest`** (new subcommand on the existing verb): catalog vs lifetime observed claims — dead entries flagged, and **suggestions from claim counts ONLY** (≥3 lifetime claims of the same non-ephemeral ad-hoc id; `auto/<x>`/`auto-<x>`/numeric ids and imported backfill never count; repo-structure inference explicitly dropped). Suggestions only — the operator confirms.
+- **`--adopt <id>`** graduates a suggestion into `catalog.json` and wakes the dormant `LANE_ADDED` (`{ lane }`, schema-fit verified); **`--prune <id>`** removes a *never-claimed* entry and wakes `LANE_REMOVED` — refusing any entry with a lifetime claim.
+- **Roadmap-mandated schema verification found real drift:** the bridge's `LANE_REMOVED` emitter wrote `data: {}` against the schema's long-documented `{ ok: boolean }`. Both emitters now conform (the type had never fired anywhere, so no read-side consumer existed to break); a self-test pins the documented shapes.
+- **`maddu lane list`** marks never-claimed catalog entries **`(unused)`**; **`maddu insights lanes`** reproduces the audit's dead-catalog/ad-hoc table across the fleet (live at ship time: 166 placements, 118 never claimed = 71%), role-filterable, `--json`.
+
 ## [v1.102.0] · 2026-07-16 · Usage-audit Tier 3 — activation funnel
 
 **Third tier of the 2026-07-16 usage-audit roadmap**: the audit found 5/21 installs (24%) parked at "installed, never started the ritual" — thousands of passive events, zero sessions/claims/slice-stops — with nothing in the product saying so. Verbs **72/72**; gates **74**; no new event type, **no registry mutation** (the p6test re-role stays a recommended operator action outside any PR). All new checks are auto-discovered self-tests.

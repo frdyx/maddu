@@ -212,7 +212,10 @@ export async function routeLanes({ req, res, path, repoRoot }) {
     catalog.lanes = (catalog.lanes || []).filter((l) => l.id !== id);
     if (catalog.lanes.length === before) return reply(res, 404, { error: 'lane not found' });
     await writeFile(paths.laneCatalog, JSON.stringify(redactLeaves(catalog), null, 2) + '\n');
-    await append(repoRoot, { type: 'LANE_REMOVED', actor: null, lane: id, data: {} });
+    // data.ok matches the shape event-schema.mjs has always documented for
+    // LANE_REMOVED — this emitter historically wrote `{}` against it (Tier-4a
+    // roadmap finding; the type had never fired anywhere, so no consumer broke).
+    await append(repoRoot, { type: 'LANE_REMOVED', actor: null, lane: id, data: { ok: true } });
     return reply(res, 200, { ok: true });
   }
   return false;
