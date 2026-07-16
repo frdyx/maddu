@@ -580,5 +580,28 @@ export default async function doctor(argv) {
     }
   }
 
+  // Activation funnel (usage-audit Tier 3): where this install is on the
+  // ritual path + the ONE next action. Printed AFTER the DOCTOR_REPORT
+  // append so a first green run counts toward the stage it reports (a fresh
+  // repo whose doctor just passed reads 'healthy', not 'installed'). Passive
+  // gate/doctor traffic does not count as adoption. Read-only; best-effort.
+  try {
+    const funnelLibPath = await resolveRuntimeLib('activation-funnel.mjs');
+    if (funnelLibPath) {
+      const funnelMod = await import(pathToFileURL(funnelLibPath).href);
+      for (const { repoRoot } of repoTargets) {
+        const fn = await funnelMod.deriveFunnel(repoRoot);
+        if (!fn) continue;
+        const t = fn.tallies;
+        const where = repoTargets.length > 1 ? `  ${ANSI.dim}${repoRoot}${ANSI.reset}` : '';
+        console.log();
+        console.log(`  ${ANSI.bold}Activation:${ANSI.reset}  ${fn.stage} (stage ${fn.stageIndex + 1}/6)${where}  ${ANSI.dim}sessions ${t.sessions} · lane claims ${t.claims} · slice-stops ${t.sliceStops}${ANSI.reset}`);
+        if (fn.stage !== 'repeating') {
+          console.log(`  ${ANSI.bold}Next:${ANSI.reset}        ${fn.nextAction}`);
+        }
+      }
+    }
+  } catch {}
+
   process.exit(counts.FAIL > 0 ? 1 : 0);
 }

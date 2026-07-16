@@ -47,6 +47,24 @@ machine. If `--id` is omitted, it is derived from the directory name.
 Roles do not change routing or gate behavior; they make fleet reports
 clearer.
 
+### Activation funnel (v1.102.0)
+
+`maddu fleet` shows, per repo, the **activation stage** — the lifetime
+furthest step reached on the ritual path:
+
+```
+installed → healthy → session → claimed → slice → repeating
+```
+
+`healthy` = a doctor run with zero FAILs; `repeating` = ≥3 lifetime
+slice-stops. The stage is derived read-only from each spine, is
+**monotonic** (it never decays — liveness is the separate recency column),
+and counts only native ritual markers: passive gate/doctor/boot traffic and
+imported transcript backfill are explicitly not adoption. The fleet
+headline sums the funnel and flags installs that never started the ritual;
+`maddu doctor` inside such a repo prints the ONE next action (wiring
+`maddu hooks install` is the proven activation lever).
+
 ### Example
 
 ```bash

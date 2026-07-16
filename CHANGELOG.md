@@ -11,6 +11,16 @@ narrative summary.
 
 ---
 
+## [v1.102.0] · 2026-07-16 · Usage-audit Tier 3 — activation funnel
+
+**Third tier of the 2026-07-16 usage-audit roadmap**: the audit found 5/21 installs (24%) parked at "installed, never started the ritual" — thousands of passive events, zero sessions/claims/slice-stops — with nothing in the product saying so. Verbs **72/72**; gates **74**; no new event type, **no registry mutation** (the p6test re-role stays a recommended operator action outside any PR). All new checks are auto-discovered self-tests.
+
+- **Activation funnel** (`activation-funnel.mjs`): read-only derivation from the spine of the lifetime furthest ritual stage — `installed → healthy (doctor FAIL:0) → session → claimed → slice → repeating (≥3 lifetime slice-stops)`. Monotonic (the funnel never decays; liveness stays the separate recency column), markers checked independently (furthest means furthest), and **passive gate/doctor/boot traffic and imported transcript backfill explicitly never count as adoption**.
+- **`maddu doctor` prints the activation stage + ONE next action** (after its own `DOCTOR_REPORT` lands, so a first green run counts toward the stage it reports). The healthy→session action points at `maddu hooks install` — the proven activation lever (the ritual-active repos in the audit are the hooked ones).
+- **`maddu fleet` gains a funnel column + headline rollup** (`0 installed → 4 healthy → … → 14 repeating`) that flags installs that never started the ritual.
+- **`maddu upgrade` nudges** when session discipline is unwired; `maddu init`'s closing message now says explicitly that an unhooked install stays parked at the bottom of the funnel.
+- **Live acceptance passed**: the funnel matches the audit's hand-derived segmentation for all 22 workspaces — the audit's 5 zero-ritual repos read as today's 4 still-parked (`p6test`, `python-tiny`, `maddu-quiz`, `menu-designer`) plus `snyggare-signature`, which genuinely activated after the audit snapshot; lifetime tallies match the audit's sessions/slice-stops columns exactly on inactive repos.
+
 ## [v1.101.0] · 2026-07-16 · Usage-audit Tier 2 — execution telemetry
 
 **Second tier of the 2026-07-16 usage-audit roadmap**: record what actually *runs*, not what gets mentioned. The audit's verb stats were transcript keyword mentions (self-dev inflated, host-specific, blind to non-Claude callers), and its GATE_RAN readout couldn't distinguish "all green" from "the fail path never writes". Verbs **72/72**; gates **74**; **no new event type, no contract bump** — receipts deliberately live outside the spine. All new checks are auto-discovered self-tests.

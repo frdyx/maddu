@@ -21,6 +21,7 @@ import { readRegistry } from './workspaces.mjs';
 import { currencyVerdict } from './framework-currency.mjs';
 import { countCatches } from './outcome.mjs';
 import { resolveInstalledVersion } from './installed-version.mjs';
+import { deriveFunnel, FUNNEL_STAGES } from './activation-funnel.mjs';
 
 const DAY_MS = 86400000;
 // Liveness tiers, in days since the last spine event.
@@ -90,6 +91,11 @@ export async function digestRepo(workspace, now = Date.now()) {
   const currency = currencyVerdict({ released: meta.released, version: meta.version, now });
   const stops = proj && Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
   const lastStop = stops.length ? stops[stops.length - 1] : null;
+  // Activation funnel (Tier 3): lifetime furthest ritual stage, read-only
+  // from the spine — which install is parked at which adoption step. Never
+  // decays; liveness above stays the separate recency signal.
+  let funnel = null;
+  try { funnel = await deriveFunnel(repoRoot); } catch {}
   return {
     id: workspace.id || workspace.label || repoRoot,
     label: workspace.label || workspace.id || repoRoot,
@@ -106,6 +112,7 @@ export async function digestRepo(workspace, now = Date.now()) {
     caught: proj && proj.gates ? countCatches(proj.gates.runs) : { total: 0, hard: 0, soft: 0 },
     lastSlice: lastStop ? { ts: lastStop.ts, summary: (lastStop.summary || '').split('\n')[0].slice(0, 100) } : null,
     goal: proj && proj.goal ? (proj.goal.objective || null) : null,
+    funnel,
     readable: !!proj,
   };
 }
@@ -130,11 +137,17 @@ export function aggregate(digests, now = Date.now()) {
     const c = r.caught || { total: 0, hard: 0, soft: 0 };
     return { total: acc.total + c.total, hard: acc.hard + c.hard, soft: acc.soft + c.soft };
   }, { total: 0, hard: 0, soft: 0 });
+  // Funnel rollup (Tier 3): how many repos are parked at each stage — over
+  // ALL repos, not just active (a parked install is the finding, and the
+  // funnel never decays with liveness).
+  const funnelCounts = Object.fromEntries(FUNNEL_STAGES.map((s) => [s, 0]));
+  for (const r of repos) { if (r.funnel && funnelCounts[r.funnel.stage] !== undefined) funnelCounts[r.funnel.stage]++; }
   return {
     generatedAt: new Date(now).toISOString(),
     fleetLatest,
     total: repos.length,
     counts,
+    funnel: funnelCounts,
     active: {
       total: activeRepos.length,
       behind: behindActive.length,

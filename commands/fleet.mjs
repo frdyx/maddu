@@ -99,7 +99,15 @@ export default async function fleet(argv) {
     const gate = r.gatePassRate;
     const gateStr = gate ? `${gate.ok}/${gate.total} gates` : `${C.dim}no gates${C.reset}`;
     const caught = r.caught && r.caught.total ? `${C.cyan}⚿ ${r.caught.total}${C.reset}` : `${C.dim}⚿ 0${C.reset}`;
-    console.log(`  ${live.dot} ${pad(r.label, 22)} ${pad(ver, 9)} ${pad(behindTag, 18)} ${pad(curStr, 14)} ${pad(ageStr, 6)} ${pad(gateStr, 12)} ${C.dim}·${C.reset} ${caught}${verSrc}`);
+    // Activation funnel (Tier 3): lifetime furthest ritual stage. 'repeating'
+    // is the goal state; anything earlier is a parked install with one obvious
+    // next step (`maddu doctor` inside the repo prints it).
+    const fn = r.funnel;
+    const funnelStr = !fn ? `${C.dim}—${C.reset}`
+      : fn.stage === 'repeating' ? `${C.green}${fn.stage}${C.reset}`
+        : (fn.stage === 'slice' || fn.stage === 'claimed') ? `${C.cyan}${fn.stage}${C.reset}`
+          : `${C.yellow}${fn.stage}${C.reset}`;
+    console.log(`  ${live.dot} ${pad(r.label, 22)} ${pad(ver, 9)} ${pad(behindTag, 18)} ${pad(funnelStr, 18)} ${pad(curStr, 14)} ${pad(ageStr, 6)} ${pad(gateStr, 12)} ${C.dim}·${C.reset} ${caught}${verSrc}`);
     if (r.lastSlice && r.lastSlice.summary) {
       console.log(`     ${C.dim}↳ ${r.lastSlice.summary.replace(/^SLICE STOP:\s*/i, '')}${C.reset}`);
     }
@@ -118,6 +126,19 @@ export default async function fleet(argv) {
   }
   if (a.caught && a.caught.total > 0) {
     console.log(`  ${C.cyan}⚿${C.reset} ${a.caught.total} fault(s) caught by guardrails across active repos ${C.dim}(${a.caught.hard} hard · ${a.caught.soft} soft · recent window)${C.reset}`);
+  }
+  // Activation-funnel headline (Tier 3): where every install is parked on the
+  // ritual path — lifetime furthest stage, never decays. Passive gate/doctor
+  // traffic does not count as adoption.
+  if (report.funnel) {
+    const f = report.funnel;
+    const seq = ['installed', 'healthy', 'session', 'claimed', 'slice', 'repeating']
+      .map((s) => `${f[s] || 0} ${s}`).join(' → ');
+    const parked = (f.installed || 0) + (f.healthy || 0);
+    console.log(`  ${C.bold}funnel${C.reset} ${C.dim}${seq}${C.reset}`);
+    if (parked > 0) {
+      console.log(`    ${C.yellow}⚠${C.reset} ${parked} install(s) never started the ritual ${C.dim}(no session/claim/slice-stop — run \`maddu doctor\` inside each for the one next action)${C.reset}`);
+    }
   }
 }
 

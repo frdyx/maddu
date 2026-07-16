@@ -272,4 +272,20 @@ export default async function upgrade(argv) {
   }
 
   console.log(`\nUpgraded to v${toVersion}. (event ${ev.id})`);
+
+  // Activation nudge (usage-audit Tier 3): hooks are the proven activation
+  // lever — the ritual-active repos in the 2026-07-16 fleet audit are the
+  // hooked ones. If this repo still isn't wired, say so once, at the moment
+  // the operator is already paying attention. Best-effort, read-only.
+  try {
+    const { loadLibOptional } = await import(new URL('./_libroot.mjs', import.meta.url).href);
+    const hooksLib = await loadLibOptional('claude-hooks.mjs');
+    if (hooksLib && hooksLib.loadSettings && hooksLib.summarize) {
+      const { settings } = await hooksLib.loadSettings(repoRoot);
+      if (!hooksLib.summarize(settings).allInstalled) {
+        console.log(`\nSession discipline is not wired in this repo — sessions won't auto-register.`);
+        console.log(`  ./maddu/run hooks install   # the proven activation lever: register → claim → slice-stop with zero keystrokes`);
+      }
+    }
+  } catch {}
 }

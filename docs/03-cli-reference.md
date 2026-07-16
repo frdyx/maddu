@@ -50,6 +50,8 @@ If a workspace registry exists at `~/.config/maddu/workspaces.json`, doctor vali
 
 **Gate runner *(v0.16+)*.** Doctor is a fan-out runner over `template/maddu/runtime/gates/builtin/*.mjs` (framework) plus `<repo>/.maddu/gates/*.mjs` (operator). Each gate emits a `GATE_RAN` event. `--gate <id>` runs only one gate (e.g. `--gate spine-integrity`). `--severity <level>` filters by severity. Operator gates with the same id as a built-in override the built-in. See [20-governance.md](20-governance.md#authoring-gates).
 
+**Activation funnel *(v1.102.0)*.** After the summary, doctor prints the repo's activation stage — the lifetime furthest step reached on the ritual path `installed → healthy → session → claimed → slice → repeating` (≥3 slice-stops) — plus the ONE next action for any repo not yet repeating. Derived read-only from the spine; passive gate/doctor traffic and imported backfill never count as adoption; the funnel never decays. `maddu fleet` shows the same stage as a column across every registered workspace.
+
 ## `maddu start`
 
 Boot the bridge server.
