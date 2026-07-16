@@ -32,8 +32,9 @@
 //       I/O is a ≤512KB tail read. Residual run-out, stated exactly: the
 //       remainder of ONE shard-enumeration pass (metadata-only readdirs —
 //       the events dir plus one per partition, no file content; the
-//       enumeration itself carries no deadline checks) OR one tail read +
-//       one ≤64-line batch + one parse step; the largest synchronous
+//       enumeration itself carries no deadline checks) OR one tail-read
+//       sequence (≤512KB total across ≤32 positioned-read syscalls) + one
+//       ≤64-line batch + one parse step; the largest synchronous
 //       event-loop block is one ≤512KB split. Synchronous preemption
 //       of a single parse step is NOT claimed — with the 64KB/256KB caps the
 //       residual overrun is bounded by one ≤64KB line parse.
@@ -93,8 +94,13 @@ async function readTail(path) {
     // Positioned reads may legally return SHORT (Codex round 4) — loop until
     // the requested range is consumed or the fd gives no more; only the
     // bytes actually read become text (never zero-filled buffer remainder).
+    // The loop is bounded BY CONSTRUCTION on both axes (round 5): total
+    // bytes ≤ TAIL_READ_BYTES, and at most MAX_READ_ITERS syscalls — a
+    // filesystem dribbling tiny short reads exits early with the shortfall
+    // surfacing as clipped → truncated, same as any other partial tail.
+    const MAX_READ_ITERS = 32;
     let off = 0;
-    while (off < len) {
+    for (let iter = 0; iter < MAX_READ_ITERS && off < len; iter++) {
       const { bytesRead } = await fh.read(buf, off, len - off, size - len + off);
       if (bytesRead <= 0) break;
       off += bytesRead;
