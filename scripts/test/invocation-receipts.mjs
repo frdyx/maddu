@@ -86,6 +86,9 @@ try {
   ({ receipts } = await ir.readReceipts(rA));
   ok(receipts.at(-1).sessionId.length === 128, `oversized sessionId capped at 128 (got ${receipts.at(-1).sessionId.length})`);
   ok(receipts.at(-1).workspace.length <= 512, 'workspace capped at 512');
+  ir.recordInvocationSync({ stateRoot: rA, verb: 'status', env: {}, now: 'T'.repeat(10000) });
+  ({ receipts } = await ir.readReceipts(rA));
+  ok(receipts.at(-1).ts.length === 40, `caller-supplied now/ts capped too — the per-line bound holds at the lib seam (got ${receipts.at(-1).ts.length})`);
 
   // Write-boundary scrub: a secret-shaped sub never lands raw.
   ir.recordInvocationSync({ stateRoot: rA, verb: 'lane', sub: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmn', env: {} });

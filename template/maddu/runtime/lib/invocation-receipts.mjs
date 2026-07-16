@@ -138,7 +138,10 @@ export function recordInvocationSync({
     // sessionId is env/cache-sourced text, so it is also redacted.
     const receipt = {
       v: 1,
-      ts: now || new Date().toISOString(),
+      // `now` is a caller override (tests use it for deterministic windows)
+      // — capped like every other string field so the per-line bound holds
+      // at this seam, not just for the bin/ caller (Codex round 4).
+      ts: (now ? String(now) : new Date().toISOString()).slice(0, 40),
       verb: redactText(String(verb)).text.slice(0, 64),
       sub: sub == null ? null : redactText(String(sub)).text.slice(0, 64),
       exit: Number.isInteger(exitCode) ? exitCode : 1,
