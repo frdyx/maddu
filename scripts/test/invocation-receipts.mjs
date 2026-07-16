@@ -106,18 +106,44 @@ try {
     `window spans rotated + current (got ${JSON.stringify(stats1.window)})`);
   ok(stats1.failures === 1 && stats1.verbs.find((v) => v.verb === 'doctor')?.fail === 1, 'non-zero exits tallied per verb and in total');
   ok(stats1.rotateBytes === ir.ROTATE_BYTES, 'stats declare the rotation cap');
-  // Unparseable lines are counted, never silently skipped.
-  const { appendFileSync } = await import('node:fs');
-  appendFileSync(join(rB, '.maddu', 'state', ir.RECEIPTS_FILE), 'not json at all\n{"v":1}\n');
+  // Unparseable AND partial lines are counted, never silently skipped —
+  // a record missing `exit` must not contaminate the failure tally
+  // (undefined !== 0; Codex round 1).
+  const { appendFileSync, mkdirSync, writeFileSync } = await import('node:fs');
+  appendFileSync(join(rB, '.maddu', 'state', ir.RECEIPTS_FILE),
+    'not json at all\n{"v":1}\n' + JSON.stringify({ v: 1, ts: '2026-07-11T00:00:00.000Z', verb: 'status' }) + '\n');
   const stats2 = await ir.readReceiptStats(rB);
-  ok(stats2.dropped === 2 && stats2.count === 2, `garbage + shape-invalid lines counted as dropped (got dropped=${stats2.dropped}, count=${stats2.count})`);
+  ok(stats2.dropped === 3 && stats2.count === 2, `garbage + shape-invalid + partial lines all dropped (got dropped=${stats2.dropped}, count=${stats2.count})`);
+  ok(stats2.failures === 1, `partial record without exit never counts as a failure (got ${stats2.failures})`);
+
+  // Rotation hard ceiling: when rotation keeps failing (prev is an unremovable
+  // non-empty DIRECTORY), the append is DROPPED at 2× the cap instead of
+  // growing the file unboundedly (Codex round 1).
+  const rHard = join(tmp, 'repoHard');
+  await mkdir(join(rHard, '.maddu', 'state'), { recursive: true });
+  mkdirSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_PREV_FILE));
+  writeFileSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_PREV_FILE, 'block.txt'), 'x');
+  writeFileSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_FILE), 'x'.repeat(200));
+  ok(ir.recordInvocationSync({ stateRoot: rHard, verb: 'status', env: {}, rotateBytes: 100 }) === false,
+    'rotation-blocked file at 2× cap drops the receipt (returns false)');
+  const { statSync } = await import('node:fs');
+  ok(statSync(join(rHard, '.maddu', 'state', ir.RECEIPTS_FILE)).size === 200, 'blocked corpus did not grow past the hard ceiling');
+  // Concurrent-rotation guard: when the CURRENT file is already gone (another
+  // process rotated it), a failed rename must NOT delete the prev generation.
+  const rRace = join(tmp, 'repoRace');
+  await mkdir(join(rRace, '.maddu', 'state'), { recursive: true });
+  writeFileSync(join(rRace, '.maddu', 'state', ir.RECEIPTS_PREV_FILE), JSON.stringify({ v: 1, ts: '2026-07-01T00:00:00.000Z', verb: 'doctor', exit: 0, ms: 1 }) + '\n');
+  ok(ir.recordInvocationSync({ stateRoot: rRace, verb: 'status', env: {}, rotateBytes: 100 }) === true,
+    'missing current + existing prev: write proceeds');
+  const race = await ir.readReceipts(rRace);
+  ok(race.receipts.some((r) => r.verb === 'doctor'), 'prev generation survives when current was already rotated away');
 
   // insights.harvestReceipts: per-workspace rollup with role + honesty fields.
   const harvested = await insights.harvestReceipts([
     { id: 'b', label: 'repoB', path: rB, role: 'project' },
     { id: 'none', label: 'no-corpus', path: join(tmp, 'repoC-nothere') },
   ]);
-  ok(harvested.length === 2 && harvested[0].name === 'repoB' && harvested[0].count === 2 && harvested[0].dropped === 2,
+  ok(harvested.length === 2 && harvested[0].name === 'repoB' && harvested[0].count === 2 && harvested[0].dropped === 3,
     'harvestReceipts rolls up counts + dropped per workspace');
   ok(harvested[1].count === 0 && harvested[1].window === null, 'workspace without a corpus reports 0 receipts, window null — honest no-telemetry');
 

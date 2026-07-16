@@ -104,12 +104,16 @@ async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
 // Resolve one GATE_RAN event's outcome. Mirrors the runner's status logic
 // (gates.mjs): explicit `status` wins (persisted since the verdict-ledger
 // work — it alone can express a soft warn on a non-warn gate); legacy events
-// without it derive from ok×severity; events with neither are 'other'
-// (pre-schema history), counted apart rather than guessed.
+// without it derive from ok×severity — but ONLY when the full pair is
+// available: the runner never emitted ok:false without a severity, so a
+// record missing it is outside the writer's shapes and counts as 'other',
+// never guessed into 'fail' (Codex diff-review round 1). ok:true needs no
+// severity (the runner resolves ok regardless).
 export function gateStatusOf(data) {
   if (data && (data.status === 'ok' || data.status === 'warn' || data.status === 'fail')) return data.status;
   if (data && typeof data.ok === 'boolean') {
     if (data.ok) return 'ok';
+    if (typeof data.severity !== 'string' || !data.severity) return 'other';
     return data.severity === 'warn' ? 'warn' : 'fail';
   }
   return 'other';

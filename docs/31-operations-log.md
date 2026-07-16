@@ -101,7 +101,8 @@ exported (`export --otel` reads only the spine), untracked
 it), excluded from spine-integrity verification, and secret-scrubbed at the
 write boundary. Recording is **fail-open**: a telemetry error never blocks
 or noises the verb, and the sync write happens in a process-exit handler
-(sub-millisecond append).
+(one small sync append; p50 < 10ms asserted by the `invocation-receipts`
+self-test — the roadmap's kill-criterion budget).
 
 **Honesty contract.** Receipts are an *observed-window* signal, never an
 authoritative total: fail-open writes, rotation, and pre-v1.101 installs
@@ -113,7 +114,8 @@ dropped/unparseable-line count alongside them.
 generation kept (total ≤ ~10MB per repo). Deliberately size-only — an age
 check on the hot write path would cost a file read, and a low-volume repo
 keeping a long window is more telemetry, not staleness (the window readout
-makes age visible).
+makes age visible). If rotation itself keeps failing, a hard ceiling at 2×
+the cap **drops** the receipt rather than growing the file unboundedly.
 
 ```bash
 maddu log --window          # declare the corpus: window, counts, dropped, cap

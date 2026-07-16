@@ -80,6 +80,9 @@ try {
   ok(insights.gateStatusOf({ ok: false, severity: 'critical' }) === 'fail', 'legacy no-status critical fail derives fail');
   ok(insights.gateStatusOf({ ok: false, severity: 'warn' }) === 'warn', 'legacy no-status warn-severity derives warn');
   ok(insights.gateStatusOf({ ok: true, severity: 'warn' }) === 'ok', 'legacy ok derives ok');
+  ok(insights.gateStatusOf({ ok: true }) === 'ok', 'ok:true needs no severity (runner resolves ok regardless)');
+  ok(insights.gateStatusOf({ ok: false }) === 'other' && insights.gateStatusOf({ ok: false, severity: 7 }) === 'other',
+    'ok:false with missing/invalid severity is outside the writer shapes → other, never guessed into fail (Codex round 1)');
   ok(insights.gateStatusOf({}) === 'other' && insights.gateStatusOf(null) === 'other', 'pre-schema events count apart as other, never guessed');
 } finally {
   await rm(tmp, { recursive: true, force: true });

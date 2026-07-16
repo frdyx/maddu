@@ -135,14 +135,29 @@ export function recordInvocationSync({
     };
 
     const file = receiptsPath(stateRoot);
+    const prev = prevPath(stateRoot);
     let size = 0;
     try { size = statSync(file).size; } catch {}
     if (size >= rotateBytes) {
-      // Windows renameSync refuses an existing destination — drop the old
-      // generation first. A rotation race between two concurrent maddu
-      // processes at worst loses one generation of telemetry: fail-open.
-      try { rmSync(prevPath(stateRoot), { force: true }); } catch {}
-      try { renameSync(file, prevPath(stateRoot)); } catch {}
+      // Rename FIRST (atomic replace on POSIX). Only if that fails — Windows
+      // refuses an existing destination — drop the old generation and retry,
+      // and only while the SOURCE still exists: if it's gone, another process
+      // already rotated and deleting prev here would destroy the generation
+      // it just created (Codex diff-review round 1). The residual TOCTOU
+      // between the isFileSync check and the retry is accepted: telemetry,
+      // worst case one generation lost.
+      try { renameSync(file, prev); } catch {
+        if (isFileSync(file)) {
+          try { rmSync(prev, { force: true }); renameSync(file, prev); } catch {}
+        }
+      }
+      // Hard ceiling: if rotation keeps failing (e.g. prev is locked), the
+      // append must not grow the file unboundedly past the declared cap —
+      // at 2× the cap we DROP the receipt instead (fail-open means dropped
+      // telemetry is fine; unbounded disk is not; Codex round 1).
+      let after = 0;
+      try { after = statSync(file).size; } catch {}
+      if (after >= rotateBytes * 2) return false;
     }
     appendFileSync(file, JSON.stringify(receipt) + '\n');
     return true;
@@ -166,7 +181,10 @@ export async function readReceipts(stateRoot) {
       if (!line.trim()) continue;
       try {
         const r = JSON.parse(line);
-        if (r && typeof r.verb === 'string' && typeof r.ts === 'string') out.receipts.push(r);
+        // Full shape check: a record missing `exit` would otherwise
+        // contaminate the failure tally (undefined !== 0 reads as a failed
+        // invocation; Codex round 1). Partial records count as dropped.
+        if (r && typeof r.verb === 'string' && typeof r.ts === 'string' && Number.isInteger(r.exit) && Number.isFinite(r.ms)) out.receipts.push(r);
         else out.dropped++;
       } catch { out.dropped++; }
     }
