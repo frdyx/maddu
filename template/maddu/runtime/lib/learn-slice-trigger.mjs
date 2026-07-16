@@ -54,16 +54,24 @@ export const MAX_LINES = 500;
 export const MAX_LINE_BYTES = 64 * 1024;
 export const MAX_TOTAL_BYTES = 256 * 1024;
 
-// Bounded raw-line window: newest shards backwards, newest lines first,
-// stopping (exclusive) at this session's previous SLICE_STOP or at the
-// caps. Returns lines in CHRONOLOGICAL order (the miners expect spine
-// order), plus honesty counters.
-async function collectWindow(repoRoot, { sessionId, stopEventId }) {
+// Bounded raw-line collection: newest shards backwards, newest lines first,
+// EVERY scanned line — oversize included — counting toward BOTH caps (Codex
+// round 1: exempting oversize lines from the caps would let a pathological
+// spine be scanned unboundedly). No boundary detection happens here: shard
+// paths do not sort chronologically across sync-mode partitions, so the
+// session boundary is applied AFTER parse, on id-sorted events (event ids
+// embed wall-clock). The only line-level cut is the oversize BOUNDARY PROBE:
+// an unparseable-by-budget line that raw-contains both the SLICE_STOP marker
+// and this session's id stops collection — a false positive only NARROWS
+// the window (safe direction); without the probe an oversize prior stop
+// would silently widen it (round 1).
+async function collectWindow(repoRoot, { sessionId }) {
   const shards = (await listSpineShards(join(repoRoot, '.maddu', 'events'))) || [];
-  const collected = []; // newest-first while collecting
+  const collected = [];
   let skippedOversize = 0;
   let truncated = false;
   let totalBytes = 0;
+  let scanned = 0;
   outer:
   for (let s = shards.length - 1; s >= 0; s--) {
     let text;
@@ -73,25 +81,36 @@ async function collectWindow(repoRoot, { sessionId, stopEventId }) {
       const line = lines[i];
       if (!line.trim()) continue;
       const bytes = Buffer.byteLength(line, 'utf8');
-      if (bytes > MAX_LINE_BYTES) { skippedOversize++; continue; } // counted, never parsed
-      // Boundary probe: only lines that can be the session's prior stop.
-      if (line.includes('"SLICE_STOP"')) {
-        let e = null;
-        try { e = JSON.parse(line); } catch {}
-        if (e && e.type === 'SLICE_STOP' && e.actor === sessionId && e.id !== stopEventId) break outer;
-        if (e && e.id === stopEventId) continue; // the just-appended stop itself is not input
-      }
-      if (collected.length >= MAX_LINES || totalBytes + bytes > MAX_TOTAL_BYTES) { truncated = true; break outer; }
-      collected.push(line);
+      if (scanned >= MAX_LINES || totalBytes + bytes > MAX_TOTAL_BYTES) { truncated = true; break outer; }
+      scanned++;
       totalBytes += bytes;
+      if (bytes > MAX_LINE_BYTES) {
+        skippedOversize++;
+        if (sessionId && line.includes('"SLICE_STOP"') && line.includes(`"${sessionId}"`)) break outer; // oversize boundary probe
+        continue;
+      }
+      // idx grows as we walk BACKWARD (newer = smaller idx): the tiebreaker
+      // that keeps same-second events in true file order after the sort.
+      collected.push({ line, idx: scanned });
     }
   }
-  return { lines: collected.reverse(), skippedOversize, truncated };
+  return { lines: collected, skippedOversize, truncated };
+}
+
+// Chronological sort key: the 14-digit wall-clock embedded in every event id
+// (evt_YYYYMMDDHHMMSS_<rand>). The random suffix is NOT ordered, so within
+// the same second the collection index (reverse-walk position) breaks ties —
+// exact file order for flat repos; bounded-arbitrary only across partitions
+// within one second.
+function idClock(e) {
+  const id = String(e?.id || '');
+  return id.startsWith('evt_') ? id.slice(4, 18) : '';
 }
 
 // The detection pass. `_testThrow` / `_testDelayMs` are GUARDED TEST-ONLY
-// hooks (no production caller sets them) — they exist so the isolation and
-// deadline-race acceptance tests can exercise the REAL failure paths.
+// hooks — the CLI call sites honor them only under MADDU_SELF_TEST=1, so
+// they exist purely for the isolation/deadline acceptance tests to exercise
+// the REAL failure paths.
 export async function detectCandidates(repoRoot, {
   sessionId, stopEventId = null,
   deadlineMs = DETECT_DEADLINE_MS, now = () => Date.now(),
@@ -99,17 +118,47 @@ export async function detectCandidates(repoRoot, {
 } = {}) {
   if (_testThrow) throw new Error('injected detector failure (test hook)');
   const t0 = now();
-  const { lines, skippedOversize, truncated } = await collectWindow(repoRoot, { sessionId, stopEventId });
-  const events = [];
+  const { lines, skippedOversize, truncated } = await collectWindow(repoRoot, { sessionId });
+  const parsed = [];
   let timedOut = false;
-  for (const line of lines) {
+  for (const item of lines) {
     // Cooperative deadline, checked between per-event parse steps (c).
     if (now() - t0 > deadlineMs) { timedOut = true; break; }
-    if (_testDelayMs) await new Promise((r) => setTimeout(r, _testDelayMs));
-    try { events.push(JSON.parse(line)); } catch {}
+    if (_testDelayMs) {
+      // Straggler timers must never hold the process open after the caller's
+      // race has already returned (round 1) — unref, then await.
+      await new Promise((r) => { const t = setTimeout(r, _testDelayMs); if (typeof t.unref === 'function') t.unref(); });
+    }
+    try { parsed.push({ e: JSON.parse(item.line), idx: item.idx }); } catch {}
   }
-  const candidates = timedOut ? [] : spineCandidates(events);
-  return { candidates, skippedOversize, truncated, linesScanned: events.length, timedOut, raced: false };
+  let candidates = [];
+  if (!timedOut) {
+    // Restore CHRONOLOGICAL order (round 1: shard-path order is meaningless
+    // across partitions): wall-clock prefix from the event id, collection
+    // index (reverse-walk position, larger = older) breaking same-second
+    // ties so flat repos keep exact file order.
+    parsed.sort((a, b) => {
+      const ca = idClock(a.e), cb = idClock(b.e);
+      if (ca !== cb) return ca < cb ? -1 : 1;
+      return b.idx - a.idx;
+    });
+    let boundary = -1;
+    for (let i = parsed.length - 1; i >= 0; i--) {
+      const e = parsed[i].e;
+      if (e && e.type === 'SLICE_STOP' && e.actor === sessionId && e.id !== stopEventId) { boundary = i; break; }
+    }
+    const windowEvents = parsed.slice(boundary + 1)
+      .map((p) => p.e)
+      .filter((e) => e && e.id !== stopEventId)
+      // Cross-session honesty (round 1): events ATTRIBUTED to another
+      // session never leak into this session's preview. Null-actor events
+      // (the TOOL_* census — live tool events carry no session linkage)
+      // stay in: they cannot be attributed and the miners need them; that
+      // residual is documented, not hidden.
+      .filter((e) => e.actor == null || e.actor === sessionId);
+    candidates = spineCandidates(windowEvents);
+  }
+  return { candidates, skippedOversize, truncated, linesScanned: parsed.length, timedOut, raced: false };
 }
 
 // Caller-facing wrapper: races detection against the deadline (+100ms grace
@@ -121,8 +170,11 @@ export async function runDetectionPreview(repoRoot, opts = {}) {
   const deadlineMs = opts.deadlineMs ?? DETECT_DEADLINE_MS;
   let timer = null;
   const deadline = new Promise((resolve) => {
+    // Deliberately REF'd (Codex round 1): this timer is what guarantees the
+    // race resolves — unref'ing it could let the process exit before the
+    // budget note prints. It is bounded (≤ deadline+100ms) and cleared the
+    // moment detection wins, so it never lingers on the fast path.
     timer = setTimeout(() => resolve({ candidates: [], skippedOversize: 0, truncated: false, linesScanned: 0, timedOut: true, raced: true }), deadlineMs + 100);
-    if (typeof timer.unref === 'function') timer.unref();
   });
   try {
     return await Promise.race([detectCandidates(repoRoot, { ...opts, deadlineMs }), deadline]);

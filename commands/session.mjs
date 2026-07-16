@@ -208,7 +208,13 @@ export default async function session(argv) {
     try {
       const lt = await loadLibOptional('learn-slice-trigger.mjs');
       if (lt?.runDetectionPreview) {
-        const res = await lt.runDetectionPreview(repoRoot, { sessionId });
+        // Same MADDU_SELF_TEST-gated test hook as slice-stop, so the
+        // isolation test exercises THIS call site too (Codex round 1).
+        const hook = process.env.MADDU_SELF_TEST === '1' ? (process.env.MADDU_TEST_LEARN_DETECTOR || null) : null;
+        const res = await lt.runDetectionPreview(repoRoot, {
+          sessionId,
+          _testThrow: hook === 'throw', _testDelayMs: hook === 'slow' ? 5000 : 0,
+        });
         if (!res.timedOut && res.candidates.length && process.stdout.isTTY) {
           console.log(`  learn: ${res.candidates.length} candidate(s) from this session — review: maddu learn digest --spine · accept: maddu learn run --spine`);
         }

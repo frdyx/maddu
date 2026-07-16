@@ -275,13 +275,15 @@ export default async function sliceStop(argv) {
   // input; 1500ms cooperative deadline raced so this print never stalls the
   // ritual. READ-ONLY (previews + one-liners onto existing learn verbs, no
   // auto-writing) — which is why it carries no rule-#9 gauntlet entry.
-  // MADDU_TEST_LEARN_DETECTOR is a guarded test-only hook ('throw'|'slow')
-  // so the isolation and deadline-race acceptance tests exercise the REAL
-  // failure paths through this exact call site.
+  // MADDU_TEST_LEARN_DETECTOR is a test-only hook ('throw'|'slow'), honored
+  // ONLY under MADDU_SELF_TEST=1 (Codex round 1: without the gate it would
+  // be a live switch in ordinary production invocations) — it exists so the
+  // isolation and deadline-race acceptance tests exercise the REAL failure
+  // paths through this exact call site.
   try {
     const lt = await loadLibOptional('learn-slice-trigger.mjs');
     if (lt?.runDetectionPreview) {
-      const hook = process.env.MADDU_TEST_LEARN_DETECTOR || null;
+      const hook = process.env.MADDU_SELF_TEST === '1' ? (process.env.MADDU_TEST_LEARN_DETECTOR || null) : null;
       const res = await lt.runDetectionPreview(repoRoot, {
         sessionId, stopEventId: ev.id,
         _testThrow: hook === 'throw', _testDelayMs: hook === 'slow' ? 5000 : 0,

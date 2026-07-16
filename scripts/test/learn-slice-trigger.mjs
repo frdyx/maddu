@@ -74,6 +74,52 @@ try {
   await writeFile(join(rMany, '.maddu', 'events', '000000000001.ndjson'), many.join(''));
   const detMany = await lt.detectCandidates(rMany, { sessionId: 'ses_t' });
   ok(detMany.truncated === true && detMany.linesScanned <= lt.MAX_LINES, `window truncates at ${lt.MAX_LINES} lines (scanned ${detMany.linesScanned})`);
+  // Oversize lines COUNT toward the caps (Codex round 1: exempting them
+  // would let a pathological all-oversize spine be scanned unboundedly).
+  const rAllBig = join(tmp, 'all-big');
+  await mkdir(join(rAllBig, '.maddu', 'events'), { recursive: true });
+  const bigLine = JSON.stringify({ v: 1, id: 'evt_20260716090002_big', ts: 'x', type: 'INBOX_MESSAGE', actor: null, lane: null, data: { text: 'y'.repeat(lt.MAX_LINE_BYTES + 10) } });
+  await writeFile(join(rAllBig, '.maddu', 'events', '000000000001.ndjson'), Array(10).fill(bigLine).join('\n') + '\n');
+  const detAllBig = await lt.detectCandidates(rAllBig, { sessionId: 'ses_t' });
+  ok(detAllBig.truncated === true && detAllBig.skippedOversize <= 4,
+    `oversize lines consume the byte cap — an all-oversize spine is bounded (skipped ${detAllBig.skippedOversize}, truncated ${detAllBig.truncated})`);
+  // Oversize BOUNDARY probe: an oversize prior stop still cuts the window
+  // (raw substring probe; a false positive only narrows — safe direction).
+  const rBigStop = join(tmp, 'big-stop');
+  await mkdir(join(rBigStop, '.maddu', 'events'), { recursive: true });
+  await writeFile(join(rBigStop, '.maddu', 'events', '000000000001.ndjson'), [
+    refusedLine('cargo'), completedLine('cargo'), // BEFORE the oversize boundary — must not leak
+    JSON.stringify({ v: 1, id: 'evt_20260716090003_bigstp', ts: 'x', type: 'SLICE_STOP', actor: 'ses_t', lane: null, data: { summary: 'huge ' + 'z'.repeat(lt.MAX_LINE_BYTES) } }) + '\n',
+    refusedLine('go'), completedLine('go'), // after — detected
+  ].join(''));
+  const detBigStop = await lt.detectCandidates(rBigStop, { sessionId: 'ses_t' });
+  ok(detBigStop.candidates.length === 1 && detBigStop.candidates[0].tool === 'go',
+    `oversize prior stop still bounds the window (got ${detBigStop.candidates.map((c) => c.tool).join(',')})`);
+  // Partition ordering: events in a by-replica partition NEWER than the flat
+  // boundary are detected — order restored by event-id sort, not path sort.
+  const rPart = join(tmp, 'partitioned');
+  await mkdir(join(rPart, '.maddu', 'events', 'by-replica', 'r1'), { recursive: true });
+  await writeFile(join(rPart, '.maddu', 'events', '000000000001.ndjson'),
+    evLine('SLICE_STOP', { summary: 'prior' }, { actor: 'ses_t', id: 'evt_20260716090100_prior1' }));
+  await writeFile(join(rPart, '.maddu', 'events', 'by-replica', 'r1', '000000000001.ndjson'),
+    JSON.stringify({ v: 1, id: 'evt_20260716090200_pref01', ts: 'x', type: 'TOOL_REFUSED', actor: null, lane: null, data: { tool: 'mvn', argv: ['mvn'], reason: 'r' } }) + '\n'
+    + JSON.stringify({ v: 1, id: 'evt_20260716090201_pcomp1', ts: 'x', type: 'TOOL_COMPLETED', actor: null, lane: null, data: { tool: 'mvn', argv: ['mvn'] } }) + '\n');
+  const detPart = await lt.detectCandidates(rPart, { sessionId: 'ses_t' });
+  ok(detPart.candidates.length === 1 && detPart.candidates[0].tool === 'mvn',
+    `partition events order by event id, not shard path (got ${detPart.candidates.map((c) => c.tool).join(',') || 'none'})`);
+  // Cross-session honesty: attributed events from ANOTHER session never leak
+  // into this session's preview; null-actor census events stay (documented).
+  const rXs = join(tmp, 'cross-session');
+  await mkdir(join(rXs, '.maddu', 'events'), { recursive: true });
+  await writeFile(join(rXs, '.maddu', 'events', '000000000001.ndjson'), [
+    evLine('SLICE_STOP', { summary: 'prior' }, { actor: 'ses_t', id: 'evt_20260716090000_prior2' }),
+    evLine('GATE_RAN', { gateId: 'gx', ok: false, status: 'fail', severity: 'critical' }, { actor: 'ses_OTHER' }),
+    evLine('GATE_RAN', { gateId: 'gx', ok: true, status: 'ok', severity: 'critical' }, { actor: 'ses_OTHER' }),
+    refusedLine('pip'), completedLine('pip'), // null-actor census pair — stays
+  ].join(''));
+  const detXs = await lt.detectCandidates(rXs, { sessionId: 'ses_t' });
+  ok(detXs.candidates.length === 1 && detXs.candidates[0].tool === 'pip',
+    `another session's attributed events are excluded; null-actor census stays (got ${detXs.candidates.map((c) => c.category).join(',')})`);
 
   // ── 4 (unit): cooperative deadline + caller race ───────────────────────────
   let calls = 0;
@@ -112,20 +158,36 @@ try {
   ok(/nothing is written/.test(s1.stdout), 'preview states the no-auto-writing contract');
 
   // ── 3: isolation — throwing detector, ritual still green ─────────────────
-  const s2 = run(['slice-stop', 'SLICE STOP: t5 isolation slice. Action: fixture. Reason: test.'], { MADDU_TEST_LEARN_DETECTOR: 'throw' });
+  // Hooks require MADDU_SELF_TEST=1 (production-gated); first prove the gate:
+  // without it, the hook env var is inert and the preview still runs. Seed a
+  // FRESH pair with current-clock ids so it lands inside the new window
+  // (post-s1 boundary — the sort is wall-clock keyed).
+  const nowClock = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const freshLine = (type, data, n) => JSON.stringify({ v: 1, id: `evt_${nowClock}_zfrsh${n}`, ts: new Date().toISOString(), type, actor: null, lane: null, data }) + '\n';
+  await appendFile(join(fixture, '.maddu', 'events', '000000000001.ndjson'),
+    freshLine('TOOL_REFUSED', { tool: 'tsc', argv: ['tsc', '--bad'], reason: 'refused' }, 1)
+    + freshLine('TOOL_COMPLETED', { tool: 'tsc', argv: ['tsc', '--good'] }, 2));
+  const sGate = run(['slice-stop', 'SLICE STOP: t5 gate slice. Action: fixture. Reason: test.'], { MADDU_TEST_LEARN_DETECTOR: 'throw' });
+  ok(sGate.status === 0 && /learn:/.test(sGate.stdout),
+    `without MADDU_SELF_TEST=1 the test hook is INERT — preview still runs (learn lines: ${sGate.stdout.split('\n').filter((l) => l.includes('learn')).join(' | ') || 'none'})`);
+  const s2 = run(['slice-stop', 'SLICE STOP: t5 isolation slice. Action: fixture. Reason: test.'], { MADDU_SELF_TEST: '1', MADDU_TEST_LEARN_DETECTOR: 'throw' });
   ok(s2.status === 0 && /slice-stop\s+evt_/.test(s2.stdout), `throwing detector still slice-stops GREEN (got ${s2.status})`);
   ok(!/learn:/.test(s2.stdout), 'no learn output when the detector throws (silently isolated)');
 
-  // ── 4 (E2E): slow detector — stop completes within budget ─────────────────
+  // ── 4 (E2E): slow detector — stop completes within budget, straggler's
+  // unref'd timers never hold the process open (bound is spawn overhead +
+  // the ~1.6s race, NOT the 5s straggler).
   const tSlow = Date.now();
-  const s3 = run(['slice-stop', 'SLICE STOP: t5 deadline slice. Action: fixture. Reason: test.'], { MADDU_TEST_LEARN_DETECTOR: 'slow' });
+  const s3 = run(['slice-stop', 'SLICE STOP: t5 deadline slice. Action: fixture. Reason: test.'], { MADDU_SELF_TEST: '1', MADDU_TEST_LEARN_DETECTOR: 'slow' });
   const slowElapsed = Date.now() - tSlow;
   ok(s3.status === 0 && /passed its 1500ms budget/.test(s3.stdout),
     `slow detector: stop green + budget note printed (got ${s3.status}; ${s3.stdout.split('\n').filter((l) => l.includes('learn')).join(' ')})`);
-  ok(slowElapsed < 20_000, `slow detector never stalls the ritual (elapsed ${slowElapsed}ms)`);
+  ok(slowElapsed < 12_000, `slow detector never stalls the ritual or holds exit (elapsed ${slowElapsed}ms)`);
 
-  // Session close: same isolation contract at the other boundary.
-  const c1 = run(['session', 'close'], { MADDU_TEST_LEARN_DETECTOR: 'throw' });
+  // Session close: same isolation contract at the other boundary — the hook
+  // is forwarded there too, so this genuinely exercises a throwing detector
+  // through the close call site.
+  const c1 = run(['session', 'close'], { MADDU_SELF_TEST: '1', MADDU_TEST_LEARN_DETECTOR: 'throw' });
   ok(c1.status === 0, `session close with a throwing detector exits 0 (got ${c1.status}: ${(c1.stderr || '').slice(0, 200)})`);
 
   // ── 2: accept path — fake judge writes correction + LEARN event ───────────

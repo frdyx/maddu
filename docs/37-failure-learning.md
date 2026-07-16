@@ -109,8 +109,13 @@ onto the existing verbs (`learn digest --spine` to review, `learn run
 - a 1500ms cooperative deadline, raced — the stop prints within budget no
   matter what detection does; a straggler is abandoned and reaped at exit.
 
-All three properties are proven by tests that drive the real CLI with a
-deliberately throwing / slow detector.
+Isolation and the deadline race are proven by tests that drive the **real
+CLI** (both `slice-stop` and `session close`) with a deliberately throwing /
+slow detector via a test-runtime-gated hook; the window caps and boundary
+semantics are proven at unit level against fixture spines. One documented
+attribution residual: live `TOOL_*` events carry no session linkage, so
+null-actor events inside the window are included (they cannot be attributed
+to another session; attributed events from other sessions are excluded).
 
 **Trial framing (kickoff decisions, recorded here):**
 
