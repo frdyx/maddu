@@ -30,12 +30,15 @@ import { resolveInstalledVersion, isSourceCheckout } from './installed-version.m
 // A spine event is IMPORTED (backfilled from an external corpus, not native
 // activity) iff its data.source carries one of these markers. Writers:
 // `maddu usage import --from claude-code` stamps 'claude-code-transcript'
-// (commands/usage.mjs), and `maddu import submit --kind inbox-note` stamps
-// 'import-submit' on the INBOX_MESSAGE it appends (imports.mjs — the one
-// import path that puts imported CONTENT on the spine; its IMPORT_* receipts
-// witness a local operation and stay native). Native emitters omit the field
-// entirely, so absence = native — verified across the 2026-07-16 fleet
-// (snyggare: 53,668 stamped import rows, 0 unstamped).
+// (commands/usage.mjs); `maddu import submit` stamps 'import-submit' on the
+// spine events its accepted kinds produce — the INBOX_MESSAGE content row
+// (kind=inbox-note) and the SKILL_CREATED/SKILL_UPDATED lifecycle receipts
+// (kind=skill, via saveSkill's trusted-caller opts). The IMPORT_* receipts
+// witness the local accept/reject operation itself and stay native; the
+// remaining kinds (memory-note/lane/brief) write files, not spine events.
+// Native emitters omit the field entirely, so absence = native — verified
+// across the 2026-07-16 fleet (snyggare: 53,668 stamped import rows, 0
+// unstamped).
 export const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript', 'import-submit']);
 
 export function isImportedEvent(e) {

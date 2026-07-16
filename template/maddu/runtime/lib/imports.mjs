@@ -88,9 +88,10 @@ async function dispatchAccepted(repoRoot, kind, payload, by) {
       tags: payload.tags || [],
       provenance: payload.provenance || [],
       body: payload.body || '',
-      by,
-      source: 'import-submit' // stamps the SKILL_* lifecycle event as imported (Tier 1)
-    });
+      by
+      // trusted-caller opts: stamps the SKILL_* lifecycle event as imported
+      // (Tier 1) — passed OUTSIDE the skill object so bridge JSON can't spoof it
+    }, { source: 'import-submit' });
     return { kind, refId: saved.id };
   }
   if (kind === 'memory-note') {
@@ -125,10 +126,11 @@ async function dispatchAccepted(repoRoot, kind, payload, by) {
     return { kind, refId: payload.name };
   }
   if (kind === 'inbox-note') {
-    // The one import path that puts imported CONTENT on the spine — stamped
-    // with data.source so insights' import/native segmentation sees it
-    // (Tier 1; contract 1.8.0 added the field). The IMPORT_ACCEPTED receipt
-    // below stays native: it witnesses the local accept operation itself.
+    // Imported CONTENT on the spine — stamped with data.source so insights'
+    // import/native segmentation sees it (Tier 1; contract 1.8.0 added the
+    // field; the skill kind stamps its SKILL_* lifecycle receipts the same
+    // way). The IMPORT_ACCEPTED receipt below stays native: it witnesses the
+    // local accept operation itself.
     await append(repoRoot, {
       type: EVENT_TYPES.INBOX_MESSAGE,
       actor: by, lane: payload.lane || null,

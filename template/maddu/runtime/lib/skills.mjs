@@ -122,7 +122,12 @@ export async function readSkill(repoRoot, id) {
   } catch { return null; }
 }
 
-export async function saveSkill(repoRoot, skill) {
+// `opts.source` (e.g. 'import-submit') stamps the lifecycle event as imported.
+// It is a TRUSTED-CALLER option, deliberately outside the `skill` object:
+// bridge routes forward caller JSON as `skill` verbatim, so a field there
+// could be spoofed by any native caller to hide its activity as imported
+// (Codex diff-review round 3). Only internal import paths pass opts.
+export async function saveSkill(repoRoot, skill, opts = {}) {
   await ensureDir(repoRoot);
   const id = skill.id || genSkillId();
   const existing = await readSkill(repoRoot, id);
@@ -144,14 +149,15 @@ export async function saveSkill(repoRoot, skill) {
   const text = serializeSkill({ frontmatter: fm, body });
   await writeFile(skillsFile(repoRoot, id), text);
   const eventType = existing ? EVENT_TYPES.SKILL_UPDATED : EVENT_TYPES.SKILL_CREATED;
-  // `skill.source` (e.g. 'import-submit') stamps the lifecycle event so
-  // insights' import/native segmentation never counts an imported skill's
-  // creation as native activity (Tier 1; contract 1.8.0 added the field).
+  // opts.source stamps the lifecycle event so insights' import/native
+  // segmentation never counts an imported skill's creation as native
+  // activity (Tier 1; contract 1.8.0 added the field). Never read from
+  // `skill` — see the trusted-caller note on the signature.
   await append(repoRoot, {
     type: eventType,
     actor: skill.by || null,
     lane: null,
-    data: skill.source ? { id, title: fm.title, source: skill.source } : { id, title: fm.title }
+    data: opts.source ? { id, title: fm.title, source: opts.source } : { id, title: fm.title }
   });
   await appendFile(provenanceLog(repoRoot), JSON.stringify({
     ts: now, kind: existing ? 'update' : 'create', id, by: skill.by || null

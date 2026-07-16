@@ -17,7 +17,7 @@
 //   4. ROLE DETECTION — self (framework source checkout, by file test),
 //      fixture (registry role), consumer (default).
 
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,8 @@ const insights = await import(new URL(`file:///${join(LIB, 'insights.mjs').repla
 const fleetLib = await import(new URL(`file:///${join(LIB, 'fleet.mjs').replace(/\\/g, '/')}`));
 const spineLib = await import(new URL(`file:///${join(LIB, 'spine.mjs').replace(/\\/g, '/')}`));
 const { EVENT_DISPOSITIONS } = await import(new URL(`file:///${join(LIB, 'event-dispositions.mjs').replace(/\\/g, '/')}`));
+const { saveSkill } = await import(new URL(`file:///${join(LIB, 'skills.mjs').replace(/\\/g, '/')}`));
+const { safeImport } = await import(new URL(`file:///${join(LIB, 'imports.mjs').replace(/\\/g, '/')}`));
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error(`  ✗ ${msg}`); } };
@@ -153,6 +155,22 @@ try {
   await makeRepo(rUndecl, { version: '1.99.0', spineLines: [evLine('TOTALLY_UNKNOWN_TYPE', { x: 1 })] });
   const undeclMatrix = insights.buildMatrix(await insights.harvestSpines([{ id: 'undecl', path: rUndecl }]), definedSet);
   ok(undeclMatrix.undeclaredCount === 1 && undeclMatrix.partition.complete, `undeclared type counted apart while partition stays complete (${undeclMatrix.undeclaredCount}, ${undeclMatrix.partition.complete})`);
+
+  // Skill-import stamping is spoof-proof (Codex rounds 2+3): the import path
+  // stamps SKILL_* lifecycle events via trusted-caller opts; a caller-supplied
+  // `source` INSIDE the skill object (the bridge-JSON shape) is ignored.
+  const rSkills = join(tmp, 'skills');
+  await makeRepo(rSkills, { version: '1.99.0', spineLines: [evLine('FRAMEWORK_BOOTED')] });
+  await safeImport(rSkills, { kind: 'skill', payload: { title: 'imported recipe', body: 'do the thing' }, by: 'ses_t' });
+  await saveSkill(rSkills, { title: 'native recipe', body: 'native thing', by: 'ses_t', source: 'import-submit' }); // spoof attempt
+  const spineTxt = await readFile(join(rSkills, '.maddu', 'events', '000000000001.ndjson'), 'utf8');
+  const skillEvents = spineTxt.split('\n').filter((l) => l.includes('SKILL_CREATED')).map((l) => JSON.parse(l));
+  const imported = skillEvents.find((e) => e.data.title === 'imported recipe');
+  const spoofed = skillEvents.find((e) => e.data.title === 'native recipe');
+  ok(imported?.data.source === 'import-submit' && insights.isImportedEvent(imported), 'import-submit skill stamps its SKILL_CREATED as imported');
+  ok(spoofed && spoofed.data.source === undefined && !insights.isImportedEvent(spoofed), `caller-supplied source inside the skill object is ignored (got ${spoofed?.data.source})`);
+  const [skillsHarvest] = await insights.harvestSpines([{ id: 'skills', path: rSkills }]);
+  ok(skillsHarvest.counts.get('SKILL_CREATED') === 1 && skillsHarvest.importedCounts.get('SKILL_CREATED') === 1, 'harvest splits native vs imported skill lifecycle events');
 
   // ── 4. Role detection ──────────────────────────────────────────────────────
   ok(await insights.workspaceRole({ path: REPO, role: 'project' }) === 'self', 'framework source checkout detects as self');
