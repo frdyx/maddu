@@ -29,9 +29,12 @@
 //       Node has no fs-read cancellation — and its run-out is bounded by
 //       construction: the deadline is checked before every shard stat,
 //       before every tail read, and every 64 scanned lines, and per-shard
-//       I/O is a ≤512KB tail read (so the residual is one small read + one
-//       ≤64-line batch + one parse step, and the largest synchronous
-//       event-loop block is one ≤512KB split). Synchronous preemption
+//       I/O is a ≤512KB tail read. Residual run-out, stated exactly: the
+//       remainder of ONE shard-enumeration pass (metadata-only readdirs —
+//       the events dir plus one per partition, no file content; the
+//       enumeration itself carries no deadline checks) OR one tail read +
+//       one ≤64-line batch + one parse step; the largest synchronous
+//       event-loop block is one ≤512KB split. Synchronous preemption
 //       of a single parse step is NOT claimed — with the 64KB/256KB caps the
 //       residual overrun is bounded by one ≤64KB line parse.
 //
@@ -87,10 +90,21 @@ async function readTail(path) {
     const len = Math.min(size, TAIL_READ_BYTES);
     if (len === 0) return { text: '', clipped: false };
     const buf = Buffer.alloc(len);
-    await fh.read(buf, 0, len, size - len);
-    let text = buf.toString('utf8');
-    const clipped = len < size;
-    if (clipped) {
+    // Positioned reads may legally return SHORT (Codex round 4) — loop until
+    // the requested range is consumed or the fd gives no more; only the
+    // bytes actually read become text (never zero-filled buffer remainder).
+    let off = 0;
+    while (off < len) {
+      const { bytesRead } = await fh.read(buf, off, len - off, size - len + off);
+      if (bytesRead <= 0) break;
+      off += bytesRead;
+    }
+    let text = buf.subarray(0, off).toString('utf8');
+    // clipped = older history exists beyond the tail OR a short-read
+    // shortfall left the range incomplete — both mean "this shard's window
+    // view is partial", surfaced via `truncated`, never silently.
+    const clipped = len < size || off < len;
+    if (len < size) {
       const nl = text.indexOf('\n'); // drop the partial (and possibly mid-codepoint) first line
       text = nl >= 0 ? text.slice(nl + 1) : '';
     }
