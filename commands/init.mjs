@@ -12,7 +12,7 @@
 //   6. Appends FRAMEWORK_INSTALLED to the spine.
 //   7. Adds Máddu's standard .gitignore entries (token paths, no-token-export).
 
-import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseFlags } from './_args.mjs';
@@ -176,7 +176,25 @@ export default async function init(argv) {
   const { hashLine } = await import(
     'file://' + join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'spine-append-core.mjs').replace(/\\/g, '/')
   );
-  const eventsSegment = join(cwd, '.maddu', 'events', '000000000001.ndjson');
+  const eventsDir = join(cwd, '.maddu', 'events');
+  const eventsSegment = join(eventsDir, '000000000001.ndjson');
+  // An EXISTING spine is project state — `init --force` re-installs framework
+  // files but must never truncate the append-only event history (Codex
+  // Tier-4b round 2; the old unconditional writeFile destroyed segment 1).
+  // On a re-install, the three install events route through the canonical
+  // spine.append instead (correct prev_hash chaining onto the current tail,
+  // funnel lock, sync-mode partition routing).
+  let existingSegs = [];
+  try { existingSegs = (await readdir(eventsDir)).filter((f) => /^\d{12}\.ndjson$/.test(f)); } catch {}
+  let hasByReplica = false;
+  try { hasByReplica = (await readdir(join(eventsDir, 'by-replica'))).length > 0; } catch {}
+  let appendViaLib = null;
+  if (existingSegs.length > 0 || hasByReplica) {
+    const spineMod = await import(
+      'file://' + join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'spine.mjs').replace(/\\/g, '/')
+    );
+    appendViaLib = (e) => spineMod.append(cwd, { type: e.type, actor: e.actor, lane: e.lane, data: e.data });
+  }
   const ts = new Date().toISOString();
   const ev = {
     v: 1,
@@ -187,10 +205,16 @@ export default async function init(argv) {
     lane: null,
     data: { version: fwVersion, files: files.length }
   };
-  ev.prev_hash = null; // genesis
-  let lastStoredLine = JSON.stringify(ev);
-  await writeFile(eventsSegment, lastStoredLine + '\n');
-  console.log(`  spine seeded with FRAMEWORK_INSTALLED event`);
+  let lastStoredLine = null;
+  if (appendViaLib) {
+    await appendViaLib(ev);
+    console.log(`  spine preserved — FRAMEWORK_INSTALLED appended to the existing record (re-install)`);
+  } else {
+    ev.prev_hash = null; // genesis
+    lastStoredLine = JSON.stringify(ev);
+    await writeFile(eventsSegment, lastStoredLine + '\n');
+    console.log(`  spine seeded with FRAMEWORK_INSTALLED event`);
+  }
 
   // 6. .gitignore — append only if our block isn't already present.
   const gitignorePath = join(cwd, '.gitignore');
@@ -249,9 +273,13 @@ export default async function init(argv) {
       lane: null,
       data: { files: result.files, action: result.action, perFile: result.perFile }
     };
-    ev2.prev_hash = hashLine(lastStoredLine);
-    lastStoredLine = JSON.stringify(ev2);
-    await appendFile(eventsSegment, lastStoredLine + '\n');
+    if (appendViaLib) {
+      await appendViaLib(ev2);
+    } else {
+      ev2.prev_hash = hashLine(lastStoredLine);
+      lastStoredLine = JSON.stringify(ev2);
+      await appendFile(eventsSegment, lastStoredLine + '\n');
+    }
     const perFileSummary = Object.entries(result.perFile)
       .map(([f, a]) => `${f}:${a}`).join(', ');
     console.log(`  agent files synced (${result.action}) — ${perFileSummary}`);
@@ -273,9 +301,13 @@ export default async function init(argv) {
         reason: slashResult.reason || null,
       }
     };
-    ev3.prev_hash = hashLine(lastStoredLine);
-    lastStoredLine = JSON.stringify(ev3);
-    await appendFile(eventsSegment, lastStoredLine + '\n');
+    if (appendViaLib) {
+      await appendViaLib(ev3);
+    } else {
+      ev3.prev_hash = hashLine(lastStoredLine);
+      lastStoredLine = JSON.stringify(ev3);
+      await appendFile(eventsSegment, lastStoredLine + '\n');
+    }
     const slashSummary = slashResult.files.length
       ? `${slashResult.files.length} command(s)`
       : (slashResult.reason || 'no commands');

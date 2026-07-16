@@ -102,6 +102,9 @@ try {
   const customCatalog = { schemaVersion: 1, framework: 'maddu', lanes: [{ id: 'general', scope: 'x' }, { id: 'my-custom-lane', scope: 'operator-authored' }] };
   await writeFile(join(fixture, '.maddu', 'lanes', 'catalog.json'), JSON.stringify(customCatalog, null, 2) + '\n');
   const claimsBefore = await readFile(join(fixture, '.maddu', 'lanes', 'claims.json'), 'utf8');
+  const segPath = join(fixture, '.maddu', 'events', '000000000001.ndjson');
+  const spineBefore = await readFile(segPath, 'utf8');
+  ok(spineBefore.split('\n').filter(Boolean).length >= 5, 'fixture spine holds real history before the re-install');
   const rForce = run(['init', '--force']);
   ok(rForce.status === 0, `init --force exits 0 on an existing install (got ${rForce.status}: ${(rForce.stderr || '').slice(0, 200)})`);
   const catAfterForce = JSON.parse(await readFile(join(fixture, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
@@ -109,6 +112,16 @@ try {
     `init --force preserves a customized catalog (got ${catAfterForce.lanes.map((l) => l.id).join(',')})`);
   ok((await readFile(join(fixture, '.maddu', 'lanes', 'claims.json'), 'utf8')) === claimsBefore,
     'init --force preserves live claims.json');
+  // The spine is project state too (Codex round 2: the old unconditional
+  // writeFile TRUNCATED segment 1): all pre-existing events must survive as
+  // an exact prefix, the re-install lands as an APPENDED chained event, and
+  // the tamper chain must still verify.
+  const spineAfter = await readFile(segPath, 'utf8');
+  ok(spineAfter.startsWith(spineBefore), 'init --force never truncates the spine — history survives byte-exact');
+  const appended = spineAfter.slice(spineBefore.length);
+  ok(/FRAMEWORK_INSTALLED/.test(appended), `re-install is recorded by APPEND, not overwrite (appended: ${appended.slice(0, 120)})`);
+  const rVerify = run(['spine', 'verify']);
+  ok(rVerify.status === 0, `spine verify passes after a --force re-install (got ${rVerify.status}: ${(rVerify.stdout + rVerify.stderr).slice(0, 300)})`);
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }
