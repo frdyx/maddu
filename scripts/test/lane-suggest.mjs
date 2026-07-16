@@ -172,15 +172,14 @@ try {
   ok(both.length === 2 && catConc.lanes.some((l) => l.id === 'alpha') && catConc.lanes.some((l) => l.id === 'beta'),
     `concurrent adopts serialize under the catalog lock — no lost update (got ${catConc.lanes.map((l) => l.id).join(',')})`);
   ok(!(await readdir(join(rConc, '.maddu', 'lanes'))).includes('catalog.lock'), 'lock released after both mutations');
-  // Stale lock (crashed holder) is broken after LOCK_STALE_MS.
+  // NO automated eviction (Codex rounds 4-6: timeout eviction was the race
+  // generator): a leftover lock — crashed holder or foreign — REFUSES with
+  // the holder's identity and the exact manual removal instruction.
   await mkdir(join(rConc, '.maddu', 'lanes', 'catalog.lock'));
-  await obs._testAgeLock(rConc, 60_000);
-  ok(/lifetime claim/.test(await refused(() => obs.pruneLane(rConc, 'alpha', {}))),
-    'stale lock is broken and the operation proceeds to its normal guard');
-  // A FRESH foreign lock refuses with a retry hint (acquire timeout).
-  await mkdir(join(rConc, '.maddu', 'lanes', 'catalog.lock'));
-  ok(/locked by another admin operation/.test(await refused(() => obs.pruneLane(rConc, 'general', {}))),
-    'fresh foreign lock → clean retry-shortly refusal');
+  await writeFile(join(rConc, '.maddu', 'lanes', 'catalog.lock', 'owner.json'), JSON.stringify({ token: 'x', pid: 4242, ts: '2026-07-16T00:00:00.000Z' }));
+  const lockedMsg = await refused(() => obs.pruneLane(rConc, 'general', {}));
+  ok(/locked by another admin operation/.test(lockedMsg) && /pid 4242/.test(lockedMsg) && /remove .maddu\/lanes\/catalog.lock by hand/.test(lockedMsg),
+    `leftover lock refuses with holder identity + removal instruction, never auto-evicts (got: ${lockedMsg})`);
   await rm(join(rConc, '.maddu', 'lanes', 'catalog.lock'), { recursive: true, force: true });
   // racedClaim POSITIVE path: a claim landing right after the mutation is
   // detected (guarded hook injects the claim between mutation and recheck).

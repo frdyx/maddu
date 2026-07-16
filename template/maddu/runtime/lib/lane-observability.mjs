@@ -26,7 +26,7 @@
 // partition-aware via the shared listSpineShards. Pure lib — no console
 // output, no process.exit. Node stdlib only (rule #4).
 
-import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
@@ -98,35 +98,44 @@ async function readCatalogTolerant(repoRoot) {
 }
 
 // Serialize maddu-side catalog mutations with an atomic lock DIRECTORY
-// (mkdir fails EEXIST — the worktrees-lib pattern) carrying an OWNER TOKEN
-// (Codex round 4: without one, a stale-broken slow holder's `finally`
-// would delete the SUCCESSOR's lock and reopen the lost-update window).
+// (mkdir fails EEXIST — the worktrees-lib pattern) carrying an OWNER TOKEN.
 // Inside the lock, read → guard → write → append → rollback run without
-// another LOCK-HONORING writer interleaving. Ownership semantics:
+// another LOCK-HONORING writer interleaving.
+//
+// There is deliberately NO automated stale-lock eviction (Codex rounds 4-6:
+// every timeout-eviction design spawned a narrower REAL lost-update race —
+// ABA on the staleness stat, evictee-vs-successor release, third-writer
+// overlap during rename-back — automated eviction IS the race generator).
+// A leftover lock from a crashed operation is instead an EXPLICIT operator
+// action: acquisition waits up to 5s, then refuses with the holder's
+// pid/timestamp and the exact removal instruction. Catalog admin is rare
+// and interactive — the operator is present to make that call. Absent
+// manual removal, no process can ever take a live holder's lock, which is
+// what makes the lost-update guarantee hold.
+//
+// Ownership semantics that remain (they guard the MANUAL-removal edge):
 //   - the holder's callback receives `assertOwned()`; mutateCatalog calls
-//     it immediately before the catalog write, so an evicted holder ABORTS
-//     instead of writing over the successor (the residual check→write gap
-//     is sub-ms against a 30s eviction threshold);
-//   - release deletes the lock ONLY while it still carries our token — a
-//     successor's lock is never torn down by the evictee.
-// Residuals, stated plainly: the bridge admin route and operator hand-
-// edits do NOT take this lock (atomic write + conditional rollback are
-// best-effort there; the spine is the reconciliation source), and a
-// legitimate holder stalled >30s is evicted by design — it aborts at its
-// next assertOwned rather than corrupting. Acquisition gives up at 5s
-// with a retry hint.
-const LOCK_STALE_MS = 30_000;
+//     it immediately before the catalog write, so a holder whose lock was
+//     hand-removed (and possibly re-acquired by another) ABORTS instead of
+//     writing;
+//   - release detaches via atomic rename and inspects the token — another
+//     holder's lock is never torn down.
+// Residuals, stated plainly: (a) the bridge admin route and operator
+// hand-edits do NOT take this lock (atomic write + conditional rollback
+// are best-effort there; the spine is the reconciliation source);
+// (b) removing the lock while its operation is STILL running voids the
+// serialization guarantee for that operation — the removal instruction
+// says exactly that; worst case thereafter is a safe abort at the next
+// assertOwned.
 const LOCK_WAIT_MS = 5_000;
 function lockPaths(repoRoot) {
   const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
   return { lockDir, ownerFile: join(lockDir, 'owner.json') };
 }
 // Atomically DETACH the lock dir by renaming it to a private name — rename
-// is atomic, so of N racing processes exactly one wins; the losers see
-// ENOENT and re-loop. This is what makes stale-eviction and release safe
-// against each other (Codex round 5: bare check-then-rm could delete a
-// freshly REPLACED lock). Returns the detached path, or null if someone
-// else took it first.
+// is atomic, so of N racing processes exactly one wins (Codex round 5:
+// bare check-then-rm could delete a freshly replaced lock). Used by RELEASE
+// only; returns the detached path, or null if the lock is already gone.
 async function detachLock(lockDir) {
   const taken = `${lockDir}.take-${process.pid}-${randomBytes(4).toString('hex')}`;
   try { await rename(lockDir, taken); return taken; } catch { return null; }
@@ -140,39 +149,40 @@ export async function withCatalogLock(repoRoot, fn) {
     try {
       await mkdir(lockDir, { recursive: false });
       // Never leak an OWNERLESS lock: if the token write fails (disk full,
-      // permissions), tear the fresh dir down before rethrowing — otherwise
-      // it could only be reclaimed via the 30s stale timeout (round 5).
+      // permissions), tear the fresh dir down before rethrowing (round 5).
       try { await writeFile(ownerFile, JSON.stringify({ token, pid: process.pid, ts: new Date().toISOString() })); }
       catch (e) { try { await rm(lockDir, { recursive: true, force: true }); } catch {} throw e; }
       break;
     } catch (e) {
       if (!e || e.code !== 'EEXIST') throw e;
-      try {
-        const st = await stat(lockDir);
-        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
-          const taken = await detachLock(lockDir); // atomic: one evictor wins
-          if (taken) { try { await rm(taken, { recursive: true, force: true }); } catch {} }
-          continue;
-        }
-      } catch {}
-      if (Date.now() - t0 > LOCK_WAIT_MS) throw new Error('lane catalog is locked by another admin operation — retry shortly');
+      if (Date.now() - t0 > LOCK_WAIT_MS) {
+        let holder = '';
+        try {
+          const o = JSON.parse(await readFile(ownerFile, 'utf8'));
+          holder = ` (held by pid ${o.pid} since ${o.ts})`;
+        } catch {}
+        throw new Error(
+          `lane catalog is locked by another admin operation${holder} — if that process is no longer running, ` +
+          `remove .maddu/lanes/catalog.lock by hand and retry. Removing it while the operation is STILL running ` +
+          `voids the serialization guarantee for that operation.`
+        );
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
   }
   const assertOwned = async () => {
     let owned = false;
     try { owned = JSON.parse(await readFile(ownerFile, 'utf8')).token === token; } catch {}
-    if (!owned) throw new Error('lane catalog lock lost (stale-broken by another process) — aborting WITHOUT writing; retry the operation');
+    if (!owned) throw new Error('lane catalog lock lost (removed by hand while this operation ran) — aborting WITHOUT writing; retry the operation');
   };
   try { return await fn(assertOwned); }
   finally {
     // Release via atomic detach: rename whatever lock exists to a private
-    // name, THEN inspect. Ours → remove. Not ours (we were evicted and a
-    // successor acquired) → rename it back; if even that races (a second
-    // acquisition landed in the same microseconds), drop it — the displaced
-    // holder's next assertOwned fails and it SAFE-ABORTS. Kill criterion
-    // for this lock: residual races may only ever cause a spurious
-    // abort/retry, never a lost update or corruption.
+    // name, THEN inspect. Ours → remove. Not ours (only possible after a
+    // MANUAL removal + re-acquisition) → rename it back; if even that
+    // races, drop it — the displaced holder's next assertOwned fails and
+    // it SAFE-ABORTS. All release-side races require the documented manual
+    // removal first and bottom out in abort/retry, never a lost update.
     try {
       const taken = await detachLock(lockDir);
       if (taken) {
@@ -187,13 +197,6 @@ export async function withCatalogLock(repoRoot, fn) {
     } catch {}
   }
 }
-// Exposed for tests only: age a lock so the stale-break path is provable.
-export async function _testAgeLock(repoRoot, ageMs) {
-  const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
-  const old = new Date(Date.now() - ageMs);
-  await utimes(lockDir, old, old);
-}
-
 // STRICT read for MUTATIONS: a missing or malformed catalog must REFUSE the
 // operation — silently treating it as `{lanes:[]}` would let adopt overwrite
 // and destroy the real file (Codex round 1). Returns { catalog, raw }.
@@ -263,8 +266,8 @@ export async function laneReport(repoRoot) {
 // forces the append to throw so the rollback path is provable.
 async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, assertOwned = null, _testFailAppend }) {
   const nextRaw = serializeCatalog(nextCatalog);
-  // Ownership check immediately before the dangerous action: an evicted
-  // (stale-broken) holder aborts here instead of writing over its successor.
+  // Ownership check immediately before the dangerous action: a holder whose
+  // lock was hand-removed aborts here instead of writing over a successor.
   if (assertOwned) await assertOwned();
   await writeCatalogAtomic(repoRoot, nextRaw);
   try {
