@@ -88,6 +88,45 @@ maddu learn retrieve <briefingId>  # the full original (byte-exact unless a secr
 
 Each curation emits `BRIEFING_CURATED { briefingId, kind, originalRef, dropped }`.
 
+## The slice-stop trial (v1.105.0 — measured, demotion pre-authorized)
+
+The 2026-07-16 fleet usage audit found learn **self-dev-only**: 11 accepted
+corrections in the framework repo, 0 across all 21 consumers — including
+repos with dozens of slice-stops. The verbs exist; nothing surfaced them
+where the work happens. So the ritual boundary now runs a candidate
+**detection pass**: every `maddu slice-stop` (and `session close`) previews
+what `maddu learn` would harvest from that slice's window, with one-liners
+onto the existing verbs (`learn digest --spine` to review, `learn run
+--spine` to accept). **Nothing is auto-written.**
+
+**Containment contract** (the detection can never hurt the ritual):
+
+- runs only *after* the stop event is appended, inside try/catch — no
+  detection outcome affects the stop's success, exit code, or spine write;
+- bounded input: this session's window (back to its previous slice-stop),
+  capped at 500 lines *and* 256KB total; any single line over 64KB is
+  skipped unparsed and counted;
+- a 1500ms cooperative deadline, raced — the stop prints within budget no
+  matter what detection does; a straggler is abandoned and reaped at exit.
+
+All three properties are proven by tests that drive the real CLI with a
+deliberately throwing / slow detector.
+
+**Trial framing (kickoff decisions, recorded here):**
+
+- Adoption metric = **accepted corrections** (`LEARN_CORRECTION_WRITTEN`,
+  measurable today). The `LEARN_RETRIEVED` contract bump was considered at
+  kickoff and **not taken** — acceptance alone decides.
+- Window: 4 weeks from ship. Qualifying cohort: ≥3 non-fixture consumer
+  repos with ≥10 slice-stops in-window; if the cohort hasn't materialized
+  the window extends to a **hard backstop of 12 weeks** — a cohort that
+  never forms *is* the verdict.
+- Success: ≥1 accepted consumer correction. On failure, the pre-authorized
+  **demotion PR** removes this hook-in and reclassifies learn as an
+  expert/self-dev feature in these docs. The verdict is binding — no "one
+  more iteration" without new evidence. The trial is tracked as a
+  `maddu plan` so the verdict lands via existing `PLAN_*` events.
+
 ## `learn scan` — reflect v1 (read-only completion-claim check)
 
 `maddu learn` above *mines failures* and **auto-writes** project facts.

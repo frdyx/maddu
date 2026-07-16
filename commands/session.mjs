@@ -200,6 +200,20 @@ export default async function session(argv) {
     });
     if (sessionActive) await sessionActive.clearActiveSession(repoRoot);
     if (process.stdout.isTTY) console.log(`closed  ${sessionId}`);
+    // Learn candidate detection at the session boundary (usage-audit Tier 5)
+    // — same containment contract as the slice-stop hook-in (post-append,
+    // try/catch isolated, bounded window, raced deadline, READ-ONLY preview;
+    // see learn-slice-trigger.mjs). A close is often the last chance to
+    // surface what this session's failures taught before the context is gone.
+    try {
+      const lt = await loadLibOptional('learn-slice-trigger.mjs');
+      if (lt?.runDetectionPreview) {
+        const res = await lt.runDetectionPreview(repoRoot, { sessionId });
+        if (!res.timedOut && res.candidates.length && process.stdout.isTTY) {
+          console.log(`  learn: ${res.candidates.length} candidate(s) from this session — review: maddu learn digest --spine · accept: maddu learn run --spine`);
+        }
+      }
+    } catch { /* isolation contract: never affects the close */ }
     return;
   }
 
