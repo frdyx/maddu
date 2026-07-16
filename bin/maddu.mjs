@@ -103,8 +103,55 @@ Docs:
 `);
 }
 
+// ── Invocation receipts (usage-audit Tier 2, v1.101.0) ──────────────────────
+// Every CLI entry records one execution receipt to
+// `.maddu/state/invocation-receipts.ndjson` — the audit's verb stats were
+// transcript MENTIONS; this is the execution signal. FAIL-OPEN at every step:
+// the lib may be absent (older install), the cwd may have no .maddu, the
+// write may fail — none of it ever blocks or noises the verb. Recording
+// happens in a process 'exit' handler because commands call process.exit()
+// directly; state-root resolution also runs at exit so `maddu init` (no
+// .maddu at entry, one at exit) is recorded too.
+async function armInvocationReceipt(raw, rest) {
+  try {
+    let lib = null;
+    for (const p of [
+      join(repoRoot, 'runtime', 'lib', 'invocation-receipts.mjs'), // consumer install (maddu/bin → maddu/runtime/lib)
+      join(repoRoot, 'template', 'maddu', 'runtime', 'lib', 'invocation-receipts.mjs'), // source checkout
+    ]) {
+      try { lib = await import(pathToFileURL(p).href); break; } catch {}
+    }
+    if (!lib || typeof lib.recordInvocationSync !== 'function') return;
+    // Normalized verb only — an unknown command's raw text is caller input
+    // and never persisted (it could be prose or a pasted secret).
+    let verb;
+    if (!raw || raw === '--help' || raw === '-h') verb = 'help';
+    else if (raw === '--version' || raw === '-v' || raw === 'version') verb = 'version';
+    else if (COMMANDS.includes(raw)) verb = raw;
+    else verb = '(unknown)';
+    // Subcommand only for a KNOWN verb and only when the first arg LOOKS like
+    // one (token shape) — this keeps free text (slice-stop messages, flag
+    // values, whatever followed a typo'd command) out of the corpus.
+    const subRaw = COMMANDS.includes(raw) && Array.isArray(rest) && typeof rest[0] === 'string' ? rest[0] : null;
+    const sub = subRaw && /^[a-z][a-z0-9-]{0,31}$/i.test(subRaw) ? subRaw.toLowerCase() : null;
+    const t0 = Date.now();
+    process.on('exit', (code) => {
+      try {
+        const stateRoot = lib.resolveStateRootSync(process.cwd(), process.env);
+        if (!stateRoot) return;
+        lib.recordInvocationSync({
+          stateRoot, verb, sub,
+          exitCode: typeof code === 'number' ? code : (process.exitCode ?? 0),
+          durationMs: Date.now() - t0,
+        });
+      } catch {}
+    });
+  } catch {}
+}
+
 async function main() {
   const [, , raw, ...rest] = process.argv;
+  await armInvocationReceipt(raw, rest);
 
   if (!raw || raw === '--help' || raw === '-h') {
     printHelp();

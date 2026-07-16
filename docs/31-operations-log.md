@@ -72,3 +72,57 @@ catch any non-determinism creeping into the projector.
 
 - **`receipts-coherent`** (safety) — projection is deterministic
   (twice-run projections byte-equal).
+
+## Invocation receipts (v1.101.0)
+
+Separate from the operations projection above, every `maddu` CLI entry
+appends one **execution receipt** to a dedicated corpus:
+
+```
+.maddu/state/invocation-receipts.ndjson        — current generation
+.maddu/state/invocation-receipts.prev.ndjson   — one rotated generation
+```
+
+One line per invocation: `{ ts, verb, sub, exit, ms, sessionId, workspace }`.
+This is what `maddu insights verbs` renders as the execution signal (the old
+transcript scan counted keyword *mentions* and remains only as a labeled
+legacy signal).
+
+**Why not the spine or `operations.ndjson`?** The spine records facts the
+project's history must witness — per-invocation telemetry there would be
+event-type noise. And `operations.ndjson` is a *regenerable projection*:
+`maddu log` overwrites it from the spine, so anything written there directly
+is destroyed on the next read.
+
+**Containment.** The corpus is device-local operational telemetry: never
+chained, never synced (`spine sync` touches only `.maddu/events/`), never
+exported (`export --otel` reads only the spine), untracked
+(`.maddu/state/*` is gitignored; the `maddu-state-untracked` gate enforces
+it), excluded from spine-integrity verification, and secret-scrubbed at the
+write boundary. Recording is **fail-open**: a telemetry error never blocks
+or noises the verb, and the sync write happens in a process-exit handler
+(one small sync append; p50 < 10ms asserted by the `invocation-receipts`
+self-test — the roadmap's kill-criterion budget).
+
+**Honesty contract.** Receipts are an *observed-window* signal, never an
+authoritative total: fail-open writes, rotation, and pre-v1.101 installs
+writing nothing make gaps structural. Every surface that renders receipt
+counts must carry the retention window (oldest→newest receipt ts) and the
+dropped/unparseable-line count alongside them.
+
+**Retention** is size-capped rotation: 5MB per file with one previous
+generation kept (normal total ≤ ~10MB per repo). Deliberately size-only — an
+age check on the hot write path would cost a file read, and a low-volume repo
+keeping a long window is more telemetry, not staleness (the window readout
+makes age visible). If rotation itself keeps failing (e.g. the prev file is
+locked), a hard ceiling **drops** receipts rather than growing the current
+file past 2× the cap — the ceiling check includes the candidate line's own
+bytes, so that bound is exact. Absolute worst case while rotation is
+persistently blocked: current ≤ 2× cap and a later rotation can move such a
+file into prev, so disk is hard-bounded at ≤ ~4× the cap (~20MB) even in
+pathological states.
+
+```bash
+maddu log --window          # declare the corpus: window, counts, dropped, cap
+maddu log --window --json
+```

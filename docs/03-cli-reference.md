@@ -696,6 +696,8 @@ $ maddu governance reset
 
 # Receipt log (Phase 4)
 $ maddu log [--since iso] [--lane id] [--op T] [--rebuild] [--json]
+$ maddu log --window [--json]   # invocation-receipts corpus: retention window,
+#   receipt/drop counts, rotation cap (v1.101.0 — see 31-operations-log.md)
 
 # Plans + kanban (Phase 5)
 $ maddu plan new "<title>" [--phases "a,b,c"] [--goal "..."]
