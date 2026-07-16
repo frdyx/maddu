@@ -1,6 +1,6 @@
 {
   "version": "1.8.0",
-  "fingerprint": "08cea7ec",
+  "fingerprint": "30a23214",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1213,6 +1213,7 @@
       "SKILL_CREATED": {
         "frozen": false,
         "data": {
+          "source": "string?",
           "title": "string"
         }
       },
@@ -1257,7 +1258,9 @@
       },
       "SKILL_UPDATED": {
         "frozen": false,
-        "data": {}
+        "data": {
+          "source": "string?"
+        }
       },
       "SLASH_COMMANDS_SYNCED": {
         "frozen": false,

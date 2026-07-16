@@ -52,10 +52,11 @@
 // tamper-detecting spine RECEIPT appended from the in-process result, read back
 // by the recency/success readouts — not a hand-writable state file the actor
 // re-reads (the "verification, not actor-witness" tier). Additive → minor bump.
-// 1.8.0 (usage-audit Tier 1) — INBOX_MESSAGE gains optional `source` so
-// `import submit --kind inbox-note` stamps its imported content the same way
+// 1.8.0 (usage-audit Tier 1) — INBOX_MESSAGE, SKILL_CREATED and SKILL_UPDATED
+// gain optional `source` so every `import submit` path that touches the spine
+// (inbox-note content; skill lifecycle receipts) stamps itself the same way
 // `usage import` stamps TOKEN_USAGE_REPORTED, letting insights' import/native
-// segmentation key on one data field. Added field to an existing type →
+// segmentation key on one data field. Added fields to existing types →
 // minor bump; baseline refreshed with this release.
 export const EVENT_CONTRACT_VERSION = '1.8.0';
 
@@ -109,8 +110,8 @@ export const EVENT_SCHEMA = {
   TASK_CREATED: { summary: "A task was created on the dependency-aware board.", data: { id: 'string', blockedBy: 'array', description: 'string', metadata: 'object', owner: 'string|null', status: 'string', tags: 'array', title: 'string' } },
   TASK_UPDATED: { summary: "A task's fields or status were updated.", data: { id: 'string', by: 'string' } },
   TASK_COMPLETED: { summary: "A task was marked complete.", data: { id: 'string' } },
-  SKILL_CREATED: { summary: "A skill was authored and added to the gallery.", data: { title: 'string' } },
-  SKILL_UPDATED: { summary: "An existing skill was edited.", data: {} },
+  SKILL_CREATED: { summary: "A skill was authored and added to the gallery.", data: { source: 'string?', title: 'string' } },
+  SKILL_UPDATED: { summary: "An existing skill was edited.", data: { source: 'string?' } },
   SKILL_DELETED: { summary: "A skill was removed from the gallery.", data: { id: 'string' } },
   SKILL_APPLIED: { summary: "A skill body was applied during a session.", data: { id: 'string', sessionId: 'string', title: 'string' } },
   WORKER_SPAWNED: { summary: "A sub-worker subprocess was launched.", data: { id: 'string', args: 'array', command: 'string|null', error: 'string|null', log: 'string', modelHint: 'string|null', pid: 'number|null', runtime: 'string', sessionId: 'string|null', stage: 'string|null', wrapper: 'string|null' } },

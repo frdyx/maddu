@@ -109,11 +109,16 @@ export default async function insights(argv) {
     } catch {}
     // --role scopes the transcript scan to the matching workspaces' session
     // dirs (path-encoded, case-insensitive) — without this, `--role consumer`
-    // verb counts would still include framework self-dev sessions.
+    // verb counts would still include framework self-dev sessions. Derived
+    // from the REGISTRY (role-checked per workspace), not from harvested
+    // spines, so a registered repo whose .maddu/events is absent still
+    // contributes its transcript dirs.
     let dirAllow = null;
-    if (roleFilter && lib.transcriptDirName) {
-      const allowedPaths = new Set(projects.map((p) => p.repoRoot));
-      dirAllow = new Set(workspaces.filter((w) => w?.path && allowedPaths.has(w.path)).map((w) => lib.transcriptDirName(w.path)));
+    if (roleFilter && lib.transcriptDirName && lib.workspaceRole) {
+      dirAllow = new Set();
+      for (const w of workspaces) {
+        if (w?.path && (await lib.workspaceRole(w)) === roleFilter) dirAllow.add(lib.transcriptDirName(w.path));
+      }
     }
     transcripts = await lib.scanTranscripts(commandSet, { dirAllow });
   }
@@ -130,6 +135,7 @@ export default async function insights(argv) {
       })),
       eventMatrix: {
         definedTotal: matrix.definedTotal, everFired: matrix.everFired, counts: matrix.counts,
+        undeclaredCount: matrix.undeclaredCount || 0,
         partition: matrix.partition ? {
           complete: matrix.partition.complete, sum: matrix.partition.sum,
           bucketSizes: Object.fromEntries(Object.entries(matrix.partition.buckets).map(([k, v]) => [k, v.length])),
@@ -219,7 +225,8 @@ export default async function insights(argv) {
   }
 
   if ((sub === 'slashes' || !sub) && transcripts) {
-    console.log(`\n  ${ANSI.bold}Slash usage${ANSI.reset}`);
+    const slashScope = roleFilter ? `scoped to role=${roleFilter} workspaces` : 'includes framework self-dev';
+    console.log(`\n  ${ANSI.bold}Slash usage${ANSI.reset}  ${ANSI.dim}(${transcripts.filesScanned} transcript files; ${slashScope}; mentions, not executions)${ANSI.reset}`);
     const rows = [...transcripts.slashCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, sub === 'slashes' ? 999 : 15);
     for (const [s, c] of rows) console.log(`      /${s.padEnd(24)} ${String(c).padStart(5)}×`);
   }

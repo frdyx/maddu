@@ -144,11 +144,14 @@ export async function saveSkill(repoRoot, skill) {
   const text = serializeSkill({ frontmatter: fm, body });
   await writeFile(skillsFile(repoRoot, id), text);
   const eventType = existing ? EVENT_TYPES.SKILL_UPDATED : EVENT_TYPES.SKILL_CREATED;
+  // `skill.source` (e.g. 'import-submit') stamps the lifecycle event so
+  // insights' import/native segmentation never counts an imported skill's
+  // creation as native activity (Tier 1; contract 1.8.0 added the field).
   await append(repoRoot, {
     type: eventType,
     actor: skill.by || null,
     lane: null,
-    data: { id, title: fm.title }
+    data: skill.source ? { id, title: fm.title, source: skill.source } : { id, title: fm.title }
   });
   await appendFile(provenanceLog(repoRoot), JSON.stringify({
     ts: now, kind: existing ? 'update' : 'create', id, by: skill.by || null

@@ -61,8 +61,8 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `TASK_CREATED` | A task was created on the dependency-aware board. | `id: string`, `blockedBy: array`, `description: string`, `metadata: object`, `owner: string\|null`, `status: string`, `tags: array`, `title: string` |
 | `TASK_UPDATED` | A task's fields or status were updated. | `id: string`, `by: string` |
 | `TASK_COMPLETED` | A task was marked complete. | `id: string` |
-| `SKILL_CREATED` | A skill was authored and added to the gallery. | `title: string` |
-| `SKILL_UPDATED` | An existing skill was edited. | — |
+| `SKILL_CREATED` | A skill was authored and added to the gallery. | `source: string?`, `title: string` |
+| `SKILL_UPDATED` | An existing skill was edited. | `source: string?` |
 | `SKILL_DELETED` | A skill was removed from the gallery. | `id: string` |
 | `SKILL_APPLIED` | A skill body was applied during a session. | `id: string`, `sessionId: string`, `title: string` |
 | `WORKER_SPAWNED` | A sub-worker subprocess was launched. | `id: string`, `args: array`, `command: string\|null`, `error: string\|null`, `log: string`, `modelHint: string\|null`, `pid: number\|null`, `runtime: string`, `sessionId: string\|null`, `stage: string\|null`, `wrapper: string\|null` |

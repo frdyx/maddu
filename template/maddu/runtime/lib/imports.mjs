@@ -88,7 +88,8 @@ async function dispatchAccepted(repoRoot, kind, payload, by) {
       tags: payload.tags || [],
       provenance: payload.provenance || [],
       body: payload.body || '',
-      by
+      by,
+      source: 'import-submit' // stamps the SKILL_* lifecycle event as imported (Tier 1)
     });
     return { kind, refId: saved.id };
   }

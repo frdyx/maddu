@@ -1011,6 +1011,9 @@
             "type": "object",
             "additionalProperties": true,
             "properties": {
+              "source": {
+                "type": "string"
+              },
               "title": {
                 "type": "string"
               }
@@ -1032,7 +1035,12 @@
           "data": {
             "description": "An existing skill was edited.",
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "properties": {
+              "source": {
+                "type": "string"
+              }
+            }
           }
         }
       }
