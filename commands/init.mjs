@@ -134,18 +134,24 @@ export default async function init(argv) {
   }
   console.log(`  scaffolded .maddu/ skeleton (${skeleton.length} dirs)`);
 
-  // 3. Seed lane catalog + empty claims.
+  // 3. Seed lane catalog + empty claims — ONLY when absent. The catalog and
+  // claims are operator/project state from the moment they exist: an
+  // `init --force` re-install must never replace a customized catalog with
+  // the seed or wipe live claims (Codex Tier-4b review round 1 — a real
+  // data-loss path; --force means "overwrite FRAMEWORK files", never state).
   const { DEFAULT_LANE_CATALOG } = await import(
     'file://' + join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'defaults.mjs').replace(/\\/g, '/')
   );
-  await writeFile(
-    join(cwd, '.maddu', 'lanes', 'catalog.json'),
-    JSON.stringify(DEFAULT_LANE_CATALOG, null, 2) + '\n'
-  );
-  await writeFile(
-    join(cwd, '.maddu', 'lanes', 'claims.json'),
-    JSON.stringify({ schemaVersion: 1, claims: [] }, null, 2) + '\n'
-  );
+  const catalogPath = join(cwd, '.maddu', 'lanes', 'catalog.json');
+  if (await exists(catalogPath)) {
+    console.log('  lane catalog already exists — preserved (operator-owned; seed is first-install only)');
+  } else {
+    await writeFile(catalogPath, JSON.stringify(DEFAULT_LANE_CATALOG, null, 2) + '\n');
+  }
+  const claimsPath = join(cwd, '.maddu', 'lanes', 'claims.json');
+  if (!(await exists(claimsPath))) {
+    await writeFile(claimsPath, JSON.stringify({ schemaVersion: 1, claims: [] }, null, 2) + '\n');
+  }
   // The lane catalog is a one-time seed — once installed, it belongs to the
   // project. `maddu upgrade` does NOT manage it, so we don't list it in the
   // managed manifest. To pull a newer framework default, delete the file and

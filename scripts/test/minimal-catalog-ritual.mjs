@@ -88,13 +88,27 @@ try {
   const seeded = JSON.parse(await readFile(join(rSeed, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
   ok(seeded.lanes.length === 1 && seeded.lanes[0].id === 'general', 'ensureSpine seeds the same minimal catalog');
 
-  // ── Existing installs untouched: upgrade must not rewrite a catalog ───────
-  // (init refuses on an existing .maddu, and upgrade's managed-file manifest
-  // never includes .maddu/lanes/catalog.json — assert the manifest fact.)
+  // ── Existing installs untouched ────────────────────────────────────────────
+  // (a) upgrade's managed-file manifest never includes catalog.json;
   const manifest = await import(toUrl(join(REPO, 'commands', '_manifest.mjs')));
   const files = await manifest.frameworkOwnedFiles();
-  ok(!files.some((f) => String(f.relPath || f).includes('lanes/catalog.json')),
+  ok(files.length > 0 && !files.some((f) => String(f.relPath || f).includes('lanes/catalog.json')),
     'catalog.json is not a framework-managed file — upgrade can never rewrite an existing catalog');
+  // (b) `init --force` re-installs FRAMEWORK files but must preserve a
+  // customized catalog and live claims — the seed is first-install only
+  // (Codex Tier-4b round 1: the old unconditional seed write was a real
+  // data-loss path under --force).
+  const { writeFile } = await import('node:fs/promises');
+  const customCatalog = { schemaVersion: 1, framework: 'maddu', lanes: [{ id: 'general', scope: 'x' }, { id: 'my-custom-lane', scope: 'operator-authored' }] };
+  await writeFile(join(fixture, '.maddu', 'lanes', 'catalog.json'), JSON.stringify(customCatalog, null, 2) + '\n');
+  const claimsBefore = await readFile(join(fixture, '.maddu', 'lanes', 'claims.json'), 'utf8');
+  const rForce = run(['init', '--force']);
+  ok(rForce.status === 0, `init --force exits 0 on an existing install (got ${rForce.status}: ${(rForce.stderr || '').slice(0, 200)})`);
+  const catAfterForce = JSON.parse(await readFile(join(fixture, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
+  ok(catAfterForce.lanes.length === 2 && catAfterForce.lanes.some((l) => l.id === 'my-custom-lane'),
+    `init --force preserves a customized catalog (got ${catAfterForce.lanes.map((l) => l.id).join(',')})`);
+  ok((await readFile(join(fixture, '.maddu', 'lanes', 'claims.json'), 'utf8')) === claimsBefore,
+    'init --force preserves live claims.json');
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }

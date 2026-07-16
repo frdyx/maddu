@@ -2,12 +2,14 @@
 // and read/write maddu.json.
 //
 // Framework-owned: everything under template/maddu/ — these get overwritten by
-// `maddu upgrade`. Plus the seed file .maddu/lanes/catalog.json.
+// `maddu upgrade`.
 //
 // NOT framework-owned (never touched by upgrade):
 //   .maddu/events/  .maddu/state/  .maddu/sessions/  .maddu/inbox/
-//   .maddu/archive/  .maddu/lanes/claims.json  .maddu/lanes/project/
-//   .maddu/briefs/project/  .maddu/wiki/project/  .maddu/harness/project/
+//   .maddu/archive/  .maddu/lanes/catalog.json (a one-time init seed —
+//   operator-owned from the moment it exists; Tier 4b)  .maddu/lanes/claims.json
+//   .maddu/lanes/project/  .maddu/briefs/project/  .maddu/wiki/project/
+//   .maddu/harness/project/
 
 import { readdir, readFile, stat, writeFile, mkdir, copyFile, chmod } from 'node:fs/promises';
 import { join, dirname, relative, sep } from 'node:path';

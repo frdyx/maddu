@@ -73,4 +73,13 @@ When the lane B owner picks up the message, it acknowledges by appending a `mail
 
 ## Adding a project-specific lane
 
-Projects may add their own lanes under `.maddu/lanes/project/<lane-id>.json`. `maddu upgrade` will never overwrite or remove these. The framework-default lanes are owned by Máddu; project lanes are owned by the project.
+The whole catalog is **operator-owned** from the moment `maddu init` seeds
+it — there is no Máddu-owned tier of lanes. Add lanes by:
+
+- claiming an ad-hoc id and letting it graduate: `maddu lane suggest --adopt <id>`
+  once it has earned ≥3 lifetime claims (the observed-reality path), or
+- editing `.maddu/lanes/catalog.json` directly.
+
+`maddu upgrade` never rewrites the catalog, and `maddu init` (including
+`--force`) preserves an existing one — the seed is written on first install
+only.
