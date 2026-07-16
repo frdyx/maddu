@@ -24,6 +24,22 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { dormantByDesignMap } from './event-dispositions.mjs';
+import { resolveInstalledVersion } from './installed-version.mjs';
+
+// ── Imported-event discriminator (Tier 1, 2026-07-16 audit) ────────────────
+// A spine event is IMPORTED (backfilled from an external corpus, not native
+// activity) iff its data.source carries one of these markers. The only writer
+// today is `maddu usage import --from claude-code` (commands/usage.mjs stamps
+// 'claude-code-transcript'); native emitters (_wrapper-common.mjs) omit the
+// field entirely, so absence = native — verified across the 2026-07-16 fleet
+// (snyggare: 53,668 stamped import rows, 0 unstamped). Cross-machine `maddu
+// import` never replays foreign events onto the spine (it appends its own
+// IMPORT_* receipt types), so those receipts are native by definition.
+export const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript']);
+
+export function isImportedEvent(e) {
+  return !!(e && e.data && typeof e.data.source === 'string' && IMPORTED_DATA_SOURCES.has(e.data.source));
+}
 
 // ── DEFINED surface ─────────────────────────────────────────────────────────
 
@@ -34,37 +50,69 @@ export async function definedEventTypes(spineLib) {
 
 // ── Spine harvest (UTILIZED) ────────────────────────────────────────────────
 
-async function harvestOne(name, repoRoot) {
+// Harvest one repo's spine. By default (Tier 1) counts/total/first/last
+// reflect NATIVE activity only — imported backfill rows are tallied apart in
+// `importedCounts`/`importedTotal` so a one-time transcript import (97% of one
+// audited repo's volume) can't masquerade as activity. `includeImported: true`
+// restores the merged pre-Tier-1 behavior for callers that want raw volume.
+async function harvestOne(name, repoRoot, { includeImported = false } = {}) {
   const evDir = join(repoRoot, '.maddu', 'events');
   let shards;
   try { shards = (await readdir(evDir)).filter((f) => f.endsWith('.ndjson')).sort(); }
   catch { return null; } // no spine — not a Máddu repo (or never run)
-  const counts = new Map();
-  let total = 0, installedVersion = null, lastTs = null, firstTs = null;
+  const counts = new Map(), importedCounts = new Map();
+  let total = 0, importedTotal = 0, lastTs = null, firstTs = null;
   for (const shard of shards) {
     let text;
     try { text = await readFile(join(evDir, shard), 'utf8'); } catch { continue; }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
+      if (isImportedEvent(e) && !includeImported) {
+        importedCounts.set(e.type, (importedCounts.get(e.type) || 0) + 1);
+        importedTotal++;
+        continue; // imported rows never move activity/recency/volume
+      }
       counts.set(e.type, (counts.get(e.type) || 0) + 1);
       total++;
       if (e.ts) { lastTs = e.ts; if (!firstTs) firstTs = e.ts; }
-      if (e.type === 'FRAMEWORK_INSTALLED' && e.data?.version) installedVersion = e.data.version;
     }
   }
-  return { name, repoRoot, counts, total, installedVersion, firstTs, lastTs };
+  // Version from the shared SSOT resolver — NOT the spine's FRAMEWORK_INSTALLED
+  // event, which is frozen at install time and made insights disagree with
+  // fleet on every since-upgraded repo (the 2026-07-16 audit's 0.19.0-vs-1.15.0).
+  const ver = await resolveInstalledVersion(repoRoot);
+  return {
+    name, repoRoot, counts, total, firstTs, lastTs,
+    importedCounts, importedTotal,
+    installedVersion: ver.version, versionSource: ver.source,
+  };
 }
 
-// Harvest every registered workspace. `workspaces` is [{id,label,path}].
-export async function harvestSpines(workspaces) {
+// Harvest every registered workspace. `workspaces` is [{id,label,path,role}].
+export async function harvestSpines(workspaces, opts = {}) {
   const projects = [];
   for (const w of workspaces) {
     if (!w?.path) continue;
-    const p = await harvestOne(w.label || w.id || w.path, w.path);
-    if (p) projects.push(p);
+    const p = await harvestOne(w.label || w.id || w.path, w.path, opts);
+    if (p) { p.role = await workspaceRole(w); projects.push(p); }
   }
   return projects;
+}
+
+// ── Role segmentation (Tier 1) ──────────────────────────────────────────────
+// 'self' = the framework's own source checkout (template/maddu + bin/maddu.mjs
+// on disk — a deterministic file test, not a name match), 'fixture' = the
+// registry says so, 'consumer' = everything else. Insights can then answer
+// "is this feature fleet-proven or just self-dev?" — the audit found self-dev
+// usage masquerading as adoption in every transcript-based metric.
+export async function workspaceRole(workspace) {
+  if (workspace?.role === 'fixture') return 'fixture';
+  try {
+    await stat(join(workspace.path, 'template', 'maddu'));
+    await stat(join(workspace.path, 'bin', 'maddu.mjs'));
+    return 'self';
+  } catch { return 'consumer'; }
 }
 
 // ── Aggregate + classify ────────────────────────────────────────────────────
@@ -101,16 +149,20 @@ export const DORMANT_BY_DESIGN = dormantByDesignMap();
 // never fired count toward `deadDefined`.
 export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
   const n = projects.length;
-  const globalCount = new Map(); // type -> total occurrences
-  const presence = new Map();    // type -> # projects it fired in
+  const globalCount = new Map();    // type -> total NATIVE occurrences
+  const importedCount = new Map();  // type -> total IMPORTED occurrences (Tier 1)
+  const presence = new Map();       // type -> # projects it natively fired in
   for (const p of projects) {
     for (const [t, c] of p.counts) {
       globalCount.set(t, (globalCount.get(t) || 0) + c);
       presence.set(t, (presence.get(t) || 0) + 1);
     }
+    for (const [t, c] of p.importedCounts || []) {
+      importedCount.set(t, (importedCount.get(t) || 0) + c);
+    }
   }
   const seen = new Set(globalCount.keys());
-  const allTypes = new Set([...definedSet, ...seen]);
+  const allTypes = new Set([...definedSet, ...seen, ...importedCount.keys()]);
   const rows = [...allTypes].map((t) => {
     const proj = presence.get(t) || 0;
     let cls = classify(proj, n);
@@ -121,10 +173,14 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
     // A core type that fires only under a specific posture/edge is dormant
     // by design, not a gap (v1.7.0). Plugin ownership takes precedence.
     else if (cls === 'dead' && dormantReason) cls = 'dormant';
+    // Never fired natively but present via imported backfill: honest middle
+    // ground (Tier 1) — not activity, but not "nothing invokes it" either.
+    else if (cls === 'dead' && (importedCount.get(t) || 0) > 0) cls = 'imported-only';
     return {
       type: t,
       defined: definedSet.has(t),
       count: globalCount.get(t) || 0,
+      importedCount: importedCount.get(t) || 0,
       projects: proj,
       cls,
       owner: owner ? `plugin:${owner}` : (dormantReason ? 'dormant-by-design' : 'core'),
@@ -134,12 +190,42 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
     };
   }).sort((a, b) => b.projects - a.projects || b.count - a.count);
 
-  const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dormant: 0, dead: 0 };
+  const counts = { 'load-bearing': 0, occasional: 0, 'single-project': 0, dormant: 0, 'imported-only': 0, dead: 0 };
   for (const r of rows) counts[r.cls]++;
   const deadDefined = rows.filter((r) => r.cls === 'dead' && r.defined).map((r) => r.type);
   const dormantByDesign = rows.filter((r) => r.cls === 'dormant' && r.owner === 'dormant-by-design').map((r) => r.type);
 
-  return { n, rows, counts, deadDefined, dormantByDesign, definedTotal: definedSet.size, everFired: seen.size };
+  return {
+    n, rows, counts, deadDefined, dormantByDesign,
+    definedTotal: definedSet.size, everFired: seen.size,
+    partition: partitionDefined(rows, definedSet),
+  };
+}
+
+// ── Exhaustive taxonomy partition (Tier 1) ──────────────────────────────────
+// Every DEFINED type lands in exactly one bucket — the audit found the summary
+// line (92 fired + 70 dormant-by-design + 1 dead = 163) leaving 19 types
+// unexplained (they were plugin-owned, silently folded into "dormant").
+// Buckets, in precedence order:
+//   fired             — natively fired somewhere (dormant annotation or not)
+//   imported-only     — never fired natively; only imported backfill rows exist
+//   dormant-by-design — never fired; disposition registry carries a reason
+//   plugin-owned      — never fired; owned by an optional plugin
+//   dead              — never fired, no excuse on file
+// The `insights-partition` self-test asserts the buckets are disjoint and sum
+// to definedTotal, so the taxonomy can never silently leak types again.
+export function partitionDefined(rows, definedSet) {
+  const buckets = { fired: [], 'imported-only': [], 'dormant-by-design': [], 'plugin-owned': [], dead: [] };
+  for (const r of rows) {
+    if (!definedSet.has(r.type)) continue; // undeclared drift is reported apart
+    if (r.count > 0) buckets.fired.push(r.type);
+    else if (r.importedCount > 0) buckets['imported-only'].push(r.type);
+    else if (r.owner === 'dormant-by-design') buckets['dormant-by-design'].push(r.type);
+    else if (String(r.owner).startsWith('plugin:')) buckets['plugin-owned'].push(r.type);
+    else buckets.dead.push(r.type);
+  }
+  const sum = Object.values(buckets).reduce((a, b) => a + b.length, 0);
+  return { buckets, sum, complete: sum === definedSet.size };
 }
 
 // ── Transcript scan (verb + slash BEHAVIOR) — best-effort, host-specific ─────

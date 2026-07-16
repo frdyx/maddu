@@ -16,12 +16,11 @@
 // `digestRepo` does the fs read; `buildFleet` wires registry → digests →
 // rollup.
 
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { project } from './projections.mjs';
 import { readRegistry } from './workspaces.mjs';
 import { currencyVerdict } from './framework-currency.mjs';
 import { countCatches } from './outcome.mjs';
+import { resolveInstalledVersion } from './installed-version.mjs';
 
 const DAY_MS = 86400000;
 // Liveness tiers, in days since the last spine event.
@@ -77,23 +76,15 @@ export function gatePassRate(gatesProjection) {
   return { total, ok: okCount, rate: okCount / total };
 }
 
-async function readMeta(repoRoot) {
-  for (const rel of ['maddu/version.json', 'version.json']) {
-    try {
-      const v = JSON.parse(await readFile(join(repoRoot, rel), 'utf8'));
-      return { version: v.version || null, released: v.released || null };
-    } catch {}
-  }
-  return { version: null, released: null };
-}
-
 // Digest one workspace WITHOUT running its maddu — read its projection + meta.
 // Returns null only when the repo can't be read at all. `now` injected for tests.
+// Version comes from the shared SSOT resolver (installed-version.mjs) so fleet
+// and insights can never disagree on the same repo again (Tier 1, 2026-07-16).
 export async function digestRepo(workspace, now = Date.now()) {
   const repoRoot = workspace.path;
   let proj = null;
   try { proj = await project(repoRoot); } catch { proj = null; }
-  const meta = await readMeta(repoRoot);
+  const meta = await resolveInstalledVersion(repoRoot);
   const lastActivity = proj ? tsFromEventId(proj.lastEventId) : null;
   const liveness = classifyLiveness(lastActivity, now);
   const currency = currencyVerdict({ released: meta.released, version: meta.version, now });
@@ -105,6 +96,7 @@ export async function digestRepo(workspace, now = Date.now()) {
     role: workspace.role || 'project',
     path: repoRoot,
     version: meta.version,
+    versionSource: meta.source,
     released: meta.released,
     currency: { level: currency.level, ageDays: currency.ageDays },
     liveness,
