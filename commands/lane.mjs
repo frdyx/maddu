@@ -101,15 +101,21 @@ export default async function lane(argv) {
     const claimed = new Map(proj.claims.map((c) => [c.lane, c]));
     // (unused) = never claimed in the repo's LIFETIME (Tier 4a) — the audit
     // found 76% of default catalog placements dead; make that visible where
-    // the catalog is read. Best-effort: an older lib just omits the marker.
-    let lifetime = new Map();
+    // the catalog is read. Best-effort: an older lib omits the marker, and
+    // an INCOMPLETE harvest (unreadable shard) never brands a lane unused.
+    let lifetime = null;
     const obs = await loadLaneObservability();
-    if (obs?.harvestLaneClaims) { try { lifetime = await obs.harvestLaneClaims(repoRoot); } catch {} }
+    if (obs?.harvestLaneClaims) {
+      try {
+        const h = await obs.harvestLaneClaims(repoRoot);
+        if (h.complete) lifetime = h.claims;
+      } catch {}
+    }
     console.log(`\x1b[1mLANES  (${cat.lanes.length})\x1b[0m`);
     for (const l of cat.lanes) {
       const c = claimed.get(l.id);
       const mark = c ? `  \x1b[33mclaimed by ${c.sessionId}\x1b[0m` : '';
-      const unused = obs && !(lifetime.get(l.id) > 0) ? '  \x1b[2m(unused — never claimed; `maddu lane suggest` to review)\x1b[0m' : '';
+      const unused = lifetime && !(lifetime.get(l.id) > 0) ? '  \x1b[2m(unused — never claimed; `maddu lane suggest` to review)\x1b[0m' : '';
       console.log(`  ${l.id.padEnd(22)} ${l.scope}${mark}${unused}`);
     }
     return;
@@ -144,6 +150,8 @@ export default async function lane(argv) {
     const report = await obs.laneReport(repoRoot);
     if (flags.json) { process.stdout.write(JSON.stringify(report, null, 2) + '\n'); return; }
     console.log(`\x1b[1mLANE CATALOG vs OBSERVED CLAIMS\x1b[0m  \x1b[2m(lifetime, native only; suggestions = claim counts only)\x1b[0m`);
+    if (!report.catalogReadable) console.log(`  \x1b[31m⚠ catalog unreadable/malformed — showing claims only; adopt/prune will refuse\x1b[0m`);
+    if (!report.claimsComplete) console.log(`  \x1b[33m⚠ spine scan INCOMPLETE (unreadable shard) — counts are a floor; (unused)/prune withheld\x1b[0m`);
     console.log(`\n  catalog (${report.catalog.length}; ${report.unusedCatalog.length} never claimed)`);
     for (const l of report.catalog) {
       console.log(`    ${l.id.padEnd(22)} ${String(l.claims).padStart(4)} claim(s)${l.claims === 0 ? '  \x1b[2m(unused — prune with: maddu lane suggest --prune ' + l.id + ')\x1b[0m' : ''}`);

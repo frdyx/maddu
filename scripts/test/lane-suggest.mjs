@@ -77,12 +77,45 @@ try {
     && report.adHoc.find((a) => a.id === 'reports')?.ephemeral === false,
     'ephemeral flags: auto/<x>, auto-<x>, numeric — real ids stay adoptable-shaped');
 
+  ok(report.claimsComplete === true && report.catalogReadable === true, 'healthy fixture reports complete + readable');
+
+  // ── Fail-closed mutations (Codex round 1) ─────────────────────────────────
+  const refused = async (fn) => fn().then(() => false, (e) => e.message);
+  // Append failure → catalog ROLLED BACK, error propagates, no event.
+  ok(/spine append failed/.test(await refused(() => obs.adoptLane(repo, 'payments', { _testFailAppend: true }))),
+    'adopt with failing append propagates the error');
+  const catRb = JSON.parse(await readFile(join(repo, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
+  ok(!catRb.lanes.some((l) => l.id === 'payments'), 'failed adopt rolled the catalog back');
+  ok(/spine append failed/.test(await refused(() => obs.pruneLane(repo, 'infra', { _testFailAppend: true })))
+    && JSON.parse(await readFile(join(repo, '.maddu', 'lanes', 'catalog.json'), 'utf8')).lanes.some((l) => l.id === 'infra'),
+    'failed prune rolled the catalog back');
+  // Incomplete spine scan → prune refuses (unreadable must never read as
+  // "zero claims"); report withholds (unused) claims.
+  const rNoSpine = join(tmp, 'no-spine');
+  await mkdir(join(rNoSpine, '.maddu', 'lanes'), { recursive: true });
+  await writeFile(join(rNoSpine, '.maddu', 'lanes', 'catalog.json'), JSON.stringify({ lanes: [{ id: 'ghost', scope: 'x' }] }));
+  ok(/scan incomplete/.test(await refused(() => obs.pruneLane(rNoSpine, 'ghost', {}))),
+    'prune refuses when the spine scan is incomplete');
+  const repNoSpine = await obs.laneReport(rNoSpine);
+  ok(repNoSpine.claimsComplete === false && repNoSpine.unusedCatalog.length === 0,
+    'incomplete harvest never brands a lane unused');
+  // Malformed catalog → mutations refuse instead of clobbering; report flags.
+  const rBadCat = join(tmp, 'bad-cat');
+  await mkdir(join(rBadCat, '.maddu', 'lanes'), { recursive: true });
+  await mkdir(join(rBadCat, '.maddu', 'events'), { recursive: true });
+  await writeFile(join(rBadCat, '.maddu', 'lanes', 'catalog.json'), '{ not json');
+  ok(/unreadable or malformed/.test(await refused(() => obs.adoptLane(rBadCat, 'x', {}))), 'adopt refuses a malformed catalog');
+  ok(/unreadable or malformed/.test(await refused(() => obs.pruneLane(rBadCat, 'x', {}))), 'prune refuses a malformed catalog');
+  const repBadCat = await obs.laneReport(rBadCat);
+  ok(repBadCat.catalogReadable === false, 'report flags an unreadable catalog without crashing');
+  ok((await readFile(join(rBadCat, '.maddu', 'lanes', 'catalog.json'), 'utf8')) === '{ not json',
+    'the malformed catalog was never overwritten');
+
   // ── 2. Adopt ───────────────────────────────────────────────────────────────
   await ok(await obs.adoptLane(repo, 'payments', { by: 'ses_t' }).then((r) => r.lane.id === 'payments', () => false),
     'adopt succeeds for a real suggestion');
   const cat1 = JSON.parse(await readFile(join(repo, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
   ok(cat1.lanes.some((l) => l.id === 'payments' && /observed ad-hoc/i.test(l.scope)), 'adopted lane lands in catalog.json with provenance scope');
-  const refused = async (fn) => fn().then(() => false, (e) => e.message);
   ok(/already in the catalog/.test(await refused(() => obs.adoptLane(repo, 'payments', {}))), 'double-adopt refused');
   ok(/needs ≥3/.test(await refused(() => obs.adoptLane(repo, 'reports', {}))), 'below-threshold adopt refused');
   ok(/ephemeral/.test(await refused(() => obs.adoptLane(repo, 'auto/wt-1', {}))), 'ephemeral adopt refused');

@@ -110,6 +110,7 @@ export default async function insights(argv) {
         ephemeral: r.adHoc.length - realAdHoc.length,
         suggestions: r.suggestions.map((s) => s.id),
         totalClaims: r.totalClaims,
+        incomplete: !r.claimsComplete || !r.catalogReadable,
       });
     }
     rows.sort((a, b) => b.totalClaims - a.totalClaims || a.name.localeCompare(b.name));
@@ -126,7 +127,8 @@ export default async function insights(argv) {
     for (const r of rows) {
       const sug = r.suggestions.length ? `  ${ANSI.lb}suggest: ${r.suggestions.join(', ')}${ANSI.reset}` : '';
       const roleTag = r.role !== 'consumer' ? ` ${ANSI.dim}[${r.role}]${ANSI.reset}` : '';
-      console.log(`    ${r.name.padEnd(18)} ${String(r.defined).padStart(3)} defined · ${String(r.claimedCatalog).padStart(3)} claimed · ${ANSI.dead}${String(r.deadCatalog).padStart(3)} dead${ANSI.reset} · ${String(r.adHoc).padStart(3)} ad-hoc${r.ephemeral ? ` ${ANSI.dim}(+${r.ephemeral} ephemeral)${ANSI.reset}` : ''}${roleTag}${sug}`);
+      const inc = r.incomplete ? `  ${ANSI.sp}(incomplete scan — counts are a floor)${ANSI.reset}` : '';
+      console.log(`    ${r.name.padEnd(18)} ${String(r.defined).padStart(3)} defined · ${String(r.claimedCatalog).padStart(3)} claimed · ${ANSI.dead}${String(r.deadCatalog).padStart(3)} dead${ANSI.reset} · ${String(r.adHoc).padStart(3)} ad-hoc${r.ephemeral ? ` ${ANSI.dim}(+${r.ephemeral} ephemeral)${ANSI.reset}` : ''}${roleTag}${sug}${inc}`);
     }
     console.log(`\n  ${ANSI.dim}adopt observed reality per repo: maddu lane suggest (inside the repo)${ANSI.reset}`);
     return;
