@@ -59,19 +59,29 @@ async function attachAndReport(wtLib, repoRoot, projections, { lane, sid, focus,
 
 function printLaneHelp() {
   console.log([
-    'Usage: maddu lane <claim|release|list> [flags]',
+    'Usage: maddu lane <claim|release|list|suggest> [flags]',
     '',
-    '  list                                          # show catalog + active claims',
+    '  list                                          # show catalog + active claims ((unused) = never claimed)',
     '  claim <lane-id> [--session <id>] [--focus]    # claim a lane (positional shorthand)',
     '  claim --lane <id> --session <id> [--focus]    # claim (legacy flag form)',
     '  claim ... --force                             # pre-empt prior holder',
     '  claim ... --worktree                          # provision an isolated git worktree bound to the claim',
     '  release --lane <id> --session <id>            # release a claim',
     '  release ... --worktree <merged|abandoned|keep> [--integration-ref <ref>] [--reason "..."]',
+    '  suggest [--json]                              # catalog vs reality: dead entries + adoptable ad-hoc lanes',
+    '  suggest --adopt <id>                          # confirm: graduate a suggested ad-hoc lane into the catalog',
+    '  suggest --prune <id>                          # remove a never-claimed catalog entry',
     '',
     '  --session falls back to $MADDU_SESSION_ID, then the active session',
     '  set by `maddu register` (no flag/env needed once registered).',
   ].join('\n'));
+}
+
+async function loadLaneObservability() {
+  try {
+    const dir = await resolveLibDir();
+    return await import(pathToFileURL(join(dir, 'lane-observability.mjs')).href);
+  } catch { return null; }
 }
 
 export default async function lane(argv) {
@@ -89,12 +99,63 @@ export default async function lane(argv) {
     const cat = JSON.parse(await readFile(p.laneCatalog, 'utf8'));
     const proj = await projections.project(repoRoot);
     const claimed = new Map(proj.claims.map((c) => [c.lane, c]));
+    // (unused) = never claimed in the repo's LIFETIME (Tier 4a) — the audit
+    // found 76% of default catalog placements dead; make that visible where
+    // the catalog is read. Best-effort: an older lib just omits the marker.
+    let lifetime = new Map();
+    const obs = await loadLaneObservability();
+    if (obs?.harvestLaneClaims) { try { lifetime = await obs.harvestLaneClaims(repoRoot); } catch {} }
     console.log(`\x1b[1mLANES  (${cat.lanes.length})\x1b[0m`);
     for (const l of cat.lanes) {
       const c = claimed.get(l.id);
       const mark = c ? `  \x1b[33mclaimed by ${c.sessionId}\x1b[0m` : '';
-      console.log(`  ${l.id.padEnd(22)} ${l.scope}${mark}`);
+      const unused = obs && !(lifetime.get(l.id) > 0) ? '  \x1b[2m(unused — never claimed; `maddu lane suggest` to review)\x1b[0m' : '';
+      console.log(`  ${l.id.padEnd(22)} ${l.scope}${mark}${unused}`);
     }
+    return;
+  }
+
+  // Tier 4a — catalog vs observed reality. Suggestions come from CLAIM
+  // COUNTS ONLY (≥3 lifetime claims of the same non-ephemeral ad-hoc id);
+  // adopt/prune are the explicit operator confirmations.
+  if (sub === 'suggest') {
+    const { flags } = parseFlags(rest);
+    const obs = await loadLaneObservability();
+    if (!obs?.laneReport) {
+      console.error('maddu lane suggest: runtime lib not found. Run `maddu upgrade` to get v1.103.0+.');
+      process.exit(2);
+    }
+    const sid = await resolveSessionId(repoRoot, flags, sessionActive);
+    if (typeof flags.adopt === 'string' && flags.adopt) {
+      try {
+        const r = await obs.adoptLane(repoRoot, flags.adopt, { by: sid });
+        console.log(`adopted  ${flags.adopt}  into the catalog (${r.claims} observed claim(s); event ${r.event})`);
+        console.log(`  edit its scope in .maddu/lanes/catalog.json to describe the surface`);
+      } catch (e) { console.error(`adopt refused: ${e.message}`); process.exit(3); }
+      return;
+    }
+    if (typeof flags.prune === 'string' && flags.prune) {
+      try {
+        const r = await obs.pruneLane(repoRoot, flags.prune, { by: sid });
+        console.log(`pruned  ${flags.prune}  from the catalog (never claimed; event ${r.event})`);
+      } catch (e) { console.error(`prune refused: ${e.message}`); process.exit(3); }
+      return;
+    }
+    const report = await obs.laneReport(repoRoot);
+    if (flags.json) { process.stdout.write(JSON.stringify(report, null, 2) + '\n'); return; }
+    console.log(`\x1b[1mLANE CATALOG vs OBSERVED CLAIMS\x1b[0m  \x1b[2m(lifetime, native only; suggestions = claim counts only)\x1b[0m`);
+    console.log(`\n  catalog (${report.catalog.length}; ${report.unusedCatalog.length} never claimed)`);
+    for (const l of report.catalog) {
+      console.log(`    ${l.id.padEnd(22)} ${String(l.claims).padStart(4)} claim(s)${l.claims === 0 ? '  \x1b[2m(unused — prune with: maddu lane suggest --prune ' + l.id + ')\x1b[0m' : ''}`);
+    }
+    const realAdHoc = report.adHoc.filter((a) => !a.ephemeral);
+    const eph = report.adHoc.length - realAdHoc.length;
+    console.log(`\n  ad-hoc claimed ids (${realAdHoc.length}${eph ? ` + ${eph} ephemeral auto/numeric, excluded` : ''})`);
+    for (const a of realAdHoc) {
+      const sug = report.suggestions.some((s) => s.id === a.id);
+      console.log(`    ${a.id.padEnd(22)} ${String(a.claims).padStart(4)} claim(s)${sug ? '  \x1b[32m→ adoptable: maddu lane suggest --adopt ' + a.id + '\x1b[0m' : ''}`);
+    }
+    if (!report.suggestions.length) console.log(`\n  \x1b[2mno adoptable suggestions (needs ≥${obs.SUGGEST_MIN_CLAIMS} lifetime claims of the same non-ephemeral id)\x1b[0m`);
     return;
   }
 

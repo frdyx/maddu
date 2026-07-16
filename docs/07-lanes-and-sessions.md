@@ -62,6 +62,28 @@ LANES  (19)
   …
 ```
 
+`lane list` marks catalog entries that were **never claimed in the repo's
+lifetime** with `(unused)` — the 2026-07-16 fleet audit found 76% of default
+catalog placements dead while most real claims were ad-hoc ids.
+
+### Suggest — let observed reality graduate into the catalog (v1.103.0)
+
+```bash
+$ maddu lane suggest              # catalog vs lifetime claims: dead entries + adoptable ad-hoc ids
+$ maddu lane suggest --adopt <id> # confirm: add a suggested ad-hoc lane to the catalog (emits LANE_ADDED)
+$ maddu lane suggest --prune <id> # remove a never-claimed catalog entry (emits LANE_REMOVED)
+$ maddu lane suggest --json
+```
+
+Suggestions come from **claim counts only**: an ad-hoc id claimed ≥3 times
+(lifetime, native events only) that isn't ephemeral (`auto/<x>`, `auto-<x>`,
+purely numeric ids never suggest). No repo-structure inference — work is
+feature-shaped, not directory-shaped. Adopt and prune are explicit operator
+confirmations: adopt refuses ids below the threshold, prune refuses any entry
+with a lifetime claim (history referenced it; it stays addressable).
+`maddu insights lanes` shows the same catalog-vs-reality table across every
+registered workspace.
+
 ### Claim
 
 ```bash

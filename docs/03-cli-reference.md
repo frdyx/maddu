@@ -182,9 +182,12 @@ The cache is a *UX hint*, not source of truth — the spine is authoritative. If
 Claim / release / list lanes.
 
 ```bash
-$ maddu lane list
+$ maddu lane list                              # (unused) marks never-claimed catalog entries (v1.103.0)
 $ maddu lane claim --lane <id> --session <sid> [--focus "<f>"]
 $ maddu lane release --lane <id> --session <sid>
+$ maddu lane suggest [--json]                  # catalog vs observed claims; adoptable ad-hoc ids (v1.103.0)
+$ maddu lane suggest --adopt <id>              # graduate a ≥3-claim ad-hoc lane into the catalog (LANE_ADDED)
+$ maddu lane suggest --prune <id>              # remove a never-claimed catalog entry (LANE_REMOVED)
 ```
 
 `claim` exits 3 if the lane is already held by another session.
