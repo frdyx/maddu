@@ -26,9 +26,12 @@
 //       per-event parse steps, AND the caller-facing runDetectionPreview
 //       races detection against a timer and returns without awaiting the
 //       straggler. The straggler is ABANDONED logically, not cancelled —
-//       Node has no fs-read cancellation, so its run-out is bounded by one
-//       in-flight file read plus one parse step before the cooperative
-//       check terminates it (both finite). Synchronous preemption
+//       Node has no fs-read cancellation — and its run-out is bounded by
+//       construction: the deadline is checked before every shard stat,
+//       before every tail read, and every 64 scanned lines, and per-shard
+//       I/O is a ≤512KB tail read (so the residual is one small read + one
+//       ≤64-line batch + one parse step, and the largest synchronous
+//       event-loop block is one ≤512KB split). Synchronous preemption
 //       of a single parse step is NOT claimed — with the 64KB/256KB caps the
 //       residual overrun is bounded by one ≤64KB line parse.
 //
@@ -47,7 +50,7 @@
 //
 // Pure lib — no console output, no process.exit. Node stdlib only (rule #4).
 
-import { readFile, stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { listSpineShards } from './insights.mjs';
 import { spineCandidates } from './learn-spine.mjs';
@@ -68,7 +71,40 @@ export const MAX_TOTAL_BYTES = 256 * 1024;
 // and this session's id stops collection — a false positive only NARROWS
 // the window (safe direction); without the probe an oversize prior stop
 // would silently widen it (round 1).
-async function collectWindow(repoRoot, { sessionId }) {
+// Per-shard I/O is a BOUNDED TAIL READ: at most TAIL_READ_BYTES (2× the
+// collection budget, so a tail can never starve the caps) from the end of
+// the file — a shard of ANY size costs one small positioned read plus one
+// ≤512KB split, which is what makes the straggler run-out and the
+// synchronous event-loop block genuinely bounded (Codex round 3: reading +
+// splitting whole shards made the stated one-read bound false). When the
+// tail clips older history, the first (partial) line is dropped and the
+// window is flagged truncated once that shard's tail is exhausted.
+const TAIL_READ_BYTES = MAX_TOTAL_BYTES * 2;
+async function readTail(path) {
+  const fh = await open(path, 'r');
+  try {
+    const size = (await fh.stat()).size;
+    const len = Math.min(size, TAIL_READ_BYTES);
+    if (len === 0) return { text: '', clipped: false };
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, size - len);
+    let text = buf.toString('utf8');
+    const clipped = len < size;
+    if (clipped) {
+      const nl = text.indexOf('\n'); // drop the partial (and possibly mid-codepoint) first line
+      text = nl >= 0 ? text.slice(nl + 1) : '';
+    }
+    return { text, clipped };
+  } finally { await fh.close(); }
+}
+
+// The cooperative deadline runs INSIDE collection too (Codex round 3):
+// checked before every shard stat, before every tail read, and every 64
+// scanned lines — a timed-out straggler's residual run-out is one tail
+// read + one ≤64-line scan batch, never "every remaining shard".
+const SCAN_CHECK_EVERY = 64;
+async function collectWindow(repoRoot, { sessionId, now, t0, deadlineMs }) {
+  const overdue = () => now() - t0 > deadlineMs;
   const shardPaths = (await listSpineShards(join(repoRoot, '.maddu', 'events'))) || [];
   // Walk shards in RECENCY order (mtime desc), not path order: on a
   // partitioned repo a lexically-first OLD partition must not burn the
@@ -78,6 +114,7 @@ async function collectWindow(repoRoot, { sessionId }) {
   // coincides with segment-number order.
   const shards = [];
   for (const p of shardPaths) {
+    if (overdue()) return { lines: [], skippedOversize: 0, truncated: false, timedOut: true };
     try { shards.push({ p, mtime: (await stat(p)).mtimeMs }); } catch {}
   }
   shards.sort((a, b) => a.mtime - b.mtime); // oldest first; walked backwards below
@@ -88,10 +125,12 @@ async function collectWindow(repoRoot, { sessionId }) {
   let scanned = 0;
   outer:
   for (let s = shards.length - 1; s >= 0; s--) {
-    let text;
-    try { text = await readFile(shards[s].p, 'utf8'); } catch { continue; }
-    const lines = text.split('\n');
+    if (overdue()) return { lines: collected, skippedOversize, truncated, timedOut: true };
+    let tail;
+    try { tail = await readTail(shards[s].p); } catch { continue; }
+    const lines = tail.text.split('\n');
     for (let i = lines.length - 1; i >= 0; i--) {
+      if (scanned % SCAN_CHECK_EVERY === 0 && overdue()) return { lines: collected, skippedOversize, truncated, timedOut: true };
       const line = lines[i];
       if (!line.trim()) continue;
       const bytes = Buffer.byteLength(line, 'utf8');
@@ -107,8 +146,12 @@ async function collectWindow(repoRoot, { sessionId }) {
       // that keeps same-second events in true file order after the sort.
       collected.push({ line, idx: scanned });
     }
+    // The tail clipped older history in this shard: anything further back is
+    // unreachable via the bounded read — stop, flagged, rather than walking
+    // an older shard as if this one were exhausted.
+    if (tail.clipped) { truncated = true; break outer; }
   }
-  return { lines: collected, skippedOversize, truncated };
+  return { lines: collected, skippedOversize, truncated, timedOut: false };
 }
 
 // Chronological sort key: the event's ISO `ts` (millisecond resolution,
@@ -135,7 +178,11 @@ export async function detectCandidates(repoRoot, {
 } = {}) {
   if (_testThrow) throw new Error('injected detector failure (test hook)');
   const t0 = now();
-  const { lines, skippedOversize, truncated } = await collectWindow(repoRoot, { sessionId });
+  const win = await collectWindow(repoRoot, { sessionId, now, t0, deadlineMs });
+  if (win.timedOut) {
+    return { candidates: [], skippedOversize: win.skippedOversize, truncated: win.truncated, linesScanned: 0, timedOut: true, raced: false };
+  }
+  const { lines, skippedOversize, truncated } = win;
   const parsed = [];
   let timedOut = false;
   for (const item of lines) {
