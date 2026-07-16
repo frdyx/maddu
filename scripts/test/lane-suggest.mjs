@@ -154,9 +154,52 @@ try {
 
   // Atomic-write hygiene: no stray temp files left behind by any adopt/prune
   // (successful or rolled back) — each write uses a unique temp + cleanup.
-  const { readdir } = await import('node:fs/promises');
+  const { readdir, appendFile } = await import('node:fs/promises');
   const laneFiles = await readdir(join(repo, '.maddu', 'lanes'));
   ok(!laneFiles.some((f) => f.includes('.tmp')), `no stray catalog temp files (got ${laneFiles.join(', ')})`);
+
+  // ── Round-3 fixes ──────────────────────────────────────────────────────────
+  // Catalog lock: two CONCURRENT adopts both land (without the lock, one
+  // whole-file write clobbers the other — lost update).
+  const rConc = join(tmp, 'concurrent');
+  await mkdir(join(rConc, '.maddu', 'events'), { recursive: true });
+  await mkdir(join(rConc, '.maddu', 'lanes'), { recursive: true });
+  await writeFile(join(rConc, '.maddu', 'lanes', 'catalog.json'), JSON.stringify({ lanes: [{ id: 'general', scope: 'x' }] }));
+  await writeFile(join(rConc, '.maddu', 'events', '000000000001.ndjson'),
+    [1, 2, 3].map(() => claimLine('alpha')).join('') + [1, 2, 3].map(() => claimLine('beta')).join(''));
+  const both = await Promise.all([obs.adoptLane(rConc, 'alpha', {}), obs.adoptLane(rConc, 'beta', {})]);
+  const catConc = JSON.parse(await readFile(join(rConc, '.maddu', 'lanes', 'catalog.json'), 'utf8'));
+  ok(both.length === 2 && catConc.lanes.some((l) => l.id === 'alpha') && catConc.lanes.some((l) => l.id === 'beta'),
+    `concurrent adopts serialize under the catalog lock — no lost update (got ${catConc.lanes.map((l) => l.id).join(',')})`);
+  ok(!(await readdir(join(rConc, '.maddu', 'lanes'))).includes('catalog.lock'), 'lock released after both mutations');
+  // Stale lock (crashed holder) is broken after LOCK_STALE_MS.
+  await mkdir(join(rConc, '.maddu', 'lanes', 'catalog.lock'));
+  await obs._testAgeLock(rConc, 60_000);
+  ok(/lifetime claim/.test(await refused(() => obs.pruneLane(rConc, 'alpha', {}))),
+    'stale lock is broken and the operation proceeds to its normal guard');
+  // A FRESH foreign lock refuses with a retry hint (acquire timeout).
+  await mkdir(join(rConc, '.maddu', 'lanes', 'catalog.lock'));
+  ok(/locked by another admin operation/.test(await refused(() => obs.pruneLane(rConc, 'general', {}))),
+    'fresh foreign lock → clean retry-shortly refusal');
+  await rm(join(rConc, '.maddu', 'lanes', 'catalog.lock'), { recursive: true, force: true });
+  // racedClaim POSITIVE path: a claim landing right after the mutation is
+  // detected (guarded hook injects the claim between mutation and recheck).
+  const rRace = join(tmp, 'race');
+  await mkdir(join(rRace, '.maddu', 'events'), { recursive: true });
+  await mkdir(join(rRace, '.maddu', 'lanes'), { recursive: true });
+  await writeFile(join(rRace, '.maddu', 'lanes', 'catalog.json'), JSON.stringify({ lanes: [{ id: 'doomed', scope: 'x' }] }));
+  await writeFile(join(rRace, '.maddu', 'events', '000000000001.ndjson'), claimLine('other'));
+  const prRace = await obs.pruneLane(rRace, 'doomed', {
+    _testAfterMutate: () => appendFile(join(rRace, '.maddu', 'events', '000000000001.ndjson'), claimLine('doomed')),
+  });
+  ok(prRace.racedClaim === true, 'a claim landing during the prune is positively detected (racedClaim)');
+  // catalogState: missing vs malformed vs ok are distinguishable, so the
+  // fleet report can surface malformed without flagging lane-less repos.
+  const rNoCat = join(tmp, 'no-catalog');
+  await mkdir(join(rNoCat, '.maddu', 'events'), { recursive: true });
+  ok((await obs.laneReport(rNoCat)).catalogState === 'missing', 'absent catalog reads as missing');
+  ok((await obs.laneReport(rBadCat)).catalogState === 'malformed', 'unparseable catalog reads as malformed');
+  ok(report.catalogState === 'ok', 'healthy catalog reads as ok');
 } finally {
   await rm(tmp, { recursive: true, force: true });
 }

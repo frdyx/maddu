@@ -26,7 +26,7 @@
 // partition-aware via the shared listSpineShards. Pure lib — no console
 // output, no process.exit. Node stdlib only (rule #4).
 
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
@@ -74,16 +74,57 @@ export async function harvestLaneClaims(repoRoot) {
 }
 
 // Tolerant read for REPORTS: a missing/malformed catalog renders as
-// "catalog unreadable", never crashes. Returns { catalog, raw, readable }.
+// "catalog unreadable", never crashes. `state` distinguishes 'missing'
+// (never had lanes / not a lane-bearing repo — a fleet report may skip it
+// quietly) from 'malformed' (a FAILURE that must be surfaced, never
+// silently hidden from the fleet table — Codex round 3).
+// Returns { catalog, raw, readable, state: 'ok'|'missing'|'malformed' }.
 async function readCatalogTolerant(repoRoot) {
   const p = pathsFor(repoRoot).laneCatalog;
   let raw;
-  try { raw = await readFile(p, 'utf8'); } catch { return { catalog: { lanes: [] }, raw: null, readable: false }; }
+  try { raw = await readFile(p, 'utf8'); } catch { return { catalog: { lanes: [] }, raw: null, readable: false, state: 'missing' }; }
   try {
     const catalog = JSON.parse(raw);
-    if (!catalog || !Array.isArray(catalog.lanes)) return { catalog: { lanes: [] }, raw, readable: false };
-    return { catalog, raw, readable: true };
-  } catch { return { catalog: { lanes: [] }, raw, readable: false }; }
+    if (!catalog || !Array.isArray(catalog.lanes)) return { catalog: { lanes: [] }, raw, readable: false, state: 'malformed' };
+    return { catalog, raw, readable: true, state: 'ok' };
+  } catch { return { catalog: { lanes: [] }, raw, readable: false, state: 'malformed' }; }
+}
+
+// Serialize maddu-side catalog mutations with an atomic lock DIRECTORY
+// (mkdir fails EEXIST — the worktrees-lib pattern). This is what actually
+// closes the CLI-writer-vs-CLI-writer races (Codex round 3: the byte-
+// equality rollback guard was itself a non-atomic check-then-act): inside
+// the lock, read → guard → write → append → rollback run without another
+// LOCK-HONORING writer interleaving. Residual, stated plainly: the bridge
+// admin route and operator hand-edits do NOT take this lock — for those
+// the atomic write + conditional rollback remain best-effort, and the
+// spine record is the reconciliation source. Stale locks (crashed holder)
+// are broken after 30s; acquisition gives up at 5s with a retry hint.
+const LOCK_STALE_MS = 30_000;
+const LOCK_WAIT_MS = 5_000;
+async function withCatalogLock(repoRoot, fn) {
+  const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
+  const t0 = Date.now();
+  while (true) {
+    try { await mkdir(lockDir, { recursive: false }); break; }
+    catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+      try {
+        const st = await stat(lockDir);
+        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) { await rm(lockDir, { recursive: true, force: true }); continue; }
+      } catch {}
+      if (Date.now() - t0 > LOCK_WAIT_MS) throw new Error('lane catalog is locked by another admin operation — retry shortly');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  try { return await fn(); }
+  finally { try { await rm(lockDir, { recursive: true, force: true }); } catch {} }
+}
+// Exposed for tests only: age a lock so the stale-break path is provable.
+export async function _testAgeLock(repoRoot, ageMs) {
+  const lockDir = join(pathsFor(repoRoot).lanes, 'catalog.lock');
+  const old = new Date(Date.now() - ageMs);
+  await utimes(lockDir, old, old);
 }
 
 // STRICT read for MUTATIONS: a missing or malformed catalog must REFUSE the
@@ -121,7 +162,7 @@ function serializeCatalog(catalog) {
 //   adHoc        — [{ id, claims, ephemeral }] claimed ids NOT in the catalog
 //   suggestions  — non-ephemeral ad-hoc ids with ≥ SUGGEST_MIN_CLAIMS claims
 export async function laneReport(repoRoot) {
-  const { catalog: cat, readable: catalogReadable } = await readCatalogTolerant(repoRoot);
+  const { catalog: cat, readable: catalogReadable, state: catalogState } = await readCatalogTolerant(repoRoot);
   const lanes = cat.lanes;
   const { claims, complete: claimsComplete } = await harvestLaneClaims(repoRoot);
   const catalogIds = new Set(lanes.map((l) => l.id));
@@ -137,7 +178,7 @@ export async function laneReport(repoRoot) {
   return {
     catalog, unusedCatalog, adHoc, suggestions,
     totalClaims: [...claims.values()].reduce((a, b) => a + b, 0),
-    claimsComplete, catalogReadable,
+    claimsComplete, catalogReadable, catalogState,
   };
 }
 
@@ -178,23 +219,25 @@ async function mutateCatalog(repoRoot, { prevRaw, nextCatalog, event, _testFailA
 }
 
 export async function adoptLane(repoRoot, id, { by = null, _testFailAppend = false } = {}) {
-  const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
-  const report = await laneReport(repoRoot);
-  if (cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is already in the catalog`);
-  const s = report.suggestions.find((x) => x.id === id);
-  if (!s) {
-    const adhoc = report.adHoc.find((x) => x.id === id);
-    if (adhoc?.ephemeral) throw new Error(`lane "${id}" is ephemeral (auto/numeric) — not adoptable`);
-    const hint = report.claimsComplete ? '' : ' (note: the spine scan was INCOMPLETE — fix the unreadable shard(s) and retry)';
-    throw new Error(`lane "${id}" has ${adhoc ? adhoc.claims : 0} claim(s) — needs ≥${SUGGEST_MIN_CLAIMS} to be adoptable (suggestions only graduate observed reality)${hint}`);
-  }
-  const lane = { id, scope: `Adopted from ${s.claims} observed ad-hoc claim(s) via \`maddu lane suggest\`. Edit this scope to describe the surface.` };
-  const next = { ...cat, lanes: [...cat.lanes, lane] };
-  const ev = await mutateCatalog(repoRoot, {
-    prevRaw, nextCatalog: next, _testFailAppend,
-    event: { type: EVENT_TYPES.LANE_ADDED, actor: by, lane: id, data: { lane } },
+  return withCatalogLock(repoRoot, async () => {
+    const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
+    const report = await laneReport(repoRoot);
+    if (cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is already in the catalog`);
+    const s = report.suggestions.find((x) => x.id === id);
+    if (!s) {
+      const adhoc = report.adHoc.find((x) => x.id === id);
+      if (adhoc?.ephemeral) throw new Error(`lane "${id}" is ephemeral (auto/numeric) — not adoptable`);
+      const hint = report.claimsComplete ? '' : ' (note: the spine scan was INCOMPLETE — fix the unreadable shard(s) and retry)';
+      throw new Error(`lane "${id}" has ${adhoc ? adhoc.claims : 0} claim(s) — needs ≥${SUGGEST_MIN_CLAIMS} to be adoptable (suggestions only graduate observed reality)${hint}`);
+    }
+    const lane = { id, scope: `Adopted from ${s.claims} observed ad-hoc claim(s) via \`maddu lane suggest\`. Edit this scope to describe the surface.` };
+    const next = { ...cat, lanes: [...cat.lanes, lane] };
+    const ev = await mutateCatalog(repoRoot, {
+      prevRaw, nextCatalog: next, _testFailAppend,
+      event: { type: EVENT_TYPES.LANE_ADDED, actor: by, lane: id, data: { lane } },
+    });
+    return { lane, event: ev.id, claims: s.claims };
   });
-  return { lane, event: ev.id, claims: s.claims };
 }
 
 // Prune a NEVER-CLAIMED catalog entry. Deliberately refuses an entry with
@@ -213,22 +256,33 @@ export async function adoptLane(repoRoot, id, { by = null, _testFailAppend = fal
 // POST-WRITE recheck detects it and reports `racedClaim: true` so the
 // caller can surface the recovery (re-adopt the lane, or release + reclaim
 // without --worktree). The claim itself is never invalidated.
-export async function pruneLane(repoRoot, id, { by = null, _testFailAppend = false } = {}) {
-  const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
-  if (!cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is not in the catalog`);
-  const { claims, complete } = await harvestLaneClaims(repoRoot);
-  if (!complete) throw new Error(`spine scan incomplete (unreadable events dir or shard) — refusing to prune "${id}": cannot prove it was never claimed`);
-  const used = claims.get(id) || 0;
-  if (used > 0) throw new Error(`lane "${id}" has ${used} lifetime claim(s) — prune is only for never-claimed entries`);
-  const next = { ...cat, lanes: cat.lanes.filter((l) => l.id !== id) };
-  const ev = await mutateCatalog(repoRoot, {
-    prevRaw, nextCatalog: next, _testFailAppend,
-    event: { type: EVENT_TYPES.LANE_REMOVED, actor: by, lane: id, data: { ok: true } },
+// `_testAfterMutate` is a guarded test-only hook (no-op in production) run
+// between the catalog mutation and the racedClaim recheck, so the
+// positive-detection path is provable (Codex round 3: only the negative
+// path was tested).
+export async function pruneLane(repoRoot, id, { by = null, _testFailAppend = false, _testAfterMutate = null } = {}) {
+  return withCatalogLock(repoRoot, async () => {
+    const { catalog: cat, raw: prevRaw } = await readCatalogStrict(repoRoot);
+    if (!cat.lanes.some((l) => l.id === id)) throw new Error(`lane "${id}" is not in the catalog`);
+    const { claims, complete } = await harvestLaneClaims(repoRoot);
+    if (!complete) throw new Error(`spine scan incomplete (unreadable events dir or shard) — refusing to prune "${id}": cannot prove it was never claimed`);
+    const used = claims.get(id) || 0;
+    if (used > 0) throw new Error(`lane "${id}" has ${used} lifetime claim(s) — prune is only for never-claimed entries`);
+    const next = { ...cat, lanes: cat.lanes.filter((l) => l.id !== id) };
+    const ev = await mutateCatalog(repoRoot, {
+      prevRaw, nextCatalog: next, _testFailAppend,
+      event: { type: EVENT_TYPES.LANE_REMOVED, actor: by, lane: id, data: { ok: true } },
+    });
+    if (typeof _testAfterMutate === 'function') { try { await _testAfterMutate(); } catch {} }
+    // racedClaim is a POSITIVE detector, not a proof of absence: the claim
+    // path is lock-free by design (hot path — never serialized behind
+    // admin), so a claim can still land after this recheck. true = a race
+    // definitely happened; false = none detected at recheck time.
+    let racedClaim = false;
+    try {
+      const after = await harvestLaneClaims(repoRoot);
+      racedClaim = (after.claims.get(id) || 0) > 0;
+    } catch {}
+    return { id, event: ev.id, racedClaim };
   });
-  let racedClaim = false;
-  try {
-    const after = await harvestLaneClaims(repoRoot);
-    racedClaim = (after.claims.get(id) || 0) > 0;
-  } catch {}
-  return { id, event: ev.id, racedClaim };
 }

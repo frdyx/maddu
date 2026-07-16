@@ -98,7 +98,11 @@ export default async function insights(argv) {
       if (roleFilter && role !== roleFilter) continue;
       let r;
       try { r = await obs.laneReport(w.path); } catch { continue; }
-      if (!r.catalog.length && !r.adHoc.length) continue; // no lane data at all
+      // Skip only genuinely lane-less repos (no catalog file, no claims,
+      // clean scan). A MALFORMED catalog or an incomplete spine scan is a
+      // failure the fleet table must surface, never silently hide (Codex
+      // round 3).
+      if (!r.catalog.length && !r.adHoc.length && r.catalogState !== 'malformed' && r.claimsComplete) continue;
       const claimedCatalog = r.catalog.filter((l) => l.claims > 0).length;
       const realAdHoc = r.adHoc.filter((a) => !a.ephemeral);
       rows.push({

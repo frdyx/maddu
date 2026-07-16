@@ -146,7 +146,9 @@ export default async function lane(argv) {
         console.log(`pruned  ${flags.prune}  from the catalog (never claimed; event ${r.event})`);
         if (r.racedClaim) {
           console.error(`  \x1b[33m⚠ a claim on "${flags.prune}" landed DURING the prune\x1b[0m — the claim stays valid (the lane now reads as ad-hoc),`);
-          console.error(`    but a concurrent \`claim --worktree\` attach may have refused; re-adopt with \`maddu lane suggest --adopt\` if intended.`);
+          console.error(`    but a concurrent \`claim --worktree\` attach may have refused. To put the lane back in the catalog now,`);
+          console.error(`    re-add it by hand in .maddu/lanes/catalog.json (or the bridge admin route) — \`--adopt\` only applies`);
+          console.error(`    once the id re-earns ≥3 claims.`);
         }
       } catch (e) { console.error(`prune refused: ${e.message}`); process.exit(3); }
       return;
