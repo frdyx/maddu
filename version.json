@@ -1,5 +1,5 @@
 {
-  "version": "1.105.1",
-  "phase": "session-binding-atomic-fix",
+  "version": "1.105.2",
+  "phase": "ci-profile-test-isolation",
   "released": "2026-07-19"
 }

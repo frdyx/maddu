@@ -24,7 +24,7 @@
 //   - a one-table markdown job summary appended to GITHUB_STEP_SUMMARY
 
 import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -36,10 +36,43 @@ async function readJsonIfPresent(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
 }
 
+// MADDU_CI_PROFILE — a test/CI-only seam that redirects WHERE `maddu ci` reads
+// and writes its pinned profile, so a self-test (scripts/test/ci-command.mjs) can
+// exercise pin/exit contracts against the real source gates WITHOUT mutating the
+// repo's own .maddu/config/ci.json (the shared-file leak this closes). It affects
+// ONLY `maddu ci`; other profile readers (e.g. commands/_gates-before-done.mjs)
+// ignore it by design. Resolved against cwd if relative.
+function ciProfileOverride() {
+  const raw = (process.env.MADDU_CI_PROFILE || '').trim();
+  return raw ? resolve(raw) : null;
+}
+
+// STRICT override read: a MISSING file means "unpinned" (the intended initial
+// state), but a present-but-unreadable / non-JSON / wrong-shaped override is a
+// hard error — never a silent green (Codex). Returns requiredGates | null.
+async function readOverrideProfile(path) {
+  let raw;
+  try { raw = await readFile(path, 'utf8'); }
+  catch (e) { if (e && e.code === 'ENOENT') return null; throw new Error(`MADDU_CI_PROFILE unreadable (${path}): ${e && e.message}`); }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch { throw new Error(`MADDU_CI_PROFILE is not valid JSON (${path})`); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.requiredGates)) {
+    throw new Error(`MADDU_CI_PROFILE has no requiredGates array (${path})`);
+  }
+  return parsed.requiredGates;
+}
+
 // The pinned profile lives in the consumer's maddu.json (`ci.requiredGates`);
 // the framework source checkout has no maddu.json by design, so it falls back
 // to .maddu/config/ci.json. Read order mirrors write order.
 async function readCiProfile(repoRoot) {
+  // Override wins over both real files (test/CI seam). Its read is strict —
+  // a bad override throws (caller surfaces a nonzero diagnostic), never green.
+  const override = ciProfileOverride();
+  if (override) {
+    return { requiredGates: await readOverrideProfile(override), source: 'MADDU_CI_PROFILE' };
+  }
   const marker = await readJsonIfPresent(join(repoRoot, 'maddu.json'));
   if (Array.isArray(marker?.ci?.requiredGates)) {
     return { requiredGates: marker.ci.requiredGates, source: 'maddu.json' };
@@ -52,6 +85,14 @@ async function readCiProfile(repoRoot) {
 }
 
 async function writeCiProfile(repoRoot, requiredGates) {
+  // Override wins over both real files (test/CI seam) — the pin lands in the temp
+  // profile, never the repo's own ci.json / maddu.json.
+  const override = ciProfileOverride();
+  if (override) {
+    await mkdir(dirname(override), { recursive: true });
+    await writeFile(override, JSON.stringify({ requiredGates }, null, 2) + '\n');
+    return 'MADDU_CI_PROFILE';
+  }
   const markerPath = join(repoRoot, 'maddu.json');
   const marker = await readJsonIfPresent(markerPath);
   if (marker) {
@@ -144,7 +185,9 @@ export default async function ciCmd(argv) {
 
   // ── verdict ─────────────────────────────────────────────────────────────--
   const strict = flags.strict === true;
-  const profile = await readCiProfile(repoRoot);
+  let profile;
+  try { profile = await readCiProfile(repoRoot); }
+  catch (e) { console.error(`maddu ci: ${e && e.message}`); process.exit(2); }
   const requiredSet = profile.requiredGates ? new Set(profile.requiredGates) : null;
   const failed = runs.filter((r) => r.status === 'fail');
   const failedRequired = requiredSet ? failed.filter((r) => requiredSet.has(r.gateId)) : [];
