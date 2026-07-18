@@ -17,9 +17,10 @@
 // (allow). Only an explicit, deterministic verdict 'block' ever denies a tool.
 
 import { join } from 'node:path';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
 import { gitRun } from './git-exec.mjs';
+import { withAppendLock } from './append-lock.mjs';
 
 // ── Enforcement + thresholds, keyed by governance mode ──────────────────────
 // enforcement: 'block' (strict — deny at the first threshold), 'graduated'
@@ -234,7 +235,7 @@ export function decide({ thresholds, state, counter, toolCtx }) {
   // Ordered preconditions: session → lane → goal/plan → slice-stop → commit.
   if (!state.session?.registered) {
     return mk(cap('block'), 'session', 'no active Máddu session governs this work',
-      'maddu register');
+      'restart this session so the SessionStart hook binds it (an unbound running session — e.g. after a mid-session hooks install/upgrade — cannot be healed from the CLI: the hook never inherits an exported MADDU_SESSION_ID). If no Máddu session exists at all, run `maddu register` first.');
   }
   if (!state.lane?.claimed) {
     return mk(cap('block'), 'lane', 'editing without a claimed lane (hard rule #8)',
@@ -296,14 +297,42 @@ export async function readDisciplineConfig(repoRoot, mode) {
 // Kept under .maddu/state/discipline/ — a local, best-effort hook cache (NOT the
 // spine). Per-session files so concurrent Claude sessions don't clobber each
 // other (Codex blocker). Every read/write is fail-safe (errors → empty/no-op).
+// Best-effort wait for the sessions-map lock. Binding is non-fatal, so a genuinely
+// stuck holder must not hang session start — time out and skip rather than block.
+const BIND_LOCK_WAIT_MS = 2000;
 function disciplineDir(repoRoot) { return join(pathsFor(repoRoot).statePrjDir, 'discipline'); }
 function counterPath(repoRoot, sid) { return join(disciplineDir(repoRoot), `${String(sid).replace(/[^\w.-]/g, '_')}.json`); }
 function sessionsMapPath(repoRoot) { return join(disciplineDir(repoRoot), 'sessions.json'); }
 
 async function readJson(p, fallback) { try { return JSON.parse(await readFile(p, 'utf8')); } catch { return fallback; } }
+// STRICT map read for the read-modify-write bind: ONLY a missing file means
+// "empty" (a legitimate first bind). A present-but-corrupt/unreadable file
+// PROPAGATES — the caller's catch turns it into a false return, leaving the
+// bad file untouched, so a malformed sessions.json is never silently replaced
+// by a singleton map that drops every surviving binding (Codex).
+async function readSessionsMapStrict(p) {
+  let raw;
+  try { raw = await readFile(p, 'utf8'); }
+  catch (e) { if (e && e.code === 'ENOENT') return {}; throw e; }
+  const parsed = JSON.parse(raw); // parse error → throw → caller returns false (no clobber)
+  // Must be a plain string-keyed object. A valid-but-wrong shape (array / scalar /
+  // null) would lose the binding on re-serialize, so reject it too — the caller's
+  // catch turns it into false and the odd file is left untouched (Codex).
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('sessions.json is not a JSON object');
+  }
+  return parsed;
+}
 async function writeJson(p, obj) {
-  try { await mkdir(disciplineDirOf(p), { recursive: true }); await writeFile(p, JSON.stringify(obj, null, 2)); return true; }
-  catch { return false; }
+  try {
+    await mkdir(disciplineDirOf(p), { recursive: true });
+    // Atomic replace (temp + rename) so a lock-free reader (resolveMadduSession)
+    // never observes a torn half-written map while a writer is mid-update.
+    const tmp = p + '.tmp';
+    await writeFile(tmp, JSON.stringify(obj, null, 2));
+    await rename(tmp, p);
+    return true;
+  } catch { return false; }
 }
 function disciplineDirOf(filePath) { return filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))); }
 
@@ -313,11 +342,26 @@ export async function readCounter(repoRoot, sid) {
 export async function writeCounter(repoRoot, sid, counter) { return writeJson(counterPath(repoRoot, sid), counter); }
 
 // Bind a Claude Code session id to a Máddu session id (called at SessionStart).
+// Serialized under a per-repo advisory lock: the read-modify-write MUST be atomic
+// or two concurrent SessionStarts (e.g. the long-lived bridge + a CLI invocation)
+// can each read the same map, add their own key, and clobber the other's mapping
+// (Codex). The lock's O_EXCL create needs the discipline dir to exist first (a
+// first-ever bind has none), so mkdir precedes it. Best-effort: a lock timeout or
+// IO error yields false — the caller treats binding as non-fatal — rather than
+// hanging session start behind a genuinely stuck holder.
 export async function bindClaudeSession(repoRoot, claudeId, madduId) {
   if (!claudeId || !madduId) return false;
-  const map = await readJson(sessionsMapPath(repoRoot), {});
-  map[claudeId] = { madduId, at: null };
-  return writeJson(sessionsMapPath(repoRoot), map);
+  const mapPath = sessionsMapPath(repoRoot);
+  try {
+    await mkdir(disciplineDir(repoRoot), { recursive: true });
+    return await withAppendLock(mapPath + '.lock', async () => {
+      const map = await readSessionsMapStrict(mapPath);   // re-read INSIDE the lock; corrupt → throw → false
+      map[claudeId] = { madduId, at: null };
+      return writeJson(mapPath, map);
+    }, { maxWaitMs: BIND_LOCK_WAIT_MS });
+  } catch {
+    return false;
+  }
 }
 export async function resolveMadduSession(repoRoot, claudeId) {
   if (!claudeId) return null;

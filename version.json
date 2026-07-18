@@ -1,5 +1,5 @@
 {
-  "version": "1.105.0",
-  "phase": "usage-audit-learn-trial",
-  "released": "2026-07-16"
+  "version": "1.105.1",
+  "phase": "session-binding-atomic-fix",
+  "released": "2026-07-19"
 }

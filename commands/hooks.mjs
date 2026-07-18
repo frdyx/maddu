@@ -108,13 +108,12 @@ export default async function hooks(argv) {
   if (sub === 'fire') {
     const event = rest[0];
     if (event === 'session-start') {
-      await quietly(() => registerCmd([]));
-      const { sessionActive } = await loadSpineLib();
-      let sid = null;
-      if (sessionActive && sessionActive.readActiveSession) {
-        const a = await sessionActive.readActiveSession(repoRoot);
-        sid = a && a.sessionId;
-      }
+      // Bind the id register JUST created — never the repo-global active pointer,
+      // which a concurrent SessionStart can overwrite, binding two Claude ids to
+      // one Máddu session (Codex). register returns its id in both branches; if it
+      // somehow yields nothing, leave sid null so the session stays honestly
+      // unbound rather than mis-bound to a pointer we can't attribute to it.
+      const sid = (await quietly(() => registerCmd([]))) || null;
       // Opportunistic stale-session sweep. The bridge janitor only runs when the
       // cockpit is open; on a CLI-first workstation stale sessions never
       // auto-close and the lane claims they leaked linger for days. Running the
