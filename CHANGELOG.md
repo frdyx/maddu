@@ -11,6 +11,13 @@ narrative summary.
 
 ---
 
+## [v1.105.2] · 2026-07-19 · Fix — ci-command test no longer clobbers the real ci.json
+
+**Test-isolation leak found while shipping v1.105.1.** `scripts/test/ci-command.mjs` ran `maddu ci` against the **real repo root** and mutated the repo's own `.maddu/config/ci.json` in place (rm + `ci pin` + a direct `{requiredGates:[failingId]}` write), restoring in a `finally`. A harness kill on timeout — or a concurrent gate reading the file mid-run — leaked the clobbered single-gate state (`["agent-file-current"]`) into the working tree, dropping the 52-gate required set to 1. Verbs **72/72**; gates **74**; no new event type / contract bump.
+
+- **New `MADDU_CI_PROFILE` env seam (test/CI-only).** When set, `maddu ci` reads **and** writes its pinned profile from that path (resolved absolute) instead of `<repoRoot>/.maddu/config/ci.json` / `maddu.json`. Precedence: **override → maddu.json → ci.json** (unchanged when unset). The override read is **fail-closed**: only `ENOENT` means unpinned; a corrupt or wrong-shaped override exits nonzero with a diagnostic — never a silent green. Other profile readers (`commands/_gates-before-done`) ignore the seam by design.
+- **The test is now isolated.** Every invocation is redirected to a temp profile; a postcondition asserts the real `.maddu/config/ci.json` is byte-identical (existence + bytes) before and after the run. Pin assertion strengthened to exact ordered equality + `target`/`profileSource === MADDU_CI_PROFILE`; a corrupt-override fail-closed case added. `ci-command` 21/21.
+
 ## [v1.105.1] · 2026-07-19 · Fix — atomic Claude→Máddu session binding
 
 **Bugfix surfaced by a consumer repo (cairn) upgrading Máddu mid-session.** The v1.105 discipline gate blocked a legitimately-running session with *"no active session governs"*. Root cause + fix, scope **Minimal & sound** (Codex-reviewed, two plan rounds + diff review). Verbs **72/72**; gates **74**; no new event type / contract bump.
