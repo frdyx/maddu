@@ -11,6 +11,18 @@ narrative summary.
 
 ---
 
+## [v1.105.1] · 2026-07-19 · Fix — atomic Claude→Máddu session binding
+
+**Bugfix surfaced by a consumer repo (cairn) upgrading Máddu mid-session.** The v1.105 discipline gate blocked a legitimately-running session with *"no active session governs"*. Root cause + fix, scope **Minimal & sound** (Codex-reviewed, two plan rounds + diff review). Verbs **72/72**; gates **74**; no new event type / contract bump.
+
+- **The load-bearing bug: the binding write was not atomic, and bound the wrong id.** The PreToolUse gate resolves which Máddu session a Claude caller owns from a claude→maddu binding (`.maddu/state/<prj>/discipline/sessions.json`) written at `SessionStart`. That write was an **unlocked read-modify-write**, so two concurrent starts (the long-lived bridge + a CLI invocation) could clobber each other's entries — and the `SessionStart` handler re-read the *shared* active-session pointer for the sid to bind, so a concurrent start could bind **both** Claude ids to **one** Máddu session. Fixes:
+  - `bindClaudeSession` now serializes under the existing per-repo advisory lock (`withAppendLock`, O_EXCL) with `mkdir`-before-lock (a first-ever bind has no `discipline/` dir yet) and a finite 2s wait (binding is non-fatal — a stuck holder times out rather than hanging session start). `writeJson` upgraded to an atomic temp+rename so a lock-free reader never sees a torn map.
+  - `maddu register` now **returns the session id it created**, and `SessionStart` binds *that* — never the shared pointer — so concurrent starts bind to **distinct** sessions (proven end-to-end).
+  - The in-lock re-read is now **strict**: only a missing file means "empty"; a corrupt/unreadable `sessions.json` propagates to a `false` return, so a malformed map is **never** silently replaced by a singleton that drops every surviving binding.
+- **Honest remedy.** The reported block is a one-time *transitional* state: a session whose `SessionStart` fired under pre-binding code — or before `maddu hooks install`/`upgrade` ran — has no binding, so its next edit is denied. The Claude `session_id` reaches Máddu **only** on the hook's stdin (never as a CLI arg), so `maddu register` alone cannot heal a running session (the hook subprocess never inherits an exported `MADDU_SESSION_ID`). The gate's remedy string and [session-hooks doc](docs/44-session-hooks.md) now state the sound recovery: **restart the session** so the fresh `SessionStart` binds it.
+- **Deliberately NOT done** (Codex ruled it F11-unsound over two review rounds): auto-*adopting* an existing session at edit time — an unbound caller can't be authenticated as the owner, so it could inherit a lone manual/other-runtime session's lane + governance. Only minting a fresh bound session would be sound; that larger change was scoped out.
+- **Tests:** `scripts/test/discipline-hook.mjs` gains concurrency (two concurrent binds + a pre-existing entry all survive — proves no lost update), fresh-repo first-bind (mkdir-before-lock), and same-id rebind cases. Full self-test green.
+
 ## [v1.105.0] · 2026-07-16 · Usage-audit Tier 5 — learn as a measured trial
 
 **Final tier of the 2026-07-16 usage-audit roadmap.** The audit found `maddu learn` self-dev-only: 11 accepted corrections in the framework repo, **0 across all 21 consumers** — including repos with dozens of slice-stops. The verbs exist; nothing surfaced them where the work happens. Verbs **72/72**; gates **74**; **no new event type / no contract bump** (the `LEARN_RETRIEVED` bump was considered at kickoff and not taken — recorded, not silent).

@@ -57,7 +57,7 @@ export default async function register(argv) {
     if (process.stdout.isTTY) {
       console.log(`  (already registered — MADDU_SESSION_ID=${env.sessionId})`);
     }
-    return;
+    return env.sessionId;
   }
   if (env && env.status === 'closed' && process.stdout.isTTY) {
     console.error(`(env MADDU_SESSION_ID=${env.sessionId} is closed — registering anew)`);
@@ -108,5 +108,9 @@ export default async function register(argv) {
     if (parentSessionId) console.log(`  parent: ${parentSessionId}`);
     console.log(`  export MADDU_SESSION_ID=${sessionId}    # paste into your shell for idempotent re-runs`);
   }
+  // Return the id so an in-process caller (the SessionStart hook) binds THIS
+  // freshly-registered session, rather than re-reading the repo-global active
+  // pointer a concurrent register may have already overwritten (Codex).
+  return sessionId;
 }
 

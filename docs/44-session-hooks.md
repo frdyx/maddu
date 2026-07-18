@@ -108,6 +108,29 @@ maddu governance set relaxed                            # drop enforcement to nu
 maddu governance set-override discipline-enforcement off   # disable just this gate
 ```
 
+### Mid-session install/upgrade — the running session heals on restart
+
+The `PreToolUse` gate resolves *which* Máddu session a Claude caller owns from a
+**claude→maddu binding** written at `SessionStart` (`.maddu/state/<prj>/discipline/
+sessions.json`, keyed by Claude's `session_id`). That id only ever reaches Máddu
+on the hook's stdin payload — never as a CLI argument.
+
+So if you run `maddu hooks install` (or `maddu upgrade` onto a version that adds
+the gate) **while a session is already running**, that session's `SessionStart`
+already fired — under old code, or before the hook existed — so it has **no
+binding**. Its next edit hits *"no active session governs"* even though the work
+is legitimate. This is a one-time transitional state, not a recurring bug:
+
+- **Fix:** **restart the session** — the fresh `SessionStart` binds it. `maddu
+  register` alone does *not* heal the running session, because the hook subprocess
+  never inherits an exported `MADDU_SESSION_ID` from your shell; only the
+  SessionStart hook (which sees the Claude `session_id` on stdin) can write the
+  binding.
+- The binding write is **atomic** (serialized under a per-repo advisory lock with
+  an atomic file replace), so two concurrent starts — e.g. the long-lived bridge
+  plus a CLI invocation — can never clobber each other's entries in
+  `sessions.json`.
+
 ## Commands
 
 ```bash
