@@ -1,0 +1,80 @@
+# CODEOWNERS — the verification trusted computing base (TCB)
+#
+# WHY THIS EXISTS
+# Máddu's north star is "don't let the actor be the sole witness." An agent that
+# can silently rewrite its own oracle — the artifacts that decide pass/fail — IS
+# the sole witness. Every control inside Máddu runs inside the agent's process:
+# `discipline.mjs` is fail-open by law, every gate is code the agent can edit,
+# every baseline is a file the agent can rewrite. This file is the ONE control an
+# in-repo agent cannot reach, because GitHub enforces it, not Máddu.
+#
+# STATUS: INERT UNTIL BRANCH PROTECTION IS ENABLED.
+# CODEOWNERS has no effect on its own. It takes effect only once `main` requires
+# code-owner review. Until then this file documents the intended boundary and
+# nothing more. Do not describe it as protection in README, site copy, or release
+# notes while it is inert. See docs/46-ci.md.
+#
+# SCOPE — two layers, and the second is the one that is easy to miss.
+# Protecting only tests and gate definitions is NOT enough: .github/workflows/
+# maddu-ci.yml checks out PR-controlled code and runs `node bin/maddu.mjs ci`, so
+# an agent can rewrite the VERDICT LOGIC (verify.mjs, gates.mjs, the runners)
+# without touching a single test file. Both layers must be owned together or
+# neither is meaningful.
+#
+# ACCEPTED RESIDUAL: CI still executes PR-controlled code. Fully closing that
+# needs the required check to run from the protected base branch or an immutable
+# action. Documented in docs/34-threat-model.md — NOT claimed as solved.
+#
+# Syntax note: LAST matching pattern wins, so the catch-all is first and the
+# self-protecting entry is last.
+
+# ---------------------------------------------------------------------------
+# Default — no global owner. Ordinary feature work stays frictionless; only the
+# paths named below require independent approval.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Layer 1 — THE ORACLE: artifacts that decide pass/fail.
+# ---------------------------------------------------------------------------
+/scripts/test/                                        @frdyx
+/template/maddu/runtime/gates/                        @frdyx
+/.maddu/config/ci.json                                @frdyx
+/.github/                                             @frdyx
+
+# Forward declaration — arrives with the tracked-source pin.
+# PRECONDITION: .maddu/config/* is gitignored (.gitignore:15), so this entry is
+# DEAD until the file is un-ignored the way ci.json already is (.gitignore:20).
+# A gitignored file never appears in a PR diff, so CODEOWNERS can never fire on
+# it. Un-ignoring it is a hard requirement of that work, not a tidy-up.
+/.maddu/config/tracked-sources.json                   @frdyx
+
+# NOT LISTED, DELIBERATELY: /.maddu/gates/
+# Operator gates shadow builtins by id (gates.mjs:51,57-59), so the directory is
+# a real attack surface — but .maddu/* is gitignored (.gitignore:11), so such a
+# gate never reaches a PR diff or a CI checkout. CODEOWNERS cannot reach it and
+# listing it here would be decoration. Consequence: gate shadowing is a
+# LOCAL-ONLY threat (it poisons `maddu ci` / `doctor` on the developer's machine,
+# never the required GitHub check). Covered instead by the `unpinned` drift class
+# in the tracked-source work. Documented in docs/34-threat-model.md.
+
+# ---------------------------------------------------------------------------
+# Layer 2 — THE VERIFIER: code that produces or interprets the verdict.
+# Editing any of these changes what "green" means without touching a test.
+# ---------------------------------------------------------------------------
+/bin/maddu.mjs                                        @frdyx
+/commands/ci.mjs                                      @frdyx
+/commands/sources.mjs                                 @frdyx
+/commands/_project-test-runner.mjs                    @frdyx
+/template/maddu/runtime/lib/gates.mjs                 @frdyx
+/template/maddu/runtime/lib/verify.mjs                @frdyx
+/template/maddu/runtime/lib/spine.mjs                 @frdyx
+/template/maddu/runtime/lib/projections.mjs           @frdyx
+/template/maddu/runtime/lib/verification-recency.mjs  @frdyx
+/template/maddu/runtime/lib/event-schema.mjs          @frdyx
+/template/maddu/runtime/lib/event-dispositions.mjs    @frdyx
+
+# ---------------------------------------------------------------------------
+# The boundary protects itself — otherwise the first move against it is to
+# quietly narrow this list.
+# ---------------------------------------------------------------------------
+/.github/CODEOWNERS                                   @frdyx
