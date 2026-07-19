@@ -58,7 +58,14 @@
 // `usage import` stamps TOKEN_USAGE_REPORTED, letting insights' import/native
 // segmentation key on one data field. Added fields to existing types →
 // minor bump; baseline refreshed with this release.
-export const EVENT_CONTRACT_VERSION = '1.8.0';
+// 1.9.0 (oracle pin) — SOURCE_HASH_RECOMPUTED gains `reason` and `by`. Re-pinning
+// the tracked-source set is the escape hatch for every check built on those
+// hashes: it makes whatever is on disk right now the new truth. Recording WHO
+// re-baselined and WHY is the whole "no longer silent, no longer self-approved"
+// property, so the fields must be CONTRACTUAL — carrying them in the open,
+// unlisted `data` object would leave the provenance unenforced. Added fields to
+// an existing type → minor bump; baseline refreshed with this release.
+export const EVENT_CONTRACT_VERSION = '1.9.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -173,7 +180,7 @@ export const EVENT_SCHEMA = {
   SLICE_REVIEWED: { summary: "A slice review completed with a verdict and findings.", data: { findingsCount: 'number', reviewPath: 'string', reviewerRuntime: 'string', sliceEventId: 'string', verdict: 'string' } },
   SLICE_SCOPE_DECLARED: { summary: "A slice locked its intended file scope.", data: { expansionBound: 'object', lockedScopeHash: 'string', scope: 'array', sliceId: 'string' } },
   SLICE_SCOPE_EXPANDED: { summary: "A slice's locked scope was expanded with a reason.", data: { addedPaths: 'array', newHash: 'string', reason: 'string', sliceId: 'string' } },
-  SOURCE_HASH_RECOMPUTED: { summary: "Source-file hashes were recomputed for drift tracking.", data: { count: 'number', paths: 'array' } },
+  SOURCE_HASH_RECOMPUTED: { summary: "Source-file hashes were recomputed for drift tracking.", data: { by: 'string|null', count: 'number', paths: 'array', reason: 'string|null' } },
   TRIGGER_FIRED: { summary: "A registered trigger fired and dispatched its target.", data: { cooldownMs: 'number', depsHash: 'string', escalated: 'boolean', planId: 'string', reason: 'string', risk: 'string|null', sliceEventId: 'string', sourceEventId: 'string|null', tag: 'string', target: 'string', triggerId: 'string', verdict: 'string', triggered_by: 'object|null' } },
   AGENT_FILE_SYNCED: { summary: "Agent instruction files were synced.", data: { action: 'string', files: 'array', perFile: 'object' } },
   SESSION_AUTO_CLOSED: { summary: "A stale session was auto-closed by the janitor.", data: { ageMs: 'number', lastHeartbeatAt: 'string', reason: 'string', sessionId: 'string' } },

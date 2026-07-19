@@ -104,6 +104,7 @@ export async function project(repoRoot) {
   let gatesLastRunAt = null;
   const sourceHashPaths = {};                 // path -> { hash, recordedAt }
   let sourceHashesLastRecomputedAt = null;
+  let sourceHashesLastReason = null;          // why the last re-pin happened
 
   // Governance Phase 3: slice scope-locks (opt-in).
   // Map sliceId → { scope, lockedScopeHash, expansionBound, expansions[], functionalApproved, declaredAt }
@@ -604,11 +605,19 @@ export async function project(repoRoot) {
         break;
       }
       case 'SOURCE_HASH_RECOMPUTED': {
+        // FULL REPLACEMENT, not a merge. A rebuild snapshots the ENTIRE declared
+        // pin set, so the newest event is the whole truth. Merging (the pre-fix
+        // behaviour) meant a path dropped from the config kept its hash forever
+        // and silently resurrected its stale baseline if it was ever re-added —
+        // and it hid the `removed` drift class entirely, since a deleted pinned
+        // file still had a recorded entry.
+        for (const k of Object.keys(sourceHashPaths)) delete sourceHashPaths[k];
         const paths = Array.isArray(ev.data?.paths) ? ev.data.paths : [];
         for (const p of paths) {
           if (p?.path && p?.hash) sourceHashPaths[p.path] = { hash: p.hash, recordedAt: ev.ts };
         }
         sourceHashesLastRecomputedAt = ev.ts;
+        sourceHashesLastReason = ev.data?.reason ?? null;
         break;
       }
       case 'GOAL_DECLARED':
@@ -966,6 +975,7 @@ export async function project(repoRoot) {
     sourceHashes: {
       paths: { ...sourceHashPaths },
       lastRecomputedAt: sourceHashesLastRecomputedAt,
+      lastReason: sourceHashesLastReason,
     },
     // Governance Phase 3: slice scope-locks (opt-in).
     sliceLocks: { ...sliceLocks },
@@ -1060,7 +1070,7 @@ export function projectionDefaults() {
     tasks: [], workers: [], proposals: [], bossTranscripts: {},
     goal: null, handoff: null, phase: null, autonomy: null, focus: null,
     gates: { lastRunAt: null, runs: [], summary: { ok: 0, warn: 0, fail: 0 } },
-    sourceHashes: { paths: {}, lastRecomputedAt: null },
+    sourceHashes: { paths: {}, lastRecomputedAt: null, lastReason: null },
     sliceLocks: {}, triggers: {}, pendingActions: [],
     reviews: { byVerdict: {}, recent: [] },
     openFollowups: [], sessionsTree: {},

@@ -43,6 +43,23 @@ shouldn't be possible:
 - **No provider SDKs in framework code.** The bridge and cockpit import no
   provider SDK; provider calls happen only inside spawned worker subprocesses,
   with credentials handed in at spawn time.
+- **Weakening the verification oracle is detected, not prevented.** The files
+  that decide pass/fail (gate definitions, the CI profile, the runners, the
+  verifier libs) can be pinned in `.maddu/config/tracked-sources.json`; the
+  `critical` `tracked-source-drift` gate then fails on `changed` / `unpinned` /
+  `missing` / `removed`, and re-pinning requires `maddu sources rebuild --reason`
+  which records the reason and actor on the spine as a contractual field.
+  **Read the limits honestly:** any authorized actor can re-baseline with a
+  plausible reason, so this is bounded by *visibility, not construction*; test
+  bodies are deliberately unpinned (they change too often for a pin to mean
+  anything) and are covered by code-owner review instead; gutting a test's
+  assertions while keeping the file is invisible; and `.maddu/*` being gitignored
+  means operator-gate shadowing is a local-only threat that CODEOWNERS cannot
+  reach. The only control an in-repo actor cannot bypass is required code-owner
+  review on a protected branch — a GitHub setting, not a Máddu mechanism. Máddu
+  does **not** prevent an authorized actor from weakening verification, and does
+  **not** prove that passing tests remain meaningful. Full analysis in
+  `docs/34-threat-model.md` §12.
 - **Secrets are not persisted to the record.** Every spine event's payload is
   redacted at the write boundary by one canonical detector (AWS, OpenAI,
   Anthropic, GitHub — classic + fine-grained + user/refresh, GitLab, Slack,

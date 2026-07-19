@@ -17,7 +17,7 @@ One compromised npm package on one developer's machine got access to
 ("local-first, files-only, no hosted backend, no provider SDKs in
 framework code, device-bound tokens") into enforced gates.
 
-## The 11 attack scenarios
+## The 12 attack scenarios
 
 Each scenario lists the attack, what Máddu enforces, what it does NOT
 enforce, and the concrete gate / spine event family that catches it
@@ -423,6 +423,81 @@ process-level isolation remain the OS's job (see *Integration with
 OS-level defenses*). The point Máddu does guarantee: **the actor is not
 the sole witness** — a naive after-the-fact rewrite leaves a detectable
 break, on the record, that an independent `spine verify` surfaces.
+
+### 12. An agent weakens its own verification (the oracle)
+
+**Attack:** the artifacts that decide pass/fail — test files, gate
+definitions, `.maddu/config/ci.json`, the CI workflow, and the verifier
+code itself — are ordinary files in the repo. An agent that has completed
+the ritual (session registered, lane claimed, goal set) can edit any of
+them and then truthfully report "the suite is green". Variants: alter an
+assertion; mark tests skipped; narrow the runner's scope; delete a test
+file; drop a gate id from `requiredGates`; downgrade a gate's severity;
+drop an operator gate under `.maddu/gates/` that shadows a builtin by id
+(`lib/gates.mjs` — later wins); or edit `verify.mjs`/`gates.mjs` so the
+verdict logic itself lies. **This is the "actor is the sole witness"
+failure in its purest form** — the actor moves the yardstick and then
+reads it.
+
+**Máddu enforcement (drift-DETECTING, cooperative):** the operator
+declares a pin set in `.maddu/config/tracked-sources.json` (literals
+and/or globs). `maddu sources rebuild --reason "…"` snapshots those files'
+hashes onto the spine as `SOURCE_HASH_RECOMPUTED`, carrying a
+**contractual** `reason` and `by` (contract 1.9.0 — the provenance is a
+listed field so it is schema-enforced, not an unvalidated extra). The
+`tracked-source-drift` gate is `critical` and pinned in `ci.json`, and
+fails on four classes: `changed`, `missing`, `unpinned` (a NEW file
+matching a pinned pattern — this is what sees gate shadowing), and
+`removed` (a pinned file no longer declared, which is what stops "delete
+the test *and* drop it from the pin set" reading green). A pin set that
+matches zero files is a **FAIL**, not a pass, so a misconfigured pattern
+cannot go green over nothing. Re-pinning without `--reason` exits 3; a
+malformed `--reason` exits 2 even with `--force`; and if the spine append
+fails the re-pin aborts rather than proceeding unrecorded.
+
+**Máddu does NOT enforce (say this plainly):**
+
+- **Re-baselining is permitted.** Any actor can run `maddu sources
+  rebuild --reason "refactor"` and the gate goes green again. This is
+  bounded by **visibility, not by construction** — the re-pin is on the
+  spine with a reason and an actor, but nothing stops it.
+- **Hash chaining authenticates continuity, not truthful appends.** A
+  validly chained event can still be a dishonest one (see scenario 11).
+- **Test bodies under `scripts/test/` are deliberately NOT pinned.** They
+  change in most PRs, so pinning them would force a reflexive re-pin every
+  time — and a pin that is rebuilt by reflex asserts nothing. What is
+  pinned is the machinery that decides what a result *means*. Individual
+  test contents are covered by code-owner review, not by this gate.
+- **Same-count, same-name tests can be gutted.** Emptying a test file's
+  assertions while keeping the file is invisible to a hash pin of *other*
+  files, and skip/`only` detection does not exist at all.
+- **`.maddu/*` is gitignored**, so an operator gate written to
+  `.maddu/gates/` never reaches a PR diff or a CI checkout. The `unpinned`
+  class sees it only on the machine where it was written; **CODEOWNERS
+  structurally cannot cover a gitignored path.** Gate shadowing is
+  therefore a LOCAL-ONLY threat to local `maddu ci`/`doctor` verdicts.
+- **The PreToolUse hook does not participate.** It decides on ritual state
+  only and is fail-open by law (`lib/discipline.mjs`); it does not know
+  which file is being edited. An actor able to disable or modify the hook
+  is not constrained by it.
+- **CI executes PR-controlled code.** `.github/workflows/maddu-ci.yml`
+  checks out the PR and runs `node bin/maddu.mjs ci`, so an agent that
+  edits the verifier can change the verdict in the same PR. Closing this
+  requires the required check to run from the protected base branch or an
+  immutable action. **Not solved here.**
+- **The external control is CODEOWNERS, and only when enabled.** Requiring
+  independent code-owner review on `main` is the one layer an in-repo
+  actor cannot reach. It is a GitHub setting, not a Máddu mechanism, and
+  it is defeated by admin/bypass credentials, by an owner approving a bad
+  change, and entirely on local, fork, and unprotected-branch workflows.
+
+**The honest claim:** in a correctly protected GitHub merge path where
+agents lack review and administration authority, designated verification
+changes require independent approval. Locally, Máddu detects unrecorded
+drift and records re-baselines. It does **not** prevent an authorized
+actor from weakening verification, and it does **not** prove that passing
+tests remain meaningful. Do not describe this as malicious-agent
+resistance, unbypassability, or trusted receipts.
 
 ## Operator responsibilities
 
