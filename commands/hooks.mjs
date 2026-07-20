@@ -47,7 +47,16 @@ async function writeGuardrailState(repoRoot, recorded) {
   await writeFile(p, JSON.stringify({ v: 1, ...recorded }, null, 2) + '\n');
 }
 async function clearGuardrailState(repoRoot) {
-  try { await rm(guardrailStatePath(repoRoot)); } catch { /* already absent */ }
+  // Only "already absent" is ignorable. Any other failure means a STALE
+  // ownership record survives the uninstall — a later install would re-record
+  // against it and could claim (then delete) a rule the user authors in the
+  // meantime. Say so instead of swallowing it.
+  try { await rm(guardrailStatePath(repoRoot)); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return;
+    console.error(`\x1b[33mwarning\x1b[0m  could not delete ${guardrailStatePath(repoRoot)} (${String((e && e.message) || e).slice(0, 80)})`);
+    console.error(`  Delete it manually — a stale ownership record can mis-claim rules on a later install.`);
+  }
 }
 
 function printHelp() {
@@ -443,12 +452,45 @@ export default async function hooks(argv) {
       if (wantGuardrails) {
         if (gPrev && lib.stripGuardrails) next = lib.stripGuardrails(next, gPrev);
         const g = lib.mergeGuardrails(next, gRules);
+        if (g.malformed && g.malformed.length) {
+          // Merging into these shapes would either lose the rules at
+          // JSON-serialize time (properties on an array) or clobber user data
+          // (non-array deny/ask) — refuse before anything is written, same as
+          // the invalid-JSON refusal above.
+          console.error(`\x1b[31mrefusing to install guardrails\x1b[0m — ${lib.settingsPath(repoRoot)} has a malformed shape at: ${g.malformed.join(', ')}.`);
+          console.error(`  Fix it (permissions must be an object; deny/ask must be arrays), or re-run with --no-guardrails.`);
+          process.exit(1);
+        }
         next = g.settings;
         gAdded = g.added;
         // Recorded ownership = exactly what this merge introduced (after the
         // prev-owned strip, re-added canonical rules land in `added`; a rule
         // the user authored independently never does).
         gRecorded = { deny: g.added.deny, ask: g.added.ask };
+        if (!gPrev) {
+          const preexisting = (gRules.deny.length + gRules.ask.length)
+            - (g.added.deny.length + g.added.ask.length);
+          if (preexisting > 0 && g.added.deny.length + g.added.ask.length === 0) {
+            // EVERY canonical rule was already present with no ownership
+            // record — the signature of a pre-record install (or lost state),
+            // not of a user hand-authoring the complete set. Recording an
+            // empty set here would make a later uninstall a silent no-op that
+            // leaves all guardrails behind; leave NO record instead so
+            // uninstall keeps its exact-string fallback, and say so.
+            gRecorded = null;
+            console.error(`\x1b[33mwarning\x1b[0m  all ${preexisting} canonical guardrail rule(s) were already present with no ownership record`);
+            console.error(`  (pre-1.107 install or lost .maddu/state/guardrails.json). No record written — uninstall will`);
+            console.error(`  strip the canonical set by exact string; if you hand-authored an identical rule, re-add it after.`);
+          } else if (preexisting > 0) {
+            // Partial overlap: the pre-existing matches are treated as YOURS
+            // (they survive uninstall) — that is the protection for a rule
+            // you authored before install, but it also means a rule left by a
+            // recordless earlier install stays behind. Be loud about it.
+            console.error(`\x1b[33mwarning\x1b[0m  ${preexisting} canonical guardrail rule(s) were already present with no ownership record —`);
+            console.error(`  treated as user-authored (they will survive uninstall). If they came from an earlier Máddu`);
+            console.error(`  install, run \x1b[1mmaddu hooks remove\x1b[0m first, then re-install, to reset ownership.`);
+          }
+        }
       }
       // Inert Write() twin retirement is an EXPLICIT operator action, never a
       // side effect of install — it edits user-visible rules (behavior-neutral

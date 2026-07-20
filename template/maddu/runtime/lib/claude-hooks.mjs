@@ -244,25 +244,41 @@ export function retireInertWriteTwins(settings) {
 
 // Pure: union the guardrail rules into permissions.deny / permissions.ask
 // (no duplicates, existing order preserved, user rules untouched). Returns
-// { settings, added } — `added` lists ONLY the strings this merge introduced,
-// which is what the caller persists as ownership side-state (a rule the user
-// already had is NOT ours and must survive uninstall). Twin retirement is
-// deliberately NOT part of merge — it edits user-visible rules, so it runs
-// only behind an explicit operator flag (`--retire-inert-write-twins`).
+// { settings, added, malformed } — `added` lists ONLY the strings this merge
+// introduced, which is what the caller persists as ownership side-state (a
+// rule the user already had is NOT ours and must survive uninstall).
+// `malformed` names shapes the merge REFUSED to touch: a `permissions` that
+// is an array/scalar, or a `deny`/`ask` that exists but is not an array —
+// writing into those would either vanish at JSON-serialize time (properties
+// set on an array) or clobber user data, so the caller must refuse the
+// install instead of proceeding. Twin retirement is deliberately NOT part of
+// merge — it edits user-visible rules, so it runs only behind an explicit
+// operator flag (`--retire-inert-write-twins`).
 export function mergeGuardrails(settings, { deny = [], ask = [] } = {}) {
   const base = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
-  if (!base.permissions || typeof base.permissions !== 'object') base.permissions = {};
   const added = { deny: [], ask: [] };
+  const malformed = [];
+  if (base.permissions !== undefined && base.permissions !== null
+      && (typeof base.permissions !== 'object' || Array.isArray(base.permissions))) {
+    malformed.push('permissions');
+    return { settings: base, added, malformed };
+  }
+  if (!base.permissions) base.permissions = {};
   for (const [key, rules] of [['deny', deny], ['ask', ask]]) {
     if (!rules.length) continue;
-    const arr = Array.isArray(base.permissions[key]) ? base.permissions[key] : [];
+    const existing = base.permissions[key];
+    if (existing !== undefined && existing !== null && !Array.isArray(existing)) {
+      malformed.push(`permissions.${key}`);
+      continue;
+    }
+    const arr = Array.isArray(existing) ? existing : [];
     const have = new Set(arr.filter((r) => typeof r === 'string'));
     for (const r of rules) {
       if (!have.has(r)) { arr.push(r); have.add(r); added[key].push(r); }
     }
     base.permissions[key] = arr;
   }
-  return { settings: base, added };
+  return { settings: base, added, malformed };
 }
 
 // Pure: remove exactly the canonical guardrail rule strings; clean up empty
@@ -312,15 +328,22 @@ export async function resolveGuardrailRules(repoRoot) {
     const raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8');
     madduJsonExists = true;
     const cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
-    askPaths = cfg?.guardrails?.ask ?? [];
+    // Distinguish "not declared" (absent → silently none) from "declared but
+    // not an array" (null/false/0/""/{} → LOUD warning). A truthiness gate
+    // here would let a falsy declaration silently apply zero ask rules.
+    const rawAsk = cfg?.guardrails?.ask;
+    if (rawAsk === undefined) {
+      askPaths = [];
+    } else if (!Array.isArray(rawAsk)) {
+      warnings.push('maddu.json guardrails.ask is not an array — declared ask rules were NOT applied.');
+      askPaths = [];
+    } else {
+      askPaths = rawAsk;
+    }
   } catch (e) {
     if (madduJsonExists) {
       warnings.push(`maddu.json exists but could not be parsed (${String((e && e.message) || e).slice(0, 60)}) — declared guardrails.ask[] rules were NOT applied.`);
     }
-  }
-  if (askPaths && !Array.isArray(askPaths)) {
-    warnings.push('maddu.json guardrails.ask is not an array — declared ask rules were NOT applied.');
-    askPaths = [];
   }
   const ask = guardrailAskRules(askPaths);
   const dropped = (Array.isArray(askPaths) ? askPaths.length : 0) - ask.length;

@@ -207,6 +207,14 @@ generated rules and adds the new ones. If the ownership record is missing
 (state dir wiped, pre-record installs), `remove` falls back to exact-string
 matching against the canonical current rule set and says so — in that one
 case a hand-authored identical rule is removed too; re-add it by hand.
+Re-running install with the record missing does NOT fabricate one: when every
+canonical rule is already present it warns and leaves no record (so `remove`
+keeps that fallback); when only some are present, the pre-existing matches are
+treated as yours, with a warning telling you to `remove` + re-install if they
+actually came from an earlier Máddu install. Install refuses (exit 1, file
+untouched) if `.claude/settings.json` carries a malformed shape — `permissions`
+not an object, or `deny`/`ask` not arrays — rather than writing rules that
+would be lost or clobber your data; fix the shape or use `--no-guardrails`.
 Formatting note: install/remove re-serialize `.claude/settings.json` as
 2-space JSON (EOL style preserved) — content-preserving, format-normalizing.
 Claude Code-only; other runtimes get no guardrails (the spine record is

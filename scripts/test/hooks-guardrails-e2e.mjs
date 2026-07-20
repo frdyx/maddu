@@ -134,6 +134,46 @@ async function main() {
     ok('install still succeeds with warning', r5.status === 0);
     runCli(repo, ['hooks', 'uninstall']);
 
+    // ── 6. lost ownership record + re-install (round-2 F1): re-install must
+    // NOT persist an empty record (that would turn uninstall into a silent
+    // no-op); it warns and leaves NO record so uninstall keeps its
+    // exact-string fallback ──
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e' }) + '\n');
+    runCli(repo, ['hooks', 'install']);
+    await rm(statePath); // simulate pre-record install / lost side-state
+    const r6 = runCliFull(repo, ['hooks', 'install']);
+    ok('lost-record re-install warns loudly', /no ownership record/.test(r6.stderr), r6.stderr.slice(0, 120));
+    ok('lost-record re-install writes NO empty record', !(await exists(statePath)));
+    runCli(repo, ['hooks', 'uninstall']);
+    const after6 = JSON.parse(await readFile(settingsPath, 'utf8'));
+    ok('uninstall after lost record still strips canonical rules (fallback)',
+      !(after6.permissions?.deny || []).includes('Edit(maddu/runtime/**)'));
+    ok('non-canonical user rule survives the fallback strip',
+      (after6.permissions?.deny || []).includes('Edit(secrets/**)'));
+
+    // ── 7. malformed permission shapes → REFUSED, file untouched (round-2 F3) ──
+    const badShape = JSON.stringify({ permissions: [] }, null, 2) + '\n';
+    await writeFile(settingsPath, badShape);
+    const r7 = runCliFull(repo, ['hooks', 'install']);
+    ok('array permissions → install refused (exit 1)', r7.status === 1, `status=${r7.status}`);
+    ok('refusal names the malformed shape', /refusing to install guardrails.*permissions/.test(r7.stderr), r7.stderr.slice(0, 120));
+    ok('refused install leaves the file untouched', (await readFile(settingsPath, 'utf8')) === badShape);
+    const r7b = runCliFull(repo, ['hooks', 'install', '--no-guardrails']);
+    ok('--no-guardrails still installs hooks around the malformed shape', r7b.status === 0, r7b.stderr.slice(0, 120));
+    runCli(repo, ['hooks', 'uninstall']);
+    await writeFile(settingsPath, JSON.stringify({ permissions: { deny: 'nope' } }, null, 2) + '\n');
+    const r7c = runCliFull(repo, ['hooks', 'install']);
+    ok('non-array deny → install refused naming permissions.deny',
+      r7c.status === 1 && /permissions\.deny/.test(r7c.stderr), r7c.stderr.slice(0, 120));
+    await writeFile(settingsPath, userRaw); // restore
+
+    // ── 8. falsy guardrails.ask declaration warns (round-2 F4) ──
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e', guardrails: { ask: null } }) + '\n');
+    const r8 = runCliFull(repo, ['hooks', 'install']);
+    ok('guardrails.ask null → loud warning, install proceeds',
+      r8.status === 0 && /not an array/.test(r8.stderr), r8.stderr.slice(0, 120));
+    runCli(repo, ['hooks', 'uninstall']);
+
     // ── status output names guardrails honestly ──
     await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e' }) + '\n');
     const st = runCli(repo, ['hooks', 'status']);

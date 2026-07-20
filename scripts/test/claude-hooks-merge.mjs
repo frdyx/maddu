@@ -200,6 +200,26 @@ async function main() {
       && g4.settings.permissions.deny.includes('Write(.claude/settings.json)')
       && g4.retired === undefined);
 
+    // malformed permission shapes are REFUSED, never clobbered (round-2 F3):
+    // properties set on an array vanish at JSON-serialize time; overwriting a
+    // non-array deny/ask would lose user data.
+    const mArr = mergeGuardrails({ permissions: [] }, rules);
+    ok('array permissions → malformed, untouched, nothing added',
+      JSON.stringify(mArr.malformed) === JSON.stringify(['permissions'])
+      && Array.isArray(mArr.settings.permissions)
+      && mArr.added.deny.length === 0 && mArr.added.ask.length === 0);
+    const mScalar = mergeGuardrails({ permissions: 'nope' }, rules);
+    ok('scalar permissions → malformed, value preserved',
+      JSON.stringify(mScalar.malformed) === JSON.stringify(['permissions'])
+      && mScalar.settings.permissions === 'nope');
+    const mDeny = mergeGuardrails({ permissions: { deny: 'nope' } }, rules);
+    ok('non-array deny → malformed, value preserved, ask still merged',
+      JSON.stringify(mDeny.malformed) === JSON.stringify(['permissions.deny'])
+      && mDeny.settings.permissions.deny === 'nope'
+      && mDeny.added.ask.length === rules.ask.length);
+    ok('well-formed merges report no malformed shapes',
+      g1.malformed.length === 0 && g3.malformed.length === 0);
+
     // layout-aware rule resolution (IO): a fake consumer layout vs source layout
     const dirC = await mkdtemp(join(tmpdir(), 'maddu-guard-consumer-'));
     await mkdir(join(dirC, 'maddu', 'bin'), { recursive: true });
@@ -244,6 +264,16 @@ async function main() {
     await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: 'tests/**' } }));
     const rw2 = await resolveGuardrailRules(dirW);
     ok('non-array guardrails.ask → loud warning', rw2.warnings.length === 1 && /not an array/.test(rw2.warnings[0]));
+    // Falsy declarations must warn too (round-2 F4): a `?? []` + truthiness
+    // gate silently erased ask: null / false / "" into zero applied rules.
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: null } }));
+    const rw4 = await resolveGuardrailRules(dirW);
+    ok('null guardrails.ask → loud warning, not silent erasure',
+      rw4.ask.length === 0 && rw4.warnings.length === 1 && /not an array/.test(rw4.warnings[0]));
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: false } }));
+    const rw5 = await resolveGuardrailRules(dirW);
+    ok('falsy guardrails.ask → loud warning',
+      rw5.ask.length === 0 && rw5.warnings.length === 1 && /not an array/.test(rw5.warnings[0]));
     await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: ['ok/**', 'bad)path', ''] } }));
     const rw3 = await resolveGuardrailRules(dirW);
     ok('invalid ask entries → warning naming the dropped count',
