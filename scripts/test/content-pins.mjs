@@ -60,8 +60,9 @@ async function main() {
     const bin2 = sha256Normalized(Buffer.from([0x00, 0x0a]));
     ok('binary (NUL present) is NOT EOL-collapsed', bin1 !== bin2);
 
-    // THE CONSOLIDATION CLAIM: the install manifest and the pin hasher must
-    // agree, or "one hasher" is a comment rather than a fact.
+    // THE AGREEMENT CLAIM: the install manifest keeps its own independent
+    // hasher (not shared code) — this assertion is what keeps the two
+    // implementations from silently disagreeing on text files.
     ok('content-pins agrees with commands/_manifest.mjs sha256OfFile',
       (await hashFile(lf)) === (await sha256OfFile(lf)));
 

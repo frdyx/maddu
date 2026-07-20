@@ -469,7 +469,8 @@ read as clean.
 - **Re-baselining is permitted.** Any actor can run `maddu sources
   rebuild --reason "refactor"` and the gate goes green again. This is
   bounded by **visibility, not by construction** — the re-pin is on the
-  spine with a reason and an actor, but nothing stops it.
+  spine with a reason (and the session id when one is active; `by` is
+  null otherwise), but nothing stops it.
 - **Hash chaining authenticates continuity, not truthful appends.** A
   validly chained event can still be a dishonest one (see scenario 11).
 - **Test bodies under `scripts/test/` are deliberately NOT pinned.** They

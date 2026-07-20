@@ -17,13 +17,16 @@
 // HONEST LIMITS (see docs/34-threat-model.md):
 //   - An actor may re-baseline via `sources rebuild --reason` and this gate goes
 //     green again. It is bounded by VISIBILITY, not by construction.
-//   - `.maddu/*` is gitignored, so operator gates under `.maddu/gates/` never
-//     reach a PR diff or a CI checkout. The `unpinned` class below is the only
-//     thing that sees them, and only on the machine where they were written.
+//   - `.maddu/gates/` is NOT in the default pin patterns, so operator-gate
+//     shadowing there is invisible to this gate unless the operator explicitly
+//     pins that path. Independently, `.maddu/*` is gitignored, so a shadow gate
+//     never reaches a PR diff or a CI checkout — a local-only, and locally
+//     unwatched, threat.
 //
-// Hashing and glob expansion are delegated to lib/content-pins.mjs so this gate,
-// `maddu sources`, and the install manifest can never disagree about what a
-// file's hash is.
+// Hashing and glob expansion are delegated to lib/content-pins.mjs so this gate
+// and `maddu sources` can never disagree about what a pinned file's hash is.
+// (The install manifest keeps its own EOL-normalized hasher — equality-tested
+// against this one in scripts/test/content-pins.mjs, not shared code.)
 
 import {
   computeDrift,
