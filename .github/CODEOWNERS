@@ -1,36 +1,46 @@
-# CODEOWNERS — the verification trusted computing base (TCB)
+# CODEOWNERS — the verification trusted computing base (TCB), enumerated
 #
-# WHY THIS EXISTS
-# Máddu's north star is "don't let the actor be the sole witness." An agent that
-# can silently rewrite its own oracle — the artifacts that decide pass/fail — IS
-# the sole witness. Every control inside Máddu runs inside the agent's process:
-# `discipline.mjs` is fail-open by law, every gate is code the agent can edit,
-# every baseline is a file the agent can rewrite. This file is the ONE control an
-# in-repo agent cannot reach, because GitHub enforces it, not Máddu.
+# WHAT THIS FILE IS
+# An ENUMERATION of the artifacts that decide what "green" means in this repo —
+# the tests, gate definitions, and verdict logic. The list itself is the value:
+# it names the surface an agent would have to touch to weaken verification.
 #
-# STATUS: INERT UNTIL BRANCH PROTECTION IS ENABLED.
-# CODEOWNERS has no effect on its own. It takes effect only once `main` requires
-# code-owner review. Until then this file documents the intended boundary and
-# nothing more. Do not describe it as protection in README, site copy, or release
-# notes while it is inert. See docs/46-ci.md.
+# WHAT THIS FILE IS NOT
+# It is NOT a control this repository currently exercises, and for a solo
+# maintainer it CANNOT become one:
+#   - CODEOWNERS is GitHub-only. It does nothing locally, for forks, or on any
+#     other host.
+#   - It has effect ONLY when branch protection requires code-owner review on
+#     `main`. That is deliberately NOT enabled here — see docs/46-ci.md.
+#   - Even if enabled, GitHub forbids self-approval: a required code-owner
+#     review is UNSATISFIABLE for a single-maintainer repository. Enabling it
+#     solo would block every PR or force admin bypass on every merge.
+# Do not describe this file as protection, enforcement, or a boundary in
+# README, site copy, or release notes. It is documentation of the TCB.
+#
+# THE LOCAL CONTROL THIS REPO ACTUALLY USES
+# `.claude/settings.json` permission rules (ask/deny on the paths below) — a
+# bypassable harness friction inside Claude Code, honest about its limits, plus
+# CI gates and the append-only spine. See SECURITY.md for what those do and do
+# not guarantee.
 #
 # SCOPE — two layers, and the second is the one that is easy to miss.
 # Protecting only tests and gate definitions is NOT enough: .github/workflows/
 # maddu-ci.yml checks out PR-controlled code and runs `node bin/maddu.mjs ci`, so
 # an agent can rewrite the VERDICT LOGIC (verify.mjs, gates.mjs, the runners)
-# without touching a single test file. Both layers must be owned together or
-# neither is meaningful.
+# without touching a single test file. Both layers must be listed together or
+# neither enumeration is meaningful.
 #
-# ACCEPTED RESIDUAL: CI still executes PR-controlled code. Fully closing that
-# needs the required check to run from the protected base branch or an immutable
+# ACCEPTED RESIDUAL: CI executes PR-controlled code. Fully closing that needs
+# the required check to run from the protected base branch or an immutable
 # action. Documented in docs/34-threat-model.md — NOT claimed as solved.
 #
 # Syntax note: LAST matching pattern wins, so the catch-all is first and the
-# self-protecting entry is last.
+# self-listing entry is last.
 
 # ---------------------------------------------------------------------------
 # Default — no global owner. Ordinary feature work stays frictionless; only the
-# paths named below require independent approval.
+# paths named below are part of the TCB enumeration.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -74,7 +84,6 @@
 /template/maddu/runtime/lib/event-dispositions.mjs    @frdyx
 
 # ---------------------------------------------------------------------------
-# The boundary protects itself — otherwise the first move against it is to
-# quietly narrow this list.
+# The enumeration lists itself — narrowing this list is a TCB change.
 # ---------------------------------------------------------------------------
 /.github/CODEOWNERS                                   @frdyx

@@ -4,7 +4,7 @@
 
 Máddu is distributed from this repository and installed directly from `main`
 (`npx github:frdyx/maddu init`, then `maddu upgrade`). **The supported version
-is always the latest `main`** (currently v1.99.0). There is no separate
+is always the latest `main`** (currently v1.105.2). There is no separate
 maintenance branch — fixes land on `main` and ship on the next tag.
 
 ## Reporting a vulnerability
@@ -74,3 +74,19 @@ These protect the **record and the framework** — they do not sanitize the
 *content* your agents produce, and redaction is applied at write time: a secret
 committed to git history before redaction existed stays in that history. Rotate
 the credential; don't rely on redaction after the fact.
+
+## What the verification story does NOT guarantee
+
+Máddu's gates, receipts, and drift signals are **cooperative accountability
+inside the repository's existing authority boundary** — they surface
+verification drift, they do not make it adversary-proof. An actor with write
+access to the repository can modify the verifier, the baselines, and the local
+event history under the same OS authority; Máddu's records cannot prove
+themselves against that actor. No Máddu feature should be read as prevention,
+independent attestation, or proof that a green result is meaningful.
+
+The claim Máddu is entitled to is narrower and stated exactly: **Máddu can
+reproduce an exact commit's declared verification in a clean checkout and
+preserve the result as auditable evidence; it does not independently validate
+the verifier that commit supplied.** The Claude Code permission rules this repo
+ships are bypassable harness friction, not a security boundary.

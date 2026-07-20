@@ -6,7 +6,7 @@
 
 ### Your AI agents are temporary. The system that governs them shouldn't be.
 
-**Máddu is the external record that verifies what your AI agents did, so no agent is ever the sole witness to its own work.** It's a local-first, files-only spine that any AI coding agent (Claude Code, Codex, or any CLI) plugs into to work as an **auditable team**: one agent per lane, risky changes held behind approvals, every slice checked by a gate. *Cooperative* means exactly that. The agent calls Máddu; Máddu never sits in the request path and never touches your keys. It runs as a small Node process with local-first, append-only files as the system of record: each approval, session, and slice is one line on disk. The durable, verifiable record is *how* the governance earns your trust, not what it sells.
+**Máddu turns ephemeral agent work into a durable, repo-owned record you can inspect, replay, and challenge — so an agent's word never has to be taken on faith.** It's a local-first, files-only spine that any AI coding agent (Claude Code, Codex, or any CLI) plugs into to work as an **auditable team**: one agent per lane, risky changes held behind approvals, every slice checked by a gate. *Cooperative* means exactly that. The agent calls Máddu; Máddu never sits in the request path and never touches your keys. It runs as a small Node process with local-first, append-only files as the system of record: each approval, session, and slice is one line on disk. The durable, verifiable record is *how* the governance earns your trust, not what it sells.
 
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps them **honest**: one agent per lane, sensitive changes waiting on your approval, every step on a record you can replay and check, instead of a black box that vanishes when the session closes.
 
@@ -82,7 +82,7 @@ Every state question reduces to `tail`, `grep`, or `git log` on a file you alrea
 
 What Máddu gives **every** install, from day one, is the always-on core: register a session, claim a lane, run a slice, stop it with a structured summary, let the gates check it — each one line on the spine. That disciplined substrate is the value; it's what makes the history trustworthy. Multi-agent **orchestration** (`coordinator`, `loop`, `pipeline`, `team`) is a powerful **opt-in** layer on top — reach for it when a job fans out across lanes, skip it when it doesn't. Most work just needs the loop, and that's by design. (See the [charter](docs/charter.md#capability-layers--positioning-v1800) for the core-vs-orchestration split.)
 
-And with `maddu hooks install`, the loop stops being advisory: a `PreToolUse` hook **blocks a mutating edit** when the ritual is stale — no session, no lane, no governing goal/plan, an overdue slice-stop, or uncommitted work piling up — so an agent can't silently drift off the record. It's **tier-scaled** by governance (`strict` blocks, `standard` warns then blocks, `relaxed` only nudges), **fails open** (any error allows the edit; it never crashes a tool), and **never gates the remedy** (`maddu slice-stop`, `git commit`…), so the fix is always one command away. Claude Code-specific; every runtime still gets the record. See [Session hooks](docs/44-session-hooks.md#discipline-enforcement-the-pretooluse-gate).
+And with `maddu hooks install`, the loop stops being advisory: a `PreToolUse` hook **blocks a mutating edit** when the ritual is stale — no session, no lane, no governing goal/plan, an overdue slice-stop, or uncommitted work piling up — so in-harness drift off the record is blocked rather than silent. It's **tier-scaled** by governance (`strict` blocks, `standard` warns then blocks, `relaxed` only nudges), **fails open** (any error allows the edit; it never crashes a tool), and **never gates the remedy** (`maddu slice-stop`, `git commit`…), so the fix is always one command away. Claude Code-specific; every runtime still gets the record. See [Session hooks](docs/44-session-hooks.md#discipline-enforcement-the-pretooluse-gate).
 
 ## How it works
 
@@ -103,11 +103,11 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 182 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
-docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.7.0)
+docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.8.0)
                            → validate any spine event against it with ajv, check-jsonschema, or any validator
 ```
 
-That's the point of *don't let the actor be the sole witness*: the witness is a contract a third party can verify, not a log you're asked to trust. (And it's write-safe to hand over — every event's payload is redacted at the write boundary, so the record you share can't leak a pasted secret.)
+What the contract attests is precise — and worth stating precisely: a third party can verify that the record is **well-formed and unbroken** (shape, continuity, typed events) without trusting you or Máddu. It does not attest that the work the record describes was *good* — that's what gates, replay, and your own review are for. (And the record is write-safe to hand over — every event's payload is redacted at the write boundary, so what you share can't leak a pasted secret.)
 
 ## Get running in 60 seconds
 
@@ -389,7 +389,7 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | Start here | Concepts | Reference | Operations |
 |---|---|---|---|
 | [Getting started](docs/01-getting-started.md) — install, boot, first slice | [Concepts](docs/02-concepts.md) — spine, projections, lanes, slices | [CLI reference](docs/03-cli-reference.md) — every `maddu` subcommand | [Multi-workspace](docs/19-multi-workspace.md) — one bridge, N repos |
-| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.7.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
+| [Team sync](docs/49-team-sync.md) — share the record via your git remote | [Experience & evolve](docs/50-experience-evolve.md) — the ledger + recommend-only planner | [Event contract](docs/event-schema.md) — the published v1.8.0 schema | [CI gate rail](docs/46-ci.md) — `maddu ci` in any pipeline |
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-detection | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
