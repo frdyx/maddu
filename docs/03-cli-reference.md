@@ -526,10 +526,10 @@ Expansion bound defaults to `+5 files OR +30%`. After `approve-functional`, only
 
 ## `maddu sources` *(v0.16)*
 
-Tracked SSOT files driven by `.maddu/config/tracked-sources.json`. `rebuild` snapshots current hashes onto the spine; the `tracked-source-drift` gate fails when any tracked file diverges from the recorded hash.
+Tracked SSOT files driven by `.maddu/config/tracked-sources.json`. `rebuild` snapshots current hashes onto the spine; the `warn`-severity `tracked-source-drift` gate reports when any tracked file diverges from the recorded hash.
 
 ```bash
-$ maddu sources rebuild      # emits SOURCE_HASH_RECOMPUTED { count, paths[] }
+$ maddu sources rebuild --reason "why"   # emits SOURCE_HASH_RECOMPUTED { count, paths[], reason, by } — refused without --reason
 $ maddu sources status       # exits 1 on drift / unrecorded / missing
 ```
 

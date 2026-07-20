@@ -18,6 +18,12 @@ template/.maddu/
 # ship so `maddu ci` enforces the SAME required set on a fresh checkout / CI
 # runner as it does locally (the churn-proof contract, docs/46-ci.md).
 !.maddu/config/ci.json
+# The verdict-machinery pin set is the same kind of committed team artifact: it must ship so
+# tracked-source-drift reports on the SAME pinned files on a fresh checkout / CI
+# runner. Left ignored it would be invisible to every PR diff and every CI job,
+# and the gate would report "nothing pinned" (a WARN, never green) on every
+# checkout that lacks it.
+!.maddu/config/tracked-sources.json
 # Likewise the structural-mass baseline (the monolith ratchet floor) must ship so
 # the architecture-mass gate enforces "monoliths may only shrink" in CI.
 !.maddu/state/

@@ -50,7 +50,6 @@
     "spine-integrity",
     "strict-mode-approval-active",
     "token-ledger-schema",
-    "tracked-source-drift",
     "worker-env-policy-coherent"
   ]
 }

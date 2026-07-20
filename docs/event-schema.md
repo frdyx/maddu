@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.8.0` · **Event types:** 182
+**Contract version:** `1.9.0` · **Event types:** 182
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -124,7 +124,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `SLICE_REVIEWED` | A slice review completed with a verdict and findings. | `findingsCount: number`, `reviewPath: string`, `reviewerRuntime: string`, `sliceEventId: string`, `verdict: string` |
 | `SLICE_SCOPE_DECLARED` | A slice locked its intended file scope. | `expansionBound: object`, `lockedScopeHash: string`, `scope: array`, `sliceId: string` |
 | `SLICE_SCOPE_EXPANDED` | A slice's locked scope was expanded with a reason. | `addedPaths: array`, `newHash: string`, `reason: string`, `sliceId: string` |
-| `SOURCE_HASH_RECOMPUTED` | Source-file hashes were recomputed for drift tracking. | `count: number`, `paths: array` |
+| `SOURCE_HASH_RECOMPUTED` | Source-file hashes were recomputed for drift tracking. | `by: string\|null`, `count: number`, `paths: array`, `reason: string\|null` |
 | `TRIGGER_FIRED` | A registered trigger fired and dispatched its target. | `cooldownMs: number`, `depsHash: string`, `escalated: boolean`, `planId: string`, `reason: string`, `risk: string\|null`, `sliceEventId: string`, `sourceEventId: string\|null`, `tag: string`, `target: string`, `triggerId: string`, `verdict: string`, `triggered_by: object\|null` |
 | `AGENT_FILE_SYNCED` | Agent instruction files were synced. | `action: string`, `files: array`, `perFile: object` |
 | `SESSION_AUTO_CLOSED` | A stale session was auto-closed by the janitor. | `ageMs: number`, `lastHeartbeatAt: string`, `reason: string`, `sessionId: string` |

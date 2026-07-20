@@ -107,7 +107,7 @@ v0.16.0 core plus a few later additions to convey the range.
 | spine-integrity | critical | append-only spine: parseable, id-unique, referential | v0.16.0 |
 | active-session-cache | warn | active-session cache points at an open session | v0.16.0 |
 | approval-ledger-completeness | warn | every auto-decision has a paired spine event | v0.16.0 |
-| tracked-source-drift | critical | tracked SSOT files unchanged since last rebuild | v0.16.0 |
+| tracked-source-drift | warn | tracked SSOT files unchanged since last rebuild | v0.16.0 |
 | command-tier-discipline | safety | every CLI command has a tier in `_tiers.mjs` | v0.16.0 |
 | slice-scope | critical | slices that declare scope stay within it | v0.16.0 |
 | generated-artifacts-current | safety | every single-sourced artifact (the four agent briefs from `rules.json`; the `template/maddu/docs/*.md` payload mirrored from `docs/`) is byte-equal to a fresh render of its source, with no orphan payload files (framework source repo only). Retired and supersedes `docs-in-sync` in v1.22.0 | v1.19.0 |
@@ -134,7 +134,7 @@ v0.16.0 core plus a few later additions to convey the range.
 
 ## Tracked sources
 
-When operator-critical files (hard-rules, CLAUDE.md, key concepts docs) drift unrecorded, agents and humans end up working from stale assumptions. The tracked-source-drift gate makes this a hard fail.
+When operator-critical files (hard-rules, CLAUDE.md, key concepts docs) drift unrecorded, agents and humans end up working from stale assumptions. The warn-severity tracked-source-drift gate surfaces this as a visible drift report.
 
 ```bash
 # 1. Pin the SSOT files
@@ -142,14 +142,16 @@ cat > .maddu/config/tracked-sources.json <<'EOF'
 { "schemaVersion": 1, "paths": ["docs/hard-rules.md", "CLAUDE.md", "docs/02-concepts.md"] }
 EOF
 
-# 2. Snapshot their hashes onto the spine
-maddu sources rebuild         # emits SOURCE_HASH_RECOMPUTED
+# 2. Snapshot their hashes onto the spine (a reason is mandatory — refused without one)
+maddu sources rebuild --reason "initial pin"   # emits SOURCE_HASH_RECOMPUTED { …, reason, by }
 
-# 3. Going forward, doctor fails the gate when any tracked file diverges
+# 3. Going forward, the warn-severity gate reports when any tracked file diverges
 maddu sources status          # show recorded vs current per file
 ```
 
-After accepted edits, re-run `maddu sources rebuild` to record the new hashes.
+After accepted edits, re-run `maddu sources rebuild --reason "…"` to record the
+new hashes — the reason lands on the spine (with the session id when one is
+active), so a re-baseline is always a reasoned, queryable act.
 
 ## Slice scope-lock (opt-in)
 

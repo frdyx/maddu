@@ -43,6 +43,25 @@ shouldn't be possible:
 - **No provider SDKs in framework code.** The bridge and cockpit import no
   provider SDK; provider calls happen only inside spawned worker subprocesses,
   with credentials handed in at spawn time.
+- **Verdict-machinery drift is surfaced, not made adversary-proof.** The files
+  that decide what a result *means* (gate definitions, the CI profile, the
+  runners, the verifier libs) can be pinned in
+  `.maddu/config/tracked-sources.json`; the `warn`-severity
+  `tracked-source-drift` gate then reports `changed` / `unpinned` / `missing` /
+  `removed`, and re-pinning requires `maddu sources rebuild --reason` — a
+  reasonless rebuild is refused outright (no `--force` waiver), and the reason
+  lands on the spine (with the session id when one is active). **Read the limits honestly:** this is a
+  cooperative accountability signal — not prevention, independent attestation,
+  or proof that a green result is meaningful. Any authorized actor can
+  re-baseline with a plausible reason (bounded by *visibility, not
+  construction*); test bodies are deliberately unpinned — test assertions ARE
+  the oracle and are NOT covered (independent review via required code-owner
+  review would cover them, but that is a GitHub setting, inert on this repo,
+  and unsatisfiable for a solo maintainer); gutting a test's assertions while
+  keeping the file is invisible; `.maddu/gates/` is not in the default pin
+  patterns; and `.maddu/*` being gitignored means operator-gate shadowing is a
+  local-only threat that CODEOWNERS cannot reach. Full analysis in
+  `docs/34-threat-model.md` §12.
 - **Secrets are not persisted to the record.** Every spine event's payload is
   redacted at the write boundary by one canonical detector (AWS, OpenAI,
   Anthropic, GitHub — classic + fine-grained + user/refresh, GitLab, Slack,
