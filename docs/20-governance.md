@@ -107,7 +107,7 @@ v0.16.0 core plus a few later additions to convey the range.
 | spine-integrity | critical | append-only spine: parseable, id-unique, referential | v0.16.0 |
 | active-session-cache | warn | active-session cache points at an open session | v0.16.0 |
 | approval-ledger-completeness | warn | every auto-decision has a paired spine event | v0.16.0 |
-| tracked-source-drift | critical | tracked SSOT files unchanged since last rebuild | v0.16.0 |
+| tracked-source-drift | warn | tracked SSOT files unchanged since last rebuild | v0.16.0 |
 | command-tier-discipline | safety | every CLI command has a tier in `_tiers.mjs` | v0.16.0 |
 | slice-scope | critical | slices that declare scope stay within it | v0.16.0 |
 | generated-artifacts-current | safety | every single-sourced artifact (the four agent briefs from `rules.json`; the `template/maddu/docs/*.md` payload mirrored from `docs/`) is byte-equal to a fresh render of its source, with no orphan payload files (framework source repo only). Retired and supersedes `docs-in-sync` in v1.22.0 | v1.19.0 |
@@ -134,7 +134,7 @@ v0.16.0 core plus a few later additions to convey the range.
 
 ## Tracked sources
 
-When operator-critical files (hard-rules, CLAUDE.md, key concepts docs) drift unrecorded, agents and humans end up working from stale assumptions. The tracked-source-drift gate makes this a hard fail.
+When operator-critical files (hard-rules, CLAUDE.md, key concepts docs) drift unrecorded, agents and humans end up working from stale assumptions. The warn-severity tracked-source-drift gate surfaces this as a visible drift report.
 
 ```bash
 # 1. Pin the SSOT files

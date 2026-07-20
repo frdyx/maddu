@@ -60,11 +60,12 @@
 // minor bump; baseline refreshed with this release.
 // 1.9.0 (verdict-machinery pins) — SOURCE_HASH_RECOMPUTED gains `reason` and `by`. Re-pinning
 // the tracked-source set is the escape hatch for every check built on those
-// hashes: it makes whatever is on disk right now the new truth. Recording WHO
-// re-baselined and WHY is the whole "no longer silent, no longer self-approved"
-// property, so the fields must be CONTRACTUAL — carrying them in the open,
-// unlisted `data` object would leave the provenance unenforced. Added fields to
-// an existing type → minor bump; baseline refreshed with this release.
+// hashes: it makes whatever is on disk right now the new truth. Listing the
+// fields makes them TYPE-CHECKED WHEN PRESENT (the contract's rule) — the
+// guarantee that `reason` is a non-empty string comes from the CLI, which
+// refuses a reasonless or whitespace-only rebuild; `by` is the session id when
+// one is active, null otherwise. Added fields to an existing type → minor
+// bump; baseline refreshed with this release.
 export const EVENT_CONTRACT_VERSION = '1.9.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.

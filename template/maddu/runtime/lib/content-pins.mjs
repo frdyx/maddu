@@ -1,16 +1,22 @@
-// Content pins — ONE hasher and ONE glob expander for every "this file must not
-// change unnoticed" check in the framework.
+// Content pins — one hasher and one glob expander for every consumer of the
+// TRACKED-SOURCE pin set (`commands/sources.mjs` and
+// `gates/builtin/tracked-source-drift.mjs`), so those two can never disagree
+// about what a pinned file's hash is.
+//
+// HONEST SCOPE: this is NOT the framework's only content hasher.
+// `commands/_manifest.mjs` (install manifest) and
+// `gates/builtin/install-integrity.mjs` keep their own EOL-normalized
+// implementations — same normalization strategy, independent code that could
+// drift from this one. Unifying them is deliberate follow-up work, not claimed
+// here.
 //
 // WHY THIS EXISTS
-// Three call sites used to hash files independently, and they disagreed:
-//   - commands/_manifest.mjs      EOL-normalized (fixed in v1.74.1)
-//   - commands/sources.mjs        raw bytes  ← wrong on Windows
-//   - gates/builtin/tracked-source-drift.mjs   raw bytes  ← wrong on Windows
-// Under `core.autocrlf=true` git rewrites every text file to CRLF on checkout,
-// so a raw-byte hash of an UNMODIFIED file differs from its LF-sourced pin and
-// the whole tracked set reads as drifted. A drift gate that cries wolf on a
-// clean checkout is worse than no gate — people learn to ignore it. One hasher,
-// normalized, used by all three.
+// The pin-set call sites used to hash files independently, raw-byte — wrong on
+// Windows: under `core.autocrlf=true` git rewrites every text file to CRLF on
+// checkout, so a raw-byte hash of an UNMODIFIED file differs from its
+// LF-sourced pin and the whole tracked set reads as drifted. A drift gate that
+// cries wolf on a clean checkout is worse than no gate — people learn to
+// ignore it. One normalized hasher for the pin set fixes that class.
 //
 // GLOBS ARE LOAD-BEARING, NOT CONVENIENCE
 // With an exact path list, ADDING a file is invisible: an agent can drop a new

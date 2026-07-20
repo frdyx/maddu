@@ -8,9 +8,10 @@
 // Re-pinning is the escape hatch for every check built on these hashes: it makes
 // whatever is on disk right now the new truth. That is legitimate (tests get
 // merged, gates get refactored) but it must never be a reflex. `--reason` is
-// recorded on the spine alongside the snapshot, so a re-baseline is always an
-// explicit, attributable act rather than a silent one. This mirrors the
-// discipline off-switch ladder in commands/governance.mjs.
+// recorded on the spine alongside the snapshot (with the session id when one
+// is active; `by` is null otherwise), so a re-baseline is always an explicit,
+// reasoned act rather than a silent one. This mirrors the discipline
+// off-switch ladder in commands/governance.mjs.
 //
 // This does NOT make weakening impossible — an actor can always rebuild with a
 // plausible reason. It makes it visible. See docs/34-threat-model.md.

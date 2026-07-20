@@ -2,8 +2,9 @@
   "schemaVersion": 1,
   "_comment": [
     "Verdict-machinery pins: files whose content decides what a green result means.",
-    "`maddu sources rebuild --reason \"...\"` re-pins; tracked-source-drift fails on",
-    "changed / unpinned / missing / removed. Entries may be literals or globs.",
+    "`maddu sources rebuild --reason \"...\"` re-pins; the warn-severity",
+    "tracked-source-drift gate reports changed / unpinned / missing / removed.",
+    "Entries may be literals or globs.",
     "",
     "DELIBERATELY NOT PINNED: the individual tests under scripts/test/.",
     "Test bodies change in most PRs, so pinning them would force a re-pin nearly",
@@ -11,8 +12,9 @@
     "the machinery deciding what a test RESULT MEANS: gate definitions, the",
     "runners, the verifier libs, and the CI profile. Those change rarely, so drift",
     "in them is signal rather than noise.",
-    "Individual test bodies are covered by code-owner review (.github/CODEOWNERS),",
-    "not by this pin. Residual documented in docs/34-threat-model.md."
+    "Test bodies have NO independent cover here: .github/CODEOWNERS lists them but",
+    "is inert without required code-owner review (not enabled; unsatisfiable for a",
+    "solo maintainer). Residual documented in docs/34-threat-model.md s12."
   ],
   "paths": [
     "template/maddu/runtime/gates/builtin/",
