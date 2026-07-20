@@ -453,8 +453,10 @@ unrecorded. The `tracked-source-drift` gate ships at severity **`warn`**
 — a cooperative drift signal, deliberately NOT `critical` and NOT in this
 repo's required set, because an actor who can edit the pinned files can
 re-pin them too; `critical` would falsely lend it trust-boundary weight.
-Operators who want it blocking may promote it per-repo via `maddu ci
-pin` as explicit project policy. It reports four drift classes:
+Note that `maddu ci pin` only accepts fail-capable gates, so a warn gate
+CANNOT be promoted to required; an operator who wants a blocking variant
+must shadow it with a fail-capable operator gate under `.maddu/gates/` —
+a local-only mechanism with its own caveats (below). It reports four drift classes:
 `changed`, `missing`, `unpinned` (a NEW file matching a *pinned pattern*),
 and `removed` (a pinned file no longer declared — which is what stops
 "delete the test *and* drop it from the pin set" reading clean). A pin
@@ -511,7 +513,8 @@ read as clean.
 **The honest claim:** Máddu is a **cooperative accountability system
 inside the repository's existing authority boundary.** It records
 declared verification, surfaces verdict-machinery drift, and makes
-re-baselining a visible, reasoned, attributed act. It cannot prove those
+re-baselining a visible, reasoned act (attributed to the active session
+when one exists). It cannot prove those
 records or verdicts against an actor who can modify the repository, the
 verifier, the baseline, and the event history under the same OS
 authority. It does **not** prevent an authorized actor from weakening

@@ -150,8 +150,8 @@ maddu sources status          # show recorded vs current per file
 ```
 
 After accepted edits, re-run `maddu sources rebuild --reason "…"` to record the
-new hashes — the reason and actor land on the spine, so a re-baseline is always
-an attributed, queryable act.
+new hashes — the reason lands on the spine (with the session id when one is
+active), so a re-baseline is always a reasoned, queryable act.
 
 ## Slice scope-lock (opt-in)
 

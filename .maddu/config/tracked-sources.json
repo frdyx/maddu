@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "_comment": [
-    "The oracle pin: files whose content decides whether the suite is green.",
+    "Verdict-machinery pins: files whose content decides what a green result means.",
     "`maddu sources rebuild --reason \"...\"` re-pins; tracked-source-drift fails on",
     "changed / unpinned / missing / removed. Entries may be literals or globs.",
     "",

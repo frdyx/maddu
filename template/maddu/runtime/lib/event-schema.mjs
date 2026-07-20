@@ -58,7 +58,7 @@
 // `usage import` stamps TOKEN_USAGE_REPORTED, letting insights' import/native
 // segmentation key on one data field. Added fields to existing types →
 // minor bump; baseline refreshed with this release.
-// 1.9.0 (oracle pin) — SOURCE_HASH_RECOMPUTED gains `reason` and `by`. Re-pinning
+// 1.9.0 (verdict-machinery pins) — SOURCE_HASH_RECOMPUTED gains `reason` and `by`. Re-pinning
 // the tracked-source set is the escape hatch for every check built on those
 // hashes: it makes whatever is on disk right now the new truth. Recording WHO
 // re-baselined and WHY is the whole "no longer silent, no longer self-approved"

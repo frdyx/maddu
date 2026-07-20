@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// content-pins — the oracle pin: one hasher, glob expansion, drift classes, and
+// content-pins — verdict-machinery pins: one hasher, glob expansion, drift classes, and
 // the projection's full-replacement semantics.
 //
 // What this locks, and how much of it is provably regression-guarding:
@@ -77,7 +77,7 @@ async function main() {
     await writeFile(join(repo, 'gates', 'two.mjs'), 'export default 2;\n');
     await writeFile(join(repo, 'node_modules', 'pkg', 'index.mjs'), 'noise\n');
 
-    // Dotted directories are exactly where the oracle lives; a walker that
+    // Dotted directories are exactly where the verdict machinery lives; a walker that
     // skips them (as architecture.mjs's does for .maddu) finds nothing.
     const dotted = await expandPins(repo, ['.maddu/config/*.json', '.github/**']);
     ok('globs reach .maddu', dotted.includes('.maddu/config/ci.json'));

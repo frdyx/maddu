@@ -50,7 +50,7 @@ shouldn't be possible:
   `tracked-source-drift` gate then reports `changed` / `unpinned` / `missing` /
   `removed`, and re-pinning requires `maddu sources rebuild --reason` — a
   reasonless rebuild is refused outright (no `--force` waiver), and the reason
-  and actor land on the spine. **Read the limits honestly:** this is a
+  lands on the spine (with the session id when one is active). **Read the limits honestly:** this is a
   cooperative accountability signal — not prevention, independent attestation,
   or proof that a green result is meaningful. Any authorized actor can
   re-baseline with a plausible reason (bounded by *visibility, not

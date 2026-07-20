@@ -32,7 +32,7 @@ import { join } from 'node:path';
 
 import { globToRegExp } from './architecture.mjs';
 
-// Deliberately does NOT skip `.maddu` or `.github` — the pinned oracle lives in
+// Deliberately does NOT skip `.maddu` or `.github` — pinned verdict-machinery files live in
 // both. Skips only genuinely derived / vendored trees.
 const SKIP_DIRS = new Set([
   '.git', 'node_modules', 'dist', 'build', 'out', 'coverage',

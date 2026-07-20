@@ -199,7 +199,7 @@ A **gate** is a single check with one of three severities (`critical`, `safety`,
 
 ### Tracked sources
 
-A list of single-source-of-truth files (docs, schemas, manifests) pinned in `.maddu/config/tracked-sources.json`. `maddu sources rebuild --reason "…"` snapshots their SHA-256 hashes onto the spine via `SOURCE_HASH_RECOMPUTED` (a reasonless rebuild is refused — re-baselining is an explicit, attributed act). The `warn`-severity `tracked-source-drift` gate reports when any pinned file diverges from the recorded hash — kills silent doc rot.
+A list of single-source-of-truth files (docs, schemas, manifests) pinned in `.maddu/config/tracked-sources.json`. `maddu sources rebuild --reason "…"` snapshots their SHA-256 hashes onto the spine via `SOURCE_HASH_RECOMPUTED` (a reasonless rebuild is refused — re-baselining is an explicit, reasoned act, attributed to the active session when one exists). The `warn`-severity `tracked-source-drift` gate reports when any pinned file diverges from the recorded hash — surfacing silent doc rot instead of letting it pass unnoticed.
 
 ### Slice scope-lock *(opt-in)*
 

@@ -1,4 +1,4 @@
-// `maddu sources <rebuild|status>` — the oracle pin.
+// `maddu sources <rebuild|status>` — verdict-machinery pins.
 //
 // rebuild: expand .maddu/config/tracked-sources.json (literals + globs), hash
 //          each file, append SOURCE_HASH_RECOMPUTED with the snapshot.
@@ -41,15 +41,19 @@ const CONFIG_HINT = [
 // It must ALSO not silently degrade into a forced, reasonless re-pin. Someone
 // typing `--reason --force` was trying to give a reason and got the quoting
 // wrong; treating that as "no reason supplied, but --force is present, so
-// proceed" would re-baseline the oracle on a typo. Distinguish the two cases:
-//   absent    — no --reason at all (refusable, waivable by --force)
+// proceed" would re-baseline the verdict machinery on a typo. Distinguish the two cases:
+//   absent    — no --reason at all (refused — there is no waiver)
 //   malformed — --reason present with a flag-shaped or empty value (hard error)
 function readReason(argv) {
   const i = argv.indexOf('--reason');
   if (i < 0) return { state: 'absent', value: null };
   const raw = argv[i + 1];
   if (!raw || String(raw).startsWith('--')) return { state: 'malformed', value: null };
-  return { state: 'ok', value: raw };
+  // A whitespace-only reason is not a reason — `--reason "  "` must not satisfy
+  // the requirement that every re-pin carries a real, human-readable why.
+  const trimmed = String(raw).trim();
+  if (!trimmed) return { state: 'malformed', value: null };
+  return { state: 'ok', value: trimmed };
 }
 
 const LABEL = {
@@ -125,7 +129,7 @@ export default async function command(argv) {
     } catch (e) {
       // The append IS the pin. If it cannot be recorded there is no re-baseline
       // to speak of — fail loudly rather than leave the caller believing the
-      // oracle moved. No --force bypass.
+      // pins moved. No bypass of any kind.
       console.error(`refused  could not record the re-pin on the spine (${e?.message || e}).`);
       console.error('         Fix the spine first — a re-baseline must leave a witness.');
       process.exit(1);
@@ -143,12 +147,18 @@ export default async function command(argv) {
     const config = await readPinConfig(repoRoot);
     const patterns = pinPatterns(config);
     if (!patterns.length) {
-      console.log('tracked sources: 0');
-      console.log('  (configure .maddu/config/tracked-sources.json)');
-      return;
+      // Exit 2, not 0 — "nothing pinned" must never read as success anywhere
+      // on this surface (same rule as the gate and as rebuild's CONFIG_HINT).
+      console.error('tracked sources: 0 — nothing pinned');
+      console.error('  (configure .maddu/config/tracked-sources.json)');
+      process.exit(2);
     }
 
     const declared = await expandPins(repoRoot, patterns);
+    if (!declared.length) {
+      console.error(`tracked sources: ${patterns.length} pattern(s) matched 0 files — misconfigured`);
+      process.exit(2);
+    }
     const proj = await projections.project(repoRoot);
     const recorded = proj.sourceHashes?.paths || {};
     const drifted = await computeDrift(repoRoot, declared, recorded);

@@ -45,8 +45,11 @@ export default {
   // `warn`, deliberately not `critical`: this is a cooperative drift SIGNAL,
   // not a trust boundary. An actor who can edit the pinned files can re-pin
   // them too, so `critical` would falsely lend it trust-boundary weight
-  // (Codex review, 2026-07-20). Operators may promote it per-repo via
-  // `maddu ci pin` as cooperative project policy.
+  // (Codex review, 2026-07-20). Note `maddu ci pin` only accepts fail-capable
+  // gates, so a warn gate cannot be promoted to required; an operator who
+  // wants a blocking variant must shadow it with a fail-capable operator gate
+  // under `.maddu/gates/` — a local-only mechanism with its own caveats (see
+  // docs/34-threat-model.md §12).
   severity: 'warn',
   description: 'Pinned verdict-machinery files unchanged since the last `maddu sources rebuild`.',
   run: async (ctx) => {
