@@ -1,9 +1,12 @@
 # CODEOWNERS — the verification trusted computing base (TCB), enumerated
 #
 # WHAT THIS FILE IS
-# An ENUMERATION of the artifacts that decide what "green" means in this repo —
-# the tests, gate definitions, and verdict logic. The list itself is the value:
-# it names the surface an agent would have to touch to weaken verification.
+# A PARTIAL ENUMERATION of key artifacts that decide what "green" means in this
+# repo — the tests, gate definitions, and verdict logic. The list names the
+# core surface an agent would have to touch to weaken verification; it is not
+# exhaustive (loaders and resolvers such as commands/_libroot.mjs can redirect
+# which verdict code runs, and any transitive import of the files below is
+# equally load-bearing).
 #
 # WHAT THIS FILE IS NOT
 # It is NOT a control this repository currently exercises, and for a solo
@@ -18,11 +21,12 @@
 # Do not describe this file as protection, enforcement, or a boundary in
 # README, site copy, or release notes. It is documentation of the TCB.
 #
-# THE LOCAL CONTROL THIS REPO ACTUALLY USES
-# `.claude/settings.json` permission rules (ask/deny on the paths below) — a
-# bypassable harness friction inside Claude Code, honest about its limits, plus
-# CI gates and the append-only spine. See SECURITY.md for what those do and do
-# not guarantee.
+# WHAT THIS REPO RELIES ON LOCALLY INSTEAD
+# CI gates and the append-only spine (see SECURITY.md for what those do and do
+# not guarantee), plus — planned, shipping via `maddu hooks install` — Claude
+# Code permission rules on the paths below: bypassable harness friction, not a
+# control. The committed `.claude/settings.json` carries hooks only today; no
+# permission rules are in the repo yet.
 #
 # SCOPE — two layers, and the second is the one that is easy to miss.
 # Protecting only tests and gate definitions is NOT enough: .github/workflows/
@@ -72,6 +76,7 @@
 # Editing any of these changes what "green" means without touching a test.
 # ---------------------------------------------------------------------------
 /bin/maddu.mjs                                        @frdyx
+/commands/_libroot.mjs                                @frdyx
 /commands/ci.mjs                                      @frdyx
 /commands/sources.mjs                                 @frdyx
 /commands/_project-test-runner.mjs                    @frdyx
