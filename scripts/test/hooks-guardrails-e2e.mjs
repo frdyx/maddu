@@ -1,0 +1,233 @@
+#!/usr/bin/env node
+// hooks-guardrails-e2e — PR 3 kill criterion, executed against the REAL CLI on
+// a scratch CONSUMER repo (not this source checkout):
+//
+//   1. `hooks install`      → hooks + guardrails merged; user content intact;
+//                             ownership record written
+//   2. `hooks install` (2nd)→ settings.json BYTE-IDENTICAL (idempotent)
+//   3. declaration change   → re-install retires the stale generated ask rule
+//                             and adds the new one
+//   4. `hooks uninstall`    → the settings FILE is BYTE-IDENTICAL to the
+//                             original user file (user file authored in the
+//                             canonical 2-space/LF form the writer emits, so
+//                             preservation is provable at the byte level) —
+//                             including a user rule IDENTICAL to a canonical
+//                             guardrail rule, which must SURVIVE because
+//                             ownership is recorded, not inferred
+//   5. malformed maddu.json → loud warning on stderr, install still succeeds
+//
+// What this does NOT prove (stated per review): Claude Code's enforcement of
+// the rules — that is version-dependent runtime behavior of Claude Code
+// itself; this suite proves Máddu's merge/strip/ownership semantics only.
+//
+// Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
+
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, writeFile, rm, access } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const CLI = join(SRC_ROOT, 'bin', 'maddu.mjs');
+
+let passed = 0, failed = 0;
+function ok(name, cond, extra = '') {
+  console.log(`  ${cond ? '[PASS]' : '[FAIL]'} ${name}${extra ? ` - ${extra}` : ''}`);
+  if (cond) passed++; else failed++;
+}
+
+function runCli(cwd, args) {
+  return execFileSync(process.execPath, [CLI, ...args], {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, MADDU_SESSION_ID: '' },
+  });
+}
+function runCliFull(cwd, args) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    cwd, encoding: 'utf8',
+    env: { ...process.env, MADDU_SESSION_ID: '' },
+  });
+}
+async function exists(p) { try { await access(p); return true; } catch { return false; } }
+
+async function main() {
+  const repo = await mkdtemp(join(tmpdir(), 'maddu-guard-e2e-'));
+  try {
+    // Consumer layout + declared ask paths + empty spine.
+    await mkdir(join(repo, 'maddu', 'bin'), { recursive: true });
+    await writeFile(join(repo, 'maddu', 'bin', 'maddu.mjs'), '// stub — layout marker only\n');
+    await mkdir(join(repo, '.maddu', 'events'), { recursive: true });
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({
+      name: 'guard-e2e', guardrails: { ask: ['tests/**', 'jest.config.js'] },
+    }, null, 2) + '\n');
+
+    // User-authored settings the run must preserve — INCLUDING a rule that is
+    // string-identical to a canonical guardrail rule (ownership must protect
+    // it), authored in the writer's canonical form (2-space JSON + LF) so
+    // preservation is byte-provable.
+    const userSettings = {
+      permissions: {
+        deny: ['Edit(secrets/**)', 'Edit(.maddu/config/**)'],
+        ask: ['Bash(git push:*)'],
+        allow: ['Bash'],
+      },
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo user-hook' }] }] },
+      model: 'opus',
+    };
+    await mkdir(join(repo, '.claude'), { recursive: true });
+    const settingsPath = join(repo, '.claude', 'settings.json');
+    const userRaw = JSON.stringify(userSettings, null, 2) + '\n';
+    await writeFile(settingsPath, userRaw);
+    const statePath = join(repo, '.maddu', 'state', 'guardrails.json');
+
+    // ── 1. install ──
+    const out1 = runCli(repo, ['hooks', 'install']);
+    const after1raw = await readFile(settingsPath, 'utf8');
+    const after1 = JSON.parse(after1raw);
+    ok('install reports guardrails', /Permission guardrails \(consumer layout\)/.test(out1), out1.split('\n')[0]);
+    ok('consumer deny rules present', ['Edit(maddu/runtime/**)', 'Edit(.maddu/config/**)', 'Edit(.maddu/gates/**)', 'Edit(.claude/settings.json)', 'Edit(.claude/settings.local.json)'].every((r) => after1.permissions.deny.includes(r)));
+    ok('declared ask rules present', ['Edit(tests/**)', 'Edit(jest.config.js)'].every((r) => after1.permissions.ask.includes(r)));
+    ok('user rules + keys survive install',
+      after1.permissions.deny[0] === 'Edit(secrets/**)'
+      && after1.permissions.ask.includes('Bash(git push:*)')
+      && JSON.stringify(after1.permissions.allow) === JSON.stringify(['Bash'])
+      && after1.hooks.SessionStart.some((g) => g.hooks?.some((h) => h.command === 'echo user-hook'))
+      && after1.model === 'opus');
+    ok('no duplicate for the user-identical rule',
+      after1.permissions.deny.filter((r) => r === 'Edit(.maddu/config/**)').length === 1);
+    const rec1 = JSON.parse(await readFile(statePath, 'utf8'));
+    ok('ownership record written', Array.isArray(rec1.deny) && Array.isArray(rec1.ask));
+    ok('ownership record EXCLUDES the user-identical rule',
+      !rec1.deny.includes('Edit(.maddu/config/**)'), JSON.stringify(rec1.deny));
+    ok('ownership record includes the generated ask rules',
+      rec1.ask.includes('Edit(tests/**)') && rec1.ask.includes('Edit(jest.config.js)'));
+
+    // ── 2. second install: byte-identical ──
+    runCli(repo, ['hooks', 'install']);
+    ok('second install is BYTE-identical', (await readFile(settingsPath, 'utf8')) === after1raw);
+
+    // ── 3. declaration change: stale generated rule retired, new one added ──
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({
+      name: 'guard-e2e', guardrails: { ask: ['vitest.config.ts'] },
+    }, null, 2) + '\n');
+    runCli(repo, ['hooks', 'install']);
+    const after3 = JSON.parse(await readFile(settingsPath, 'utf8'));
+    ok('stale generated ask rules retired on re-install',
+      !after3.permissions.ask.includes('Edit(tests/**)') && !after3.permissions.ask.includes('Edit(jest.config.js)'));
+    ok('new declared ask rule added', after3.permissions.ask.includes('Edit(vitest.config.ts)'));
+    ok('user ask rule still present through declaration change', after3.permissions.ask.includes('Bash(git push:*)'));
+
+    // ── 4. uninstall: BYTE-identical to the original user file ──
+    runCli(repo, ['hooks', 'uninstall']);
+    const finalRaw = await readFile(settingsPath, 'utf8');
+    ok('uninstall restores the user file BYTE-identical', finalRaw === userRaw,
+      finalRaw === userRaw ? '' : finalRaw.slice(0, 120));
+    ok('user-identical rule SURVIVED uninstall (recorded ownership)',
+      JSON.parse(finalRaw).permissions.deny.includes('Edit(.maddu/config/**)'));
+    ok('ownership record cleared on uninstall', !(await exists(statePath)));
+
+    // ── 5. malformed maddu.json: loud warning, install proceeds ──
+    await writeFile(join(repo, 'maddu.json'), '{ not json');
+    const r5 = runCliFull(repo, ['hooks', 'install']);
+    ok('malformed maddu.json warns on stderr', /warning.*could not be parsed/.test(r5.stderr), r5.stderr.slice(0, 120));
+    ok('install still succeeds with warning', r5.status === 0);
+    runCli(repo, ['hooks', 'uninstall']);
+
+    // ── 6. lost ownership record + re-install (round-2 F1): re-install must
+    // NOT persist an empty record (that would turn uninstall into a silent
+    // no-op); it warns and leaves NO record so uninstall keeps its
+    // exact-string fallback ──
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e' }) + '\n');
+    runCli(repo, ['hooks', 'install']);
+    await rm(statePath); // simulate pre-record install / lost side-state
+    const r6 = runCliFull(repo, ['hooks', 'install']);
+    ok('lost-record re-install warns loudly', /no ownership record/.test(r6.stderr), r6.stderr.slice(0, 120));
+    ok('lost-record re-install writes NO empty record', !(await exists(statePath)));
+    runCli(repo, ['hooks', 'uninstall']);
+    const after6 = JSON.parse(await readFile(settingsPath, 'utf8'));
+    ok('uninstall after lost record still strips canonical rules (fallback)',
+      !(after6.permissions?.deny || []).includes('Edit(maddu/runtime/**)'));
+    ok('non-canonical user rule survives the fallback strip',
+      (after6.permissions?.deny || []).includes('Edit(secrets/**)'));
+    // Round-3: an already-persisted EMPTY record (the round-2 bug's artifact)
+    // must read as absent — recovered on install, fallback-stripped on remove.
+    runCli(repo, ['hooks', 'install']);
+    await writeFile(statePath, JSON.stringify({ v: 1, deny: [], ask: [] }, null, 2) + '\n');
+    const r6b = runCliFull(repo, ['hooks', 'install']);
+    ok('empty ownership record treated as absent (warns)', /no ownership record/.test(r6b.stderr), r6b.stderr.slice(0, 120));
+    ok('empty record cleared, not rewritten', !(await exists(statePath)));
+    runCli(repo, ['hooks', 'uninstall']);
+    const after6b = JSON.parse(await readFile(settingsPath, 'utf8'));
+    ok('uninstall after empty record strips canonical rules (fallback)',
+      !(after6b.permissions?.deny || []).includes('Edit(maddu/runtime/**)'));
+
+    // ── 7. malformed permission shapes → REFUSED, file untouched (round-2 F3) ──
+    const badShape = JSON.stringify({ permissions: [] }, null, 2) + '\n';
+    await writeFile(settingsPath, badShape);
+    const r7 = runCliFull(repo, ['hooks', 'install']);
+    ok('array permissions → install refused (exit 1)', r7.status === 1, `status=${r7.status}`);
+    ok('refusal names the malformed shape', /refusing to install guardrails.*permissions/.test(r7.stderr), r7.stderr.slice(0, 120));
+    ok('refused install leaves the file untouched', (await readFile(settingsPath, 'utf8')) === badShape);
+    const r7b = runCliFull(repo, ['hooks', 'install', '--no-guardrails']);
+    ok('--no-guardrails still installs hooks around the malformed shape', r7b.status === 0, r7b.stderr.slice(0, 120));
+    runCli(repo, ['hooks', 'uninstall']);
+    await writeFile(settingsPath, JSON.stringify({ permissions: { deny: 'nope' } }, null, 2) + '\n');
+    const r7c = runCliFull(repo, ['hooks', 'install']);
+    ok('non-array deny → install refused naming permissions.deny',
+      r7c.status === 1 && /permissions\.deny/.test(r7c.stderr), r7c.stderr.slice(0, 120));
+    const nullShape = JSON.stringify({ permissions: null }, null, 2) + '\n';
+    await writeFile(settingsPath, nullShape);
+    const r7d = runCliFull(repo, ['hooks', 'install']);
+    ok('null permissions → install refused, file untouched',
+      r7d.status === 1 && (await readFile(settingsPath, 'utf8')) === nullShape, `status=${r7d.status}`);
+    // Round-4: a non-object settings ROOT refuses too — properties attached
+    // to an array vanish at serialize time, so install would "succeed" while
+    // installing nothing (and still record ownership).
+    const arrRoot = '[]\n';
+    await writeFile(settingsPath, arrRoot);
+    const r7e = runCliFull(repo, ['hooks', 'install']);
+    ok('array settings root → install refused, file untouched',
+      r7e.status === 1 && /not a JSON object/.test(r7e.stderr)
+      && (await readFile(settingsPath, 'utf8')) === arrRoot, `status=${r7e.status}`);
+    ok('array settings root → no ownership record written', !(await exists(statePath)));
+    await writeFile(settingsPath, userRaw); // restore
+
+    // ── 8. falsy guardrails.ask declaration warns (round-2 F4) ──
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e', guardrails: { ask: null } }) + '\n');
+    const r8 = runCliFull(repo, ['hooks', 'install']);
+    ok('guardrails.ask null → loud warning, install proceeds',
+      r8.status === 0 && /not an array/.test(r8.stderr), r8.stderr.slice(0, 120));
+    runCli(repo, ['hooks', 'uninstall']);
+
+    // ── 9. user's pre-existing EMPTY permission arrays survive a full
+    // install→uninstall through the real CLI (round-4: created-aware strip) ──
+    const emptyArrRaw = JSON.stringify({ permissions: { deny: [], ask: [] }, model: 'opus' }, null, 2) + '\n';
+    await writeFile(settingsPath, emptyArrRaw);
+    runCli(repo, ['hooks', 'install']);
+    runCli(repo, ['hooks', 'uninstall']);
+    const after9 = await readFile(settingsPath, 'utf8');
+    ok('pre-existing empty arrays survive install→uninstall BYTE-identical',
+      after9 === emptyArrRaw, after9.slice(0, 120));
+    await writeFile(settingsPath, userRaw); // restore
+
+    // ── status output names guardrails honestly ──
+    await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e' }) + '\n');
+    const st = runCli(repo, ['hooks', 'status']);
+    ok('status names guardrails as harness friction', /harness friction, not a security boundary/.test(st));
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+}
+
+try {
+  await main();
+  console.log('');
+  console.log(`hooks-guardrails-e2e: ${passed} pass - ${failed} fail`);
+  if (failed > 0) process.exit(1);
+  console.log('hooks-guardrails-e2e OK');
+  process.exit(0);
+} catch (err) {
+  console.error(`harness error: ${err.stack || err.message}`);
+  process.exit(2);
+}

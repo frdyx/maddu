@@ -151,6 +151,84 @@ the project-local CLI, so it is cross-platform (no shell-specific shim path).
 In the framework **source** checkout (which has `bin/maddu.mjs`, not
 `maddu/bin/`), install resolves the entrypoint accordingly (v1.89.1).
 
+## Permission guardrails (v1.107.0)
+
+`hooks install` also installs **permission guardrails** by default
+(`--no-guardrails` skips them): Claude Code `permissions` rules over the
+verdict-machinery paths.
+
+On a **consumer** install (runtime at `maddu/`), the agent has no legitimate
+reason to edit framework internals, so those are `deny`:
+
+```
+deny  Edit(maddu/runtime/**)      deny  Edit(.maddu/config/**)
+deny  Edit(.maddu/gates/**)       deny  Edit(.claude/settings.json)
+deny  Edit(.claude/settings.local.json)
+```
+
+Project-specific paths — your tests, your CI config — are **declared, never
+guessed** (Máddu cannot know where a project's tests live; a guessed rule is
+dead or wrong). Declare them in `maddu.json` and they become `ask` rules:
+
+```json
+{ "guardrails": { "ask": ["tests/**", "jest.config.js"] } }
+```
+
+On the framework **source** checkout, gate and verifier development IS the
+work, so the TCB paths carry operator-managed `ask` rules instead; the
+guardrail layer only self-protects the settings files.
+
+**Read the strength honestly — this is bypassable harness friction, not a
+security boundary.** The rules are Edit-form only, because `Write(path)` rules
+are accepted but never matched by file permission checks in Claude Code
+v2.1.210+ (an explicit `maddu hooks install --retire-inert-write-twins`
+retires such redundant `Write()` rules when their `Edit()` twin exists in the
+same list, reporting each removal — never a silent side effect of a normal
+install). What the Edit deny rules certainly cover is Claude Code's
+**built-in file tools** (Edit/Write/NotebookEdit, including creating a new
+file on the path). Whether they also cover Bash file commands Claude Code
+recognizes (`cat`, `sed`, …) is **version-dependent and not guaranteed** —
+don't lean on it. Subprocesses that open files themselves (`node -e`,
+`python -c`) are **never** covered by permission rules; such a Bash command
+goes through Máddu's discipline hook instead, which classifies it and gates it
+on **ritual state** (session/lane/slice discipline, tier-scaled) — that gate
+does not know about denied paths, so it is a different, weaker kind of
+friction, and a process spawned outside the harness leaves no trace at all.
+OS-level enforcement is the Claude Code sandbox
+(`sandbox.filesystem.denyWrite` — macOS/Linux/WSL2, not native Windows). The
+rules raise friction and visibility; they do not make tampering impossible.
+See `docs/34-threat-model.md` §12 and SECURITY.md.
+
+**Ownership model:** the exact rule strings an install adds are recorded in
+`.maddu/state/guardrails.json`; `remove` strips exactly the recorded strings,
+so a rule you had hand-authored before install survives uninstall. Changing
+`maddu.json → guardrails.ask[]` and re-running install retires the previously
+generated rules and adds the new ones. If the ownership record is missing
+(state dir wiped, pre-record installs), `remove` falls back to exact-string
+matching against the canonical current rule set and says so — in that one
+case a hand-authored identical rule is removed too; re-add it by hand.
+Re-running install with the record missing does NOT fabricate one: when every
+canonical rule is already present it warns and leaves no record (so `remove`
+keeps that fallback); when only some are present, the pre-existing matches are
+treated as yours, with a warning telling you to `remove` + re-install if they
+actually came from an earlier Máddu install. An empty ownership record is
+treated as absent — install never writes one, and one found on disk is
+recovered, not trusted. The record also marks which containers install
+created, so uninstall deletes an emptied `deny`/`ask` array (or the
+`permissions` object) only if install created it — your pre-existing empty
+arrays survive; the no-record fallback still removes empties. Install refuses
+(exit 1, file untouched) if `.claude/settings.json` carries a malformed
+shape — a non-object root, `permissions` not an object, or `deny`/`ask`
+present but not arrays (an explicit `null` counts, and both keys are checked
+even when a run has no rules to write into them) — rather than writing rules
+that would be lost or clobber your data; fix the shape or use
+`--no-guardrails`. A `maddu.json` that exists but cannot be read or parsed
+warns loudly — only a genuinely absent file means "nothing declared".
+Formatting note: install/remove re-serialize `.claude/settings.json` as
+2-space JSON (EOL style preserved) — content-preserving, format-normalizing.
+Claude Code-only; other runtimes get no guardrails (the spine record is
+runtime-agnostic, the guardrails are not).
+
 ## The pre-compaction checkpoint (v1.89.0)
 
 Context compaction is where sessions silently lose state: anything the agent

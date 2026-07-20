@@ -8,7 +8,7 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mergeInstall, stripMaddu, summarize, MADDU_HOOKS, hookCommandFor, resolveHookBin, HOOK_BIN, HOOK_BIN_SOURCE, mergeStatusLine, stripStatusLine, statusLineInstalled, statusLineCommandFor } from '../../template/maddu/runtime/lib/claude-hooks.mjs';
+import { mergeInstall, stripMaddu, summarize, MADDU_HOOKS, hookCommandFor, resolveHookBin, HOOK_BIN, HOOK_BIN_SOURCE, mergeStatusLine, stripStatusLine, statusLineInstalled, statusLineCommandFor, GUARDRAIL_DENY_CONSUMER, GUARDRAIL_DENY_SOURCE, guardrailAskRules, mergeGuardrails, stripGuardrails, summarizeGuardrails, retireInertWriteTwins, resolveGuardrailRules } from '../../template/maddu/runtime/lib/claude-hooks.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -124,6 +124,200 @@ async function main() {
 
     // statusLine is orthogonal to hooks — merging hooks doesn't add a statusLine
     ok('mergeInstall alone adds no statusLine', !statusLineInstalled(mergeInstall({})));
+  }
+
+  // ── permission guardrails (PR 3, verification-witness plan) ──
+  {
+    const rules = { deny: [...GUARDRAIL_DENY_CONSUMER], ask: guardrailAskRules(['tests/**', 'vitest.config.ts']) };
+
+    // ask-rule generation: Edit-form, trimmed, paren-injection rejected
+    ok('guardrailAskRules emits Edit-form rules',
+      JSON.stringify(rules.ask) === JSON.stringify(['Edit(tests/**)', 'Edit(vitest.config.ts)']));
+    ok('guardrailAskRules rejects paren injection + junk',
+      guardrailAskRules(['a)b', '(x', '', '   ', 42, null]).length === 0);
+
+    // fresh merge adds every rule
+    const g1 = mergeGuardrails({}, rules);
+    const sum1 = summarizeGuardrails(g1.settings, rules);
+    ok('mergeGuardrails installs all rules', sum1.allInstalled, JSON.stringify(sum1.missing));
+    ok('mergeGuardrails reports what it added',
+      g1.added.deny.length === GUARDRAIL_DENY_CONSUMER.length && g1.added.ask.length === 2);
+
+    // idempotent
+    const g2 = mergeGuardrails(g1.settings, rules);
+    ok('mergeGuardrails idempotent (deep-equal)', JSON.stringify(g1.settings) === JSON.stringify(g2.settings));
+    ok('idempotent re-merge adds nothing', g2.added.deny.length === 0 && g2.added.ask.length === 0);
+
+    // user rules preserved, order kept, no duplicates
+    const user = { permissions: { deny: ['Edit(secrets/**)'], ask: ['Bash(git push:*)'], allow: ['Bash'] } };
+    const g3 = mergeGuardrails(user, rules);
+    ok('user deny rule preserved first', g3.settings.permissions.deny[0] === 'Edit(secrets/**)');
+    ok('user ask rule preserved', g3.settings.permissions.ask.includes('Bash(git push:*)'));
+    ok('user allow untouched', JSON.stringify(g3.settings.permissions.allow) === JSON.stringify(['Bash']));
+
+    // strip removes exactly the canonical strings, cleans empties
+    const s1 = stripGuardrails(g1.settings, rules);
+    ok('stripGuardrails leaves no permissions object when nothing remains', !s1.permissions);
+    const s2 = stripGuardrails(g3.settings, rules);
+    ok('stripGuardrails keeps user rules',
+      s2.permissions.deny.includes('Edit(secrets/**)') && s2.permissions.ask.includes('Bash(git push:*)'));
+    ok('stripGuardrails removed canonical rules',
+      !s2.permissions.deny.some((r) => GUARDRAIL_DENY_CONSUMER.includes(r)));
+
+    // BYTE-PRESERVATION (kill criterion core): install→uninstall on a settings
+    // object with user content returns deep-equal user content.
+    const userBefore = JSON.stringify(user);
+    const roundTrip = stripGuardrails(mergeGuardrails(JSON.parse(userBefore), rules).settings, rules);
+    ok('install→uninstall round-trip preserves user settings deep-equal',
+      JSON.stringify(roundTrip) === userBefore);
+
+    // inert Write() twin retirement: removed only when the Edit twin is in the
+    // SAME array; a twin-less Write rule survives; removals are reported.
+    const twins = {
+      permissions: {
+        ask: ['Edit(.maddu/config/**)', 'Write(.maddu/config/**)', 'Write(untwinned/**)'],
+        deny: ['Edit(.claude/settings.json)', 'Write(.claude/settings.json)'],
+      },
+    };
+    const r1 = retireInertWriteTwins(twins);
+    ok('twin Write retired from ask', !r1.settings.permissions.ask.includes('Write(.maddu/config/**)'));
+    ok('twin Write retired from deny', !r1.settings.permissions.deny.includes('Write(.claude/settings.json)'));
+    ok('twin-less Write survives', r1.settings.permissions.ask.includes('Write(untwinned/**)'));
+    ok('retirements reported', r1.retired.length === 2 && r1.retired.every((x) => x.rule.startsWith('Write(')));
+    ok('Edit rules untouched by retirement',
+      r1.settings.permissions.ask.includes('Edit(.maddu/config/**)')
+      && r1.settings.permissions.deny.includes('Edit(.claude/settings.json)'));
+
+    // cross-array twin does NOT retire (Edit in deny, Write in ask ≠ same array)
+    const cross = { permissions: { ask: ['Write(x/**)'], deny: ['Edit(x/**)'] } };
+    ok('cross-array Write twin NOT retired', retireInertWriteTwins(cross).settings.permissions.ask.includes('Write(x/**)'));
+
+    // retirement is NOT a merge side effect (explicit-flag-only — Codex F6):
+    // a plain merge leaves user Write twins exactly where they were.
+    const g4 = mergeGuardrails(twins, { deny: [], ask: [] });
+    ok('mergeGuardrails does NOT retire twins',
+      g4.settings.permissions.ask.includes('Write(.maddu/config/**)')
+      && g4.settings.permissions.deny.includes('Write(.claude/settings.json)')
+      && g4.retired === undefined);
+
+    // malformed permission shapes are REFUSED, never clobbered (round-2 F3):
+    // properties set on an array vanish at JSON-serialize time; overwriting a
+    // non-array deny/ask would lose user data.
+    const mArr = mergeGuardrails({ permissions: [] }, rules);
+    ok('array permissions → malformed, untouched, nothing added',
+      JSON.stringify(mArr.malformed) === JSON.stringify(['permissions'])
+      && Array.isArray(mArr.settings.permissions)
+      && mArr.added.deny.length === 0 && mArr.added.ask.length === 0);
+    const mScalar = mergeGuardrails({ permissions: 'nope' }, rules);
+    ok('scalar permissions → malformed, value preserved',
+      JSON.stringify(mScalar.malformed) === JSON.stringify(['permissions'])
+      && mScalar.settings.permissions === 'nope');
+    const mDeny = mergeGuardrails({ permissions: { deny: 'nope' } }, rules);
+    ok('non-array deny → malformed, value preserved, NOTHING merged',
+      JSON.stringify(mDeny.malformed) === JSON.stringify(['permissions.deny'])
+      && mDeny.settings.permissions.deny === 'nope'
+      && mDeny.added.deny.length === 0 && mDeny.added.ask.length === 0);
+    // Round-3: explicit null is malformed too (silently normalizing it breaks
+    // the byte-round-trip), and keys are validated even when this run has no
+    // rules to write into them.
+    const mNull = mergeGuardrails({ permissions: null }, rules);
+    ok('null permissions → malformed, value preserved',
+      JSON.stringify(mNull.malformed) === JSON.stringify(['permissions'])
+      && mNull.settings.permissions === null);
+    const mDenyNull = mergeGuardrails({ permissions: { deny: null } }, rules);
+    ok('null deny → malformed, value preserved',
+      JSON.stringify(mDenyNull.malformed) === JSON.stringify(['permissions.deny'])
+      && mDenyNull.settings.permissions.deny === null);
+    const mAskIdle = mergeGuardrails({ permissions: { ask: 'custom' } }, { deny: rules.deny, ask: [] });
+    ok('non-array ask → malformed even with no incoming ask rules',
+      JSON.stringify(mAskIdle.malformed) === JSON.stringify(['permissions.ask'])
+      && mAskIdle.settings.permissions.ask === 'custom'
+      && mAskIdle.added.deny.length === 0);
+    ok('well-formed merges report no malformed shapes',
+      g1.malformed.length === 0 && g3.malformed.length === 0);
+
+    // Round-4: `created` markers — strip cleans up only containers install
+    // created, so a user's pre-existing EMPTY arrays/object survive uninstall.
+    const emptyUser = { permissions: { deny: [], ask: [] }, model: 'opus' };
+    const emptyBefore = JSON.stringify(emptyUser);
+    const gE = mergeGuardrails(JSON.parse(emptyBefore), rules);
+    ok('merge into pre-existing empty arrays marks nothing created',
+      gE.created.permissions === false && gE.created.deny === false && gE.created.ask === false);
+    const sE = stripGuardrails(gE.settings, { deny: gE.added.deny, ask: gE.added.ask, created: gE.created });
+    ok('round-trip preserves user empty arrays (created-aware strip)',
+      JSON.stringify(sE) === emptyBefore, JSON.stringify(sE));
+    ok('fresh merge marks containers created',
+      g1.created.permissions === true && g1.created.deny === true && g1.created.ask === true);
+    ok('created-aware strip still removes created containers', !stripGuardrails(g1.settings, { ...rules, created: g1.created }).permissions);
+
+    // layout-aware rule resolution (IO): a fake consumer layout vs source layout
+    const dirC = await mkdtemp(join(tmpdir(), 'maddu-guard-consumer-'));
+    await mkdir(join(dirC, 'maddu', 'bin'), { recursive: true });
+    await writeFile(join(dirC, 'maddu', 'bin', 'maddu.mjs'), '// stub');
+    await writeFile(join(dirC, 'maddu.json'), JSON.stringify({ guardrails: { ask: ['tests/**'] } }));
+    const rc = await resolveGuardrailRules(dirC);
+    ok('consumer layout resolves consumer deny set',
+      rc.layout === 'consumer' && JSON.stringify(rc.deny) === JSON.stringify(GUARDRAIL_DENY_CONSUMER));
+    ok('consumer ask rules read from maddu.json', JSON.stringify(rc.ask) === JSON.stringify(['Edit(tests/**)']));
+    ok('clean consumer resolution carries no warnings', rc.warnings.length === 0);
+    await rm(dirC, { recursive: true, force: true });
+
+    // source layout needs BOTH the source CLI and the source runtime tree
+    const dirS = await mkdtemp(join(tmpdir(), 'maddu-guard-source-'));
+    await mkdir(join(dirS, 'bin'), { recursive: true });
+    await writeFile(join(dirS, 'bin', 'maddu.mjs'), '// stub');
+    await mkdir(join(dirS, 'template', 'maddu', 'runtime'), { recursive: true });
+    const rs = await resolveGuardrailRules(dirS);
+    ok('source layout resolves settings-only deny set',
+      rs.layout === 'source' && JSON.stringify(rs.deny) === JSON.stringify(GUARDRAIL_DENY_SOURCE));
+    ok('missing maddu.json → no ask rules, no warning', rs.ask.length === 0 && rs.warnings.length === 0);
+    await rm(dirS, { recursive: true, force: true });
+
+    // AMBIGUOUS layout fails CLOSED to the consumer (stronger) deny set —
+    // bin/maddu.mjs alone, without the source runtime tree, is not source.
+    const dirA = await mkdtemp(join(tmpdir(), 'maddu-guard-ambig-'));
+    await mkdir(join(dirA, 'bin'), { recursive: true });
+    await writeFile(join(dirA, 'bin', 'maddu.mjs'), '// stub');
+    const ra = await resolveGuardrailRules(dirA);
+    ok('ambiguous layout fails closed to consumer denies',
+      ra.layout === 'consumer' && JSON.stringify(ra.deny) === JSON.stringify(GUARDRAIL_DENY_CONSUMER));
+    await rm(dirA, { recursive: true, force: true });
+
+    // declared-but-broken guardrails surface WARNINGS (never silent — Codex F8)
+    const dirW = await mkdtemp(join(tmpdir(), 'maddu-guard-warn-'));
+    await mkdir(join(dirW, 'maddu', 'bin'), { recursive: true });
+    await writeFile(join(dirW, 'maddu', 'bin', 'maddu.mjs'), '// stub');
+    await writeFile(join(dirW, 'maddu.json'), '{ not json');
+    const rw1 = await resolveGuardrailRules(dirW);
+    ok('malformed maddu.json → loud warning, zero ask rules',
+      rw1.ask.length === 0 && rw1.warnings.length === 1 && /could not be parsed/.test(rw1.warnings[0]));
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: 'tests/**' } }));
+    const rw2 = await resolveGuardrailRules(dirW);
+    ok('non-array guardrails.ask → loud warning', rw2.warnings.length === 1 && /not an array/.test(rw2.warnings[0]));
+    // Falsy declarations must warn too (round-2 F4): a `?? []` + truthiness
+    // gate silently erased ask: null / false / "" into zero applied rules.
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: null } }));
+    const rw4 = await resolveGuardrailRules(dirW);
+    ok('null guardrails.ask → loud warning, not silent erasure',
+      rw4.ask.length === 0 && rw4.warnings.length === 1 && /not an array/.test(rw4.warnings[0]));
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: false } }));
+    const rw5 = await resolveGuardrailRules(dirW);
+    ok('falsy guardrails.ask → loud warning',
+      rw5.ask.length === 0 && rw5.warnings.length === 1 && /not an array/.test(rw5.warnings[0]));
+    // Round-4: unreadable-but-existing maddu.json (here: a directory → EISDIR)
+    // must warn — only ENOENT means "nothing declared".
+    await rm(join(dirW, 'maddu.json'), { force: true });
+    await mkdir(join(dirW, 'maddu.json'));
+    const rw6 = await resolveGuardrailRules(dirW);
+    ok('unreadable maddu.json → loud warning, not silent absence',
+      rw6.ask.length === 0 && rw6.warnings.length === 1 && /could not be read/.test(rw6.warnings[0]),
+      JSON.stringify(rw6.warnings));
+    await rm(join(dirW, 'maddu.json'), { recursive: true, force: true }); // it was a directory
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: ['ok/**', 'bad)path', ''] } }));
+    const rw3 = await resolveGuardrailRules(dirW);
+    ok('invalid ask entries → warning naming the dropped count',
+      JSON.stringify(rw3.ask) === JSON.stringify(['Edit(ok/**)']) && rw3.warnings.length === 1 && /2 guardrails/.test(rw3.warnings[0]));
+    await rm(dirW, { recursive: true, force: true });
   }
 }
 
