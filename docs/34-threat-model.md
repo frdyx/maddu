@@ -424,7 +424,7 @@ OS-level defenses*). The point Máddu does guarantee: **the actor is not
 the sole witness** — a naive after-the-fact rewrite leaves a detectable
 break, on the record, that an independent `spine verify` surfaces.
 
-### 12. An agent weakens its own verification (the oracle)
+### 12. An agent weakens its own verification (the verdict machinery)
 
 **Attack:** the artifacts that decide pass/fail — test files, gate
 definitions, `.maddu/config/ci.json`, the CI workflow, and the verifier
@@ -439,21 +439,28 @@ verdict logic itself lies. **This is the "actor is the sole witness"
 failure in its purest form** — the actor moves the yardstick and then
 reads it.
 
-**Máddu enforcement (drift-DETECTING, cooperative):** the operator
-declares a pin set in `.maddu/config/tracked-sources.json` (literals
-and/or globs). `maddu sources rebuild --reason "…"` snapshots those files'
-hashes onto the spine as `SOURCE_HASH_RECOMPUTED`, carrying a
-**contractual** `reason` and `by` (contract 1.9.0 — the provenance is a
-listed field so it is schema-enforced, not an unvalidated extra). The
-`tracked-source-drift` gate is `critical` and pinned in `ci.json`, and
-fails on four classes: `changed`, `missing`, `unpinned` (a NEW file
-matching a pinned pattern — this is what sees gate shadowing), and
-`removed` (a pinned file no longer declared, which is what stops "delete
-the test *and* drop it from the pin set" reading green). A pin set that
-matches zero files is a **FAIL**, not a pass, so a misconfigured pattern
-cannot go green over nothing. Re-pinning without `--reason` exits 3; a
-malformed `--reason` exits 2 even with `--force`; and if the spine append
-fails the re-pin aborts rather than proceeding unrecorded.
+**Máddu's signal (verdict-machinery drift DETECTION, cooperative):** the
+operator declares a pin set in `.maddu/config/tracked-sources.json`
+(literals and/or globs). `maddu sources rebuild --reason "…"` snapshots
+those files' hashes onto the spine as `SOURCE_HASH_RECOMPUTED`, carrying
+`reason` and `by` as **listed contract fields** (contract 1.9.0). Be
+precise about what that means: listed fields are **type-checked when
+present**, not schema-required — the guarantee that `reason` is never
+null comes from the CLI, which refuses a reasonless rebuild outright
+(exit 3; there is no `--force` waiver, and a malformed `--reason` exits
+2). If the spine append fails, the re-pin aborts rather than proceeding
+unrecorded. The `tracked-source-drift` gate ships at severity **`warn`**
+— a cooperative drift signal, deliberately NOT `critical` and NOT in this
+repo's required set, because an actor who can edit the pinned files can
+re-pin them too; `critical` would falsely lend it trust-boundary weight.
+Operators who want it blocking may promote it per-repo via `maddu ci
+pin` as explicit project policy. It reports four drift classes:
+`changed`, `missing`, `unpinned` (a NEW file matching a *pinned pattern*),
+and `removed` (a pinned file no longer declared — which is what stops
+"delete the test *and* drop it from the pin set" reading clean). A pin
+set that matches zero files reports failure, and an EMPTY config reports
+"nothing pinned" — neither is ever a pass, so misconfiguration cannot
+read as clean.
 
 **Máddu does NOT enforce (say this plainly):**
 
@@ -466,16 +473,22 @@ fails the re-pin aborts rather than proceeding unrecorded.
 - **Test bodies under `scripts/test/` are deliberately NOT pinned.** They
   change in most PRs, so pinning them would force a reflexive re-pin every
   time — and a pin that is rebuilt by reflex asserts nothing. What is
-  pinned is the machinery that decides what a result *means*. Individual
-  test contents are covered by code-owner review, not by this gate.
+  pinned is the machinery that decides what a result *means* — which is
+  why this feature is named verdict-machinery drift detection, not "oracle
+  integrity": **test assertions ARE the oracle, and they are not covered.**
+  Independent review of test bodies is an external possibility (CODEOWNERS
+  + required code-owner review), currently INERT in this repo — see below.
 - **Same-count, same-name tests can be gutted.** Emptying a test file's
   assertions while keeping the file is invisible to a hash pin of *other*
   files, and skip/`only` detection does not exist at all.
-- **`.maddu/*` is gitignored**, so an operator gate written to
-  `.maddu/gates/` never reaches a PR diff or a CI checkout. The `unpinned`
-  class sees it only on the machine where it was written; **CODEOWNERS
-  structurally cannot cover a gitignored path.** Gate shadowing is
-  therefore a LOCAL-ONLY threat to local `maddu ci`/`doctor` verdicts.
+- **`.maddu/gates/` is NOT in the default pin patterns at all** — the
+  `unpinned` class only sees new files matching *pinned* patterns, so gate
+  shadowing under `.maddu/gates/` is invisible to this gate unless the
+  operator explicitly pins that path. Independently, `.maddu/*` is
+  gitignored, so a shadow gate never reaches a PR diff or a CI checkout
+  (**CODEOWNERS structurally cannot cover a gitignored path**): shadowing
+  is a LOCAL-ONLY threat to local `maddu ci`/`doctor` verdicts, and on the
+  local machine it is currently an UNWATCHED one.
 - **The PreToolUse hook does not participate.** It decides on ritual state
   only and is fail-open by law (`lib/discipline.mjs`); it does not know
   which file is being edited. An actor able to disable or modify the hook
@@ -485,19 +498,26 @@ fails the re-pin aborts rather than proceeding unrecorded.
   edits the verifier can change the verdict in the same PR. Closing this
   requires the required check to run from the protected base branch or an
   immutable action. **Not solved here.**
-- **The external control is CODEOWNERS, and only when enabled.** Requiring
-  independent code-owner review on `main` is the one layer an in-repo
-  actor cannot reach. It is a GitHub setting, not a Máddu mechanism, and
-  it is defeated by admin/bypass credentials, by an owner approving a bad
-  change, and entirely on local, fork, and unprotected-branch workflows.
+- **CODEOWNERS is an enumeration here, not a control.** Requiring
+  independent code-owner review on `main` would put designated
+  verification changes behind a second reviewer — but that is a GitHub
+  setting, it is deliberately NOT enabled on this repo, and for a solo
+  maintainer it is UNSATISFIABLE (GitHub forbids self-approval). Even
+  where enabled, it is defeated by admin/bypass credentials, by an owner
+  approving a bad change, and entirely on local, fork, and
+  unprotected-branch workflows. `.github/CODEOWNERS` in this repo is
+  documentation of the trusted computing base, nothing more.
 
-**The honest claim:** in a correctly protected GitHub merge path where
-agents lack review and administration authority, designated verification
-changes require independent approval. Locally, Máddu detects unrecorded
-drift and records re-baselines. It does **not** prevent an authorized
-actor from weakening verification, and it does **not** prove that passing
-tests remain meaningful. Do not describe this as malicious-agent
-resistance, unbypassability, or trusted receipts.
+**The honest claim:** Máddu is a **cooperative accountability system
+inside the repository's existing authority boundary.** It records
+declared verification, surfaces verdict-machinery drift, and makes
+re-baselining a visible, reasoned, attributed act. It cannot prove those
+records or verdicts against an actor who can modify the repository, the
+verifier, the baseline, and the event history under the same OS
+authority. It does **not** prevent an authorized actor from weakening
+verification, and it does **not** prove that passing tests remain
+meaningful. Do not describe this as malicious-agent resistance,
+unbypassability, or trusted receipts.
 
 ## Operator responsibilities
 

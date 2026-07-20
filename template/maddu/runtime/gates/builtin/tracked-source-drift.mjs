@@ -1,9 +1,12 @@
-// Tracked-source drift — the oracle pin.
+// Tracked-source drift — verdict-machinery drift detection.
 //
 // Operator declares a pin set in .maddu/config/tracked-sources.json (literals
 // and/or globs). `maddu sources rebuild --reason "…"` snapshots their hashes
 // onto the spine as SOURCE_HASH_RECOMPUTED. This gate compares the current tree
-// to that snapshot.
+// to that snapshot. It watches the machinery that PRODUCES verdicts (gates,
+// verifier libs, CI profile) for stable-harness/config drift — it is NOT an
+// "oracle integrity" proof: test BODIES are not pinned by default, and the
+// actor who can edit these files can re-pin them.
 //
 // WHAT THIS IS FOR
 // The artifacts that decide pass/fail — tests, gate definitions, the CI profile,
@@ -39,13 +42,24 @@ const REASON_LABEL = {
 export default {
   id: 'tracked-source-drift',
   label: 'tracked source drift',
-  severity: 'critical',
-  description: 'Pinned oracle files unchanged since the last `maddu sources rebuild`.',
+  // `warn`, deliberately not `critical`: this is a cooperative drift SIGNAL,
+  // not a trust boundary. An actor who can edit the pinned files can re-pin
+  // them too, so `critical` would falsely lend it trust-boundary weight
+  // (Codex review, 2026-07-20). Operators may promote it per-repo via
+  // `maddu ci pin` as cooperative project policy.
+  severity: 'warn',
+  description: 'Pinned verdict-machinery files unchanged since the last `maddu sources rebuild`.',
   run: async (ctx) => {
     const config = await readPinConfig(ctx.repoRoot);
     const patterns = pinPatterns(config);
     if (!patterns.length) {
-      return { ok: true, message: 'no tracked sources configured' };
+      // Not ok:true — "nothing is pinned" must stay visibly distinct from
+      // "pinned and clean". An empty config greening over nothing is the same
+      // failure mode as a gate scanning zero files and reporting success.
+      return {
+        ok: false,
+        message: 'nothing pinned — no tracked sources configured (declare pins in .maddu/config/tracked-sources.json)',
+      };
     }
 
     const declared = await expandPins(ctx.repoRoot, patterns);

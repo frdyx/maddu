@@ -66,9 +66,8 @@ export default async function command(argv) {
 
   if (sub === 'rebuild') {
     const parsed = readReason(argv);
-    const force = argv.includes('--force');
 
-    // Malformed beats forced: a mis-quoted reason is a mistake, not consent.
+    // Malformed beats everything: a mis-quoted reason is a mistake, not consent.
     if (parsed.state === 'malformed') {
       console.error('error  --reason needs a value: maddu sources rebuild --reason "why these files legitimately changed"');
       process.exit(2);
@@ -82,11 +81,12 @@ export default async function command(argv) {
       process.exit(2);
     }
 
-    // Refuse an unexplained re-baseline. `--force` waives THIS refusal only —
-    // it never waives recording (below), because an unrecordable re-pin must
-    // not happen at all.
-    if (!reason && !force) {
-      console.error('refused  re-pinning the oracle needs a reason.');
+    // Refuse an unexplained re-baseline, always. There is no forced reasonless
+    // re-pin: `--force` is deliberately NOT honored here, because a re-baseline
+    // with `reason:null` on the record defeats the whole "explicit, reasoned,
+    // spine-recorded act" property this command exists to provide.
+    if (!reason) {
+      console.error('refused  re-pinning the verdict machinery needs a reason — there is no forced reasonless re-pin.');
       console.error('         maddu sources rebuild --reason "why these files legitimately changed"');
       process.exit(3);
     }
@@ -118,7 +118,7 @@ export default async function command(argv) {
         data: {
           count: out.length,
           paths: out,
-          reason: reason || null,
+          reason,
           by: sessionId,
         },
       });
@@ -134,8 +134,7 @@ export default async function command(argv) {
     console.log(`sources rebuilt: ${out.length} file(s)`);
     for (const p of out.slice(0, 20)) console.log(`  ${p.hash.slice(0, 12)}…  ${p.path}`);
     if (out.length > 20) console.log(`  … and ${out.length - 20} more`);
-    if (reason) console.log(`reason: ${reason}`);
-    else console.log('reason: (none — forced)');
+    console.log(`reason: ${reason}`);
     console.log(`event: ${ev.id}`);
     return;
   }

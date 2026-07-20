@@ -1,6 +1,6 @@
 {
-  "version": "1.8.0",
-  "fingerprint": "30a23214",
+  "version": "1.9.0",
+  "fingerprint": "4c868e1d",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1323,8 +1323,10 @@
       "SOURCE_HASH_RECOMPUTED": {
         "frozen": false,
         "data": {
+          "by": "string|null",
           "count": "number",
-          "paths": "array"
+          "paths": "array",
+          "reason": "string|null"
         }
       },
       "SPINE_CUTOVER": {

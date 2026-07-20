@@ -142,14 +142,16 @@ cat > .maddu/config/tracked-sources.json <<'EOF'
 { "schemaVersion": 1, "paths": ["docs/hard-rules.md", "CLAUDE.md", "docs/02-concepts.md"] }
 EOF
 
-# 2. Snapshot their hashes onto the spine
-maddu sources rebuild         # emits SOURCE_HASH_RECOMPUTED
+# 2. Snapshot their hashes onto the spine (a reason is mandatory — refused without one)
+maddu sources rebuild --reason "initial pin"   # emits SOURCE_HASH_RECOMPUTED { …, reason, by }
 
-# 3. Going forward, doctor fails the gate when any tracked file diverges
+# 3. Going forward, the warn-severity gate reports when any tracked file diverges
 maddu sources status          # show recorded vs current per file
 ```
 
-After accepted edits, re-run `maddu sources rebuild` to record the new hashes.
+After accepted edits, re-run `maddu sources rebuild --reason "…"` to record the
+new hashes — the reason and actor land on the spine, so a re-baseline is always
+an attributed, queryable act.
 
 ## Slice scope-lock (opt-in)
 
