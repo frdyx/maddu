@@ -181,23 +181,36 @@ guardrail layer only self-protects the settings files.
 **Read the strength honestly — this is bypassable harness friction, not a
 security boundary.** The rules are Edit-form only, because `Write(path)` rules
 are accepted but never matched by file permission checks in Claude Code
-v2.1.210+ (install retires such inert `Write()` twins when their `Edit()` twin
-exists, and reports each removal). `Edit`/`Read` deny rules cover the built-in
-file tools plus Bash file commands Claude Code *recognizes* (`cat`, `sed`,
-`head`, …) — they are documented NOT to reach arbitrary subprocesses
-(`node -e`, `python -c` opening files directly). OS-level enforcement is the
-Claude Code sandbox (`sandbox.filesystem.denyWrite` — macOS/Linux/WSL2, not
-native Windows). A subprocess write around the rules is exactly the kind of
-action the discipline classifier witnesses on the spine; the rules raise
-friction and visibility, they do not make tampering impossible. See
-`docs/34-threat-model.md` §12 and SECURITY.md.
+v2.1.210+ (an explicit `maddu hooks install --retire-inert-write-twins`
+retires such redundant `Write()` rules when their `Edit()` twin exists in the
+same list, reporting each removal — never a silent side effect of a normal
+install). What the Edit deny rules certainly cover is Claude Code's
+**built-in file tools** (Edit/Write/NotebookEdit, including creating a new
+file on the path). Whether they also cover Bash file commands Claude Code
+recognizes (`cat`, `sed`, …) is **version-dependent and not guaranteed** —
+don't lean on it. Subprocesses that open files themselves (`node -e`,
+`python -c`) are **never** covered by permission rules; such a Bash command
+goes through Máddu's discipline hook instead, which classifies it and gates it
+on **ritual state** (session/lane/slice discipline, tier-scaled) — that gate
+does not know about denied paths, so it is a different, weaker kind of
+friction, and a process spawned outside the harness leaves no trace at all.
+OS-level enforcement is the Claude Code sandbox
+(`sandbox.filesystem.denyWrite` — macOS/Linux/WSL2, not native Windows). The
+rules raise friction and visibility; they do not make tampering impossible.
+See `docs/34-threat-model.md` §12 and SECURITY.md.
 
-**Ownership model (documented limit):** permission rules are plain strings, so
-Máddu owns exactly the strings it generates — `remove` strips those exact
-strings and nothing else. If you had hand-authored an identical rule before
-install, uninstall removes it too; re-add it by hand. Claude Code-only; other
-runtimes get no guardrails (the spine record is runtime-agnostic, the
-guardrails are not).
+**Ownership model:** the exact rule strings an install adds are recorded in
+`.maddu/state/guardrails.json`; `remove` strips exactly the recorded strings,
+so a rule you had hand-authored before install survives uninstall. Changing
+`maddu.json → guardrails.ask[]` and re-running install retires the previously
+generated rules and adds the new ones. If the ownership record is missing
+(state dir wiped, pre-record installs), `remove` falls back to exact-string
+matching against the canonical current rule set and says so — in that one
+case a hand-authored identical rule is removed too; re-add it by hand.
+Formatting note: install/remove re-serialize `.claude/settings.json` as
+2-space JSON (EOL style preserved) — content-preserving, format-normalizing.
+Claude Code-only; other runtimes get no guardrails (the spine record is
+runtime-agnostic, the guardrails are not).
 
 ## The pre-compaction checkpoint (v1.89.0)
 

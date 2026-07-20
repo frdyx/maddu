@@ -163,9 +163,12 @@ export function statusLineInstalled(settings) {
 // deny/ask rules over the verdict-machinery paths, installed alongside the
 // hooks. HONEST STRENGTH (docs/34-threat-model.md §12, SECURITY.md): this is
 // bypassable harness friction inside Claude Code, not a security boundary —
-// Edit/Read deny rules cover the built-in file tools plus the Bash file
-// commands Claude Code recognizes, and are documented NOT to reach arbitrary
-// subprocesses (`node -e`, `python -c`). OS-level enforcement is the Claude
+// Edit deny rules cover the built-in file tools (Edit/Write/NotebookEdit and
+// new-file creation); whether they ALSO cover Bash file commands Claude Code
+// recognizes is version-dependent and not guaranteed, and subprocesses that
+// open files themselves (`node -e`, `python -c`) are never covered — those go
+// through Máddu's discipline hook, which gates them on ritual state
+// (tier-scaled), not on the denied path. OS-level enforcement is the Claude
 // Code sandbox (`filesystem.denyWrite`), unavailable on native Windows.
 //
 // Edit-form ONLY: `Write(path)` rules are accepted but never matched by file
@@ -240,8 +243,12 @@ export function retireInertWriteTwins(settings) {
 }
 
 // Pure: union the guardrail rules into permissions.deny / permissions.ask
-// (no duplicates, existing order preserved, user rules untouched), then
-// retire inert Write twins. Returns { settings, added, retired }.
+// (no duplicates, existing order preserved, user rules untouched). Returns
+// { settings, added } — `added` lists ONLY the strings this merge introduced,
+// which is what the caller persists as ownership side-state (a rule the user
+// already had is NOT ours and must survive uninstall). Twin retirement is
+// deliberately NOT part of merge — it edits user-visible rules, so it runs
+// only behind an explicit operator flag (`--retire-inert-write-twins`).
 export function mergeGuardrails(settings, { deny = [], ask = [] } = {}) {
   const base = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
   if (!base.permissions || typeof base.permissions !== 'object') base.permissions = {};
@@ -255,8 +262,7 @@ export function mergeGuardrails(settings, { deny = [], ask = [] } = {}) {
     }
     base.permissions[key] = arr;
   }
-  const { settings: next, retired } = retireInertWriteTwins(base);
-  return { settings: next, added, retired };
+  return { settings: base, added };
 }
 
 // Pure: remove exactly the canonical guardrail rule strings; clean up empty
@@ -285,18 +291,43 @@ export function summarizeGuardrails(settings, { deny = [], ask = [] } = {}) {
 
 // IO: the canonical rule set for THIS repo — layout-aware deny list + ask
 // rules generated from maddu.json `guardrails.ask[]` (absent → none).
+// Layout detection FAILS CLOSED to the consumer (stronger) deny set: only a
+// repo carrying BOTH the source CLI (bin/maddu.mjs) and the source runtime
+// tree (template/maddu/runtime) — and no consumer marker — is treated as the
+// framework source checkout. A guessed-source repo would silently get the
+// weaker settings-only denies, so ambiguity resolves to consumer.
+// `warnings` surfaces problems the caller must print: a malformed maddu.json
+// or invalid ask entries silently yielding zero ask rules would let install
+// report success while declared protection was dropped.
 export async function resolveGuardrailRules(repoRoot) {
   const has = async (p) => { try { await stat(p); return true; } catch { return false; } };
   const isSource = !(await has(join(repoRoot, 'maddu', 'bin', 'maddu.mjs')))
-    && (await has(join(repoRoot, 'bin', 'maddu.mjs')));
+    && (await has(join(repoRoot, 'bin', 'maddu.mjs')))
+    && (await has(join(repoRoot, 'template', 'maddu', 'runtime')));
   const deny = isSource ? [...GUARDRAIL_DENY_SOURCE] : [...GUARDRAIL_DENY_CONSUMER];
+  const warnings = [];
   let askPaths = [];
+  let madduJsonExists = false;
   try {
     const raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8');
+    madduJsonExists = true;
     const cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
-    askPaths = cfg?.guardrails?.ask || [];
-  } catch { /* no maddu.json / malformed → no ask rules */ }
-  return { deny, ask: guardrailAskRules(askPaths), layout: isSource ? 'source' : 'consumer' };
+    askPaths = cfg?.guardrails?.ask ?? [];
+  } catch (e) {
+    if (madduJsonExists) {
+      warnings.push(`maddu.json exists but could not be parsed (${String((e && e.message) || e).slice(0, 60)}) — declared guardrails.ask[] rules were NOT applied.`);
+    }
+  }
+  if (askPaths && !Array.isArray(askPaths)) {
+    warnings.push('maddu.json guardrails.ask is not an array — declared ask rules were NOT applied.');
+    askPaths = [];
+  }
+  const ask = guardrailAskRules(askPaths);
+  const dropped = (Array.isArray(askPaths) ? askPaths.length : 0) - ask.length;
+  if (dropped > 0) {
+    warnings.push(`${dropped} guardrails.ask[] entr${dropped === 1 ? 'y was' : 'ies were'} invalid (non-string, empty, or containing parentheses) and were NOT applied.`);
+  }
+  return { deny, ask, layout: isSource ? 'source' : 'consumer', warnings };
 }
 
 // structuredClone is available on Node ≥ 17; fall back to JSON round-trip for

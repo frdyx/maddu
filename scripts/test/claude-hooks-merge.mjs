@@ -192,9 +192,13 @@ async function main() {
     const cross = { permissions: { ask: ['Write(x/**)'], deny: ['Edit(x/**)'] } };
     ok('cross-array Write twin NOT retired', retireInertWriteTwins(cross).settings.permissions.ask.includes('Write(x/**)'));
 
-    // mergeGuardrails runs retirement and reports it
+    // retirement is NOT a merge side effect (explicit-flag-only — Codex F6):
+    // a plain merge leaves user Write twins exactly where they were.
     const g4 = mergeGuardrails(twins, { deny: [], ask: [] });
-    ok('mergeGuardrails retires twins and reports', g4.retired.length === 2);
+    ok('mergeGuardrails does NOT retire twins',
+      g4.settings.permissions.ask.includes('Write(.maddu/config/**)')
+      && g4.settings.permissions.deny.includes('Write(.claude/settings.json)')
+      && g4.retired === undefined);
 
     // layout-aware rule resolution (IO): a fake consumer layout vs source layout
     const dirC = await mkdtemp(join(tmpdir(), 'maddu-guard-consumer-'));
@@ -205,16 +209,46 @@ async function main() {
     ok('consumer layout resolves consumer deny set',
       rc.layout === 'consumer' && JSON.stringify(rc.deny) === JSON.stringify(GUARDRAIL_DENY_CONSUMER));
     ok('consumer ask rules read from maddu.json', JSON.stringify(rc.ask) === JSON.stringify(['Edit(tests/**)']));
+    ok('clean consumer resolution carries no warnings', rc.warnings.length === 0);
     await rm(dirC, { recursive: true, force: true });
 
+    // source layout needs BOTH the source CLI and the source runtime tree
     const dirS = await mkdtemp(join(tmpdir(), 'maddu-guard-source-'));
     await mkdir(join(dirS, 'bin'), { recursive: true });
     await writeFile(join(dirS, 'bin', 'maddu.mjs'), '// stub');
+    await mkdir(join(dirS, 'template', 'maddu', 'runtime'), { recursive: true });
     const rs = await resolveGuardrailRules(dirS);
     ok('source layout resolves settings-only deny set',
       rs.layout === 'source' && JSON.stringify(rs.deny) === JSON.stringify(GUARDRAIL_DENY_SOURCE));
-    ok('missing maddu.json → no ask rules', rs.ask.length === 0);
+    ok('missing maddu.json → no ask rules, no warning', rs.ask.length === 0 && rs.warnings.length === 0);
     await rm(dirS, { recursive: true, force: true });
+
+    // AMBIGUOUS layout fails CLOSED to the consumer (stronger) deny set —
+    // bin/maddu.mjs alone, without the source runtime tree, is not source.
+    const dirA = await mkdtemp(join(tmpdir(), 'maddu-guard-ambig-'));
+    await mkdir(join(dirA, 'bin'), { recursive: true });
+    await writeFile(join(dirA, 'bin', 'maddu.mjs'), '// stub');
+    const ra = await resolveGuardrailRules(dirA);
+    ok('ambiguous layout fails closed to consumer denies',
+      ra.layout === 'consumer' && JSON.stringify(ra.deny) === JSON.stringify(GUARDRAIL_DENY_CONSUMER));
+    await rm(dirA, { recursive: true, force: true });
+
+    // declared-but-broken guardrails surface WARNINGS (never silent — Codex F8)
+    const dirW = await mkdtemp(join(tmpdir(), 'maddu-guard-warn-'));
+    await mkdir(join(dirW, 'maddu', 'bin'), { recursive: true });
+    await writeFile(join(dirW, 'maddu', 'bin', 'maddu.mjs'), '// stub');
+    await writeFile(join(dirW, 'maddu.json'), '{ not json');
+    const rw1 = await resolveGuardrailRules(dirW);
+    ok('malformed maddu.json → loud warning, zero ask rules',
+      rw1.ask.length === 0 && rw1.warnings.length === 1 && /could not be parsed/.test(rw1.warnings[0]));
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: 'tests/**' } }));
+    const rw2 = await resolveGuardrailRules(dirW);
+    ok('non-array guardrails.ask → loud warning', rw2.warnings.length === 1 && /not an array/.test(rw2.warnings[0]));
+    await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: ['ok/**', 'bad)path', ''] } }));
+    const rw3 = await resolveGuardrailRules(dirW);
+    ok('invalid ask entries → warning naming the dropped count',
+      JSON.stringify(rw3.ask) === JSON.stringify(['Edit(ok/**)']) && rw3.warnings.length === 1 && /2 guardrails/.test(rw3.warnings[0]));
+    await rm(dirW, { recursive: true, force: true });
   }
 }
 
