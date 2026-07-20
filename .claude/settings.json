@@ -2,13 +2,9 @@
   "permissions": {
     "ask": [
       "Edit(.maddu/config/**)",
-      "Write(.maddu/config/**)",
       "Edit(.github/**)",
-      "Write(.github/**)",
       "Edit(scripts/test/**)",
-      "Write(scripts/test/**)",
       "Edit(template/maddu/runtime/gates/**)",
-      "Write(template/maddu/runtime/gates/**)",
       "Edit(template/maddu/runtime/lib/gates.mjs)",
       "Edit(template/maddu/runtime/lib/verify.mjs)",
       "Edit(template/maddu/runtime/lib/spine.mjs)",
@@ -17,14 +13,13 @@
       "Edit(template/maddu/runtime/lib/event-schema.mjs)",
       "Edit(template/maddu/runtime/lib/event-dispositions.mjs)",
       "Edit(bin/maddu.mjs)",
-      "Write(bin/maddu.mjs)",
       "Edit(commands/ci.mjs)",
       "Edit(commands/sources.mjs)",
       "Edit(commands/_project-test-runner.mjs)"
     ],
     "deny": [
       "Edit(.claude/settings.json)",
-      "Write(.claude/settings.json)"
+      "Edit(.claude/settings.local.json)"
     ]
   },
   "hooks": {

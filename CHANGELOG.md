@@ -11,6 +11,15 @@ narrative summary.
 
 ---
 
+## [v1.107.0] · 2026-07-20 · Consumer permission guardrails ride `hooks install`
+
+**PR 3 of the verification-witness track** (plan v3, Codex-SOUND; PR 1 = #284, PR 2 = #286). The guardrails that previously existed only as hand-authored settings on the maintainer workstation now ship to every consumer by default. Verbs **72/72**; gates **74**; no contract change.
+
+- **`maddu hooks install` installs permission guardrails by default** (`--no-guardrails` opts out): layout-aware **Edit-form** deny rules over framework internals — consumer: `maddu/runtime/**`, `.maddu/config/**`, `.maddu/gates/**`, both settings files; source checkout: settings files only (gate development IS the work there) — plus `ask` rules generated from `maddu.json → guardrails.ask[]`, **declared by the project, never guessed**.
+- **Edit-form only, stated why:** `Write(path)` rules are accepted but never matched by file permission checks in Claude Code v2.1.210+; install **retires inert `Write()` twins** (only when the `Edit()` twin exists in the same list) with a printed report — this repo's own settings dropped 6.
+- **Exact-string ownership, byte-preservation proven:** uninstall removes exactly the generated strings; a new e2e test drives the real CLI on a scratch consumer repo — install → byte-identical second install → deep-equal user content after uninstall (15/15; unit merge/strip suite 57/57).
+- **Honest framing shipped in the CLI output and docs:** bypassable harness friction covering the built-in file tools plus recognized Bash file commands — NOT a security boundary; arbitrary subprocesses bypass it and are witnessed by the discipline classifier instead. `docs/44-session-hooks.md` gains the full section.
+
 ## [v1.106.0] · 2026-07-20 · Verdict-machinery drift detection (descoped oracle pin) + docs honesty
 
 **PR 2 of the verification-witness track** (plan v3, Codex-SOUND after 3 review rounds; PR 1 = #284 docs honesty). Descopes the unshipped `oracle-pin-sources` branch to its proven fixes and renames the feature to what it honestly is: **verdict-machinery drift detection** — it watches the machinery that decides what a result *means*; **test assertions ARE the oracle and are not covered.** Verbs **72/72**; gates **74**; contract **1.8.0 → 1.9.0** (`SOURCE_HASH_RECOMPUTED` gains `reason` + `by` as listed fields).

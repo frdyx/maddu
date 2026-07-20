@@ -159,6 +159,146 @@ export function statusLineInstalled(settings) {
   return isMadduStatusLine(settings && settings.statusLine);
 }
 
+// ── Permission guardrails (verification-witness plan, PR 3) ─────────────────
+// deny/ask rules over the verdict-machinery paths, installed alongside the
+// hooks. HONEST STRENGTH (docs/34-threat-model.md §12, SECURITY.md): this is
+// bypassable harness friction inside Claude Code, not a security boundary —
+// Edit/Read deny rules cover the built-in file tools plus the Bash file
+// commands Claude Code recognizes, and are documented NOT to reach arbitrary
+// subprocesses (`node -e`, `python -c`). OS-level enforcement is the Claude
+// Code sandbox (`filesystem.denyWrite`), unavailable on native Windows.
+//
+// Edit-form ONLY: `Write(path)` rules are accepted but never matched by file
+// permission checks in Claude Code v2.1.210+ (officially documented — use
+// `Edit(path)`, which also blocks creating a new file there).
+//
+// OWNERSHIP MODEL (documented limit): permission rules are plain strings, so
+// there is no room for a sentinel marker inside a rule. Máddu owns EXACTLY the
+// strings it generates: merge unions them in without duplicates, strip removes
+// them by string equality. Consequence: if the operator had hand-authored an
+// identical rule string before install, uninstall removes it too — re-add it
+// by hand. Non-identical operator rules are never touched.
+
+// Consumer layout: the runtime lives at maddu/, and a consumer's agent has no
+// legitimate reason to edit framework internals → deny.
+export const GUARDRAIL_DENY_CONSUMER = [
+  'Edit(maddu/runtime/**)',
+  'Edit(.maddu/config/**)',
+  'Edit(.maddu/gates/**)',
+  'Edit(.claude/settings.json)',
+  'Edit(.claude/settings.local.json)',
+];
+// Framework SOURCE repo: gate/verifier development IS the work, so the TCB
+// paths carry operator-managed `ask` rules instead (committed in-repo); the
+// guardrail layer only self-protects the settings files.
+export const GUARDRAIL_DENY_SOURCE = [
+  'Edit(.claude/settings.json)',
+  'Edit(.claude/settings.local.json)',
+];
+
+// A declared project path → an ask rule. Paths come from maddu.json
+// `guardrails.ask[]` — DECLARED by the project, never guessed (Máddu cannot
+// know where a consumer's tests live; a guessed rule is dead or wrong).
+// Parentheses are rejected because the path is interpolated into the rule
+// syntax `Edit(<path>)` and a ')' would terminate the rule early.
+export function guardrailAskRules(askPaths) {
+  const rules = [];
+  for (const p of Array.isArray(askPaths) ? askPaths : []) {
+    if (typeof p !== 'string') continue;
+    const t = p.trim();
+    if (!t || t.includes('(') || t.includes(')')) continue;
+    rules.push(`Edit(${t})`);
+  }
+  return rules;
+}
+
+// Pure: retire inert `Write(X)` twins. A `Write(path)` rule is documented
+// inert in Claude Code v2.1.210+; when the SAME array also carries `Edit(X)`
+// (which subsumes it), removing the Write twin is behavior-neutral dead-config
+// cleanup. Only twin-redundant Write rules are removed — a Write rule with no
+// Edit twin is left alone (still inert, but removing it would change what the
+// operator sees without a covering rule remaining). Returns { settings,
+// retired } and reports every removal so the caller can print it.
+export function retireInertWriteTwins(settings) {
+  const retired = [];
+  if (!settings?.permissions || typeof settings.permissions !== 'object') {
+    return { settings: settings || {}, retired };
+  }
+  const next = structuredCloneSafe(settings);
+  for (const key of ['deny', 'ask', 'allow']) {
+    const arr = next.permissions[key];
+    if (!Array.isArray(arr)) continue;
+    const editSet = new Set(arr.filter((r) => typeof r === 'string' && r.startsWith('Edit(')));
+    next.permissions[key] = arr.filter((r) => {
+      if (typeof r !== 'string' || !r.startsWith('Write(')) return true;
+      const twin = 'Edit(' + r.slice('Write('.length);
+      if (editSet.has(twin)) { retired.push({ list: key, rule: r }); return false; }
+      return true;
+    });
+  }
+  return { settings: next, retired };
+}
+
+// Pure: union the guardrail rules into permissions.deny / permissions.ask
+// (no duplicates, existing order preserved, user rules untouched), then
+// retire inert Write twins. Returns { settings, added, retired }.
+export function mergeGuardrails(settings, { deny = [], ask = [] } = {}) {
+  const base = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
+  if (!base.permissions || typeof base.permissions !== 'object') base.permissions = {};
+  const added = { deny: [], ask: [] };
+  for (const [key, rules] of [['deny', deny], ['ask', ask]]) {
+    if (!rules.length) continue;
+    const arr = Array.isArray(base.permissions[key]) ? base.permissions[key] : [];
+    const have = new Set(arr.filter((r) => typeof r === 'string'));
+    for (const r of rules) {
+      if (!have.has(r)) { arr.push(r); have.add(r); added[key].push(r); }
+    }
+    base.permissions[key] = arr;
+  }
+  const { settings: next, retired } = retireInertWriteTwins(base);
+  return { settings: next, added, retired };
+}
+
+// Pure: remove exactly the canonical guardrail rule strings; clean up empty
+// arrays / an empty permissions object. Never touches non-matching rules.
+export function stripGuardrails(settings, { deny = [], ask = [] } = {}) {
+  if (!settings || typeof settings !== 'object' || !settings.permissions) return settings || {};
+  const next = structuredCloneSafe(settings);
+  const drop = { deny: new Set(deny), ask: new Set(ask) };
+  for (const key of ['deny', 'ask']) {
+    if (!Array.isArray(next.permissions[key])) continue;
+    next.permissions[key] = next.permissions[key].filter((r) => !drop[key].has(r));
+    if (next.permissions[key].length === 0) delete next.permissions[key];
+  }
+  if (Object.keys(next.permissions).length === 0) delete next.permissions;
+  return next;
+}
+
+// Pure: which canonical guardrail rules are present / missing.
+export function summarizeGuardrails(settings, { deny = [], ask = [] } = {}) {
+  const has = (key, r) => Array.isArray(settings?.permissions?.[key]) && settings.permissions[key].includes(r);
+  const present = [], missing = [];
+  for (const r of deny) (has('deny', r) ? present : missing).push(`deny ${r}`);
+  for (const r of ask) (has('ask', r) ? present : missing).push(`ask ${r}`);
+  return { present, missing, allInstalled: missing.length === 0 && (deny.length + ask.length) > 0 };
+}
+
+// IO: the canonical rule set for THIS repo — layout-aware deny list + ask
+// rules generated from maddu.json `guardrails.ask[]` (absent → none).
+export async function resolveGuardrailRules(repoRoot) {
+  const has = async (p) => { try { await stat(p); return true; } catch { return false; } };
+  const isSource = !(await has(join(repoRoot, 'maddu', 'bin', 'maddu.mjs')))
+    && (await has(join(repoRoot, 'bin', 'maddu.mjs')));
+  const deny = isSource ? [...GUARDRAIL_DENY_SOURCE] : [...GUARDRAIL_DENY_CONSUMER];
+  let askPaths = [];
+  try {
+    const raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8');
+    const cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+    askPaths = cfg?.guardrails?.ask || [];
+  } catch { /* no maddu.json / malformed → no ask rules */ }
+  return { deny, ask: guardrailAskRules(askPaths), layout: isSource ? 'source' : 'consumer' };
+}
+
 // structuredClone is available on Node ≥ 17; fall back to JSON round-trip for
 // the plain-data settings object on anything older.
 function structuredCloneSafe(obj) {

@@ -24,7 +24,7 @@ import sessionCmd from './session.mjs';
 
 function printHelp() {
   console.log([
-    'Usage: maddu hooks <install|status|remove|uninstall> [--statusline] [--dry-run]',
+    'Usage: maddu hooks <install|status|remove|uninstall> [--statusline] [--no-guardrails] [--dry-run]',
     '',
     '  install     Wire SessionStart (auto-register + stale-sweep) + SessionEnd',
     '              (close) + PreCompact (compaction checkpoint) + PreToolUse',
@@ -32,11 +32,19 @@ function printHelp() {
     '              <repo>/.claude/settings.json so every Claude Code session in',
     '              this repo records to the spine. Idempotent; preserves your',
     '              own hooks.',
+    '              Also installs permission guardrails by default: deny-rules on',
+    '              the framework internals (maddu/runtime/**, .maddu/config/**,',
+    '              .maddu/gates/**, the settings files) plus ask-rules for paths',
+    '              the project declares in maddu.json → guardrails.ask[].',
+    '              Edit-form only (Write() rules are inert in Claude Code',
+    '              v2.1.210+). Bypassable harness friction, NOT a security',
+    '              boundary. --no-guardrails skips them.',
     '              With --statusline, also set the Claude Code statusLine to',
     '              `maddu status --line` (a one-line on-goal/drift segment). Opt-in;',
     '              never clobbers a statusLine you already set.',
-    '  status      Show which Máddu hooks are installed.',
-    '  remove      Remove only Máddu\'s hook entries (and its statusLine, if set).',
+    '  status      Show which Máddu hooks + guardrails are installed.',
+    '  remove      Remove only Máddu\'s hook entries, its guardrail rules (exact',
+    '              strings), and its statusLine, if set.',
     '  uninstall   Alias for `remove` — the fast off-switch for the discipline hook.',
     '',
     'Once installed, a session auto-registers, the SessionStart sweep clears stale',
@@ -340,6 +348,13 @@ export default async function hooks(argv) {
       const on = installed.includes(event);
       console.log(`  ${on ? '\x1b[32m●\x1b[0m installed ' : '\x1b[2m○ not set  \x1b[0m'} ${event}`);
     }
+    if (lib.resolveGuardrailRules && lib.summarizeGuardrails) {
+      const rules = await lib.resolveGuardrailRules(repoRoot);
+      const g = lib.summarizeGuardrails(settings, rules);
+      console.log(`\x1b[1mPermission guardrails\x1b[0m (${rules.layout} layout — harness friction, not a security boundary)`);
+      for (const r of g.present) console.log(`  \x1b[32m●\x1b[0m installed  ${r}`);
+      for (const r of g.missing) console.log(`  \x1b[2m○ not set   ${r}\x1b[0m`);
+    }
     if (!allInstalled) console.log(`\nRun \x1b[1mmaddu hooks install\x1b[0m to wire session discipline into this repo.`);
     return;
   }
@@ -360,16 +375,30 @@ export default async function hooks(argv) {
     // dangling `status --line` pointing at removed wiring. On install, only wire
     // the statusLine when --statusline is passed (opt-in).
     let statusLineSkipped = false;
+    // Permission guardrails ride install/remove by default (the point is that a
+    // consumer install ships them without a second command); --no-guardrails
+    // opts out. Rules are layout-aware + generated from maddu.json
+    // `guardrails.ask[]` — see claude-hooks.mjs for the honest-strength notes.
+    const wantGuardrails = !flags['no-guardrails'] && lib.resolveGuardrailRules && lib.mergeGuardrails;
+    const gRules = wantGuardrails ? await lib.resolveGuardrailRules(repoRoot) : null;
+    let gAdded = null, gRetired = null;
     let next;
     if (removing) {
       next = lib.stripMaddu(settings);
       if (lib.stripStatusLine) next = lib.stripStatusLine(next);
+      if (wantGuardrails && lib.stripGuardrails) next = lib.stripGuardrails(next, gRules);
     } else {
       next = lib.mergeInstall(settings, { bin });
       if (flags.statusline && lib.mergeStatusLine) {
         const merged = lib.mergeStatusLine(next, { bin });
         next = merged.settings;
         statusLineSkipped = merged.skipped;
+      }
+      if (wantGuardrails) {
+        const g = lib.mergeGuardrails(next, gRules);
+        next = g.settings;
+        gAdded = g.added;
+        gRetired = g.retired;
       }
     }
     const before = JSON.stringify(settings);
@@ -422,12 +451,23 @@ export default async function hooks(argv) {
     const eol = existed && raw && raw.includes('\r\n') ? '\r\n' : '\n';
     await lib.saveSettings(repoRoot, next, { eol });
     if (removing) {
-      console.log(`\x1b[32mremoved\x1b[0m Máddu hooks → ${lib.settingsPath(repoRoot)}`);
+      console.log(`\x1b[32mremoved\x1b[0m Máddu hooks${wantGuardrails ? ' + permission guardrails' : ''} → ${lib.settingsPath(repoRoot)}`);
     } else {
       const { installed } = lib.summarize(next);
       console.log(`\x1b[32minstalled\x1b[0m Máddu hooks (${installed.join(', ')}) → ${lib.settingsPath(repoRoot)}`);
       console.log(`  Every Claude Code session now auto-registers, sweeps stale sessions + orphaned`);
       console.log(`  claims, auto-claims a lane before the first edit, and checkpoints before compaction.`);
+      if (gAdded && (gAdded.deny.length || gAdded.ask.length)) {
+        console.log(`  Permission guardrails (${gRules.layout} layout): ${gAdded.deny.length} deny + ${gAdded.ask.length} ask rule(s) added.`);
+        console.log(`  \x1b[2mHarness friction inside Claude Code, not a security boundary — recognized Bash`);
+        console.log(`  file commands are covered; arbitrary subprocesses are not (docs/34-threat-model.md).\x1b[0m`);
+        if (!gRules.ask.length) console.log(`  \x1b[2mDeclare project paths to guard as ask-rules in maddu.json → guardrails.ask[].\x1b[0m`);
+      }
+      if (gRetired && gRetired.length) {
+        console.log(`  Retired ${gRetired.length} inert Write() twin rule(s) (Write rules are never`);
+        console.log(`  matched by file checks in Claude Code v2.1.210+; the Edit twin covers each):`);
+        for (const r of gRetired) console.log(`    \x1b[2m- ${r.list}: ${r.rule}\x1b[0m`);
+      }
       if (flags.statusline && lib.statusLineInstalled && lib.statusLineInstalled(next)) {
         console.log(`  statusLine set to \x1b[1mmaddu status --line\x1b[0m (on-goal / drift, one glance).`);
       } else if (flags.statusline && statusLineSkipped) {

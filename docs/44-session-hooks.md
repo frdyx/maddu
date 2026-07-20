@@ -151,6 +151,54 @@ the project-local CLI, so it is cross-platform (no shell-specific shim path).
 In the framework **source** checkout (which has `bin/maddu.mjs`, not
 `maddu/bin/`), install resolves the entrypoint accordingly (v1.89.1).
 
+## Permission guardrails (v1.107.0)
+
+`hooks install` also installs **permission guardrails** by default
+(`--no-guardrails` skips them): Claude Code `permissions` rules over the
+verdict-machinery paths.
+
+On a **consumer** install (runtime at `maddu/`), the agent has no legitimate
+reason to edit framework internals, so those are `deny`:
+
+```
+deny  Edit(maddu/runtime/**)      deny  Edit(.maddu/config/**)
+deny  Edit(.maddu/gates/**)       deny  Edit(.claude/settings.json)
+deny  Edit(.claude/settings.local.json)
+```
+
+Project-specific paths — your tests, your CI config — are **declared, never
+guessed** (Máddu cannot know where a project's tests live; a guessed rule is
+dead or wrong). Declare them in `maddu.json` and they become `ask` rules:
+
+```json
+{ "guardrails": { "ask": ["tests/**", "jest.config.js"] } }
+```
+
+On the framework **source** checkout, gate and verifier development IS the
+work, so the TCB paths carry operator-managed `ask` rules instead; the
+guardrail layer only self-protects the settings files.
+
+**Read the strength honestly — this is bypassable harness friction, not a
+security boundary.** The rules are Edit-form only, because `Write(path)` rules
+are accepted but never matched by file permission checks in Claude Code
+v2.1.210+ (install retires such inert `Write()` twins when their `Edit()` twin
+exists, and reports each removal). `Edit`/`Read` deny rules cover the built-in
+file tools plus Bash file commands Claude Code *recognizes* (`cat`, `sed`,
+`head`, …) — they are documented NOT to reach arbitrary subprocesses
+(`node -e`, `python -c` opening files directly). OS-level enforcement is the
+Claude Code sandbox (`sandbox.filesystem.denyWrite` — macOS/Linux/WSL2, not
+native Windows). A subprocess write around the rules is exactly the kind of
+action the discipline classifier witnesses on the spine; the rules raise
+friction and visibility, they do not make tampering impossible. See
+`docs/34-threat-model.md` §12 and SECURITY.md.
+
+**Ownership model (documented limit):** permission rules are plain strings, so
+Máddu owns exactly the strings it generates — `remove` strips those exact
+strings and nothing else. If you had hand-authored an identical rule before
+install, uninstall removes it too; re-add it by hand. Claude Code-only; other
+runtimes get no guardrails (the spine record is runtime-agnostic, the
+guardrails are not).
+
 ## The pre-compaction checkpoint (v1.89.0)
 
 Context compaction is where sessions silently lose state: anything the agent
