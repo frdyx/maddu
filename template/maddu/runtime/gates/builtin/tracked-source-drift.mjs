@@ -11,8 +11,9 @@
 // WHAT THIS IS FOR
 // The artifacts that decide pass/fail — tests, gate definitions, the CI profile,
 // the verifier itself — are ordinary files an agent can edit. This gate does not
-// PREVENT that; it makes it impossible to do silently. Re-pinning is allowed but
-// must be an explicit, reasoned, spine-recorded act.
+// PREVENT that; it makes drift in the PINNED set visible (what is not pinned —
+// test bodies, `.maddu/gates/` — drifts unseen; see HONEST LIMITS below).
+// Re-pinning is allowed but must be an explicit, reasoned, spine-recorded act.
 //
 // HONEST LIMITS (see docs/34-threat-model.md):
 //   - An actor may re-baseline via `sources rebuild --reason` and this gate goes

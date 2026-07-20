@@ -61,10 +61,16 @@ async function main() {
     ok('binary (NUL present) is NOT EOL-collapsed', bin1 !== bin2);
 
     // THE AGREEMENT CLAIM: the install manifest keeps its own independent
-    // hasher (not shared code) — this assertion is what keeps the two
-    // implementations from silently disagreeing on text files.
-    ok('content-pins agrees with commands/_manifest.mjs sha256OfFile',
+    // hasher (not shared code) — these assertions are what keep the two
+    // implementations from silently disagreeing on text files. Both LF and
+    // CRLF inputs are asserted: agreement on LF alone would let a regression
+    // in the manifest's CRLF normalization pass unnoticed.
+    ok('content-pins agrees with commands/_manifest.mjs sha256OfFile (LF)',
       (await hashFile(lf)) === (await sha256OfFile(lf)));
+    ok('content-pins agrees with commands/_manifest.mjs sha256OfFile (CRLF)',
+      (await hashFile(crlf)) === (await sha256OfFile(crlf)));
+    ok('manifest hasher is itself autocrlf-tolerant (LF ≡ CRLF)',
+      (await sha256OfFile(lf)) === (await sha256OfFile(crlf)));
 
     // ── 2. glob expansion ────────────────────────────────────────────────────
     const repo = await mkdtemp(join(tmpdir(), 'maddu-pinrepo-'));
