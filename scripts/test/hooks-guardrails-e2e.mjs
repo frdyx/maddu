@@ -181,6 +181,16 @@ async function main() {
     const r7d = runCliFull(repo, ['hooks', 'install']);
     ok('null permissions → install refused, file untouched',
       r7d.status === 1 && (await readFile(settingsPath, 'utf8')) === nullShape, `status=${r7d.status}`);
+    // Round-4: a non-object settings ROOT refuses too — properties attached
+    // to an array vanish at serialize time, so install would "succeed" while
+    // installing nothing (and still record ownership).
+    const arrRoot = '[]\n';
+    await writeFile(settingsPath, arrRoot);
+    const r7e = runCliFull(repo, ['hooks', 'install']);
+    ok('array settings root → install refused, file untouched',
+      r7e.status === 1 && /not a JSON object/.test(r7e.stderr)
+      && (await readFile(settingsPath, 'utf8')) === arrRoot, `status=${r7e.status}`);
+    ok('array settings root → no ownership record written', !(await exists(statePath)));
     await writeFile(settingsPath, userRaw); // restore
 
     // ── 8. falsy guardrails.ask declaration warns (round-2 F4) ──
@@ -189,6 +199,17 @@ async function main() {
     ok('guardrails.ask null → loud warning, install proceeds',
       r8.status === 0 && /not an array/.test(r8.stderr), r8.stderr.slice(0, 120));
     runCli(repo, ['hooks', 'uninstall']);
+
+    // ── 9. user's pre-existing EMPTY permission arrays survive a full
+    // install→uninstall through the real CLI (round-4: created-aware strip) ──
+    const emptyArrRaw = JSON.stringify({ permissions: { deny: [], ask: [] }, model: 'opus' }, null, 2) + '\n';
+    await writeFile(settingsPath, emptyArrRaw);
+    runCli(repo, ['hooks', 'install']);
+    runCli(repo, ['hooks', 'uninstall']);
+    const after9 = await readFile(settingsPath, 'utf8');
+    ok('pre-existing empty arrays survive install→uninstall BYTE-identical',
+      after9 === emptyArrRaw, after9.slice(0, 120));
+    await writeFile(settingsPath, userRaw); // restore
 
     // ── status output names guardrails honestly ──
     await writeFile(join(repo, 'maddu.json'), JSON.stringify({ name: 'guard-e2e' }) + '\n');

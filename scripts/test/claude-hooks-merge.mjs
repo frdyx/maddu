@@ -236,6 +236,20 @@ async function main() {
     ok('well-formed merges report no malformed shapes',
       g1.malformed.length === 0 && g3.malformed.length === 0);
 
+    // Round-4: `created` markers — strip cleans up only containers install
+    // created, so a user's pre-existing EMPTY arrays/object survive uninstall.
+    const emptyUser = { permissions: { deny: [], ask: [] }, model: 'opus' };
+    const emptyBefore = JSON.stringify(emptyUser);
+    const gE = mergeGuardrails(JSON.parse(emptyBefore), rules);
+    ok('merge into pre-existing empty arrays marks nothing created',
+      gE.created.permissions === false && gE.created.deny === false && gE.created.ask === false);
+    const sE = stripGuardrails(gE.settings, { deny: gE.added.deny, ask: gE.added.ask, created: gE.created });
+    ok('round-trip preserves user empty arrays (created-aware strip)',
+      JSON.stringify(sE) === emptyBefore, JSON.stringify(sE));
+    ok('fresh merge marks containers created',
+      g1.created.permissions === true && g1.created.deny === true && g1.created.ask === true);
+    ok('created-aware strip still removes created containers', !stripGuardrails(g1.settings, { ...rules, created: g1.created }).permissions);
+
     // layout-aware rule resolution (IO): a fake consumer layout vs source layout
     const dirC = await mkdtemp(join(tmpdir(), 'maddu-guard-consumer-'));
     await mkdir(join(dirC, 'maddu', 'bin'), { recursive: true });
@@ -290,6 +304,15 @@ async function main() {
     const rw5 = await resolveGuardrailRules(dirW);
     ok('falsy guardrails.ask → loud warning',
       rw5.ask.length === 0 && rw5.warnings.length === 1 && /not an array/.test(rw5.warnings[0]));
+    // Round-4: unreadable-but-existing maddu.json (here: a directory → EISDIR)
+    // must warn — only ENOENT means "nothing declared".
+    await rm(join(dirW, 'maddu.json'), { force: true });
+    await mkdir(join(dirW, 'maddu.json'));
+    const rw6 = await resolveGuardrailRules(dirW);
+    ok('unreadable maddu.json → loud warning, not silent absence',
+      rw6.ask.length === 0 && rw6.warnings.length === 1 && /could not be read/.test(rw6.warnings[0]),
+      JSON.stringify(rw6.warnings));
+    await rm(join(dirW, 'maddu.json'), { recursive: true, force: true }); // it was a directory
     await writeFile(join(dirW, 'maddu.json'), JSON.stringify({ guardrails: { ask: ['ok/**', 'bad)path', ''] } }));
     const rw3 = await resolveGuardrailRules(dirW);
     ok('invalid ask entries → warning naming the dropped count',

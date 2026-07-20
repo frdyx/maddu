@@ -43,7 +43,13 @@ async function readGuardrailState(repoRoot) {
       // worse than the documented exact-string fallback an absent record
       // triggers. Install never writes one; one on disk is stale state.
       if (j.deny.length + j.ask.length === 0) return null;
-      return { deny: j.deny, ask: j.ask };
+      // `created` marks which containers install brought into existence, so
+      // strip only cleans up those (a user's pre-existing empty array stays).
+      // Records from before this field default to the old delete-empties
+      // behavior inside stripGuardrails.
+      const created = j.created && typeof j.created === 'object' && !Array.isArray(j.created)
+        ? j.created : undefined;
+      return created ? { deny: j.deny, ask: j.ask, created } : { deny: j.deny, ask: j.ask };
     }
   } catch { /* absent / malformed → null */ }
   return null;
@@ -417,6 +423,13 @@ export default async function hooks(argv) {
       console.error(`\x1b[31mrefusing to touch ${lib.settingsPath(repoRoot)} — it exists but is not valid JSON. Fix or remove it first.\x1b[0m`);
       process.exit(1);
     }
+    if (typeof settings !== 'object' || Array.isArray(settings)) {
+      // Valid JSON but not an object root ([], "x", 42, true): properties
+      // attached to an array/primitive vanish at serialize time, so a merge
+      // would "succeed" while installing nothing (and still record ownership).
+      console.error(`\x1b[31mrefusing to touch ${lib.settingsPath(repoRoot)} — its root is not a JSON object. Fix or remove it first.\x1b[0m`);
+      process.exit(1);
+    }
     const bin = lib.resolveHookBin ? await lib.resolveHookBin(repoRoot) : undefined;
     // On remove, also strip Máddu's statusLine (if present) — never leave a
     // dangling `status --line` pointing at removed wiring. On install, only wire
@@ -476,7 +489,7 @@ export default async function hooks(argv) {
         // NEVER written — it reads back as absent anyway, and persisting one
         // was the round-2 bug that neutered uninstall.
         gRecorded = (g.added.deny.length + g.added.ask.length)
-          ? { deny: g.added.deny, ask: g.added.ask } : null;
+          ? { deny: g.added.deny, ask: g.added.ask, created: g.created } : null;
         if (!gPrev) {
           const preexisting = (gRules.deny.length + gRules.ask.length)
             - (g.added.deny.length + g.added.ask.length);

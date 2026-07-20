@@ -274,31 +274,42 @@ export function mergeGuardrails(settings, { deny = [], ask = [] } = {}) {
     }
     if (malformed.length) return { settings: base, added, malformed };
   }
-  if (!base.permissions) base.permissions = {};
+  // `created` records which containers THIS merge brought into existence —
+  // strip uses it to clean up only what install created, so a user's
+  // pre-existing EMPTY deny/ask array (or empty permissions object) survives
+  // the uninstall instead of being deleted as "leftover".
+  const created = { permissions: false, deny: false, ask: false };
+  if (!base.permissions) { base.permissions = {}; created.permissions = true; }
   for (const [key, rules] of [['deny', deny], ['ask', ask]]) {
     if (!rules.length) continue;
-    const arr = Array.isArray(base.permissions[key]) ? base.permissions[key] : [];
+    const existing = base.permissions[key];
+    if (!Array.isArray(existing)) created[key] = true;
+    const arr = Array.isArray(existing) ? existing : [];
     const have = new Set(arr.filter((r) => typeof r === 'string'));
     for (const r of rules) {
       if (!have.has(r)) { arr.push(r); have.add(r); added[key].push(r); }
     }
     base.permissions[key] = arr;
   }
-  return { settings: base, added, malformed };
+  return { settings: base, added, malformed, created };
 }
 
 // Pure: remove exactly the canonical guardrail rule strings; clean up empty
-// arrays / an empty permissions object. Never touches non-matching rules.
-export function stripGuardrails(settings, { deny = [], ask = [] } = {}) {
+// containers. Never touches non-matching rules. When `created` (from the
+// ownership record) is present, only containers the install CREATED are
+// deleted when they end up empty — a user's pre-existing empty array/object
+// stays. Without `created` (the no-record fallback), empties are deleted as
+// before (documented degradation).
+export function stripGuardrails(settings, { deny = [], ask = [], created } = {}) {
   if (!settings || typeof settings !== 'object' || !settings.permissions) return settings || {};
   const next = structuredCloneSafe(settings);
   const drop = { deny: new Set(deny), ask: new Set(ask) };
   for (const key of ['deny', 'ask']) {
     if (!Array.isArray(next.permissions[key])) continue;
     next.permissions[key] = next.permissions[key].filter((r) => !drop[key].has(r));
-    if (next.permissions[key].length === 0) delete next.permissions[key];
+    if (next.permissions[key].length === 0 && (!created || created[key])) delete next.permissions[key];
   }
-  if (Object.keys(next.permissions).length === 0) delete next.permissions;
+  if (Object.keys(next.permissions).length === 0 && (!created || created.permissions)) delete next.permissions;
   return next;
 }
 
@@ -349,6 +360,11 @@ export async function resolveGuardrailRules(repoRoot) {
   } catch (e) {
     if (madduJsonExists) {
       warnings.push(`maddu.json exists but could not be parsed (${String((e && e.message) || e).slice(0, 60)}) — declared guardrails.ask[] rules were NOT applied.`);
+    } else if (e && e.code && e.code !== 'ENOENT') {
+      // Only "no such file" means no declaration. An unreadable maddu.json
+      // (EACCES/EISDIR/…) may well DECLARE ask rules we cannot see — silence
+      // here would report a successful install with that protection dropped.
+      warnings.push(`maddu.json could not be read (${e.code}) — any declared guardrails.ask[] rules were NOT applied.`);
     }
   }
   const ask = guardrailAskRules(askPaths);

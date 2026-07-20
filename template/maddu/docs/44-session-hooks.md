@@ -213,12 +213,17 @@ keeps that fallback); when only some are present, the pre-existing matches are
 treated as yours, with a warning telling you to `remove` + re-install if they
 actually came from an earlier Máddu install. An empty ownership record is
 treated as absent — install never writes one, and one found on disk is
-recovered, not trusted. Install refuses (exit 1, file untouched) if
-`.claude/settings.json` carries a malformed shape — `permissions` not an
-object, or `deny`/`ask` present but not arrays (an explicit `null` counts,
-and both keys are checked even when a run has no rules to write into them) —
-rather than writing rules that would be lost or clobber your data; fix the
-shape or use `--no-guardrails`.
+recovered, not trusted. The record also marks which containers install
+created, so uninstall deletes an emptied `deny`/`ask` array (or the
+`permissions` object) only if install created it — your pre-existing empty
+arrays survive; the no-record fallback still removes empties. Install refuses
+(exit 1, file untouched) if `.claude/settings.json` carries a malformed
+shape — a non-object root, `permissions` not an object, or `deny`/`ask`
+present but not arrays (an explicit `null` counts, and both keys are checked
+even when a run has no rules to write into them) — rather than writing rules
+that would be lost or clobber your data; fix the shape or use
+`--no-guardrails`. A `maddu.json` that exists but cannot be read or parsed
+warns loudly — only a genuinely absent file means "nothing declared".
 Formatting note: install/remove re-serialize `.claude/settings.json` as
 2-space JSON (EOL style preserved) — content-preserving, format-normalizing.
 Claude Code-only; other runtimes get no guardrails (the spine record is
