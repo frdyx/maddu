@@ -213,10 +213,26 @@ async function main() {
       JSON.stringify(mScalar.malformed) === JSON.stringify(['permissions'])
       && mScalar.settings.permissions === 'nope');
     const mDeny = mergeGuardrails({ permissions: { deny: 'nope' } }, rules);
-    ok('non-array deny → malformed, value preserved, ask still merged',
+    ok('non-array deny → malformed, value preserved, NOTHING merged',
       JSON.stringify(mDeny.malformed) === JSON.stringify(['permissions.deny'])
       && mDeny.settings.permissions.deny === 'nope'
-      && mDeny.added.ask.length === rules.ask.length);
+      && mDeny.added.deny.length === 0 && mDeny.added.ask.length === 0);
+    // Round-3: explicit null is malformed too (silently normalizing it breaks
+    // the byte-round-trip), and keys are validated even when this run has no
+    // rules to write into them.
+    const mNull = mergeGuardrails({ permissions: null }, rules);
+    ok('null permissions → malformed, value preserved',
+      JSON.stringify(mNull.malformed) === JSON.stringify(['permissions'])
+      && mNull.settings.permissions === null);
+    const mDenyNull = mergeGuardrails({ permissions: { deny: null } }, rules);
+    ok('null deny → malformed, value preserved',
+      JSON.stringify(mDenyNull.malformed) === JSON.stringify(['permissions.deny'])
+      && mDenyNull.settings.permissions.deny === null);
+    const mAskIdle = mergeGuardrails({ permissions: { ask: 'custom' } }, { deny: rules.deny, ask: [] });
+    ok('non-array ask → malformed even with no incoming ask rules',
+      JSON.stringify(mAskIdle.malformed) === JSON.stringify(['permissions.ask'])
+      && mAskIdle.settings.permissions.ask === 'custom'
+      && mAskIdle.added.deny.length === 0);
     ok('well-formed merges report no malformed shapes',
       g1.malformed.length === 0 && g3.malformed.length === 0);
 

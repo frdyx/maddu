@@ -258,20 +258,26 @@ export function mergeGuardrails(settings, { deny = [], ask = [] } = {}) {
   const base = settings && typeof settings === 'object' ? structuredCloneSafe(settings) : {};
   const added = { deny: [], ask: [] };
   const malformed = [];
-  if (base.permissions !== undefined && base.permissions !== null
-      && (typeof base.permissions !== 'object' || Array.isArray(base.permissions))) {
+  // Shape validation is UNCONDITIONAL — an explicitly-authored `null` and a
+  // key we happen not to be writing this run are still malformed (silently
+  // normalizing them would break the byte-round-trip promise, and a later run
+  // WITH rules for that key would suddenly refuse). Any malformed shape →
+  // nothing merged; the caller refuses the install.
+  const p = base.permissions;
+  if (p !== undefined && (p === null || typeof p !== 'object' || Array.isArray(p))) {
     malformed.push('permissions');
     return { settings: base, added, malformed };
+  }
+  if (p) {
+    for (const key of ['deny', 'ask']) {
+      if (p[key] !== undefined && !Array.isArray(p[key])) malformed.push(`permissions.${key}`);
+    }
+    if (malformed.length) return { settings: base, added, malformed };
   }
   if (!base.permissions) base.permissions = {};
   for (const [key, rules] of [['deny', deny], ['ask', ask]]) {
     if (!rules.length) continue;
-    const existing = base.permissions[key];
-    if (existing !== undefined && existing !== null && !Array.isArray(existing)) {
-      malformed.push(`permissions.${key}`);
-      continue;
-    }
-    const arr = Array.isArray(existing) ? existing : [];
+    const arr = Array.isArray(base.permissions[key]) ? base.permissions[key] : [];
     const have = new Set(arr.filter((r) => typeof r === 'string'));
     for (const r of rules) {
       if (!have.has(r)) { arr.push(r); have.add(r); added[key].push(r); }

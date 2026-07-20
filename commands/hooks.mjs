@@ -37,7 +37,14 @@ async function readGuardrailState(repoRoot) {
   try {
     const raw = await readFile(guardrailStatePath(repoRoot), 'utf8');
     const j = JSON.parse(raw);
-    if (j && Array.isArray(j.deny) && Array.isArray(j.ask)) return { deny: j.deny, ask: j.ask };
+    if (j && Array.isArray(j.deny) && Array.isArray(j.ask)) {
+      // An EMPTY record is treated as absent: "we own nothing" makes uninstall
+      // a silent no-op that leaves every guardrail behind, which is strictly
+      // worse than the documented exact-string fallback an absent record
+      // triggers. Install never writes one; one on disk is stale state.
+      if (j.deny.length + j.ask.length === 0) return null;
+      return { deny: j.deny, ask: j.ask };
+    }
   } catch { /* absent / malformed → null */ }
   return null;
 }
@@ -465,8 +472,11 @@ export default async function hooks(argv) {
         gAdded = g.added;
         // Recorded ownership = exactly what this merge introduced (after the
         // prev-owned strip, re-added canonical rules land in `added`; a rule
-        // the user authored independently never does).
-        gRecorded = { deny: g.added.deny, ask: g.added.ask };
+        // the user authored independently never does). An all-empty record is
+        // NEVER written — it reads back as absent anyway, and persisting one
+        // was the round-2 bug that neutered uninstall.
+        gRecorded = (g.added.deny.length + g.added.ask.length)
+          ? { deny: g.added.deny, ask: g.added.ask } : null;
         if (!gPrev) {
           const preexisting = (gRules.deny.length + gRules.ask.length)
             - (g.added.deny.length + g.added.ask.length);
@@ -511,6 +521,7 @@ export default async function hooks(argv) {
       if (!flags['dry-run'] && wantGuardrails) {
         if (removing) await clearGuardrailState(repoRoot);
         else if (gRecorded) await writeGuardrailState(repoRoot, gRecorded);
+        else await clearGuardrailState(repoRoot); // never leave a stale/empty record behind
       }
       if (!removing && flags.statusline && statusLineSkipped) {
         console.log('\x1b[33mstatusLine already set to your own command\x1b[0m — left untouched. Remove it first to use Máddu\'s.');
@@ -561,6 +572,7 @@ export default async function hooks(argv) {
     if (wantGuardrails) {
       if (removing) await clearGuardrailState(repoRoot);
       else if (gRecorded) await writeGuardrailState(repoRoot, gRecorded);
+      else await clearGuardrailState(repoRoot); // never leave a stale/empty record behind
     }
     if (removing) {
       console.log(`\x1b[32mremoved\x1b[0m Máddu hooks${wantGuardrails ? ' + permission guardrails' : ''} → ${lib.settingsPath(repoRoot)}`);

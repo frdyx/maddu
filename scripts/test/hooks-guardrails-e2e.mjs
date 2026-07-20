@@ -150,6 +150,17 @@ async function main() {
       !(after6.permissions?.deny || []).includes('Edit(maddu/runtime/**)'));
     ok('non-canonical user rule survives the fallback strip',
       (after6.permissions?.deny || []).includes('Edit(secrets/**)'));
+    // Round-3: an already-persisted EMPTY record (the round-2 bug's artifact)
+    // must read as absent — recovered on install, fallback-stripped on remove.
+    runCli(repo, ['hooks', 'install']);
+    await writeFile(statePath, JSON.stringify({ v: 1, deny: [], ask: [] }, null, 2) + '\n');
+    const r6b = runCliFull(repo, ['hooks', 'install']);
+    ok('empty ownership record treated as absent (warns)', /no ownership record/.test(r6b.stderr), r6b.stderr.slice(0, 120));
+    ok('empty record cleared, not rewritten', !(await exists(statePath)));
+    runCli(repo, ['hooks', 'uninstall']);
+    const after6b = JSON.parse(await readFile(settingsPath, 'utf8'));
+    ok('uninstall after empty record strips canonical rules (fallback)',
+      !(after6b.permissions?.deny || []).includes('Edit(maddu/runtime/**)'));
 
     // ── 7. malformed permission shapes → REFUSED, file untouched (round-2 F3) ──
     const badShape = JSON.stringify({ permissions: [] }, null, 2) + '\n';
@@ -165,6 +176,11 @@ async function main() {
     const r7c = runCliFull(repo, ['hooks', 'install']);
     ok('non-array deny → install refused naming permissions.deny',
       r7c.status === 1 && /permissions\.deny/.test(r7c.stderr), r7c.stderr.slice(0, 120));
+    const nullShape = JSON.stringify({ permissions: null }, null, 2) + '\n';
+    await writeFile(settingsPath, nullShape);
+    const r7d = runCliFull(repo, ['hooks', 'install']);
+    ok('null permissions → install refused, file untouched',
+      r7d.status === 1 && (await readFile(settingsPath, 'utf8')) === nullShape, `status=${r7d.status}`);
     await writeFile(settingsPath, userRaw); // restore
 
     // ── 8. falsy guardrails.ask declaration warns (round-2 F4) ──
