@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.106.0] · 2026-07-20 · Verdict-machinery drift detection (descoped oracle pin) + docs honesty
+
+**PR 2 of the verification-witness track** (plan v3, Codex-SOUND after 3 review rounds; PR 1 = #284 docs honesty). Descopes the unshipped `oracle-pin-sources` branch to its proven fixes and renames the feature to what it honestly is: **verdict-machinery drift detection** — it watches the machinery that decides what a result *means*; **test assertions ARE the oracle and are not covered.** Verbs **72/72**; gates **74**; contract **1.8.0 → 1.9.0** (`SOURCE_HASH_RECOMPUTED` gains `reason` + `by` as listed fields).
+
+- **Kept from the original branch (Codex-verified):** CRLF-normalizing content hasher (raw-byte hashing broke every Windows `autocrlf` checkout), binary raw-byte preservation, full-replacement projection semantics for `sourceHashes`, 2 regression tests proven to fail on pre-fix code + 16 labeled characterization tests.
+- **`tracked-source-drift` demoted `critical` → `warn` and removed from the required set.** A cooperative drift signal, not a trust boundary — an actor who can edit the pinned files can re-pin them, so `critical` falsely lent it trust-boundary weight (and the P4 fail-closed rule turns a warn-severity *required* gate RED). Operators may promote it per-repo via `maddu ci pin`. Fresh clones now go green with an honest "nothing pinned yet" WARN — the original branch's fresh-CI-red blocker is resolved by honesty, not by tracking the baseline.
+- **No forced reasonless re-pin.** `maddu sources rebuild` refuses without `--reason` (exit 3); the `--force` waiver is gone, so `reason` is never null on the record and every re-baseline is an explicit, attributed act.
+- **Empty pin config is never green.** "Nothing pinned" now reports as a distinct non-ok state, same rule as a zero-match pattern set.
+- **Threat-model §12 rewritten + SECURITY.md aligned:** the cooperative-accountability honest claim verbatim; four false claims fixed (contract fields are type-checked when present, not schema-required; empty config cannot green; `.maddu/gates/` is not in the default pin patterns and is locally unwatched; code-owner review is inert here and unsatisfiable solo).
+- **Event-contract baseline fixture refreshed** to 1.9.0 (fingerprint `4c868e1d`) — the original branch's missed fixture. Docs 02/03/20 reasonless-rebuild examples fixed; template docs regenerated.
+
 ## [v1.105.2] · 2026-07-19 · Fix — ci-command test no longer clobbers the real ci.json
 
 **Test-isolation leak found while shipping v1.105.1.** `scripts/test/ci-command.mjs` ran `maddu ci` against the **real repo root** and mutated the repo's own `.maddu/config/ci.json` in place (rm + `ci pin` + a direct `{requiredGates:[failingId]}` write), restoring in a `finally`. A harness kill on timeout — or a concurrent gate reading the file mid-run — leaked the clobbered single-gate state (`["agent-file-current"]`) into the working tree, dropping the 52-gate required set to 1. Verbs **72/72**; gates **74**; no new event type / contract bump.
