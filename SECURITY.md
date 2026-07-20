@@ -86,9 +86,10 @@ themselves against that actor. No Máddu feature should be read as prevention,
 independent attestation, or proof that a green result is meaningful.
 
 The claim Máddu is entitled to today is narrower and stated exactly: **Máddu
-records an exact commit's declared verification and preserves the result as
-auditable evidence; it does not independently validate the verifier that
-commit supplied.** (Clean-checkout reproduction — `maddu verify --replay` — is
-planned, not shipped; this section will be updated when it lands.) Claude Code
-permission rules, where installed, are bypassable harness friction, not a
-security boundary.
+records a project's declared verification runs and preserves the results as
+auditable evidence; receipts are not bound to a commit SHA and may describe an
+uncommitted working tree, and Máddu does not independently validate the
+verifier the project supplied.** (Commit-bound, clean-checkout reproduction —
+`maddu verify --replay` — is planned, not shipped; this section will be
+updated when it lands.) Claude Code permission rules, where installed, are
+bypassable harness friction, not a security boundary.

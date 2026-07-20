@@ -8,7 +8,7 @@
 
 **Máddu turns ephemeral agent work into a durable, repo-owned record you can inspect, replay, and challenge — so an agent's word never has to be taken on faith.** It's a local-first, files-only spine that any AI coding agent (Claude Code, Codex, or any CLI) plugs into to work as an **auditable team**: one agent per lane, risky changes held behind approvals, every slice checked by a gate. *Cooperative* means exactly that. The agent calls Máddu; Máddu never sits in the request path and never touches your keys. It runs as a small Node process with local-first, append-only files as the system of record: each approval, session, and slice is one line on disk. The durable, verifiable record is *how* the governance earns your trust, not what it sells.
 
-*New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that keeps their work **on the record**: one agent per lane, sensitive changes waiting on your approval, every step replayable and checkable, instead of a black box that vanishes when the session closes.
+*New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that puts their work **on a record**: one agent per lane, sensitive changes waiting on your approval, recorded steps replayable and checkable, instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
 [![Version 1.105.2](https://img.shields.io/badge/version-1.105.2-D0FF00?style=flat-square&labelColor=050B17)](version.json)
@@ -167,7 +167,7 @@ maddu orient                   # goal progress verified by real commands, not vi
 
 <picture><img alt="Verify the agent instead of trusting it — the agent's claim taken on faith vs the spine's evidence checked by maddu ci, learn scan, and orient" src="docs/images/use-case-verify.svg" width="920"></picture>
 
-Confident completion claims are joined against the *recorded* evidence for that lane — gate passes, deliverables, diffs — and flagged when the proof is missing (a warn-tier check over the record, machinery-gated so pre-existing work isn't policed). A model checking a model is a second opinion; this is a check against the record.
+Completion-claim language in slice-stops is checked against the record — confident verification claims are matched to recorded proof, hedged claims are counted, and a recent spike trips a warn-tier gate (machinery-gated, so pre-existing work isn't policed). A model checking a model is a second opinion; this is a check against the record — a signal, not proof.
 
 ### 🚀 2. The independent app builder
 
@@ -222,7 +222,7 @@ One agent per lane is a hard rule, `--worktree` gives each its own checkout on i
 
 <picture><img alt="CI for agents — the agent's PR runs maddu ci; required gates, secret scan, and completion-claim checks decide merge or blocked, with the event id that says why" src="docs/images/use-case-ci.svg" width="920"></picture>
 
-You pin which gates are required (`maddu ci pin`) — pinning fixes *which* gate IDs are required, so an upgrade can't silently add or drop required gates; a pinned gate's implementation still ships with the framework and can change on upgrade. Same exit code drives GitHub Actions, GitLab, or a fully-offline git pre-push hook.
+You pin which gates are required (`maddu ci pin`) — pinning fixes *which* gate IDs are required, so an upgrade can't silently add or drop required gates; a pinned gate's *implementation* can still change (framework upgrade, or a same-ID operator override shadowing the builtin). Same exit code drives GitHub Actions, GitLab, or a fully-offline git pre-push hook.
 
 ### 🎓 6. Governed experience data — for training pipelines and audits
 
@@ -373,7 +373,7 @@ Nine invariants. `maddu doctor` verifies them on every install and every upgrade
 | # | Rule | What it prevents |
 |---|---|---|
 | 1 | Files-only state | SQLite corruption, opaque feature state, schema-migration hazards |
-| 2 | Append-only event spine (tamper-detecting) | Undetected interior edits, replay-divergence, silent history rewrites |
+| 2 | Append-only event spine (tamper-detecting) | Naive interior edits passing unnoticed, replay-divergence (unkeyed — full-chain recompute out of scope) |
 | 3 | No hosted backends | Telemetry, vendor lock-in, "Máddu Cloud" |
 | 4 | No broad dependencies | Supply-chain risk, transitive vulnerabilities |
 | 5 | No provider SDKs in app code | Hidden API keys, SDK churn in the orchestrator |
