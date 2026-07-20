@@ -23,10 +23,10 @@
 #
 # WHAT THIS REPO RELIES ON LOCALLY INSTEAD
 # CI gates and the append-only spine (see SECURITY.md for what those do and do
-# not guarantee), plus — planned, shipping via `maddu hooks install` — Claude
-# Code permission rules on the paths below: bypassable harness friction, not a
-# control. The committed `.claude/settings.json` carries hooks only today; no
-# permission rules are in the repo yet.
+# not guarantee), plus the Claude Code permission rules committed in
+# `.claude/settings.json` (ask on the TCB paths below, deny on the settings
+# file itself): bypassable harness friction, not a control. Consumer-facing
+# packaging of these rules ships via `maddu hooks install`.
 #
 # SCOPE — two layers, and the second is the one that is easy to miss.
 # Protecting only tests and gate definitions is NOT enough: .github/workflows/
