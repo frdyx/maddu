@@ -23,7 +23,6 @@ import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import registerCmd from './register.mjs';
-import sessionCmd from './session.mjs';
 
 // Ownership side-state for the permission guardrails: the exact rule strings
 // THIS install added (a rule the user already had is not ours and must survive
