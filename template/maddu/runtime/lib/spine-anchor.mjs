@@ -55,8 +55,16 @@ export const PAYLOAD_VERSION = 1;
 const SEQ_DIR_RE = /^\d{6}$/;
 
 export function anchorsDir(repoRoot) { return join(repoRoot, '.maddu', 'anchors'); }
-function lockPath(repoRoot) { return join(anchorsDir(repoRoot), '.lock'); }
+// The funnel lock lives under state/ (UNTRACKED), never inside the tracked
+// anchors dir — a committed lockfile would hang every other host forever (the
+// lock protocol never steals a foreign-host lock).
+function lockPath(repoRoot) { return join(repoRoot, '.maddu', 'state', 'anchors.lock'); }
 function seqDirName(seq) { return String(seq).padStart(6, '0'); }
+
+// Both SHA-1 (40 hex) and SHA-256 (64 hex) git object ids are valid subjects.
+export function isGitSha(s) {
+  return typeof s === 'string' && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(s);
+}
 
 export function sha256Hex(bufOrStr) {
   return createHash('sha256').update(bufOrStr).digest('hex');
@@ -110,7 +118,7 @@ async function gitHead(repoRoot) {
   try {
     const { stdout } = await pExecFile('git', ['rev-parse', 'HEAD'], { cwd: repoRoot });
     const sha = stdout.trim();
-    return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+    return isGitSha(sha) ? sha : null;
   } catch { return null; }
 }
 
@@ -321,7 +329,12 @@ export async function stampAnchor(repoRoot, {
   if (cal.error) return { ok: false, reason: 'config-invalid', detail: cal.error };
 
   await mkdir(anchorsDir(repoRoot), { recursive: true });
+  await mkdir(join(repoRoot, '.maddu', 'state'), { recursive: true });
   return withAppendLock(lockPath(repoRoot), async () => {
+    // Re-check sync mode INSIDE the lock: a `spine sync init` that started
+    // after the early check would otherwise race this stamp and migrate the
+    // segment the payload is about to point at (TOCTOU).
+    if (await readActiveReplicaId(repoRoot)) return { ok: false, reason: 'sync-mode' };
     const { receipt, chainHead } = await findReceipt(repoRoot, { eventId });
     if (!receipt) {
       return { ok: false, reason: eventId ? 'event-not-found' : 'no-receipt' };
@@ -329,14 +342,24 @@ export async function stampAnchor(repoRoot, {
     const { anchors } = await listAnchors(repoRoot);
     const last = anchors.length ? anchors[anchors.length - 1] : null;
 
-    // Crash recovery FIRST: a payload dir with no proof is a stamp that died
-    // between payload write and ots stamp — re-stamp that exact payload
-    // (idempotent, keyed by the payload digest). Not a queue: it never grows.
+    // Crash recovery FIRST — two windows a death can leave behind:
+    //   payload, no proof  → the stamp died before ots ran: re-stamp that
+    //                        exact payload (idempotent, keyed by its digest).
+    //   proof, no meta     → ots ran but finishStamp didn't: finalize (meta +
+    //                        ANCHOR_STAMPED) without re-stamping, or the next
+    //                        run would take the `already` shortcut and the
+    //                        anchor would stay unrecorded forever.
+    // Neither is a queue: they never grow past the single crashed stamp.
     if (last && !last.hasProof && last.payloadBytes) {
       const r = await runStamp(repoRoot, otsBin, last.seq, cal.calendars);
       if (!r.ok) return { ok: false, reason: 'stamp-failed', detail: r.detail, seq: last.seq, recovered: false };
       await finishStamp(repoRoot, last.seq, last.payloadDigest, r, spineLib);
       return { ok: true, seq: last.seq, payloadDigest: last.payloadDigest, calendars: r.calendars, recovered: true };
+    }
+    if (last && last.hasProof && !last.meta && last.payloadBytes) {
+      await finishStamp(repoRoot, last.seq, last.payloadDigest, { calendars: [] }, spineLib);
+      const gi = await ensureAnchorsGitignore(repoRoot);
+      return { ok: true, seq: last.seq, payloadDigest: last.payloadDigest, calendars: [], recovered: true, gitignore: gi.state };
     }
 
     // Idempotency: nothing new to anchor when the latest anchor already
@@ -346,6 +369,7 @@ export async function stampAnchor(repoRoot, {
     // (each stamp's own ANCHOR_STAMPED event advances the chain head).
     if (last && last.hasProof && last.payload
         && last.payload.receipt_digest === hashLine(receipt.line)) {
+      await ensureAnchorsGitignore(repoRoot); // self-heal even on the no-op path
       return { ok: true, already: true, seq: last.seq, payloadDigest: last.payloadDigest };
     }
 
@@ -426,14 +450,42 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
   const presence = await otsPresence(otsBin);
   if (!presence.ok) return { ok: false, reason: 'ots-missing', detail: presence.error, hint: presence.hint };
 
+  await mkdir(join(repoRoot, '.maddu', 'state'), { recursive: true });
   return withAppendLock(lockPath(repoRoot), async () => {
+    if (await readActiveReplicaId(repoRoot)) return { ok: false, reason: 'sync-mode' };
     const { anchors } = await listAnchors(repoRoot);
+    const newestEv = await newestAnchorEventDigests(repoRoot);
     const results = [];
     for (const a of anchors) {
       if (!a.hasProof) { results.push({ seq: a.seq, state: 'no-proof' }); continue; }
-      if (a.meta && a.meta.complete === true) { results.push({ seq: a.seq, state: 'complete' }); continue; }
       const base = join(anchorsDir(repoRoot), a.dir);
       const proofPath = join(base, 'payload.json.ots');
+      if (a.meta && a.meta.complete === true) {
+        // Reconcile: the newest ANCHOR_* event must record the CURRENT proof
+        // digest. A mismatch here is the benign twin of the --verify FAIL (an
+        // upgrade whose event append failed) — re-emit so the record matches
+        // disk again instead of skipping forever.
+        const rec = newestEv.get(a.seq);
+        if (spineLib && spineLib.append && rec && rec.digest !== a.proofDigest) {
+          await spineLib.append(repoRoot, {
+            type: 'ANCHOR_UPGRADED',
+            actor: process.env.MADDU_SESSION_ID || null,
+            data: {
+              seq: a.seq, payload_digest: a.payloadDigest, complete: true,
+              proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: a.proofDigest }],
+            },
+          });
+          results.push({ seq: a.seq, state: 'reconciled' });
+        } else {
+          results.push({ seq: a.seq, state: 'complete' });
+        }
+        continue;
+      }
+      // The stock client backs the proof up to `<file>.bak` on upgrade and
+      // REFUSES the next upgrade while that backup exists — remove any
+      // leftover before and after (git + the events are the durable history;
+      // a .bak inside the tracked anchors dir is both noise and a jam).
+      await rm(`${proofPath}.bak`, { force: true });
       const before = a.proofDigest;
       let complete = false, detail = null;
       try {
@@ -443,6 +495,7 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         detail = String((e && (e.stderr || e.stdout || e.message)) || e).slice(0, 300);
         complete = false;
       }
+      await rm(`${proofPath}.bak`, { force: true });
       let after = before;
       try { after = sha256Hex(await readFile(proofPath)); } catch { /* unchanged */ }
       const upgraded = after !== before;
@@ -468,6 +521,31 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
     }
     return { ok: true, results };
   });
+}
+
+// The newest ANCHOR_STAMPED/ANCHOR_UPGRADED event per seq (spine order), with
+// the proof digest it recorded. Shared by --verify (forgery predicate: the
+// NEWEST event must match disk; older events are superseded history) and by
+// --upgrade's reconciliation.
+async function newestAnchorEventDigests(repoRoot) {
+  const map = new Map();
+  for (const seg of await listFlatSegments(repoRoot)) {
+    let raw = null;
+    try { raw = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); } catch { continue; }
+    for (const l of raw.split('\n')) {
+      const line = l.replace(/\r$/, '');
+      if (!line.trim()) continue;
+      let ev = null;
+      try { ev = JSON.parse(line); } catch { continue; }
+      if (!ev || (ev.type !== 'ANCHOR_STAMPED' && ev.type !== 'ANCHOR_UPGRADED')) continue;
+      const d = ev.data || {};
+      if (typeof d.seq !== 'number') continue;
+      const digest = Array.isArray(d.proof_files) && d.proof_files[0] && typeof d.proof_files[0].digest === 'string'
+        ? d.proof_files[0].digest : null;
+      map.set(d.seq, { type: ev.type, id: ev.id, digest });
+    }
+  }
+  return map;
 }
 
 // ── status ───────────────────────────────────────────────────────────────
@@ -500,6 +578,25 @@ export async function verifyAnchors(repoRoot) {
   for (const d of invalidDirs) {
     issues.push({ level: 'FAIL', kind: 'invalid-dir', detail: `.maddu/anchors/${d} is not a 6-digit sequence dir` });
   }
+  // Index every stored line's hash → position, once. Used for the chain_head
+  // membership check: the payload's chain_head must be the hash of a line that
+  // STILL EXISTS at/after the receipt. Rewriting any covered event either
+  // breaks the spine's own prev_hash chain (spine verify) or re-chains the
+  // suffix — which changes the head line's bytes, so no stored line hashes to
+  // the anchored chain_head anymore and this check FAILs.
+  const lineIndex = new Map();
+  const segsAll = await listFlatSegments(repoRoot);
+  for (const seg of segsAll) {
+    let raw = null;
+    try { raw = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); } catch { continue; }
+    const ls = raw.split('\n');
+    for (let n = 0; n < ls.length; n++) {
+      const line = ls[n].replace(/\r$/, '');
+      if (!line.trim()) continue;
+      lineIndex.set(hashLine(line), { segment: seg, line: n + 1 });
+    }
+  }
+  const posLE = (a, b) => a.segment < b.segment || (a.segment === b.segment && a.line <= b.line);
   // Sequence continuity: strictly 1..N with no gaps. A gap or renumbering is
   // MID-HISTORY tampering; suffix/all-history deletion is NOT detectable here.
   for (let i = 0; i < anchors.length; i++) {
@@ -547,6 +644,17 @@ export async function verifyAnchors(repoRoot) {
             issues.push({ level: 'FAIL', kind: 'event-id-mismatch', seq: a.seq, detail: `event at position has id ${ev.id}, payload says ${a.payload.event_id}` });
           }
         }
+        // chain_head membership: the anchored head line must still exist, at
+        // or after the receipt — otherwise a covered TAIL event was rewritten
+        // (re-chaining changes the head line's bytes) or the head was dropped.
+        if (typeof a.payload.chain_head === 'string' && lineIndex.size) {
+          const at = lineIndex.get(a.payload.chain_head);
+          if (!at) {
+            issues.push({ level: 'FAIL', kind: 'chain-head-missing', seq: a.seq, detail: `no stored spine line hashes to the anchored chain_head — a covered event after the receipt was rewritten, or the head line was deleted` });
+          } else if (!posLE(a.payload.position, at)) {
+            issues.push({ level: 'FAIL', kind: 'chain-head-order', seq: a.seq, detail: `the anchored chain_head line (${at.segment}:${at.line}) precedes the receipt position — inconsistent anchor` });
+          }
+        }
       }
     }
   }
@@ -568,6 +676,7 @@ export async function verifyAnchors(repoRoot) {
     }
   }
   const bySeq = new Map(anchors.map((a) => [a.seq, a]));
+  const newestPerSeq = new Map(); // spine order → the last event per seq wins
   for (const ev of events) {
     const d = ev.data || {};
     const a = bySeq.get(d.seq);
@@ -575,15 +684,24 @@ export async function verifyAnchors(repoRoot) {
       issues.push({ level: 'FAIL', kind: 'event-anchor-missing', seq: d.seq ?? null, detail: `${ev.type} (${ev.id}) references anchor seq ${d.seq} which does not exist on disk — forged event or deleted anchor` });
       continue;
     }
+    // The payload NEVER legitimately changes, so EVERY event for a seq must
+    // carry the on-disk payload digest — old or new.
     if (d.payload_digest && a.payloadDigest && d.payload_digest !== a.payloadDigest) {
       issues.push({ level: 'FAIL', kind: 'event-digest-mismatch', seq: d.seq, detail: `${ev.type} (${ev.id}) payload_digest does not match the stored payload — forged event or edited payload` });
     }
-    if (ev.type === 'ANCHOR_UPGRADED' && Array.isArray(d.proof_files)) {
-      for (const pf of d.proof_files) {
-        if (pf && pf.digest && a.proofDigest && pf.digest !== a.proofDigest) {
-          issues.push({ level: 'WARN', kind: 'event-proof-drift', seq: d.seq, detail: `${ev.type} (${ev.id}) records proof digest ${String(pf.digest).slice(0, 12)}… but disk has ${String(a.proofDigest).slice(0, 12)}… — superseded by a later upgrade, or the proof was replaced` });
-        }
-      }
+    newestPerSeq.set(d.seq, ev);
+  }
+  // Proof digests DO change across upgrades, so only the NEWEST event per seq
+  // is held to disk: a forged "upgraded" event (wrong or absent proof digest)
+  // FAILs; older events are superseded history and are not compared.
+  for (const [seqNo, ev] of newestPerSeq) {
+    const a = bySeq.get(seqNo);
+    const d = ev.data || {};
+    const recorded = Array.isArray(d.proof_files) && d.proof_files[0] && typeof d.proof_files[0].digest === 'string'
+      ? d.proof_files[0].digest : null;
+    if (!a.proofDigest) continue; // proof-missing already flagged above
+    if (recorded !== a.proofDigest) {
+      issues.push({ level: 'FAIL', kind: 'event-proof-mismatch', seq: seqNo, detail: `newest ${ev.type} (${ev.id}) records proof digest ${recorded ? String(recorded).slice(0, 12) + '…' : '(none)'} but disk has ${String(a.proofDigest).slice(0, 12)}… — forged event or replaced proof (if an upgrade's event append failed, \`maddu spine anchor --upgrade\` reconciles)` });
     }
   }
   const stampedSeqs = new Set(events.filter((e) => e.type === 'ANCHOR_STAMPED').map((e) => e.data?.seq));
