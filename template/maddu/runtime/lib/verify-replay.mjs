@@ -88,9 +88,12 @@ export async function resolveSubjectSha(workRoot, sha) {
   if (sha.length !== want) {
     return { ok: false, reason: 'sha-invalid', detail: `this repository's object format is ${format} — a ${sha.length}-hex id would be an abbreviation; supply the full ${want}-hex commit id` };
   }
+  // --no-replace-objects: a `git replace` ref can make a real commit appear as
+  // another object type (or vice versa) — validate the RAW object, exactly as
+  // the clone will see it (replace refs are not fetched by clone).
   let type = null;
   try {
-    const { stdout } = await pExecFile('git', ['cat-file', '-t', sha], { cwd: workRoot });
+    const { stdout } = await pExecFile('git', ['--no-replace-objects', 'cat-file', '-t', sha], { cwd: workRoot });
     type = stdout.trim();
   } catch {
     return { ok: false, reason: 'sha-not-found', detail: `object ${sha} does not exist in this repository` };
@@ -108,7 +111,7 @@ export async function cloneAtSha(workRoot, sha) {
   try {
     dir = await mkdtemp(join(tmpdir(), 'maddu-replay-'));
     await pExecFile('git', ['clone', '--no-local', '--no-checkout', '--quiet', workRoot, dir], { maxBuffer: 8 * 1024 * 1024 });
-    await pExecFile('git', ['checkout', '--detach', '--quiet', sha], { cwd: dir, maxBuffer: 8 * 1024 * 1024 });
+    await pExecFile('git', ['--no-replace-objects', 'checkout', '--detach', '--quiet', sha], { cwd: dir, maxBuffer: 8 * 1024 * 1024 });
     return { ok: true, dir };
   } catch (e) {
     return { ok: false, reason: 'clone-failed', detail: shortErr(e), dir };
@@ -117,6 +120,12 @@ export async function cloneAtSha(workRoot, sha) {
 
 // Windows: git writes read-only pack files; fs.rm has no built-in chmod, so
 // EPERM there is EXPECTED — one best-effort recursive chmod, then retry once.
+// SCOPE: the repair walks ONLY the clone's `.git` subtree — that is where
+// git's read-only files live, and a `--no-local` clone guarantees those bytes
+// are clone-owned. The worktree is deliberately excluded: a declared install
+// may have HARDLINKED files into it (pnpm's global store), and chmod on a
+// hardlink mutates the shared inode — host state we must never touch. A
+// genuinely stuck worktree file simply fails cleanup → the fail-closed path.
 // SYMLINKS ARE SKIPPED ENTIRELY: chmod follows links, so touching one would
 // chmod its TARGET — possibly a host file outside the clone. (rm unlinks the
 // link itself without needing its permission bits, so skipping loses nothing.)
@@ -146,7 +155,7 @@ export async function cleanupClone(dir) {
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     return true;
   } catch {
-    await chmodTree(dir);
+    await chmodTree(join(dir, '.git'));
     try {
       await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       return true;
@@ -230,6 +239,8 @@ export function runDeclared(command, { cwd, timeoutMs, json = false } = {}) {
     };
     let timedOut = false;
     let exitCode;
+    let exitSignal = null;
+    let execTimer = null;
     try {
       child = spawn(command, {
         cwd,
@@ -249,22 +260,27 @@ export function runDeclared(command, { cwd, timeoutMs, json = false } = {}) {
       if (child.stdout) child.stdout.pipe(process.stderr);
       if (child.stderr) child.stderr.pipe(process.stderr);
     }
-    child.on('error', (e) => settle({ exit: null, timedOut, spawnError: shortErr(e), settled: true }));
+    child.on('error', (e) => settle({ exit: null, signal: null, timedOut, spawnError: shortErr(e), settled: true }));
     // 'exit' = the shell died (code known); 'close' additionally waits for
     // stdio to drain — which a lingering DESCENDANT can hold open forever.
     // After exit, allow a short drain window (the shell's own final output
     // arrives within it), then release our pipe ends so 'close' fires even
     // when a descendant kept them open. 'close' stays the settle point.
-    child.on('exit', (code) => {
+    // The execution timeout DISARMS here: the shell has exited, so a drain
+    // window that happens to straddle the deadline must not relabel a
+    // finished run as timed out.
+    child.on('exit', (code, sig) => {
       exitCode = code;
+      exitSignal = sig || null;
+      if (execTimer) clearTimeout(execTimer);
       timers.push(setTimeout(releaseChild, 1500));
     });
-    child.on('close', (code) => settle({ exit: code ?? exitCode ?? null, timedOut, spawnError: null, settled: true }));
-    timers.push(setTimeout(() => {
+    child.on('close', (code, sig) => settle({ exit: code ?? exitCode ?? null, signal: sig || exitSignal, timedOut, spawnError: null, settled: true }));
+    execTimer = setTimeout(() => {
       timedOut = true;
       // Universal settlement deadline starts AT KILL INITIATION — a stalled
       // taskkill (itself bounded below) can never postpone it.
-      timers.push(setTimeout(() => settle({ exit: null, timedOut: true, spawnError: null, settled: false }), KILL_SETTLE_MS));
+      timers.push(setTimeout(() => settle({ exit: null, signal: null, timedOut: true, spawnError: null, settled: false }), KILL_SETTLE_MS));
       (async () => {
         try {
           if (process.platform === 'win32') {
@@ -278,7 +294,8 @@ export function runDeclared(command, { cwd, timeoutMs, json = false } = {}) {
           try { child.kill('SIGKILL'); } catch {}
         }
       })();
-    }, timeoutMs));
+    }, timeoutMs);
+    timers.push(execTimer);
   });
 }
 
@@ -337,12 +354,14 @@ export async function runReplay({ workRoot, stateRoot, sha, spine, actor = null,
   // Receipt semantics: verify exit 0 + full protocol (incl. cleanup) → pass.
   // Verify nonzero → fail, complete:true (the protocol completed; the
   // commands failed). Install failure / timeout / spawn error / unsettled
-  // kill → fail, complete:false (the declared verify never ran or was
-  // killed). Cleanup failure → fail, complete:false even when verify passed
-  // (an incompletely-executed replay protocol never reads as a successful
-  // replayed run) — verify_exit stays visible so the truth is auditable.
+  // kill / SIGNAL DEATH (exit is null, not a number — an externally-killed
+  // verify never "completed") → fail, complete:false. Cleanup failure →
+  // fail, complete:false even when verify passed (an incompletely-executed
+  // replay protocol never reads as a successful replayed run) — verify_exit
+  // stays visible so the truth is auditable.
   const verifyRan = !!verifyRes;
-  const verifyClean = verifyRan && verifyRes.settled && !verifyRes.timedOut && !verifyRes.spawnError;
+  const verifyClean = verifyRan && verifyRes.settled && !verifyRes.timedOut && !verifyRes.spawnError
+    && typeof verifyRes.exit === 'number';
   const protocolComplete = installOk && verifyClean;
   const verifyPassed = verifyClean && verifyRes.exit === 0;
   const result = verifyPassed && cloneDeleted ? 'pass' : 'fail';
@@ -362,6 +381,8 @@ export async function runReplay({ workRoot, stateRoot, sha, spine, actor = null,
     commands: { install: cfg.install, verify: cfg.verify },
     install_exit: installRes ? installRes.exit : null,
     verify_exit: verifyRes ? verifyRes.exit : null,
+    install_signal: installRes ? (installRes.signal || null) : null,
+    verify_signal: verifyRes ? (verifyRes.signal || null) : null,
     timed_out: timedOut,
     spawn_error: spawnError,
     settled: !unsettled,
@@ -386,6 +407,8 @@ export async function runReplay({ workRoot, stateRoot, sha, spine, actor = null,
     installDeclared: !!cfg.install,
     installExit: installRes ? installRes.exit : null,
     verifyExit: verifyRes ? verifyRes.exit : null,
+    installSignal: installRes ? (installRes.signal || null) : null,
+    verifySignal: verifyRes ? (verifyRes.signal || null) : null,
     timedOut,
     spawnError,
     settled: !unsettled,

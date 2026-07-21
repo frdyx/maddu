@@ -192,6 +192,27 @@ async function main() {
     const lingerPid = Number((await readFile(lingerPidFile, 'utf8').catch(() => '')).trim());
     if (lingerPid && alive(lingerPid)) { try { process.kill(lingerPid); } catch {} }
 
+    // ── 3c. signal death is NOT complete (POSIX only: Windows shells report
+    // numeric exit codes, not signals) ──
+    if (process.platform !== 'win32') {
+      const rSig = await makeRepo(base, 'sigkill', { madduJson: { name: 'sigkill', replay: { verify: `${NODE} -e "process.kill(process.pid, 'SIGKILL')"` } } });
+      const oSig = runCli(rSig, ['spine', 'verify', '--replay', headSha(rSig), '--json']);
+      const jSig = JSON.parse(oSig.stdout);
+      ok('signal-killed verify: fail + complete FALSE (never "protocol completed")',
+        oSig.status === 1 && jSig.result === 'fail' && jSig.complete === false && jSig.verifyExit === null,
+        JSON.stringify({ status: oSig.status, complete: jSig.complete, sig: jSig.verifySignal }));
+    }
+
+    // ── 3d. `git replace` refs must not fool subject validation or checkout ──
+    const rRepl = await makeRepo(base, 'replref', { madduJson: { name: 'replref', replay: { verify: `${NODE} -e "process.exit(0)"` } } });
+    const shaRepl = headSha(rRepl);
+    const blobId = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: rRepl, input: 'not a commit\n', encoding: 'utf8' }).trim();
+    git(rRepl, ['replace', '-f', shaRepl, blobId]);
+    const oRepl = runCli(rRepl, ['spine', 'verify', '--replay', shaRepl, '--json']);
+    const jRepl = JSON.parse(oRepl.stdout || '{}');
+    ok('replace-ref smuggling: raw commit still validates and replays (blob replacement ignored)',
+      oRepl.status === 0 && jRepl.result === 'pass', `status=${oRepl.status} ${(oRepl.stderr || '').slice(0, 120)}`);
+
     // ── 4. declared-only discipline ──
     const rNone = await makeRepo(base, 'none', { madduJson: { name: 'none' } });
     const spineBefore = await spineText(rNone);
