@@ -58,6 +58,10 @@ ok('AUTONOMY_RECOMMENDATION summarized with arrow + verdict', /backend: observe 
 const mutedRow = m.eventRow({ ts: '2026-07-03T12:00:00Z', type: 'AUTONOMY_RECOMMENDATION', data: { lane: 'backend', fromRung: 'observe', toRung: 'established', muted: true } });
 ok('muted recommendation says so', /· muted/.test(summaryOf(mutedRow)), summaryOf(mutedRow));
 
+// assurance assessment (PR 6a) — every consumer labels it non-authoritative.
+const assessedRow = m.eventRow({ ts: '2026-07-21T12:00:00Z', type: 'ASSURANCE_ASSESSED', data: { level: 'anchored', subject_sha: 'a'.repeat(40), assessed_by: 'operator-ceremony' } });
+ok('ASSURANCE_ASSESSED labeled non-authoritative', /anchored \(non-authoritative\) · aaaaaaaaaaaa/.test(summaryOf(assessedRow)), summaryOf(assessedRow));
+
 // eventRow — .event-row, fresh adds " new", classified type, summarized payload.
 const row = m.eventRow({ ts: '2026-06-19T12:00:00.000Z', type: 'SLICE_STOP', lane: 'harness', actor: 'me', data: { summary: 'did a thing' } });
 ok('eventRow → .event-row', row.className === 'event-row');

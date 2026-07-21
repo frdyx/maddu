@@ -106,9 +106,24 @@ independent attestation, or proof that a green result is meaningful.
 
 The claim Máddu is entitled to today is narrower and stated exactly: **Máddu
 records a project's declared verification runs and preserves the results as
-auditable evidence; receipts are not bound to a commit SHA and may describe an
-uncommitted working tree, and Máddu does not independently validate the
-verifier the project supplied.** (Commit-bound, clean-checkout reproduction —
-`maddu verify --replay` — is planned, not shipped; this section will be
-updated when it lands.) Claude Code permission rules, where installed, are
-bypassable harness friction, not a security boundary.
+auditable evidence, can re-run the DECLARED commands in a clean checkout of an
+exact commit (`maddu spine verify --replay <sha>`, v1.109.0), and can commit a
+receipt to Bitcoin via OpenTimestamps (`maddu spine anchor`, v1.108.0) — but
+it does not independently validate the verifier the project supplied, and no
+local state ever asserts external assurance.** Claude Code permission rules,
+where installed, are bypassable harness friction, not a security boundary.
+
+The assurance ladder makes the evidence per rung explicit —
+**actor-reported** (the actor's own receipt) → **replayed** (clean-checkout
+re-run of declared commands) → **anchored** (Bitcoin-backed existence proof
+PLUS an operator-run `ots verify` ceremony, recorded by
+`maddu spine anchor --assess <sha>` as a **non-authoritative ledger note**;
+the tool's checks only refuse, they never grant) → *presence-attested*
+(deferred, does not exist yet). Residuals are stated exactly in
+`docs/34-threat-model.md` §13: suffix/all-history anchor deletion is
+undetectable without a retained operator checkpoint; suppression (never
+stamping) is silent; superseded proof-digest claims are unverifiable (only
+the newest proof is disk-checkable); explorer-mode verification trusts
+explorers, not PoW; and everything an anchor doesn't cover inherits the
+unkeyed-spine limits. An anchor proves a receipt existed by a time — not
+that the work was good.

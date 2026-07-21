@@ -104,6 +104,7 @@ function summarize(ev) {
     case 'PHASE_CLEARED':       return d.name ? `${d.name} exited` : '';
     case 'AUTONOMY_SCORED':     return `${d.totalSlices ?? '?'} slice(s) · ${(d.lanes || []).length} lane(s) scored`;
     case 'AUTONOMY_RECOMMENDATION': return `${d.lane || '?'}: ${d.fromRung || '?'} → ${d.toRung || '?'}${d.muted ? ' · muted' : d.recommendation ? ` · ${d.recommendation}` : ''}`;
+    case 'ASSURANCE_ASSESSED':  return `${d.level || '?'} (non-authoritative) · ${(d.subject_sha || '').slice(0, 12)}`;
     default: return '';
   }
 }

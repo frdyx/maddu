@@ -1,5 +1,12 @@
 [
   {
+    "symptom": "Witness track PR 6a: the 'anchored' assurance rung had no producer — contract 1.10.0 declared ASSURANCE_ASSESSED + per-level evidence shapes (v1.108.0) but nothing recorded an operator consume ceremony, and shipped PR 4 verification had containment gaps (position.segment joined unchecked → ../ and symlink escapes; historical ANCHOR_* events with an OMITTED payload_digest skipped the equality check).",
+    "area": "runtime/lib/spine-anchor (assessBinding + readMaxAnchorAge + hardened segment access) + commands/spine (--assess ceremony, --status/show labeling) + events/search/cockpit-event-rows labels",
+    "fixed_in": "1.110.0",
+    "consumer_impact": "`maddu spine anchor --assess <sha>`: interactive operator ceremony recording a NON-AUTHORITATIVE ASSURANCE_ASSESSED (level anchored). Local checks only REFUSE (binding, chain continuity, forged events, witness.maxAnchorAge staleness incl. future dates, TOCTOU recheck after the final confirm incl. policy reload); positive evidence is the operator's pasted external `ots verify` output (redact-before-truncate). Containment: every spine-anchor segment read is symlink-free by lstat with canonical-basename positions; historical anchor events require a string payload_digest equal to disk. Every consumer labels the event non-authoritative; consume gating stays cooperative.",
+    "ledger_ref": "feat/anchor-assess"
+  },
+  {
     "symptom": "Audit P5: the 'secrets are redacted at the write boundary' claim was aspirational — the central redactor covered the spine but ~10 auxiliary state stores (checkpoint tag+index, active-session pointer, schedule, review archive, memory facts, MCP/runtime descriptors+health, lane catalog) wrote caller/agent/subprocess text raw; the detector missed GitHub fine-grained/user/refresh, Google, Stripe, and PEM private-key shapes and had a second stale scanner (imports.mjs); package.json/package-lock.json (1.86/1.45) drifted 12+ versions behind version.json; and several docs miscounted gates / overclaimed doctor coverage.",
     "area": "runtime/lib/secret-scan + checkpoints/session-active/schedule/review/hindsight/mcp/runtimes/global/bridge-routes-lanes + imports + docs",
     "fixed_in": "1.99.0",

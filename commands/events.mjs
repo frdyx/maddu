@@ -42,6 +42,7 @@ function summarizeEvent(e) {
     case 'APPROVAL_REQUESTED':  return `${e.data.tool}  ${e.data.action || ''}`;
     case 'APPROVAL_DECIDED':    return `${e.data.decision}  ${e.data.tool || ''}`;
     case 'APPROVAL_POLICY_SET': return `${e.data.decision}  ${e.data.tool}@${e.data.lane || '*'}`;
+    case 'ASSURANCE_ASSESSED': return `${e.data.level || '?'} (non-authoritative) · ${(e.data.subject_sha || '').slice(0, 12)}`;
     default: return '';
   }
 }

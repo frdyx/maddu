@@ -1,5 +1,5 @@
 {
-  "version": "1.109.0",
-  "phase": "verify-replay",
+  "version": "1.110.0",
+  "phase": "anchored-assessment",
   "released": "2026-07-21"
 }

@@ -53,6 +53,9 @@ export async function search(repoRoot, query, { kinds = null, limit = 50 } = {})
       if (!want.has(kind)) continue;
       const title = ev.type === 'SLICE_STOP' ? (ev.data?.summary || ev.type) :
                     ev.type === 'INBOX_MESSAGE' ? (ev.data?.message || '').slice(0, 80) :
+                    // ledger note, not a verification result — label it wherever
+                    // the shared title surfaces (CLI search + cockpit search).
+                    ev.type === 'ASSURANCE_ASSESSED' ? `${ev.type} (non-authoritative)` :
                     ev.type;
       results.push({
         kind, id: ev.id, ts: ev.ts, lane: ev.lane || null,
