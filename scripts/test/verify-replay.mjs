@@ -192,10 +192,14 @@ async function main() {
     const lingerPid = Number((await readFile(lingerPidFile, 'utf8').catch(() => '')).trim());
     if (lingerPid && alive(lingerPid)) { try { process.kill(lingerPid); } catch {} }
 
-    // ── 3c. signal death is NOT complete (POSIX only: Windows shells report
-    // numeric exit codes, not signals) ──
+    // ── 3c. WRAPPER signal death is NOT complete (POSIX only: Windows shells
+    // report numeric exit codes, not signals). `kill` is a shell BUILTIN and
+    // `$$` is the shell node spawned — our direct child SIGKILLs itself, so
+    // 'close' reports (null, SIGKILL). (A signal sent to a grandchild instead
+    // surfaces as numeric 128+n from the surviving shell — that is case
+    // 3c-ii below, the documented residual.) ──
     if (process.platform !== 'win32') {
-      const rSig = await makeRepo(base, 'sigkill', { madduJson: { name: 'sigkill', replay: { verify: `${NODE} -e "process.kill(process.pid, 'SIGKILL')"` } } });
+      const rSig = await makeRepo(base, 'sigkill', { madduJson: { name: 'sigkill', replay: { verify: 'kill -9 $$' } } });
       const oSig = runCli(rSig, ['spine', 'verify', '--replay', headSha(rSig), '--json']);
       const jSig = JSON.parse(oSig.stdout);
       ok('signal-killed verify: fail + complete FALSE (never "protocol completed")',
@@ -207,7 +211,10 @@ async function main() {
     // fail with complete:true (documented residual — 128+n is also a
     // legitimate exit code); the point proven here: never a pass ──
     if (process.platform !== 'win32') {
-      const rSig2 = await makeRepo(base, 'siginner', { madduJson: { name: 'siginner', replay: { verify: `sh -c 'kill -9 \\$\\$'` } } });
+      // `; exit $?` forces the outer shell to FORK the inner sh (a lone
+      // command would be exec'd, collapsing this into case 3c) and then
+      // report the inner signal death as numeric 128+9.
+      const rSig2 = await makeRepo(base, 'siginner', { madduJson: { name: 'siginner', replay: { verify: `sh -c 'kill -9 $$'; exit $?` } } });
       const oSig2 = runCli(rSig2, ['spine', 'verify', '--replay', headSha(rSig2), '--json']);
       const jSig2 = JSON.parse(oSig2.stdout);
       ok('inner signal death: always FAIL, never pass (exit recorded verbatim)',
