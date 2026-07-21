@@ -43,8 +43,112 @@ export default async function spine(argv) {
   const repoRoot = await resolveRepoRoot(lib.paths);
 
   if (!sub) {
-    console.error('Usage: maddu spine <verify|show|oversight|sync|import> [args]');
+    console.error('Usage: maddu spine <verify|show|oversight|anchor|sync|import> [args]');
     process.exit(2);
+  }
+
+  if (sub === 'anchor') {
+    if (!lib.spineAnchor) {
+      console.error('spine-anchor.mjs not found in this install. Run `maddu upgrade` to enable anchoring.');
+      process.exit(2);
+    }
+    const { flags, positional } = parseFlags(rest);
+    // STRICT flag validation: stamping is irreversible (a calendar submission
+    // cannot be recalled), so a typo'd flag (--upgarde) or a valueless --event
+    // must be usage error 2 — never a fall-through to "stamp now".
+    const ANCHOR_FLAGS = new Set(['upgrade', 'status', 'verify', 'json', 'event']);
+    const unknown = Object.keys(flags).filter((f) => !ANCHOR_FLAGS.has(f));
+    const modes = ['upgrade', 'status', 'verify'].filter((f) => flags[f]);
+    // Boolean flags must be EXACTLY true — the shared parser consumes a
+    // following bare word as a value (`--upgrade now` → 'now'), and `=false`
+    // is not a supported spelling; both are usage errors, not near-misses.
+    const boolBad = ['upgrade', 'status', 'verify', 'json'].some((f) => flags[f] !== undefined && flags[f] !== true);
+    if (unknown.length || boolBad || (positional && positional.length) || modes.length > 1
+        || (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim()))
+        || (flags.event !== undefined && modes.length)) {
+      console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify] [--json]');
+      if (unknown.length) console.error(`  unknown flag(s): ${unknown.map((f) => `--${f}`).join(', ')}`);
+      if (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim())) console.error('  --event requires an event id');
+      process.exit(2);
+    }
+    const sa = lib.spineAnchor;
+    const emit = (obj, code) => { process.stdout.write(JSON.stringify(obj, null, 2) + '\n'); process.exit(code); };
+
+    if (flags.status) {
+      const st = await sa.anchorStatus(repoRoot);
+      if (flags.json) emit(st, 0);
+      console.log(`${ANSI.bold}Máddu spine anchors${ANSI.reset}  ${repoRoot}`);
+      console.log();
+      if (!st.anchors.length) {
+        console.log(`  ${ANSI.dim}(no anchors yet — \`maddu spine anchor\` stamps the newest verification receipt)${ANSI.reset}`);
+      }
+      for (const a of st.anchors) {
+        const state = a.complete ? `${ANSI.pass}complete${ANSI.reset}` : a.hasProof ? `${ANSI.warn}pending${ANSI.reset}` : `${ANSI.fail}no proof${ANSI.reset}`;
+        console.log(`  ${ANSI.accent}#${a.seq}${ANSI.reset}  ${state}  ${ANSI.dim}${(a.payloadDigest || '').slice(0, 12)}… · receipt ${a.eventId || '—'} · ${fmtTs(a.stampedAt)}${ANSI.reset}`);
+      }
+      if (st.anchors.some((a) => !a.complete && a.hasProof)) {
+        console.log();
+        console.log(`  ${ANSI.dim}Bitcoin confirmation takes hours — re-run \`maddu spine anchor --upgrade\` later.${ANSI.reset}`);
+      }
+      process.exit(0);
+    }
+
+    if (flags.verify) {
+      const v = await sa.verifyAnchors(repoRoot);
+      if (flags.json) emit(v, v.ok ? 0 : 1);
+      console.log(`${ANSI.bold}Máddu anchor verify${ANSI.reset}  ${repoRoot}  ${ANSI.dim}(read-only diagnostic — not assurance evidence)${ANSI.reset}`);
+      console.log();
+      for (const i of v.issues) {
+        console.log(`  ${levelTag(i.level)}  ${ANSI.dim}${i.kind}${i.seq ? ` #${i.seq}` : ''}${ANSI.reset}`);
+        console.log(`        ${i.detail}`);
+      }
+      if (!v.issues.length) console.log(`  ${levelTag('PASS')}  ${v.anchors} anchor(s): continuity intact, payloads canonical, spine positions match`);
+      console.log();
+      console.log(`  ${ANSI.dim}Residual: ${v.residual}${ANSI.reset}`);
+      console.log(`  ${ANSI.dim}${v.operatorVerify}${ANSI.reset}`);
+      process.exit(v.ok ? 0 : 1);
+    }
+
+    if (flags.upgrade) {
+      const r = await sa.upgradeAnchors(repoRoot, { spineLib: lib.spine });
+      // Per-result errors (bak-error, no-proof) mean lost or unreconciled
+      // protection — automation must see nonzero even when the run itself ok'd.
+      const anyError = r.ok && r.results.some((x) => x.state === 'bak-error' || x.state === 'no-proof');
+      if (flags.json) emit(r, r.ok && !anyError ? 0 : 1);
+      if (!r.ok) { printAnchorRefusal(r); process.exit(1); }
+      if (!r.results.length) console.log(`${ANSI.dim}no anchors to upgrade${ANSI.reset}`);
+      let hadError = false;
+      for (const it of r.results) {
+        const tag = it.state === 'completed' ? levelTag('PASS')
+          : it.state === 'complete' ? `${ANSI.dim}complete${ANSI.reset}`
+          : it.state === 'partial' ? levelTag('WARN')
+          : it.state === 'reconciled' ? `${ANSI.accent}reconciled${ANSI.reset}`
+          : it.state === 'pending' ? `${ANSI.warn}pending${ANSI.reset}`
+          : `${ANSI.fail}${it.state}${ANSI.reset}`;
+        if (it.state === 'bak-error' || it.state === 'no-proof') hadError = true;
+        console.log(`  ${ANSI.accent}#${it.seq}${ANSI.reset}  ${tag}${it.state === 'pending' ? `  ${ANSI.dim}(Bitcoin confirmation not in yet — retry in a few hours)${ANSI.reset}` : ''}`);
+        if (it.detail && (it.state === 'bak-error' || it.state === 'no-proof')) console.log(`      ${ANSI.dim}${it.detail}${ANSI.reset}`);
+      }
+      if (hadError) console.log(`  ${ANSI.dim}run \`maddu spine anchor --verify\` for the full diagnostic${ANSI.reset}`);
+      process.exit(hadError ? 1 : 0);
+    }
+
+    // Default: stamp now.
+    const r = await sa.stampAnchor(repoRoot, { eventId: typeof flags.event === 'string' ? flags.event : null, spineLib: lib.spine });
+    if (flags.json) emit(r, r.ok ? 0 : 1);
+    if (!r.ok) { printAnchorRefusal(r); process.exit(1); }
+    if (r.already) {
+      console.log(`${ANSI.dim}already anchored${ANSI.reset} — anchor ${ANSI.accent}#${r.seq}${ANSI.reset} already commits to the current receipt.`);
+      process.exit(0);
+    }
+    console.log(`${levelTag('PASS')}  anchor ${ANSI.accent}#${r.seq}${ANSI.reset} stamped${r.recovered ? ' (recovered a crashed stamp)' : ''}`);
+    console.log(`  payload sha256: ${ANSI.dim}${r.payloadDigest}${ANSI.reset}`);
+    if (r.calendars && r.calendars.length) console.log(`  calendars: ${ANSI.dim}${r.calendars.join(', ')}${ANSI.reset}`);
+    if (r.gitignore === 'added') console.log(`  ${ANSI.dim}.gitignore: added !.maddu/anchors/ inside Máddu's block (anchors are meant to be committed)${ANSI.reset}`);
+    if (r.gitignore === 'no-maddu-block') console.log(`  ${ANSI.warn}WARN${ANSI.reset}  .gitignore has no Máddu block — make sure .maddu/anchors/ is tracked, or anchors won't travel with the repo`);
+    console.log(`  ${ANSI.dim}Bitcoin confirmation takes hours: \`maddu spine anchor --upgrade\` later, then keep an${ANSI.reset}`);
+    console.log(`  ${ANSI.dim}operator note of "anchor #${r.seq} ${String(r.payloadDigest).slice(0, 12)}" — suffix deletion is undetectable without it.${ANSI.reset}`);
+    process.exit(0);
   }
 
   if (sub === 'sync' && rest[0] !== 'init') {
@@ -132,6 +236,9 @@ export default async function spine(argv) {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} committing the spine would expose ${res.hits.length} secret-shaped value(s):`);
         for (const h of res.hits.slice(0, 10)) console.error(`  ${ANSI.dim}${h.where}${ANSI.reset}  ${h.patternTypes.join(', ')}`);
         console.error(`\nRedact these events before enabling sync (the whole data payload becomes git-visible).`);
+      } else if (res.reason === 'anchors-present') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} this repo has spine anchors (.maddu/anchors/) — anchoring is unsupported in team-sync mode, and migrating would orphan the positions existing anchors point at.`);
+        console.error(`  Archive or remove the anchors first if you want team-sync on this repo.`);
       } else if (res.reason === 'config-invalid') {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
       } else {
@@ -259,6 +366,28 @@ export default async function spine(argv) {
 
   console.error(`maddu spine: unknown subcommand "${sub}" (expected: verify | show | oversight | sync | import)`);
   process.exit(2);
+}
+
+// Shared refusal printer for `spine anchor` / `--upgrade` — every reason maps
+// to a remedy the operator can actually take.
+function printAnchorRefusal(r) {
+  if (r.reason === 'sync-mode') {
+    console.error(`${ANSI.fail}Refused:${ANSI.reset} anchoring is unsupported in team-sync mode — one anchor chain covers one replica's spine; a singular chain head cannot cover a merged multi-replica spine.`);
+  } else if (r.reason === 'ots-missing') {
+    console.error(`${ANSI.fail}Refused:${ANSI.reset} the OpenTimestamps client is not available (${r.detail}).`);
+    if (r.hint) console.error(r.hint.split('\n').map((l) => `  ${ANSI.dim}${l}${ANSI.reset}`).join('\n'));
+  } else if (r.reason === 'config-invalid') {
+    console.error(`${ANSI.fail}Refused:${ANSI.reset} ${r.detail}`);
+  } else if (r.reason === 'no-receipt') {
+    console.error(`${ANSI.fail}Refused:${ANSI.reset} nothing to anchor — no VERIFICATION_RAN receipt on the spine yet. Run a verification (e.g. \`maddu test\`) first, or pass --event <id>.`);
+  } else if (r.reason === 'event-not-found') {
+    console.error(`${ANSI.fail}Refused:${ANSI.reset} --event id not found on the spine.`);
+  } else if (r.reason === 'stamp-failed') {
+    console.error(`${ANSI.fail}Failed:${ANSI.reset} calendar submission failed (offline?). There is NO offline queue — nothing was recorded; re-run \`maddu spine anchor\` when online.`);
+    if (r.detail) console.error(`  ${ANSI.dim}${r.detail}${ANSI.reset}`);
+  } else {
+    console.error(`${ANSI.fail}Refused:${ANSI.reset} ${r.reason}${r.detail ? ` — ${r.detail}` : ''}`);
+  }
 }
 
 // Human-readable "what did my agent do" readout — the terminal twin of the

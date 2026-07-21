@@ -66,7 +66,18 @@
 // refuses a reasonless or whitespace-only rebuild; `by` is the session id when
 // one is active, null otherwise. Added fields to an existing type → minor
 // bump; baseline refreshed with this release.
-export const EVENT_CONTRACT_VERSION = '1.9.0';
+// 1.10.0 (witness PR 4) — added ANCHOR_STAMPED, ANCHOR_UPGRADED, and
+// ASSURANCE_ASSESSED: the Tier-1 external-witness events. This bump covers
+// ONLY the three events whose producers ship in PR 4–6a (ANCHOR_* now,
+// ASSURANCE_ASSESSED's ceremony producer in PR 6a); ATTESTATION_RECORDED
+// waits for a SECOND bump after PR 6b's parser/ceremony spikes are proven —
+// honest sequencing beats bump-count vanity. ASSURANCE_ASSESSED's per-level
+// REQUIRED evidence shapes are enforced by the producer through
+// spine-anchor.mjs validateAssuranceEvidence (the schema grammar below
+// declares field types; the per-level requirement has one canonical checker),
+// and every consumer labels the event non-authoritative. Additive → minor
+// bump; baseline refreshed with this release.
+export const EVENT_CONTRACT_VERSION = '1.10.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -256,6 +267,9 @@ export const EVENT_SCHEMA = {
   ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   VERIFICATION_STARTED: { summary: "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.", data: { kind: 'string', profile: 'string|null' } },
   VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.", data: { allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?' } },
+  ANCHOR_STAMPED: { summary: "A spine receipt was stamped into the OpenTimestamps calendars as a new anchor.", data: { seq: 'number', payload_digest: 'string', calendars: 'array', proof_files: 'array' } },
+  ANCHOR_UPGRADED: { summary: "An anchor's OpenTimestamps proof file changed (partial merge or completed Bitcoin attestation).", data: { seq: 'number', payload_digest: 'string', complete: 'boolean', proof_files: 'array' } },
+  ASSURANCE_ASSESSED: { summary: "An operator-run consume ceremony recorded an assurance assessment — ledger convenience only, labeled non-authoritative by every consumer.", data: { subject_sha: 'string', receipt_digest: 'string', level: 'string', evidence: 'object', assessed_by: 'string', note: 'string?' } },
   BLUEPRINT_DISTILLED: { summary: "A blueprint skeleton was distilled into prose by a provider CLI.", data: { distilledBytes: 'number', outPath: 'string', provider: 'string', runtime: 'string', skeletonBytes: 'number', slug: 'string' } },
   DEBT_SCANNED: { summary: "The source tree was scanned for deliberate-shortcut debt markers.", data: { files: 'number', ledgerPath: 'string|null', markers: 'number', noTrigger: 'number' } },
   ARCHITECTURE_SCANNED: { summary: "The declared architecture contract was checked against the import graph.", data: { blocking: 'boolean', cycles: 'number', driftScore: 'number', edges: 'number', failOn: 'string', forbidden: 'number', modules: 'number', newViolations: 'number', uncovered: 'number', undeclared: 'number' } },

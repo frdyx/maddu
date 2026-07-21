@@ -316,6 +316,25 @@ export const EVENT_TYPES = {
   //     // success-eval only: allMet, metCount, verifiable, pendingCount,
   //     //   objective, setAt, conditions:[{text,state}] }
   VERIFICATION_RAN:           'VERIFICATION_RAN',
+  // witness PR 4 (contract 1.10.0) — `maddu spine anchor` stamped a canonical
+  // payload (receipt digest + subject SHA + spine position + chain head) into
+  // the OpenTimestamps calendars. The proof completes hours later when Bitcoin
+  // confirms; local pending/complete status is NEVER assurance evidence — only
+  // an operator-run Bitcoin-backed `ots verify` at consume time is. data:
+  //   { seq, payload_digest, calendars: [urls], proof_files: [{path, digest}] }
+  ANCHOR_STAMPED:             'ANCHOR_STAMPED',
+  // witness PR 4 — `maddu spine anchor --upgrade` changed a proof file
+  // (partial calendar merge or a completed Bitcoin attestation). Emitted only
+  // when the proof bytes actually changed; a no-op pending poll is silent.
+  // data: { seq, payload_digest, complete, proof_files: [{path, digest}] }
+  ANCHOR_UPGRADED:            'ANCHOR_UPGRADED',
+  // witness PR 4 (producer ships in PR 6a) — an OPERATOR-run consume ceremony
+  // recorded an assurance assessment. Ledger convenience ONLY: no projection or
+  // gate may treat it as proof, and every consumer labels it non-authoritative.
+  // Per-level REQUIRED evidence shapes are enforced by the producer via
+  // spine-anchor.mjs validateAssuranceEvidence. data:
+  //   { subject_sha, receipt_digest, level, evidence, assessed_by, note? }
+  ASSURANCE_ASSESSED:         'ASSURANCE_ASSESSED',
   // v1.15.0 — `maddu blueprint --distill` spawned a provider CLI (subprocess,
   // hard rule #5) to rewrite the deterministic skeleton into prose. Recorded on
   // success only; an unmet auth gate or worker failure falls back to the
