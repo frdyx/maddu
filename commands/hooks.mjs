@@ -188,17 +188,25 @@ async function readHookPayload() {
   try { return raw.trim() ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
-// The WORK root for dirty observation: the hook payload's cwd resolved
-// through the worktree-aware root resolver (an attached lane worktree must
-// be observed as ITSELF, not as the primary checkout the state root names).
+// The WORK root for dirty observation: the hook payload's cwd (falling back
+// to process.cwd()) resolved through the worktree-aware root resolver — an
+// attached lane worktree must be observed as ITSELF, not as the primary
+// checkout the state root names. FAILURE DIRECTION: an unresolvable work
+// root returns NULL, which downstream reads as observed:false (unknown, no
+// commit pressure) — falling back to the primary checkout could baseline or
+// gate a worktree session against the WRONG repo's dirt.
 async function resolveWorkRootFrom(paths, payloadCwd, repoRoot) {
+  void repoRoot;
   try {
-    if (paths && typeof paths.resolveRoots === 'function' && typeof payloadCwd === 'string' && payloadCwd) {
-      const roots = await paths.resolveRoots(payloadCwd);
-      if (roots && roots.workRoot) return roots.workRoot;
+    if (paths && typeof paths.resolveRoots === 'function') {
+      for (const cwd of [payloadCwd, process.cwd()]) {
+        if (typeof cwd !== 'string' || !cwd) continue;
+        const roots = await paths.resolveRoots(cwd);
+        if (roots && roots.workRoot) return roots.workRoot;
+      }
     }
   } catch { /* fall through */ }
-  return repoRoot;
+  return null;
 }
 
 async function fireSessionStart() {
@@ -216,14 +224,15 @@ async function fireSessionStart() {
     const isRefId = spine.isRefId || (() => false);
     const isSid = spine.isSid || (() => false);
     const label = basename(repoRoot) || 'agent';
-    const parentEnv = process.env.MADDU_PARENT_SESSION_ID;
+    // Parent forwarded VERBATIM as on main — parent validation is PR-B's.
+    const parentEnv = process.env.MADDU_PARENT_SESSION_ID || null;
     const makeEvent = (sessionId) => ({
       type: spine.EVENT_TYPES.SESSION_AUTO_REGISTERED,
       actor: sessionId,
       lane: null,
       data: {
         sessionId,
-        parentSessionId: isRefId(parentEnv) ? parentEnv : null,
+        parentSessionId: parentEnv,
         source: 'cli',
         label,
         role: 'implementer',

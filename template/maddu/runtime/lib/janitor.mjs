@@ -83,7 +83,23 @@ export function evaluateSessions(projection, now, cfg) {
 // caller logs/exposes them.
 export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
   const cfg = await readJanitorConfig(repoRoot);
-  const { stale, closed } = evaluateSessions(projection, nowMs, cfg);
+  // v1.111.0: PASS-LEVEL strict snapshot + parse gate. Candidate selection
+  // comes from ONE strict reduction (not the caller's tolerant projection —
+  // kept as a parameter for API compatibility, used only as a fallback on an
+  // older lib without the reducers): parseErrors > 0 skips the WHOLE pass
+  // before any candidate is mutated; the close-locked helpers then
+  // re-validate each mutation against their own fresh in-lock snapshot.
+  let selectionView = projection;
+  try {
+    const { events, parseErrors } = await readAllStrict(repoRoot);
+    if (typeof parseErrors === 'number' && parseErrors > 0) {
+      process.stderr.write('[maddu janitor] spine has malformed lines — session pass skipped this round (run maddu verify)\n');
+      return { staleEmitted: 0, closedEmitted: 0, orphanedWorktrees: [] };
+    }
+    const view = reduceSessions(events, { nowMs });
+    selectionView = { activeSessions: view.activeSessions, janitor: { staleSessions: [...view.staleSet] } };
+  } catch { /* fall back to the caller's projection */ }
+  const { stale, closed } = evaluateSessions(selectionView, nowMs, cfg);
   const firedAt = new Date(nowMs).toISOString();
   const triggeredBy = { kind: 'janitor', id: 'sessions', fired_at: firedAt };
 

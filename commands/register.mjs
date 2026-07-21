@@ -87,8 +87,9 @@ export default async function register(argv) {
   const cwdLabel = basename(repoRoot) || 'agent';
   const label = positional[0] || flags.label || cwdLabel;
   const role = flags.role || 'implementer';
-  const parentRaw = flags.parent || process.env.MADDU_PARENT_SESSION_ID || null;
-  const parentSessionId = isRefId(parentRaw) ? parentRaw : null;
+  // Parent forwarded VERBATIM as on main — parent validation + existence
+  // checking are explicitly deferred to the PR-B id-validation campaign.
+  const parentSessionId = flags.parent || process.env.MADDU_PARENT_SESSION_ID || null;
 
   // 3. Append SESSION_AUTO_REGISTERED through the uniqueness transaction.
   //    The session id IS the actor — same convention as SESSION_REGISTERED;

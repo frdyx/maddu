@@ -687,6 +687,9 @@ export function lastOwnSliceStop(stops, sessionId) {
   return found;
 }
 
+// workRoot: undefined -> repoRoot (repository-scoped callers); NULL -> the
+// caller could not resolve a work root, so the observation is UNKNOWN
+// (observed:false) rather than silently measured against the wrong repo.
 export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { workRoot = repoRoot } = {}) {
   const [{ project }, plansMod] = await Promise.all([
     import('./projections.mjs'), import('./plans.mjs'),
@@ -724,7 +727,7 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { w
     configInvalid = !!cfgT.configInvalid;
   } catch { configInvalid = true; }
 
-  const obs = await dirtyFilesDetailed(workRoot);
+  const obs = workRoot ? await dirtyFilesDetailed(workRoot) : { ok: false, paths: [], renames: new Map() };
   const observed = obs.ok && !configInvalid;
   const rawDirty = obs.paths;
   const currentDirtyPaths = observed ? filterIgnored(rawDirty, ignore) : [];
@@ -800,7 +803,9 @@ export async function evaluateDiscipline(repoRoot, opts = {}) {
     if (!isMutating) return ok();
 
     const counter = sessionId ? await readCounter(repoRoot, sessionId) : { editsSinceSlice: 0, dirtyBaseline: [] };
-    const state = await gatherRitualState(repoRoot, sessionId, nowMs, counter, { workRoot: opts.workRoot || repoRoot });
+    // undefined = repository-scoped caller (observe the repo we were given);
+    // explicit null = the hook could not resolve a work root (observed:false).
+    const state = await gatherRitualState(repoRoot, sessionId, nowMs, counter, { workRoot: opts.workRoot === undefined ? repoRoot : opts.workRoot });
     if (laneJustClaimed) state.lane = { claimed: true };
 
     return decide({ thresholds, state, counter, toolCtx: { isMutating } });
@@ -1012,7 +1017,7 @@ export async function enforcePreTool(repoRoot, opts = {}) {
     // a git failure. Lock failure → NO write; evaluate a TRANSIENT
     // nextCounter result in memory (never the raw snapshot, whose stale
     // firstDirtyTs could block a now-clean repo) and skip the edit bump.
-    const workRoot = opts.workRoot || repoRoot;
+    const workRoot = opts.workRoot === undefined ? repoRoot : opts.workRoot;
     let decision, enforcedState;
     const persisted = counterKey ? await mutateCounter(repoRoot, counterKey, async (prev) => {
       const state = await gatherRitualState(repoRoot, sid, nowMs, prev, { workRoot });

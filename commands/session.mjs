@@ -72,7 +72,10 @@ async function doRegister(spine, sessionActive, repoRoot, { id, role, label, foc
     // rejected (a same-id registration after a close must never resurrect
     // the closed session); generated ids are existence-checked with a
     // bounded regenerate.
-    const res = await sessionLifecycle.registerSessionUnique(repoRoot, { id: id !== undefined && id !== true ? id : undefined, makeEvent });
+    // A BARE `--id` parses to boolean true — passed through so the
+    // transaction rejects it as invalid-id (exit 2 below), never silently
+    // registering a generated id the caller didn't ask for.
+    const res = await sessionLifecycle.registerSessionUnique(repoRoot, { id, makeEvent });
     if (res.status === 'invalid-id') {
       console.error(`invalid session id (must match ses_[A-Za-z0-9_]{1,64}) — omit --id to generate one`);
       process.exit(2);

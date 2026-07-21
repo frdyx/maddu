@@ -255,6 +255,188 @@ async function main() {
   ok('normalizeHandoff: object kept', lc.normalizeHandoff({ summary: 's', n: 1 }).n === 1);
   ok('normalizeHandoff: junk → null', lc.normalizeHandoff(3) === null && lc.normalizeHandoff([]) === null && lc.normalizeHandoff('') === null);
 
+  // ── counter store: locked RMW concurrency + legacy-interlude detection ──
+  {
+    const disc = await import(pathToFileURL(join(LIB, 'discipline.mjs')).href);
+    const repo = await makeRepo();
+    const K = 'ses_20260101000000_rmwrmw';
+    // parallel mutations both land (locked RMW — no lost update)
+    await Promise.all([
+      disc.mutateCounter(repo, K, (c) => { c.a = 1; return c; }),
+      disc.mutateCounter(repo, K, (c) => { c.b = 2; return c; }),
+    ]);
+    const both = await disc.readCounter(repo, K);
+    ok('mutateCounter: parallel writes both land', both.a === 1 && both.b === 2, JSON.stringify({ a: both.a, b: both.b }));
+    // meta distinguishes absent / parsed / malformed
+    const dAbs = await disc.readCounterDetailed(repo, 'ses_20260101000000_nofile');
+    ok('counter meta: absent', dAbs.meta.existed === false);
+    const dOk = await disc.readCounterDetailed(repo, K);
+    ok('counter meta: parsed', dOk.meta.existed === true && dOk.meta.readOk === true);
+    // legacy-interlude: seed a baselineInit'd v2 counter, then write the
+    // LEGACY flat file (what a v1 rollback touches) → next read strips the
+    // marker (forces re-initialization, fail-open discard of the clocks).
+    await disc.mutateCounter(repo, K, (c) => { c.baselineInit = true; c.dirtyBaseline = ['x']; return c; });
+    const legacyPath = join(repo, '.maddu', 'state', 'discipline', `${K}.json`);
+    await mkdir(dirname(legacyPath), { recursive: true });
+    await new Promise((r) => setTimeout(r, 20)); // ensure a distinct mtime signature
+    await writeFile(legacyPath, JSON.stringify({ firstDirtyTs: 123 }) + '\n');
+    const after = await disc.readCounter(repo, K);
+    ok('legacy interlude: drift vs recorded observation strips baselineInit', after.baselineInit !== true);
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── real-git observation: rename parsing + unknown direction ──
+  {
+    const { spawnSync } = await import('node:child_process');
+    const disc = await import(pathToFileURL(join(LIB, 'discipline.mjs')).href);
+    const repo = await makeRepo();
+    const g = (...args) => spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+    const init = g('init', '-b', 'main');
+    if (init.status !== 0) {
+      console.log('  [SKIP] git unavailable — real-git observation fixtures skipped');
+    } else {
+      g('config', 'user.email', 't@t.t'); g('config', 'user.name', 'T');
+      await writeFile(join(repo, 'orig.js'), 'content that stays identical\n');
+      await writeFile(join(repo, 'other.js'), 'x\n');
+      g('add', '-A'); g('commit', '-m', 'init');
+      g('mv', 'orig.js', 'moved.js');
+      const obs = await disc.dirtyFilesDetailed(repo);
+      const meta = obs.renames.get('moved.js');
+      ok('dirtyFilesDetailed: staged rename parsed (to + from + kind R)',
+        obs.ok && meta && meta.from === 'orig.js' && meta.kind === 'R', JSON.stringify([...obs.renames]));
+      ok('dirtyFilesDetailed: no bogus source-path entries', !obs.paths.includes('orig.js'), JSON.stringify(obs.paths));
+      // unknown observation: nonexistent work root → ok:false
+      const bad = await disc.dirtyFilesDetailed(join(repo, 'no', 'such', 'dir'));
+      ok('dirtyFilesDetailed: unresolvable root → ok:false', bad.ok === false);
+      // invalid discipline config → observed:false (commit gate unknown)
+      await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+      await writeFile(join(repo, '.maddu', 'config', 'discipline.json'), '{broken');
+      const st = await disc.gatherRitualState(repo, null, Date.now(), { baselineInit: true, dirtyBaseline: [] });
+      ok('invalid config → observed:false (unknown, no commit pressure)', st.commit.observed === false && st.commit.newDirtyFiles === 0);
+      await rm(join(repo, '.maddu', 'config', 'discipline.json'), { force: true });
+      // null workRoot (hook could not resolve) → observed:false, never the wrong repo
+      const stNull = await disc.gatherRitualState(repo, null, Date.now(), { baselineInit: true, dirtyBaseline: [] }, { workRoot: null });
+      ok('null workRoot → observed:false', stNull.commit.observed === false);
+    }
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── janitor: malformed spine skips; heartbeat-vs-sweep; sweep report accuracy ──
+  {
+    const janitor = await import(pathToFileURL(join(LIB, 'janitor.mjs')).href);
+    const repo = await makeRepo();
+    const A = 'ses_20260101000000_jj00aa';
+    const regEv = await reg(repo, A);
+    const staleNow = Date.parse(regEv.ts) + 5 * 60 * 60 * 1000;
+    // heartbeat lands after selection-age would close → helper refuses in-lock
+    await spine.append(repo, { type: T.SESSION_HEARTBEAT, actor: A, data: { focus: null } });
+    const projLike = { activeSessions: [{ id: A, status: 'active', lastHeartbeatAt: regEv.ts }], janitor: { staleSessions: [] } };
+    const jr = await janitor.runJanitor(repo, projLike, Date.parse(regEv.ts) + 1000);
+    ok('janitor: fresh session not closed, report counts real appends only', jr.closedEmitted === 0 && jr.staleEmitted === 0);
+    // stale for real → closed exactly once, HEARTBEAT→AUTO_CLOSED never inverted
+    const jr2 = await janitor.runJanitor(repo, projLike, staleNow);
+    ok('janitor: genuinely stale session closed once', jr2.closedEmitted === 1);
+    // malformed spine → whole session pass skipped, orphan pass skipped
+    const repo2 = await makeRepo();
+    await reg(repo2, 'ses_20260101000000_jj00bb');
+    await corruptSpine(repo2);
+    const projections2 = await import(pathToFileURL(join(LIB, 'projections.mjs')).href);
+    const jr3 = await janitor.reconcileStale(repo2, projections2, Date.now() + 10 * 60 * 60 * 1000);
+    ok('janitor: malformed spine → nothing mutated', jr3.autoClosed === 0 && jr3.staleDetected === 0 && (jr3.orphanedClaimsReleased || []).length === 0);
+    await rm(repo, { recursive: true, force: true });
+    await rm(repo2, { recursive: true, force: true });
+  }
+
+  // ── concurrent pointer repair: exactly one write, no steal ──
+  {
+    const repo = await makeRepo();
+    const A = 'ses_20260101000000_pp00aa';
+    const B = 'ses_20260101000000_pp00bb';
+    await reg(repo, A); await reg(repo, B);
+    const rs = await Promise.all([
+      sa.writeActiveSessionIfAbsent(repo, { sessionId: A }),
+      sa.writeActiveSessionIfAbsent(repo, { sessionId: B }),
+    ]);
+    ok('concurrent repair: exactly one wrote', rs.filter(Boolean).length === 1, JSON.stringify(rs));
+    const rec = await sa.readActiveSession(repo);
+    ok('concurrent repair: survivor is a live registered session', rec && (rec.sessionId === A || rec.sessionId === B));
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── hooks fire e2e: containment 4×2, session-end binding lifecycle ──
+  {
+    const { spawnSync } = await import('node:child_process');
+    const BIN = join(ROOT, 'bin', 'maddu.mjs');
+    const repo = await makeRepo();
+    const fire = (event, payload, env = {}) => spawnSync(process.execPath, [BIN, 'hooks', 'fire', event], {
+      cwd: repo, encoding: 'utf8', input: payload === null ? '' : JSON.stringify(payload),
+      env: { ...process.env, MADDU_SESSION_ID: '', MADDU_PARENT_SESSION_ID: '', ...env },
+    });
+    // containment: every event × bootstrap/handler seam → exit 0
+    for (const ev of ['session-start', 'session-end', 'pre-compact', 'pre-tool-use']) {
+      for (const stage of ['bootstrap', 'handler']) {
+        const r = fire(ev, { session_id: 'c-contain', cwd: repo, tool_name: 'Edit', tool_input: { file_path: 'x.js' } },
+          { MADDU_SELF_TEST: '1', MADDU_HOOK_TEST_THROW: stage });
+        ok(`containment: ${ev} × ${stage} seam → exit 0`, r.status === 0, `status=${r.status} stderr=${(r.stderr || '').slice(0, 60)}`);
+      }
+    }
+    ok('containment: seam inert without MADDU_SELF_TEST',
+      fire('session-start', { session_id: 'c-inert', cwd: repo }, { MADDU_HOOK_TEST_THROW: 'bootstrap', MADDU_SELF_TEST: '' }).status === 0);
+    // session-start registers + binds; session-end closes the BOUND session
+    const claudeId = 'e2e-claude-1111';
+    const st = fire('session-start', { session_id: claudeId, cwd: repo });
+    ok('e2e session-start: exit 0 + context emitted', st.status === 0 && /Máddu session ses_/.test(st.stdout));
+    const sid = (st.stdout.match(/ses_[A-Za-z0-9_]+/) || [null])[0];
+    ok('e2e session-start: sid parseable from note', !!sid, st.stdout.slice(0, 120));
+    // age the binding past the 10s freshness guard
+    const mapPath = join(repo, '.maddu', 'state', 'discipline', 'sessions.json');
+    const map = JSON.parse(await readFile(mapPath, 'utf8'));
+    ok('e2e binding: claude id bound with a real boundAt', map[claudeId] && map[claudeId].madduId === sid && Number.isFinite(map[claudeId].at));
+    map[claudeId].at = Date.now() - 60_000;
+    await writeFile(mapPath, JSON.stringify(map, null, 2));
+    const en = fire('session-end', { session_id: claudeId, cwd: repo });
+    ok('e2e session-end: exit 0', en.status === 0);
+    ok('e2e session-end: closed the bound session with a conformant handoff object',
+      (await spineEvents(spine, repo)).some((e) => e.type === 'SESSION_CLOSED' && e.actor === sid && e.data.handoff && typeof e.data.handoff === 'object' && e.data.handoff.auto === true));
+    const map2 = JSON.parse(await readFile(mapPath, 'utf8'));
+    ok('e2e session-end: binding removed on terminal close', !map2[claudeId]);
+    // duplicate end → nothing new; unbound end → nothing at all
+    const before = (await spineEvents(spine, repo)).length;
+    fire('session-end', { session_id: claudeId, cwd: repo });
+    fire('session-end', { session_id: 'never-bound-claude', cwd: repo });
+    ok('e2e session-end: duplicate + unbound ends append nothing', (await spineEvents(spine, repo)).length === before);
+    // fresh rebind (<10s) → freshness guard skips the close
+    const st2 = fire('session-start', { session_id: claudeId, cwd: repo });
+    const sid2 = (st2.stdout.match(/ses_[A-Za-z0-9_]+/) || [null])[0];
+    fire('session-end', { session_id: claudeId, cwd: repo });
+    const closed2 = (await spineEvents(spine, repo)).some((e) => e.type === 'SESSION_CLOSED' && e.actor === sid2);
+    ok('e2e freshness guard: end racing a fresh binding skips the close', !closed2);
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── CLI status mappings: session close + bare --id ──
+  {
+    const { spawnSync } = await import('node:child_process');
+    const BIN = join(ROOT, 'bin', 'maddu.mjs');
+    const repo = await makeRepo();
+    const A = 'ses_20260101000000_climap';
+    await reg(repo, A);
+    const cli = (...args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, encoding: 'utf8', env: { ...process.env, MADDU_SESSION_ID: '' } });
+    let r = cli('session', 'close', '--session', A, '--handoff', 'bye');
+    ok('CLI close: active → exit 0', r.status === 0, `status=${r.status} ${(r.stderr || '').slice(0, 80)}`);
+    r = cli('session', 'close', '--session', A);
+    ok('CLI close: already-closed → exit 0 with marker', r.status === 0 && /already closed/.test(r.stdout + r.stderr));
+    r = cli('session', 'close', '--session', 'ses_20260101000000_absent');
+    ok('CLI close: missing → exit 2, no invalid append', r.status === 2 && (await countType(spine, repo, 'SESSION_CLOSED')) === 1);
+    r = cli('session', 'register', '--id');
+    ok('CLI register: bare --id → exit 2 invalid-id', r.status === 2 && /invalid session id/.test(r.stderr), `status=${r.status}`);
+    r = cli('session', 'register', '--id', 'ses_ok_explicit');
+    ok('CLI register: conforming explicit id → exit 0', r.status === 0);
+    r = cli('session', 'register', '--id', 'ses_ok_explicit');
+    ok('CLI register: duplicate → exit 2', r.status === 2 && /already exists/.test(r.stderr));
+    await rm(repo, { recursive: true, force: true });
+  }
+
   console.log('');
   console.log(`session-lifecycle: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

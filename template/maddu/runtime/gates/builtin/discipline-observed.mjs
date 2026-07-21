@@ -52,7 +52,18 @@ export default {
       else if (a && a.kind === undefined && !a.stale && a.sessionId) sid = a.sessionId;
     } catch {}
     let state = null;
-    try { state = await discipline.gatherRitualState(repoRoot, sid, Date.now(), { dirtyBaseline: [], editsSinceSlice: 0 }); } catch {}
+    try {
+      // Read the REAL counter when a session resolved (its baseline/init
+      // marker governs what counts as new); with no session, a synthetic
+      // counter with `baselineInit: true` keeps the gate's historical
+      // "count every dirty file" semantics — without the marker every
+      // observation would read as baseline initialization and the >= 15
+      // readout could never fire.
+      const counter = (sid && discipline.readCounter)
+        ? await discipline.readCounter(repoRoot, sid)
+        : { dirtyBaseline: [], editsSinceSlice: 0, baselineInit: true };
+      state = await discipline.gatherRitualState(repoRoot, sid, Date.now(), counter);
+    } catch {}
 
     const problems = [];
     if (enforcing && !hookWired) problems.push(`enforcement is "${enforcement}" but the PreToolUse hook is NOT installed — run \`maddu hooks install\` (discipline currently does nothing)`);
