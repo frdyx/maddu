@@ -27,7 +27,10 @@
 
 import { stat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { append, EVENT_TYPES } from './spine.mjs';
+import { append, EVENT_TYPES, readAllStrict } from './spine.mjs';
+import { readActiveReplicaId } from './spine-append-core.mjs';
+import { reduceSessions, reduceClaims } from './projections.mjs';
+import { markSessionStaleIfStill, closeSessionIfActive } from './session-lifecycle.mjs';
 import { pathsFor } from './paths.mjs';
 
 export const DEFAULT_STALE_MS = 30 * 60 * 1000;        // 30 min
@@ -82,32 +85,66 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
   const cfg = await readJanitorConfig(repoRoot);
   const { stale, closed } = evaluateSessions(projection, nowMs, cfg);
   const firedAt = new Date(nowMs).toISOString();
+  const triggeredBy = { kind: 'janitor', id: 'sessions', fired_at: firedAt };
 
+  // v1.111.0: every lifecycle append goes through the close-locked
+  // conditional helpers, which RE-VALIDATE against a fresh strict snapshot
+  // INSIDE the lock — a session that heartbeated after candidate selection is
+  // never marked or closed, parallel sweeps can't double-mark, and reported
+  // counts derive ONLY from appends that actually happened. Non-string
+  // actors (historical corrupt registrations) are classified unrecoverable
+  // corruption: skipped with a stderr note, never appended for.
+  let staleEmitted = 0;
+  const closedDone = [];
+  const stalePrecondition = (session) => {
+    const last = new Date(session.lastHeartbeatAt || session.registeredAt).getTime();
+    return Number.isFinite(last) && (nowMs - last) >= cfg.staleAfterMs;
+  };
   for (const s of stale) {
-    await append(repoRoot, {
-      type: EVENT_TYPES.SESSION_STALE_DETECTED,
-      actor: null,
-      lane: null,
-      data: {
-        sessionId: s.sessionId,
-        lastHeartbeatAt: s.lastHeartbeatAt,
-        ageMs: s.ageMs,
-      },
+    if (typeof s.sessionId !== 'string' || s.sessionId.length === 0) {
+      process.stderr.write(`[maddu janitor] skipping corrupt session actor (non-string) — unrecoverable history\n`);
+      continue;
+    }
+    const r = await markSessionStaleIfStill(repoRoot, {
+      sessionId: s.sessionId,
+      data: { lastHeartbeatAt: s.lastHeartbeatAt, ageMs: s.ageMs },
+      triggeredBy,
+      precondition: stalePrecondition,
+      nowMs,
     });
+    if (r.status === 'marked') staleEmitted++;
+    else if (r.status === 'spine-corrupt') {
+      process.stderr.write('[maddu janitor] spine has malformed lines — stale marking skipped this round (run maddu verify)\n');
+      break;
+    }
   }
+  const closePrecondition = (session) => {
+    const last = new Date(session.lastHeartbeatAt || session.registeredAt).getTime();
+    return Number.isFinite(last) && (nowMs - last) >= cfg.autoCloseAfterMs;
+  };
   for (const s of closed) {
-    await append(repoRoot, {
-      type: EVENT_TYPES.SESSION_AUTO_CLOSED,
-      actor: s.sessionId,
-      lane: null,
+    if (typeof s.sessionId !== 'string' || s.sessionId.length === 0) {
+      process.stderr.write(`[maddu janitor] skipping corrupt session actor (non-string) — unrecoverable history\n`);
+      continue;
+    }
+    const r = await closeSessionIfActive(repoRoot, {
+      sessionId: s.sessionId,
+      eventType: EVENT_TYPES.SESSION_AUTO_CLOSED,
       data: {
         sessionId: s.sessionId,
         reason: 'janitor-stale',
         lastHeartbeatAt: s.lastHeartbeatAt,
         ageMs: s.ageMs,
       },
-      triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
+      triggeredBy,
+      precondition: closePrecondition,
+      nowMs,
     });
+    if (r.status === 'closed') closedDone.push(s);
+    else if (r.status === 'spine-corrupt') {
+      process.stderr.write('[maddu janitor] spine has malformed lines — auto-close skipped this round (run maddu verify)\n');
+      break;
+    }
   }
 
   // Lane worktrees (roadmap #12a phase 6): auto-closing a session drops its
@@ -115,11 +152,12 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
   // the operator can disposition them — it NEVER auto-removes a worktree (that
   // could discard un-integrated work; removal is always an explicit
   // `maddu lane release <lane> --worktree ...`). Best-effort + read-only.
+  // Derived ONLY from closes that actually happened.
   let orphanedWorktrees = [];
-  if (closed.length) {
+  if (closedDone.length) {
     try {
       const { readAttachments } = await import('./worktrees.mjs');
-      const closedIds = new Set(closed.map((s) => s.sessionId));
+      const closedIds = new Set(closedDone.map((s) => s.sessionId));
       for (const att of (await readAttachments(repoRoot)).values()) {
         if (closedIds.has(att.session)) {
           orphanedWorktrees.push({ lane: att.lane, path: att.pathRepoRel, session: att.session });
@@ -128,7 +166,7 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
     } catch { /* older install without worktrees lib → nothing to report */ }
   }
 
-  return { staleEmitted: stale.length, closedEmitted: closed.length, orphanedWorktrees };
+  return { staleEmitted, closedEmitted: closedDone.length, orphanedWorktrees };
 }
 
 // Full stale reconciliation — the CLI-side counterpart to the bridge's inline
@@ -152,23 +190,42 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
   const proj1 = await projections.project(repoRoot);
   const jan = await runJanitor(repoRoot, proj1, nowMs);
 
-  // Pass 2 — orphan-claim reconcile (re-project so we see pass-1's releases).
-  const proj2 = await projections.project(repoRoot);
-  const activeIds = new Set(
-    (proj2.activeSessions || []).filter((s) => s.status === 'active').map((s) => s.id),
-  );
-  const orphaned = (proj2.claims || []).filter((c) => !activeIds.has(c.sessionId));
-  for (const c of orphaned) {
-    // Release AS the orphaned owner: correct in both the default (delete-by-lane)
-    // and sync (delete-that-owner) projection paths.
-    await append(repoRoot, {
-      type: EVENT_TYPES.LANE_RELEASED,
-      actor: c.sessionId,
-      lane: c.lane,
-      data: { reason: 'orphan-reconcile' },
-      triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
-    });
-  }
+  // Pass 2 — orphan-claim reconcile with its OWN fresh strict snapshot
+  // (v1.111.0): a valid force-claim landing during pass 1 must be visible
+  // here (a round-start snapshot would make this pass LESS fresh than main),
+  // and a malformed registration line must not fabricate an orphan (the
+  // tolerant projection would drop the session but keep its parseable claim
+  // → false LANE_RELEASED). parseErrors > 0 → skip the pass with a note;
+  // null (replica mode) → tolerant semantics exactly as main. The remaining
+  // snapshot→append window inside this pass is main's own pre-existing race
+  // (no claim writer takes a lock today) — unwidened here, seeded to the
+  // follow-up lane-surface campaign.
+  let orphaned = [];
+  try {
+    const { events, parseErrors } = await readAllStrict(repoRoot);
+    if (typeof parseErrors === 'number' && parseErrors > 0) {
+      process.stderr.write('[maddu janitor] spine has malformed lines — orphan-claim pass skipped this round (run maddu verify)\n');
+    } else {
+      const syncMode = !!(await readActiveReplicaId(repoRoot));
+      const view = reduceSessions(events, { nowMs });
+      const activeIds = new Set(view.activeSessions.map((s) => s.id));
+      const claims = reduceClaims(events, { syncMode });
+      orphaned = claims.filter((c) => typeof c.sessionId === 'string' && c.sessionId.length > 0 && !activeIds.has(c.sessionId));
+      const corrupt = claims.filter((c) => typeof c.sessionId !== 'string' || c.sessionId.length === 0);
+      if (corrupt.length) process.stderr.write(`[maddu janitor] skipping ${corrupt.length} claim(s) with corrupt (non-string) actors — unrecoverable history\n`);
+      for (const c of orphaned) {
+        // Release AS the orphaned owner: correct in both the default
+        // (delete-by-lane) and sync (delete-that-owner) projection paths.
+        await append(repoRoot, {
+          type: EVENT_TYPES.LANE_RELEASED,
+          actor: c.sessionId,
+          lane: c.lane,
+          data: { reason: 'orphan-reconcile' },
+          triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
+        });
+      }
+    }
+  } catch { /* best-effort pass */ }
 
   return {
     staleDetected: jan.staleEmitted,

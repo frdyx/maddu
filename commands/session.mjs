@@ -196,12 +196,28 @@ export default async function session(argv) {
       console.error('  Run "maddu session start \\"<label>\\"" or pass --session <id>.');
       process.exit(2);
     }
-    const hbEv = await spine.append(repoRoot, {
+    if (spine.isRefId && !spine.isRefId(sessionId)) {
+      console.error('invalid session id (must be a string matching [\\w.-]{1,128})');
+      process.exit(2);
+    }
+    // v1.111.0: heartbeat appends take the close lock so a janitor close can
+    // never interleave between its liveness check and this append. Lock
+    // timeout → append anyway (fail toward liveness: a dropped heartbeat
+    // could get a LIVE session janitor-closed — strictly worse than
+    // re-opening the race in an already-degraded stuck-lock state).
+    const doAppend = () => spine.append(repoRoot, {
       type: spine.EVENT_TYPES.SESSION_HEARTBEAT,
       actor: sessionId,
       lane: flags.lane || null,
       data: { focus: flags.focus || null }
     });
+    let hbEv;
+    if (sessionLifecycle && sessionLifecycle.withCloseLock) {
+      const r = await sessionLifecycle.withCloseLock(repoRoot, doAppend);
+      hbEv = sessionLifecycle.isLockFailed(r) ? await doAppend() : r;
+    } else {
+      hbEv = await doAppend();
+    }
     if (process.stdout.isTTY) console.log(`heartbeat  ${sessionId}`);
 
     // Focus Director — the per-turn pulse. Tag the trajectory vs the declared

@@ -12,7 +12,9 @@
 // so handleBridge falls through. `reply()` is the sendJson-then-return-true
 // shim that preserves the original `return sendJson(...)` flow verbatim.
 
-import { append, ensureSpine, EVENT_TYPES, genSessionId } from './spine.mjs';
+import { append, ensureSpine, EVENT_TYPES, genSessionId, isSid, isRefId } from './spine.mjs';
+import { registerSessionUnique, closeSessionIfActive } from './session-lifecycle.mjs';
+import { withCloseLock, isLockFailed } from './session-lifecycle.mjs';
 import { project } from './projections.mjs';
 import { pathsFor } from './paths.mjs';
 import { LANE_SLUG_RE } from './worktrees.mjs';
@@ -30,8 +32,13 @@ export async function routeSessions({ req, res, path, repoRoot }) {
   }
   if (path === '/bridge/sessions/register' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
-    const sessionId = body.id || genSessionId();
-    const ev = await append(repoRoot, {
+    // v1.111.0: explicit ids are strict-grammar validated and duplicate-
+    // rejected through the close-locked uniqueness transaction — a same-id
+    // registration after a close must never resurrect the closed session.
+    if (body.id !== undefined && body.id !== null && !isSid(body.id)) {
+      return reply(res, 400, { error: 'invalid session id (must match ses_[A-Za-z0-9_]{1,64}) — omit id to generate one' });
+    }
+    const makeEvent = (sessionId) => ({
       type: EVENT_TYPES.SESSION_REGISTERED,
       actor: sessionId,
       lane: null,
@@ -42,29 +49,43 @@ export async function routeSessions({ req, res, path, repoRoot }) {
         runtime: body.runtime || null
       }
     });
-    return reply(res, 200, { ok: true, sessionId, event: ev });
+    const r = await registerSessionUnique(repoRoot, { id: body.id ?? undefined, makeEvent });
+    if (r.status === 'exists') return reply(res, 409, { error: 'session id already exists — omit id to register a new session' });
+    if (r.status === 'invalid-id') return reply(res, 400, { error: 'invalid session id (must match ses_[A-Za-z0-9_]{1,64}) — omit id to generate one' });
+    if (r.status === 'lock') return reply(res, 503, { error: 'session lock busy — retry' });
+    if (r.status === 'spine-corrupt') return reply(res, 409, { error: 'spine has malformed lines — explicit-id registration refused; run maddu verify' });
+    return reply(res, 200, { ok: true, sessionId: r.sessionId, event: r.event });
   }
   if (path === '/bridge/sessions/heartbeat' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
-    if (!body.sessionId) return reply(res, 400, { error: 'sessionId required' });
-    const ev = await append(repoRoot, {
+    if (!isRefId(body.sessionId)) return reply(res, 400, { error: 'sessionId required (string, [\\w.-]{1,128})' });
+    // Heartbeat appends take the close lock (v1.111.0) so a janitor close
+    // can never interleave between its liveness check and this append.
+    // Lock timeout → append anyway (fail toward liveness: dropping the
+    // heartbeat could get a LIVE session janitor-closed, strictly worse
+    // than re-opening the race in an already-degraded stuck-lock state).
+    const doAppend = () => append(repoRoot, {
       type: EVENT_TYPES.SESSION_HEARTBEAT,
       actor: body.sessionId,
       lane: body.lane || null,
       data: { focus: body.focus || null }
     });
+    let ev = await withCloseLock(repoRoot, doAppend);
+    if (isLockFailed(ev)) ev = await doAppend();
     return reply(res, 200, { ok: true, event: ev });
   }
   if (path === '/bridge/sessions/close' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
-    if (!body.sessionId) return reply(res, 400, { error: 'sessionId required' });
-    const ev = await append(repoRoot, {
-      type: EVENT_TYPES.SESSION_CLOSED,
-      actor: body.sessionId,
-      lane: null,
-      data: { handoff: body.handoff || null }
+    if (!isRefId(body.sessionId)) return reply(res, 400, { error: 'sessionId required (string, [\\w.-]{1,128})' });
+    // v1.111.0: serialized conditional close; handoff strings normalize to
+    // the schema's object shape inside the helper.
+    const r = await closeSessionIfActive(repoRoot, {
+      sessionId: body.sessionId,
+      eventType: EVENT_TYPES.SESSION_CLOSED,
+      data: { handoff: body.handoff ?? null },
     });
-    return reply(res, 200, { ok: true, event: ev });
+    if (r.status === 'closed') return reply(res, 200, { ok: true, event: r.event });
+    return reply(res, 409, { error: `close refused: ${r.status}`, status: r.status });
   }
   return false;
 }

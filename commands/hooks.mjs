@@ -149,7 +149,15 @@ async function witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterK
     const { spine } = await loadSpineLib();
     await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data });
     // Set the latch ONLY after a successful append (an append failure retries).
-    if (latchKey && counterKey && disc?.readCounter && disc?.writeCounter) {
+    // Routed through the LOCKED mutator (v1.111.0) so a parallel gate's RMW
+    // can't be clobbered; a witness-created counter carries no baselineInit
+    // marker, so baseline initialization still fires at the first gate call.
+    if (latchKey && counterKey && disc?.mutateCounter) {
+      await disc.mutateCounter(repoRoot, counterKey, (c) => {
+        c.skipLatch = { ...(c.skipLatch || {}), [latchKey]: true };
+        return c;
+      });
+    } else if (latchKey && counterKey && disc?.readCounter && disc?.writeCounter) {
       const c = (await disc.readCounter(repoRoot, counterKey)) || {};
       c.skipLatch = { ...(c.skipLatch || {}), [latchKey]: true };
       await disc.writeCounter(repoRoot, counterKey, c);
