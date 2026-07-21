@@ -38,10 +38,71 @@ slice-stop with no flag and no env var, across fresh shells.
 
 | Hook event | What it runs | Effect |
 | --- | --- | --- |
-| `SessionStart` | `maddu hooks fire session-start` | Auto-registers a session (records `SESSION_AUTO_REGISTERED`), **sweeps stale sessions + orphaned lane claims** (the CLI-side janitor — below), and surfaces a one-line reminder. |
-| `SessionEnd` | `maddu hooks fire session-end` | Closes the active session (releases the lane claims it held). |
+| `SessionStart` | `maddu hooks fire session-start` | Auto-registers a session (records `SESSION_AUTO_REGISTERED`) — as one serialized transaction with the Claude→Máddu binding (v1.111.0, below) — **sweeps stale sessions + orphaned lane claims** (the CLI-side janitor — below), and surfaces a one-line reminder. |
+| `SessionEnd` | `maddu hooks fire session-end` | Closes **the session bound to THIS Claude session** (via the SessionStart binding) — never "whatever is active". An unbound end closes nothing (v1.111.0, below). |
 | `PreCompact` | `maddu hooks fire pre-compact` | Writes a `COMPACTION_CHECKPOINT` to the spine just before Claude Code compacts its context (v1.89.0, below). |
 | `PreToolUse` (matcher `Edit\|Write\|MultiEdit\|NotebookEdit\|Bash`) | `maddu hooks fire pre-tool-use` | Before a **mutating** tool call: auto-claims a lane if none is held, then **enforces the rituals** — allow, nudge, or *deny* the edit when a ritual is stale (see [Discipline enforcement](#discipline-enforcement-the-pretooluse-gate)). Bash reads/remedies are classified out and never gated. Fails open. |
+
+All four fire handlers bootstrap **inside their own fail-open containment**
+(v1.111.0): any internal failure — including a broken install's library load
+— exits 0 and never blocks a tool call, a compaction, or a session boundary.
+
+## Session-lifecycle serialization (v1.111.0)
+
+Concurrent sessions used to race three fragile pieces of state: the
+repo-global *active-session pointer* (any SessionStart overwrote it; closing
+any session cleared it, unbinding whoever else was live — the recurring
+"no active Máddu session governs"), the *close path* (four independent
+writers could double-close or close a just-heartbeated session), and
+*registration* (a re-register of a closed id silently resurrected it).
+v1.111.0 serializes all of it:
+
+- **One conditional close.** Every close — CLI, bridge, hooks, janitor —
+  goes through a close-locked helper that re-checks the session against a
+  fresh strict spine snapshot *inside the lock*: already closed → no second
+  event; never registered → no event at all (previously an invalid close
+  that `maddu spine verify` would FAIL); a caller-supplied precondition (the
+  janitor re-validates heartbeat age here) → refused if it no longer holds.
+  The pointer is cleared only if it still names the closed session
+  (compare-and-clear under the pointer lock).
+- **Scoped SessionEnd.** The end handler resolves *its own* Claude session's
+  binding under the binding lock, skips if the binding is <10 s fresh (a
+  just-rebound successor — the SessionEnd payload cannot distinguish
+  same-Claude-id generations, so the rule fails open toward a
+  janitor-reaped leak), closes conditionally, and unbinds only on terminal
+  statuses.
+- **Unique registration.** All registration producers share a close-locked
+  uniqueness transaction: explicit ids must match `ses_[A-Za-z0-9_]{1,64}`
+  and must not already exist in ANY status (no resurrection); generated ids
+  are existence-checked with a bounded regenerate. A continuation reusing a
+  pinned `MADDU_SESSION_ID` is *renewed* (liveness re-proved + heartbeat
+  appended atomically) rather than blindly reused, and repairs an
+  absent/corrupt pointer — never a live one.
+- **Heartbeats take the close lock** so the janitor can never close a
+  session between its staleness check and the heartbeat's append (a lock
+  timeout appends anyway — fail toward liveness). A heartbeat from an
+  active session also **clears its janitor stale mark** (previously a
+  renewed session stayed visibly stale forever, suppressing all later
+  stale detection).
+- **Malformed spines refuse mutations.** Lifecycle writers gate on parse
+  accounting: garbled/truncated lines → close/stale-mark refuse and the
+  janitor skips the round (with a note pointing at `maddu verify`);
+  registration of *generated* ids still works. This targets ACCIDENTAL
+  corruption only — a parseable adversarial edit passes parse accounting
+  and is the verification layer's domain (`maddu verify`'s hash chain,
+  threat model §13), not the lifecycle helpers'.
+
+**Concurrent-session residual (documented, not fixed):** with two live
+sessions in one repo, `--session`-less CLI verbs attribute to the
+last-started session (the pointer is last-writer-wins by design). Pin with
+`MADDU_SESSION_ID` — worker spawns already do; the SessionStart note tells
+an agent when another session is live. The hook also best-effort writes an
+`export MADDU_SESSION_ID=…` line to `CLAUDE_ENV_FILE` when the harness
+provides one (unreliable upstream; never load-bearing; only for
+strict-grammar ids — shell safety). Sessions whose historical actor is not
+a string at all (corrupt legacy registrations) are classified unrecoverable
+history: the janitor skips them with a note, and lifecycle helpers report
+them as `missing`.
 
 ## Keeping lanes and sessions self-clean
 
@@ -86,6 +147,32 @@ governance tier, **allows, nudges, or denies** the edit.
   the first threshold; `standard` = *graduated* (block a missing session/lane now, warn
   then block on stale slice-stop/commit); `relaxed` = nudge only. See
   [Governance tiers](30-governance-tiers.md).
+- **Commit pressure measures real work, not scratch churn (v1.111.0).**
+  - `uncommitted.ignore: ["<glob>", …]` in `.maddu/config/discipline.json`
+    excludes operator-declared scratch patterns (`_*.mjs`, `*.tmp`, …) from
+    both the file count and the age clock. Globs: `*` segment-local, `**`
+    crosses `/`, `?` one char; a bad glob is dropped, siblings still apply.
+    The knob lives in the SAME operator file as the warn/block thresholds —
+    an agent that can edit it could already set `blockFiles: Infinity`, so
+    it adds no new bypass class (and the file is deny-guarded on consumer
+    installs; that guard is bypassable harness friction, not a boundary).
+  - **Per-file age clocks:** the age is the OLDEST still-uncommitted file's,
+    not "time since the repo was last pristine" — committing your oldest
+    work drops the clock to the next-oldest; one lingering scratch file no
+    longer holds it forever. Staged renames carry their clock (copies seed
+    fresh; an untracked delete+recreate resets — cooperative-boundary
+    residual). A path that goes clean *retires from the baseline*, so
+    re-dirtying it later counts as new work (previously it was excluded
+    forever).
+  - **Worktree-aware observation:** dirt is observed in the WORK root the
+    hook payload names (an attached lane worktree is measured as itself,
+    not as the primary checkout); switching worktrees re-baselines in the
+    new root with fresh clocks, and the transition call never blocks on the
+    new root's pre-existing dirt.
+  - **Unknown stays unknown:** a failed git observation or an invalid
+    discipline config suppresses the commit gate for that call (allow),
+    preserves the clocks, and `maddu doctor`'s discipline gate reports
+    `dirty=unknown` instead of a false clean.
 - **Fails OPEN.** Any evaluator/git/parse error → allow; the hook never exits `2`, so it
   can only *deny via a structured decision*, never crash the tool. Only an explicit
   block denies.

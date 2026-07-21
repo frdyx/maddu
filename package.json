@@ -1,7 +1,7 @@
 {
   "name": "maddu",
-  "version": "1.110.0",
-  "description": "The Source of local truth — a files-only, local-first orchestration framework for AI agents inside any git repo.",
+  "version": "1.111.0",
+  "description": "The Source of local truth \u2014 a files-only, local-first orchestration framework for AI agents inside any git repo.",
   "type": "module",
   "bin": {
     "maddu": "./bin/maddu.mjs"
@@ -40,7 +40,7 @@
     "claude",
     "codex"
   ],
-  "author": "Máddu contributors",
+  "author": "M\u00e1ddu contributors",
   "devDependencies": {
     "happy-dom": "^20.10.6",
     "playwright": "^1.61.0"
