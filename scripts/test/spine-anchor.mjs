@@ -65,6 +65,14 @@ if (cmd === 'stamp') {
   writeFileSync(file + '.ots', Buffer.concat([Buffer.from('OTSSTUB1'), Buffer.from(String(content.length))]));
   process.exit(0);
 }
+if (cmd === 'info') {
+  // Parse check: a real proof starts with the stub magic; anything else is
+  // unreadable (mirrors the stock client failing to parse a truncated file).
+  const buf = readFileSync(rest[rest.length - 1]);
+  if (buf.subarray(0, 8).toString() === 'OTSSTUB1') { console.log('File sha256 hash: stub'); process.exit(0); }
+  console.error('Error! Not a timestamp file');
+  process.exit(1);
+}
 if (cmd === 'upgrade') {
   const file = rest[rest.length - 1];
   // Stock-client behavior: an existing backup JAMS the upgrade entirely.
@@ -217,6 +225,31 @@ async function main() {
       JSON.parse(r6d.stdout).results.find((x) => x.seq === 1)?.state === 'reconciled'
       && (await readFile(seg, 'utf8')).match(/"type":"ANCHOR_UPGRADED"/g).length === 7);
 
+    // ── 6a2. round-2 upgrade hardening on a fresh mini-repo ──
+    const repoU = await makeRepo(base, 'anchor-u');
+    runCli(repoU, ['spine', 'anchor', '--json'], ENV);
+    const proofU = join(repoU, '.maddu', 'anchors', '000001', 'payload.json.ots');
+    // (a) .bak restore: truncated primary + valid backup — upgrade must
+    // restore from the backup (ots info oracle), not destroy it.
+    const validProof = await readFile(proofU);
+    await writeFile(`${proofU}.bak`, validProof);
+    await writeFile(proofU, Buffer.from('garbage'));
+    const rU1 = runCli(repoU, ['spine', 'anchor', '--upgrade', '--json'], ENV);
+    ok('.bak restore: corrupt primary recovered from backup, upgrade completes',
+      JSON.parse(rU1.stdout).results[0].state === 'completed'
+      && (await readFile(proofU)).subarray(0, 8).toString() === 'OTSSTUB1'
+      && !(await exists(`${proofU}.bak`)));
+    // (b) incomplete-anchor reconcile: partial bytes land but the recorded
+    // event digest is stale (append "failed") — a pending poll must re-emit.
+    const repoV = await makeRepo(base, 'anchor-v');
+    runCli(repoV, ['spine', 'anchor', '--json'], ENV);
+    runCli(repoV, ['spine', 'anchor', '--upgrade', '--json'], { ...ENV, OTS_STUB_MODE: 'partial' });
+    const proofV = join(repoV, '.maddu', 'anchors', '000001', 'payload.json.ots');
+    await writeFile(proofV, Buffer.concat([await readFile(proofV), Buffer.from('+LOST')]));
+    const rV = runCli(repoV, ['spine', 'anchor', '--upgrade', '--json'], { ...ENV, OTS_STUB_MODE: 'pending' });
+    ok('incomplete anchor with stale event digest → reconciled on a pending poll',
+      JSON.parse(rV.stdout).results[0].state === 'reconciled');
+
     // ── 6b. wide-coverage anchor (#4) for the covered-range fixtures: anchor
     //       an OLD event so (receipt, head] spans real chained events ──
     const r6e = runCli(repo, ['spine', 'anchor', '--event', 'evt_r1', '--json'], ENV);
@@ -323,6 +356,19 @@ async function main() {
       const forged = { v: 1, id: 'evt_forged2', ts: '2026-07-21T03:00:00.000Z', type: 'ANCHOR_UPGRADED', actor: null, lane: null, data: { seq: 1, payload_digest: pd, complete: true, proof_files: [{ path: '.maddu/anchors/000001/payload.json.ots', digest: 'a'.repeat(64) }] } };
       await writeFile(s, (await readFile(s, 'utf8')) + JSON.stringify(forged) + '\n');
     }, 'event-proof-mismatch');
+    // Forged newest event that simply OMITS payload_digest (dodging the
+    // every-event equality check) while carrying the correct proof digest.
+    await fx('forged-omit-digest', async (r) => {
+      const s = join(r, '.maddu', 'events', '000000000001.ndjson');
+      const proofDigest = sa.sha256Hex(await readFile(join(r, '.maddu', 'anchors', '000001', 'payload.json.ots')));
+      const forged = { v: 1, id: 'evt_forged3', ts: '2026-07-21T03:10:00.000Z', type: 'ANCHOR_UPGRADED', actor: null, lane: null, data: { seq: 1, complete: true, proof_files: [{ path: '.maddu/anchors/000001/payload.json.ots', digest: proofDigest }] } };
+      await writeFile(s, (await readFile(s, 'utf8')) + JSON.stringify(forged) + '\n');
+    }, 'event-digest-mismatch');
+    // Destroyed evidence: the proof deleted AFTER a finalized stamp (meta
+    // present) must be a FAIL, not the benign mid-stamp-crash WARN.
+    await fx('proof-destroyed', async (r) => {
+      await rm(join(r, '.maddu', 'anchors', '000001', 'payload.json.ots'), { force: true });
+    }, 'proof-destroyed');
     // The un-mutated base repo verifies CLEAN, and the honest residual is
     // ALWAYS printed alongside it.
     const vres = runCli(repo, ['spine', 'anchor', '--verify', '--json'], ENV);
@@ -341,6 +387,14 @@ async function main() {
     ok('valueless --event → usage exit 2', rT2.status === 2 && /requires an event id/.test(rT2.stderr));
     const rT3 = runCli(repo, ['spine', 'anchor', '--upgrade', '--verify'], ENV);
     ok('conflicting modes → usage exit 2', rT3.status === 2);
+    const rT4 = runCli(repo, ['spine', 'anchor', '--upgrade', 'now'], ENV);
+    const rT5 = runCli(repo, ['spine', 'anchor', '--json=false', '--status'], ENV);
+    ok('boolean flag with a value → usage exit 2 (both spellings)', rT4.status === 2 && rT5.status === 2);
+
+    // ── 8c. sync init refuses while anchors exist (the other side of the
+    //       anchors-vs-sync incompatibility) ──
+    const rSI = runCli(repo, ['spine', 'sync', 'init', '--json'], ENV);
+    ok('sync init with anchors present → refused', rSI.status === 1 && JSON.parse(rSI.stdout).reason === 'anchors-present');
 
     // ── 9. sync-mode refusal ──
     const repoS = await makeRepo(base, 'anchor-s');

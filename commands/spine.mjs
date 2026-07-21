@@ -59,7 +59,11 @@ export default async function spine(argv) {
     const ANCHOR_FLAGS = new Set(['upgrade', 'status', 'verify', 'json', 'event']);
     const unknown = Object.keys(flags).filter((f) => !ANCHOR_FLAGS.has(f));
     const modes = ['upgrade', 'status', 'verify'].filter((f) => flags[f]);
-    if (unknown.length || (positional && positional.length) || modes.length > 1
+    // Boolean flags must be EXACTLY true — the shared parser consumes a
+    // following bare word as a value (`--upgrade now` → 'now'), and `=false`
+    // is not a supported spelling; both are usage errors, not near-misses.
+    const boolBad = ['upgrade', 'status', 'verify', 'json'].some((f) => flags[f] !== undefined && flags[f] !== true);
+    if (unknown.length || boolBad || (positional && positional.length) || modes.length > 1
         || (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim()))
         || (flags.event !== undefined && modes.length)) {
       console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify] [--json]');
@@ -220,6 +224,9 @@ export default async function spine(argv) {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} committing the spine would expose ${res.hits.length} secret-shaped value(s):`);
         for (const h of res.hits.slice(0, 10)) console.error(`  ${ANSI.dim}${h.where}${ANSI.reset}  ${h.patternTypes.join(', ')}`);
         console.error(`\nRedact these events before enabling sync (the whole data payload becomes git-visible).`);
+      } else if (res.reason === 'anchors-present') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} this repo has spine anchors (.maddu/anchors/) — anchoring is unsupported in team-sync mode, and migrating would orphan the positions existing anchors point at.`);
+        console.error(`  Archive or remove the anchors first if you want team-sync on this repo.`);
       } else if (res.reason === 'config-invalid') {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
       } else {

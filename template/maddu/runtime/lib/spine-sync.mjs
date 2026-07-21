@@ -173,6 +173,18 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   try { existing = await readReplicaId(repoRoot); }
   catch (e) { return { ok: false, reason: 'config-invalid', message: e.message }; }
 
+  // Anchors and team-sync are structurally incompatible (witness PR 4: one
+  // anchor chain covers one replica's flat spine; migration would also move
+  // the very segments existing payloads point at). BOTH sides refuse: `spine
+  // anchor` refuses in sync mode, and init refuses while anchors exist —
+  // closing the stamp-vs-migration race from this side too.
+  try {
+    const entries = await readdir(join(repoRoot, '.maddu', 'anchors'), { withFileTypes: true });
+    if (entries.some((e) => e.isDirectory() && /^\d{6}$/.test(e.name))) {
+      return { ok: false, reason: 'anchors-present' };
+    }
+  } catch { /* no anchors dir — fine */ }
+
   // Secret gate runs UNCONDITIONALLY (first-time, resume, AND already): the sync
   // surface must never be created/refreshed while a secret is present in the payload.
   const hits = await scanSpineForSecrets(repoRoot);

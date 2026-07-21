@@ -40,7 +40,7 @@
 // fresh clone can verify anchor continuity and payload self-consistency, and
 // can check payloads against a spine only where that spine is available.
 
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -354,7 +354,8 @@ export async function stampAnchor(repoRoot, {
       const r = await runStamp(repoRoot, otsBin, last.seq, cal.calendars);
       if (!r.ok) return { ok: false, reason: 'stamp-failed', detail: r.detail, seq: last.seq, recovered: false };
       await finishStamp(repoRoot, last.seq, last.payloadDigest, r, spineLib);
-      return { ok: true, seq: last.seq, payloadDigest: last.payloadDigest, calendars: r.calendars, recovered: true };
+      const giR = await ensureAnchorsGitignore(repoRoot);
+      return { ok: true, seq: last.seq, payloadDigest: last.payloadDigest, calendars: r.calendars, recovered: true, gitignore: giR.state };
     }
     if (last && last.hasProof && !last.meta && last.payloadBytes) {
       await finishStamp(repoRoot, last.seq, last.payloadDigest, { calendars: [] }, spineLib);
@@ -395,6 +396,16 @@ export async function stampAnchor(repoRoot, {
       // leaving a pending artifact a later run would silently retry.
       await rm(destDir, { recursive: true, force: true });
       return { ok: false, reason: 'stamp-failed', detail: r.detail };
+    }
+    // Final sync recheck AFTER the (slow, networked) stamp: a `spine sync
+    // init` that slipped past our lock via its own lock could have migrated
+    // the segment this payload points at while ots ran. Roll the anchor back
+    // (the calendar submission is unrecallable but records nothing locally)
+    // rather than publish a payload pointing at a moved segment. syncInit
+    // also refuses while anchors exist, so both sides now close this race.
+    if (await readActiveReplicaId(repoRoot)) {
+      await rm(destDir, { recursive: true, force: true });
+      return { ok: false, reason: 'sync-mode' };
     }
     await finishStamp(repoRoot, seq, payloadDigest, r, spineLib);
     const gi = await ensureAnchorsGitignore(repoRoot);
@@ -482,11 +493,24 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         continue;
       }
       // The stock client backs the proof up to `<file>.bak` on upgrade and
-      // REFUSES the next upgrade while that backup exists — remove any
-      // leftover before and after (git + the events are the durable history;
-      // a .bak inside the tracked anchors dir is both noise and a jam).
+      // REFUSES the next upgrade while that backup exists. A leftover .bak
+      // can also be the ONLY valid copy (a crash mid-rewrite leaves a
+      // truncated primary) — so before clearing it, validate the primary with
+      // the client itself (`ots info`) and restore from the backup if the
+      // primary is unparseable. Only then is the .bak safe to remove.
+      try {
+        await stat(`${proofPath}.bak`);
+        try {
+          await execOts(otsBin, ['info', proofPath], { timeout: 60000, shell: false });
+        } catch {
+          await rename(`${proofPath}.bak`, proofPath); // primary corrupt → the backup IS the proof
+        }
+      } catch { /* no .bak — nothing to reconcile */ }
       await rm(`${proofPath}.bak`, { force: true });
-      const before = a.proofDigest;
+      // Recompute from disk — a .bak restore just above may have replaced the
+      // bytes listAnchors saw.
+      let before = a.proofDigest;
+      try { before = sha256Hex(await readFile(proofPath)); } catch { /* keep listed */ }
       let complete = false, detail = null;
       try {
         await execOts(otsBin, ['upgrade', proofPath], { timeout: 120000, shell: false });
@@ -515,6 +539,25 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
               proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: after }],
             },
           });
+        }
+      }
+      if (!upgraded && !complete) {
+        // Pending with NOTHING new — but if an earlier partial upgrade's
+        // event append failed, the newest recorded digest still mismatches
+        // disk; reconcile here too (round-2 F5: reconciliation must not be
+        // gated on complete anchors only).
+        const rec = newestEv.get(a.seq);
+        if (spineLib && spineLib.append && rec && rec.digest !== before) {
+          await spineLib.append(repoRoot, {
+            type: 'ANCHOR_UPGRADED',
+            actor: process.env.MADDU_SESSION_ID || null,
+            data: {
+              seq: a.seq, payload_digest: a.payloadDigest, complete: false,
+              proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: before }],
+            },
+          });
+          results.push({ seq: a.seq, state: 'reconciled', detail });
+          continue;
         }
       }
       results.push({ seq: a.seq, state: complete ? 'completed' : upgraded ? 'partial' : 'pending', detail });
@@ -645,7 +688,14 @@ export async function verifyAnchors(repoRoot) {
       issues.push({ level: 'FAIL', kind: 'prev-mismatch', seq: a.seq, detail: `prev_anchor_sha256 does not match the stored bytes of anchor ${prev ? prev.seq : '(none)'} — chain broken (edited or reordered)` });
     }
     if (!a.hasProof) {
-      issues.push({ level: 'WARN', kind: 'proof-missing', seq: a.seq, detail: 'payload.json.ots missing — crashed stamp (re-run `maddu spine anchor`) or deleted proof' });
+      // A missing proof is only benign BEFORE the stamp finalized (mid-stamp
+      // crash: payload, no meta, no event). Once meta exists, a stamp
+      // demonstrably completed — a vanished proof is destroyed evidence.
+      if (a.meta) {
+        issues.push({ level: 'FAIL', kind: 'proof-destroyed', seq: a.seq, detail: 'payload.json.ots missing but meta.json records a completed stamp — the proof was deleted; the Bitcoin-backed protection for this anchor is gone' });
+      } else {
+        issues.push({ level: 'WARN', kind: 'proof-missing', seq: a.seq, detail: 'payload.json.ots missing — crashed stamp (re-run `maddu spine anchor`) or deleted proof' });
+      }
     }
     // Spine-position binding — only where this device's spine has the segment.
     if (a.payload.position && a.payload.position.segment) {
@@ -722,9 +772,21 @@ export async function verifyAnchors(repoRoot) {
   for (const [seqNo, ev] of newestPerSeq) {
     const a = bySeq.get(seqNo);
     const d = ev.data || {};
+    // The newest event must CARRY the payload digest — a forged event that
+    // simply omits it must not slip past the every-event equality check.
+    if (!d.payload_digest) {
+      issues.push({ level: 'FAIL', kind: 'event-digest-mismatch', seq: seqNo, detail: `newest ${ev.type} (${ev.id}) carries no payload_digest — real anchor events always do; forged or corrupted event` });
+    }
     const recorded = Array.isArray(d.proof_files) && d.proof_files[0] && typeof d.proof_files[0].digest === 'string'
       ? d.proof_files[0].digest : null;
-    if (!a.proofDigest) continue; // proof-missing already flagged above
+    if (!a.proofDigest) {
+      // An event proves a stamp happened; no proof on disk (and possibly no
+      // meta either, so the loop above stayed WARN) = destroyed evidence.
+      if (!a.meta) {
+        issues.push({ level: 'FAIL', kind: 'proof-destroyed', seq: seqNo, detail: `${ev.type} (${ev.id}) records a stamp for seq ${seqNo} but no proof exists on disk — the proof was deleted; the Bitcoin-backed protection for this anchor is gone` });
+      }
+      continue;
+    }
     if (recorded !== a.proofDigest) {
       issues.push({ level: 'FAIL', kind: 'event-proof-mismatch', seq: seqNo, detail: `newest ${ev.type} (${ev.id}) records proof digest ${recorded ? String(recorded).slice(0, 12) + '…' : '(none)'} but disk has ${String(a.proofDigest).slice(0, 12)}… — forged event or replaced proof (if an upgrade's event append failed, \`maddu spine anchor --upgrade\` reconciles)` });
     }
