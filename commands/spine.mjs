@@ -2,6 +2,9 @@
 //
 // Usage:
 //   maddu spine verify [--json]            # walk every segment, report integrity issues
+//   maddu spine verify --replay <sha>      # clean-checkout replay of the declared
+//                                          #   maddu.json replay.{install?,verify} at that
+//                                          #   exact commit (witness track PR 5)
 //   maddu spine show <eventId>             # pretty-print a single event by id
 //   maddu spine sync init [--json]         # opt into #12c team-sync (mint replicaId,
 //                                          #   migrate legacy segment, template gitignore)
@@ -13,7 +16,17 @@
 //                                          #   record-intact + independently checkable
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSecretScan } from './_tools.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveSessionId } from './_spine.mjs';
+
+// Flag NAMES are caller-typed text echoed back to stderr — a token pasted as
+// a flag (`--ghp_…`) must come back redacted, never verbatim.
+async function redactFlagNames(names) {
+  try {
+    const scan = await loadSecretScan();
+    return names.map((n) => scan.redactText(String(n)).text);
+  } catch { return names.map(() => '(unprintable)'); }
+}
 
 const ANSI = {
   dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m',
@@ -67,7 +80,7 @@ export default async function spine(argv) {
         || (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim()))
         || (flags.event !== undefined && modes.length)) {
       console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify] [--json]');
-      if (unknown.length) console.error(`  unknown flag(s): ${unknown.map((f) => `--${f}`).join(', ')}`);
+      if (unknown.length) console.error(`  unknown flag(s): ${(await redactFlagNames(unknown)).map((f) => `--${f}`).join(', ')}`);
       if (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim())) console.error('  --event requires an event id');
       process.exit(2);
     }
@@ -292,11 +305,53 @@ export default async function spine(argv) {
   }
 
   if (sub === 'verify') {
+    const { flags, positional } = parseFlags(rest);
+    // STRICT flag validation (PR 5): --replay runs declared commands, so a
+    // typo'd flag or a valueless --replay must be usage error 2 — never a
+    // silent fall-through to the integrity walk.
+    const VERIFY_FLAGS = new Set(['json', 'replay']);
+    const vUnknown = Object.keys(flags).filter((f) => !VERIFY_FLAGS.has(f));
+    const vJsonBad = flags.json !== undefined && flags.json !== true;
+    const vReplayBad = flags.replay !== undefined && (typeof flags.replay !== 'string' || !flags.replay.trim());
+    if (vUnknown.length || vJsonBad || vReplayBad || (positional && positional.length)) {
+      console.error('Usage: maddu spine verify [--replay <full-commit-sha>] [--json]');
+      if (vUnknown.length) console.error(`  unknown flag(s): ${(await redactFlagNames(vUnknown)).map((f) => `--${f}`).join(', ')}`);
+      if (vReplayBad) console.error('  --replay requires a full commit sha');
+      process.exit(2);
+    }
+
+    if (flags.replay !== undefined) {
+      if (!lib.verifyReplay) {
+        console.error('verify-replay.mjs not found in this install. Run `maddu upgrade` to enable replay.');
+        process.exit(2);
+      }
+      const roots = await resolveWorkAndStateRoots(lib.paths);
+      const workRoot = roots ? roots.workRoot : repoRoot;
+      const stateRoot = roots ? roots.stateRoot : repoRoot;
+      const actor = await resolveSessionId(stateRoot, flags, lib.sessionActive);
+      const r = await lib.verifyReplay.runReplay({
+        workRoot, stateRoot, sha: flags.replay.trim(), spine: lib.spine,
+        actor, lane: process.env.MADDU_LANE || null, json: !!flags.json,
+      });
+      const pass = r.ok && r.result === 'pass' && r.receiptAppended && r.cloneDeleted;
+      const code = !r.ok ? 2 : pass ? 0 : 1;
+      if (flags.json) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(code); }
+      if (!r.ok) { printReplayRefusal(r); process.exit(2); }
+      console.log(`${ANSI.bold}Máddu replay${ANSI.reset}  ${r.sha.slice(0, 12)}…  ${r.result === 'pass' ? levelTag('PASS') : levelTag('FAIL')}`);
+      console.log(`  install: ${r.installDeclared ? (r.installExit === 0 ? 'exit 0' : `exit ${r.installExit ?? '—'}`) : ANSI.dim + '(not declared)' + ANSI.reset}  ·  verify: ${r.verifyExit !== null ? `exit ${r.verifyExit}` : '—'}  ·  ${(r.durationMs / 1000).toFixed(1)}s`);
+      if (r.timedOut) console.log(`  ${levelTag('FAIL')}  timed out — the command tree was killed${r.settled ? '' : ' (child not proven dead before the settlement deadline)'}`);
+      if (r.spawnError) console.log(`  ${levelTag('FAIL')}  spawn error: ${r.spawnError}`);
+      if (!r.cloneDeleted && r.cloneDir) console.log(`  ${levelTag('FAIL')}  clone left at ${r.cloneDir} — delete it by hand (result forced to fail: an incomplete replay protocol never reads as a pass)`);
+      if (!r.receiptAppended) console.log(`  ${levelTag('FAIL')}  result was "${r.result}" but the receipt could not be appended (${r.appendError || 'unknown'}) — this run never counts as replayed`);
+      console.log();
+      console.log(`  ${ANSI.dim}${r.scope}${ANSI.reset}`);
+      process.exit(code);
+    }
+
     if (!lib.verify) {
       console.error('verify.mjs not found in this install. Run `maddu upgrade` to enable spine verification.');
       process.exit(2);
     }
-    const { flags } = parseFlags(rest);
     const result = await lib.verify.verifySpine(repoRoot, { maxEvents: Infinity });
 
     if (flags.json) {
@@ -366,6 +421,23 @@ export default async function spine(argv) {
 
   console.error(`maddu spine: unknown subcommand "${sub}" (expected: verify | show | oversight | sync | import)`);
   process.exit(2);
+}
+
+// Refusal printer for `spine verify --replay` — every reason maps to a
+// remedy. Refusals emit NO spine events (setup is not verification).
+function printReplayRefusal(r) {
+  console.error(`${ANSI.fail}Refused:${ANSI.reset} ${r.detail || r.reason}`);
+  if (r.reason === 'unsupported') {
+    console.error('  This project (at that SHA) declares no replay commands, so it can never gain `replayed`.');
+    console.error('  Declare in maddu.json:  "replay": { "install": "<cmd>", "verify": "<cmd>" }  (install optional) — then commit.');
+  } else if (r.reason === 'config-invalid') {
+    console.error('  Fix the declared replay config at the subject SHA (the shape is exactly {install?: string, verify: string}).');
+  } else if (r.reason === 'sha-invalid' || r.reason === 'sha-not-found') {
+    console.error('  Pass the full commit id, e.g.:  git rev-parse HEAD');
+  } else if (r.reason === 'spine-unavailable') {
+    console.error('  Replay refuses to run unrecorded — restore the spine (see `maddu doctor`) and retry.');
+  }
+  if (r.cloneDir) console.error(`  A clone was left at ${r.cloneDir} — delete it by hand.`);
 }
 
 // Shared refusal printer for `spine anchor` / `--upgrade` — every reason maps

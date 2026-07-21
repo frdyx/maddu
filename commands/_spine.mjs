@@ -48,7 +48,11 @@ export async function loadSpineLib() {
   // Optional-load so a newer global CLI degrades cleanly on an older install.
   let spineAnchor = null;
   try { spineAnchor = await import(pathToFileURL(join(dir, 'spine-anchor.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor };
+  // verify-replay.mjs (witness track PR 5) powers `maddu spine verify --replay`.
+  // Optional-load so a newer global CLI degrades cleanly on an older install.
+  let verifyReplay = null;
+  try { verifyReplay = await import(pathToFileURL(join(dir, 'verify-replay.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,
