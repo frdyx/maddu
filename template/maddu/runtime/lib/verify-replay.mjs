@@ -197,7 +197,10 @@ export async function readReplayConfig(cloneDir) {
     return { status: 'config-invalid', detail: 'maddu.json replay must be an object of shape {install?: string, verify: string}' };
   }
   const KEYS = new Set(['install', 'verify']);
-  const unknown = Object.keys(r).filter((k) => !KEYS.has(k));
+  // Key NAMES are caller-authored text that lands on stderr and --json stdout
+  // — redact them like any other echoed input (a token pasted as a key must
+  // not leak through the refusal).
+  const unknown = Object.keys(r).filter((k) => !KEYS.has(k)).map((k) => redactText(k).text);
   if (unknown.length) {
     return { status: 'config-invalid', detail: `maddu.json replay has unknown key(s): ${unknown.join(', ')} — the v1 shape is exactly {install?: string, verify: string}` };
   }
@@ -359,6 +362,11 @@ export async function runReplay({ workRoot, stateRoot, sha, spine, actor = null,
   // fail, complete:false even when verify passed (an incompletely-executed
   // replay protocol never reads as a successful replayed run) — verify_exit
   // stays visible so the truth is auditable.
+  // Deliberate residual: when an INNER process (not our declared shell) dies
+  // by signal, POSIX shells report numeric 128+n — that stays complete:true
+  // with the exit recorded verbatim, because 128+n values are also legitimate
+  // ordinary exit codes and reclassifying them would misread real programs.
+  // Either way it is a FAIL; no signal path can ever produce a pass.
   const verifyRan = !!verifyRes;
   const verifyClean = verifyRan && verifyRes.settled && !verifyRes.timedOut && !verifyRes.spawnError
     && typeof verifyRes.exit === 'number';

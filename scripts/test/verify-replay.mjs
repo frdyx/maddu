@@ -203,6 +203,30 @@ async function main() {
         JSON.stringify({ status: oSig.status, complete: jSig.complete, sig: jSig.verifySignal }));
     }
 
+    // ── 3c-ii. INNER signal death (nested shell): reports numeric 128+n →
+    // fail with complete:true (documented residual — 128+n is also a
+    // legitimate exit code); the point proven here: never a pass ──
+    if (process.platform !== 'win32') {
+      const rSig2 = await makeRepo(base, 'siginner', { madduJson: { name: 'siginner', replay: { verify: `sh -c 'kill -9 \\$\\$'` } } });
+      const oSig2 = runCli(rSig2, ['spine', 'verify', '--replay', headSha(rSig2), '--json']);
+      const jSig2 = JSON.parse(oSig2.stdout);
+      ok('inner signal death: always FAIL, never pass (exit recorded verbatim)',
+        oSig2.status === 1 && jSig2.result === 'fail'
+        && (jSig2.verifyExit === null || jSig2.verifyExit >= 128),
+        JSON.stringify({ exit: jSig2.verifyExit, sig: jSig2.verifySignal, complete: jSig2.complete }));
+    }
+
+    // ── 3e. token-shaped UNKNOWN CONFIG KEY never leaks through refusals ──
+    const tokenKey = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
+    const rLeak = await makeRepo(base, 'keyleak', { madduJson: { name: 'keyleak', replay: { verify: 'v', [tokenKey]: true } } });
+    const oLeakH = runCli(rLeak, ['spine', 'verify', '--replay', headSha(rLeak)]);
+    const oLeakJ = runCli(rLeak, ['spine', 'verify', '--replay', headSha(rLeak), '--json']);
+    ok('unknown-key refusal: token-shaped key redacted (human stderr + --json)',
+      oLeakH.status === 2 && oLeakJ.status === 2
+      && !(oLeakH.stderr || '').includes(tokenKey) && !(oLeakH.stdout || '').includes(tokenKey)
+      && !(oLeakJ.stdout || '').includes(tokenKey) && !(oLeakJ.stderr || '').includes(tokenKey)
+      && /unknown key/i.test(oLeakH.stderr), (oLeakH.stderr || '').slice(0, 140));
+
     // ── 3d. `git replace` refs must not fool subject validation or checkout ──
     const rRepl = await makeRepo(base, 'replref', { madduJson: { name: 'replref', replay: { verify: `${NODE} -e "process.exit(0)"` } } });
     const shaRepl = headSha(rRepl);
