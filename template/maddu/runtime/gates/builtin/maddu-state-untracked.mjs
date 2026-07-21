@@ -22,6 +22,7 @@ const DURABLE_PREFIXES = [
   '.maddu/plans/',
   '.maddu/wiki/',
   '.maddu/state/architecture/', // architecture-mass ratchet baseline — durable
+  '.maddu/anchors/', // witness PR 4 — OpenTimestamps payloads+proofs travel with the repo
 ];
 const DURABLE_EXACT = new Set(['.maddu/lanes/catalog.json']);
 

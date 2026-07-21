@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.9.0",
+  "x-contractVersion": "1.10.0",
   "type": "object",
   "required": [
     "v",
@@ -190,6 +190,9 @@
         "ENFORCEMENT_ERROR",
         "VERIFICATION_STARTED",
         "VERIFICATION_RAN",
+        "ANCHOR_STAMPED",
+        "ANCHOR_UPGRADED",
+        "ASSURANCE_ASSESSED",
         "BLUEPRINT_DISTILLED",
         "DEBT_SCANNED",
         "ARCHITECTURE_SCANNED",
@@ -5644,6 +5647,108 @@
               },
               "verifiable": {
                 "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ANCHOR_STAMPED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A spine receipt was stamped into the OpenTimestamps calendars as a new anchor.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "seq": {
+                "type": "number"
+              },
+              "payload_digest": {
+                "type": "string"
+              },
+              "calendars": {
+                "type": "array"
+              },
+              "proof_files": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ANCHOR_UPGRADED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An anchor's OpenTimestamps proof file changed (partial merge or completed Bitcoin attestation).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "seq": {
+                "type": "number"
+              },
+              "payload_digest": {
+                "type": "string"
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "proof_files": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ASSURANCE_ASSESSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An operator-run consume ceremony recorded an assurance assessment — ledger convenience only, labeled non-authoritative by every consumer.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "subject_sha": {
+                "type": "string"
+              },
+              "receipt_digest": {
+                "type": "string"
+              },
+              "level": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "object"
+              },
+              "assessed_by": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
               }
             }
           }

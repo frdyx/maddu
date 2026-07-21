@@ -44,7 +44,11 @@ export async function loadSpineLib() {
   // Optional-load so the readout degrades cleanly on an older install.
   let bridgeBuilders = null;
   try { bridgeBuilders = await import(pathToFileURL(join(dir, 'bridge-builders.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders };
+  // spine-anchor.mjs (witness track PR 4) powers `maddu spine anchor`.
+  // Optional-load so a newer global CLI degrades cleanly on an older install.
+  let spineAnchor = null;
+  try { spineAnchor = await import(pathToFileURL(join(dir, 'spine-anchor.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,

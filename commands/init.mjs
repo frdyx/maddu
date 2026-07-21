@@ -32,6 +32,7 @@ const GITIGNORE_BLOCK = `
 # the working tree perpetually dirty. Ignore .maddu/* by default; re-include
 # only the durable, authored artifacts a team would want to share.
 .maddu/*
+!.maddu/anchors/
 !.maddu/config/
 !.maddu/skills/
 !.maddu/plans/

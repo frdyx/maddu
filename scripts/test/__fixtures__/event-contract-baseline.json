@@ -1,6 +1,6 @@
 {
-  "version": "1.9.0",
-  "fingerprint": "4c868e1d",
+  "version": "1.10.0",
+  "fingerprint": "66ee0925",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -53,6 +53,24 @@
           "perFile": "object"
         }
       },
+      "ANCHOR_STAMPED": {
+        "frozen": false,
+        "data": {
+          "calendars": "array",
+          "payload_digest": "string",
+          "proof_files": "array",
+          "seq": "number"
+        }
+      },
+      "ANCHOR_UPGRADED": {
+        "frozen": false,
+        "data": {
+          "complete": "boolean",
+          "payload_digest": "string",
+          "proof_files": "array",
+          "seq": "number"
+        }
+      },
       "APPROVAL_DECIDED": {
         "frozen": false,
         "data": {
@@ -92,6 +110,17 @@
           "newViolations": "number",
           "uncovered": "number",
           "undeclared": "number"
+        }
+      },
+      "ASSURANCE_ASSESSED": {
+        "frozen": false,
+        "data": {
+          "assessed_by": "string",
+          "evidence": "object",
+          "level": "string",
+          "note": "string?",
+          "receipt_digest": "string",
+          "subject_sha": "string"
         }
       },
       "AUDIT_REPORT": {
