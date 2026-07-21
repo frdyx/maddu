@@ -894,12 +894,13 @@ export function nextCounter(prev, state, nowMs) {
   // counter with a scalar firstDirtyTs but no valid map seeds every current
   // new-dirty path at that scalar (preserves the old age on upgrade).
   let seen = new Map();
-  const mapValid = c.dirtyV === 2 && Array.isArray(c.dirtyFirstSeen);
+  const mapValid = c.dirtyV === 2 && Array.isArray(c.dirtyFirstSeen)
+    && c.dirtyFirstSeen.every((pair) => Array.isArray(pair) && typeof pair[0] === 'string' && Number.isFinite(pair[1]));
   if (mapValid) {
-    for (const pair of c.dirtyFirstSeen) {
-      if (Array.isArray(pair) && typeof pair[0] === 'string' && Number.isFinite(pair[1])) seen.set(pair[0], pair[1]);
-    }
+    for (const pair of c.dirtyFirstSeen) seen.set(pair[0], pair[1]);
   } else if (c.firstDirtyTs != null) {
+    // Legacy/malformed map → migrate from the scalar (seed every current
+    // new-dirty path at the preserved firstDirtyTs).
     for (const p of newDirtyPaths) seen.set(p, c.firstDirtyTs);
   }
   // Snapshot rename sources BEFORE pruning (transfer decisions need the
