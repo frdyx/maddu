@@ -16,11 +16,11 @@
 // install/remove touch a HOST-repo file (.claude/settings.json) outside
 // .maddu/, so they run only on explicit invocation — never silently at init.
 
-import { join } from 'node:path';
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { join, basename } from 'node:path';
+import { mkdir, readFile, writeFile, rm, appendFile } from 'node:fs/promises';
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import registerCmd from './register.mjs';
 import sessionCmd from './session.mjs';
@@ -157,95 +157,294 @@ async function witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterK
   } catch { /* witness is best-effort — never block the tool */ }
 }
 
+// ── The hook-fire handlers (v1.111.0) ───────────────────────────────────────
+// EVERY fire event performs its OWN bootstrap inside its OWN fail-open
+// containment — the shared bootstrap used to run before dispatch, so a
+// bootstrap failure could exit nonzero and block an edit or compaction.
+// Any error → exit 0 with the event's legal output (or nothing).
+//
+// Test seam: MADDU_HOOK_TEST_THROW=bootstrap|handler throws at the named
+// stage — PRODUCTION-GATED on MADDU_SELF_TEST === '1' (an inherited env
+// value must never silently disable enforcement via the fail-open path).
+function seamThrow(stage) {
+  if (process.env.MADDU_SELF_TEST === '1' && process.env.MADDU_HOOK_TEST_THROW === stage) {
+    throw new Error(`hook test seam: ${stage}`);
+  }
+}
+
+async function readHookPayload() {
+  // Claude Code pipes the hook payload on stdin; a human at a terminal has a
+  // TTY there — skip reading to avoid blocking on interactive stdin.
+  if (process.stdin.isTTY) return {};
+  let raw = '';
+  try { for await (const chunk of process.stdin) raw += chunk; } catch { return {}; }
+  try { return raw.trim() ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+
+// The WORK root for dirty observation: the hook payload's cwd resolved
+// through the worktree-aware root resolver (an attached lane worktree must
+// be observed as ITSELF, not as the primary checkout the state root names).
+async function resolveWorkRootFrom(paths, payloadCwd, repoRoot) {
+  try {
+    if (paths && typeof paths.resolveRoots === 'function' && typeof payloadCwd === 'string' && payloadCwd) {
+      const roots = await paths.resolveRoots(payloadCwd);
+      if (roots && roots.workRoot) return roots.workRoot;
+    }
+  } catch { /* fall through */ }
+  return repoRoot;
+}
+
+async function fireSessionStart() {
+  let note = 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.';
+  try {
+    seamThrow('bootstrap');
+    const { paths, spine, projections, sessionActive, sessionLifecycle } = await loadSpineLib();
+    const repoRoot = await resolveRepoRoot(paths);
+    const disc = await loadLib('discipline.mjs');
+    seamThrow('handler');
+    // Payload FIRST — the claude id + cwd inform everything downstream.
+    const payload = await readHookPayload();
+    const claudeId = payload.session_id || null;
+    const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
+    const isRefId = spine.isRefId || (() => false);
+    const isSid = spine.isSid || (() => false);
+    const label = basename(repoRoot) || 'agent';
+    const parentEnv = process.env.MADDU_PARENT_SESSION_ID;
+    const makeEvent = (sessionId) => ({
+      type: spine.EVENT_TYPES.SESSION_AUTO_REGISTERED,
+      actor: sessionId,
+      lane: null,
+      data: {
+        sessionId,
+        parentSessionId: isRefId(parentEnv) ? parentEnv : null,
+        source: 'cli',
+        label,
+        role: 'implementer',
+      },
+    });
+
+    // Register + idempotency validation + bind as ONE transaction:
+    // withBindingTransaction { withCloseLock { renewIn-or-registerIn +
+    // bindIn } }. The bind commits while the close lock still protects the
+    // liveness proof, so a close-lock-only caller can never close the sid in
+    // the gap. Fallbacks: binding lock busy → register WITHOUT binding
+    // (main's best-effort shape; restart heals the binding); close lock busy
+    // → registerSessionUnique's own unlocked-generated fallback (a fresh id
+    // cannot be the target of a racing close). A SessionStart is never lost
+    // to a busy lock.
+    let sid = null, created = false;
+    if (disc && sessionLifecycle && disc.withBindingTransaction) {
+      const envId = process.env.MADDU_SESSION_ID;
+      const registerAndBindUnlockedClose = async () => {
+        const reg = await sessionLifecycle.registerSessionUnique(repoRoot, { makeEvent });
+        if (reg.status !== 'registered') return { sid: null, created: false };
+        if (claudeId) await disc.bindClaudeSessionIn(repoRoot, claudeId, reg.sessionId);
+        if (sessionActive) await sessionActive.writeActiveSession(repoRoot, { sessionId: reg.sessionId, registeredAt: reg.event ? reg.event.ts : null, role: 'implementer', label, lane: null });
+        return { sid: reg.sessionId, created: true };
+      };
+      const bt = await disc.withBindingTransaction(repoRoot, async () => {
+        const inner = await sessionLifecycle.withCloseLock(repoRoot, async () => {
+          if (isRefId(envId)) {
+            const renewal = await sessionLifecycle.renewSessionIfActiveIn(repoRoot, { sessionId: envId, focus: 'continuation (SessionStart)' });
+            if (renewal.status === 'renewed') {
+              if (claudeId) await disc.bindClaudeSessionIn(repoRoot, claudeId, envId);
+              if (sessionActive && sessionActive.writeActiveSessionIfAbsent) {
+                await sessionActive.writeActiveSessionIfAbsent(repoRoot, { sessionId: envId, registeredAt: renewal.event ? renewal.event.ts : null, role: 'implementer', label, lane: null });
+              }
+              return { sid: envId, created: false };
+            }
+            // not-active / spine-corrupt → fresh registration below.
+          }
+          const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { makeEvent });
+          if (reg.status !== 'registered') return { sid: null, created: false };
+          if (claudeId) await disc.bindClaudeSessionIn(repoRoot, claudeId, reg.sessionId);
+          if (sessionActive) await sessionActive.writeActiveSession(repoRoot, { sessionId: reg.sessionId, registeredAt: reg.event ? reg.event.ts : null, role: 'implementer', label, lane: null });
+          return { sid: reg.sessionId, created: true };
+        });
+        if (sessionLifecycle.isLockFailed(inner)) return registerAndBindUnlockedClose();
+        return inner;
+      });
+      if (disc.isBindingLockFailed && disc.isBindingLockFailed(bt)) {
+        // Binding lock busy: register close-locked WITHOUT binding.
+        const reg = await sessionLifecycle.registerSessionUnique(repoRoot, { makeEvent });
+        if (reg.status === 'registered') {
+          sid = reg.sessionId; created = true;
+          if (sessionActive) await sessionActive.writeActiveSession(repoRoot, { sessionId: sid, registeredAt: reg.event ? reg.event.ts : null, role: 'implementer', label, lane: null });
+        }
+      } else if (bt && bt.sid) { sid = bt.sid; created = bt.created; }
+    } else {
+      // Legacy fallback: the register command (returns {sessionId, created}
+      // as of v1.111.0; tolerate the old bare-string shape too).
+      const r = await quietly(() => registerCmd([]));
+      sid = (r && typeof r === 'object') ? r.sessionId : (typeof r === 'string' ? r : null);
+      created = !!(r && typeof r === 'object' && r.created);
+      if (claudeId && disc && sid) await disc.bindClaudeSession(repoRoot, claudeId, sid);
+    }
+
+    // Opportunistic stale-session sweep. The bridge janitor only runs when
+    // the cockpit is open; on a CLI-first workstation stale sessions never
+    // auto-close. Best-effort + silent (stdout is parsed as context).
+    try {
+      const jan = await loadLib('janitor.mjs');
+      if (jan && jan.reconcileStale) await jan.reconcileStale(repoRoot, projections);
+    } catch { /* sweep is best-effort */ }
+
+    // Baseline capture is CREATE-ONLY (a continuation reusing a pinned sid
+    // must not re-baseline its accumulated history away), via the locked
+    // mutator, observing the WORK root; a failed observation skips (the
+    // baselineInit marker rule seeds fail-open at the first gate call).
+    let disciplineLine = '';
+    try {
+      if (disc && sid) {
+        if (created && disc.mutateCounter && disc.dirtyFilesDetailed) {
+          const obs = await disc.dirtyFilesDetailed(workRoot);
+          if (obs.ok) {
+            await disc.mutateCounter(repoRoot, sid, (c) => {
+              c.dirtyBaseline = obs.paths.slice();
+              c.dirtyFirstSeen = [];
+              c.firstDirtyTs = null;
+              c.baselineInit = true;
+              c.workRoot = workRoot;
+              c.dirtyV = 2;
+              return c;
+            });
+          }
+        }
+        const counter = await disc.readCounter(repoRoot, sid);
+        const st = await disc.gatherRitualState(repoRoot, sid, Date.now(), counter, { workRoot });
+        const gaps = [];
+        if (!st.goalOrPlan?.active) gaps.push('no goal or open plan');
+        if (!st.lane?.claimed) gaps.push('no lane claimed');
+        if (gaps.length) disciplineLine = ` Máddu discipline: ${gaps.join('; ')} — declare/claim before editing (enforcement may block otherwise).`;
+      }
+    } catch { /* discipline context is best-effort */ }
+
+    // Opportunistic env pinning (best-effort, never load-bearing — Claude
+    // Code's CLAUDE_ENV_FILE injection is documented-but-unreliable). The
+    // export line is written ONLY for strict-grammar sids: session ids can
+    // be caller input, and a quote/newline inside single quotes yields
+    // malformed or injectable shell. Non-conforming → skip, no escaping.
+    const sidShellSafe = isSid(sid);
+    try {
+      if (sid && sidShellSafe && typeof process.env.CLAUDE_ENV_FILE === 'string' && process.env.CLAUDE_ENV_FILE) {
+        await appendFile(process.env.CLAUDE_ENV_FILE, `export MADDU_SESSION_ID='${sid}'\n`);
+      }
+    } catch { /* pinning is best-effort */ }
+
+    // Concurrent-session clause: with two live sessions, `--session`-less CLI
+    // verbs attribute to the last-started one — tell the agent how to pin.
+    // The export RECOMMENDATION is grammar-gated like the env-file write.
+    let concurrentClause = '';
+    try {
+      const proj = await projections.project(repoRoot);
+      const others = (proj.activeSessions || []).filter((s) => s.id !== sid);
+      if (sid && others.length > 0) {
+        concurrentClause = sidShellSafe
+          ? ` Another session is active — export MADDU_SESSION_ID=${sid} in Bash calls to pin attribution.`
+          : ` Another session is active — this session's id could not be safely quoted; run \`maddu session list\` to identify it.`;
+      }
+    } catch { /* clause is best-effort */ }
+
+    note = (sid
+      ? `Máddu session ${sid} auto-registered (recorded in the spine). Claim a lane before editing (\`maddu lane claim <lane>\`) and run \`maddu slice-stop\` at each slice boundary — no --session needed, it resolves the active session.${concurrentClause}`
+      : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.') + disciplineLine;
+  } catch { /* CONTAINMENT: any error → the fallback note, exit 0 */ }
+  try {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note },
+    }) + '\n');
+  } catch { /* stdout gone — still exit 0 */ }
+  process.exit(0);
+}
+
+async function fireSessionEnd() {
+  try {
+    seamThrow('bootstrap');
+    const { paths, spine, sessionLifecycle } = await loadSpineLib();
+    const repoRoot = await resolveRepoRoot(paths);
+    const disc = await loadLib('discipline.mjs');
+    seamThrow('handler');
+    const payload = await readHookPayload();
+    const claudeId = payload.session_id || null;
+    // No payload / no binding infra → close NOTHING (never close an
+    // unattributed session; the janitor sweep is the leak backstop).
+    if (!claudeId || !disc || !sessionLifecycle || !disc.withBindingTransaction) process.exit(0);
+    const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
+    let uncommitted = 0;
+    try {
+      const obs = await disc.dirtyFilesDetailed(workRoot);
+      if (obs.ok) uncommitted = obs.paths.length;
+    } catch { /* count is informational */ }
+    // The whole sequence holds the BINDING lock (close lock nests inside per
+    // the global order): read binding → rebind-freshness guard → conditional
+    // close → status-scoped unbind. A rebind either blocks until this
+    // completes or landed first and makes the guard skip — no interleaving
+    // closes a live pinned continuation. The SessionEnd payload carries
+    // nothing that distinguishes same-claude-id generations, so the <10s
+    // freshness guard is deliberately fail-open (a skipped close is a
+    // janitor-reaped leak; a wrong close kills a live session).
+    await disc.withBindingTransaction(repoRoot, async () => {
+      const binding = await disc.resolveClaudeBindingIn(repoRoot, claudeId);
+      if (!binding) return;
+      if (Number.isFinite(binding.boundAt) && (Date.now() - binding.boundAt) < 10_000) return;
+      const res = await sessionLifecycle.withCloseLock(repoRoot, () =>
+        sessionLifecycle.closeSessionIfActiveIn(repoRoot, {
+          sessionId: binding.madduId,
+          eventType: spine.EVENT_TYPES.SESSION_CLOSED,
+          data: {
+            handoff: {
+              summary: `session ended (auto)${uncommitted > 0 ? ` — ${uncommitted} uncommitted file(s) at close` : ''}`,
+              uncommittedFiles: uncommitted,
+              auto: true,
+            },
+          },
+        }));
+      const status = sessionLifecycle.isLockFailed(res) ? 'lock' : res.status;
+      // Unbind only on terminal statuses — a lock/spine-corrupt result leaves
+      // an ACTIVE session; deleting its binding would orphan it.
+      if (status === 'closed' || status === 'already-closed' || status === 'missing') {
+        await disc.unbindClaudeSessionIn(repoRoot, claudeId, binding.madduId);
+      }
+    });
+  } catch { /* CONTAINMENT: never block Claude's session end */ }
+  process.exit(0);
+}
+
 export default async function hooks(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths } = await loadSpineLib();
-  const repoRoot = await resolveRepoRoot(paths);
-  const lib = await loadLib('claude-hooks.mjs');
 
   // ── fire: the runtime entrypoint the installed hooks call ──
+  // Handled BEFORE the shared bootstrap: each event bootstraps inside its own
+  // fail-open containment (a bootstrap failure must never block a tool call,
+  // a compaction, or a session boundary).
   if (sub === 'fire') {
     const event = rest[0];
     if (event === 'session-start') {
-      // Bind the id register JUST created — never the repo-global active pointer,
-      // which a concurrent SessionStart can overwrite, binding two Claude ids to
-      // one Máddu session (Codex). register returns its id in both branches; if it
-      // somehow yields nothing, leave sid null so the session stays honestly
-      // unbound rather than mis-bound to a pointer we can't attribute to it.
-      const sid = (await quietly(() => registerCmd([]))) || null;
-      // Opportunistic stale-session sweep. The bridge janitor only runs when the
-      // cockpit is open; on a CLI-first workstation stale sessions never
-      // auto-close and the lane claims they leaked linger for days. Running the
-      // same evaluation on every session start keeps the record self-cleaning.
-      // Best-effort + silent — a sweep failure must never break session start,
-      // and it must not write to stdout (parsed as SessionStart context).
-      try {
-        const { projections } = await loadSpineLib();
-        const jan = await loadLib('janitor.mjs');
-        if (jan && jan.reconcileStale) {
-          await jan.reconcileStale(repoRoot, projections);
-        }
-      } catch { /* sweep is best-effort */ }
-      // Bind this Claude session → the Máddu session and capture the dirty
-      // baseline, so the discipline counter measures only THIS session's new
-      // uncommitted work (Codex: per-session, no cross-session clobber).
-      // Best-effort + fail-safe — never breaks session start or dirties stdout.
-      let disciplineLine = '';
-      try {
-        const disc = await loadLib('discipline.mjs');
-        if (disc && sid) {
-          let claudeId = null;
-          if (!process.stdin.isTTY) {
-            let raw = '';
-            try { for await (const chunk of process.stdin) raw += chunk; } catch {}
-            try { claudeId = raw.trim() ? (JSON.parse(raw).session_id || null) : null; } catch {}
-          }
-          if (claudeId) await disc.bindClaudeSession(repoRoot, claudeId, sid);
-          const dirty = await disc.dirtyFiles(repoRoot);
-          const counter = await disc.readCounter(repoRoot, sid);
-          counter.dirtyBaseline = dirty;
-          await disc.writeCounter(repoRoot, sid, counter);
-          const st = await disc.gatherRitualState(repoRoot, sid, Date.now(), counter);
-          const gaps = [];
-          if (!st.goalOrPlan?.active) gaps.push('no goal or open plan');
-          if (!st.lane?.claimed) gaps.push('no lane claimed');
-          if (gaps.length) disciplineLine = ` Máddu discipline: ${gaps.join('; ')} — declare/claim before editing (enforcement may block otherwise).`;
-        }
-      } catch { /* discipline context is best-effort */ }
-      // SessionStart: emit additionalContext so the agent sees the session is
-      // live and is reminded of the per-slice discipline the hook can't enforce.
-      const note = (sid
-        ? `Máddu session ${sid} auto-registered (recorded in the spine). Claim a lane before editing (\`maddu lane claim <lane>\`) and run \`maddu slice-stop\` at each slice boundary — no --session needed, it resolves the active session.`
-        : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.') + disciplineLine;
-      process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note },
-      }) + '\n');
-      return;
+      return fireSessionStart();
     }
     if (event === 'session-end') {
-      let focus = 'session ended (auto)';
-      try {
-        const disc = await loadLib('discipline.mjs');
-        if (disc) { const n = (await disc.dirtyFiles(repoRoot)).length; if (n > 0) focus += ` — ${n} uncommitted file(s) at close`; }
-      } catch { /* best-effort */ }
-      await quietly(() => sessionCmd(['close', '--focus', focus]));
-      return;
+      return fireSessionEnd();
     }
     if (event === 'pre-tool-use') {
       // Enforce Máddu's session rituals before a mutating edit. First auto-claim
       // a lane (so agentic work is never un-laned), then evaluate discipline and
       // either allow, nudge (additionalContext), or block (permissionDecision:
       // deny). FAILS OPEN — any error exits 0 with no output, never blocking the
-      // tool; only an explicit verdict:'block' emits a deny.
+      // tool; only an explicit verdict:'block' emits a deny. The bootstrap runs
+      // INSIDE this containment (a bootstrap failure must never block a tool).
       // Context hoisted so BOTH the happy path and the outer catch can witness (F6).
-      let tool = null, sid = null, counterKey = null, disc = null;
+      let tool = null, sid = null, counterKey = null, disc = null, repoRoot = null;
       try {
+        seamThrow('bootstrap');
         if (process.stdin.isTTY) process.exit(0); // human at a terminal → no gate (not a bypass)
         // Load the discipline lib BEFORE reading/parsing stdin so a malformed-input
         // throw still lands in the catch with `disc` available to witness (F6).
         disc = await loadLib('discipline.mjs');
+        const { paths, projections, spine } = await loadSpineLib();
+        repoRoot = await resolveRepoRoot(paths);
+        seamThrow('handler');
         let raw = '';
         for await (const chunk of process.stdin) raw += chunk;
         const payload = raw.trim() ? JSON.parse(raw) : {};
@@ -254,6 +453,7 @@ export default async function hooks(argv) {
         const filePath = ti.file_path || ti.notebook_path || null;
         const command = ti.command || null;
         const claudeSessionId = payload.session_id || null;
+        const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
 
         // Classify for the early-exit. A read/remedy Bash (and any non-mutating tool)
         // has nothing to gate OR witness → exit. Everything else (edit/write/
@@ -262,14 +462,22 @@ export default async function hooks(argv) {
           : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
         if (kind === 'read' || kind === 'remedy') process.exit(0);
 
-        const { projections } = await loadSpineLib();
-
-        // Resolve the CALLER's Máddu session: explicit env → the SessionStart
-        // binding (Claude id → Máddu id). NO active-session-cache fallback (audit P2
-        // F11): an unbound Claude caller must stay unbound rather than inherit the
-        // cached active session, or it defeats the null-session gate + Claude counter.
-        sid = process.env.MADDU_SESSION_ID || null;
-        if (!sid && disc && claudeSessionId) { try { sid = await disc.resolveMadduSession(repoRoot, claudeSessionId); } catch { /* fall through */ } }
+        // CENTRALIZED acting-sid resolution (v1.111.0): validated ONCE, then
+        // every consumer — auto-claim, enforcement, the witness path — uses
+        // the SAME result, so an invalid env value or legacy nonconforming
+        // binding can never produce a lane claim or witness event upstream of
+        // the check. Precedence: env → SessionStart binding. NO active-
+        // session-cache fallback (audit P2 F11): an unbound Claude caller
+        // must stay unbound rather than inherit the cached active session.
+        const refOk = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
+        const envSid = process.env.MADDU_SESSION_ID;
+        sid = refOk(envSid) ? envSid : null;
+        if (!sid && disc && claudeSessionId) {
+          try {
+            const bound = await disc.resolveMadduSession(repoRoot, claudeSessionId);
+            if (refOk(bound)) sid = bound;
+          } catch { /* fall through */ }
+        }
         counterKey = sid || (claudeSessionId ? `claude:${claudeSessionId}` : null);
 
         // Auto-claim a lane before the first edit (rule-#9 clean via the trigger
@@ -291,7 +499,7 @@ export default async function hooks(argv) {
         if (disc && disc.enforcePreTool) {
           decision = await disc.enforcePreTool(repoRoot, {
             madduSessionId: sid, claudeSessionId, tool, filePath, command,
-            nowMs: Date.now(), laneJustClaimed,
+            nowMs: Date.now(), laneJustClaimed, workRoot,
           });
         }
         counterKey = decision.counterKey || counterKey;
@@ -338,19 +546,14 @@ export default async function hooks(argv) {
     if (event === 'pre-compact') {
       // FAILS OPEN by design: whatever goes wrong, exit 0 so compaction is
       // never blocked (exit 2 would block it) and the session never breaks.
+      // Bootstrap runs INSIDE the containment.
       try {
-        // Claude Code pipes the hook payload on stdin ({trigger, session_id,
-        // transcript_path, …}); a human running this from a terminal has a TTY
-        // there, so skip reading to avoid blocking on interactive stdin.
-        let payload = {};
-        if (!process.stdin.isTTY) {
-          let raw = '';
-          try {
-            for await (const chunk of process.stdin) raw += chunk;
-            if (raw.trim()) payload = JSON.parse(raw);
-          } catch { payload = {}; }
-        }
-        const { spine, projections } = await loadSpineLib();
+        seamThrow('bootstrap');
+        const payload = await readHookPayload();
+        const { paths, spine, projections } = await loadSpineLib();
+        const repoRoot = await resolveRepoRoot(paths);
+        seamThrow('handler');
+        const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
         const proj = await projections.project(repoRoot);
         const stops = Array.isArray(proj.sliceStops) ? proj.sliceStops : [];
         const last = stops.length ? stops[stops.length - 1] : null;
@@ -360,8 +563,20 @@ export default async function hooks(argv) {
         try {
           const disc = await loadLib('discipline.mjs');
           if (disc) {
-            uncommittedFiles = (await disc.dirtyFiles(repoRoot)).length;
-            const sid2 = process.env.MADDU_SESSION_ID || (payload.session_id ? await disc.resolveMadduSession(repoRoot, payload.session_id) : null);
+            // Observe the WORK root (an attached worktree's own dirt, not the
+            // primary checkout's); a failed observation stays null-honest.
+            if (disc.dirtyFilesDetailed) {
+              const obs = await disc.dirtyFilesDetailed(workRoot);
+              uncommittedFiles = obs.ok ? obs.paths.length : null;
+            } else {
+              uncommittedFiles = (await disc.dirtyFiles(workRoot)).length;
+            }
+            const refOk2 = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
+            let sid2 = refOk2(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null;
+            if (!sid2 && payload.session_id) {
+              const b = await disc.resolveMadduSession(repoRoot, payload.session_id);
+              if (refOk2(b)) sid2 = b;
+            }
             if (sid2) editsSinceSlice = (await disc.readCounter(repoRoot, sid2)).editsSinceSlice || 0;
             if (uncommittedFiles > 0) process.stderr.write(`[maddu] compacting with ${uncommittedFiles} uncommitted file(s) — consider committing/slice-stopping first.\n`);
           }
@@ -386,6 +601,13 @@ export default async function hooks(argv) {
     console.error(`maddu hooks fire: unknown event "${event}". One of: session-start, session-end, pre-compact, pre-tool-use.`);
     process.exit(2);
   }
+
+  // Shared bootstrap for the NON-fire subcommands (install/status/remove).
+  // These are interactive operator commands — a bootstrap failure may error
+  // normally here; only the fire handlers carry the fail-open containment.
+  const { paths } = await loadSpineLib();
+  const repoRoot = await resolveRepoRoot(paths);
+  const lib = await loadLib('claude-hooks.mjs');
 
   // ── status ──
   if (!sub || sub === 'status' || sub === 'list') {
