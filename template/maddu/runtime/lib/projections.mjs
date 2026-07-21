@@ -196,6 +196,17 @@ export async function project(repoRoot) {
         if (s) {
           s.lastHeartbeatAt = ev.ts;
           if (ev.data.focus) s.focus = ev.data.focus;
+          // A heartbeat from a session that is still ACTIVE clears any
+          // janitor stale mark and restores its tree state — otherwise a
+          // renewed continuation stays visibly stale forever and the
+          // one-shot stale guard suppresses every later legitimate
+          // stale episode. Closed sessions stay closed (a late heartbeat
+          // never resurrects state).
+          if (s.status === 'active') {
+            janitorStaleSet.delete(ev.actor);
+            const tt = sessionsTree.get(ev.actor);
+            if (tt && tt.state === 'stale') tt.state = 'active';
+          }
         }
         const t = sessionsTree.get(ev.actor);
         if (t) t.lastHeartbeatAt = ev.ts;
@@ -1104,5 +1115,153 @@ export function normalizeProjection(raw) {
   out.janitor = { ...d.janitor, ...(r.janitor && typeof r.janitor === 'object' ? r.janitor : {}) };
   out.sourceSchemaVersion = (typeof r.schemaVersion === 'number') ? r.schemaVersion : 0;
   out.schemaVersion = SCHEMA_VERSION;
+  return out;
+}
+
+// ── Narrow pure reducers over a SUPPLIED event snapshot (PR-A, v1.111.0) ─────
+//
+// The session-lifecycle transactions (close / stale-mark / renew / register)
+// must decide from the SAME strict snapshot they parse-gated — `project()`
+// always re-reads the spine tolerantly, so it cannot serve them. These
+// reducers are pure over explicit inputs and mirror project()'s session and
+// claim semantics EXACTLY (a parity fixture pins that). They deliberately
+// return only what the lifecycle helpers need; everything else stays on
+// project().
+//
+// reduceSessions(events, { nowMs }) → { sessions, activeSessions, staleSet }
+//   nowMs is accepted for API stability (callers compute ages themselves);
+//   the reduction itself is time-independent.
+export function reduceSessions(events, { nowMs = 0 } = {}) {
+  void nowMs;
+  const sessions = new Map();
+  const staleSet = new Set();
+  for (const ev of (Array.isArray(events) ? events : [])) {
+    if (!ev || typeof ev !== 'object') continue;
+    switch (ev.type) {
+      case 'SESSION_REGISTERED':
+      case 'SESSION_AUTO_REGISTERED':
+        sessions.set(ev.actor, {
+          id: ev.actor,
+          role: (ev.data && ev.data.role) || null,
+          label: (ev.data && ev.data.label) || null,
+          registeredAt: ev.ts,
+          lastHeartbeatAt: ev.ts,
+          closedAt: null,
+          status: 'active',
+        });
+        break;
+      case 'SESSION_HEARTBEAT': {
+        const s = sessions.get(ev.actor);
+        if (s) {
+          s.lastHeartbeatAt = ev.ts;
+          // Mirrors project(): an active session's heartbeat clears its
+          // janitor stale mark.
+          if (s.status === 'active') staleSet.delete(ev.actor);
+        }
+        break;
+      }
+      case 'SESSION_STALE_DETECTED':
+        if (ev.data && ev.data.sessionId) staleSet.add(ev.data.sessionId);
+        break;
+      case 'SESSION_CLOSED':
+      case 'SESSION_AUTO_CLOSED': {
+        const sid = ev.actor || (ev.data && ev.data.sessionId);
+        const s = sessions.get(sid);
+        if (s) { s.closedAt = ev.ts; s.status = 'closed'; }
+        staleSet.delete(sid);
+        break;
+      }
+      default: break;
+    }
+  }
+  const all = Array.from(sessions.values());
+  return {
+    sessions: all,
+    activeSessions: all.filter((s) => s.status === 'active'),
+    staleSet,
+  };
+}
+
+// reduceClaims(events, { syncMode }) → claims array (one entry per held claim).
+// syncMode is EXPLICIT (round-24): default mode is last-writer-claim /
+// unconditional-release-clear; sync mode is first-claimer / per-owner-release.
+// Both modes mirror project()'s reducer byte-for-byte in semantics.
+export function reduceClaims(events, { syncMode = false } = {}) {
+  if (!syncMode) {
+    const claims = new Map();
+    for (const ev of (Array.isArray(events) ? events : [])) {
+      if (!ev || typeof ev !== 'object') continue;
+      switch (ev.type) {
+        case 'LANE_CLAIMED':
+          claims.set(ev.lane, {
+            lane: ev.lane,
+            sessionId: ev.actor,
+            focus: (ev.data && ev.data.focus) || null,
+            claimedAt: ev.ts,
+          });
+          break;
+        case 'LANE_RELEASED':
+          claims.delete(ev.lane);
+          break;
+        case 'SESSION_CLOSED':
+        case 'SESSION_AUTO_CLOSED': {
+          const sid = ev.actor || (ev.data && ev.data.sessionId);
+          for (const [lane, c] of claims) {
+            if (c.sessionId === sid) claims.delete(lane);
+          }
+          break;
+        }
+        default: break;
+      }
+    }
+    return Array.from(claims.values());
+  }
+  // Sync mode: per-owner claims, first-claimer holds (earliest _order wins).
+  const laneClaims = new Map(); // lane -> Map<sessionId, claim>
+  let claimSeq = 0;
+  for (const ev of (Array.isArray(events) ? events : [])) {
+    if (!ev || typeof ev !== 'object') continue;
+    switch (ev.type) {
+      case 'LANE_CLAIMED': {
+        let owners = laneClaims.get(ev.lane);
+        if (!owners) { owners = new Map(); laneClaims.set(ev.lane, owners); }
+        const rank = claimSeq++;
+        const prior = owners.get(ev.actor);
+        owners.set(ev.actor, {
+          lane: ev.lane,
+          sessionId: ev.actor,
+          focus: (ev.data && ev.data.focus) || null,
+          claimedAt: ev.ts,
+          _order: prior ? prior._order : rank,
+        });
+        break;
+      }
+      case 'LANE_RELEASED': {
+        const owners = laneClaims.get(ev.lane);
+        if (owners) {
+          owners.delete(ev.actor);
+          if (owners.size === 0) laneClaims.delete(ev.lane);
+        }
+        break;
+      }
+      case 'SESSION_CLOSED':
+      case 'SESSION_AUTO_CLOSED': {
+        const sid = ev.actor || (ev.data && ev.data.sessionId);
+        for (const [lane, owners] of laneClaims) {
+          if (owners.delete(sid) && owners.size === 0) laneClaims.delete(lane);
+        }
+        break;
+      }
+      default: break;
+    }
+  }
+  const out = [];
+  for (const owners of laneClaims.values()) {
+    let winner = null;
+    for (const c of owners.values()) {
+      if (!winner || c._order < winner._order) winner = c;
+    }
+    if (winner) { const { _order, ...rest } = winner; out.push(rest); }
+  }
   return out;
 }

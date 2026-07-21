@@ -101,7 +101,12 @@ export async function resolveSessionId(repoRoot, flags, sessionActive) {
   if (env && env.length > 0) return env;
   if (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function') {
     const res = await sessionActive.readActiveSessionVerified(repoRoot);
-    if (res && !res.stale && res.sessionId) return res.sessionId;
+    // v1.111.0 discriminated union: `active` resolves; `unverified` resolves
+    // too (today's leniency — usable, never claimed verified); stale/invalid
+    // never resolve. Pre-v1.111 lib shapes (a raw record / {stale}) keep
+    // working via the fallback arm so a mid-upgrade mixed tree stays sane.
+    if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
+    if (res && res.kind === undefined && !res.stale && res.sessionId) return res.sessionId;
   }
   return null;
 }
