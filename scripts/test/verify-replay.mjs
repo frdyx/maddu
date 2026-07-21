@@ -217,9 +217,10 @@ async function main() {
       const rSig2 = await makeRepo(base, 'siginner', { madduJson: { name: 'siginner', replay: { verify: `sh -c 'kill -9 $$'; exit $?` } } });
       const oSig2 = runCli(rSig2, ['spine', 'verify', '--replay', headSha(rSig2), '--json']);
       const jSig2 = JSON.parse(oSig2.stdout);
-      ok('inner signal death: always FAIL, never pass (exit recorded verbatim)',
+      ok('inner signal death: FAIL with numeric 128+n, complete:true (the documented residual, exactly)',
         oSig2.status === 1 && jSig2.result === 'fail'
-        && (jSig2.verifyExit === null || jSig2.verifyExit >= 128),
+        && typeof jSig2.verifyExit === 'number' && jSig2.verifyExit >= 128
+        && jSig2.complete === true && jSig2.verifySignal === null,
         JSON.stringify({ exit: jSig2.verifyExit, sig: jSig2.verifySignal, complete: jSig2.complete }));
     }
 
