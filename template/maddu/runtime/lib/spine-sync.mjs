@@ -176,14 +176,25 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   // Anchors and team-sync are structurally incompatible (witness PR 4: one
   // anchor chain covers one replica's flat spine; migration would also move
   // the very segments existing payloads point at). BOTH sides refuse: `spine
-  // anchor` refuses in sync mode, and init refuses while anchors exist —
-  // closing the stamp-vs-migration race from this side too.
-  try {
-    const entries = await readdir(join(repoRoot, '.maddu', 'anchors'), { withFileTypes: true });
-    if (entries.some((e) => e.isDirectory() && /^\d{6}$/.test(e.name))) {
-      return { ok: false, reason: 'anchors-present' };
+  // anchor` refuses in sync mode, and init refuses while anchors exist. This
+  // early check fails CLOSED — only a genuinely-absent dir (ENOENT) means no
+  // anchors; an unreadable dir must not let init migrate covered segments.
+  // A SECOND check runs after the pending marker is written (see below) to
+  // close the race with a stamp completing between here and the marker.
+  const anchorsPresent = async () => {
+    try {
+      const entries = await readdir(join(repoRoot, '.maddu', 'anchors'), { withFileTypes: true });
+      return entries.some((e) => e.isDirectory() && /^\d{6}$/.test(e.name));
+    } catch (e) {
+      if (e && e.code === 'ENOENT') return false;
+      throw e; // unreadable ≠ absent — surface it, don't fail open
     }
-  } catch { /* no anchors dir — fine */ }
+  };
+  try {
+    if (await anchorsPresent()) return { ok: false, reason: 'anchors-present' };
+  } catch (e) {
+    return { ok: false, reason: 'config-invalid', message: `cannot read .maddu/anchors (${e.code || e.message}) — resolve before sync init` };
+  }
 
   // Secret gate runs UNCONDITIONALLY (first-time, resume, AND already): the sync
   // surface must never be created/refreshed while a secret is present in the payload.
@@ -216,6 +227,20 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   // partition + residual flat (readActiveReplicaId), so reads stay consistent.
   await mkdir(join(repoRoot, '.maddu', 'config'), { recursive: true });
   await writeFile(pendingReplicaPath(repoRoot), JSON.stringify({ replicaId }) + '\n');
+
+  // Anchors recheck AFTER the marker: once the marker exists, any in-flight
+  // `spine anchor` sees sync mode at its post-stamp recheck and rolls back —
+  // so a stamp that FINALIZED before our marker is exactly the case this
+  // catches. One of the two rechecks always fires; both cannot pass.
+  try {
+    if (await anchorsPresent()) {
+      await unlink(pendingReplicaPath(repoRoot)).catch(() => {});
+      return { ok: false, reason: 'anchors-present' };
+    }
+  } catch (e) {
+    await unlink(pendingReplicaPath(repoRoot)).catch(() => {});
+    return { ok: false, reason: 'config-invalid', message: `cannot read .maddu/anchors (${e.code || e.message}) — resolve before sync init` };
+  }
 
   // Migrate all flat segments in, THEN write replica.json LAST (activation): only
   // once every segment is in place does append() route to the partition.

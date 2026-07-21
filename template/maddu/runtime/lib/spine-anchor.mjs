@@ -351,6 +351,20 @@ export async function stampAnchor(repoRoot, {
     //                        anchor would stay unrecorded forever.
     // Neither is a queue: they never grow past the single crashed stamp.
     if (last && !last.hasProof && last.payloadBytes) {
+      // An upgrade crash can leave the proof only in `.bak` — restore that
+      // EARLIER attestation instead of re-stamping (a fresh stamp would carry
+      // a later date and silently discard the original evidence).
+      const lastProof = join(anchorsDir(repoRoot), last.dir, 'payload.json.ots');
+      try {
+        const rb = await reconcileBak(otsBin, lastProof);
+        if (rb.restored) {
+          if (!last.meta) await finishStamp(repoRoot, last.seq, last.payloadDigest, { calendars: [] }, spineLib);
+          const giB = await ensureAnchorsGitignore(repoRoot);
+          return { ok: true, seq: last.seq, payloadDigest: last.payloadDigest, calendars: [], recovered: true, gitignore: giB.state };
+        }
+      } catch (e) {
+        return { ok: false, reason: 'bak-error', detail: `could not reconcile payload.json.ots.bak (${String((e && e.message) || e).slice(0, 120)}) — backup preserved; resolve manually`, seq: last.seq };
+      }
       const r = await runStamp(repoRoot, otsBin, last.seq, cal.calendars);
       if (!r.ok) return { ok: false, reason: 'stamp-failed', detail: r.detail, seq: last.seq, recovered: false };
       await finishStamp(repoRoot, last.seq, last.payloadDigest, r, spineLib);
@@ -450,6 +464,37 @@ async function finishStamp(repoRoot, seq, payloadDigest, stampResult, spineLib) 
   }
 }
 
+// ── .bak reconciliation protocol ─────────────────────────────────────────
+
+// The stock client's upgrade path renames the proof to `<file>.bak`, then
+// rewrites the primary — so a crash can leave the BACKUP as the only valid
+// copy (primary missing OR truncated). The protocol: a .bak is NEVER deleted
+// until the primary is proven parseable by the client itself (`ots info`).
+//   primary missing            → restore (rename .bak → primary)
+//   primary unparseable        → restore (replace the corrupt primary)
+//   primary parses             → the backup is redundant → delete it
+// Any fs failure THROWS with the .bak preserved — the caller reports the
+// anchor as errored and skips it; irreversible loss is never the fallback.
+async function reconcileBak(otsBin, proofPath) {
+  const bak = `${proofPath}.bak`;
+  try { await stat(bak); } catch { return { restored: false, hadBak: false }; }
+  let primaryOk = false;
+  try {
+    await stat(proofPath);
+    try {
+      await execOts(otsBin, ['info', proofPath], { timeout: 60000, shell: false });
+      primaryOk = true;
+    } catch { /* unparseable primary */ }
+  } catch { /* primary missing */ }
+  if (!primaryOk) {
+    await rm(proofPath, { force: true });
+    await rename(bak, proofPath); // throws → caller aborts, .bak intact
+    return { restored: true, hadBak: true };
+  }
+  await rm(bak, { force: true });
+  return { restored: false, hadBak: true };
+}
+
 // ── upgrade ──────────────────────────────────────────────────────────────
 
 // Oldest-first `ots upgrade` over incomplete anchors. Emits ANCHOR_UPGRADED
@@ -468,22 +513,39 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
     const newestEv = await newestAnchorEventDigests(repoRoot);
     const results = [];
     for (const a of anchors) {
-      if (!a.hasProof) { results.push({ seq: a.seq, state: 'no-proof' }); continue; }
       const base = join(anchorsDir(repoRoot), a.dir);
       const proofPath = join(base, 'payload.json.ots');
+      // Reconcile the backup BEFORE any presence decision: a crash between
+      // the client's rename-to-.bak and its rewrite leaves hasProof false
+      // with the backup as the only valid proof — restoring here is what
+      // keeps `no-proof` (and a later destructive re-stamp) from being the
+      // answer to a recoverable state.
+      let hasProof = a.hasProof;
+      try {
+        const rb = await reconcileBak(otsBin, proofPath);
+        if (rb.restored) hasProof = true;
+      } catch (e) {
+        results.push({ seq: a.seq, state: 'bak-error', detail: `could not reconcile payload.json.ots.bak (${String((e && e.message) || e).slice(0, 120)}) — backup preserved; resolve manually` });
+        continue;
+      }
+      if (!hasProof) { results.push({ seq: a.seq, state: 'no-proof' }); continue; }
+      // Digest from DISK — a restore above may have replaced the bytes
+      // listAnchors saw.
+      let diskDigest = a.proofDigest;
+      try { diskDigest = sha256Hex(await readFile(proofPath)); } catch { /* keep listed */ }
       if (a.meta && a.meta.complete === true) {
         // Reconcile: the newest ANCHOR_* event must record the CURRENT proof
         // digest. A mismatch here is the benign twin of the --verify FAIL (an
         // upgrade whose event append failed) — re-emit so the record matches
         // disk again instead of skipping forever.
         const rec = newestEv.get(a.seq);
-        if (spineLib && spineLib.append && rec && rec.digest !== a.proofDigest) {
+        if (spineLib && spineLib.append && rec && rec.digest !== diskDigest) {
           await spineLib.append(repoRoot, {
             type: 'ANCHOR_UPGRADED',
             actor: process.env.MADDU_SESSION_ID || null,
             data: {
               seq: a.seq, payload_digest: a.payloadDigest, complete: true,
-              proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: a.proofDigest }],
+              proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: diskDigest }],
             },
           });
           results.push({ seq: a.seq, state: 'reconciled' });
@@ -492,25 +554,7 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         }
         continue;
       }
-      // The stock client backs the proof up to `<file>.bak` on upgrade and
-      // REFUSES the next upgrade while that backup exists. A leftover .bak
-      // can also be the ONLY valid copy (a crash mid-rewrite leaves a
-      // truncated primary) — so before clearing it, validate the primary with
-      // the client itself (`ots info`) and restore from the backup if the
-      // primary is unparseable. Only then is the .bak safe to remove.
-      try {
-        await stat(`${proofPath}.bak`);
-        try {
-          await execOts(otsBin, ['info', proofPath], { timeout: 60000, shell: false });
-        } catch {
-          await rename(`${proofPath}.bak`, proofPath); // primary corrupt → the backup IS the proof
-        }
-      } catch { /* no .bak — nothing to reconcile */ }
-      await rm(`${proofPath}.bak`, { force: true });
-      // Recompute from disk — a .bak restore just above may have replaced the
-      // bytes listAnchors saw.
-      let before = a.proofDigest;
-      try { before = sha256Hex(await readFile(proofPath)); } catch { /* keep listed */ }
+      const before = diskDigest; // reconcileBak already ran at the loop top
       let complete = false, detail = null;
       try {
         await execOts(otsBin, ['upgrade', proofPath], { timeout: 120000, shell: false });
@@ -519,7 +563,20 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         detail = String((e && (e.stderr || e.stdout || e.message)) || e).slice(0, 300);
         complete = false;
       }
-      await rm(`${proofPath}.bak`, { force: true });
+      // Post-run backup reconciliation: the client just created a fresh .bak
+      // and rewrote the primary — if that rewrite died (truncated primary),
+      // restore from the backup and record NOTHING as upgraded; the .bak is
+      // deleted only once the primary parses. A reconcile failure preserves
+      // the backup and reports the anchor instead of proceeding.
+      let restoredPostRun = false;
+      try {
+        const rb2 = await reconcileBak(otsBin, proofPath);
+        restoredPostRun = rb2.restored;
+      } catch (e) {
+        results.push({ seq: a.seq, state: 'bak-error', detail: `could not reconcile payload.json.ots.bak after upgrade (${String((e && e.message) || e).slice(0, 120)}) — backup preserved; resolve manually` });
+        continue;
+      }
+      if (restoredPostRun) complete = false; // the client's rewrite was bad — nothing advanced
       let after = before;
       try { after = sha256Hex(await readFile(proofPath)); } catch { /* unchanged */ }
       const upgraded = after !== before;

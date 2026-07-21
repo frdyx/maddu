@@ -114,11 +114,20 @@ export default async function spine(argv) {
       if (flags.json) emit(r, r.ok ? 0 : 1);
       if (!r.ok) { printAnchorRefusal(r); process.exit(1); }
       if (!r.results.length) console.log(`${ANSI.dim}no anchors to upgrade${ANSI.reset}`);
+      let hadError = false;
       for (const it of r.results) {
-        const tag = it.state === 'completed' ? levelTag('PASS') : it.state === 'complete' ? `${ANSI.dim}complete${ANSI.reset}` : it.state === 'partial' ? levelTag('WARN') : `${ANSI.warn}pending${ANSI.reset}`;
+        const tag = it.state === 'completed' ? levelTag('PASS')
+          : it.state === 'complete' ? `${ANSI.dim}complete${ANSI.reset}`
+          : it.state === 'partial' ? levelTag('WARN')
+          : it.state === 'reconciled' ? `${ANSI.accent}reconciled${ANSI.reset}`
+          : it.state === 'pending' ? `${ANSI.warn}pending${ANSI.reset}`
+          : `${ANSI.fail}${it.state}${ANSI.reset}`;
+        if (it.state === 'bak-error' || it.state === 'no-proof') hadError = true;
         console.log(`  ${ANSI.accent}#${it.seq}${ANSI.reset}  ${tag}${it.state === 'pending' ? `  ${ANSI.dim}(Bitcoin confirmation not in yet — retry in a few hours)${ANSI.reset}` : ''}`);
+        if (it.detail && (it.state === 'bak-error' || it.state === 'no-proof')) console.log(`      ${ANSI.dim}${it.detail}${ANSI.reset}`);
       }
-      process.exit(0);
+      if (hadError) console.log(`  ${ANSI.dim}run \`maddu spine anchor --verify\` for the full diagnostic${ANSI.reset}`);
+      process.exit(hadError ? 1 : 0);
     }
 
     // Default: stamp now.

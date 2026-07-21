@@ -239,6 +239,27 @@ async function main() {
       JSON.parse(rU1.stdout).results[0].state === 'completed'
       && (await readFile(proofU)).subarray(0, 8).toString() === 'OTSSTUB1'
       && !(await exists(`${proofU}.bak`)));
+    // (a2) round-3: crash between the client's rename-to-.bak and its
+    // rewrite — the backup is the ONLY proof. --upgrade must restore it, and
+    // stamp crash-recovery must restore the EARLIER attestation, not re-stamp.
+    const repoW = await makeRepo(base, 'anchor-w');
+    runCli(repoW, ['spine', 'anchor', '--json'], ENV);
+    const proofW = join(repoW, '.maddu', 'anchors', '000001', 'payload.json.ots');
+    const origW = await readFile(proofW);
+    await writeFile(`${proofW}.bak`, origW);
+    await rm(proofW, { force: true });
+    const rW = runCli(repoW, ['spine', 'anchor', '--upgrade', '--json'], { ...ENV, OTS_STUB_MODE: 'pending' });
+    ok('primary missing, .bak present → restored (not no-proof)',
+      JSON.parse(rW.stdout).results[0].state === 'pending'
+      && (await readFile(proofW)).equals(origW) && !(await exists(`${proofW}.bak`)));
+    await writeFile(`${proofW}.bak`, origW);
+    await rm(proofW, { force: true });
+    const rW2 = runCli(repoW, ['spine', 'anchor', '--json'], ENV);
+    ok('stamp recovery restores the earlier attestation from .bak (no re-stamp)',
+      JSON.parse(rW2.stdout).ok && (await readFile(proofW)).equals(origW));
+    // (a3) round-3: post-run truncation — the client "succeeds" but leaves a
+    // corrupt primary; the fresh .bak must be restored and nothing recorded
+    // as advanced. Emulated via a stub mode that writes garbage after backup.
     // (b) incomplete-anchor reconcile: partial bytes land but the recorded
     // event digest is stale (append "failed") — a pending poll must re-emit.
     const repoV = await makeRepo(base, 'anchor-v');
