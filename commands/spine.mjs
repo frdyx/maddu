@@ -766,35 +766,42 @@ async function runAssessCeremony(lib, sa, repoRoot, sha, seqFlag) {
   rl.close();
   if (confirm !== 'y' && confirm !== 'yes') assessRefuse('not confirmed.');
 
-  // Pass 2 — the LAST act before append: re-run the binding checks AND
-  // reload the age policy. Anything moved during the interactive window
-  // (anchor bytes, spine, maddu.json policy) is a refusal.
-  const pass2 = await sa.assessBinding(repoRoot, { sha, seq: seqFlag });
-  const t2 = pass2.anchor;
-  const TUPLE = ['seq', 'payloadDigest', 'proofDigest', 'receiptDigest', 'subjectSha', 'eventId'];
-  const same = pass2.ok && t2 && TUPLE.every((k) => anchor[k] === t2[k]);
-  const policy2 = await sa.readMaxAnchorAge(repoRoot);
-  const gate2 = evalAgeGate(policy2, dateStr, Date.now());
-  if (!same || !gate2.ok) {
-    assessRefuse('anchor state or witness policy changed while you were verifying — re-run the ceremony.');
-  }
-
-  const evidence = { anchor_seq: t2.seq, anchor_payload_digest: t2.payloadDigest, proof_digest: t2.proofDigest };
+  // Build everything the append needs from the PASS-1 tuple first (actor
+  // resolution, evidence, redacted note) so the pass-2 recheck can be the
+  // literal last act before the write — no avoidable await between them.
+  const evidence = { anchor_seq: anchor.seq, anchor_payload_digest: anchor.payloadDigest, proof_digest: anchor.proofDigest };
   const check = sa.validateAssuranceEvidence('anchored', evidence);
   if (!check.ok) assessRefuse(`evidence shape rejected by the canonical checker (missing: ${check.missing.join(', ') || check.error}) — never appending what it rejects.`);
-
   const noteLines = [`attested-date: ${dateStr || '(no age policy declared)'}`];
   if (handle) noteLines.push(`operator-handle: ${scan.redactText(handle).text}`);
   noteLines.push('--- pasted verifier output (redacted, capped) ---', noteBody);
   const data = scan.redactLeaves({
     subject_sha: sha,
-    receipt_digest: t2.receiptDigest,
+    receipt_digest: anchor.receiptDigest,
     level: 'anchored',
     evidence,
     assessed_by: 'operator-ceremony',
     note: noteLines.join('\n'),
   });
   const actor = await resolveSessionId(repoRoot, {}, lib.sessionActive);
+
+  // Pass 2 — the LAST act before append: re-run the binding checks AND
+  // reload the age policy. ANY movement during the interactive window is a
+  // refusal — including a policy that was removed or LOOSENED (a policy
+  // change mid-ceremony is a refusal, never a renegotiation), not just one
+  // that now rejects the entered date.
+  const pass2 = await sa.assessBinding(repoRoot, { sha, seq: seqFlag });
+  const t2 = pass2.anchor;
+  const TUPLE = ['seq', 'payloadDigest', 'proofDigest', 'receiptDigest', 'subjectSha', 'eventId'];
+  const same = pass2.ok && t2 && TUPLE.every((k) => anchor[k] === t2[k]);
+  const policy2 = await sa.readMaxAnchorAge(repoRoot);
+  const policyChanged = policy1.set !== policy2.set
+    || (policy1.invalid === true) !== (policy2.invalid === true)
+    || (policy1.days ?? null) !== (policy2.days ?? null);
+  const gate2 = evalAgeGate(policy2, dateStr, Date.now());
+  if (!same || policyChanged || !gate2.ok) {
+    assessRefuse('anchor state or witness policy changed while you were verifying — re-run the ceremony.');
+  }
   let ev = null;
   try {
     const T = (lib.spine && lib.spine.EVENT_TYPES) || {};

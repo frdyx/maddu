@@ -191,9 +191,27 @@ async function main() {
     await setPolicy('30x');
     r = runAssess(polRepo, headSha, happyWithDate(utcDaysAgo(0)));
     ok('invalid maxAnchorAge refused (config-invalid, fail-closed)', r.status === 2 && /maxAnchorAge/.test(r.stderr));
+    await setPolicy('9'.repeat(24) + 'd'); // parseInt → Infinity → stale check could never fire
+    r = runAssess(polRepo, headSha, happyWithDate(utcDaysAgo(0)));
+    ok('unbounded digit-run policy refused (Infinity days)', r.status === 2 && /maxAnchorAge/.test(r.stderr));
     let s = runCli(polRepo, ['spine', 'anchor', '--status'], ENV);
     ok('--status WARNs on invalid maxAnchorAge', s.status === 0 && /maxAnchorAge/.test(s.stdout));
     ok('policy repo has no events appended', (await countAssessed(polRepo)) === 0);
+    // Fail-closed policy READ: maddu.json present but unreadable (a directory).
+    const eisdirRepo = await clone('policy-eisdir');
+    await rm(join(eisdirRepo, 'maddu.json'), { force: true });
+    await mkdir(join(eisdirRepo, 'maddu.json'));
+    r = runAssess(eisdirRepo, headSha, HAPPY);
+    ok('unreadable maddu.json refused (fail-closed, not no-policy)', r.status === 2 && /cannot be read/.test(r.stderr));
+    // A secret-shaped policy VALUE is never echoed back. Assembled from
+    // parts so no secret-shaped literal lives in this source blob (GitHub
+    // push protection scans every pushed commit).
+    const leakToken = ['xoxb', '1234567890', 'ABCDEFGHIJKLMNOP'].join('-');
+    await setPolicy(leakToken);
+    r = runAssess(polRepo, headSha, happyWithDate(utcDaysAgo(0)));
+    ok('invalid policy refused without echoing the value', r.status === 2 && !(r.stderr + r.stdout).includes(leakToken));
+    s = runCli(polRepo, ['spine', 'anchor', '--status'], ENV);
+    ok('--status never echoes the policy value either', !(s.stderr + s.stdout).includes(leakToken));
     await setPolicy('2d');
     r = runAssess(polRepo, headSha, happyWithDate(utcDaysAgo(1)));
     ok('fresh date within policy records', r.status === 0 && (await countAssessed(polRepo)) === 1, r.stderr);
@@ -314,6 +332,18 @@ async function main() {
     await rm(join(tam6, '.maddu', 'anchors', '000001', 'payload.json.ots'), { force: true });
     r = runAssess(tam6, headSha, HAPPY);
     ok('deleted proof refused', r.status === 2 && /proof/.test(r.stderr));
+    const tam7 = await clone('tamper-version');
+    const p7 = JSON.parse(payloadBytes.toString('utf8'));
+    p7.v = 99;
+    await writeFile(join(tam7, '.maddu', 'anchors', '000001', 'payload.json'), Buffer.from(sa.canonicalJson(p7), 'utf8'));
+    r = runAssess(tam7, headSha, HAPPY);
+    ok('unknown payload version refused (payload-version)', r.status === 2 && /payload-version/.test(r.stderr));
+    const tam8 = await clone('tamper-noreplica');
+    const p8 = JSON.parse(payloadBytes.toString('utf8'));
+    delete p8.position.replica;
+    await writeFile(join(tam8, '.maddu', 'anchors', '000001', 'payload.json'), Buffer.from(sa.canonicalJson(p8), 'utf8'));
+    r = runAssess(tam8, headSha, HAPPY);
+    ok('omitted replica refused (strict null, not missing)', r.status === 2 && /position-invalid/.test(r.stderr));
 
     // ── 11. symlink containment (POSIX-gated: symlink creation needs privileges on Windows) ──
     if (POSIX) {
@@ -398,6 +428,13 @@ async function main() {
     });
     ok('TOCTOU: policy tightened at final confirm → refused', t.acted && t.code === 2 && /changed while you were verifying/.test(t.err), `code ${t.code}`);
     ok('TOCTOU: policy variant recorded nothing', (await countAssessed(toc2)) === 0);
+    const toc3 = await clone('toctou-loosen');
+    await writeFile(join(toc3, 'maddu.json'), JSON.stringify({ name: 'toctou-loosen', witness: { maxAnchorAge: '30d' } }) + '\n');
+    t = await toctou(toc3, `${PASTE_OK}\ny\n${utcDaysAgo(3)}\nfixture-op\n`, async () => {
+      await writeFile(join(toc3, 'maddu.json'), JSON.stringify({ name: 'toctou-loosen' }) + '\n');
+    });
+    ok('TOCTOU: policy REMOVED at final confirm → still refused', t.acted && t.code === 2 && /changed while you were verifying/.test(t.err), `code ${t.code}`);
+    ok('TOCTOU: loosen variant recorded nothing', (await countAssessed(toc3)) === 0);
   } finally {
     await rm(base, { recursive: true, force: true }).catch(() => {});
   }

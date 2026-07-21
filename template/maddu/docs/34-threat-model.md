@@ -583,6 +583,14 @@ confirm, immediately before the write).
    ever, and an actor can re-anchor a rewritten history going forward.
    An anchor proves a receipt existed by a time — not that the work was
    good, and not that later history is honest.
+6. **Live filesystem races**: the containment checks refuse STATIC
+   adversarial states deterministically (symlinked leaves, symlinked
+   ancestors, path-shaped positions) and re-verify after every read, but
+   a writer RACING the syscalls — swapping a path component in and back
+   out inside the check window — can still win on any platform. That is
+   a live co-resident actor with repo write authority, who is outside
+   the cooperative boundary anyway (they can rewrite the record
+   wholesale instead).
 
 The `ASSURANCE_ASSESSED` event itself is writable by anyone with repo
 access (like every spine event); that is why every consumer prints it as

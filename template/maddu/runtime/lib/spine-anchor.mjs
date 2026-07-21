@@ -40,7 +40,8 @@
 // fresh clone can verify anchor continuity and payload self-consistency, and
 // can check payloads against a spine only where that spine is available.
 
-import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -228,10 +229,38 @@ async function readSegmentSafe(repoRoot, basename) {
   const dirOk = await eventsDirSafe(repoRoot);
   if (!dirOk.ok) return { ok: false, reason: 'events-dir', detail: dirOk.detail };
   const p = join(repoRoot, '.maddu', 'events', basename);
-  let st = null;
-  try { st = await lstat(p); } catch { return { ok: false, reason: 'absent' }; }
-  if (st.isSymbolicLink() || !st.isFile()) return { ok: false, reason: 'not-regular', detail: `${basename} is not a regular file — refusing to follow` };
-  try { return { ok: true, raw: await readFile(p, 'utf8') }; } catch (e) { return { ok: false, reason: 'read-error', detail: String((e && e.message) || e).slice(0, 120) }; }
+  // Open-then-fstat so the bytes provably come from the file we checked (a
+  // bare lstat→readFile pair can be raced by a symlink swap). O_NOFOLLOW
+  // refuses a leaf symlink at open time on POSIX; Windows has no O_NOFOLLOW,
+  // so the post-read lstat catches a persistent symlink there. The dir/leaf
+  // state is re-verified AFTER the read as well, shrinking the swap window
+  // to the syscall gap. RESIDUAL (all platforms, stated in threat model
+  // §13): a writer RACING these syscalls — swapping a path component in and
+  // back out inside that gap — can still win. That is a live co-resident
+  // adversary with repo write authority, who is outside the cooperative
+  // model's boundary anyway (such an actor can rewrite the record
+  // wholesale); the checks here are about STATIC adversarial states, which
+  // they refuse deterministically.
+  let fh = null;
+  try {
+    fh = await open(p, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+    const st = await fh.stat();
+    if (!st.isFile()) return { ok: false, reason: 'not-regular', detail: `${basename} is not a regular file — refusing to follow` };
+    const raw = await fh.readFile({ encoding: 'utf8' });
+    // Post-read recheck: the path (leaf AND ancestors) must still be the
+    // symlink-free shape we validated before the open.
+    const lst = await lstat(p);
+    if (lst.isSymbolicLink() || !lst.isFile()) return { ok: false, reason: 'not-regular', detail: `${basename} is not a regular file — refusing to follow` };
+    const dirOk2 = await eventsDirSafe(repoRoot);
+    if (!dirOk2.ok) return { ok: false, reason: 'events-dir', detail: dirOk2.detail };
+    return { ok: true, raw };
+  } catch (e) {
+    if (e && (e.code === 'ENOENT')) return { ok: false, reason: 'absent' };
+    if (e && (e.code === 'ELOOP' || e.code === 'EMLINK')) return { ok: false, reason: 'not-regular', detail: `${basename} is a symlink — refusing to follow` };
+    return { ok: false, reason: 'read-error', detail: String((e && e.message) || e).slice(0, 120) };
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
 }
 
 async function listFlatSegments(repoRoot) {
@@ -692,8 +721,9 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
 async function newestAnchorEventDigests(repoRoot) {
   const map = new Map();
   for (const seg of await listFlatSegments(repoRoot)) {
-    let raw = null;
-    try { raw = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); } catch { continue; }
+    const rs = await readSegmentSafe(repoRoot, seg);
+    if (!rs.ok) continue;
+    const raw = rs.raw;
     for (const l of raw.split('\n')) {
       const line = l.replace(/\r$/, '');
       if (!line.trim()) continue;
@@ -826,19 +856,20 @@ export async function verifyAnchors(repoRoot) {
         issues.push({ level: 'WARN', kind: 'proof-missing', seq: a.seq, detail: 'payload.json.ots missing — crashed stamp (re-run `maddu spine anchor`) or deleted proof' });
       }
     }
-    // Spine-position binding — only where this device's spine has the segment.
-    if (a.payload.position && a.payload.position.segment !== undefined) {
+    // Spine-position binding. EVERY payload must carry a canonical position:
+    // a v1 payload always has one, so an absent/malformed position is a
+    // forged payload, never a benign omission. A path-shaped segment
+    // (`../fake.ndjson`), a non-positive or non-integer line, or a replica
+    // that is not the EXPLICIT null v1 writes are all refused; only "the
+    // named segment is not on this device" stays a WARN (fresh clone).
+    {
       const pos = a.payload.position;
-      // Containment: the recorded position must be a canonical in-spine
-      // reference. A path-shaped segment (`../fake.ndjson`), a non-positive
-      // or non-integer line, or a non-null replica is a forged payload, not a
-      // missing segment.
-      const posValid = typeof pos.segment === 'string' && SEGMENT_NAME_RE.test(pos.segment)
-        && Number.isInteger(pos.line) && pos.line >= 1 && (pos.replica ?? null) === null;
+      const posValid = pos && typeof pos === 'object' && typeof pos.segment === 'string' && SEGMENT_NAME_RE.test(pos.segment)
+        && Number.isInteger(pos.line) && pos.line >= 1 && pos.replica === null;
       let raw = null;
       let unsafe = null;
       if (!posValid) {
-        issues.push({ level: 'FAIL', kind: 'position-invalid', seq: a.seq, detail: `payload position is not a canonical in-spine segment/line reference (segment ${JSON.stringify(String(pos.segment)).slice(0, 40)}, line ${JSON.stringify(pos.line)})` });
+        issues.push({ level: 'FAIL', kind: 'position-invalid', seq: a.seq, detail: `payload position is not a canonical in-spine segment/line/replica reference — forged or hand-built payload` });
       } else {
         const rs = await readSegmentSafe(repoRoot, pos.segment);
         if (rs.ok) raw = rs.raw;
@@ -986,15 +1017,26 @@ export function validateAssuranceEvidence(level, evidence) {
 // never guess its own policy).
 export async function readMaxAnchorAge(repoRoot) {
   let raw = null;
-  try { raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8'); } catch { return { set: false }; }
+  try { raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8'); } catch (e) {
+    // Fail closed on everything but a genuinely ABSENT file: an unreadable or
+    // replaced maddu.json (EACCES, EISDIR, …) must not silently skip the age
+    // gate — only "there is no maddu.json" means "no policy declared".
+    if (e && e.code === 'ENOENT') return { set: false };
+    return { set: true, invalid: true, detail: `maddu.json exists but cannot be read (${(e && e.code) || 'error'}) — cannot read witness.maxAnchorAge` };
+  }
   let cfg = null;
   try { cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw); } catch {
     return { set: true, invalid: true, detail: 'maddu.json is present but not valid JSON — cannot read witness.maxAnchorAge' };
   }
   const v = cfg?.witness?.maxAnchorAge;
   if (v === undefined || v === null) return { set: false };
-  if (typeof v !== 'string' || !/^\d+d$/.test(v) || parseInt(v, 10) < 1) {
-    return { set: true, invalid: true, detail: `maddu.json witness.maxAnchorAge must be "<n>d" (whole days, ≥1), got ${JSON.stringify(v).slice(0, 40)}` };
+  // Bounded by construction: at most 5 digits (≈273 years). An unbounded
+  // digit run would parse to Infinity and make every stale-date comparison
+  // false — a policy that can never fire is worse than none.
+  if (typeof v !== 'string' || !/^\d{1,5}d$/.test(v) || parseInt(v, 10) < 1) {
+    // The offending VALUE is caller-typed config text — never echo it (a
+    // secret pasted into the wrong field would land on stderr and in logs).
+    return { set: true, invalid: true, detail: 'maddu.json witness.maxAnchorAge must be "<n>d" (whole days, 1–99999) — the configured value does not conform (value not echoed)' };
   }
   return { set: true, invalid: false, days: parseInt(v, 10) };
 }
@@ -1029,11 +1071,14 @@ export async function assessBinding(repoRoot, { sha, seq = null } = {}) {
     if (!target.hasProof || !target.proofDigest) {
       issues.push({ level: 'FAIL', kind: 'proof-missing', seq: target.seq, detail: `anchor #${target.seq} has no payload.json.ots on disk — there is nothing to verify externally` });
     }
+    if (target.payload?.v !== PAYLOAD_VERSION) {
+      issues.push({ level: 'FAIL', kind: 'payload-version', seq: target.seq, detail: `payload version is not the known v${PAYLOAD_VERSION} — refusing to assess a shape this code cannot vouch for` });
+    }
     const pos = target.payload?.position;
-    const posValid = pos && typeof pos.segment === 'string' && SEGMENT_NAME_RE.test(pos.segment)
-      && Number.isInteger(pos.line) && pos.line >= 1 && (pos.replica ?? null) === null;
+    const posValid = pos && typeof pos === 'object' && typeof pos.segment === 'string' && SEGMENT_NAME_RE.test(pos.segment)
+      && Number.isInteger(pos.line) && pos.line >= 1 && pos.replica === null;
     if (!posValid) {
-      issues.push({ level: 'FAIL', kind: 'position-invalid', seq: target.seq, detail: 'payload position is not a canonical in-spine segment/line reference' });
+      issues.push({ level: 'FAIL', kind: 'position-invalid', seq: target.seq, detail: 'payload position is not a canonical in-spine segment/line/replica reference' });
     } else {
       const rs = await readSegmentSafe(repoRoot, pos.segment);
       if (!rs.ok) {
