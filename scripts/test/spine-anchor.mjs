@@ -80,6 +80,7 @@ if (cmd === 'upgrade') {
   if (mode === 'pending') { console.error('Pending confirmation in Bitcoin blockchain'); process.exit(1); }
   copyFileSync(file, file + '.bak'); // stock client backs up before rewriting
   if (mode === 'partial') { appendFileSync(file, Buffer.from('+CAL')); console.error('Pending confirmation in Bitcoin blockchain'); process.exit(1); }
+  if (mode === 'truncate') { writeFileSync(file, Buffer.from('trunc')); console.log('Success! Timestamp complete'); process.exit(0); }
   appendFileSync(file, Buffer.from('+BTC'));
   console.log('Success! Timestamp complete');
   process.exit(0);
@@ -257,9 +258,20 @@ async function main() {
     const rW2 = runCli(repoW, ['spine', 'anchor', '--json'], ENV);
     ok('stamp recovery restores the earlier attestation from .bak (no re-stamp)',
       JSON.parse(rW2.stdout).ok && (await readFile(proofW)).equals(origW));
-    // (a3) round-3: post-run truncation — the client "succeeds" but leaves a
-    // corrupt primary; the fresh .bak must be restored and nothing recorded
-    // as advanced. Emulated via a stub mode that writes garbage after backup.
+    // (a3) round-3: post-run truncation — the client claims success but
+    // leaves a corrupt primary; the fresh .bak must be restored and NOTHING
+    // recorded as advanced (exit-0-with-garbage never counts as completed).
+    const rW3 = runCli(repoW, ['spine', 'anchor', '--upgrade', '--json'], { ...ENV, OTS_STUB_MODE: 'truncate' });
+    ok('post-run truncated primary → restored from fresh .bak, not completed',
+      JSON.parse(rW3.stdout).results[0].state === 'pending'
+      && (await readFile(proofW)).equals(origW) && !(await exists(`${proofW}.bak`)));
+    // (a4) round-3: sync-init anchors check fails CLOSED — .maddu/anchors as
+    // an unreadable-as-directory entry (a FILE) must refuse, not migrate.
+    const repoX = await makeRepo(base, 'anchor-x');
+    await writeFile(join(repoX, '.maddu', 'anchors'), 'not a dir\n');
+    const rX = runCli(repoX, ['spine', 'sync', 'init', '--json'], ENV);
+    ok('sync init with unreadable anchors path → refused fail-closed',
+      rX.status === 1 && JSON.parse(rX.stdout).reason === 'config-invalid', rX.stdout.slice(0, 120));
     // (b) incomplete-anchor reconcile: partial bytes land but the recorded
     // event digest is stale (append "failed") — a pending poll must re-emit.
     const repoV = await makeRepo(base, 'anchor-v');
