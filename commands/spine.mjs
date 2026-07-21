@@ -52,7 +52,21 @@ export default async function spine(argv) {
       console.error('spine-anchor.mjs not found in this install. Run `maddu upgrade` to enable anchoring.');
       process.exit(2);
     }
-    const { flags } = parseFlags(rest);
+    const { flags, positional } = parseFlags(rest);
+    // STRICT flag validation: stamping is irreversible (a calendar submission
+    // cannot be recalled), so a typo'd flag (--upgarde) or a valueless --event
+    // must be usage error 2 — never a fall-through to "stamp now".
+    const ANCHOR_FLAGS = new Set(['upgrade', 'status', 'verify', 'json', 'event']);
+    const unknown = Object.keys(flags).filter((f) => !ANCHOR_FLAGS.has(f));
+    const modes = ['upgrade', 'status', 'verify'].filter((f) => flags[f]);
+    if (unknown.length || (positional && positional.length) || modes.length > 1
+        || (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim()))
+        || (flags.event !== undefined && modes.length)) {
+      console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify] [--json]');
+      if (unknown.length) console.error(`  unknown flag(s): ${unknown.map((f) => `--${f}`).join(', ')}`);
+      if (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim())) console.error('  --event requires an event id');
+      process.exit(2);
+    }
     const sa = lib.spineAnchor;
     const emit = (obj, code) => { process.stdout.write(JSON.stringify(obj, null, 2) + '\n'); process.exit(code); };
 

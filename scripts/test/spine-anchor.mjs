@@ -49,7 +49,7 @@ function runCli(cwd, args, env = {}) {
 }
 
 const STUB = `#!/usr/bin/env node
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, copyFileSync } from 'node:fs';
 const mode = process.env.OTS_STUB_MODE || 'ok';
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === '--version') { console.log('ots-stub v0.0.1'); process.exit(0); }
@@ -67,7 +67,11 @@ if (cmd === 'stamp') {
 }
 if (cmd === 'upgrade') {
   const file = rest[rest.length - 1];
+  // Stock-client behavior: an existing backup JAMS the upgrade entirely.
+  if (existsSync(file + '.bak')) { console.error('Error! Backup file already exists'); process.exit(1); }
   if (mode === 'pending') { console.error('Pending confirmation in Bitcoin blockchain'); process.exit(1); }
+  copyFileSync(file, file + '.bak'); // stock client backs up before rewriting
+  if (mode === 'partial') { appendFileSync(file, Buffer.from('+CAL')); console.error('Pending confirmation in Bitcoin blockchain'); process.exit(1); }
   appendFileSync(file, Buffer.from('+BTC'));
   console.log('Success! Timestamp complete');
   process.exit(0);
@@ -112,6 +116,9 @@ async function main() {
       && sa.validateAssuranceEvidence('anchored', { anchor_seq: 1, anchor_payload_digest: 'x', proof_digest: 'y' }).ok);
     ok('assurance: unknown level rejected', !sa.validateAssuranceEvidence('vibes', {}).ok);
     ok('assurance: actor-reported needs nothing', sa.validateAssuranceEvidence('actor-reported', {}).ok);
+    ok('isGitSha accepts SHA-1 and SHA-256, rejects junk',
+      sa.isGitSha('a'.repeat(40)) && sa.isGitSha('b'.repeat(64))
+      && !sa.isGitSha('a'.repeat(39)) && !sa.isGitSha('X'.repeat(40)) && !sa.isGitSha(null));
 
     // ── 2. stamp ──
     const repo = await makeRepo(base, 'anchor-t');
@@ -162,10 +169,12 @@ async function main() {
     const segLines = (await readFile(seg, 'utf8')).split('\n');
     const r5line = segLines.findIndex((l) => l.includes('"evt_r5"'));
     const p2bytes = await readFile(join(repo, '.maddu', 'anchors', '000002', 'payload.json'), 'utf8');
+    const orphanReceipt = sa.sha256Hex(segLines[r5line].replace(/\r$/, ''));
     const orphan = {
       ...p2, seq: 3, event_id: 'evt_r5',
       position: { replica: null, segment: '000000000001.ndjson', line: r5line + 1 },
-      receipt_digest: sa.sha256Hex(segLines[r5line].replace(/\r$/, '')),
+      receipt_digest: orphanReceipt,
+      chain_head: orphanReceipt, // head == receipt (evt_r5 was the last line at "crash" time)
       prev_anchor_sha256: sa.sha256Hex(Buffer.from(p2bytes, 'utf8')),
     };
     await writeFile(join(repo, '.maddu', 'anchors', '000003', 'payload.json'), sa.canonicalJson(orphan));
@@ -174,20 +183,66 @@ async function main() {
     ok('crashed stamp recovered at same seq', j5.ok && j5.seq === 3 && j5.recovered === true
       && (await exists(join(repo, '.maddu', 'anchors', '000003', 'payload.json.ots'))));
 
-    // ── 6. upgrade ──
+    // ── 6. upgrade: pending → partial (.bak jam defused) → complete →
+    //      idempotent → reconcile ──
     const r6a = runCli(repo, ['spine', 'anchor', '--upgrade', '--json'], { ...ENV, OTS_STUB_MODE: 'pending' });
     const j6a = JSON.parse(r6a.stdout);
     ok('pending upgrade: all pending, no event', j6a.ok && j6a.results.every((x) => x.state === 'pending')
       && !/"type":"ANCHOR_UPGRADED"/.test(await readFile(seg, 'utf8')));
+    // Partial: the stub writes a .bak (stock behavior) and merges bytes but
+    // stays incomplete — our pre/post cleanup must defuse the jam.
+    const r6p = runCli(repo, ['spine', 'anchor', '--upgrade', '--json'], { ...ENV, OTS_STUB_MODE: 'partial' });
+    const j6p = JSON.parse(r6p.stdout);
+    ok('partial upgrade: bytes changed, complete:false events', j6p.ok && j6p.results.every((x) => x.state === 'partial')
+      && (await readFile(seg, 'utf8')).includes('"complete":false'));
+    ok('no .bak left behind after partial upgrade',
+      !(await exists(join(repo, '.maddu', 'anchors', '000001', 'payload.json.ots.bak'))));
+    // Complete: would JAM on the stock client if a .bak survived — passing
+    // proves the pre-run cleanup.
     const r6b = runCli(repo, ['spine', 'anchor', '--upgrade', '--json'], ENV);
     const j6b = JSON.parse(r6b.stdout);
     const spine6 = await readFile(seg, 'utf8');
-    ok('upgrade completes all', j6b.ok && j6b.results.every((x) => x.state === 'completed'));
-    ok('ANCHOR_UPGRADED events with complete:true', (spine6.match(/"type":"ANCHOR_UPGRADED"/g) || []).length === 3
+    ok('upgrade completes all despite prior partial (.bak defused)', j6b.ok && j6b.results.every((x) => x.state === 'completed'));
+    ok('ANCHOR_UPGRADED events: 3 partial + 3 complete', (spine6.match(/"type":"ANCHOR_UPGRADED"/g) || []).length === 6
       && /"complete":true/.test(spine6));
     ok('meta marked complete', JSON.parse(await readFile(join(repo, '.maddu', 'anchors', '000001', 'meta.json'), 'utf8')).complete === true);
     const r6c = runCli(repo, ['spine', 'anchor', '--upgrade', '--json'], ENV);
     ok('upgrade idempotent (complete anchors untouched)', JSON.parse(r6c.stdout).results.every((x) => x.state === 'complete'));
+    // Reconcile: disk proof changes with no matching event (the benign twin of
+    // a forged event: an upgrade whose append failed) → --upgrade re-emits.
+    const proof1 = join(repo, '.maddu', 'anchors', '000001', 'payload.json.ots');
+    await writeFile(proof1, Buffer.concat([await readFile(proof1), Buffer.from('+LATE')]));
+    const r6d = runCli(repo, ['spine', 'anchor', '--upgrade', '--json'], ENV);
+    ok('mismatched newest event → reconciled with a fresh ANCHOR_UPGRADED',
+      JSON.parse(r6d.stdout).results.find((x) => x.seq === 1)?.state === 'reconciled'
+      && (await readFile(seg, 'utf8')).match(/"type":"ANCHOR_UPGRADED"/g).length === 7);
+
+    // ── 6b. wide-coverage anchor (#4) for the covered-range fixtures: anchor
+    //       an OLD event so (receipt, head] spans real chained events ──
+    const r6e = runCli(repo, ['spine', 'anchor', '--event', 'evt_r1', '--json'], ENV);
+    ok('explicit --event anchors an old receipt as #4', JSON.parse(r6e.stdout).seq === 4);
+
+    // ── 6c. crash after proof write, before finalize (meta/event) — must
+    //       finalize, never pass for `already` ──
+    const repoF = await makeRepo(base, 'anchor-f');
+    runCli(repoF, ['spine', 'anchor', '--json'], ENV);
+    await rm(join(repoF, '.maddu', 'anchors', '000001', 'meta.json'), { force: true });
+    const segF = join(repoF, '.maddu', 'events', '000000000001.ndjson');
+    const linesF = (await readFile(segF, 'utf8')).split('\n').filter((l) => l.trim());
+    await writeFile(segF, linesF.filter((l) => !l.includes('ANCHOR_STAMPED')).join('\n') + '\n');
+    const rF = runCli(repoF, ['spine', 'anchor', '--json'], ENV);
+    const jF = JSON.parse(rF.stdout);
+    ok('proof-without-meta crash → finalized (meta + event), not `already`',
+      jF.ok && jF.recovered === true && !jF.already
+      && (await exists(join(repoF, '.maddu', 'anchors', '000001', 'meta.json')))
+      && /"type":"ANCHOR_STAMPED"/.test(await readFile(segF, 'utf8')));
+
+    // ── 6d. hygiene: nothing but sequence dirs inside the tracked anchors
+    //       dir — the funnel lock lives under untracked state/ ──
+    const { readdir } = await import('node:fs/promises');
+    const anchorEntries = await readdir(join(repo, '.maddu', 'anchors'));
+    ok('anchors dir carries only sequence dirs (lock is in state/, no .bak)',
+      anchorEntries.every((e) => /^\d{6}$/.test(e)), anchorEntries.join(','));
 
     // ── 7. concurrency: two simultaneous stamps, funnel-serialized ──
     const repoC = await makeRepo(base, 'anchor-c');
@@ -249,6 +304,25 @@ async function main() {
       lines[2] = lines[2].replace('"result":"pass"', '"result":"fail"');
       await writeFile(s, lines.join('\n'));
     }, 'position-mismatch');
+    // A covered MIDDLE event rewritten (not the receipt, not the head): the
+    // wide anchor #4 (receipt evt_r1) must flag the prev_hash break inside
+    // its covered range even though its own position/head lines are intact.
+    await fx('rewritten-tail', async (r) => {
+      const s = join(r, '.maddu', 'events', '000000000001.ndjson');
+      const lines = (await readFile(s, 'utf8')).split('\n');
+      const i = lines.findIndex((l) => l.includes('"evt_r4"'));
+      lines[i] = lines[i].replace('"result":"pass"', '"result":"fail"');
+      await writeFile(s, lines.join('\n'));
+    }, 'covered-chain-break');
+    // Forged ANCHOR_UPGRADED for an EXISTING seq with the correct (public)
+    // payload digest but a fabricated proof digest — the newest-event
+    // predicate must FAIL it.
+    await fx('forged-newest', async (r) => {
+      const s = join(r, '.maddu', 'events', '000000000001.ndjson');
+      const pd = JSON.parse(await readFile(join(r, '.maddu', 'anchors', '000001', 'meta.json'), 'utf8')).payload_digest;
+      const forged = { v: 1, id: 'evt_forged2', ts: '2026-07-21T03:00:00.000Z', type: 'ANCHOR_UPGRADED', actor: null, lane: null, data: { seq: 1, payload_digest: pd, complete: true, proof_files: [{ path: '.maddu/anchors/000001/payload.json.ots', digest: 'a'.repeat(64) }] } };
+      await writeFile(s, (await readFile(s, 'utf8')) + JSON.stringify(forged) + '\n');
+    }, 'event-proof-mismatch');
     // The un-mutated base repo verifies CLEAN, and the honest residual is
     // ALWAYS printed alongside it.
     const vres = runCli(repo, ['spine', 'anchor', '--verify', '--json'], ENV);
@@ -257,6 +331,16 @@ async function main() {
       && jres.issues.filter((i) => i.level === 'FAIL').length === 0, JSON.stringify(jres.issues.slice(0, 3)));
     ok('verify states the suffix-deletion residual', /suffix deletion/.test(jres.residual));
     ok('verify names the operator Bitcoin-backed command', /ots verify/.test(jres.operatorVerify));
+
+    // ── 8b. flag validation: a typo or valueless --event must be usage
+    //       error 2, never an irreversible fall-through stamp ──
+    const rT1 = runCli(repo, ['spine', 'anchor', '--upgarde'], ENV);
+    ok('typo flag → usage exit 2, nothing stamped', rT1.status === 2 && /unknown flag/.test(rT1.stderr)
+      && !(await exists(join(repo, '.maddu', 'anchors', '000005'))));
+    const rT2 = runCli(repo, ['spine', 'anchor', '--event'], ENV);
+    ok('valueless --event → usage exit 2', rT2.status === 2 && /requires an event id/.test(rT2.stderr));
+    const rT3 = runCli(repo, ['spine', 'anchor', '--upgrade', '--verify'], ENV);
+    ok('conflicting modes → usage exit 2', rT3.status === 2);
 
     // ── 9. sync-mode refusal ──
     const repoS = await makeRepo(base, 'anchor-s');

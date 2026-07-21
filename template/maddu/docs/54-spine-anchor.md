@@ -86,9 +86,13 @@ ots verify .maddu/anchors/<seq>/payload.json.ots
 ```
 
 Bitcoin-backed verification needs a **local Bitcoin Core node** (pruned is
-fine) or your client's **explorer-backed mode** — explorer mode trusts the
-explorers, not proof-of-work directly; know which one you ran. This step is
-the `anchored` assurance level's spine: local anchor state never is.
+fine) — the stock Python client has **no explorer fallback**; without a node
+it refuses. The explorer-backed alternative is the **JS client's lite mode**
+(`npm install opentimestamps`, then `ots-cli.js verify <file>.ots`), which
+prints "Lite-client verification, assuming block … is valid" — it trusts the
+block explorers, not proof-of-work directly. Know which one you ran; say so
+in any consume ceremony note. This step is the `anchored` assurance level's
+spine: local anchor state never is.
 
 ## The stock client is an ambient tool
 

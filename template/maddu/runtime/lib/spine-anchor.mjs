@@ -585,6 +585,7 @@ export async function verifyAnchors(repoRoot) {
   // suffix — which changes the head line's bytes, so no stored line hashes to
   // the anchored chain_head anymore and this check FAILs.
   const lineIndex = new Map();
+  const ordered = []; // every stored line in spine order, with its own hash + declared prev_hash
   const segsAll = await listFlatSegments(repoRoot);
   for (const seg of segsAll) {
     let raw = null;
@@ -593,10 +594,29 @@ export async function verifyAnchors(repoRoot) {
     for (let n = 0; n < ls.length; n++) {
       const line = ls[n].replace(/\r$/, '');
       if (!line.trim()) continue;
-      lineIndex.set(hashLine(line), { segment: seg, line: n + 1 });
+      const h = hashLine(line);
+      lineIndex.set(h, { segment: seg, line: n + 1 });
+      let prevHash;
+      try { const ev = JSON.parse(line); prevHash = ev && typeof ev === 'object' ? ev.prev_hash : undefined; } catch { /* torn */ }
+      ordered.push({ segment: seg, line: n + 1, hash: h, prevHash });
+    }
+  }
+  // Chain breaks INSIDE the stored spine: a line whose declared prev_hash does
+  // not match its predecessor's stored bytes. Membership of the head line
+  // alone would miss a rewritten MIDDLE event whose immediate successor
+  // carries no prev_hash — the break list closes that: any break inside an
+  // anchor's covered range (receipt, head] is a FAIL. Links are only checked
+  // where prev_hash is declared (pre-chain events are honestly uncovered —
+  // that is spine verify's forward-only stance, mirrored here).
+  const chainBreaks = [];
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i].prevHash !== undefined && ordered[i].prevHash !== null
+        && ordered[i].prevHash !== ordered[i - 1].hash) {
+      chainBreaks.push({ segment: ordered[i].segment, line: ordered[i].line });
     }
   }
   const posLE = (a, b) => a.segment < b.segment || (a.segment === b.segment && a.line <= b.line);
+  const posLT = (a, b) => a.segment < b.segment || (a.segment === b.segment && a.line < b.line);
   // Sequence continuity: strictly 1..N with no gaps. A gap or renumbering is
   // MID-HISTORY tampering; suffix/all-history deletion is NOT detectable here.
   for (let i = 0; i < anchors.length; i++) {
@@ -653,6 +673,11 @@ export async function verifyAnchors(repoRoot) {
             issues.push({ level: 'FAIL', kind: 'chain-head-missing', seq: a.seq, detail: `no stored spine line hashes to the anchored chain_head — a covered event after the receipt was rewritten, or the head line was deleted` });
           } else if (!posLE(a.payload.position, at)) {
             issues.push({ level: 'FAIL', kind: 'chain-head-order', seq: a.seq, detail: `the anchored chain_head line (${at.segment}:${at.line}) precedes the receipt position — inconsistent anchor` });
+          } else {
+            const inRange = chainBreaks.filter((b) => posLT(a.payload.position, b) && posLE(b, at));
+            for (const b of inRange) {
+              issues.push({ level: 'FAIL', kind: 'covered-chain-break', seq: a.seq, detail: `prev_hash break at ${b.segment}:${b.line} inside this anchor's covered range — a covered event between the receipt and the anchored head was rewritten` });
+            }
           }
         }
       }
@@ -715,7 +740,7 @@ export async function verifyAnchors(repoRoot) {
     anchors: anchors.length,
     issues,
     residual: 'suffix deletion (dropping the newest anchors) and all-history deletion are NOT detectable without a retained checkpoint — keep an operator note of the latest seq + payload digest.',
-    operatorVerify: 'Bitcoin-backed verification is an operator action: `ots verify .maddu/anchors/<seq>/payload.json.ots` (needs a local Bitcoin Core node, or your client\'s explorer mode — explorer mode trusts the explorers, not PoW directly). It is deliberately not wrapped in a maddu verb: a runner the agent controls re-verifying its own evidence would be actor-as-witness.',
+    operatorVerify: 'Bitcoin-backed verification is an operator action: `ots verify .maddu/anchors/<seq>/payload.json.ots` with a local Bitcoin Core node (the stock Python client has NO explorer fallback), or the JS client\'s lite mode (`npx opentimestamps` → ots-cli.js verify) which trusts block explorers, not PoW directly — know which one you ran. It is deliberately not wrapped in a maddu verb: a runner the agent controls re-verifying its own evidence would be actor-as-witness.',
   };
 }
 
