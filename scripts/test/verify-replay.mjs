@@ -238,10 +238,18 @@ async function main() {
       !(oJ.stdout || '').includes('CHILD_OUT_MARKER') && (oJ.stderr || '').includes('CHILD_OUT_MARKER'));
     ok('--json: scope line carried in the document', typeof jJ?.scope === 'string' && jJ.scope.includes('git object copying only'));
 
-    // ── 8. no temp-dir leaks across all scenarios ──
-    const tempAfter = await replayTempDirs();
-    const leaked = tempAfter.filter((d) => !tempBefore.includes(d));
-    ok('cleanup: no maddu-replay-* temp dirs leaked', leaked.length === 0, JSON.stringify(leaked));
+    // ── 8. forced cleanup failure fails CLOSED (guarded test seam) ──
+    const rClean = await makeRepo(base, 'cleanfail', { madduJson: { name: 'cleanfail', replay: { verify: `${NODE} -e "process.exit(0)"` } } });
+    const oC = runCli(rClean, ['spine', 'verify', '--replay', headSha(rClean), '--json'], { MADDU_REPLAY_TEST_CLEANUP_FAIL: '1' });
+    const jC = JSON.parse(oC.stdout);
+    ok('cleanup-fail: exit 1 even though the commands passed', oC.status === 1 && jC.verifyExit === 0);
+    ok('cleanup-fail: receipt fails closed (fail, complete false, clone_deleted false)',
+      jC.result === 'fail' && jC.complete === false && jC.cloneDeleted === false && typeof jC.cloneDir === 'string');
+    const evsC = (await spineEvents(rClean)).filter((e) => e.type === 'VERIFICATION_RAN' && e.data.kind === 'replay');
+    ok('cleanup-fail: spine receipt mirrors the fail-closed shape',
+      evsC.length === 1 && evsC[0].data.result === 'fail' && evsC[0].data.complete === false
+      && evsC[0].data.clone_deleted === false && evsC[0].data.verify_exit === 0);
+    if (jC.cloneDir) await rm(jC.cloneDir, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
 
     // ── 9. spine-unavailable refuses PRE-run ──
     const rSpine = await makeRepo(base, 'nospine', { madduJson: { name: 'nospine', replay: { verify: `${NODE} -e "require('fs').writeFileSync(process.env.MADDU_TEST_RAN_MARK || 'ran.txt', 'x'); process.exit(0)"` } } });
@@ -252,6 +260,12 @@ async function main() {
     const oS = runCli(rSpine, ['spine', 'verify', '--replay', shaS], { MADDU_TEST_RAN_MARK: ranMark });
     ok('spine-unavailable: refuses (exit 2) and never runs the commands',
       oS.status === 2 && /unrecorded|spine/i.test(oS.stderr) && !(await exists(ranMark)), (oS.stderr || '').slice(0, 160));
+    // Same refusal with cleanup ALSO failing → the leftover clone is named.
+    const oS2 = runCli(rSpine, ['spine', 'verify', '--replay', shaS], { MADDU_TEST_RAN_MARK: ranMark, MADDU_REPLAY_TEST_CLEANUP_FAIL: '1' });
+    const leftMatch = /clone was left at (.+?) — delete/.exec(oS2.stderr || '');
+    ok('spine-unavailable + cleanup-fail: refusal names the leftover clone path',
+      oS2.status === 2 && leftMatch !== null, (oS2.stderr || '').slice(0, 200));
+    if (leftMatch) await rm(leftMatch[1].trim(), { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
 
     // ── 10. recency isolation ──
     const evsIso = await spineEvents(rPass);
@@ -272,6 +286,13 @@ async function main() {
     }
     const oPlain = runCli(rPass, ['spine', 'verify']);
     ok('flag validation: plain `spine verify` integrity walk still works', oPlain.status === 0 && /spine integrity|events/.test(oPlain.stdout));
+
+    // ── 12. no temp-dir leaks across ALL scenarios (last, after every case;
+    // deliberately-leaked seam clones were removed above as part of their
+    // own assertions) ──
+    const tempAfter = await replayTempDirs();
+    const leaked = tempAfter.filter((d) => !tempBefore.includes(d));
+    ok('cleanup: no maddu-replay-* temp dirs leaked by any scenario', leaked.length === 0, JSON.stringify(leaked));
 
   } catch (e) {
     console.error('harness error:', e && e.stack || e);

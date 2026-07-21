@@ -113,19 +113,31 @@ export async function cloneAtSha(workRoot, sha) {
 
 // Windows: git writes read-only pack files; fs.rm has no built-in chmod, so
 // EPERM there is EXPECTED — one best-effort recursive chmod, then retry once.
+// SYMLINKS ARE SKIPPED ENTIRELY: chmod follows links, so touching one would
+// chmod its TARGET — possibly a host file outside the clone. (rm unlinks the
+// link itself without needing its permission bits, so skipping loses nothing.)
 async function chmodTree(dir) {
   let entries = [];
   try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const ent of entries) {
+    if (ent.isSymbolicLink()) continue;
     const p = join(dir, ent.name);
-    try { await chmod(p, 0o700); } catch {}
-    if (ent.isDirectory()) await chmodTree(p);
-    else { try { await chmod(p, 0o600); } catch {} }
+    if (ent.isDirectory()) {
+      try { await chmod(p, 0o700); } catch {}
+      await chmodTree(p);
+    } else {
+      try { await chmod(p, 0o600); } catch {}
+    }
   }
 }
 
+// MADDU_REPLAY_TEST_CLEANUP_FAIL is a guarded no-op-in-production TEST seam:
+// it forces cleanup to REPORT failure (without deleting) so the fail-closed
+// reaction is provable. Direction-safe — it can only make a run FAIL harder,
+// never pass.
 export async function cleanupClone(dir) {
   if (!dir) return true;
+  if (process.env.MADDU_REPLAY_TEST_CLEANUP_FAIL === '1') return false;
   try {
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     return true;
@@ -281,8 +293,8 @@ export async function runReplay({ workRoot, stateRoot, sha, spine, actor = null,
     startedId = (ev && ev.id) || null;
     if (!startedId) throw new Error('spine.append returned no event id');
   } catch (e) {
-    await cleanupClone(dir);
-    return { ok: false, reason: 'spine-unavailable', detail: `could not append VERIFICATION_STARTED — replay refuses to run unrecorded: ${shortErr(e)}` };
+    const deleted = await cleanupClone(dir);
+    return { ok: false, reason: 'spine-unavailable', detail: `could not append VERIFICATION_STARTED — replay refuses to run unrecorded: ${shortErr(e)}`, cloneDir: deleted ? null : dir };
   }
 
   const timeoutMs = replayTimeoutMs();
