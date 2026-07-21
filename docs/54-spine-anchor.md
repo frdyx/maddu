@@ -106,3 +106,67 @@ nothing is guessed. Calendar servers default to the client's stock set;
 `maddu.json → witness.calendars[]` (https URLs, validated hard) overrides
 them. Multiple calendars improve *availability* only — assurance changes only
 with a Bitcoin-verified proof.
+
+## Consume ritual — `--assess <sha>` (v1.110.0)
+
+```bash
+maddu spine anchor --assess <full-commit-sha> [--seq <n>]
+```
+
+An **interactive operator ceremony** that records the `anchored` rung of the
+assurance ladder (*actor-reported → replayed → anchored → presence-attested
+(deferred)*) as an `ASSURANCE_ASSESSED` event. Read the labels carefully: the
+event is a **non-authoritative ledger note** — a record that YOU ran the
+ceremony — never a verification result. Every consumer prints it that way
+(`--status`, `spine show`, `events list`, search), nothing gates on it, and
+anyone consuming the record must re-run the ceremony themselves.
+
+The tool's own checks can only **refuse** — they never grant the level:
+
+1. **Binding**: the anchor's payload must be canonical bytes whose recorded
+   spine position hashes to `receipt_digest` and names the right
+   `VERIFICATION_RAN` event; positions are containment-checked (canonical
+   segment basename inside a symlink-free `.maddu/events` — path-shaped or
+   symlinked references are refused, not followed). The whole anchor chain
+   must verify: mid-history deletion/renumbering, forged `ANCHOR_*` events
+   (absent/non-string/mismatched payload digest on ANY event; a newest proof
+   digest disk doesn't back), and missing proofs all refuse.
+2. **External evidence**: the ceremony prints the exact `ots verify` command,
+   YOU run it in another terminal, and paste the output (redacted, capped at
+   8 KiB, stored verbatim in the note). It asks whether YOUR verifier
+   attested success — default No.
+3. **Age policy**: `maddu.json → witness.maxAnchorAge` (`"<n>d"`, optional).
+   When set, you enter the attestation date from the verifier output
+   (strict `YYYY-MM-DD`, UTC); blank, unparseable, future, or stale-beyond-
+   policy dates refuse. An invalid policy value refuses outright. When
+   unset, the ceremony says so and skips the check.
+4. **No stale writes**: the binding checks and the age policy are re-run
+   AFTER the final confirm, immediately before the append — anything that
+   moved during your verification window (anchor bytes, spine, policy)
+   refuses with nothing recorded. Refused or declined ceremonies never
+   append anything.
+
+The event's `assessed_by` is the literal `operator-ceremony`; your handle
+(optional) and the pasted verifier output live in the note. Recorded
+evidence is the triple `{anchor_seq, anchor_payload_digest, proof_digest}` —
+`--status` shows "assessed anchored" only while ALL of it still matches the
+anchor's current state; after an upgrade changes the proof, the old
+assessment shows as superseded, never as current.
+
+**Residual, stated exactly:** upgrades replace the proof file, so only the
+NEWEST anchor event's proof digest is disk-checkable — a forged claim about
+a *superseded* proof digest asserts something about bytes nobody (including
+Bitcoin) can re-examine. Payload digests, which never legitimately change,
+are checked on every event. Full residual list: `docs/34-threat-model.md`
+§13.
+
+### Optional Tier 2 — GitHub as an external immutable index
+
+The framework never requires GitHub, but a repo that lives there can layer
+an independent index on top of Tier 1: publish each release with the anchor
+payloads + proofs + the receipt as **release assets**, and enable GitHub's
+**immutable releases** where available (once immutable, a release's assets
+cannot be replaced and a deleted tag leaves a tombstone — a burned tag
+cannot be silently reused). `gh attestation verify` can be part of your
+consume ceremony for artifacts built by GitHub Actions. This is an operator
+action — `frdyx/maddu` doing it is dogfooding, not a framework dependency.

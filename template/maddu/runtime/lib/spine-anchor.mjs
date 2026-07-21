@@ -40,7 +40,7 @@
 // fresh clone can verify anchor continuity and payload self-consistency, and
 // can check payloads against a spine only where that spine is available.
 
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -187,11 +187,58 @@ export async function witnessCalendars(repoRoot) {
 
 // ── receipt selection (flat spine, raw lines) ────────────────────────────
 
-async function listFlatSegments(repoRoot) {
+// Containment (PR 6a): every segment read in THIS lib must resolve inside a
+// REAL .maddu/events directory with no symlink anywhere on the path — a
+// canonical-named symlink (leaf OR ancestor) pointing outside the repo would
+// let a forged payload bind to planted bytes that are not the spine. Scope:
+// the anchor/assessment lib's own reads; the general spine lib is unchanged.
+const SEGMENT_NAME_RE = /^\d{12}\.ndjson$/;
+
+async function eventsDirSafe(repoRoot) {
+  for (const p of [join(repoRoot, '.maddu'), join(repoRoot, '.maddu', 'events')]) {
+    let st = null;
+    try { st = await lstat(p); } catch { return { ok: false, detail: `${p} does not exist` }; }
+    if (st.isSymbolicLink() || !st.isDirectory()) return { ok: false, detail: `${p} is a symlink or not a real directory — refusing to follow` };
+  }
+  return { ok: true };
+}
+
+// Canonical segment basenames that are REAL regular files; canonical-NAMED
+// entries that are not (symlinks, dirs) are surfaced as badEntries so
+// verifyAnchors can FAIL them — an unreferenced symlink segment must not
+// silently skew the chain-head/newest-event scans either way.
+async function listSegmentsSafe(repoRoot) {
+  const dirOk = await eventsDirSafe(repoRoot);
+  if (!dirOk.ok) return { ok: false, detail: dirOk.detail, segments: [], badEntries: [] };
   const dir = join(repoRoot, '.maddu', 'events');
-  try {
-    return (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
-  } catch { return []; }
+  let names = [];
+  try { names = (await readdir(dir)).filter((f) => SEGMENT_NAME_RE.test(f)).sort(); } catch { return { ok: true, segments: [], badEntries: [] }; }
+  const segments = [];
+  const badEntries = [];
+  for (const n of names) {
+    let st = null;
+    try { st = await lstat(join(dir, n)); } catch { badEntries.push(n); continue; }
+    if (st.isSymbolicLink() || !st.isFile()) badEntries.push(n); else segments.push(n);
+  }
+  return { ok: true, segments, badEntries };
+}
+
+async function readSegmentSafe(repoRoot, basename) {
+  if (typeof basename !== 'string' || !SEGMENT_NAME_RE.test(basename)) return { ok: false, reason: 'bad-name' };
+  const dirOk = await eventsDirSafe(repoRoot);
+  if (!dirOk.ok) return { ok: false, reason: 'events-dir', detail: dirOk.detail };
+  const p = join(repoRoot, '.maddu', 'events', basename);
+  let st = null;
+  try { st = await lstat(p); } catch { return { ok: false, reason: 'absent' }; }
+  if (st.isSymbolicLink() || !st.isFile()) return { ok: false, reason: 'not-regular', detail: `${basename} is not a regular file — refusing to follow` };
+  try { return { ok: true, raw: await readFile(p, 'utf8') }; } catch (e) { return { ok: false, reason: 'read-error', detail: String((e && e.message) || e).slice(0, 120) }; }
+}
+
+async function listFlatSegments(repoRoot) {
+  // Refusal direction: an unsafe events dir yields NO segments (stamp then
+  // refuses no-receipt) rather than following a symlinked tree.
+  const r = await listSegmentsSafe(repoRoot);
+  return r.segments;
 }
 
 // Scan the flat spine for (a) the newest VERIFICATION_RAN — the default
@@ -203,9 +250,9 @@ export async function findReceipt(repoRoot, { eventId = null } = {}) {
   let found = null;
   let lastLine = null;
   for (const seg of segs) {
-    let raw;
-    try { raw = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); } catch { continue; }
-    const lines = raw.split('\n');
+    const rs = await readSegmentSafe(repoRoot, seg);
+    if (!rs.ok) continue;
+    const lines = rs.raw.split('\n');
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].replace(/\r$/, '');
       if (!line.trim()) continue;
@@ -673,6 +720,8 @@ export async function anchorStatus(repoRoot) {
       payloadDigest: a.payloadDigest,
       eventId: a.payload?.event_id ?? null,
       subjectSha: a.payload?.subject_sha ?? null,
+      receiptDigest: a.payload?.receipt_digest ?? null,
+      proofDigest: a.proofDigest ?? null,
       stampedAt: a.meta?.stamped_at ?? null,
       complete: a.meta?.complete === true,
       hasProof: a.hasProof,
@@ -701,10 +750,18 @@ export async function verifyAnchors(repoRoot) {
   // the anchored chain_head anymore and this check FAILs.
   const lineIndex = new Map();
   const ordered = []; // every stored line in spine order, with its own hash + declared prev_hash
-  const segsAll = await listFlatSegments(repoRoot);
+  const segList = await listSegmentsSafe(repoRoot);
+  if (!segList.ok) {
+    issues.push({ level: 'FAIL', kind: 'events-dir-unsafe', detail: `${segList.detail} — every position/chain check would read outside the spine` });
+  }
+  for (const bad of segList.badEntries) {
+    issues.push({ level: 'FAIL', kind: 'segment-not-regular', detail: `.maddu/events/${bad} is a canonical-named entry that is not a regular file (symlink?) — refusing to read it; it would skew chain-head and event scans` });
+  }
+  const segsAll = segList.segments;
   for (const seg of segsAll) {
-    let raw = null;
-    try { raw = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); } catch { continue; }
+    const rs = await readSegmentSafe(repoRoot, seg);
+    if (!rs.ok) continue;
+    const raw = rs.raw;
     const ls = raw.split('\n');
     for (let n = 0; n < ls.length; n++) {
       const line = ls[n].replace(/\r$/, '');
@@ -770,10 +827,28 @@ export async function verifyAnchors(repoRoot) {
       }
     }
     // Spine-position binding — only where this device's spine has the segment.
-    if (a.payload.position && a.payload.position.segment) {
+    if (a.payload.position && a.payload.position.segment !== undefined) {
+      const pos = a.payload.position;
+      // Containment: the recorded position must be a canonical in-spine
+      // reference. A path-shaped segment (`../fake.ndjson`), a non-positive
+      // or non-integer line, or a non-null replica is a forged payload, not a
+      // missing segment.
+      const posValid = typeof pos.segment === 'string' && SEGMENT_NAME_RE.test(pos.segment)
+        && Number.isInteger(pos.line) && pos.line >= 1 && (pos.replica ?? null) === null;
       let raw = null;
-      try { raw = await readFile(join(repoRoot, '.maddu', 'events', a.payload.position.segment), 'utf8'); } catch { /* absent */ }
-      if (raw === null) {
+      let unsafe = null;
+      if (!posValid) {
+        issues.push({ level: 'FAIL', kind: 'position-invalid', seq: a.seq, detail: `payload position is not a canonical in-spine segment/line reference (segment ${JSON.stringify(String(pos.segment)).slice(0, 40)}, line ${JSON.stringify(pos.line)})` });
+      } else {
+        const rs = await readSegmentSafe(repoRoot, pos.segment);
+        if (rs.ok) raw = rs.raw;
+        else if (rs.reason !== 'absent') unsafe = rs.detail || rs.reason;
+      }
+      if (!posValid) {
+        /* already FAILed above */
+      } else if (unsafe) {
+        issues.push({ level: 'FAIL', kind: 'position-unsafe', seq: a.seq, detail: `refusing to read segment ${pos.segment}: ${unsafe}` });
+      } else if (raw === null) {
         issues.push({ level: 'WARN', kind: 'spine-unavailable', seq: a.seq, detail: `segment ${a.payload.position.segment} not on this device (fresh clone?) — position check skipped; continuity + self-consistency still hold` });
       } else {
         const line = (raw.split('\n')[a.payload.position.line - 1] || '').replace(/\r$/, '');
@@ -809,11 +884,10 @@ export async function verifyAnchors(repoRoot) {
   // upgrade/stamp that disk doesn't back is flagged; disk anchors with no
   // STAMPED event are a WARN (the event append is best-effort after the stamp).
   const events = [];
-  const segs = await listFlatSegments(repoRoot);
-  for (const seg of segs) {
-    let raw = null;
-    try { raw = await readFile(join(repoRoot, '.maddu', 'events', seg), 'utf8'); } catch { continue; }
-    for (const l of raw.split('\n')) {
+  for (const seg of segsAll) {
+    const rs = await readSegmentSafe(repoRoot, seg);
+    if (!rs.ok) continue;
+    for (const l of rs.raw.split('\n')) {
       const line = l.replace(/\r$/, '');
       if (!line.trim()) continue;
       try {
@@ -832,9 +906,12 @@ export async function verifyAnchors(repoRoot) {
       continue;
     }
     // The payload NEVER legitimately changes, so EVERY event for a seq must
-    // carry the on-disk payload digest — old or new.
-    if (d.payload_digest && a.payloadDigest && d.payload_digest !== a.payloadDigest) {
-      issues.push({ level: 'FAIL', kind: 'event-digest-mismatch', seq: d.seq, detail: `${ev.type} (${ev.id}) payload_digest does not match the stored payload — forged event or edited payload` });
+    // carry the on-disk payload digest — old or new. A forged event that
+    // OMITS the field (or carries a non-string) must not slip past the
+    // equality check by being falsy: presence, type, and equality are all
+    // required wherever the stored payload exists to compare against.
+    if (a.payloadDigest && (typeof d.payload_digest !== 'string' || d.payload_digest !== a.payloadDigest)) {
+      issues.push({ level: 'FAIL', kind: 'event-digest-mismatch', seq: d.seq, detail: `${ev.type} (${ev.id}) ${typeof d.payload_digest === 'string' ? 'payload_digest does not match the stored payload' : 'carries no string payload_digest — real anchor events always do'} — forged event or edited payload` });
     }
     newestPerSeq.set(d.seq, ev);
   }
@@ -844,11 +921,8 @@ export async function verifyAnchors(repoRoot) {
   for (const [seqNo, ev] of newestPerSeq) {
     const a = bySeq.get(seqNo);
     const d = ev.data || {};
-    // The newest event must CARRY the payload digest — a forged event that
-    // simply omits it must not slip past the every-event equality check.
-    if (!d.payload_digest) {
-      issues.push({ level: 'FAIL', kind: 'event-digest-mismatch', seq: seqNo, detail: `newest ${ev.type} (${ev.id}) carries no payload_digest — real anchor events always do; forged or corrupted event` });
-    }
+    // (payload_digest presence/type/equality for EVERY event — newest
+    // included — is enforced in the loop above.)
     const recorded = Array.isArray(d.proof_files) && d.proof_files[0] && typeof d.proof_files[0].digest === 'string'
       ? d.proof_files[0].digest : null;
     if (!a.proofDigest) {
@@ -897,4 +971,92 @@ export function validateAssuranceEvidence(level, evidence) {
   const ev = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? evidence : {};
   const missing = need.filter((k) => ev[k] === undefined || ev[k] === null || ev[k] === '');
   return missing.length ? { ok: false, missing } : { ok: true, missing: [] };
+}
+
+// ── PR 6a: the assess ceremony's local refusal gates ─────────────────────
+//
+// These checks can only BLOCK an assessment — they never grant one. The
+// positive evidence for `anchored` is the OPERATOR's own external
+// Bitcoin-backed `ots verify` run; the tool never executes a verifier and
+// never derives the level from local state alone.
+
+// maddu.json → witness.maxAnchorAge: optional "<n>d" (days). A missing
+// maddu.json means no policy; a PRESENT-but-unparseable file or a malformed
+// value is invalid — the ceremony fails closed on it (a consume gate must
+// never guess its own policy).
+export async function readMaxAnchorAge(repoRoot) {
+  let raw = null;
+  try { raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8'); } catch { return { set: false }; }
+  let cfg = null;
+  try { cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw); } catch {
+    return { set: true, invalid: true, detail: 'maddu.json is present but not valid JSON — cannot read witness.maxAnchorAge' };
+  }
+  const v = cfg?.witness?.maxAnchorAge;
+  if (v === undefined || v === null) return { set: false };
+  if (typeof v !== 'string' || !/^\d+d$/.test(v) || parseInt(v, 10) < 1) {
+    return { set: true, invalid: true, detail: `maddu.json witness.maxAnchorAge must be "<n>d" (whole days, ≥1), got ${JSON.stringify(v).slice(0, 40)}` };
+  }
+  return { set: true, invalid: false, days: parseInt(v, 10) };
+}
+
+// assessBinding — the read-only binding check the ceremony runs TWICE (before
+// prompting and again after the final confirm, immediately before append).
+// ANY FAIL blocks. Stricter than verifyAnchors on one point: the receipt
+// bytes must be readable on THIS device (a fresh clone missing the segment is
+// a verify WARN but an assess refusal — the ceremony cannot confirm
+// payload↔receipt binding it cannot read).
+export async function assessBinding(repoRoot, { sha, seq = null } = {}) {
+  const issues = [];
+  const warns = [];
+  if (!isGitSha(sha)) {
+    return { ok: false, anchor: null, warns, issues: [{ level: 'FAIL', kind: 'bad-sha', detail: 'subject must be a FULL lowercase 40- or 64-hex git commit sha (no abbreviations, no refs)' }] };
+  }
+  const v = await verifyAnchors(repoRoot);
+  for (const i of v.issues) (i.level === 'FAIL' ? issues : warns).push(i);
+  const { anchors } = await listAnchors(repoRoot);
+  const matches = anchors.filter((a) => a.payload && a.payload.subject_sha === sha);
+  let target = null;
+  if (seq !== null) {
+    target = matches.find((a) => a.seq === seq) || null;
+    if (!target) issues.push({ level: 'FAIL', kind: 'seq-not-matching', detail: `--seq ${seq} does not name an anchor whose payload commits to subject ${sha.slice(0, 12)}…` });
+  } else if (matches.length) {
+    target = matches[matches.length - 1]; // newest seq wins
+  } else {
+    issues.push({ level: 'FAIL', kind: 'no-anchor-for-sha', detail: `no anchor payload commits to subject ${sha.slice(0, 12)}… — stamp one first (\`maddu spine anchor\`)` });
+  }
+  let anchor = null;
+  if (target) {
+    if (!target.hasProof || !target.proofDigest) {
+      issues.push({ level: 'FAIL', kind: 'proof-missing', seq: target.seq, detail: `anchor #${target.seq} has no payload.json.ots on disk — there is nothing to verify externally` });
+    }
+    const pos = target.payload?.position;
+    const posValid = pos && typeof pos.segment === 'string' && SEGMENT_NAME_RE.test(pos.segment)
+      && Number.isInteger(pos.line) && pos.line >= 1 && (pos.replica ?? null) === null;
+    if (!posValid) {
+      issues.push({ level: 'FAIL', kind: 'position-invalid', seq: target.seq, detail: 'payload position is not a canonical in-spine segment/line reference' });
+    } else {
+      const rs = await readSegmentSafe(repoRoot, pos.segment);
+      if (!rs.ok) {
+        issues.push({ level: 'FAIL', kind: 'receipt-unavailable', seq: target.seq, detail: `cannot read spine segment ${pos.segment} (${rs.detail || rs.reason}) — assessment requires the receipt bytes on this device` });
+      } else {
+        const line = (rs.raw.split('\n')[pos.line - 1] || '').replace(/\r$/, '');
+        let ev = null;
+        try { ev = JSON.parse(line); } catch { /* handled below */ }
+        if (!line || hashLine(line) !== target.payload.receipt_digest) {
+          issues.push({ level: 'FAIL', kind: 'receipt-mismatch', seq: target.seq, detail: `spine ${pos.segment}:${pos.line} does not hash to the payload's receipt_digest — the spine was rewritten, or the anchor lies` });
+        } else if (!ev || ev.type !== 'VERIFICATION_RAN' || ev.id !== target.payload.event_id) {
+          issues.push({ level: 'FAIL', kind: 'receipt-wrong-event', seq: target.seq, detail: 'the line at the recorded position is not the VERIFICATION_RAN receipt the payload names' });
+        }
+      }
+    }
+    anchor = {
+      seq: target.seq,
+      payloadDigest: target.payloadDigest,
+      proofDigest: target.proofDigest,
+      receiptDigest: target.payload?.receipt_digest ?? null,
+      subjectSha: sha,
+      eventId: target.payload?.event_id ?? null,
+    };
+  }
+  return { ok: issues.length === 0, anchor, issues, warns };
 }

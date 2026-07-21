@@ -15,6 +15,7 @@
 //                                          #   WITHHELD (plain-language), on-goal drift,
 //                                          #   record-intact + independently checkable
 
+import { createInterface } from 'node:readline';
 import { parseFlags } from './_args.mjs';
 import { loadSecretScan } from './_tools.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveSessionId } from './_spine.mjs';
@@ -69,19 +70,29 @@ export default async function spine(argv) {
     // STRICT flag validation: stamping is irreversible (a calendar submission
     // cannot be recalled), so a typo'd flag (--upgarde) or a valueless --event
     // must be usage error 2 — never a fall-through to "stamp now".
-    const ANCHOR_FLAGS = new Set(['upgrade', 'status', 'verify', 'json', 'event']);
+    const ANCHOR_FLAGS = new Set(['upgrade', 'status', 'verify', 'json', 'event', 'assess', 'seq']);
     const unknown = Object.keys(flags).filter((f) => !ANCHOR_FLAGS.has(f));
     const modes = ['upgrade', 'status', 'verify'].filter((f) => flags[f]);
     // Boolean flags must be EXACTLY true — the shared parser consumes a
     // following bare word as a value (`--upgrade now` → 'now'), and `=false`
     // is not a supported spelling; both are usage errors, not near-misses.
     const boolBad = ['upgrade', 'status', 'verify', 'json'].some((f) => flags[f] !== undefined && flags[f] !== true);
+    // --assess <sha> is an interactive ceremony: it excludes every other mode
+    // AND --json (a machine-driveable assessment would be the actor assessing
+    // itself); --seq is only meaningful with --assess.
+    const assessBad = flags.assess !== undefined && (typeof flags.assess !== 'string' || !flags.assess.trim());
+    const assessMix = flags.assess !== undefined && (modes.length > 0 || flags.event !== undefined || flags.json !== undefined);
+    const seqBad = flags.seq !== undefined && (flags.assess === undefined || typeof flags.seq !== 'string' || !/^\d+$/.test(flags.seq.trim()) || parseInt(flags.seq, 10) < 1);
     if (unknown.length || boolBad || (positional && positional.length) || modes.length > 1
+        || assessBad || assessMix || seqBad
         || (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim()))
         || (flags.event !== undefined && modes.length)) {
-      console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify] [--json]');
+      console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify | --assess <full-commit-sha> [--seq <n>]] [--json]');
       if (unknown.length) console.error(`  unknown flag(s): ${(await redactFlagNames(unknown)).map((f) => `--${f}`).join(', ')}`);
       if (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim())) console.error('  --event requires an event id');
+      if (assessBad) console.error('  --assess requires a full commit sha');
+      if (assessMix) console.error('  --assess is an interactive ceremony — it cannot combine with other modes or --json');
+      if (seqBad) console.error('  --seq requires --assess and a positive integer');
       process.exit(2);
     }
     const sa = lib.spineAnchor;
@@ -89,7 +100,42 @@ export default async function spine(argv) {
 
     if (flags.status) {
       const st = await sa.anchorStatus(repoRoot);
-      if (flags.json) emit(st, 0);
+      // Assessments are LEDGER NOTES, never verification results: an event
+      // counts for an anchor only when its level is 'anchored' AND its whole
+      // evidence tuple matches the anchor's CURRENT state — a same-seq event
+      // whose tuple no longer matches (post-upgrade supersession, tampering)
+      // shows as a mismatch WARN, never as "assessed".
+      let assessEvents = [];
+      try { assessEvents = (await lib.spine.readAll(repoRoot)).filter((e) => e.type === 'ASSURANCE_ASSESSED'); } catch { /* unreadable spine → no assessment lines */ }
+      const assessFor = (a) => {
+        const matching = assessEvents.filter((e) => {
+          const d = e.data || {};
+          const ev2 = d.evidence && typeof d.evidence === 'object' ? d.evidence : {};
+          return d.level === 'anchored' && d.subject_sha === a.subjectSha && d.receipt_digest === a.receiptDigest
+            && ev2.anchor_seq === a.seq && ev2.anchor_payload_digest === a.payloadDigest && ev2.proof_digest === a.proofDigest;
+        });
+        const newest = matching.length ? matching[matching.length - 1] : null;
+        const mismatched = !newest && assessEvents.some((e) => e.data?.level === 'anchored'
+          && (e.data?.evidence && typeof e.data.evidence === 'object' ? e.data.evidence : {}).anchor_seq === a.seq);
+        return { newest, mismatched };
+      };
+      const agePolicy = typeof sa.readMaxAnchorAge === 'function' ? await sa.readMaxAnchorAge(repoRoot) : { set: false };
+      if (flags.json) {
+        const assessments = st.anchors.map((a) => {
+          const { newest, mismatched } = assessFor(a);
+          if (!newest && !mismatched) return null;
+          return {
+            seq: a.seq,
+            authoritative: false,
+            matched: !!newest,
+            mismatched,
+            eventId: newest ? newest.id : null,
+            ts: newest ? newest.ts : null,
+            assessedBy: newest ? (newest.data?.assessed_by ?? null) : null,
+          };
+        }).filter(Boolean);
+        emit({ ...st, assessments, maxAnchorAge: agePolicy }, 0);
+      }
       console.log(`${ANSI.bold}Máddu spine anchors${ANSI.reset}  ${repoRoot}`);
       console.log();
       if (!st.anchors.length) {
@@ -98,6 +144,16 @@ export default async function spine(argv) {
       for (const a of st.anchors) {
         const state = a.complete ? `${ANSI.pass}complete${ANSI.reset}` : a.hasProof ? `${ANSI.warn}pending${ANSI.reset}` : `${ANSI.fail}no proof${ANSI.reset}`;
         console.log(`  ${ANSI.accent}#${a.seq}${ANSI.reset}  ${state}  ${ANSI.dim}${(a.payloadDigest || '').slice(0, 12)}… · receipt ${a.eventId || '—'} · ${fmtTs(a.stampedAt)}${ANSI.reset}`);
+        const { newest, mismatched } = assessFor(a);
+        if (newest) {
+          console.log(`      assessed anchored ${fmtTs(newest.ts)} ${ANSI.dim}(non-authoritative — ledger note; trust requires re-running the ceremony yourself)${ANSI.reset}`);
+        } else if (mismatched) {
+          console.log(`      ${ANSI.warn}WARN${ANSI.reset}  assessment on record no longer matches this anchor (superseded by upgrade, or tampered) — re-run the ceremony`);
+        }
+      }
+      if (agePolicy.set && agePolicy.invalid) {
+        console.log();
+        console.log(`  ${ANSI.warn}WARN${ANSI.reset}  ${agePolicy.detail} — the assess ceremony will refuse until it is fixed`);
       }
       if (st.anchors.some((a) => !a.complete && a.hasProof)) {
         console.log();
@@ -120,6 +176,15 @@ export default async function spine(argv) {
       console.log(`  ${ANSI.dim}Residual: ${v.residual}${ANSI.reset}`);
       console.log(`  ${ANSI.dim}${v.operatorVerify}${ANSI.reset}`);
       process.exit(v.ok ? 0 : 1);
+    }
+
+    if (flags.assess !== undefined) {
+      if (typeof sa.assessBinding !== 'function' || typeof sa.readMaxAnchorAge !== 'function') {
+        console.error('this install predates the assess ceremony. Run `maddu upgrade`.');
+        process.exit(2);
+      }
+      await runAssessCeremony(lib, sa, repoRoot, flags.assess.trim(), flags.seq !== undefined ? parseInt(flags.seq, 10) : null);
+      return; // runAssessCeremony always exits
     }
 
     if (flags.upgrade) {
@@ -401,6 +466,11 @@ export default async function spine(argv) {
       process.exit(1);
     }
     console.log(JSON.stringify(ev, null, 2));
+    // Every consumer labels an assessment non-authoritative — including the
+    // raw event printer. stderr, so piped stdout stays parseable JSON.
+    if (ev.type === 'ASSURANCE_ASSESSED') {
+      console.error('non-authoritative — operator-ceremony ledger note, not a verification result');
+    }
     return;
   }
 
@@ -525,4 +595,220 @@ function renderOversightText(o, repoRoot) {
     console.log(`${ANSI.bold}Record${ANSI.reset}  ${intact ? ANSI.pass + '✓' : ANSI.fail + '⚠'}${ANSI.reset} ${events} events · ${intact ? 'chain intact' : 'chain BROKEN'}${contract ? ` · contract ${contract}` : ''}`);
     console.log(`  ${ANSI.dim}independently checkable — full uncapped check: maddu spine verify${ANSI.reset}`);
   }
+}
+
+// ── the assess ceremony (witness track PR 6a) ────────────────────────────
+//
+// `maddu spine anchor --assess <sha>` walks the OPERATOR through the
+// consume-time checks for the `anchored` assurance level and records an
+// ASSURANCE_ASSESSED ledger note. The tool's own checks (assessBinding) can
+// only BLOCK — the positive evidence is the operator's external
+// Bitcoin-backed `ots verify` run, pasted verbatim. The recorded event is
+// non-authoritative everywhere: the real consume gate is the operator's
+// independent ritual, never this note.
+
+// Line I/O: a persistent queue over the readline 'line' stream. With piped
+// stdin (the test seam) readline can emit every buffered line in ONE
+// synchronous loop — a question()-based flow would drop lines emitted while
+// no listener was attached and hang forever. The queue never detaches, so
+// every line is either consumed by a waiter or held for the next prompt.
+// EOF resolves pending and future reads as null → callers treat it as an
+// empty answer, which every gate refuses by default.
+function lineSource(rl) {
+  const queue = [];
+  const waiters = [];
+  let closed = false;
+  rl.on('line', (l) => { const w = waiters.shift(); if (w) w(l); else queue.push(l); });
+  rl.on('close', () => { closed = true; for (const w of waiters.splice(0)) w(null); });
+  return {
+    next() {
+      if (queue.length) return Promise.resolve(queue.shift());
+      if (closed) return Promise.resolve(null);
+      return new Promise((res) => waiters.push(res));
+    },
+  };
+}
+
+async function askLine(src, q) {
+  process.stdout.write(q);
+  const line = await src.next();
+  return line === null ? '' : line;
+}
+
+// Multi-line paste terminated by a blank line (or EOF). The raw read is
+// hard-bounded at 64 KiB (input beyond it is dropped, flagged); redaction
+// happens on the FULL bounded paste BEFORE any storage truncation so a token
+// straddling the stored cap cannot evade the pattern matcher.
+const ASSESS_READ_CEILING = 64 * 1024;
+const ASSESS_NOTE_CAP = 8 * 1024;
+async function readPaste(src, promptText) {
+  process.stdout.write(promptText);
+  const lines = [];
+  let bytes = 0;
+  let truncatedRead = false;
+  for (;;) {
+    const l = await src.next();
+    if (l === null || l.trim() === '') break;
+    bytes += Buffer.byteLength(l, 'utf8') + 1;
+    if (bytes > ASSESS_READ_CEILING) { truncatedRead = true; continue; }
+    lines.push(l);
+  }
+  return { text: lines.join('\n'), truncatedRead };
+}
+
+function parseUtcDate(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const t = Date.UTC(y, m - 1, d);
+  const dt = new Date(t);
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return t;
+}
+
+// The age gate, evaluated against a POLICY and the operator-entered date.
+// Runs twice: at prompt time and again (with a RELOADED policy) after the
+// final confirm — a policy changed mid-ceremony is a refusal, never a
+// renegotiation. A future "attestation" is nonsense, not young.
+function evalAgeGate(policy, dateStr, nowMs) {
+  if (!policy.set) return { ok: true, unchecked: true };
+  if (policy.invalid) return { ok: false, detail: policy.detail };
+  const t = parseUtcDate(dateStr);
+  if (t === null) return { ok: false, detail: 'a declared witness.maxAnchorAge policy must be confirmable — the attestation date is required, exactly YYYY-MM-DD' };
+  if (t > nowMs) return { ok: false, detail: 'the attestation date is in the future — that is not an attestation' };
+  const days = Math.floor((nowMs - t) / 86400000);
+  if (days > policy.days) return { ok: false, detail: `attestation is ${days} day(s) old — witness.maxAnchorAge is ${policy.days}d` };
+  return { ok: true, days };
+}
+
+function assessRefuse(msg) {
+  console.error(`${ANSI.fail}Refused:${ANSI.reset} ${msg}`);
+  console.error(`${ANSI.dim}nothing recorded${ANSI.reset}`);
+  process.exit(2);
+}
+
+async function runAssessCeremony(lib, sa, repoRoot, sha, seqFlag) {
+  // Fail closed on the write boundary FIRST: the ceremony stores pasted
+  // caller text and refuses to store it unredacted.
+  let scan = null;
+  try { scan = await loadSecretScan(); } catch { /* refused below */ }
+  if (!scan || typeof scan.redactText !== 'function' || typeof scan.redactLeaves !== 'function') {
+    assessRefuse('secret-scan.mjs unavailable — pasted verifier output cannot be stored unredacted. Run `maddu upgrade`.');
+  }
+  if (!process.stdin.isTTY && process.env.MADDU_ASSESS_TEST_STDIN !== '1') {
+    assessRefuse('the assess ceremony is operator-interactive — run it in your own terminal. (A script-driven assessment would be the actor assessing itself.)');
+  }
+
+  console.log(`${ANSI.bold}Máddu assess ceremony${ANSI.reset}  subject ${ANSI.accent}${sha.slice(0, 12)}…${ANSI.reset}`);
+  console.log(`${ANSI.dim}This records a NON-AUTHORITATIVE ledger note (ASSURANCE_ASSESSED, level anchored).`);
+  console.log(`It is a convenience record of a ceremony YOU run — the tool executes no verifier and`);
+  console.log(`never derives the level from local state. The real consume gate is your own ritual.${ANSI.reset}`);
+  console.log();
+
+  // Pass 1 — local binding refusal gates. These BLOCK; they never grant.
+  const pass1 = await sa.assessBinding(repoRoot, { sha, seq: seqFlag });
+  for (const w of pass1.warns || []) {
+    console.log(`  ${ANSI.warn}WARN${ANSI.reset}  ${ANSI.dim}${w.kind}${w.seq ? ` #${w.seq}` : ''}${ANSI.reset}  ${w.detail}`);
+  }
+  if (!pass1.ok) {
+    for (const i of pass1.issues) {
+      console.error(`  ${ANSI.fail}FAIL${ANSI.reset}  ${ANSI.dim}${i.kind}${i.seq ? ` #${i.seq}` : ''}${ANSI.reset}  ${i.detail}`);
+    }
+    assessRefuse('the local binding checks failed — fix the record (or the anchor) before assessing.');
+  }
+  const anchor = pass1.anchor;
+  const policy1 = await sa.readMaxAnchorAge(repoRoot);
+  if (policy1.set && policy1.invalid) assessRefuse(policy1.detail);
+
+  console.log(`  anchor ${ANSI.accent}#${anchor.seq}${ANSI.reset}  payload ${ANSI.dim}${String(anchor.payloadDigest).slice(0, 12)}…${ANSI.reset}  proof ${ANSI.dim}${String(anchor.proofDigest).slice(0, 12)}…${ANSI.reset}`);
+  console.log();
+  console.log(`Run the external verifier YOURSELF, in ANOTHER terminal:`);
+  console.log(`  ${ANSI.accent}ots verify .maddu/anchors/${String(anchor.seq).padStart(6, '0')}/payload.json.ots${ANSI.reset}`);
+  console.log(`${ANSI.dim}Bitcoin-backed verification is an operator action: the stock Python client needs a local`);
+  console.log(`Bitcoin Core node (it has NO explorer fallback); the JS client's lite mode (npx opentimestamps)`);
+  console.log(`trusts block explorers, not PoW directly — know which one you ran.${ANSI.reset}`);
+  console.log();
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const src = lineSource(rl);
+  const paste = await readPaste(src, 'Paste the verifier output here (finish with an empty line):\n');
+  if (!paste.text.trim()) { rl.close(); assessRefuse('no external verifier output pasted — without external evidence there is nothing to assess.'); }
+  // Redact the FULL bounded paste, THEN truncate to the stored cap.
+  let noteBody = scan.redactText(paste.text).text;
+  let truncated = paste.truncatedRead;
+  if (Buffer.byteLength(noteBody, 'utf8') > ASSESS_NOTE_CAP) {
+    noteBody = Buffer.from(noteBody, 'utf8').subarray(0, ASSESS_NOTE_CAP).toString('utf8').replace(/�+$/, '');
+    truncated = true;
+  }
+  if (truncated) noteBody += '\n…[truncated at 8 KiB]';
+
+  const okAns = (await askLine(src, 'Did YOUR verifier attest success against Bitcoin? (y/N) ')).trim().toLowerCase();
+  if (okAns !== 'y' && okAns !== 'yes') { rl.close(); assessRefuse('verifier success not confirmed.'); }
+
+  let dateStr = null;
+  if (policy1.set) {
+    dateStr = (await askLine(src, `Bitcoin attestation date from the verifier output (YYYY-MM-DD, UTC; policy ${policy1.days}d): `)).trim();
+    const gate1 = evalAgeGate(policy1, dateStr, Date.now());
+    if (!gate1.ok) { rl.close(); assessRefuse(gate1.detail); }
+  } else {
+    console.log(`${ANSI.dim}no witness.maxAnchorAge declared in maddu.json — age unchecked${ANSI.reset}`);
+  }
+
+  const handle = (await askLine(src, 'Your handle for the record (optional, stored in the note): ')).trim();
+
+  console.log();
+  console.log(`${ANSI.bold}Summary${ANSI.reset}  level anchored ${ANSI.dim}(non-authoritative ledger note)${ANSI.reset}`);
+  console.log(`  subject:  ${sha}`);
+  console.log(`  anchor:   #${anchor.seq}  payload ${anchor.payloadDigest}`);
+  console.log(`  proof:    ${anchor.proofDigest}`);
+  console.log(`  receipt:  ${anchor.receiptDigest}`);
+  console.log(`  age:      ${policy1.set ? `${dateStr} vs ${policy1.days}d policy — ok` : 'unchecked (no policy)'}`);
+  const confirm = (await askLine(src, 'Record this assessment? (y/N) ')).trim().toLowerCase();
+  rl.close();
+  if (confirm !== 'y' && confirm !== 'yes') assessRefuse('not confirmed.');
+
+  // Pass 2 — the LAST act before append: re-run the binding checks AND
+  // reload the age policy. Anything moved during the interactive window
+  // (anchor bytes, spine, maddu.json policy) is a refusal.
+  const pass2 = await sa.assessBinding(repoRoot, { sha, seq: seqFlag });
+  const t2 = pass2.anchor;
+  const TUPLE = ['seq', 'payloadDigest', 'proofDigest', 'receiptDigest', 'subjectSha', 'eventId'];
+  const same = pass2.ok && t2 && TUPLE.every((k) => anchor[k] === t2[k]);
+  const policy2 = await sa.readMaxAnchorAge(repoRoot);
+  const gate2 = evalAgeGate(policy2, dateStr, Date.now());
+  if (!same || !gate2.ok) {
+    assessRefuse('anchor state or witness policy changed while you were verifying — re-run the ceremony.');
+  }
+
+  const evidence = { anchor_seq: t2.seq, anchor_payload_digest: t2.payloadDigest, proof_digest: t2.proofDigest };
+  const check = sa.validateAssuranceEvidence('anchored', evidence);
+  if (!check.ok) assessRefuse(`evidence shape rejected by the canonical checker (missing: ${check.missing.join(', ') || check.error}) — never appending what it rejects.`);
+
+  const noteLines = [`attested-date: ${dateStr || '(no age policy declared)'}`];
+  if (handle) noteLines.push(`operator-handle: ${scan.redactText(handle).text}`);
+  noteLines.push('--- pasted verifier output (redacted, capped) ---', noteBody);
+  const data = scan.redactLeaves({
+    subject_sha: sha,
+    receipt_digest: t2.receiptDigest,
+    level: 'anchored',
+    evidence,
+    assessed_by: 'operator-ceremony',
+    note: noteLines.join('\n'),
+  });
+  const actor = await resolveSessionId(repoRoot, {}, lib.sessionActive);
+  let ev = null;
+  try {
+    const T = (lib.spine && lib.spine.EVENT_TYPES) || {};
+    ev = await lib.spine.append(repoRoot, { type: T.ASSURANCE_ASSESSED || 'ASSURANCE_ASSESSED', actor, lane: process.env.MADDU_LANE || null, data });
+  } catch (e) {
+    console.error(`${ANSI.fail}FAIL${ANSI.reset}  assessment NOT recorded — the spine append failed (${scan.redactText(String((e && e.message) || e)).text.slice(0, 200)}).`);
+    process.exit(1);
+  }
+  if (!ev || !ev.id) {
+    console.error(`${ANSI.fail}FAIL${ANSI.reset}  assessment NOT recorded — the spine append returned no event id.`);
+    process.exit(1);
+  }
+  console.log();
+  console.log(`${levelTag('PASS')}  recorded ${ANSI.accent}${ev.id}${ANSI.reset}  ASSURANCE_ASSESSED level anchored`);
+  console.log(`  ${ANSI.dim}non-authoritative — ledger note only; anyone consuming this must re-run the ceremony themselves.${ANSI.reset}`);
+  process.exit(0);
 }

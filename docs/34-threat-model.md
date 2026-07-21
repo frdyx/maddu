@@ -17,7 +17,7 @@ One compromised npm package on one developer's machine got access to
 ("local-first, files-only, no hosted backend, no provider SDKs in
 framework code, device-bound tokens") into enforced gates.
 
-## The 12 attack scenarios
+## The 13 attack scenarios
 
 Each scenario lists the attack, what Máddu enforces, what it does NOT
 enforce, and the concrete gate / spine event family that catches it
@@ -522,6 +522,72 @@ authority. It does **not** prevent an authorized actor from weakening
 verification, and it does **not** prove that passing tests remain
 meaningful. Do not describe this as malicious-agent resistance,
 unbypassability, or trusted receipts.
+
+### 13. Faking an assurance level (the external witness and the ladder)
+
+**Attack:** the actor claims a verification result is better-evidenced
+than it is — asserts a receipt was externally anchored when it wasn't,
+re-stamps after rewriting history, forges the anchor bookkeeping, or
+records a consume-ceremony note for checks nobody ran.
+
+**The assurance ladder** (each rung names its evidence; no rung is
+granted by local state):
+
+- **actor-reported** — a `VERIFICATION_RAN` receipt. The actor ran its
+  own verifier; the spine preserves the claim.
+- **replayed** — `maddu spine verify --replay <sha>` re-ran the DECLARED
+  commands in a clean checkout of that exact commit and appended its own
+  strict receipt (v1.109.0).
+- **anchored** — an OpenTimestamps anchor commits a receipt (and chain
+  head) to Bitcoin, and the OPERATOR ran a Bitcoin-backed `ots verify`
+  themselves. `maddu spine anchor --assess <sha>` walks that ceremony and
+  records `ASSURANCE_ASSESSED` — a **non-authoritative ledger note**. The
+  tool's own checks (payload↔receipt↔SHA binding, chain continuity,
+  forged-event predicates, `witness.maxAnchorAge` staleness) can only
+  REFUSE; the positive evidence is the operator's pasted external verifier
+  output. Every consumer labels the event non-authoritative; nothing
+  gates on it.
+- **presence-attested** — deferred (PR 6b); does not exist yet.
+
+**Máddu enforcement:** the assess ceremony refuses on: mid-history
+anchor deletion/renumbering; payloads whose bytes are not their own
+canonical serialization; positions that don't hash to the receipt (with
+containment — path-shaped or symlinked segment references are refused,
+not followed); missing proofs; `ANCHOR_*` events whose payload digest is
+absent, non-string, or mismatched, and a newest event whose proof digest
+disk doesn't back; stale or future attestation dates under a declared
+`witness.maxAnchorAge`; and any state or policy change between the
+operator's checks and the append (the binding re-runs after the final
+confirm, immediately before the write).
+
+**Máddu does NOT enforce (the residuals, stated exactly):**
+
+1. **Suffix deletion** (dropping the newest anchors) and **all-history
+   deletion** are undetectable without a retained checkpoint — keep an
+   operator note of the latest anchor seq + payload digest outside the
+   repo.
+2. **Suppression**: anchoring is opt-in; work that is never stamped
+   leaves no anchor to check. Absence of an anchor is not evidence of
+   anything.
+3. **Superseded proof-digest claims are unverifiable**: upgrades replace
+   the proof file, so only the NEWEST anchor event's proof digest can be
+   checked against disk. A forged claim about a superseded proof asserts
+   something about bytes nobody — including Bitcoin — can re-examine.
+   (Payload digests, which never legitimately change, ARE checked on
+   every event.)
+4. **Explorer-mode trust reduction**: the JS client's lite mode trusts
+   block explorers, not proof-of-work directly. The ceremony asks the
+   operator to know and say which client they ran.
+5. **Everything an anchor doesn't cover** inherits scenario 11's unkeyed
+   limits: events after the anchored chain head are as rewritable as
+   ever, and an actor can re-anchor a rewritten history going forward.
+   An anchor proves a receipt existed by a time — not that the work was
+   good, and not that later history is honest.
+
+The `ASSURANCE_ASSESSED` event itself is writable by anyone with repo
+access (like every spine event); that is why every consumer prints it as
+a non-authoritative ledger note and the real consume gate is the
+operator re-running the ceremony themselves.
 
 ## Operator responsibilities
 
