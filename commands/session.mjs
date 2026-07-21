@@ -50,9 +50,8 @@ async function resolveSession(flags, repoRoot, sessionActive) {
   return null;
 }
 
-async function doRegister(spine, sessionActive, repoRoot, { id, role, label, focus, runtime, lane, parentSessionId }) {
-  const sessionId = id || spine.genSessionId();
-  const ev = await spine.append(repoRoot, {
+async function doRegister(spine, sessionActive, repoRoot, { id, role, label, focus, runtime, lane, parentSessionId }, sessionLifecycle = null) {
+  const makeEvent = (sessionId) => ({
     type: spine.EVENT_TYPES.SESSION_REGISTERED,
     actor: sessionId,
     lane: lane || null,
@@ -66,6 +65,34 @@ async function doRegister(spine, sessionActive, repoRoot, { id, role, label, foc
       ...(parentSessionId ? { parentSessionId } : {})
     }
   });
+  let sessionId, ev;
+  if (sessionLifecycle && sessionLifecycle.registerSessionUnique) {
+    // v1.111.0: ALL registration goes through the close-locked uniqueness
+    // transaction. Explicit ids are strict-grammar validated and duplicate-
+    // rejected (a same-id registration after a close must never resurrect
+    // the closed session); generated ids are existence-checked with a
+    // bounded regenerate.
+    const res = await sessionLifecycle.registerSessionUnique(repoRoot, { id: id !== undefined && id !== true ? id : undefined, makeEvent });
+    if (res.status === 'invalid-id') {
+      console.error(`invalid session id (must match ses_[A-Za-z0-9_]{1,64}) — omit --id to generate one`);
+      process.exit(2);
+    }
+    if (res.status === 'exists') {
+      console.error(`session id already exists on the spine (${res.sessionId}) — omit --id to register a new session`);
+      process.exit(2);
+    }
+    if (res.status === 'lock' || res.status === 'spine-corrupt') {
+      console.error(res.status === 'lock'
+        ? '(session lock busy — retry, or omit --id)'
+        : '(spine has malformed lines — explicit-id registration refused; run maddu verify)');
+      process.exit(1);
+    }
+    sessionId = res.sessionId; ev = res.event;
+  } else {
+    // Legacy fallback (older installed lib without session-lifecycle.mjs).
+    sessionId = (id && id !== true) ? id : spine.genSessionId();
+    ev = await spine.append(repoRoot, makeEvent(sessionId));
+  }
   if (sessionActive) {
     await sessionActive.writeActiveSession(repoRoot, {
       sessionId,
@@ -81,7 +108,7 @@ async function doRegister(spine, sessionActive, repoRoot, { id, role, label, foc
 export default async function session(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths, spine, projections, sessionActive } = await loadSpineLib();
+  const { paths, spine, projections, sessionActive, sessionLifecycle } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   if (!sub) {
@@ -121,7 +148,7 @@ export default async function session(argv) {
       id: flags.id, role: flags.role, label: flags.label, focus: flags.focus,
       runtime: flags.runtime, lane: flags.lane,
       parentSessionId: flags.parent || process.env.MADDU_PARENT_SESSION_ID || null
-    });
+    }, sessionLifecycle);
     console.log(sessionId);
     if (process.stdout.isTTY) {
       console.log(`  registered  ${fmtTime(ev.ts)}`);
@@ -151,7 +178,7 @@ export default async function session(argv) {
       runtime: flags.runtime,
       lane: flags.lane,
       parentSessionId: flags.parent || process.env.MADDU_PARENT_SESSION_ID || null
-    });
+    }, sessionLifecycle);
     console.log(sessionId);
     if (process.stdout.isTTY) {
       console.log(`  started  ${fmtTime(ev.ts)}  role=${flags.role || 'implementer'}  label="${label}"`);
@@ -203,13 +230,40 @@ export default async function session(argv) {
       console.error('--session required (no active session cached for this repo)');
       process.exit(2);
     }
-    await spine.append(repoRoot, {
-      type: spine.EVENT_TYPES.SESSION_CLOSED,
-      actor: sessionId,
-      lane: null,
-      data: { handoff: flags.handoff || null }
-    });
-    if (sessionActive) await sessionActive.clearActiveSession(repoRoot);
+    if (sessionLifecycle && sessionLifecycle.closeSessionIfActive) {
+      // v1.111.0: conditional serialized close. Post-close effects (learn
+      // detection below) run ONLY on a real close; every other status maps
+      // to an explicit message + exit. `--handoff` strings are wrapped to
+      // the schema's object shape by the helper's normalization.
+      const res = await sessionLifecycle.closeSessionIfActive(repoRoot, {
+        sessionId,
+        eventType: spine.EVENT_TYPES.SESSION_CLOSED,
+        data: { handoff: flags.handoff && flags.handoff !== true ? flags.handoff : null },
+      });
+      if (res.status === 'already-closed') { console.log(`(already closed)  ${sessionId}`); return; }
+      if (res.status === 'missing') {
+        console.error(`no such session on the spine: ${sessionId}`);
+        process.exit(2);
+      }
+      if (res.status === 'lock') {
+        console.error('(close lock busy — retry)');
+        process.exit(1);
+      }
+      if (res.status === 'spine-corrupt') {
+        console.error('(spine has malformed lines — close refused; run maddu verify)');
+        process.exit(1);
+      }
+    } else {
+      // Legacy fallback (older installed lib): direct append + unconditional
+      // clear, exactly the pre-v1.111 behavior.
+      await spine.append(repoRoot, {
+        type: spine.EVENT_TYPES.SESSION_CLOSED,
+        actor: sessionId,
+        lane: null,
+        data: { handoff: flags.handoff && flags.handoff !== true ? { summary: flags.handoff } : null }
+      });
+      if (sessionActive) await sessionActive.clearActiveSession(repoRoot);
+    }
     if (process.stdout.isTTY) console.log(`closed  ${sessionId}`);
     // Learn candidate detection at the session boundary (usage-audit Tier 5)
     // — same containment contract as the slice-stop hook-in (post-append,
