@@ -23,10 +23,10 @@ export default {
   run: async (ctx) => {
     const lib = await loadSessionActive();
     if (!lib) return { ok: true, message: 'cache not used (legacy install)' };
-    const cached = await lib.readActiveSession(ctx.repoRoot);
-    if (!cached) return { ok: true, message: 'no active session cached', status: 'ok' };
     const verified = await lib.readActiveSessionVerified(ctx.repoRoot);
-    if (verified && verified.stale) {
+    if (!verified) return { ok: true, message: 'no active session cached', status: 'ok' };
+    // v1.111.0 discriminated union (kind); pre-v1.111 shapes fall through.
+    if (verified.kind === 'stale' || (verified.kind === undefined && verified.stale)) {
       return {
         ok: true,
         status: 'warn',
@@ -34,6 +34,13 @@ export default {
         evidence: { sessionId: verified.sessionId },
       };
     }
-    return { ok: true, message: cached.sessionId };
+    if (verified.kind === 'invalid') {
+      return { ok: true, status: 'warn', message: 'cache file unreadable — self-heals on next register' };
+    }
+    if (verified.kind === 'unverified') {
+      return { ok: true, status: 'warn', message: `${verified.record.sessionId} (unverified — spine unreadable)` };
+    }
+    const sid = verified.record ? verified.record.sessionId : verified.sessionId;
+    return { ok: true, message: sid };
   },
 };

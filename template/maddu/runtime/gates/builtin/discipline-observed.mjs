@@ -45,7 +45,12 @@ export default {
 
     // Gather current ritual state (best-effort; fail-open to a healthy read).
     let sid = null;
-    try { const a = await sessionActive.readActiveSessionVerified(repoRoot); sid = a && a.sessionId; } catch {}
+    try {
+      const a = await sessionActive.readActiveSessionVerified(repoRoot);
+      // v1.111.0 union (kind) with pre-v1.111 shape fallback.
+      if (a && (a.kind === 'active' || a.kind === 'unverified') && a.record) sid = a.record.sessionId;
+      else if (a && a.kind === undefined && !a.stale && a.sessionId) sid = a.sessionId;
+    } catch {}
     let state = null;
     try { state = await discipline.gatherRitualState(repoRoot, sid, Date.now(), { dirtyBaseline: [], editsSinceSlice: 0 }); } catch {}
 
@@ -82,11 +87,22 @@ export default {
       if (!state.session?.registered) problems.push('no active session registered');
       if (!state.lane?.claimed) problems.push('no lane claimed');
       if (!state.goalOrPlan?.active) problems.push('no active goal or open plan governs current work');
-      if (state.commit && state.commit.newDirtyFiles >= 15) problems.push(`${state.commit.newDirtyFiles} uncommitted files piling up`);
+      // Honest unknown (v1.111.0): a failed/invalid git observation or broken
+      // discipline config must NOT render as dirty=0 / "rituals observed" —
+      // report the observation problem instead (enforcement stays fail-open;
+      // this diagnostic just stops lying).
+      if (state.commit && state.commit.observed === false) {
+        problems.push('commit observation unavailable (git failure or invalid discipline config) — dirty state unknown');
+      } else if (state.commit && state.commit.newDirtyFiles >= 15) {
+        problems.push(`${state.commit.newDirtyFiles} uncommitted files piling up`);
+      }
     }
 
+    const dirtyLabel = state && state.commit
+      ? (state.commit.observed === false ? 'unknown' : (state.commit.newDirtyFiles ?? '?'))
+      : '?';
     const summary = state
-      ? `mode=${cfg.mode} enforcement=${enforcement} hook=${hookWired ? 'wired' : 'MISSING'} · session=${state.session?.registered ? 'ok' : 'none'} lane=${state.lane?.claimed ? 'ok' : 'none'} goal/plan=${state.goalOrPlan?.active ? 'ok' : 'none'} dirty=${state.commit?.newDirtyFiles ?? '?'}`
+      ? `mode=${cfg.mode} enforcement=${enforcement} hook=${hookWired ? 'wired' : 'MISSING'} · session=${state.session?.registered ? 'ok' : 'none'} lane=${state.lane?.claimed ? 'ok' : 'none'} goal/plan=${state.goalOrPlan?.active ? 'ok' : 'none'} dirty=${dirtyLabel}`
       : `mode=${cfg.mode} enforcement=${enforcement} hook=${hookWired ? 'wired' : 'MISSING'}`;
 
     if (problems.length === 0) return { ok: true, message: `rituals observed — ${summary}` };

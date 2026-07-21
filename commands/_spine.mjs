@@ -52,7 +52,12 @@ export async function loadSpineLib() {
   // Optional-load so a newer global CLI degrades cleanly on an older install.
   let verifyReplay = null;
   try { verifyReplay = await import(pathToFileURL(join(dir, 'verify-replay.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay };
+  // session-lifecycle.mjs (v1.111.0) — the serialized session-lifecycle
+  // transactions. Optional-load so a newer global CLI degrades cleanly on an
+  // older install (callers fall back to their legacy direct appends).
+  let sessionLifecycle = null;
+  try { sessionLifecycle = await import(pathToFileURL(join(dir, 'session-lifecycle.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay, sessionLifecycle };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,
