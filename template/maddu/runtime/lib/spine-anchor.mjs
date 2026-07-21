@@ -477,15 +477,30 @@ async function finishStamp(repoRoot, seq, payloadDigest, stampResult, spineLib) 
 // anchor as errored and skips it; irreversible loss is never the fallback.
 async function reconcileBak(otsBin, proofPath) {
   const bak = `${proofPath}.bak`;
-  try { await stat(bak); } catch { return { restored: false, hadBak: false }; }
+  try { await stat(bak); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return { restored: false, hadBak: false };
+    throw e; // unreadable ≠ absent — proceeding could orphan a sole-copy backup
+  }
+  let primaryMissing = false;
+  try { await stat(proofPath); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') primaryMissing = true;
+    else throw e; // can't tell — never decide destructively on a transient error
+  }
   let primaryOk = false;
-  try {
-    await stat(proofPath);
+  if (!primaryMissing) {
     try {
       await execOts(otsBin, ['info', proofPath], { timeout: 60000, shell: false });
       primaryOk = true;
-    } catch { /* unparseable primary */ }
-  } catch { /* primary missing */ }
+    } catch (e) {
+      // Only the client REJECTING the file (a clean nonzero exit) proves it
+      // unparseable. A spawn failure, timeout, or kill proves nothing about
+      // the file — restoring on those would delete a VALID newer primary.
+      const clientRejected = typeof (e && e.code) === 'number' && !(e && e.killed);
+      if (!clientRejected) throw e;
+    }
+  }
   if (!primaryOk) {
     await rm(proofPath, { force: true });
     await rename(bak, proofPath); // throws → caller aborts, .bak intact

@@ -111,7 +111,10 @@ export default async function spine(argv) {
 
     if (flags.upgrade) {
       const r = await sa.upgradeAnchors(repoRoot, { spineLib: lib.spine });
-      if (flags.json) emit(r, r.ok ? 0 : 1);
+      // Per-result errors (bak-error, no-proof) mean lost or unreconciled
+      // protection — automation must see nonzero even when the run itself ok'd.
+      const anyError = r.ok && r.results.some((x) => x.state === 'bak-error' || x.state === 'no-proof');
+      if (flags.json) emit(r, r.ok && !anyError ? 0 : 1);
       if (!r.ok) { printAnchorRefusal(r); process.exit(1); }
       if (!r.results.length) console.log(`${ANSI.dim}no anchors to upgrade${ANSI.reset}`);
       let hadError = false;

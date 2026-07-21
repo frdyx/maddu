@@ -265,6 +265,12 @@ async function main() {
     ok('post-run truncated primary → restored from fresh .bak, not completed',
       JSON.parse(rW3.stdout).results[0].state === 'pending'
       && (await readFile(proofW)).equals(origW) && !(await exists(`${proofW}.bak`)));
+    // (a3b) round-4: per-result errors surface as exit 1 even in --json —
+    // automation must not read lost protection as success.
+    await rm(proofW, { force: true }); // no proof, no .bak, meta present
+    const rW4 = runCli(repoW, ['spine', 'anchor', '--upgrade', '--json'], ENV);
+    ok('upgrade --json with a no-proof anchor → exit 1',
+      rW4.status === 1 && JSON.parse(rW4.stdout).results[0].state === 'no-proof');
     // (a4) round-3: sync-init anchors check fails CLOSED — .maddu/anchors as
     // an unreadable-as-directory entry (a FILE) must refuse, not migrate.
     const repoX = await makeRepo(base, 'anchor-x');
