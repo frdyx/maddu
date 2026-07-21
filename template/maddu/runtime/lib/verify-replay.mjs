@@ -41,7 +41,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { redactLeaves } from './secret-scan.mjs';
+import { redactLeaves, redactText } from './secret-scan.mjs';
 
 const pExecFile = promisify(execFile);
 
@@ -52,8 +52,12 @@ const TASKKILL_TIMEOUT_MS = 5000; // bound on the taskkill invocation itself
 export const REPLAY_SCOPE_LINE =
   'clean-checkout replay: --no-local isolates git object copying only — host env, credentials, caches, services, and absolute-path writes are NOT isolated.';
 
+// Every error detail this module returns is PRINTED (human + --json stdout)
+// and some land in receipts — a spawn/clone error can echo the declared
+// command string, so redact at the source, not just at the receipt boundary.
 function shortErr(e) {
-  return String((e && e.message) || e).replace(/\s+/g, ' ').trim().slice(0, 300);
+  const raw = String((e && e.message) || e).replace(/\s+/g, ' ').trim();
+  return redactText(raw).text.slice(0, 300);
 }
 
 export function replayTimeoutMs() {
@@ -207,14 +211,25 @@ export function runDeclared(command, { cwd, timeoutMs, json = false } = {}) {
   return new Promise((resolvePromise) => {
     const timers = [];
     let done = false;
+    let child = null;
+    // A background DESCENDANT can inherit the piped stdio and hold it open
+    // after the shell itself exits — 'close' then never fires. Destroying our
+    // read ends (and unref'ing) is what lets settlement actually settle.
+    const releaseChild = () => {
+      if (!child) return;
+      try { if (child.stdout) child.stdout.destroy(); } catch {}
+      try { if (child.stderr) child.stderr.destroy(); } catch {}
+      try { child.unref(); } catch {}
+    };
     const settle = (out) => {
       if (done) return;
       done = true;
       for (const t of timers) clearTimeout(t);
+      releaseChild();
       resolvePromise(out);
     };
     let timedOut = false;
-    let child = null;
+    let exitCode;
     try {
       child = spawn(command, {
         cwd,
@@ -235,7 +250,16 @@ export function runDeclared(command, { cwd, timeoutMs, json = false } = {}) {
       if (child.stderr) child.stderr.pipe(process.stderr);
     }
     child.on('error', (e) => settle({ exit: null, timedOut, spawnError: shortErr(e), settled: true }));
-    child.on('close', (code) => settle({ exit: code, timedOut, spawnError: null, settled: true }));
+    // 'exit' = the shell died (code known); 'close' additionally waits for
+    // stdio to drain — which a lingering DESCENDANT can hold open forever.
+    // After exit, allow a short drain window (the shell's own final output
+    // arrives within it), then release our pipe ends so 'close' fires even
+    // when a descendant kept them open. 'close' stays the settle point.
+    child.on('exit', (code) => {
+      exitCode = code;
+      timers.push(setTimeout(releaseChild, 1500));
+    });
+    child.on('close', (code) => settle({ exit: code ?? exitCode ?? null, timedOut, spawnError: null, settled: true }));
     timers.push(setTimeout(() => {
       timedOut = true;
       // Universal settlement deadline starts AT KILL INITIATION — a stalled

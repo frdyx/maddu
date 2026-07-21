@@ -166,6 +166,32 @@ async function main() {
       JSON.stringify(pids.map((p) => ({ p, alive: alive(p) }))));
     ok('timeout: clone deleted after kill', j4.cloneDeleted === true && j4.cloneDir === null);
 
+    // ── 3b. lingering descendant holding the piped stdio must not stall
+    // settlement (--json pipes; the shell exits 0 while a detached grandchild
+    // keeps the inherited pipe open for 60s) ──
+    const rLinger = await makeRepo(base, 'linger', { madduJson: { name: 'linger', replay: { verify: `${NODE} linger.mjs` } } });
+    await writeFile(join(rLinger, 'linger.mjs'), [
+      "import { spawn } from 'node:child_process';",
+      "import { writeFileSync } from 'node:fs';",
+      "import { tmpdir } from 'node:os';",
+      "// cwd OUTSIDE the clone: this lingerer squats on the inherited PIPE only",
+      "// (the cwd-squatter variant is the cleanup-fail path, seam-tested above).",
+      "const c = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'inherit', detached: true, cwd: tmpdir() });",
+      'c.unref();',
+      "writeFileSync(process.env.MADDU_TEST_LINGER_PID, String(c.pid));",
+      'process.exit(0);',
+    ].join('\n'));
+    git(rLinger, ['add', '-A']); git(rLinger, ['commit', '-q', '-m', 'linger']);
+    const lingerPidFile = join(base, 'linger-pid.txt');
+    const tL = Date.now();
+    const oL = runCli(rLinger, ['spine', 'verify', '--replay', headSha(rLinger), '--json'], { MADDU_TEST_LINGER_PID: lingerPidFile });
+    const elapsedL = Date.now() - tL;
+    let jL = null; try { jL = JSON.parse(oL.stdout); } catch {}
+    ok('lingering descendant: settles pass promptly (pipes released after exit)',
+      oL.status === 0 && jL?.result === 'pass' && elapsedL < 30000, `${elapsedL}ms status=${oL.status}`);
+    const lingerPid = Number((await readFile(lingerPidFile, 'utf8').catch(() => '')).trim());
+    if (lingerPid && alive(lingerPid)) { try { process.kill(lingerPid); } catch {} }
+
     // ── 4. declared-only discipline ──
     const rNone = await makeRepo(base, 'none', { madduJson: { name: 'none' } });
     const spineBefore = await spineText(rNone);
