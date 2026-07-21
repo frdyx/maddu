@@ -16,7 +16,17 @@
 //                                          #   record-intact + independently checkable
 
 import { parseFlags } from './_args.mjs';
+import { loadSecretScan } from './_tools.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveSessionId } from './_spine.mjs';
+
+// Flag NAMES are caller-typed text echoed back to stderr — a token pasted as
+// a flag (`--ghp_…`) must come back redacted, never verbatim.
+async function redactFlagNames(names) {
+  try {
+    const scan = await loadSecretScan();
+    return names.map((n) => scan.redactText(String(n)).text);
+  } catch { return names.map(() => '(unprintable)'); }
+}
 
 const ANSI = {
   dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m',
@@ -70,7 +80,7 @@ export default async function spine(argv) {
         || (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim()))
         || (flags.event !== undefined && modes.length)) {
       console.error('Usage: maddu spine anchor [--event <id>] [--upgrade | --status | --verify] [--json]');
-      if (unknown.length) console.error(`  unknown flag(s): ${unknown.map((f) => `--${f}`).join(', ')}`);
+      if (unknown.length) console.error(`  unknown flag(s): ${(await redactFlagNames(unknown)).map((f) => `--${f}`).join(', ')}`);
       if (flags.event !== undefined && (typeof flags.event !== 'string' || !flags.event.trim())) console.error('  --event requires an event id');
       process.exit(2);
     }
@@ -305,7 +315,7 @@ export default async function spine(argv) {
     const vReplayBad = flags.replay !== undefined && (typeof flags.replay !== 'string' || !flags.replay.trim());
     if (vUnknown.length || vJsonBad || vReplayBad || (positional && positional.length)) {
       console.error('Usage: maddu spine verify [--replay <full-commit-sha>] [--json]');
-      if (vUnknown.length) console.error(`  unknown flag(s): ${vUnknown.map((f) => `--${f}`).join(', ')}`);
+      if (vUnknown.length) console.error(`  unknown flag(s): ${(await redactFlagNames(vUnknown)).map((f) => `--${f}`).join(', ')}`);
       if (vReplayBad) console.error('  --replay requires a full commit sha');
       process.exit(2);
     }

@@ -227,6 +227,28 @@ async function main() {
       && !(oLeakJ.stdout || '').includes(tokenKey) && !(oLeakJ.stderr || '').includes(tokenKey)
       && /unknown key/i.test(oLeakH.stderr), (oLeakH.stderr || '').slice(0, 140));
 
+    // ── 3f. committed SYMLINK maddu.json (mode 120000) refused even where
+    // core.symlinks=false would materialize it as a regular file whose
+    // CONTENT is the target string — here the target string IS valid JSON
+    // declaring commands, the exact smuggling shape ──
+    const rSym = await makeRepo(base, 'symcfg', {});
+    const evilTarget = JSON.stringify({ name: 'symcfg', replay: { verify: `${NODE} -e "require('fs').writeFileSync(process.env.MADDU_TEST_SYM_MARK,'x')"` } });
+    const symBlob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: rSym, input: evilTarget, encoding: 'utf8' }).trim();
+    execFileSync('git', ['update-index', '--add', '--cacheinfo', `120000,${symBlob},maddu.json`], { cwd: rSym });
+    git(rSym, ['commit', '-q', '-m', 'symlink maddu.json']);
+    const symMark = join(base, 'sym-mark.txt');
+    const oSym = runCli(rSym, ['spine', 'verify', '--replay', headSha(rSym)], { MADDU_TEST_SYM_MARK: symMark });
+    ok('symlink maddu.json in tree → config-invalid; smuggled commands never run',
+      oSym.status === 2 && /not a regular file in the tree|mode 120000/i.test(oSym.stderr) && !(await exists(symMark)),
+      (oSym.stderr || '').slice(0, 140));
+
+    // ── 3g. token-shaped UNKNOWN FLAG name never echoed verbatim ──
+    const tokenFlag = 'ghp_' + 'Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2';
+    const oFlagLeak = runCli(rSym, ['spine', 'verify', `--${tokenFlag}`]);
+    ok('unknown-flag refusal: token-shaped flag name redacted',
+      oFlagLeak.status === 2 && !(oFlagLeak.stderr || '').includes(tokenFlag) && /unknown flag/i.test(oFlagLeak.stderr),
+      (oFlagLeak.stderr || '').slice(0, 140));
+
     // ── 3d. `git replace` refs must not fool subject validation or checkout ──
     const rRepl = await makeRepo(base, 'replref', { madduJson: { name: 'replref', replay: { verify: `${NODE} -e "process.exit(0)"` } } });
     const shaRepl = headSha(rRepl);

@@ -36,7 +36,7 @@
 // it exists so the kill path is exercisable in tests. The v1 maddu.json shape
 // stays exactly {install?: string, verify: string} — no timeout config.
 
-import { chmod, lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
@@ -165,24 +165,32 @@ export async function cleanupClone(dir) {
 
 // ── declared config (read FROM THE CLONE, fail-closed) ───────────────────
 
-export async function readReplayConfig(cloneDir) {
-  const p = join(cloneDir, 'maddu.json');
-  let st = null;
+export async function readReplayConfig(cloneDir, sha) {
+  // Read from the GIT OBJECT STORE, never the checked-out filesystem: on a
+  // case-insensitive FS a differently-cased tree entry would resolve, and
+  // under core.symlinks=false (Windows default) a committed SYMLINK
+  // materializes as a regular file whose CONTENT is the target string — a
+  // link target that is itself JSON would smuggle executable config past any
+  // lstat check. ls-tree sees the exact tree path + mode; only a blob with a
+  // regular-file mode qualifies.
+  let entry = '';
   try {
-    st = await lstat(p);
+    const { stdout } = await pExecFile('git', ['--no-replace-objects', 'ls-tree', sha, '--', 'maddu.json'], { cwd: cloneDir, maxBuffer: 1024 * 1024 });
+    entry = stdout.trim();
   } catch (e) {
-    if (e && e.code === 'ENOENT') return { status: 'unsupported', detail: 'no maddu.json at the replayed SHA — declare replay: {install?, verify} (it is read at the subject SHA, not from the worktree)' };
-    return { status: 'config-invalid', detail: `maddu.json at the replayed SHA is unreadable: ${shortErr(e)}` };
+    return { status: 'config-invalid', detail: `could not inspect the tree at the replayed SHA: ${shortErr(e)}` };
   }
-  // A committed symlink could resolve to host-mutable content OUTSIDE the
-  // clone, defeating exact-SHA reproducibility — regular files only.
-  if (!st.isFile() || st.isSymbolicLink()) {
-    return { status: 'config-invalid', detail: 'maddu.json at the replayed SHA is not a regular file (symlinks are refused — they can resolve outside the clone)' };
+  if (!entry) return { status: 'unsupported', detail: 'no maddu.json at the replayed SHA — declare replay: {install?, verify} (it is read at the subject SHA, not from the worktree)' };
+  const m = /^(\d{6}) (\w+) /.exec(entry);
+  const mode = m ? m[1] : null;
+  const objType = m ? m[2] : null;
+  if (objType !== 'blob' || (mode !== '100644' && mode !== '100755')) {
+    return { status: 'config-invalid', detail: `maddu.json at the replayed SHA is not a regular file in the tree (mode ${mode || '?'}, type ${objType || '?'}) — symlinks and non-blob entries are refused` };
   }
   let cfg = null;
   try {
-    const raw = await readFile(p, 'utf8');
-    cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+    const { stdout } = await pExecFile('git', ['--no-replace-objects', 'show', `${sha}:maddu.json`], { cwd: cloneDir, maxBuffer: 8 * 1024 * 1024 });
+    cfg = JSON.parse(stdout.charCodeAt(0) === 0xFEFF ? stdout.slice(1) : stdout);
   } catch (e) {
     return { status: 'config-invalid', detail: `maddu.json at the replayed SHA did not parse: ${shortErr(e)}` };
   }
@@ -320,7 +328,7 @@ export async function runReplay({ workRoot, stateRoot, sha, spine, actor = null,
   }
   const dir = cloned.dir;
 
-  const cfg = await readReplayConfig(dir);
+  const cfg = await readReplayConfig(dir, sha);
   if (cfg.status !== 'ok') {
     const deleted = await cleanupClone(dir);
     return { ok: false, reason: cfg.status, detail: cfg.detail, cloneDir: deleted ? null : dir };
