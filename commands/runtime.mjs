@@ -11,7 +11,7 @@
 //   maddu runtime remove <name>
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, explicitSessionFlag } from './_spine.mjs';
 
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', fail: '\x1b[31m', info: '\x1b[36m', accent: '\x1b[35m' };
 
@@ -121,7 +121,7 @@ export default async function runtime(argv) {
     if (!name) { console.error('usage: maddu runtime spawn <name>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
     const out = await runtimes.spawnWorker(repoRoot, name, {
-      session: flags.session || null,
+      session: await explicitSessionFlag(flags),
       lane: flags.lane || null,
       extraArgs: csv(flags.args)
     });

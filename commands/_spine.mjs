@@ -114,6 +114,25 @@ export async function loadIdGrammar() {
   return null;
 }
 
+// CP1b: validate an explicit --session at a DIRECT reader (the commands that
+// read `flags.session` without going through resolveSessionId). Owned-malformed
+// throws InvalidExplicitId; absent → null. Historically these did
+// `flags.session || null`, collapsing a bad explicit flag (or a bare boolean)
+// to a null/true actor. Fail-open on a pre-PR-B lib: a string value passes, a
+// bare/empty flag → null (no worse than main, strictly safer than a boolean).
+export async function explicitSessionFlag(flags) {
+  const g = await loadIdGrammar();
+  if (flags && Object.hasOwn(flags, 'session')) {
+    const v = flags.session;
+    if (g) {
+      if (g.isRefId(v)) return v;
+      throw new g.InvalidExplicitId('session');
+    }
+    return (typeof v === 'string' && v.length > 0) ? v : null;
+  }
+  return null;
+}
+
 export async function resolveSessionId(repoRoot, flags, sessionActive) {
   const g = await loadIdGrammar();
   // Explicit --session: an OWNED flag must be a valid reference id. A malformed

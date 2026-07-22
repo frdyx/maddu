@@ -14,7 +14,7 @@
 //   maddu worker show <id>
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, explicitSessionFlag } from './_spine.mjs';
 import { loadSecretScan } from './_tools.mjs';
 
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', fail: '\x1b[31m', info: '\x1b[36m', accent: '\x1b[35m' };
@@ -86,14 +86,14 @@ export default async function worker(argv) {
     });
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_SPAWNED,
-      actor: flags.session || null,
+      actor: workerSid,
       lane: flags.lane || null,
       data: {
         id,
         command: spawnRec.command,
         args: spawnRec.args,
         pid: flags.pid ? parseInt(flags.pid, 10) : null,
-        sessionId: flags.session || null
+        sessionId: workerSid
       }
     });
     console.log(id);
@@ -107,7 +107,7 @@ export default async function worker(argv) {
     const { flags } = parseFlags(rest.slice(1));
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_HEARTBEAT,
-      actor: flags.session || null,
+      actor: await explicitSessionFlag(flags),
       lane: null,
       data: { id, focus: flags.focus || null }
     });
@@ -121,7 +121,7 @@ export default async function worker(argv) {
     const { flags } = parseFlags(rest.slice(1));
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_EXITED,
-      actor: flags.session || null,
+      actor: await explicitSessionFlag(flags),
       lane: null,
       data: { id, exitCode: flags.code !== undefined ? parseInt(flags.code, 10) : 0 }
     });
