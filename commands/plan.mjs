@@ -18,7 +18,7 @@
 //   maddu plan kanban
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', accent: '\x1b[35m', pass: '\x1b[32m', warn: '\x1b[33m', fail: '\x1b[31m' };
@@ -79,7 +79,7 @@ export default async function planCmd(argv) {
   const { paths } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const plans = await loadPlans();
-  const sessionId = process.env.MADDU_SESSION_ID || null;
+  const sessionId = await envActingSid();
 
   if (!sub) { printPlanHelp(); process.exit(2); }
 

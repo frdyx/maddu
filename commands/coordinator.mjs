@@ -10,7 +10,7 @@
 //                            env vars and can branch on the phase name.
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', pass: '\x1b[32m', fail: '\x1b[31m' };
@@ -36,7 +36,7 @@ export default async function coordinatorCmd(argv) {
     dryRun: !!flags['dry-run'],
     syntheticPhaseCmd: typeof flags['synthetic-cmd'] === 'string' ? flags['synthetic-cmd'] : null,
     iterCap: typeof flags['iter-cap'] === 'string' ? Number(flags['iter-cap']) : null,
-    sessionId: process.env.MADDU_SESSION_ID || null,
+    sessionId: await envActingSid(),
   };
 
   console.log(`${ANSI.bold}coordinator${ANSI.reset}  plan: ${planId}  ${opts.dryRun ? '(dry-run)' : (opts.syntheticPhaseCmd ? '(synthetic)' : `(runtime: ${opts.runtime || 'shell'})`)}`);

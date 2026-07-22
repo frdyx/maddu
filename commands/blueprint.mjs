@@ -31,7 +31,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import { spawnWorker, isProviderSignedIn } from './_worker-spawn.mjs';
 
@@ -135,7 +135,7 @@ export default async function blueprint(argv) {
         await writeFile(distilledPath, cleaned);
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.BLUEPRINT_DISTILLED,
-          actor: process.env.MADDU_SESSION_ID || null,
+          actor: await envActingSid(),
           data: { runtime: runtimeName, provider: cfg.authProvider, slug, skeletonBytes: Buffer.byteLength(md), distilledBytes: Buffer.byteLength(cleaned), outPath: distilledPath },
         });
       } else {

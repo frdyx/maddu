@@ -133,6 +133,21 @@ export async function explicitSessionFlag(flags) {
   return null;
 }
 
+// CP3 (PR-B): resolve the AMBIENT acting-session id from the environment,
+// grammar-gated, for the many command sites that stamped an event actor from a
+// raw `process.env.MADDU_SESSION_ID || null`. A malformed MADDU_SESSION_ID is
+// ambient (not an explicit request) → treated as absent (null), never written
+// raw into a persisted actor/id. Routed through the resolved runtime lib so a
+// newer CLI FAILS OPEN against a pre-PR-B install (returns the raw env, exactly
+// today's behavior) rather than dropping attribution. Returns a ref-id or null.
+export async function envActingSid() {
+  const v = process.env.MADDU_SESSION_ID;
+  if (!v) return null;
+  const g = await loadIdGrammar();
+  if (g) return g.isRefId(v) ? v : null;
+  return v; // pre-PR-B lib: today's behavior (raw env)
+}
+
 // CP5 (PR-B): resolve a parent session id for a registration. Grammar + an
 // EXISTENCE check (verify.mjs FAILs a dangling parentSessionId post-append; this
 // is the write-time fail-fast). Explicit --parent malformed → THROW; ambient

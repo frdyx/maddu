@@ -27,7 +27,7 @@
 // existing rule-8-no-duplicate-claims gate).
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 
 async function openTeam(flags) {
   const members = Number(flags.members || flags.n || 0);
@@ -65,19 +65,19 @@ async function openTeam(flags) {
   const label = flags.label || `team-${members}`;
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.TEAM_OPENED,
-    actor: process.env.MADDU_SESSION_ID || null,
+    actor: await envActingSid(),
     data: {
       teamId,
       label,
       members,
       lanes: lanes.slice(),
-      parentSessionId: process.env.MADDU_SESSION_ID || null,
+      parentSessionId: await envActingSid(),
     },
   });
   for (const lane of lanes) {
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.TEAM_LANE_ALLOCATED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { teamId, lane },
     });
   }
@@ -119,7 +119,7 @@ async function spawnTeam(flags) {
   const held = (proj.claims || []).filter((c) => lanes.includes(c.lane)).map((c) => c.lane);
   if (held.length) { console.error(`maddu team spawn: lane(s) already claimed — ${held.join(', ')}`); process.exit(1); }
 
-  const parent = process.env.MADDU_SESSION_ID || null;
+  const parent = await envActingSid();
   const teamId = spine.makeId('team');
   const label = flags.label || `team-spawn-${lanes.length}`;
   await spine.append(repoRoot, {
@@ -210,7 +210,7 @@ async function closeTeam(flags) {
   const stillIn = t.members.filter((m) => !m.leftAt);
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.TEAM_CLOSED,
-    actor: process.env.MADDU_SESSION_ID || null,
+    actor: await envActingSid(),
     data: { teamId, openMembers: stillIn.map((m) => m.sessionId) },
   });
   console.log(`team ${teamId} closed`);

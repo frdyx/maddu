@@ -30,6 +30,7 @@ import { createHash } from 'node:crypto';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot } from './_resolve.mjs';
 import { loadLib } from './_libroot.mjs';
+import { envActingSid } from './_spine.mjs';
 
 const ANSI = {
   dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m',
@@ -104,7 +105,7 @@ export default async function evolve(argv) {
     process.exit(2);
   }
 
-  const actor = process.env.MADDU_SESSION_ID || null;
+  const actor = await envActingSid();
   const result = { recId, category: rec.category, destination, wrote: null, event: null };
 
   if (rec.category === 'memory') {

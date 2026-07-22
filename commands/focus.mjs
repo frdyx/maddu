@@ -11,7 +11,7 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', pass: '\x1b[32m', warn: '\x1b[33m', accent: '\x1b[35m' };
 const FOCUS_TRIGGERS = ['heartbeat:focus-director', 'slice-stop:focus-director'];
@@ -70,7 +70,7 @@ export default async function focus(argv) {
       console.error(`usage: maddu focus resolve <${CHOICES.join('|')}>`);
       process.exit(2);
     }
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await envActingSid();
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.DRIFT_FLAGGED,
       actor: sessionId,

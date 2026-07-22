@@ -26,6 +26,7 @@ import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { resolveWriteReplica, appendPartitioned, appendFlatChained } from '../spine-append-core.mjs';
 import { redactDataPayload, redactText } from '../secret-scan.mjs';
+import { envActingSid } from '../id-grammar.mjs';
 
 function genId() {
   const t = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
@@ -147,7 +148,7 @@ export function workerIdFromEnv() {
 }
 
 export function sessionIdFromEnv() {
-  return process.env.MADDU_SESSION_ID || null;
+  return envActingSid();
 }
 
 export function modelHintFromEnv() {

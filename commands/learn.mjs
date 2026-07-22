@@ -42,7 +42,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import { spawnWorker, isProviderSignedIn } from './_worker-spawn.mjs';
 
@@ -122,7 +122,7 @@ export default async function learnCmd(argv) {
   const { paths, spine, auth, runtimes, hindsight } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const learn = await loadLib('learn.mjs');
-  const actor = process.env.MADDU_SESSION_ID || null;
+  const actor = await envActingSid();
 
   const mineOpts = {
     root: flags.root && flags.root !== true ? String(flags.root) : undefined,

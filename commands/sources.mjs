@@ -25,7 +25,7 @@ import {
   pinPatterns,
   readPinConfig,
 } from '../template/maddu/runtime/lib/content-pins.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 
 const CONFIG_HINT = [
   'No tracked sources configured. Create .maddu/config/tracked-sources.json:',
@@ -113,7 +113,7 @@ export default async function command(argv) {
       process.exit(1);
     }
 
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await envActingSid();
     let ev;
     try {
       ev = await spine.append(repoRoot, {

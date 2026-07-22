@@ -49,6 +49,7 @@ import { promisify } from 'node:util';
 import { withAppendLock } from './append-lock.mjs';
 import { hashLine, readActiveReplicaId } from './spine-append-core.mjs';
 import { redactLeaves } from './secret-scan.mjs';
+import { envActingSid } from './id-grammar.mjs';
 
 const pExecFile = promisify(execFile);
 
@@ -531,7 +532,7 @@ async function finishStamp(repoRoot, seq, payloadDigest, stampResult, spineLib) 
   if (spineLib && spineLib.append) {
     await spineLib.append(repoRoot, {
       type: 'ANCHOR_STAMPED',
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: envActingSid(),
       data: {
         seq, payload_digest: payloadDigest, calendars: stampResult.calendars,
         proof_files: [{ path: `.maddu/anchors/${seqDirName(seq)}/payload.json.ots`, digest: proofDigest }],
@@ -633,7 +634,7 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         if (spineLib && spineLib.append && rec && rec.digest !== diskDigest) {
           await spineLib.append(repoRoot, {
             type: 'ANCHOR_UPGRADED',
-            actor: process.env.MADDU_SESSION_ID || null,
+            actor: envActingSid(),
             data: {
               seq: a.seq, payload_digest: a.payloadDigest, complete: true,
               proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: diskDigest }],
@@ -681,7 +682,7 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         if (spineLib && spineLib.append) {
           await spineLib.append(repoRoot, {
             type: 'ANCHOR_UPGRADED',
-            actor: process.env.MADDU_SESSION_ID || null,
+            actor: envActingSid(),
             data: {
               seq: a.seq, payload_digest: a.payloadDigest, complete,
               proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: after }],
@@ -698,7 +699,7 @@ export async function upgradeAnchors(repoRoot, { otsBin = resolveOtsBin(), spine
         if (spineLib && spineLib.append && rec && rec.digest !== before) {
           await spineLib.append(repoRoot, {
             type: 'ANCHOR_UPGRADED',
-            actor: process.env.MADDU_SESSION_ID || null,
+            actor: envActingSid(),
             data: {
               seq: a.seq, payload_digest: a.payloadDigest, complete: false,
               proof_files: [{ path: `.maddu/anchors/${a.dir}/payload.json.ots`, digest: before }],

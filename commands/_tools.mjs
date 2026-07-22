@@ -33,13 +33,13 @@ export async function loadSecretScan() {
 //                 Runs after the secret scan, before tools.runTool.
 export async function runWrapper(tool, argv, opts = {}) {
   const { parseRunner = false, strict = null } = opts;
-  const { loadSpineLib, resolveRepoRoot } = await import('./_spine.mjs');
+  const { loadSpineLib, resolveRepoRoot, envActingSid } = await import('./_spine.mjs');
   const spineLib = await loadSpineLib();
   const { paths } = spineLib;
   const repoRoot = await resolveRepoRoot(paths);
   const tools = await loadTools();
   const lane = process.env.MADDU_LANE || null;
-  const sessionId = process.env.MADDU_SESSION_ID || null;
+  const sessionId = await envActingSid();
 
   let toolArgv = argv;
   let runner = null;

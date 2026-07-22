@@ -12,7 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', pass: '\x1b[32m', warn: '\x1b[33m', fail: '\x1b[31m' };
@@ -52,7 +52,7 @@ export default async function loopCmd(argv) {
   const { paths } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const loopsLib = await loadLoopsLib();
-  const sessionId = process.env.MADDU_SESSION_ID || null;
+  const sessionId = await envActingSid();
 
   if (!sub) { console.error('usage: maddu loop <ralph|plan|status|cancel> [args]'); process.exit(2); }
 

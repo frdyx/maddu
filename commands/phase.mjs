@@ -8,7 +8,7 @@
 // Show:  prints the current phase (latest PHASE_DECLARED, null after clear).
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
 export default async function command(argv) {
@@ -31,7 +31,7 @@ export default async function command(argv) {
     }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PHASE_DECLARED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { name, notes, tier },
     });
     console.log(`phase set: ${name}`);
@@ -50,7 +50,7 @@ export default async function command(argv) {
     if (!proj.phase) { console.log('no active phase — nothing to clear.'); return; }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PHASE_CLEARED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { name: proj.phase.name || null },
     });
     console.log(`phase cleared: ${proj.phase.name}${proj.phase.tier ? ` (tier ${proj.phase.tier} escalation lifted)` : ''}`);
