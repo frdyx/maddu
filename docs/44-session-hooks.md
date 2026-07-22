@@ -104,6 +104,75 @@ a string at all (corrupt legacy registrations) are classified unrecoverable
 history: the janitor skips them with a note, and lifecycle helpers report
 them as `missing`.
 
+## Session-id boundary validation (v1.112.0)
+
+Serialization fixed *which* session state wins; this fixes what a session id is
+allowed to BE. Before, an id could enter the record unvalidated — a bare
+`--session` flag (the boolean `true`), an empty string, a repeated flag (an
+array), a malformed or oversized `MADDU_SESSION_ID`, a control-char lane — and
+be written raw as an event actor or a persisted id. Validation now happens at a
+handful of **chokepoints** (the funnels every verb and route flows through),
+not at ~50 leaf call sites, so the surface can't silently regrow.
+
+**Two-tier grammar.** Ids are checked against one of two shapes, by use:
+
+- `isSid` — **strict** `ses_[A-Za-z0-9_]{1,64}`, for *creating* or
+  shell-interpolating an id.
+- `isRefId` — **relaxed** `[\w.-]{1,128}`, for *referencing* an id that already
+  exists (the ambient-actor / parent / body tier).
+- `isClaudeId` — `[\w-]{1,64}`, the Claude→Máddu binding key.
+
+Each predicate requires a real string before it tests, so a boolean or object
+can never slip through a naked regex.
+
+**Explicit flags are a hard error, never a silent fall-through.** An *owned*
+`--session` / `--parent` that is malformed (bare `true`, `''`, a repeated-flag
+array, bad grammar) throws `InvalidExplicitId` — the CLI prints `invalid
+--<option> id` and exits `2`, and the **raw value is never retained or
+printed** (no injection surface). It does **not** quietly fall back to
+`$MADDU_SESSION_ID` or the cache, which could attribute the command to a
+*different* session than the one you named. `Object.hasOwn` (not truthiness)
+detects the owned flag, so `--session` with no value is caught, not collapsed
+to "absent".
+
+**Ambient inputs grammar-gate to null (never throw).** A malformed
+`MADDU_SESSION_ID`, active-session cache, or `MADDU_PARENT_SESSION_ID` is
+*ambient*, not an explicit request — so it is treated as absent (null actor)
+and the command proceeds unattributed, rather than erroring. This covers the
+~25 env-actor reads across the verbs, the invocation-receipt telemetry (all
+three candidates — explicit opt, env, raw cache — gated; a >128 id is dropped,
+so the per-line disk bound holds by construction), and the child env a spawn
+hands down (a malformed inherited id is scrubbed unless a fresh child session
+supersedes it).
+
+**Bridge request bodies validate at the HTTP boundary.** `readBodySessionId`
+gates the `sessionId` a loopback client posts: *required* routes (`slice-stop`,
+lane claim/release) reject an absent/null/malformed id with `400`; *optional*
+routes (inbox, approvals, worker lifecycle, runtime spawn, skill apply) treat
+absent/null as a null actor — the cockpit legitimately posts `sessionId:null` —
+but still `400` a **present** malformed value.
+
+**Parent links are grammar- + existence-checked.** A registration's parent id
+must both parse and name an *ever-registered* session (closed parents stay
+valid — the ever-registered set, not just live sessions); a dangling or
+malformed parent link is dropped rather than written as a reference that
+`maddu verify` would later FAIL.
+
+**Binding maps are prototype-safe.** The Claude→Máddu binding uses a
+null-prototype write copy and `Object.hasOwn` reads, so a grammar-valid but
+pollution-shaped id (`__proto__`, `constructor`) binds, resolves, and unbinds
+as an ordinary key with the prototype intact — never a bind that silently
+no-ops or corrupts the map.
+
+**Fail-open on an older runtime.** A newer CLI running against a pre-v1.112
+installed library (no id-grammar module) validates *nothing* — exactly the
+prior behavior — rather than crashing; it never swallows a validation *throw*,
+only the absence of the validator.
+
+A regression guard (`scripts/test/sid-surface-census.mjs`, in the self-test
+suite) scans the shipped source for any raw ungated read of the session env and
+fails if one reappears, so the boundary can't erode over time.
+
 ## Keeping lanes and sessions self-clean
 
 Two mechanisms keep the record from accumulating stale sessions and lane claims —
