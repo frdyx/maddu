@@ -15,7 +15,7 @@
 // CLI clears it and asks the user to start a new one.
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, loadIdGrammar } from './_spine.mjs';
 import { loadLibOptional } from './_libroot.mjs';
 
 function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
@@ -24,9 +24,24 @@ function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z
 // the cached active id. Self-heals stale cache entries (session already
 // closed in the spine).
 async function resolveSession(flags, repoRoot, sessionActive) {
-  if (flags.session && flags.session !== true) return flags.session;
+  const g = await loadIdGrammar();
+  // Explicit --session: OWNED-but-malformed is a hard error (PR-B), never a
+  // silent fall-through. `Object.hasOwn` catches bare `--session` / `--session=`.
+  if (Object.hasOwn(flags, 'session')) {
+    const v = flags.session;
+    if (g) {
+      if (g.isRefId(v)) return v;
+      throw new g.InvalidExplicitId('session');
+    }
+    if (typeof v === 'string' && v.length > 0) return v; // fail open (old lib)
+  }
   // v0.19.1 PR-B1: env-var fallback (matches advise / team / pipeline).
-  if (process.env.MADDU_SESSION_ID) return process.env.MADDU_SESSION_ID;
+  // PR-B: ambient malformed env → treated as absent (fall through).
+  const envSid = process.env.MADDU_SESSION_ID;
+  if (envSid) {
+    if (g) { if (g.isRefId(envSid)) return envSid; }
+    else return envSid;
+  }
   if (!sessionActive) return null;
   const result = await sessionActive.readActiveSessionVerified(repoRoot);
   if (!result) return null;

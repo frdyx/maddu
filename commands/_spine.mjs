@@ -100,18 +100,53 @@ export async function resolveWorkAndStateRoots(paths) {
 // command, which is the friction that made it get skipped. `sessionActive`
 // is the lib from loadSpineLib() (null on pre-v0.14 installs → cache step
 // is simply skipped, env/flag still work). Returns a string id, or null.
+// Load the id grammar (PR-B) from the resolved runtime lib. Returns
+// { isRefId, InvalidExplicitId } or null on a PRE-PR-B lib — the null case is
+// the fail-open signal (validate nothing, exactly today's behavior; a newer CLI
+// must keep running against an older installed runtime). Fail open ONLY when
+// the module/exports are absent — never swallow a validation THROW.
+export async function loadIdGrammar() {
+  try {
+    const dir = await resolveLibDir();
+    const m = await import(pathToFileURL(join(dir, 'id-grammar.mjs')).href);
+    if (typeof m.isRefId === 'function' && typeof m.InvalidExplicitId === 'function') return m;
+  } catch { /* pre-PR-B lib: no id-grammar.mjs → fail open */ }
+  return null;
+}
+
 export async function resolveSessionId(repoRoot, flags, sessionActive) {
-  if (flags && typeof flags.session === 'string' && flags.session.length > 0) return flags.session;
+  const g = await loadIdGrammar();
+  // Explicit --session: an OWNED flag must be a valid reference id. A malformed
+  // owned flag (bare `true`, empty '', repeated array, non-string, bad grammar)
+  // is a HARD user error — never a silent fall-through to a DIFFERENT env/cache
+  // session. `Object.hasOwn` (not truthiness) so `--session` / `--session=` are
+  // caught, not collapsed to absence.
+  if (flags && Object.hasOwn(flags, 'session')) {
+    const v = flags.session;
+    if (g) {
+      if (g.isRefId(v)) return v;
+      throw new g.InvalidExplicitId('session');
+    }
+    // Fail open (pre-PR-B lib can't validate): today's behavior.
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  // Ambient env: grammar-gate. A malformed MADDU_SESSION_ID is AMBIENT, not an
+  // explicit request → treated as absent (fall through), never thrown.
   const env = process.env.MADDU_SESSION_ID;
-  if (env && env.length > 0) return env;
+  if (env) {
+    if (g) { if (g.isRefId(env)) return env; }
+    else if (env.length > 0) return env;
+  }
   if (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function') {
     const res = await sessionActive.readActiveSessionVerified(repoRoot);
-    // v1.111.0 discriminated union: `active` resolves; `unverified` resolves
-    // too (today's leniency — usable, never claimed verified); stale/invalid
-    // never resolve. Pre-v1.111 lib shapes (a raw record / {stale}) keep
-    // working via the fallback arm so a mid-upgrade mixed tree stays sane.
+    // v1.111.0 discriminated union: `active`/`unverified` resolve over a
+    // SANITIZED (isRefId-gated) record; stale/invalid never resolve.
     if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
-    if (res && res.kind === undefined && !res.stale && res.sessionId) return res.sessionId;
+    // Pre-v1.111 lib shape (a raw record) — grammar-gate it here (the sanitized
+    // union already gates the current shape; the legacy raw arm did not).
+    if (res && res.kind === undefined && !res.stale && res.sessionId) {
+      if (!g || g.isRefId(res.sessionId)) return res.sessionId;
+    }
   }
   return null;
 }

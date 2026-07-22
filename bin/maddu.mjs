@@ -198,6 +198,13 @@ async function main() {
 }
 
 main().catch((err) => {
+  // A malformed EXPLICIT id flag (--session / --parent, PR-B) is a clean user
+  // error: render the message without a stack, exit 2. The raw value is never
+  // in err.message (no injection surface).
+  if (err && err.code === 'INVALID_EXPLICIT_ID') {
+    console.error(err.message);
+    process.exit(2);
+  }
   console.error(err?.stack || err?.message || err);
   process.exit(1);
 });
