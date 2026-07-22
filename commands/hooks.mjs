@@ -196,15 +196,26 @@ async function readHookPayload() {
 // commit pressure) — falling back to the primary checkout could baseline or
 // gate a worktree session against the WRONG repo's dirt.
 async function resolveWorkRootFrom(paths, payloadCwd, repoRoot) {
-  void repoRoot;
   if (!paths || typeof paths.resolveRoots !== 'function') return null;
+  const { resolve } = await import('node:path');
+  const norm = (p) => {
+    const r = resolve(String(p));
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
   for (const cwd of [payloadCwd, process.cwd()]) {
     if (typeof cwd !== 'string' || !cwd) continue;
     // Per-candidate containment: a throwing payload-cwd resolution must not
     // abort the process.cwd() attempt.
     try {
       const roots = await paths.resolveRoots(cwd);
-      if (roots && roots.workRoot) return roots.workRoot;
+      if (!roots || !roots.workRoot) continue;
+      // The candidate must belong to THIS repo's state root — a cwd inside
+      // ANOTHER Máddu repo would measure that repo's dirt while mutating
+      // this repo's counters (and could reset a baseline via domainChanged).
+      // A foreign candidate falls through; no in-repo candidate → null
+      // (observed:false), never a cross-repo measurement.
+      if (roots.stateRoot && norm(roots.stateRoot) !== norm(repoRoot)) continue;
+      return roots.workRoot;
     } catch { /* try the next candidate */ }
   }
   return null;
