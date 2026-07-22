@@ -4,6 +4,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { resolveLibDir, FRAMEWORK_ROOT } from './_libroot.mjs';
 
 export async function loadSpineLib() {
@@ -109,18 +110,18 @@ export async function loadIdGrammar() {
   let dir;
   try { dir = await resolveLibDir(); }
   catch { return null; } // can't resolve the lib root → pre-PR-B-style fail open
-  let m;
-  try {
-    m = await import(pathToFileURL(join(dir, 'id-grammar.mjs')).href);
-  } catch (err) {
-    // ABSENT module → a genuine pre-PR-B install: fail open (validate nothing,
-    // exactly today's behavior). A PRESENT-but-broken validator (a syntax or
-    // other load error) must NOT silently disable validation — propagate it so
-    // a corrupt install fails LOUD rather than letting a malformed --session
-    // slip through as a validation no-op.
-    if (err && (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'ENOENT')) return null;
-    throw err;
-  }
+  const file = join(dir, 'id-grammar.mjs');
+  // EXISTENCE — not the import error code — decides fail-open. Node reports BOTH
+  // an absent target module AND a missing transitive dependency of a PRESENT
+  // module as ERR_MODULE_NOT_FOUND, so the code alone cannot distinguish
+  // "pre-PR-B install (no validator)" from "validator present but broken". Stat
+  // the file: absent → fail open (validate nothing, exactly today's behavior);
+  // present-but-unloadable (a syntax error, a missing transitive dep) → let the
+  // import throw and PROPAGATE LOUD — never silently disable a present validator
+  // (which would let a malformed --session slip through as a no-op).
+  try { await stat(file); }
+  catch { return null; } // id-grammar.mjs absent → genuine pre-PR-B install
+  const m = await import(pathToFileURL(file).href); // present: any load error propagates
   if (typeof m.isRefId === 'function' && typeof m.InvalidExplicitId === 'function') return m;
   return null; // present but missing the expected exports → older shape, fail open
 }

@@ -56,7 +56,7 @@ const KEY = 'MADDU_SESSION_ID';
 // `<obj>['MADDU_SESSION_ID']`, NOT immediately followed by `=` (a write). The
 // `<obj>` may be `process.env` or any bound/aliased env identifier.
 const ACCESS_RE = new RegExp(
-  `[A-Za-z_$][\\w$.]*(?:\\.${KEY}\\b|\\[\\s*['"]${KEY}['"]\\s*\\])(?!\\s*\\]?\\s*=(?!=))`,
+  `[A-Za-z_$][\\w$.]*(?:\\??\\.\\s*${KEY}\\b|(?:\\?\\.)?\\[\\s*['"]${KEY}['"]\\s*\\])(?!\\s*\\]?\\s*=(?!=))`,
   'g',
 );
 // Every predicate that grammar-gates an id, incl. the local aliases in
@@ -81,9 +81,11 @@ const DISPLAY_RE = new RegExp(`${KEY}\\s*\\|\\|\\s*'\\(none\\)'`);
 // Matched by EXACT basename (not endsWith) so `evil_spine.mjs` is NOT exempted.
 const OWNER_FILES = ['id-grammar.mjs', '_spine.mjs'];
 // A destructure that binds the session env key — `const { MADDU_SESSION_ID } =
-// process.env` — the bound local is then read WITHOUT the `env.` prefix, so
-// ACCESS_RE would miss the downstream sink. None exist today; flag the binding.
-const DESTRUCTURE_RE = new RegExp(`\\{[^}]*\\b${'MADDU_SESSION_ID'}\\b[^}]*\\}\\s*=`);
+// process.env` (possibly multi-line, formatter-split) — the bound local is then
+// read WITHOUT the `env.` prefix, so the per-line ACCESS pass would miss the
+// downstream sink. `[^{}]` spans newlines, so the source-level scan catches the
+// multi-line form. None exist today; flag the binding.
+const DESTRUCTURE_RE = new RegExp(`\\{[^{}]*\\b${KEY}\\b[^{}]*\\}\\s*=`, 'g');
 
 // Strip block then line comments so our own prose (which mentions the token) is
 // not miscounted. Block comments are blanked but KEEP their newlines so line
@@ -128,15 +130,21 @@ function censusFile(relPath, src) {
   const stripped = stripComments(src);
   const lines = stripped.split('\n');
   const ungated = [];
+  // Source-level destructure scan (multi-line capable) — a destructure binding
+  // can't be inline-gated, so any occurrence in a non-owner file is flagged.
+  if (!owner) {
+    DESTRUCTURE_RE.lastIndex = 0;
+    let dm;
+    while ((dm = DESTRUCTURE_RE.exec(stripped)) !== null) {
+      const lineNo = stripped.slice(0, dm.index + dm[0].indexOf(KEY)).split('\n').length;
+      ungated.push({ line: lineNo, text: `destructure: ${dm[0].replace(/\s+/g, ' ').trim().slice(0, 60)}` });
+    }
+  }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     ACCESS_RE.lastIndex = 0;
-    const isAccess = ACCESS_RE.test(line);
-    const isDestructure = DESTRUCTURE_RE.test(line);
-    if (!isAccess && !isDestructure) continue;        // no read of the session env
+    if (!ACCESS_RE.test(line)) continue;              // no rvalue access read
     if (owner) continue;                              // gate-owner file
-    // A destructure binding of the key can't be inline-gated → always flag.
-    if (isDestructure) { ungated.push({ line: i + 1, text: line.trim() }); continue; }
     if (DISPLAY_RE.test(line)) continue;              // operator display
     if (GATE_ARG_RE.test(line)) continue;             // read is a gate argument
     const m = line.match(ASSIGN_RE);
@@ -171,6 +179,8 @@ function main() {
     ['bare read return',   'commands/x.mjs', '  return process.env.MADDU_SESSION_ID || null;'],
     ['aliased env read',   'commands/x.mjs', '  const e = process.env; const s = e.MADDU_SESSION_ID || null;'],
     ['destructure binding','commands/x.mjs', '  const { MADDU_SESSION_ID } = process.env;'],
+    ['multiline destructure','commands/x.mjs', '  const {\n    MADDU_SESSION_ID,\n  } = process.env;'],
+    ['optional chaining',  'commands/x.mjs', '  actor = env?.MADDU_SESSION_ID || null;'],
     ['evil owner suffix',  'commands/evil_spine.mjs', '  export const bad = () => process.env.MADDU_SESSION_ID + 1;'],
     ['sink after str //',  'commands/x.mjs', '  const url = "http://x"; actor = process.env.MADDU_SESSION_ID || null;'],
     ['sink across str /*',  'commands/x.mjs', '  const a = "/*"; const s = process.env.MADDU_SESSION_ID || null; const b = "*/";'],
