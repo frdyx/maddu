@@ -469,7 +469,13 @@ export default async function hooks(argv) {
         const ti = payload.tool_input || {};
         const filePath = ti.file_path || ti.notebook_path || null;
         const command = ti.command || null;
-        const claudeSessionId = payload.session_id || null;
+        // Grammar-gated AT THE SOURCE (v1.111.0): everything downstream —
+        // binding resolution, the counter-key fallback, and enforcePreTool
+        // (which against an OLDER installed discipline lib builds
+        // `claude:<id>` counter filenames itself) — sees a validated-or-null
+        // claude id, never raw payload input.
+        const claudeOk = spine.isClaudeId || ((v) => typeof v === 'string' && /^[\w-]{1,64}$/.test(v));
+        const claudeSessionId = claudeOk(payload.session_id) ? payload.session_id : null;
         const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
 
         // Classify for the early-exit. A read/remedy Bash (and any non-mutating tool)
@@ -495,11 +501,9 @@ export default async function hooks(argv) {
             if (refOk(bound)) sid = bound;
           } catch { /* fall through */ }
         }
-        // The claude-fallback counter key is grammar-gated too (an
-        // unconstrained id could exceed filename limits, killing latch
-        // persistence and repeating per-episode witnesses).
-        const claudeOk = spine.isClaudeId || ((v) => typeof v === 'string' && /^[\w-]{1,64}$/.test(v));
-        counterKey = sid || (claudeOk(claudeSessionId) ? `claude:${claudeSessionId}` : null);
+        // claudeSessionId is already validated-or-null (gated at the source
+        // above), so the fallback key is filename-safe by construction.
+        counterKey = sid || (claudeSessionId ? `claude:${claudeSessionId}` : null);
 
         // Auto-claim a lane before the first edit (rule-#9 clean via the trigger
         // gauntlet); note if we just claimed so the eval doesn't race the spine.
@@ -523,7 +527,12 @@ export default async function hooks(argv) {
             nowMs: Date.now(), laneJustClaimed, workRoot,
           });
         }
-        counterKey = decision.counterKey || counterKey;
+        // Adopt the decision's counter key only when it is shape-safe (a sid
+        // per the reference grammar, or a claude:-prefixed gated id) — an
+        // older installed lib could hand back a key built from raw input.
+        const keyOk = (k) => typeof k === 'string'
+          && (k.startsWith('claude:') ? claudeOk(k.slice(7)) : refOk(k));
+        counterKey = keyOk(decision.counterKey) ? decision.counterKey : counterKey;
 
         // Witness a bypass / fail-open BEFORE acting on the verdict (best-effort).
         await witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterKey });
