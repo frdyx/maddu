@@ -77,12 +77,20 @@ async function main() {
     ok('lanes without a worktree have worktree=null', otherRow ? otherRow.worktree === null : true);
 
     // ── janitor REPORTS an orphaned worktree when it auto-closes the holder,
-    //    and never auto-removes it. Craft a stale session (holder of the
-    //    git-integration attachment) and run the janitor.
+    //    and never auto-removes it. v1.111.0: the close helper RE-VALIDATES
+    //    against the real spine inside the lock, so the fixture REGISTERS s1
+    //    for real and derives nowMs from the appended event's ACTUAL
+    //    timestamp (a synthetic January nowMs would make the in-lock
+    //    precondition see a "fresh" registration and refuse the close).
     const janitor = await import(pathToFileURL(path.join(LIB, 'janitor.mjs')).href);
-    const staleTs = '2026-01-01T00:00:00.000Z';
-    const projection = { activeSessions: [{ id: 's1', status: 'active', lastHeartbeatAt: staleTs }], janitor: { staleSessions: [] } };
-    const nowMs = Date.parse(staleTs) + 5 * 60 * 60 * 1000; // +5h > 4h auto-close
+    const spineLib = await import(pathToFileURL(path.join(LIB, 'spine.mjs')).href);
+    const regEv = await spineLib.append(repo, {
+      type: spineLib.EVENT_TYPES.SESSION_AUTO_REGISTERED,
+      actor: 's1', lane: null,
+      data: { sessionId: 's1', source: 'cli', label: 't', role: 'implementer' },
+    });
+    const projection = { activeSessions: [{ id: 's1', status: 'active', lastHeartbeatAt: regEv.ts }], janitor: { staleSessions: [] } };
+    const nowMs = Date.parse(regEv.ts) + 5 * 60 * 60 * 1000; // +5h > 4h auto-close
     const jr = await janitor.runJanitor(repo, projection, nowMs);
     ok('janitor auto-closed the stale holder', jr.closedEmitted === 1);
     ok('janitor REPORTED the orphaned worktree', Array.isArray(jr.orphanedWorktrees) && jr.orphanedWorktrees.some((o) => o.lane === 'git-integration'));

@@ -436,6 +436,27 @@ function genId(ts) { return makeId('evt', ts); }
 
 function genSessionId() { return makeId('ses'); }
 
+// ── Session-id grammars (PR-A, v1.111.0) ────────────────────────────────────
+// Typed PREDICATES, never bare regexes: JS regex .test() coerces non-strings,
+// so a bare `--id` flag (boolean true), a number, or an array would pass a
+// naked regex. Every check requires `typeof === 'string'` first.
+//
+//   isSid    — STRICT. Gates ids we CREATE (registration) and ids we
+//              INTERPOLATE into shell-adjacent surfaces (CLAUDE_ENV_FILE
+//              export line, additionalContext export recommendation). Every
+//              id genSessionId has ever produced conforms.
+//   isRefId  — RELAXED. Gates ids we REFERENCE at external input boundaries
+//              (validated per-surface; spine-derived ids are trusted by the
+//              lifecycle helpers, which verify existence themselves).
+//              Filename-safe, shell-metacharacter-free, admits legacy shapes.
+//   isClaudeId — the `claude:<id>` counter-key fallback's id component.
+export const SID_RE = /^ses_[A-Za-z0-9_]{1,64}$/;
+export const SID_REF_RE = /^[\w.-]{1,128}$/;
+export const CLAUDE_ID_RE = /^[\w-]{1,64}$/;
+export function isSid(v) { return typeof v === 'string' && SID_RE.test(v); }
+export function isRefId(v) { return typeof v === 'string' && SID_REF_RE.test(v); }
+export function isClaudeId(v) { return typeof v === 'string' && CLAUDE_ID_RE.test(v); }
+
 export function genTaskId() { return makeId('tsk'); }
 
 export function genSkillId() { return makeId('skl'); }

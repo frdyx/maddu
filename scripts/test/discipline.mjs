@@ -7,7 +7,7 @@
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 const { resolveThresholds, decide, classifyBashWrite, denyReason, DISCIPLINE_DEFAULTS,
-  nextCounter, enforcePreTool, lastOwnSliceStop } =
+  nextCounter, enforcePreTool, lastOwnSliceStop, globToRegExp, filterIgnored } =
   await import('../../template/maddu/runtime/lib/discipline.mjs');
 
 let passed = 0, failed = 0;
@@ -142,10 +142,13 @@ ok('nextCounter: same slice carries editsSinceSlice',
   nextCounter({ lastSliceStopId: 'A', editsSinceSlice: 5 }, St(), 0).editsSinceSlice === 5);
 ok('nextCounter: does NOT bump editsSinceSlice (bump is post-decide)',
   nextCounter({ lastSliceStopId: 'A', editsSinceSlice: 2 }, St(), 0).editsSinceSlice === 2);
+// v1.111.0: the age anchor derives from the per-file dirtyFirstSeen map —
+// synthetic states carry the full commit shape (paths + observed flag).
+const Cm = (over = {}) => ({ newDirtyFiles: (over.newDirtyPaths || []).length, newDirtyPaths: [], currentDirtyPaths: [], observed: true, workRoot: '/w', renames: new Map(), ...over });
 ok('nextCounter: firstDirtyTs anchors on first dirty',
-  nextCounter({ firstDirtyTs: null }, St({ commit: { newDirtyFiles: 3 } }), 1000).firstDirtyTs === 1000);
+  nextCounter({ firstDirtyTs: null }, St({ commit: Cm({ newDirtyPaths: ['a.js', 'b.js', 'c.js'], currentDirtyPaths: ['a.js', 'b.js', 'c.js'] }) }), 1000).firstDirtyTs === 1000);
 ok('nextCounter: firstDirtyTs clears when clean',
-  nextCounter({ firstDirtyTs: 1000 }, St({ commit: { newDirtyFiles: 0 } }), 5000).firstDirtyTs === null);
+  nextCounter({ firstDirtyTs: 1000 }, St({ commit: Cm({}) }), 5000).firstDirtyTs === null);
 ok('nextCounter: goal/plan active resets grace anchors',
   (() => { const c = nextCounter({ goalplanFirstTs: 500, goalplanAgeEdits: 3 }, St(), 0); return c.goalplanFirstTs === null && c.goalplanAgeEdits === 0; })());
 ok('nextCounter: goal/plan inactive anchors the grace clock',
@@ -153,7 +156,7 @@ ok('nextCounter: goal/plan inactive anchors the grace clock',
 ok('nextCounter: goalplanAgeMin derived from anchor',
   Math.round(nextCounter({ goalplanFirstTs: 1000 }, St({ goalOrPlan: { active: false } }), 601000).goalplanAgeMin) === 10);
 ok('nextCounter: firstDirtyTs of 0 is preserved (== null guard, not falsy)',
-  nextCounter({ firstDirtyTs: 0 }, St({ commit: { newDirtyFiles: 2 } }), 9000).firstDirtyTs === 0);
+  nextCounter({ firstDirtyTs: 0 }, St({ commit: Cm({ newDirtyPaths: ['a', 'b'], currentDirtyPaths: ['a', 'b'] }) }), 9000).firstDirtyTs === 0);
 
 // ── lastOwnSliceStop (per-session accounting — Codex cross-session fix) ──────
 {
@@ -202,6 +205,91 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   // that the call resolves to a well-formed decision object.
   const r = await enforcePreTool('/no/such/repo', { tool: 'Edit', filePath: 'x.js', nowMs: 0 });
   ok('enforcePreTool: mutating on bogus repo never throws (fail-open shape)', typeof r.verdict === 'string');
+}
+
+// ── v1.111.0 — scratch-ignore globs (typed, fail-safe) ──────────────────────
+{
+  ok('glob: * is segment-local', globToRegExp('src/*.js').test('src/a.js') && !globToRegExp('src/*.js').test('src/x/a.js'));
+  ok('glob: ** crosses segments', globToRegExp('**/*.tmp').test('a/b/c.tmp') && globToRegExp('**/*.tmp').test('c.tmp'));
+  ok('glob: ? is one non-slash char', globToRegExp('a?.js').test('ab.js') && !globToRegExp('a?.js').test('a/x.js') && !globToRegExp('a?.js').test('a.js'));
+  ok('glob: anchored both ends', !globToRegExp('a.js').test('xa.js') && !globToRegExp('a.js').test('a.jsx'));
+  ok('glob: regex metacharacters escaped', globToRegExp('a+b.txt').test('a+b.txt') && !globToRegExp('a+b.txt').test('aab.txt'));
+  ok('glob: non-string/empty → null', globToRegExp(true) === null && globToRegExp('') === null && globToRegExp(3) === null);
+  ok('filterIgnored: mixed set', JSON.stringify(filterIgnored(['keep.js', '_scratch.mjs', 'x/_t.mjs'], ['_*', '**/_*.mjs'])) === JSON.stringify(['keep.js']));
+  ok('filterIgnored: bad glob dropped, siblings apply', JSON.stringify(filterIgnored(['a.tmp', 'b.js'], [null, '*.tmp'])) === JSON.stringify(['b.js']));
+  ok('filterIgnored: empty globs → identity', JSON.stringify(filterIgnored(['a', 'b'], [])) === JSON.stringify(['a', 'b']));
+  ok('resolveThresholds: null root normalized', Array.isArray(resolveThresholds('standard', null).uncommitted.ignore));
+  ok('resolveThresholds: non-array ignore → []', resolveThresholds('standard', { uncommitted: { ignore: 'x' } }).uncommitted.ignore.length === 0);
+  ok('resolveThresholds: mixed-type ignore filtered', JSON.stringify(resolveThresholds('standard', { uncommitted: { ignore: ['ok', 3, null, ''] } }).uncommitted.ignore) === JSON.stringify(['ok']));
+}
+
+// ── v1.111.0 — per-file first-seen clocks (map maintenance) ─────────────────
+{
+  const base = { baselineInit: true, workRoot: '/w', dirtyBaseline: [] };
+  // seed → prune-on-commit drops age to next-oldest
+  let c = nextCounter({ ...base }, St({ commit: Cm({ newDirtyPaths: ['old.js'], currentDirtyPaths: ['old.js'] }) }), 1000);
+  c = nextCounter(c, St({ commit: Cm({ newDirtyPaths: ['old.js', 'new.js'], currentDirtyPaths: ['old.js', 'new.js'] }) }), 5000);
+  ok('map: two files, min = oldest', c.firstDirtyTs === 1000 && c.dirtyFirstSeen.length === 2);
+  c = nextCounter(c, St({ commit: Cm({ newDirtyPaths: ['new.js'], currentDirtyPaths: ['new.js'] }) }), 6000);
+  ok('map: committing the oldest drops age to next-oldest', c.firstDirtyTs === 5000);
+  c = nextCounter(c, St({ commit: Cm({}) }), 7000);
+  ok('map: full clean → empty map + null scalar', c.firstDirtyTs === null && c.dirtyFirstSeen.length === 0);
+  // legacy migration preserves age
+  const m = nextCounter({ ...base, firstDirtyTs: 2000 }, St({ commit: Cm({ newDirtyPaths: ['a', 'b'], currentDirtyPaths: ['a', 'b'] }) }), 9000);
+  ok('map: legacy scalar migration seeds at old ts', m.firstDirtyTs === 2000 && m.dirtyFirstSeen.every((p) => p[1] === 2000));
+  // malformed stored map → rebuilt from scalar (nextCounter-level guard)
+  const bad = nextCounter({ ...base, dirtyV: 2, dirtyFirstSeen: [['x']], firstDirtyTs: 3000 }, St({ commit: Cm({ newDirtyPaths: ['x'], currentDirtyPaths: ['x'] }) }), 9000);
+  ok('map: malformed pairs → legacy migration path', bad.firstDirtyTs === 3000);
+  // __proto__ as a path is inert (array-of-pairs storage)
+  const proto = nextCounter({ ...base }, St({ commit: Cm({ newDirtyPaths: ['__proto__'], currentDirtyPaths: ['__proto__'] }) }), 100);
+  ok('map: __proto__ path inert', proto.firstDirtyTs === 100 && Object.getPrototypeOf({}) === Object.prototype);
+  // observed=false preserves clocks but slice/goalplan still run
+  const pres = nextCounter({ ...base, lastSliceStopId: 'A', editsSinceSlice: 4, firstDirtyTs: 500, dirtyV: 2, dirtyFirstSeen: [['f', 500]] },
+    St({ slice: { lastStopId: 'B' }, commit: { observed: false, newDirtyFiles: 0 } }), 9999);
+  ok('unobserved: clocks preserved', pres.firstDirtyTs === 500 && pres.dirtyFirstSeen.length === 1);
+  ok('unobserved: slice reset still runs', pres.editsSinceSlice === 0 && pres.lastSliceStopId === 'B');
+}
+
+// ── v1.111.0 — rename clock transfer (R-only, snapshot-then-prune) ──────────
+{
+  const base = { baselineInit: true, workRoot: '/w', dirtyBaseline: [] };
+  let c = nextCounter({ ...base }, St({ commit: Cm({ newDirtyPaths: ['src.js'], currentDirtyPaths: ['src.js'] }) }), 1000);
+  // staged rename: src.js → dst.js (src leaves the dirty set) → clock transfers
+  const ren = new Map([['dst.js', { from: 'src.js', kind: 'R' }]]);
+  c = nextCounter(c, St({ commit: Cm({ newDirtyPaths: ['dst.js'], currentDirtyPaths: ['dst.js'], renames: ren }) }), 5000);
+  ok('rename: R transfers the clock', c.firstDirtyTs === 1000 && c.dirtyFirstSeen[0][0] === 'dst.js');
+  // copy: source still dirty → target seeds fresh, source keeps its clock
+  let k = nextCounter({ ...base }, St({ commit: Cm({ newDirtyPaths: ['s.js'], currentDirtyPaths: ['s.js'] }) }), 1000);
+  const cp = new Map([['t.js', { from: 's.js', kind: 'C' }]]);
+  k = nextCounter(k, St({ commit: Cm({ newDirtyPaths: ['s.js', 't.js'], currentDirtyPaths: ['s.js', 't.js'], renames: cp }) }), 5000);
+  const tEntry = k.dirtyFirstSeen.find((p) => p[0] === 't.js');
+  ok('copy: C never transfers (target seeds at now)', tEntry && tEntry[1] === 5000);
+  // C where the source did leave: still no transfer (kind gate, not set membership)
+  let k2 = nextCounter({ ...base }, St({ commit: Cm({ newDirtyPaths: ['s2.js'], currentDirtyPaths: ['s2.js'] }) }), 1000);
+  const cp2 = new Map([['t2.js', { from: 's2.js', kind: 'C' }]]);
+  k2 = nextCounter(k2, St({ commit: Cm({ newDirtyPaths: ['t2.js'], currentDirtyPaths: ['t2.js'], renames: cp2 }) }), 5000);
+  ok('copy: C with departed source still seeds fresh', k2.dirtyFirstSeen.find((p) => p[0] === 't2.js')[1] === 5000);
+}
+
+// ── v1.111.0 — workRoot domains, baseline init/retirement ───────────────────
+{
+  // domain change: re-baseline + clear clocks + stamp
+  const dc = nextCounter({ baselineInit: true, workRoot: '/old', dirtyBaseline: ['gone.js'], dirtyV: 2, dirtyFirstSeen: [['gone.js', 111]], firstDirtyTs: 111 },
+    St({ commit: Cm({ domainChanged: true, workRoot: '/new', currentDirtyPaths: ['pre.js'] }) }), 5000);
+  ok('domain change: re-baseline + cleared clocks + stamped root',
+    dc.workRoot === '/new' && dc.dirtyBaseline[0] === 'pre.js' && dc.firstDirtyTs === null && dc.dirtyFirstSeen.length === 0);
+  // baseline init: seed + marker
+  const bi = nextCounter({}, St({ commit: Cm({ needsBaselineInit: true, workRoot: '/w', currentDirtyPaths: ['pre1.js', 'pre2.js'] }) }), 5000);
+  ok('baseline init: seeds full current list + sets marker',
+    bi.baselineInit === true && bi.dirtyBaseline.length === 2 && bi.firstDirtyTs === null);
+  // absent workRoot ADOPTS without clearing
+  const ad = nextCounter({ baselineInit: true, dirtyBaseline: [], dirtyV: 2, dirtyFirstSeen: [['f.js', 700]], firstDirtyTs: 700 },
+    St({ commit: Cm({ workRoot: '/adopted', newDirtyPaths: ['f.js'], currentDirtyPaths: ['f.js'] }) }), 5000);
+  ok('absent workRoot: adopts, clocks survive', ad.workRoot === '/adopted' && ad.firstDirtyTs === 700);
+  // baseline retirement: clean-then-redirty counts as new
+  const rt = nextCounter({ baselineInit: true, workRoot: '/w', dirtyBaseline: ['a.js', 'b.js'] },
+    St({ commit: Cm({ newDirtyPaths: [], currentDirtyPaths: ['a.js'] }) }), 5000);
+  ok('baseline retirement: clean path retires', JSON.stringify(rt.dirtyBaseline) === JSON.stringify(['a.js']));
 }
 
 console.log('');

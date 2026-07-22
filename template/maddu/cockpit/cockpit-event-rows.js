@@ -90,7 +90,9 @@ function summarize(ev) {
     case 'DOCTOR_REPORT':       return `${d.counts.PASS} pass · ${d.counts.WARN} warn · ${d.counts.FAIL} fail`;
     case 'SESSION_REGISTERED':  return `${d.role || '—'}  ${d.label || ''}`;
     case 'SESSION_HEARTBEAT':   return d.focus || '';
-    case 'SESSION_CLOSED':      return d.handoff || '';
+    // v1.111.0: handoff is a schema-conformant OBJECT ({ summary, … });
+    // historical events carry plain strings — render both.
+    case 'SESSION_CLOSED':      return (d.handoff && typeof d.handoff === 'object' ? d.handoff.summary : d.handoff) || '';
     case 'LANE_CLAIMED':        return d.focus || '';
     case 'LANE_RELEASED':       return '';
     case 'SLICE_STOP':          return d.summary || '';

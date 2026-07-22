@@ -34,7 +34,9 @@ function summarizeEvent(e) {
     case 'DOCTOR_REPORT':       return `${e.data.counts.PASS} pass · ${e.data.counts.WARN} warn · ${e.data.counts.FAIL} fail`;
     case 'SESSION_REGISTERED':  return `${e.data.role || '—'}  ${e.data.label || ''}`;
     case 'SESSION_HEARTBEAT':   return e.data.focus || '';
-    case 'SESSION_CLOSED':      return e.data.handoff || '';
+    // v1.111.0: handoff is a schema-conformant OBJECT ({ summary, … });
+    // historical events carry plain strings — render both.
+    case 'SESSION_CLOSED':      return (e.data.handoff && typeof e.data.handoff === 'object' ? e.data.handoff.summary : e.data.handoff) || '';
     case 'LANE_CLAIMED':        return e.data.focus || '';
     case 'LANE_RELEASED':       return '';
     case 'SLICE_STOP':          return e.data.summary || '';

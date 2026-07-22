@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES, genWorkerId, makeId } from './spine.mjs';
+import { append, EVENT_TYPES, genWorkerId } from './spine.mjs';
 import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
 import { redactSpawn, redactLeaves } from './secret-scan.mjs';
 
@@ -165,17 +165,16 @@ function defaultDescriptor(name) {
   };
 }
 
-function genChildSessionId() {
-  return makeId('ses');
-}
-
 // Internal helper for Phase 3 autoRegister spawns. Emits
 // SESSION_AUTO_REGISTERED with source:'spawn' and parentSessionId set
 // to the caller's session id. Returns the new child session id, ready
 // to be threaded into the spawned worker's env.
+// v1.111.0: routed through the close-locked uniqueness transaction (all
+// four production registration appenders share it — generated ids are
+// existence-checked with a bounded regenerate; the makeEvent factory
+// receives the FINAL id so data.sessionId is always correct).
 async function registerChildSession(repoRoot, parentSessionId, runtimeName, label) {
-  const sessionId = genChildSessionId();
-  await append(repoRoot, {
+  const makeEvent = (sessionId) => ({
     type: EVENT_TYPES.SESSION_AUTO_REGISTERED,
     actor: sessionId,
     lane: null,
@@ -188,7 +187,12 @@ async function registerChildSession(repoRoot, parentSessionId, runtimeName, labe
       runtime: runtimeName
     }
   });
-  return sessionId;
+  const { registerSessionUnique } = await import('./session-lifecycle.mjs');
+  const r = await registerSessionUnique(repoRoot, { makeEvent });
+  if (r.status !== 'registered') {
+    throw new Error(`child session registration failed: ${r.status}`);
+  }
+  return r.sessionId;
 }
 
 function mergeDescriptor(base, patch) {

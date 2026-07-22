@@ -52,7 +52,12 @@ export async function loadSpineLib() {
   // Optional-load so a newer global CLI degrades cleanly on an older install.
   let verifyReplay = null;
   try { verifyReplay = await import(pathToFileURL(join(dir, 'verify-replay.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay };
+  // session-lifecycle.mjs (v1.111.0) — the serialized session-lifecycle
+  // transactions. Optional-load so a newer global CLI degrades cleanly on an
+  // older install (callers fall back to their legacy direct appends).
+  let sessionLifecycle = null;
+  try { sessionLifecycle = await import(pathToFileURL(join(dir, 'session-lifecycle.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay, sessionLifecycle };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,
@@ -101,7 +106,12 @@ export async function resolveSessionId(repoRoot, flags, sessionActive) {
   if (env && env.length > 0) return env;
   if (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function') {
     const res = await sessionActive.readActiveSessionVerified(repoRoot);
-    if (res && !res.stale && res.sessionId) return res.sessionId;
+    // v1.111.0 discriminated union: `active` resolves; `unverified` resolves
+    // too (today's leniency — usable, never claimed verified); stale/invalid
+    // never resolve. Pre-v1.111 lib shapes (a raw record / {stale}) keep
+    // working via the fallback arm so a mid-upgrade mixed tree stays sane.
+    if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
+    if (res && res.kind === undefined && !res.stale && res.sessionId) return res.sessionId;
   }
   return null;
 }
