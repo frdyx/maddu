@@ -79,13 +79,26 @@ try {
   ok(receipts.at(-2).sessionId === 'ses_env' && receipts.at(-1).sessionId === 'ses_cache',
     'sessionId precedence: env > raw active-session cache');
 
-  // Field caps: every string field is length-capped at construction so one
-  // line has a hard ~1KB max — the disk-bound argument depends on it. An
-  // env-sourced sessionId is the attacker-shaped field (Codex round 3).
+  // Field caps + grammar gate (PR-B CP3): a VALID id at the 128 cap is kept;
+  // an oversized (>128) or malformed env id fails the reference grammar and is
+  // dropped to null, so the per-line disk bound holds BY CONSTRUCTION — not
+  // only by the .slice cap. The env sessionId is the attacker-shaped field
+  // (Codex round 3); the other string fields stay length-capped.
+  const id128 = 'ses_' + 'x'.repeat(124); // exactly 128 chars, grammar-valid
+  ir.recordInvocationSync({ stateRoot: rA, verb: 'status', env: { MADDU_SESSION_ID: id128 } });
+  ({ receipts } = await ir.readReceipts(rA));
+  ok(receipts.at(-1).sessionId === id128 && receipts.at(-1).sessionId.length === 128,
+    `valid 128-char sessionId kept at the cap (got ${JSON.stringify(receipts.at(-1).sessionId)})`);
+  ok(receipts.at(-1).workspace.length <= 512, 'workspace capped at 512');
+  // Clear the active-session cache so a grammar-failing env drops all the way
+  // to null (rather than legitimately falling through to the valid cache).
+  await rm(join(rA, '.maddu', 'state', 'session.active.json'), { force: true });
   ir.recordInvocationSync({ stateRoot: rA, verb: 'status', env: { MADDU_SESSION_ID: 'S'.repeat(10000) } });
   ({ receipts } = await ir.readReceipts(rA));
-  ok(receipts.at(-1).sessionId.length === 128, `oversized sessionId capped at 128 (got ${receipts.at(-1).sessionId.length})`);
-  ok(receipts.at(-1).workspace.length <= 512, 'workspace capped at 512');
+  ok(receipts.at(-1).sessionId === null, 'oversized (>128) env sessionId fails grammar → null (no cache)');
+  ir.recordInvocationSync({ stateRoot: rA, verb: 'status', env: { MADDU_SESSION_ID: 'bad id!' } });
+  ({ receipts } = await ir.readReceipts(rA));
+  ok(receipts.at(-1).sessionId === null, 'malformed env sessionId (space/!) fails grammar → null (no cache)');
   ir.recordInvocationSync({ stateRoot: rA, verb: 'status', env: {}, now: 'T'.repeat(10000) });
   ({ receipts } = await ir.readReceipts(rA));
   ok(receipts.at(-1).ts.length === 40, `caller-supplied now/ts capped too — the per-line bound holds at the lib seam (got ${receipts.at(-1).ts.length})`);

@@ -51,6 +51,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync }
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { redactText } from './secret-scan.mjs';
+import { isRefId } from './id-grammar.mjs';
 
 export const RECEIPTS_FILE = 'invocation-receipts.ndjson';
 export const RECEIPTS_PREV_FILE = 'invocation-receipts.prev.ndjson';
@@ -122,11 +123,19 @@ export function recordInvocationSync({
     const dir = join(stateRoot, '.maddu', 'state');
     mkdirSync(dir, { recursive: true });
 
-    let sid = sessionId || (env && env.MADDU_SESSION_ID) || null;
-    if (!sid) {
+    // sessionId candidates in precedence order (explicit opt > env > raw
+    // cache), EACH grammar-gated (isRefId): a malformed or oversized id — the
+    // env is the attacker-shaped field — is dropped to null rather than
+    // mislabeling attribution. The <=128 grammar bound also makes the per-line
+    // disk ceiling hold BY CONSTRUCTION, not only by the .slice cap below
+    // (Codex round 3 concern, now enforced at the source).
+    let sid = null;
+    if (isRefId(sessionId)) sid = sessionId;
+    else if (env && isRefId(env.MADDU_SESSION_ID)) sid = env.MADDU_SESSION_ID;
+    else {
       try {
         const cache = JSON.parse(readFileSync(join(dir, 'session.active.json'), 'utf8'));
-        if (cache && typeof cache.sessionId === 'string') sid = cache.sessionId;
+        if (cache && isRefId(cache.sessionId)) sid = cache.sessionId;
       } catch {}
     }
 
