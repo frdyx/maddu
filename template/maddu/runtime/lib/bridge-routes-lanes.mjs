@@ -12,7 +12,7 @@
 // so handleBridge falls through. `reply()` is the sendJson-then-return-true
 // shim that preserves the original `return sendJson(...)` flow verbatim.
 
-import { append, ensureSpine, EVENT_TYPES, genSessionId, isSid, isRefId } from './spine.mjs';
+import { append, ensureSpine, EVENT_TYPES, genSessionId, isSid, isRefId, isClaimLane } from './spine.mjs';
 import { registerSessionUnique, closeSessionIfActive } from './session-lifecycle.mjs';
 import { withCloseLock, isLockFailed } from './session-lifecycle.mjs';
 import { project } from './projections.mjs';
@@ -102,6 +102,10 @@ export async function routeLanes({ req, res, path, repoRoot }) {
   if (path === '/bridge/lanes/claim' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     if (!body.lane || !body.sessionId) return reply(res, 400, { error: 'lane and sessionId required' });
+    // PR-B: input grammar (isRefId sessionId, isClaimLane lane) — NOT LANE_SLUG_RE
+    // (preserve `auto/…` + ad-hoc). Ownership/locking is unchanged (→ PR-C).
+    if (!isRefId(body.sessionId)) return reply(res, 400, { error: 'invalid sessionId (string, [\\w.-]{1,128})' });
+    if (!isClaimLane(body.lane)) return reply(res, 400, { error: 'invalid lane (1-128 chars, no control characters)' });
     const proj = await project(repoRoot);
     const existing = proj.claims.find((c) => c.lane === body.lane);
     if (existing && existing.sessionId !== body.sessionId) {
@@ -118,6 +122,8 @@ export async function routeLanes({ req, res, path, repoRoot }) {
   if (path === '/bridge/lanes/release' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     if (!body.lane || !body.sessionId) return reply(res, 400, { error: 'lane and sessionId required' });
+    if (!isRefId(body.sessionId)) return reply(res, 400, { error: 'invalid sessionId (string, [\\w.-]{1,128})' });
+    if (!isClaimLane(body.lane)) return reply(res, 400, { error: 'invalid lane (1-128 chars, no control characters)' });
     const ev = await append(repoRoot, {
       type: EVENT_TYPES.LANE_RELEASED,
       actor: body.sessionId,

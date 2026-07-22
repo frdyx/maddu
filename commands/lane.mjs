@@ -181,10 +181,18 @@ export default async function lane(argv) {
     const { flags, positional } = parseFlags(rest);
     // v1.1.1 C3: first positional argument is lane id; `--lane <id>` still
     // accepted as alias. `--session` falls back to MADDU_SESSION_ID per v0.19.1.
-    const lid = (typeof flags.lane === 'string' && flags.lane.length > 0)
-      ? flags.lane
-      : (positional && positional[0]);
+    // PR-B: input grammar (isClaimLane; NOT LANE_SLUG_RE — preserve `auto/…` +
+    // ad-hoc). An OWNED --lane is validated and NEVER falls back to positional.
+    const isClaimLane = spine.isClaimLane || ((v) => typeof v === 'string' && v.length >= 1 && v.length <= 128);
+    let lid;
+    if (Object.hasOwn(flags, 'lane')) {
+      if (!isClaimLane(flags.lane)) { console.error('invalid --lane (1-128 chars, no control characters)'); process.exit(2); }
+      lid = flags.lane;
+    } else {
+      lid = positional && positional[0];
+    }
     if (!lid) { console.error('usage: maddu lane claim <lane-id> [--session <id>] [--focus "..."] [--force] [--worktree]'); process.exit(2); }
+    if (!isClaimLane(lid)) { console.error('invalid lane id (1-128 chars, no control characters)'); process.exit(2); }
 
     // v1.93.0 (roadmap #12a phase 4) — --worktree provisions an isolated git
     // worktree bound to this claim. Validate the lane id + catalog membership
@@ -283,10 +291,16 @@ export default async function lane(argv) {
   if (sub === 'release') {
     const { flags, positional } = parseFlags(rest);
     // v1.1.1 C3: positional shorthand symmetric with `lane claim`.
-    const lid = (typeof flags.lane === 'string' && flags.lane.length > 0)
-      ? flags.lane
-      : (positional && positional[0]);
+    const isClaimLane = spine.isClaimLane || ((v) => typeof v === 'string' && v.length >= 1 && v.length <= 128);
+    let lid;
+    if (Object.hasOwn(flags, 'lane')) {
+      if (!isClaimLane(flags.lane)) { console.error('invalid --lane (1-128 chars, no control characters)'); process.exit(2); }
+      lid = flags.lane;
+    } else {
+      lid = positional && positional[0];
+    }
     if (!lid) { console.error('usage: maddu lane release <lane-id> [--session <id>]'); process.exit(2); }
+    if (!isClaimLane(lid)) { console.error('invalid lane id (1-128 chars, no control characters)'); process.exit(2); }
     const sid = await resolveSessionId(repoRoot, flags, sessionActive);
     if (!sid) {
       console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
