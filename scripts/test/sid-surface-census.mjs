@@ -21,10 +21,20 @@
 //
 // r4-4 (validate the SINK, not a helper-token-on-a-line): the classifier is
 // meta-tested at the bottom against known-DANGEROUS forms (object-value actor,
-// dotted/bracket/aliased read, empty-string child sink) which MUST be flagged,
-// and known-SAFE forms (inline-gated, assigned-then-gated, write, display,
-// owner) which must not — so a classifier that stops catching a form is itself
-// caught. The claim-writer census is out of scope (PR-C).
+// dotted/bracket/aliased read, empty-string child sink, destructure binding,
+// a non-owner file whose name merely ENDS with an owner name, and a sink hidden
+// after a string that contains `//` or `/* … */`) which MUST be flagged, and
+// known-SAFE forms (inline-gated, assigned-then-gated, write, display,
+// help-string mention, exact owner) which must not — so a classifier that stops
+// catching a form is itself caught. The claim-writer census is out of scope (PR-C).
+//
+// HONEST RESIDUAL LIMITS (this is a heuristic TRIPWIRE, not a sound analyzer —
+// the CHOKEPOINTS are the boundary; this only guards against accidental
+// reintroduction of the removed raw-actor pattern): a fully obfuscated computed
+// read (`const k="MADDU_SESSION_ID"; process.env[k]`) is NOT tracked (dataflow),
+// and the gate-argument exemption trusts that a gate wrapping the token on a
+// line gates that line's sink. Neither form exists in the tree; introducing one
+// would need review, not evade a security control.
 //
 // Exit codes: 0 = OK, 1 = an ungated raw read (or a meta-test) failed, 2 = harness error.
 
@@ -68,17 +78,44 @@ const ASSIGN_RE = new RegExp(`(?:(?:const|let|var)\\s+)?(\\w+)\\s*=\\s*[^=].*\\.
 // operator ( … MADDU_SESSION_ID || '(none)' ). Never a persisted sink.
 const DISPLAY_RE = new RegExp(`${KEY}\\s*\\|\\|\\s*'\\(none\\)'`);
 // Files that DEFINE the gates — their raw reads are the gate implementation.
+// Matched by EXACT basename (not endsWith) so `evil_spine.mjs` is NOT exempted.
 const OWNER_FILES = ['id-grammar.mjs', '_spine.mjs'];
+// A destructure that binds the session env key — `const { MADDU_SESSION_ID } =
+// process.env` — the bound local is then read WITHOUT the `env.` prefix, so
+// ACCESS_RE would miss the downstream sink. None exist today; flag the binding.
+const DESTRUCTURE_RE = new RegExp(`\\{[^}]*\\b${'MADDU_SESSION_ID'}\\b[^}]*\\}\\s*=`);
 
 // Strip block then line comments so our own prose (which mentions the token) is
 // not miscounted. Block comments are blanked but KEEP their newlines so line
 // numbers stay aligned.
+// Blank the CONTENTS of single-line string / template literals (keep the
+// delimiters and length) so comment markers or token mentions INSIDE a string
+// (`const a = "/*"`, `const u = "http://x"`, a help-string naming the env var)
+// are never misread as comments or reads. Char classes exclude the newline, so
+// blanking stays single-line and never collapses line numbers; a multi-line
+// template is left intact (none carry an actor sink).
+function blankStrings(line) {
+  // A bracket-key access — env['MADDU_SESSION_ID'] — is a real read expressed as
+  // a quoted string; protect it (and restore after) so blanking doesn't erase
+  // the access itself.
+  const PROT = 'BRACKET_SID';
+  const saved = [];
+  let s = line.replace(/\[\s*(['"])MADDU_SESSION_ID\1\s*\]/g, (m) => { saved.push(m); return PROT; });
+  s = s
+    .replace(/'(?:\\.|[^'\\\n])*'/g, (m) => `'${' '.repeat(m.length - 2)}'`)
+    .replace(/"(?:\\.|[^"\\\n])*"/g, (m) => `"${' '.repeat(m.length - 2)}"`)
+    .replace(/`(?:\\.|[^`\\\n])*`/g, (m) => '`' + ' '.repeat(m.length - 2) + '`');
+  let i = 0;
+  return s.replace(new RegExp(PROT, 'g'), () => saved[i++]);
+}
+
 function stripComments(src) {
-  // Normalize CRLF/CR first: a trailing \r would defeat the /$/ (no `m` flag)
-  // in the line-comment strip, leaving a comment that mentions the token
-  // miscounted as a read.
-  return src
-    .replace(/\r\n?/g, '\n')
+  // Order matters: normalize CRLF (a trailing \r defeats /$/ without the `m`
+  // flag), then blank STRINGS before comments so a marker inside a string can't
+  // start/stop a comment (the `"/*" … "*/"` cross-string span), THEN strip
+  // block comments (newline-preserving) and line comments.
+  const norm = src.replace(/\r\n?/g, '\n').split('\n').map(blankStrings).join('\n');
+  return norm
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
     .split('\n')
     .map((l) => l.replace(/\/\/.*$/, ''))
@@ -87,15 +124,19 @@ function stripComments(src) {
 
 // Classify one source file. Returns an array of ungated { line, text } reads.
 function censusFile(relPath, src) {
-  const owner = OWNER_FILES.some((f) => relPath.endsWith(f));
+  const owner = OWNER_FILES.includes(relPath.split('/').pop());
   const stripped = stripComments(src);
   const lines = stripped.split('\n');
   const ungated = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     ACCESS_RE.lastIndex = 0;
-    if (!ACCESS_RE.test(line)) continue;              // no rvalue access read
+    const isAccess = ACCESS_RE.test(line);
+    const isDestructure = DESTRUCTURE_RE.test(line);
+    if (!isAccess && !isDestructure) continue;        // no read of the session env
     if (owner) continue;                              // gate-owner file
+    // A destructure binding of the key can't be inline-gated → always flag.
+    if (isDestructure) { ungated.push({ line: i + 1, text: line.trim() }); continue; }
     if (DISPLAY_RE.test(line)) continue;              // operator display
     if (GATE_ARG_RE.test(line)) continue;             // read is a gate argument
     const m = line.match(ASSIGN_RE);
@@ -129,6 +170,10 @@ function main() {
     ['empty-string child', 'commands/x.mjs', "        MADDU_SESSION_ID: process.env.MADDU_SESSION_ID || '',"],
     ['bare read return',   'commands/x.mjs', '  return process.env.MADDU_SESSION_ID || null;'],
     ['aliased env read',   'commands/x.mjs', '  const e = process.env; const s = e.MADDU_SESSION_ID || null;'],
+    ['destructure binding','commands/x.mjs', '  const { MADDU_SESSION_ID } = process.env;'],
+    ['evil owner suffix',  'commands/evil_spine.mjs', '  export const bad = () => process.env.MADDU_SESSION_ID + 1;'],
+    ['sink after str //',  'commands/x.mjs', '  const url = "http://x"; actor = process.env.MADDU_SESSION_ID || null;'],
+    ['sink across str /*',  'commands/x.mjs', '  const a = "/*"; const s = process.env.MADDU_SESSION_ID || null; const b = "*/";'],
   ];
   for (const [label, path, snippet] of BAD) {
     const hits = censusFile(path, snippet);
@@ -142,7 +187,9 @@ function main() {
     ['env write not read',  'commands/x.mjs', '  if (effectiveSession) env.MADDU_SESSION_ID = effectiveSession;'],
     ['export string',       'commands/x.mjs', "  await appendFile(f, `export MADDU_SESSION_ID='${sid}'\\n`);"],
     ['display none',        'commands/x.mjs', "    console.log(`parent: ${process.env.MADDU_SESSION_ID || '(none)'}`);"],
-    ['owner file read',     'template/maddu/runtime/lib/id-grammar.mjs', '  const v = env && env.MADDU_SESSION_ID;'],
+    ['help-string mention', 'commands/x.mjs', "    console.error('--session required (or set MADDU_SESSION_ID first)');"],
+    ['owner id-grammar',    'template/maddu/runtime/lib/id-grammar.mjs', '  const v = env && env.MADDU_SESSION_ID;'],
+    ['owner _spine exact',  'commands/_spine.mjs', '  const env = process.env.MADDU_SESSION_ID;'],
   ];
   for (const [label, path, snippet] of GOOD) {
     const hits = censusFile(path, snippet);

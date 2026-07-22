@@ -106,12 +106,23 @@ export async function resolveWorkAndStateRoots(paths) {
 // must keep running against an older installed runtime). Fail open ONLY when
 // the module/exports are absent — never swallow a validation THROW.
 export async function loadIdGrammar() {
+  let dir;
+  try { dir = await resolveLibDir(); }
+  catch { return null; } // can't resolve the lib root → pre-PR-B-style fail open
+  let m;
   try {
-    const dir = await resolveLibDir();
-    const m = await import(pathToFileURL(join(dir, 'id-grammar.mjs')).href);
-    if (typeof m.isRefId === 'function' && typeof m.InvalidExplicitId === 'function') return m;
-  } catch { /* pre-PR-B lib: no id-grammar.mjs → fail open */ }
-  return null;
+    m = await import(pathToFileURL(join(dir, 'id-grammar.mjs')).href);
+  } catch (err) {
+    // ABSENT module → a genuine pre-PR-B install: fail open (validate nothing,
+    // exactly today's behavior). A PRESENT-but-broken validator (a syntax or
+    // other load error) must NOT silently disable validation — propagate it so
+    // a corrupt install fails LOUD rather than letting a malformed --session
+    // slip through as a validation no-op.
+    if (err && (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'ENOENT')) return null;
+    throw err;
+  }
+  if (typeof m.isRefId === 'function' && typeof m.InvalidExplicitId === 'function') return m;
+  return null; // present but missing the expected exports → older shape, fail open
 }
 
 // CP1b: validate an explicit --session at a DIRECT reader (the commands that

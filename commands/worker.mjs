@@ -76,6 +76,10 @@ export default async function worker(argv) {
 
   if (sub === 'register') {
     const { flags } = parseFlags(rest);
+    // CP1b: an owned-but-malformed --session throws InvalidExplicitId (never a
+    // raw/boolean actor). Resolved once — used as both the event actor and the
+    // persisted data.sessionId.
+    const workerSid = await explicitSessionFlag(flags);
     const id = flags.id || spine.genWorkerId();
     // Scrub caller-supplied command/args before persisting (no-op on clean
     // text) so a secret-shaped value never reaches the append-only spine.
