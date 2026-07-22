@@ -462,7 +462,11 @@ function sameSig(a, b) {
 async function reconcileCounter(repoRoot, key, c) {
   if (!c || typeof c !== 'object') return COUNTER_DEFAULT();
   const out = { ...c };
-  const mapPresent = Array.isArray(out.dirtyFirstSeen) && out.dirtyFirstSeen.length > 0;
+  // ANY array is reconciled — an EMPTY map beside a finite scalar is exactly
+  // the rollback-desync shape (v1 cleared the paths but v2's empty map would
+  // read as authoritative and re-seed dirty paths at "now", losing the
+  // preserved age).
+  const mapPresent = Array.isArray(out.dirtyFirstSeen);
   if (mapPresent) {
     let min = Infinity;
     let wellFormed = out.dirtyV === 2;

@@ -35,6 +35,15 @@ async function resolveSession(flags, repoRoot, sessionActive) {
   // whether the clear actually happened (a racing rewrite can make the CAS
   // decline; the cache then self-heals on the next register).
   if (result.kind === 'active' || result.kind === 'unverified') return result.record.sessionId;
+  // Pre-v1.111 lib shapes (a raw record / {stale}) — a newer CLI must keep
+  // working against an older installed runtime.
+  if (result.kind === undefined && !result.stale && result.sessionId) return result.sessionId;
+  if (result.kind === undefined && result.stale) {
+    await sessionActive.clearActiveSession(repoRoot);
+    console.error(`active session ${result.sessionId} is already closed (cache cleared).`);
+    console.error(`Run 'maddu session start "<label>"' to register a new one.`);
+    process.exit(3);
+  }
   if (result.kind === 'stale') {
     const cleared = await sessionActive.clearActiveSessionIf(repoRoot, result.sessionId);
     console.error(`active session ${result.sessionId} is already closed${cleared ? ' (cache cleared)' : ' (cache present but not cleared — self-heals on next register)'}.`);
@@ -330,7 +339,13 @@ export default async function session(argv) {
       console.log(`(no active session — cache unreadable${cleared ? '; invalid cache cleared' : '; not cleared, self-heals on next register'})`);
       process.exit(1);
     }
-    const rec = result.record;
+    if (result.kind === undefined && result.stale) {
+      await sessionActive.clearActiveSession(repoRoot);
+      console.log(`(no active session — stale cache for ${result.sessionId} cleared)`);
+      process.exit(1);
+    }
+    // v1.111 union record, or a pre-v1.111 raw record (legacy lib).
+    const rec = result.record || result;
     const note = result.kind === 'unverified' ? '  (unverified — spine unreadable)' : '';
     console.log(`${rec.sessionId}  ${rec.role || '—'}  ${rec.label ? `"${rec.label}"` : ''}${note}`);
     return;

@@ -495,7 +495,11 @@ export default async function hooks(argv) {
             if (refOk(bound)) sid = bound;
           } catch { /* fall through */ }
         }
-        counterKey = sid || (claudeSessionId ? `claude:${claudeSessionId}` : null);
+        // The claude-fallback counter key is grammar-gated too (an
+        // unconstrained id could exceed filename limits, killing latch
+        // persistence and repeating per-episode witnesses).
+        const claudeOk = spine.isClaudeId || ((v) => typeof v === 'string' && /^[\w-]{1,64}$/.test(v));
+        counterKey = sid || (claudeOk(claudeSessionId) ? `claude:${claudeSessionId}` : null);
 
         // Auto-claim a lane before the first edit (rule-#9 clean via the trigger
         // gauntlet); note if we just claimed so the eval doesn't race the spine.
