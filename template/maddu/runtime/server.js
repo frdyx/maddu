@@ -44,6 +44,7 @@ import { readRegistry, writeRegistry, activateWorkspace, registryExists, registr
 // static serving) — the first slice of decomposing this file. Bridge state never
 // flows through these, so they live in runtime-libs.
 import { MIME, send, sendJson, hostnameOf, isLoopbackHostname, readBody, serveStatic } from './lib/http-util.mjs';
+import { readBodySessionId } from './lib/bridge-body-id.mjs';
 // Cockpit projection builders (conductor / queue / claims / backlinks) — pure
 // repo-root → data, no bridge state. The second server-split slice.
 import { buildConductor, buildQueueBoard, buildClaimMap, buildBacklinks, listDocs, readDoc, buildOversight, buildDigest, buildProjectCockpit, buildDecisions, buildHandoff } from './lib/bridge-builders.mjs';
@@ -603,11 +604,12 @@ async function handleBridge(req, res, url, ctx) {
   // ── slice-stop ────────────────────────────────────────────────────────
   if (path === '/bridge/slice-stop' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
-    if (!body.sessionId) return sendJson(res, 400, { error: 'sessionId required' });
+    const sidr = readBodySessionId(body, { required: true });
+    if (!sidr.ok) return sendJson(res, sidr.status, { error: sidr.error });
     if (!body.summary) return sendJson(res, 400, { error: 'summary required' });
     const ev = await append(repoRoot, {
       type: EVENT_TYPES.SLICE_STOP,
-      actor: body.sessionId,
+      actor: sidr.sessionId,
       lane: body.lane || null,
       data: {
         summary: body.summary,
@@ -636,9 +638,11 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/inbox' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     if (!body.message) return sendJson(res, 400, { error: 'message required' });
+    const sidr = readBodySessionId(body, { required: false });
+    if (!sidr.ok) return sendJson(res, sidr.status, { error: sidr.error });
     const ev = await append(repoRoot, {
       type: EVENT_TYPES.INBOX_MESSAGE,
-      actor: body.sessionId || null,
+      actor: sidr.sessionId,
       lane: body.lane || null,
       data: { message: body.message, kind: body.kind || 'note' }
     });

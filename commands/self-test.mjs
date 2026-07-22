@@ -69,7 +69,8 @@ export default async function selfTest(argv) {
   const isList = argv.includes('--list');
   if (recordVerification && spine && spine.append && !isList && argsValid) {
     let captured = null;
-    const out = await recordVerification(frameworkRoot, { spine, actor: process.env.MADDU_SESSION_ID || null, lane: process.env.MADDU_LANE || null }, {
+    const stActor = (spine.isRefId && spine.isRefId(process.env.MADDU_SESSION_ID)) ? process.env.MADDU_SESSION_ID : null;
+    const out = await recordVerification(frameworkRoot, { spine, actor: stActor, lane: process.env.MADDU_LANE || null }, {
       kind: 'self-test', profile,
       run: async () => runner.runSelfTestCli(argv, { frameworkRoot, onResult: (r) => { captured = r; } }),
       // null → emit no receipt (a config/usage error ran nothing, captured stays null).

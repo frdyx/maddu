@@ -28,7 +28,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { exists } from './_libroot.mjs';
 
 const CONFIG_DIR = '.maddu/config/pipelines';
@@ -92,7 +92,7 @@ async function runPipeline(name, goalText, flags) {
   const pipelineRunId = spine.makeId('pipe');
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.PIPELINE_STARTED,
-    actor: process.env.MADDU_SESSION_ID || null,
+    actor: await envActingSid(),
     data: { pipelineRunId, name, goal: goalText || null },
   });
   console.log(pipelineRunId);
@@ -110,20 +110,20 @@ async function runPipeline(name, goalText, flags) {
   for (const stage of cfg.stages) {
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PIPELINE_STAGE_ENTERED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { pipelineRunId, stage: stage.name, intent: stage.intent || null },
     });
     if (process.stdout.isTTY) console.log(`  → ${stage.name}: ${stage.intent || ''}`);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PIPELINE_STAGE_EXITED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { pipelineRunId, stage: stage.name, status: 'ok' },
     });
   }
 
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.PIPELINE_COMPLETED,
-    actor: process.env.MADDU_SESSION_ID || null,
+    actor: await envActingSid(),
     data: { pipelineRunId, name },
   });
   if (process.stdout.isTTY) console.log(`  ✓ pipeline ${name} completed`);

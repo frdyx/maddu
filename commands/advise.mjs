@@ -30,7 +30,7 @@ import { mkdir, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { exists } from './_libroot.mjs';
 
 
@@ -153,7 +153,7 @@ export default async function advise(argv) {
   }
 
   const advisorId = spine.makeId('adv');
-  const parentSessionId = process.env.MADDU_SESSION_ID || null;
+  const parentSessionId = await envActingSid();
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.ADVISOR_INVOKED,
     actor: parentSessionId,

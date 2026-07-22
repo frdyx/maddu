@@ -15,6 +15,7 @@ import { append, EVENT_TYPES } from './spine.mjs';
 import { project } from './projections.mjs';
 import { maybeAutoDecide } from './approvals.mjs';
 import { sendJson, readBody } from './http-util.mjs';
+import { readBodySessionId } from './bridge-body-id.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
 
@@ -27,9 +28,11 @@ export async function routeApprovals({ req, res, path, repoRoot }) {
   if (path === '/bridge/approvals/request' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     if (!body.tool) return reply(res, 400, { error: 'tool required' });
+    const sidr = readBodySessionId(body, { required: false });
+    if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
     const ev = await append(repoRoot, {
       type: EVENT_TYPES.APPROVAL_REQUESTED,
-      actor: body.sessionId || null,
+      actor: sidr.sessionId,
       lane: body.lane || null,
       data: {
         tool: body.tool,

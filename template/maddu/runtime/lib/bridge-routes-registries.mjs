@@ -17,6 +17,7 @@ import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp,
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime,
   detectAll, runtimesHealth, spawnWorker } from './runtimes.mjs';
 import { sendJson, readBody } from './http-util.mjs';
+import { readBodySessionId } from './bridge-body-id.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
 
@@ -108,9 +109,11 @@ export async function routeRuntimes({ req, res, path, repoRoot }) {
     if (rest.endsWith('/spawn') && req.method === 'POST') {
       const name = rest.slice(0, -'/spawn'.length);
       const body = (await readBody(req)) || {};
+      const sidr = readBodySessionId(body, { required: false });
+      if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
       try {
         const out = await spawnWorker(repoRoot, name, {
-          session: body.sessionId || null,
+          session: sidr.sessionId,
           lane: body.lane || null,
           extraArgs: body.args || [],
           // Workers always run with cwd = the workspace's repoRoot so they

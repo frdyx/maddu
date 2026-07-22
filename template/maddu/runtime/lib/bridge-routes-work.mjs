@@ -22,6 +22,7 @@ import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSli
 import { readMailbox, send as mailboxSend, markRead as mailboxMarkRead, counts as mailboxCounts } from './mailbox.mjs';
 import { searchMemory, rebuildMemory, extractEvent } from './hindsight.mjs';
 import { sendJson, readBody } from './http-util.mjs';
+import { readBodySessionId } from './bridge-body-id.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
 
@@ -33,6 +34,8 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
   }
   if (path === '/bridge/workers' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
+    const sidr = readBodySessionId(body, { required: false });
+    if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
     const id = body.id || genWorkerId();
     // Scrub caller-supplied command/args before persisting (no-op on clean
     // text). The bridge accepts these from any loopback client, so a
@@ -40,14 +43,14 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
     const spawnRec = redactSpawn({ command: body.command || null, args: body.args || [] });
     const ev = await append(repoRoot, {
       type: EVENT_TYPES.WORKER_SPAWNED,
-      actor: body.sessionId || null,
+      actor: sidr.sessionId,
       lane: body.lane || null,
       data: {
         id,
         command: spawnRec.command,
         args: spawnRec.args,
         pid: body.pid || null,
-        sessionId: body.sessionId || null
+        sessionId: sidr.sessionId
       }
     });
     return reply(res, 200, { ok: true, workerId: id, event: ev });
@@ -57,9 +60,11 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
     if (rest.endsWith('/heartbeat') && req.method === 'POST') {
       const id = rest.slice(0, -'/heartbeat'.length);
       const body = (await readBody(req)) || {};
+      const sidr = readBodySessionId(body, { required: false });
+      if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
       await append(repoRoot, {
         type: EVENT_TYPES.WORKER_HEARTBEAT,
-        actor: body.sessionId || null,
+        actor: sidr.sessionId,
         lane: null,
         data: { id, focus: body.focus || null }
       });
@@ -68,9 +73,11 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
     if (rest.endsWith('/exit') && req.method === 'POST') {
       const id = rest.slice(0, -'/exit'.length);
       const body = (await readBody(req)) || {};
+      const sidr = readBodySessionId(body, { required: false });
+      if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
       await append(repoRoot, {
         type: EVENT_TYPES.WORKER_EXITED,
-        actor: body.sessionId || null,
+        actor: sidr.sessionId,
         lane: null,
         data: { id, exitCode: body.exitCode ?? 0 }
       });
@@ -131,8 +138,10 @@ export async function routeSkills({ req, res, path, repoRoot }) {
     if (rest.endsWith('/apply') && req.method === 'POST') {
       const id = rest.slice(0, -'/apply'.length);
       const body = (await readBody(req)) || {};
+      const sidr = readBodySessionId(body, { required: false });
+      if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
       try {
-        const s = await applySkill(repoRoot, id, body.by || null, body.sessionId || null);
+        const s = await applySkill(repoRoot, id, body.by || null, sidr.sessionId);
         return reply(res, 200, { ok: true, applied: { id, title: s.title } });
       } catch (err) { return reply(res, 404, { error: err.message }); }
     }

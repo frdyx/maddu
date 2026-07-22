@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES, genWorkerId } from './spine.mjs';
+import { append, EVENT_TYPES, genWorkerId, normalizeParentId, isRefId } from './spine.mjs';
 import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
 import { redactSpawn, redactLeaves } from './secret-scan.mjs';
 
@@ -174,13 +174,24 @@ function defaultDescriptor(name) {
 // existence-checked with a bounded regenerate; the makeEvent factory
 // receives the FINAL id so data.sessionId is always correct).
 async function registerChildSession(repoRoot, parentSessionId, runtimeName, label) {
+  // CP5 (PR-B): grammar + existence on the spawn-supplied parent. verify.mjs
+  // FAILs a dangling parentSessionId, so a malformed/nonexistent parent is
+  // dropped to null here (ever-registered proj.sessions incl. closed).
+  let parent = normalizeParentId(parentSessionId);
+  if (parent) {
+    try {
+      const { project } = await import('./projections.mjs');
+      const proj = await project(repoRoot);
+      if (!new Set((proj.sessions || []).map((s) => s.id)).has(parent)) parent = null;
+    } catch { /* projection read failed → keep parent; verify is the backstop */ }
+  }
   const makeEvent = (sessionId) => ({
     type: EVENT_TYPES.SESSION_AUTO_REGISTERED,
     actor: sessionId,
     lane: null,
     data: {
       sessionId,
-      parentSessionId: parentSessionId || null,
+      parentSessionId: parent,
       source: 'spawn',
       label: label || `${runtimeName} worker`,
       role: 'implementer',
@@ -399,7 +410,13 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
       opts.label || `${name} worker ${workerId}`
     );
   }
+  // CP3 (r4-2): a fresh child session supersedes the inherited env; otherwise
+  // the child inherits process.env.MADDU_SESSION_ID via the env spread above
+  // (MADDU_* is allow-listed). Scrub it if it is malformed, so a nonconforming
+  // parent id is never handed to the child as an actor identity — a valid
+  // inherited id legitimately continues the parent session.
   if (effectiveSession) env.MADDU_SESSION_ID = effectiveSession;
+  else if (!isRefId(env.MADDU_SESSION_ID)) delete env.MADDU_SESSION_ID;
   if (opts.lane) env.MADDU_LANE = opts.lane;
 
   let child, pid = null, error = null;

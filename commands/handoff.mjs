@@ -9,7 +9,7 @@
 //   maddu handoff show               print the current curated handoff
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
 const C = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', ok: '\x1b[32m', warn: '\x1b[33m', accent: '\x1b[36m' };
@@ -61,8 +61,8 @@ export default async function handoff(argv) {
       : (positional[0] || requireFlag(flags, 'body'));
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.HANDOFF_SET,
-      actor: process.env.MADDU_SESSION_ID || null,
-      data: { body, by: process.env.MADDU_SESSION_ID || null },
+      actor: await envActingSid(),
+      data: { body, by: await envActingSid() },
     });
     console.log(`handoff set (${body.length} chars)`);
     console.log(`event: ${ev.id}`);

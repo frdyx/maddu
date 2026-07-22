@@ -59,7 +59,10 @@ export default async function model(argv) {
   const dir = await resolveLibDir();
   const manifests = await import(pathToFileURL(join(dir, 'model-manifests.mjs')).href);
   const projection = await import(pathToFileURL(join(dir, 'model-projection.mjs')).href);
-  const sid = await resolveSessionId(repoRoot, flags, lib.sessionActive).catch(() => null);
+  // Fail-soft on unrelated resolver errors, but a malformed EXPLICIT --session
+  // (PR-B) must surface, not silently become an anonymous null actor.
+  const sid = await resolveSessionId(repoRoot, flags, lib.sessionActive)
+    .catch((e) => { if (e && e.code === 'INVALID_EXPLICIT_ID') throw e; return null; });
 
   const emit = (type, data) => lib.spine.append(repoRoot, { type, actor: sid || null, data: { schemaVersion: 1, ...data } });
   const registry = async () => projection.deriveModels(await lib.spine.readAll(repoRoot));

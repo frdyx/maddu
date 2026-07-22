@@ -30,7 +30,7 @@
 
 import { basename } from 'node:path';
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveParentId } from './_spine.mjs';
 
 function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
 
@@ -87,9 +87,9 @@ export default async function register(argv) {
   const cwdLabel = basename(repoRoot) || 'agent';
   const label = positional[0] || flags.label || cwdLabel;
   const role = flags.role || 'implementer';
-  // Parent forwarded VERBATIM as on main — parent validation + existence
-  // checking are explicitly deferred to the PR-B id-validation campaign.
-  const parentSessionId = flags.parent || process.env.MADDU_PARENT_SESSION_ID || null;
+  // CP5 (PR-B): grammar + existence. Explicit --parent malformed throws;
+  // ambient env malformed / grammar-valid-but-nonexistent → dropped to null.
+  const parentSessionId = await resolveParentId(repoRoot, flags, { projections });
 
   // 3. Append SESSION_AUTO_REGISTERED through the uniqueness transaction.
   //    The session id IS the actor — same convention as SESSION_REGISTERED;

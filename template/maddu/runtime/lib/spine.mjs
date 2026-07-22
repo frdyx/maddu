@@ -450,12 +450,16 @@ function genSessionId() { return makeId('ses'); }
 //              lifecycle helpers, which verify existence themselves).
 //              Filename-safe, shell-metacharacter-free, admits legacy shapes.
 //   isClaudeId — the `claude:<id>` counter-key fallback's id component.
-export const SID_RE = /^ses_[A-Za-z0-9_]{1,64}$/;
-export const SID_REF_RE = /^[\w.-]{1,128}$/;
-export const CLAUDE_ID_RE = /^[\w-]{1,64}$/;
-export function isSid(v) { return typeof v === 'string' && SID_RE.test(v); }
-export function isRefId(v) { return typeof v === 'string' && SID_REF_RE.test(v); }
-export function isClaudeId(v) { return typeof v === 'string' && CLAUDE_ID_RE.test(v); }
+// SSOT relocated to id-grammar.mjs (PR-B) — a stdlib-only, dependency-free
+// module so standalone code (the worker token-wrapper, telemetry) can share the
+// grammar WITHOUT importing the full spine. Re-exported here so every existing
+// `from './spine.mjs'` predicate importer (verify.mjs, discipline.mjs, the hook
+// chain, …) is byte-for-byte unaffected. New symbols (isClaimLane,
+// InvalidExplicitId, envActingSid, normalizeParentId) ride the same door.
+export {
+  SID_RE, SID_REF_RE, CLAUDE_ID_RE, isSid, isRefId, isClaudeId,
+  isClaimLane, InvalidExplicitId, envActingSid, normalizeParentId,
+} from './id-grammar.mjs';
 
 export function genTaskId() { return makeId('tsk'); }
 

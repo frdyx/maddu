@@ -8,7 +8,7 @@
 
 import { runWrapper } from './_tools.mjs';
 import { loadSecretScan, loadTools } from './_tools.mjs';
-import { loadSpineLib } from './_spine.mjs';
+import { loadSpineLib, envActingSid } from './_spine.mjs';
 import { isAdaptiveProjectTestArgs, runProjectTestCli, parseProjectTestArgs } from './_project-test-runner.mjs';
 
 async function resolveAdaptiveContext() {
@@ -78,7 +78,7 @@ export default async function testCmd(argv) {
   if (isAdaptiveProjectTestArgs(argv)) {
     const { repoRoot, spine } = await resolveAdaptiveContext();
     const lane = process.env.MADDU_LANE || null;
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await envActingSid();
     // Redact argv for EVERY spine event this adaptive path emits (mirrors
     // runTool). Detection still uses the raw argv; only logging is scrubbed.
     const secretScan = await loadSecretScan();

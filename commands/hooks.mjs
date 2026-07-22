@@ -20,7 +20,7 @@ import { join, basename } from 'node:path';
 import { mkdir, readFile, writeFile, rm, appendFile } from 'node:fs/promises';
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveParentId } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import registerCmd from './register.mjs';
 
@@ -231,13 +231,19 @@ async function fireSessionStart() {
     seamThrow('handler');
     // Payload FIRST — the claude id + cwd inform everything downstream.
     const payload = await readHookPayload();
-    const claudeId = payload.session_id || null;
-    const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
     const isRefId = spine.isRefId || (() => false);
     const isSid = spine.isSid || (() => false);
+    const isClaudeId = spine.isClaudeId || (() => false);
+    // CP2 (PR-B): gate the claude session id at the boundary — a malformed id
+    // never reaches a binding-map key (the map helpers also self-guard).
+    // Malformed → null → the register-without-binding path.
+    const claudeId = isClaudeId(payload.session_id) ? payload.session_id : null;
+    const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
     const label = basename(repoRoot) || 'agent';
     // Parent forwarded VERBATIM as on main — parent validation is PR-B's.
-    const parentEnv = process.env.MADDU_PARENT_SESSION_ID || null;
+    // CP5 (PR-B): ambient MADDU_PARENT_SESSION_ID — grammar-gated + existence
+    // checked (malformed / nonexistent → dropped to null; verify is the backstop).
+    const parentEnv = await resolveParentId(repoRoot, null, { projections });
     const makeEvent = (sessionId) => ({
       type: spine.EVENT_TYPES.SESSION_AUTO_REGISTERED,
       actor: sessionId,
@@ -393,7 +399,11 @@ async function fireSessionEnd() {
     const disc = await loadLib('discipline.mjs');
     seamThrow('handler');
     const payload = await readHookPayload();
-    const claudeId = payload.session_id || null;
+    // CP2 (PR-B): gate the claude id at the boundary (resolve/unbind self-guard
+    // too); fail-open to today's behavior on a pre-PR-B lib without isClaudeId.
+    const claudeId = spine.isClaudeId
+      ? (spine.isClaudeId(payload.session_id) ? payload.session_id : null)
+      : (payload.session_id || null);
     // No payload / no binding infra → close NOTHING (never close an
     // unattributed session; the janitor sweep is the leak backstop).
     if (!claudeId || !disc || !sessionLifecycle || !disc.withBindingTransaction) process.exit(0);
@@ -601,6 +611,14 @@ export default async function hooks(argv) {
         // Discipline snapshot (non-load-bearing open fields): don't compact over
         // undisciplined state silently. Best-effort; fail-safe to nulls.
         let uncommittedFiles = null, editsSinceSlice = null;
+        // CP3 hoist (PR-B): resolve the checkpoint actor + claude id ONCE, above
+        // the best-effort discipline snapshot, so the append records a
+        // grammar-clean actor even when the snapshot (which further refines sid2
+        // via the stored binding) is skipped or throws.
+        const refOk2 = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
+        const isClaudeId2 = spine.isClaudeId || ((v) => typeof v === 'string' && /^[\w-]{1,64}$/.test(v));
+        const claudeSessionId = isClaudeId2(payload.session_id) ? payload.session_id : null;
+        let sid2 = refOk2(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null;
         try {
           const disc = await loadLib('discipline.mjs');
           if (disc) {
@@ -612,10 +630,8 @@ export default async function hooks(argv) {
             } else {
               uncommittedFiles = (await disc.dirtyFiles(workRoot)).length;
             }
-            const refOk2 = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
-            let sid2 = refOk2(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null;
-            if (!sid2 && payload.session_id) {
-              const b = await disc.resolveMadduSession(repoRoot, payload.session_id);
+            if (!sid2 && claudeSessionId) {
+              const b = await disc.resolveMadduSession(repoRoot, claudeSessionId);
               if (refOk2(b)) sid2 = b;
             }
             if (sid2) editsSinceSlice = (await disc.readCounter(repoRoot, sid2)).editsSinceSlice || 0;
@@ -624,10 +640,10 @@ export default async function hooks(argv) {
         } catch { /* discipline snapshot best-effort */ }
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.COMPACTION_CHECKPOINT,
-          actor: process.env.MADDU_SESSION_ID || null,
+          actor: sid2,
           data: {
             trigger: payload.trigger || null,             // 'manual' | 'auto'
-            claudeSessionId: payload.session_id || null,
+            claudeSessionId,
             lastSliceStop: last ? { id: last.id, ts: last.ts, summary: String(last.summary || '').slice(0, 200) } : null,
             handoffSetAt: proj.handoff?.setAt || null,
             openApprovals: Array.isArray(proj.approvals) ? proj.approvals.filter((a) => a.status === 'requested' || a.status === 'pending').length : 0,
@@ -829,12 +845,16 @@ export default async function hooks(argv) {
       // is genuinely broken, which is itself the problem to fix).
       try {
         const { spine } = await loadSpineLib();
+        // CP3: grammar-gate the actor — an inherited malformed env id must not be
+        // written raw into the disable witness.
+        const refUninstall = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
+        const uninstallActor = refUninstall(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null;
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.DISCIPLINE_SKIPPED,
-          actor: process.env.MADDU_SESSION_ID || null,
+          actor: uninstallActor,
           data: {
             reason: 'enforcement-hook-uninstalled',
-            tool: null, sessionId: process.env.MADDU_SESSION_ID || null, enforcement: null,
+            tool: null, sessionId: uninstallActor, enforcement: null,
           },
         });
       } catch (e) {

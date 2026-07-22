@@ -4,6 +4,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { resolveLibDir, FRAMEWORK_ROOT } from './_libroot.mjs';
 
 export async function loadSpineLib() {
@@ -100,18 +101,144 @@ export async function resolveWorkAndStateRoots(paths) {
 // command, which is the friction that made it get skipped. `sessionActive`
 // is the lib from loadSpineLib() (null on pre-v0.14 installs → cache step
 // is simply skipped, env/flag still work). Returns a string id, or null.
+// Load the id grammar (PR-B) from the resolved runtime lib. Returns
+// { isRefId, InvalidExplicitId } or null on a PRE-PR-B lib — the null case is
+// the fail-open signal (validate nothing, exactly today's behavior; a newer CLI
+// must keep running against an older installed runtime). Fail open ONLY when
+// the module/exports are absent — never swallow a validation THROW.
+export async function loadIdGrammar() {
+  let dir;
+  try { dir = await resolveLibDir(); }
+  catch { return null; } // can't resolve the lib root → pre-PR-B-style fail open
+  const file = join(dir, 'id-grammar.mjs');
+  // EXISTENCE — not the import error code — decides fail-open. Node reports BOTH
+  // an absent target module AND a missing transitive dependency of a PRESENT
+  // module as ERR_MODULE_NOT_FOUND, so the code alone cannot distinguish
+  // "pre-PR-B install (no validator)" from "validator present but broken".
+  // ONLY a definitively ABSENT module (stat ENOENT) is a genuine pre-PR-B
+  // install → fail open (validate nothing, exactly today's behavior). Any OTHER
+  // stat error (EACCES/EPERM/EIO on an ACL-controlled or network-mounted
+  // install) means the file is probably THERE but unreadable → do NOT silently
+  // disable validation; propagate.
+  try { await stat(file); }
+  catch (err) {
+    if (err && err.code === 'ENOENT') return null; // genuinely absent → pre-PR-B
+    throw err;                                      // present-but-unreadable → loud
+  }
+  // Present: any import load error (a syntax error, a missing transitive dep)
+  // propagates — never silently disable a present validator.
+  const m = await import(pathToFileURL(file).href);
+  if (typeof m.isRefId === 'function' && typeof m.InvalidExplicitId === 'function') return m;
+  // Present + loads but missing the expected exports is a CORRUPT / incomplete
+  // validator, NOT a legitimate older shape (id-grammar.mjs is new in PR-B, so a
+  // present file must carry these exports). Fail LOUD, never validate-nothing.
+  throw new Error('id-grammar.mjs present but missing expected exports (isRefId/InvalidExplicitId) — corrupt install');
+}
+
+// CP1b: validate an explicit --session at a DIRECT reader (the commands that
+// read `flags.session` without going through resolveSessionId). Owned-malformed
+// throws InvalidExplicitId; absent → null. Historically these did
+// `flags.session || null`, collapsing a bad explicit flag (or a bare boolean)
+// to a null/true actor. Fail-open on a pre-PR-B lib: a string value passes, a
+// bare/empty flag → null (no worse than main, strictly safer than a boolean).
+export async function explicitSessionFlag(flags) {
+  const g = await loadIdGrammar();
+  if (flags && Object.hasOwn(flags, 'session')) {
+    const v = flags.session;
+    if (g) {
+      if (g.isRefId(v)) return v;
+      throw new g.InvalidExplicitId('session');
+    }
+    return (typeof v === 'string' && v.length > 0) ? v : null;
+  }
+  return null;
+}
+
+// CP3 (PR-B): resolve the AMBIENT acting-session id from the environment,
+// grammar-gated, for the many command sites that stamped an event actor from a
+// raw `process.env.MADDU_SESSION_ID || null`. A malformed MADDU_SESSION_ID is
+// ambient (not an explicit request) → treated as absent (null), never written
+// raw into a persisted actor/id. Routed through the resolved runtime lib so a
+// newer CLI FAILS OPEN against a pre-PR-B install (returns the raw env, exactly
+// today's behavior) rather than dropping attribution. Returns a ref-id or null.
+export async function envActingSid() {
+  const v = process.env.MADDU_SESSION_ID;
+  if (!v) return null;
+  const g = await loadIdGrammar();
+  if (g) return g.isRefId(v) ? v : null;
+  return v; // pre-PR-B lib: today's behavior (raw env)
+}
+
+// CP5 (PR-B): resolve a parent session id for a registration. Grammar + an
+// EXISTENCE check (verify.mjs FAILs a dangling parentSessionId post-append; this
+// is the write-time fail-fast). Explicit --parent malformed → THROW; ambient
+// MADDU_PARENT_SESSION_ID malformed → drop to null (+ note). Existence uses
+// ever-registered proj.sessions (includes CLOSED — a registered-then-closed
+// parent stays valid). Pass { spine, projections } to enable the existence
+// check; omit for grammar-only. Fail-open on a pre-PR-B lib.
+export async function resolveParentId(repoRoot, flags, { projections } = {}) {
+  const g = await loadIdGrammar();
+  let candidate = null;
+  if (flags && Object.hasOwn(flags, 'parent')) {
+    const v = flags.parent; // EXPLICIT — malformed is a hard error
+    if (g) {
+      if (g.isRefId(v)) candidate = v;
+      else throw new g.InvalidExplicitId('parent');
+    } else if (typeof v === 'string' && v.length > 0) candidate = v;
+  } else {
+    const env = process.env.MADDU_PARENT_SESSION_ID; // AMBIENT — malformed drops
+    if (env) {
+      if (g) { if (g.isRefId(env)) candidate = env; else process.stderr.write('[maddu] MADDU_PARENT_SESSION_ID malformed — parent link dropped\n'); }
+      else if (env.length > 0) candidate = env;
+    }
+  }
+  if (!candidate) return null;
+  try {
+    if (projections && typeof projections.project === 'function') {
+      const proj = await projections.project(repoRoot);
+      const known = new Set((proj.sessions || []).map((s) => s.id));
+      if (!known.has(candidate)) {
+        process.stderr.write('[maddu] parent session not found — parent link dropped\n');
+        return null;
+      }
+    }
+  } catch { /* projection read failed → keep candidate; verify is the backstop */ }
+  return candidate;
+}
+
 export async function resolveSessionId(repoRoot, flags, sessionActive) {
-  if (flags && typeof flags.session === 'string' && flags.session.length > 0) return flags.session;
+  const g = await loadIdGrammar();
+  // Explicit --session: an OWNED flag must be a valid reference id. A malformed
+  // owned flag (bare `true`, empty '', repeated array, non-string, bad grammar)
+  // is a HARD user error — never a silent fall-through to a DIFFERENT env/cache
+  // session. `Object.hasOwn` (not truthiness) so `--session` / `--session=` are
+  // caught, not collapsed to absence.
+  if (flags && Object.hasOwn(flags, 'session')) {
+    const v = flags.session;
+    if (g) {
+      if (g.isRefId(v)) return v;
+      throw new g.InvalidExplicitId('session');
+    }
+    // Fail open (pre-PR-B lib can't validate): today's behavior.
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  // Ambient env: grammar-gate. A malformed MADDU_SESSION_ID is AMBIENT, not an
+  // explicit request → treated as absent (fall through), never thrown.
   const env = process.env.MADDU_SESSION_ID;
-  if (env && env.length > 0) return env;
+  if (env) {
+    if (g) { if (g.isRefId(env)) return env; }
+    else if (env.length > 0) return env;
+  }
   if (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function') {
     const res = await sessionActive.readActiveSessionVerified(repoRoot);
-    // v1.111.0 discriminated union: `active` resolves; `unverified` resolves
-    // too (today's leniency — usable, never claimed verified); stale/invalid
-    // never resolve. Pre-v1.111 lib shapes (a raw record / {stale}) keep
-    // working via the fallback arm so a mid-upgrade mixed tree stays sane.
+    // v1.111.0 discriminated union: `active`/`unverified` resolve over a
+    // SANITIZED (isRefId-gated) record; stale/invalid never resolve.
     if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
-    if (res && res.kind === undefined && !res.stale && res.sessionId) return res.sessionId;
+    // Pre-v1.111 lib shape (a raw record) — grammar-gate it here (the sanitized
+    // union already gates the current shape; the legacy raw arm did not).
+    if (res && res.kind === undefined && !res.stale && res.sessionId) {
+      if (!g || g.isRefId(res.sessionId)) return res.sessionId;
+    }
   }
   return null;
 }

@@ -10,7 +10,7 @@
 //   maddu skill delete <id>
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, explicitSessionFlag } from './_spine.mjs';
 import { loadLib, loadLibOptional } from './_libroot.mjs';
 
 const ANSI = { dim: '\x1b[2m', bold: '\x1b[1m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', accent: '\x1b[35m' };
@@ -104,7 +104,7 @@ export default async function skill(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu skill apply <id> [--session <sid>]'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
-    const s = await skills.applySkill(repoRoot, id, flags.by || null, flags.session || null);
+    const s = await skills.applySkill(repoRoot, id, flags.by || null, await explicitSessionFlag(flags));
     console.log(`${ANSI.pass}applied${ANSI.reset}  ${id}  ${s.title}`);
     return;
   }

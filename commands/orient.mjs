@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib, loadLibOptional } from './_libroot.mjs';
 
 // Read this install's own version + release date for the staleness FLOOR
@@ -142,7 +142,7 @@ export default async function orient(argv) {
 
   const goal = proj.goal || null;
   const success = Array.isArray(goal?.success) ? goal.success : [];
-  const seActor = process.env.MADDU_SESSION_ID || null;
+  const seActor = await envActingSid();
   const seLane = process.env.MADDU_LANE || null;
   // audit P3 — open the eval receipt BEFORE evaluating, so a crash DURING
   // evalSuccess leaves a dangling STARTED (which stales the prior receipt) rather
@@ -349,7 +349,7 @@ export default async function orient(argv) {
         const briefings = await loadLib('briefings.mjs');
         const budget = Number(flags['curate-budget'] || 800);
         const { curated, dropped, briefingId } = await briefings.curate(repoRoot, {
-          kind: 'orient', full: handoff.body, budget, by: process.env.MADDU_SESSION_ID || null,
+          kind: 'orient', full: handoff.body, budget, by: await envActingSid(),
         });
         console.log(curated);
         if (dropped) console.log(`  ${C.dim}(reversible briefing ${briefingId} — full original retrievable)${C.reset}`);

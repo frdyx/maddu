@@ -50,8 +50,21 @@ async function main() {
     // 6. missing sessionActive lib (pre-v0.14 install) → null, no throw
     ok('absent sessionActive lib → null (no throw)', await resolveSessionId('/x', {}, null) === null);
 
-    // 7. flags.session === true (bare --session with no value) is not an id
-    ok('bare --session (true) ignored, falls through to cache', await resolveSessionId('/x', { session: true }, stub(ALIVE)) === 'ses_cache_alive');
+    // 7. PR-B: an OWNED-but-malformed --session is a HARD error (never a silent
+    //    fall-through to env/cache, which could resolve a DIFFERENT session).
+    //    Bare true, empty '', repeated array, and bad grammar all throw.
+    for (const [label, val] of [['bare true', true], ['empty', ''], ['array', ['a', 'b']], ['bad grammar', 'bad id!']]) {
+      let threw = false;
+      try { await resolveSessionId('/x', { session: val }, stub(ALIVE)); }
+      catch (e) { threw = !!(e && e.code === 'INVALID_EXPLICIT_ID'); }
+      ok(`malformed --session (${label}) throws InvalidExplicitId`, threw);
+    }
+
+    // 8. a malformed AMBIENT env is NOT an explicit request → falls through to
+    //    the (valid) cache rather than throwing.
+    process.env.MADDU_SESSION_ID = 'bad env!';
+    ok('malformed env falls through to cache', await resolveSessionId('/x', {}, stub(ALIVE)) === 'ses_cache_alive');
+    delete process.env.MADDU_SESSION_ID;
   } finally {
     if (saved === undefined) delete process.env.MADDU_SESSION_ID;
     else process.env.MADDU_SESSION_ID = saved;

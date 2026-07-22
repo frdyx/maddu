@@ -9,7 +9,7 @@
 // description. No `::` → text-only, unverifiable. Mirrors posto's goal.success[].
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 
 function parseSuccess(raw) {
   const items = raw === undefined || raw === true ? [] : (Array.isArray(raw) ? raw : [raw]);
@@ -45,7 +45,7 @@ export default async function command(argv) {
     }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.GOAL_DECLARED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { objective, constraints, success },
     });
     console.log(`goal set: ${objective}`);
@@ -78,7 +78,7 @@ export default async function command(argv) {
     }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.GOAL_COMPLETED,
-      actor: process.env.MADDU_SESSION_ID || null,
+      actor: await envActingSid(),
       data: { note, objective: g.objective || null, outcome, gatesFailed: gateInfo.failCount || 0, gatesForced: !!gateInfo.forced },
     });
     console.log(`goal ${outcome}: ${g.objective}`);

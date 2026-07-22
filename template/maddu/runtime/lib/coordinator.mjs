@@ -19,6 +19,7 @@ import { readPlan, completePhase } from './plans.mjs';
 import { readEffectiveGovernance, effectiveValue } from './governance.mjs';
 import { runSliceReview } from './review.mjs';
 import { spawnWorker } from './runtimes.mjs';
+import { isRefId, envActingSid } from './id-grammar.mjs';
 
 // NOTE (v1.3.0 coherence): the per-phase loop below shares its
 // stuck-detection heuristic ("same fail signature twice → halt") with
@@ -151,7 +152,10 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
         MADDU_COORDINATOR_PHASE: phase.name,
         MADDU_COORDINATOR_ID: coordinatorId,
         MADDU_COORDINATOR_ITER: String(iter),
-        MADDU_SESSION_ID: sessionId || process.env.MADDU_SESSION_ID || '',
+        // CP3: validate BOTH the explicit coordinator sessionId and the
+        // inherited ambient env before injecting into the child — a malformed
+        // id must not propagate down the spawn chain as an actor identity.
+        MADDU_SESSION_ID: (isRefId(sessionId) ? sessionId : envActingSid()) || '',
       };
 
       let result;

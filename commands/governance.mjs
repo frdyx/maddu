@@ -9,7 +9,7 @@
 // Three modes tune operational gates only. The 8+1 hard rules are
 // immutable regardless of mode.
 
-import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', fail: '\x1b[31m', red: '\x1b[31m', blue: '\x1b[34m', yellow: '\x1b[33m' };
@@ -100,7 +100,7 @@ export default async function governanceCmd(argv) {
       process.exit(3);
     }
     await lib.writeGovernance(repoRoot, { mode, overrides: before.overrides || {} });
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await envActingSid();
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.GOVERNANCE_MODE_CHANGED,
       actor: sessionId, lane: null,
@@ -166,7 +166,7 @@ export default async function governanceCmd(argv) {
     // never silent. For the security-sensitive off-switch an append failure ALWAYS
     // aborts (no --force bypass — an unrecordable disable must not proceed); other
     // keys downgrade a failure to a warning.
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await envActingSid();
     try {
       await spine.append(repoRoot, {
         type: spine.EVENT_TYPES.GOVERNANCE_OVERRIDE_CHANGED,
@@ -189,7 +189,7 @@ export default async function governanceCmd(argv) {
 
   if (sub === 'reset') {
     const before = await lib.readGovernance(repoRoot);
-    const sessionId = process.env.MADDU_SESSION_ID || null;
+    const sessionId = await envActingSid();
     // audit P2 (C6c/F9): reset clears overrides. Record a clear of the
     // discipline-enforcement override (→ null) so the provenance replay stays exact
     // (an out-of-band re-add would then no longer look "accounted for"). Write-ahead.

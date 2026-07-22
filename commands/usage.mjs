@@ -130,7 +130,15 @@ async function importFromClaudeCode(repoRoot, spine, flags) {
   if (files.length === 0) {
     return { ok: true, message: 'no transcript files found', imported: 0, skipped: 0, scanned: 0 };
   }
-  const sessionFilter = flags.session && flags.session !== true ? String(flags.session) : null;
+  // CP1b: --session here is a transcript-id SUBSTRING selector (not a resolved
+  // session id), so it is NOT isRefId-gated. But an OWNED bare/empty/repeated
+  // flag must be a usage error, not silently collapse to null (= import ALL
+  // transcripts) or String(array).
+  if (Object.hasOwn(flags, 'session') &&
+      (flags.session === true || flags.session === '' || Array.isArray(flags.session))) {
+    return { ok: false, message: 'invalid --session: pass a transcript-id substring, not a bare/empty/repeated flag' };
+  }
+  const sessionFilter = (typeof flags.session === 'string' && flags.session.length > 0) ? flags.session : null;
   const sinceMs = flags.since && flags.since !== true ? new Date(flags.since).getTime() : null;
   const dryRun = !!flags['dry-run'];
   const existing = await loadExistingHashes(spine, repoRoot);
