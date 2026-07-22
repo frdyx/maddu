@@ -483,12 +483,16 @@ async function reconcileCounter(repoRoot, key, c) {
       delete out.dirtyV;
     }
   }
-  // Legacy-interlude detection against the RECORDED observation.
+  // Legacy-interlude detection against the RECORDED observation. The drift
+  // alarm is CONSUMED whenever it fires — even when the counter had no
+  // baselineInit to strip (e.g. a witness-created counter): leaving it set
+  // would force a SECOND initialization on a later read, silently absorbing
+  // files dirtied in between into the baseline (never aged).
   try {
     const cur = await statSig(legacyCounterPath(repoRoot, key));
     const recorded = (out.legacySeen && typeof out.legacySeen === 'object') ? out.legacySeen : null;
     const drifted = out.legacyDrift === true || !sameSig(cur, recorded);
-    if (drifted && out.baselineInit === true) {
+    if (drifted) {
       delete out.baselineInit;   // forces a baseline-initialization evaluation
       delete out.legacyDrift;
     }
