@@ -44,15 +44,29 @@ function closeLockPath(repoRoot) {
 
 // Serialize fn under the close lock (mkdir first — the lock primitive opens
 // its path directly and .maddu/state is rebuildable/possibly absent).
-// Returns fn's result, or the LOCK sentinel when the lock cannot be acquired.
+// Returns fn's result, or the LOCK sentinel ONLY for acquisition failure
+// (timeout / lock IO): a callback exception PROPAGATES — an operational
+// failure (strict read, reducer, append) must never masquerade as lock
+// contention, or fallbacks meant for a busy lock would bypass the
+// transaction on ordinary errors.
 const LOCK_FAILED = Symbol('close-lock-failed');
 export async function withCloseLock(repoRoot, fn) {
   try {
     await mkdir(pathsFor(repoRoot).statePrjDir, { recursive: true });
-    return await withAppendLock(closeLockPath(repoRoot), fn, { maxWaitMs: CLOSE_LOCK_WAIT_MS });
   } catch {
     return LOCK_FAILED;
   }
+  let cbError = null;
+  let result;
+  try {
+    result = await withAppendLock(closeLockPath(repoRoot), async () => {
+      try { return await fn(); } catch (e) { cbError = e; return undefined; }
+    }, { maxWaitMs: CLOSE_LOCK_WAIT_MS });
+  } catch {
+    return LOCK_FAILED;   // acquisition/timeout only — fn never ran
+  }
+  if (cbError) throw cbError;
+  return result;
 }
 export function isLockFailed(v) { return v === LOCK_FAILED; }
 
@@ -175,12 +189,13 @@ export async function renewSessionIfActive(repoRoot, opts) {
 // helper asserts actor/data.sessionId consistency before appending.
 // { status: 'registered'|'invalid-id'|'exists'|'lock'|'spine-corrupt', sessionId, event }
 export async function registerSessionUniqueIn(repoRoot, { id, makeEvent, nowMs = Date.now() }) {
-  const snap = await snapshotIn(repoRoot, nowMs);
   const explicit = id !== undefined && id !== null;
+  // Grammar validation PRECEDES any snapshot/lock work — an invalid id must
+  // map to invalid-id deterministically, never contention-dependently.
+  if (explicit && !isSid(id)) return { status: 'invalid-id', sessionId: null, event: null };
+  const snap = await snapshotIn(repoRoot, nowMs);
   if (explicit) {
-    // Ids we CREATE are strict-grammar. Uniqueness is unprovable on a corrupt
-    // spine → refuse.
-    if (!isSid(id)) return { status: 'invalid-id', sessionId: null, event: null };
+    // Uniqueness is unprovable on a corrupt spine → refuse.
     if (snap.gate === 'corrupt') return { status: 'spine-corrupt', sessionId: null, event: null };
     if (snap.view.sessions.some((s) => s.id === id)) {
       return { status: 'exists', sessionId: id, event: null };
@@ -215,14 +230,20 @@ async function appendChecked(repoRoot, makeEvent, sessionId) {
 }
 
 export async function registerSessionUnique(repoRoot, opts) {
+  // Grammar validation precedes the lock (deterministic invalid-id even
+  // under contention).
+  const explicit = opts && opts.id !== undefined && opts.id !== null;
+  if (explicit && !isSid(opts.id)) return { status: 'invalid-id', sessionId: null, event: null };
   const res = await withCloseLock(repoRoot, () => registerSessionUniqueIn(repoRoot, opts));
   if (!isLockFailed(res)) return res;
-  // Close-lock busy: a SessionStart must never be lost to a busy lock. An
-  // EXPLICIT id refuses (uniqueness unprovable while the lock is held), but a
-  // GENERATED id falls back to the unlocked append — main's current shape — a
-  // freshly generated id cannot be the target of a racing close, and random
+  // Close-lock ACQUISITION failure (only — operational callback errors
+  // propagate from withCloseLock and never reach this fallback): a
+  // SessionStart must never be lost to a busy lock. An EXPLICIT id refuses
+  // (uniqueness unprovable while the lock is held), but a GENERATED id
+  // falls back to the unlocked append — main's current shape — a freshly
+  // generated id cannot be the target of a racing close, and random
   // collision is the accepted negligible risk.
-  if (opts && opts.id !== undefined && opts.id !== null) {
+  if (explicit) {
     return { status: 'lock', sessionId: null, event: null };
   }
   const sessionId = genSessionId();

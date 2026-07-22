@@ -641,6 +641,11 @@ export async function resolveClaudeBindingIn(repoRoot, claudeId) {
 //     transferred clock would age a just-created file).
 // `dirtyFiles` keeps its legacy shape ([] on failure) for count-only callers.
 export async function dirtyFilesDetailed(workRoot) {
+  // A null/absent work root is an UNKNOWN observation — Node would treat
+  // `cwd: null` as the process cwd, silently measuring the WRONG checkout.
+  if (typeof workRoot !== 'string' || workRoot.length === 0) {
+    return { ok: false, paths: [], renames: new Map() };
+  }
   try {
     const r = await gitRun(['status', '--porcelain=v1', '-z'], workRoot, 5000);
     if (r.code !== 0) return { ok: false, paths: [], renames: new Map() };

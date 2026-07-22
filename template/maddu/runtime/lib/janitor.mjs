@@ -89,7 +89,7 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
   // older lib without the reducers): parseErrors > 0 skips the WHOLE pass
   // before any candidate is mutated; the close-locked helpers then
   // re-validate each mutation against their own fresh in-lock snapshot.
-  let selectionView = projection;
+  let selectionView;
   try {
     const { events, parseErrors } = await readAllStrict(repoRoot);
     if (typeof parseErrors === 'number' && parseErrors > 0) {
@@ -98,7 +98,15 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
     }
     const view = reduceSessions(events, { nowMs });
     selectionView = { activeSessions: view.activeSessions, janitor: { staleSessions: [...view.staleSet] } };
-  } catch { /* fall back to the caller's projection */ }
+  } catch {
+    // A strict-read/reduction failure SKIPS the pass — falling back to the
+    // caller's tolerant projection would mutate without the pass-level gate
+    // this pass promises. (The projection param remains for API compat; it
+    // is never used for selection.)
+    process.stderr.write('[maddu janitor] spine unreadable — session pass skipped this round\n');
+    return { staleEmitted: 0, closedEmitted: 0, orphanedWorktrees: [] };
+  }
+  void projection;
   const { stale, closed } = evaluateSessions(selectionView, nowMs, cfg);
   const firedAt = new Date(nowMs).toISOString();
   const triggeredBy = { kind: 'janitor', id: 'sessions', fired_at: firedAt };
@@ -216,7 +224,10 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
   // snapshot→append window inside this pass is main's own pre-existing race
   // (no claim writer takes a lock today) — unwidened here, seeded to the
   // follow-up lane-surface campaign.
-  let orphaned = [];
+  // Reported releases derive ONLY from appends that actually happened — a
+  // failed append stops the loop and never reports that claim (or any
+  // unattempted later claim) as released.
+  const released = [];
   try {
     const { events, parseErrors } = await readAllStrict(repoRoot);
     if (typeof parseErrors === 'number' && parseErrors > 0) {
@@ -226,19 +237,25 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
       const view = reduceSessions(events, { nowMs });
       const activeIds = new Set(view.activeSessions.map((s) => s.id));
       const claims = reduceClaims(events, { syncMode });
-      orphaned = claims.filter((c) => typeof c.sessionId === 'string' && c.sessionId.length > 0 && !activeIds.has(c.sessionId));
+      const orphaned = claims.filter((c) => typeof c.sessionId === 'string' && c.sessionId.length > 0 && !activeIds.has(c.sessionId));
       const corrupt = claims.filter((c) => typeof c.sessionId !== 'string' || c.sessionId.length === 0);
       if (corrupt.length) process.stderr.write(`[maddu janitor] skipping ${corrupt.length} claim(s) with corrupt (non-string) actors — unrecoverable history\n`);
       for (const c of orphaned) {
         // Release AS the orphaned owner: correct in both the default
         // (delete-by-lane) and sync (delete-that-owner) projection paths.
-        await append(repoRoot, {
-          type: EVENT_TYPES.LANE_RELEASED,
-          actor: c.sessionId,
-          lane: c.lane,
-          data: { reason: 'orphan-reconcile' },
-          triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
-        });
+        try {
+          await append(repoRoot, {
+            type: EVENT_TYPES.LANE_RELEASED,
+            actor: c.sessionId,
+            lane: c.lane,
+            data: { reason: 'orphan-reconcile' },
+            triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
+          });
+          released.push(c);
+        } catch {
+          process.stderr.write(`[maddu janitor] orphan release append failed for lane ${c.lane} — remaining claims left for the next round\n`);
+          break;
+        }
       }
     }
   } catch { /* best-effort pass */ }
@@ -246,7 +263,7 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
   return {
     staleDetected: jan.staleEmitted,
     autoClosed: jan.closedEmitted,
-    orphanedClaimsReleased: orphaned.map((c) => ({ lane: c.lane, sessionId: c.sessionId })),
+    orphanedClaimsReleased: released.map((c) => ({ lane: c.lane, sessionId: c.sessionId })),
     orphanedWorktrees: jan.orphanedWorktrees || [],
   };
 }

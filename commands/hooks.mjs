@@ -197,15 +197,16 @@ async function readHookPayload() {
 // gate a worktree session against the WRONG repo's dirt.
 async function resolveWorkRootFrom(paths, payloadCwd, repoRoot) {
   void repoRoot;
-  try {
-    if (paths && typeof paths.resolveRoots === 'function') {
-      for (const cwd of [payloadCwd, process.cwd()]) {
-        if (typeof cwd !== 'string' || !cwd) continue;
-        const roots = await paths.resolveRoots(cwd);
-        if (roots && roots.workRoot) return roots.workRoot;
-      }
-    }
-  } catch { /* fall through */ }
+  if (!paths || typeof paths.resolveRoots !== 'function') return null;
+  for (const cwd of [payloadCwd, process.cwd()]) {
+    if (typeof cwd !== 'string' || !cwd) continue;
+    // Per-candidate containment: a throwing payload-cwd resolution must not
+    // abort the process.cwd() attempt.
+    try {
+      const roots = await paths.resolveRoots(cwd);
+      if (roots && roots.workRoot) return roots.workRoot;
+    } catch { /* try the next candidate */ }
+  }
   return null;
 }
 
