@@ -56,16 +56,18 @@ export async function withCloseLock(repoRoot, fn) {
   } catch {
     return LOCK_FAILED;
   }
-  let cbError = null;
+  let cbThrew = false, cbError;
   let result;
   try {
     result = await withAppendLock(closeLockPath(repoRoot), async () => {
-      try { return await fn(); } catch (e) { cbError = e; return undefined; }
+      // Boolean-tracked (not value-truthiness): `throw null` / `throw
+      // undefined` / `Promise.reject()` must propagate too.
+      try { return await fn(); } catch (e) { cbThrew = true; cbError = e; return undefined; }
     }, { maxWaitMs: CLOSE_LOCK_WAIT_MS });
   } catch {
     return LOCK_FAILED;   // acquisition/timeout only — fn never ran
   }
-  if (cbError) throw cbError;
+  if (cbThrew) throw cbError;
   return result;
 }
 export function isLockFailed(v) { return v === LOCK_FAILED; }

@@ -590,16 +590,18 @@ export async function withBindingTransaction(repoRoot, fn) {
   } catch {
     return BINDING_LOCK_FAILED;
   }
-  let cbError = null;
+  let cbThrew = false, cbError;
   let result;
   try {
     result = await withAppendLock(mapPath + '.lock', async () => {
-      try { return await fn(); } catch (e) { cbError = e; return undefined; }
+      // Boolean-tracked (not value-truthiness): `throw null` / `throw
+      // undefined` / `Promise.reject()` must propagate too.
+      try { return await fn(); } catch (e) { cbThrew = true; cbError = e; return undefined; }
     }, { maxWaitMs: BIND_LOCK_WAIT_MS });
   } catch {
     return BINDING_LOCK_FAILED;   // acquisition/timeout only — fn never ran
   }
-  if (cbError) throw cbError;
+  if (cbThrew) throw cbError;
   return result;
 }
 
