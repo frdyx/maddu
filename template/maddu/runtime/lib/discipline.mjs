@@ -536,9 +536,15 @@ export async function mutateCounter(repoRoot, key, fn) {
       const { counter, meta } = await readCounterDetailed(repoRoot, key);
       const next = (await fn(counter, meta)) || counter;
       next.legacySeen = preSig;
-      await writeJson(p, next);
+      // Persistence must be REAL to report success: a failed atomic write
+      // returns null so the caller falls to its transient fail-open path
+      // instead of believing an in-memory-only counter was persisted.
+      if (!(await writeJson(p, next))) return null;
       const postSig = await statSig(legacyCounterPath(repoRoot, key));
       if (!sameSig(preSig, postSig)) {
+        // Drift alarm. If THIS write fails, the alarm still self-corrects:
+        // the persisted legacySeen is the PRE-drift signature, so the next
+        // read's stat comparison detects the drift regardless.
         next.legacyDrift = true;
         await writeJson(p, next);
       }
@@ -575,12 +581,26 @@ const BINDING_LOCK_FAILED = Symbol('binding-lock-failed');
 export function isBindingLockFailed(v) { return v === BINDING_LOCK_FAILED; }
 export async function withBindingTransaction(repoRoot, fn) {
   const mapPath = sessionsMapPath(repoRoot);
+  // The sentinel means ACQUISITION failure only — a callback exception
+  // PROPAGATES (an operational failure inside the transaction must never
+  // masquerade as binding contention, or the caller's contention fallback
+  // would re-attempt work the transaction already partially did).
   try {
     await mkdir(disciplineDir(repoRoot), { recursive: true });
-    return await withAppendLock(mapPath + '.lock', fn, { maxWaitMs: BIND_LOCK_WAIT_MS });
   } catch {
     return BINDING_LOCK_FAILED;
   }
+  let cbError = null;
+  let result;
+  try {
+    result = await withAppendLock(mapPath + '.lock', async () => {
+      try { return await fn(); } catch (e) { cbError = e; return undefined; }
+    }, { maxWaitMs: BIND_LOCK_WAIT_MS });
+  } catch {
+    return BINDING_LOCK_FAILED;   // acquisition/timeout only — fn never ran
+  }
+  if (cbError) throw cbError;
+  return result;
 }
 
 // Unlocked inner bind — caller MUST hold the binding lock. `boundAt` is real
