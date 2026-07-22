@@ -616,10 +616,15 @@ export async function withBindingTransaction(repoRoot, fn) {
 // Unlocked inner bind — caller MUST hold the binding lock. `boundAt` is real
 // (epoch ms): the session-end rebind-freshness guard keys on it.
 export async function bindClaudeSessionIn(repoRoot, claudeId, madduId, boundAt = Date.now()) {
-  if (!claudeId || !madduId) return false;
+  // CP2 (PR-B): gate BOTH keys at the chokepoint. isClaudeId admits grammar-valid
+  // `__proto__`/`constructor`, so the write map is NULL-PROTOTYPE — a `__proto__`
+  // key becomes a plain own entry, never a prototype mutation.
+  if (!claudeIdOk(claudeId) || !refIdOk(madduId)) return false;
   const mapPath = sessionsMapPath(repoRoot);
   try {
-    const map = await readSessionsMapStrict(mapPath);   // corrupt → throw → false (no clobber)
+    const raw = await readSessionsMapStrict(mapPath);   // corrupt → throw → false (no clobber)
+    const map = Object.create(null);
+    for (const k of Object.keys(raw)) map[k] = raw[k];
     map[claudeId] = { madduId, at: boundAt };
     return writeJson(mapPath, map);
   } catch { return false; }
@@ -628,20 +633,27 @@ export async function bindClaudeSessionIn(repoRoot, claudeId, madduId, boundAt =
 // Unlocked inner unbind — caller MUST hold the binding lock. Deletes the
 // entry only if it still maps to `madduId` (compare-and-remove).
 export async function unbindClaudeSessionIn(repoRoot, claudeId, madduId) {
-  if (!claudeId || !madduId) return false;
+  if (!claudeIdOk(claudeId) || !refIdOk(madduId)) return false;
   const mapPath = sessionsMapPath(repoRoot);
   try {
-    const map = await readSessionsMapStrict(mapPath);
-    if (!map[claudeId] || map[claudeId].madduId !== madduId) return false;
-    delete map[claudeId];
+    const raw = await readSessionsMapStrict(mapPath);
+    if (!Object.hasOwn(raw, claudeId)) return false;   // own-property-safe read
+    const e = raw[claudeId];
+    if (!e || e.madduId !== madduId) return false;
+    const map = Object.create(null);
+    for (const k of Object.keys(raw)) if (k !== claudeId) map[k] = raw[k];
     return writeJson(mapPath, map);
   } catch { return false; }
 }
 
 export async function resolveMadduSession(repoRoot, claudeId) {
-  if (!claudeId) return null;
+  // CP2 (PR-B): self-validate the key (SessionStart/End reach here) and
+  // own-property-safe read; gate the persisted madduId with refIdOk.
+  if (!claudeIdOk(claudeId)) return null;
   const map = await readJson(sessionsMapPath(repoRoot), {});
-  return (map[claudeId] && map[claudeId].madduId) || null;
+  if (!map || typeof map !== 'object' || !Object.hasOwn(map, claudeId)) return null;
+  const mid = map[claudeId] && map[claudeId].madduId;
+  return refIdOk(mid) ? mid : null;
 }
 
 // Binding with its timestamp — { madduId, boundAt } | null. Lock-free
@@ -651,10 +663,11 @@ export async function resolveClaudeBinding(repoRoot, claudeId) {
   return resolveClaudeBindingIn(repoRoot, claudeId);
 }
 export async function resolveClaudeBindingIn(repoRoot, claudeId) {
-  if (!claudeId) return null;
+  if (!claudeIdOk(claudeId)) return null;
   const map = await readJson(sessionsMapPath(repoRoot), {});
+  if (!map || typeof map !== 'object' || !Object.hasOwn(map, claudeId)) return null;
   const e = map[claudeId];
-  if (!e || typeof e.madduId !== 'string' || e.madduId.length === 0) return null;
+  if (!e || !refIdOk(e.madduId)) return null;
   return { madduId: e.madduId, boundAt: Number.isFinite(e.at) ? e.at : null };
 }
 

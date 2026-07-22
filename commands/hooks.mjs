@@ -231,10 +231,14 @@ async function fireSessionStart() {
     seamThrow('handler');
     // Payload FIRST — the claude id + cwd inform everything downstream.
     const payload = await readHookPayload();
-    const claudeId = payload.session_id || null;
-    const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
     const isRefId = spine.isRefId || (() => false);
     const isSid = spine.isSid || (() => false);
+    const isClaudeId = spine.isClaudeId || (() => false);
+    // CP2 (PR-B): gate the claude session id at the boundary — a malformed id
+    // never reaches a binding-map key (the map helpers also self-guard).
+    // Malformed → null → the register-without-binding path.
+    const claudeId = isClaudeId(payload.session_id) ? payload.session_id : null;
+    const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
     const label = basename(repoRoot) || 'agent';
     // Parent forwarded VERBATIM as on main — parent validation is PR-B's.
     const parentEnv = process.env.MADDU_PARENT_SESSION_ID || null;
@@ -393,7 +397,11 @@ async function fireSessionEnd() {
     const disc = await loadLib('discipline.mjs');
     seamThrow('handler');
     const payload = await readHookPayload();
-    const claudeId = payload.session_id || null;
+    // CP2 (PR-B): gate the claude id at the boundary (resolve/unbind self-guard
+    // too); fail-open to today's behavior on a pre-PR-B lib without isClaudeId.
+    const claudeId = spine.isClaudeId
+      ? (spine.isClaudeId(payload.session_id) ? payload.session_id : null)
+      : (payload.session_id || null);
     // No payload / no binding infra → close NOTHING (never close an
     // unattributed session; the janitor sweep is the leak backstop).
     if (!claudeId || !disc || !sessionLifecycle || !disc.withBindingTransaction) process.exit(0);
