@@ -20,7 +20,7 @@ import { join, basename } from 'node:path';
 import { mkdir, readFile, writeFile, rm, appendFile } from 'node:fs/promises';
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveParentId } from './_spine.mjs';
 import { loadLib } from './_libroot.mjs';
 import registerCmd from './register.mjs';
 
@@ -241,7 +241,9 @@ async function fireSessionStart() {
     const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
     const label = basename(repoRoot) || 'agent';
     // Parent forwarded VERBATIM as on main — parent validation is PR-B's.
-    const parentEnv = process.env.MADDU_PARENT_SESSION_ID || null;
+    // CP5 (PR-B): ambient MADDU_PARENT_SESSION_ID — grammar-gated + existence
+    // checked (malformed / nonexistent → dropped to null; verify is the backstop).
+    const parentEnv = await resolveParentId(repoRoot, null, { projections });
     const makeEvent = (sessionId) => ({
       type: spine.EVENT_TYPES.SESSION_AUTO_REGISTERED,
       actor: sessionId,

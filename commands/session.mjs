@@ -15,7 +15,7 @@
 // CLI clears it and asks the user to start a new one.
 
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, loadIdGrammar } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, loadIdGrammar, resolveParentId } from './_spine.mjs';
 import { loadLibOptional } from './_libroot.mjs';
 
 function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
@@ -174,7 +174,7 @@ export default async function session(argv) {
     const { sessionId, ev } = await doRegister(spine, sessionActive, repoRoot, {
       id: flags.id, role: flags.role, label: flags.label, focus: flags.focus,
       runtime: flags.runtime, lane: flags.lane,
-      parentSessionId: flags.parent || process.env.MADDU_PARENT_SESSION_ID || null
+      parentSessionId: await resolveParentId(repoRoot, flags, { projections })
     }, sessionLifecycle);
     console.log(sessionId);
     if (process.stdout.isTTY) {
@@ -204,7 +204,7 @@ export default async function session(argv) {
       focus: flags.focus || label,
       runtime: flags.runtime,
       lane: flags.lane,
-      parentSessionId: flags.parent || process.env.MADDU_PARENT_SESSION_ID || null
+      parentSessionId: await resolveParentId(repoRoot, flags, { projections })
     }, sessionLifecycle);
     console.log(sessionId);
     if (process.stdout.isTTY) {

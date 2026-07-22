@@ -133,6 +133,43 @@ export async function explicitSessionFlag(flags) {
   return null;
 }
 
+// CP5 (PR-B): resolve a parent session id for a registration. Grammar + an
+// EXISTENCE check (verify.mjs FAILs a dangling parentSessionId post-append; this
+// is the write-time fail-fast). Explicit --parent malformed → THROW; ambient
+// MADDU_PARENT_SESSION_ID malformed → drop to null (+ note). Existence uses
+// ever-registered proj.sessions (includes CLOSED — a registered-then-closed
+// parent stays valid). Pass { spine, projections } to enable the existence
+// check; omit for grammar-only. Fail-open on a pre-PR-B lib.
+export async function resolveParentId(repoRoot, flags, { projections } = {}) {
+  const g = await loadIdGrammar();
+  let candidate = null;
+  if (flags && Object.hasOwn(flags, 'parent')) {
+    const v = flags.parent; // EXPLICIT — malformed is a hard error
+    if (g) {
+      if (g.isRefId(v)) candidate = v;
+      else throw new g.InvalidExplicitId('parent');
+    } else if (typeof v === 'string' && v.length > 0) candidate = v;
+  } else {
+    const env = process.env.MADDU_PARENT_SESSION_ID; // AMBIENT — malformed drops
+    if (env) {
+      if (g) { if (g.isRefId(env)) candidate = env; else process.stderr.write('[maddu] MADDU_PARENT_SESSION_ID malformed — parent link dropped\n'); }
+      else if (env.length > 0) candidate = env;
+    }
+  }
+  if (!candidate) return null;
+  try {
+    if (projections && typeof projections.project === 'function') {
+      const proj = await projections.project(repoRoot);
+      const known = new Set((proj.sessions || []).map((s) => s.id));
+      if (!known.has(candidate)) {
+        process.stderr.write('[maddu] parent session not found — parent link dropped\n');
+        return null;
+      }
+    }
+  } catch { /* projection read failed → keep candidate; verify is the backstop */ }
+  return candidate;
+}
+
 export async function resolveSessionId(repoRoot, flags, sessionActive) {
   const g = await loadIdGrammar();
   // Explicit --session: an OWNED flag must be a valid reference id. A malformed
