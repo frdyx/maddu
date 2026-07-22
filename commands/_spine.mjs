@@ -114,16 +114,25 @@ export async function loadIdGrammar() {
   // EXISTENCE — not the import error code — decides fail-open. Node reports BOTH
   // an absent target module AND a missing transitive dependency of a PRESENT
   // module as ERR_MODULE_NOT_FOUND, so the code alone cannot distinguish
-  // "pre-PR-B install (no validator)" from "validator present but broken". Stat
-  // the file: absent → fail open (validate nothing, exactly today's behavior);
-  // present-but-unloadable (a syntax error, a missing transitive dep) → let the
-  // import throw and PROPAGATE LOUD — never silently disable a present validator
-  // (which would let a malformed --session slip through as a no-op).
+  // "pre-PR-B install (no validator)" from "validator present but broken".
+  // ONLY a definitively ABSENT module (stat ENOENT) is a genuine pre-PR-B
+  // install → fail open (validate nothing, exactly today's behavior). Any OTHER
+  // stat error (EACCES/EPERM/EIO on an ACL-controlled or network-mounted
+  // install) means the file is probably THERE but unreadable → do NOT silently
+  // disable validation; propagate.
   try { await stat(file); }
-  catch { return null; } // id-grammar.mjs absent → genuine pre-PR-B install
-  const m = await import(pathToFileURL(file).href); // present: any load error propagates
+  catch (err) {
+    if (err && err.code === 'ENOENT') return null; // genuinely absent → pre-PR-B
+    throw err;                                      // present-but-unreadable → loud
+  }
+  // Present: any import load error (a syntax error, a missing transitive dep)
+  // propagates — never silently disable a present validator.
+  const m = await import(pathToFileURL(file).href);
   if (typeof m.isRefId === 'function' && typeof m.InvalidExplicitId === 'function') return m;
-  return null; // present but missing the expected exports → older shape, fail open
+  // Present + loads but missing the expected exports is a CORRUPT / incomplete
+  // validator, NOT a legitimate older shape (id-grammar.mjs is new in PR-B, so a
+  // present file must carry these exports). Fail LOUD, never validate-nothing.
+  throw new Error('id-grammar.mjs present but missing expected exports (isRefId/InvalidExplicitId) — corrupt install');
 }
 
 // CP1b: validate an explicit --session at a DIRECT reader (the commands that
