@@ -41,19 +41,14 @@ export async function project(repoRoot) {
   let janitorAutoClosedThisHour = 0;
   let janitorLastRunAt = null;
   const hourMs = 60 * 60 * 1000;
-  // Default-path lane claims (pre-#12c behavior): lane -> { lane, sessionId,
-  // focus, claimedAt }. Last-writer-claim, release clears the lane. Used when
-  // NOT in sync mode — byte-identical to the original reducer.
-  const claims = new Map();
-  // Team-sync reconciliation (sync mode only): track EVERY active claim per
-  // lane keyed by owning session. The winner is re-derived every rebuild as the
-  // claim earliest in the k-way-merged total order (first-claimer holds); all
-  // later concurrent claims are computed as superseded and surfaced as a
-  // read-time `contentions` view, and NOTHING is written to the spine (rule #2).
-  // Re-derived from the whole set each rebuild, so a late-arriving earlier claim
-  // wins on the next rebuild — monotonic, no frozen "B won" record.
-  const laneClaims = new Map();            // lane -> Map<sessionId, { lane, sessionId, focus, claimedAt, _order }>
-  let claimSeq = 0;                        // monotonic rank = position in the merged total order
+  // Lane ownership (PR-C): ONE ownership-fold state, mutated through the shared
+  // applyOwnershipEvent so this read-time projection and every write-time
+  // decision (ownersOf) reduce identically. Default = last-writer-claim /
+  // release clears the lane; sync = per-owner first-claimer, later concurrent
+  // claims surfaced as the read-time `contentions` view (NOTHING written to the
+  // spine, rule #2 — re-derived each rebuild, so a late-arriving earlier claim
+  // wins on the next rebuild; monotonic, no frozen "B won" record).
+  const ownState = createOwnershipState();
   const sliceStops = [];                   // list of slice-stop events, newest last
   const inbox = [];                        // list of inbox events
 
@@ -221,16 +216,8 @@ export async function project(repoRoot) {
         }
         const t = sessionsTree.get(ev.actor);
         if (t) t.state = 'closed';
-        // Release any claims held by this session (across every lane).
-        if (syncMode) {
-          for (const [lane, owners] of laneClaims) {
-            if (owners.delete(ev.actor) && owners.size === 0) laneClaims.delete(lane);
-          }
-        } else {
-          for (const [lane, c] of claims) {
-            if (c.sessionId === ev.actor) claims.delete(lane);
-          }
-        }
+        // Release any claims held by this session (shared ownership fold).
+        applyOwnershipEvent(ownState, ev, { syncMode });
         // Clear from the janitor's stale set — the session is closed
         // by the operator and no longer a janitor concern.
         janitorStaleSet.delete(ev.actor);
@@ -261,62 +248,16 @@ export async function project(repoRoot) {
         // The cockpit can re-window against Date.now() at display time
         // if it wants a sliding hour.
         janitorAutoClosedThisHour += 1;
-        // Release any claims held by the auto-closed session (across every lane).
-        if (syncMode) {
-          for (const [lane, owners] of laneClaims) {
-            if (owners.delete(sid) && owners.size === 0) laneClaims.delete(lane);
-          }
-        } else {
-          for (const [lane, c] of claims) {
-            if (c.sessionId === sid) claims.delete(lane);
-          }
-        }
+        // Release any claims held by the auto-closed session (shared fold).
+        applyOwnershipEvent(ownState, ev, { syncMode });
         break;
       }
-      case 'LANE_CLAIMED': {
-        if (!syncMode) {
-          // Pre-#12c default path: last-writer-claim.
-          claims.set(ev.lane, {
-            lane: ev.lane,
-            sessionId: ev.actor,
-            focus: ev.data.focus || null,
-            claimedAt: ev.ts
-          });
-          break;
-        }
-        // Sync mode: track every owner; first-claimer holds.
-        let owners = laneClaims.get(ev.lane);
-        if (!owners) { owners = new Map(); laneClaims.set(ev.lane, owners); }
-        const rank = claimSeq++;
-        const prior = owners.get(ev.actor);
-        owners.set(ev.actor, {
-          lane: ev.lane,
-          sessionId: ev.actor,
-          focus: ev.data.focus || null,
-          claimedAt: ev.ts,
-          // A re-claim by the SAME owner updates its data (last-writer-wins
-          // within an owner) but KEEPS its original total-order rank, so
-          // first-claimer semantics hold and a focus refresh never moves the
-          // owner behind a rival.
-          _order: prior ? prior._order : rank,
-        });
+      // Lane ownership: one delegating pair — the shared fold applies the exact
+      // per-mode transition (default last-writer / sync per-owner first-claimer).
+      case 'LANE_CLAIMED':
+      case 'LANE_RELEASED':
+        applyOwnershipEvent(ownState, ev, { syncMode });
         break;
-      }
-      case 'LANE_RELEASED': {
-        if (!syncMode) {
-          // Pre-#12c default path: a release clears the lane unconditionally.
-          claims.delete(ev.lane);
-          break;
-        }
-        // Sync mode: drop ONLY the releasing owner's claim, so a co-claimant's
-        // (or foreign/bogus) release never evicts a surviving holder.
-        const owners = laneClaims.get(ev.lane);
-        if (owners) {
-          owners.delete(ev.actor);
-          if (owners.size === 0) laneClaims.delete(ev.lane);
-        }
-        break;
-      }
       case 'SLICE_STOP':
         sliceStops.push({ id: ev.id, ts: ev.ts, actor: ev.actor, lane: ev.lane, ...ev.data });
         break;
@@ -925,6 +866,7 @@ export async function project(repoRoot) {
   // holder = the claim earliest in the total order (lowest rank; a rank tie
   // breaks on sessionId so every replica converges on the same holder). Zero
   // spine writes — pure projection, re-derived every rebuild.
+  const { claims, laneClaims } = ownState;
   let claimsOut;
   const contentions = [];
   if (!syncMode) {
@@ -1182,79 +1124,124 @@ export function reduceSessions(events, { nowMs = 0 } = {}) {
   };
 }
 
-// reduceClaims(events, { syncMode }) → claims array (one entry per held claim).
-// syncMode is EXPLICIT (round-24): default mode is last-writer-claim /
-// unconditional-release-clear; sync mode is first-claimer / per-owner-release.
-// Both modes mirror project()'s reducer byte-for-byte in semantics.
-export function reduceClaims(events, { syncMode = false } = {}) {
-  if (!syncMode) {
-    const claims = new Map();
-    for (const ev of (Array.isArray(events) ? events : [])) {
-      if (!ev || typeof ev !== 'object') continue;
-      switch (ev.type) {
-        case 'LANE_CLAIMED':
-          claims.set(ev.lane, {
-            lane: ev.lane,
-            sessionId: ev.actor,
-            focus: (ev.data && ev.data.focus) || null,
-            claimedAt: ev.ts,
-          });
-          break;
-        case 'LANE_RELEASED':
-          claims.delete(ev.lane);
-          break;
-        case 'SESSION_CLOSED':
-        case 'SESSION_AUTO_CLOSED': {
-          const sid = ev.actor || (ev.data && ev.data.sessionId);
-          for (const [lane, c] of claims) {
-            if (c.sessionId === sid) claims.delete(lane);
-          }
-          break;
-        }
-        default: break;
-      }
-    }
-    return Array.from(claims.values());
-  }
-  // Sync mode: per-owner claims, first-claimer holds (earliest _order wins).
-  const laneClaims = new Map(); // lane -> Map<sessionId, claim>
-  let claimSeq = 0;
-  for (const ev of (Array.isArray(events) ? events : [])) {
-    if (!ev || typeof ev !== 'object') continue;
-    switch (ev.type) {
-      case 'LANE_CLAIMED': {
-        let owners = laneClaims.get(ev.lane);
-        if (!owners) { owners = new Map(); laneClaims.set(ev.lane, owners); }
-        const rank = claimSeq++;
-        const prior = owners.get(ev.actor);
-        owners.set(ev.actor, {
+// ── Lane-ownership fold (PR-C, v1.113.0) — the SINGLE reduction authority ──────
+// One transition + one fold, consumed by BOTH the read-time projection
+// (project(): claims + contentions) and every write-time decision (ownersOf on a
+// fresh in-lock snapshot). Before PR-C the same reduction was hand-copied in
+// three places (project()'s inline reducer, its contentions builder, and
+// reduceClaims) and could drift; now they all derive from foldOwnership, so the
+// writer that DECIDES a claim and the projection that DISPLAYS it can never
+// disagree. syncMode is EXPLICIT: default = last-writer-claim /
+// unconditional-release-clear; sync = first-claimer (earliest _order) /
+// per-owner-release, later concurrent claims surfaced as read-time contentions.
+//   default -> st.claims:     Map<lane, { lane, sessionId, focus, claimedAt }>
+//   sync    -> st.laneClaims:  Map<lane, Map<sessionId, { ..., _order }>> + claimSeq
+export function createOwnershipState() {
+  return { claims: new Map(), laneClaims: new Map(), claimSeq: 0 };
+}
+
+// Apply ONE event's ownership transition to `st` (mutated in place, also
+// returned). Non-ownership events are ignored. Mirrors the exact semantics the
+// pre-PR-C inline reducers used, so project() output stays byte-identical.
+export function applyOwnershipEvent(st, ev, { syncMode = false } = {}) {
+  if (!ev || typeof ev !== 'object') return st;
+  switch (ev.type) {
+    case 'LANE_CLAIMED': {
+      if (!syncMode) {
+        // Default path: last-writer-claim.
+        st.claims.set(ev.lane, {
           lane: ev.lane,
           sessionId: ev.actor,
           focus: (ev.data && ev.data.focus) || null,
           claimedAt: ev.ts,
-          _order: prior ? prior._order : rank,
         });
         break;
       }
-      case 'LANE_RELEASED': {
-        const owners = laneClaims.get(ev.lane);
-        if (owners) {
-          owners.delete(ev.actor);
-          if (owners.size === 0) laneClaims.delete(ev.lane);
-        }
-        break;
-      }
-      case 'SESSION_CLOSED':
-      case 'SESSION_AUTO_CLOSED': {
-        const sid = ev.actor || (ev.data && ev.data.sessionId);
-        for (const [lane, owners] of laneClaims) {
-          if (owners.delete(sid) && owners.size === 0) laneClaims.delete(lane);
-        }
-        break;
-      }
-      default: break;
+      // Sync: track every owner; a re-claim by the SAME owner updates its data
+      // but KEEPS its original total-order rank (first-claimer semantics — a
+      // focus refresh never moves an owner behind a rival).
+      let owners = st.laneClaims.get(ev.lane);
+      if (!owners) { owners = new Map(); st.laneClaims.set(ev.lane, owners); }
+      const rank = st.claimSeq++;
+      const prior = owners.get(ev.actor);
+      owners.set(ev.actor, {
+        lane: ev.lane,
+        sessionId: ev.actor,
+        focus: (ev.data && ev.data.focus) || null,
+        claimedAt: ev.ts,
+        _order: prior ? prior._order : rank,
+      });
+      break;
     }
+    case 'LANE_RELEASED': {
+      if (!syncMode) { st.claims.delete(ev.lane); break; }
+      // Sync: drop ONLY the releasing owner, so a co-claimant's (or foreign/
+      // bogus) release never evicts a surviving holder.
+      const owners = st.laneClaims.get(ev.lane);
+      if (owners) {
+        owners.delete(ev.actor);
+        if (owners.size === 0) st.laneClaims.delete(ev.lane);
+      }
+      break;
+    }
+    case 'SESSION_CLOSED':
+    case 'SESSION_AUTO_CLOSED': {
+      const sid = ev.actor || (ev.data && ev.data.sessionId);
+      if (syncMode) {
+        for (const [lane, owners] of st.laneClaims) {
+          if (owners.delete(sid) && owners.size === 0) st.laneClaims.delete(lane);
+        }
+      } else {
+        for (const [lane, c] of st.claims) {
+          if (c.sessionId === sid) st.claims.delete(lane);
+        }
+      }
+      break;
+    }
+    default: break;
   }
+  return st;
+}
+
+// Fold an event stream into final ownership state.
+export function foldOwnership(events, { syncMode = false } = {}) {
+  const st = createOwnershipState();
+  for (const ev of (Array.isArray(events) ? events : [])) applyOwnershipEvent(st, ev, { syncMode });
+  return st;
+}
+
+// Sync-mode canonical owner ordering for one lane's owner Map: earliest _order
+// first; a rank tie (impossible within a single lane — claimSeq is unique per
+// claim — but defended for determinism) breaks on sessionId so every replica
+// converges on the same holder.
+function sortSyncOwners(ownersMap) {
+  return Array.from(ownersMap.values()).sort(
+    (a, b) => a._order - b._order || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0)
+  );
+}
+
+// ownersOf(events, lane, { syncMode }) -> { mode, holder, owners } — the
+// write-time authority. Writers call this on a FRESH in-lock strict snapshot to
+// see the FULL owner set (not just the winner) so they can reason about inactive
+// orphans and superseded owners. holder = the winning claim record (or null);
+// owners = every owner of the lane in canonical order (holder first).
+export function ownersOf(events, lane, { syncMode = false } = {}) {
+  const { claims, laneClaims } = foldOwnership(events, { syncMode });
+  if (!syncMode) {
+    const c = claims.get(lane) || null;
+    return { mode: 'default', holder: c, owners: c ? [c] : [] };
+  }
+  const ownersMap = laneClaims.get(lane);
+  const owners = ownersMap ? sortSyncOwners(ownersMap) : [];
+  return { mode: 'sync', holder: owners[0] || null, owners };
+}
+
+// reduceClaims(events, { syncMode }) -> claims array (one entry per held claim).
+// Delegates the fold to foldOwnership (single authority) then applies each
+// mode's winner selection — byte-identical to the pre-PR-C hand-rolled reducer.
+export function reduceClaims(events, { syncMode = false } = {}) {
+  const { claims, laneClaims } = foldOwnership(events, { syncMode });
+  if (!syncMode) return Array.from(claims.values());
   const out = [];
   for (const owners of laneClaims.values()) {
     let winner = null;
