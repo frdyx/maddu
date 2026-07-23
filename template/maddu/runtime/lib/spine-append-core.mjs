@@ -230,22 +230,62 @@ function onWaitStderr(dir) {
 // would contradict that partition's prev_hash chain). `ts` (tie-break replicaId)
 // only decides the CROSS-partition interleave: which stream's head goes next.
 
-// Parse the numeric segments directly under `dir` (non-recursive) into an ordered
-// event array (seq = segment index + line position). Mirrors spine.mjs#readAll's
-// bad-line tolerance so a torn line never aborts the whole read.
-async function readStreamEvents(dir) {
+// Shared segment enumeration + parse for ONE stream dir. Returns the ordered event
+// array (seq = segment index + line position) AND a strict `parseErrors` count (a
+// torn/unreadable segment or a non-JSON line). The tolerant and strict readers
+// BOTH go through here so their segment enumeration and parse rules can never
+// drift (PR-D r3-b): the tolerant caller ignores `parseErrors` and logs each bad
+// line; the strict caller uses `parseErrors` to refuse auto-recovery on any doubt.
+async function parseStreamDir(dir, { onBadLine = null } = {}) {
   const segs = await listSegmentsInDir(dir);
   const out = [];
+  let parseErrors = 0;
   for (const seg of segs) {
     let text;
-    try { text = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
+    try { text = await readFile(join(dir, seg), 'utf8'); }
+    catch { parseErrors++; continue; } // an unreadable segment is an accounting gap
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }
-      catch (err) { console.error(`spine: bad line in ${seg}:`, err.message); }
+      catch (err) { parseErrors++; if (onBadLine) onBadLine(seg, err); }
     }
   }
-  return out;
+  return { events: out, parseErrors };
+}
+
+// Tolerant read (seq order), mirrors spine.mjs#readAll's bad-line tolerance so a
+// torn line never aborts the whole read. Delegates to parseStreamDir.
+async function readStreamEvents(dir) {
+  const { events } = await parseStreamDir(dir, {
+    onBadLine: (seg, err) => console.error(`spine: bad line in ${seg}:`, err.message),
+  });
+  return events;
+}
+
+// STRICT provenance read (PR-D §3.3): every stream — the flat sentinel ('' — kept
+// even when empty so its parse status is knowable during migration) and each
+// by-replica partition — as { replicaId, events, parseErrors }, WITHOUT merging
+// (source provenance is exactly what recovery needs; readAllPartitioned discards
+// it). No tolerance: a caller decides what a nonzero parseErrors means (recovery
+// treats it as "cannot strict-account this partition → no auto").
+export async function readPartitionStreamsStrict(repoRoot) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const streams = [];
+  const flat = await parseStreamDir(eventsDir);
+  streams.push({ replicaId: '', events: flat.events, parseErrors: flat.parseErrors });
+  const byReplica = join(eventsDir, 'by-replica');
+  let dirs = [];
+  try {
+    dirs = (await readdir(byReplica, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch { /* no partitions */ }
+  for (const rid of dirs) {
+    const s = await parseStreamDir(join(byReplica, rid));
+    streams.push({ replicaId: rid, events: s.events, parseErrors: s.parseErrors });
+  }
+  return streams;
 }
 
 // Pure k-way merge of seq-ordered streams. Each `streams[k]` = { replicaId,

@@ -13,12 +13,14 @@
 // malformed id or an escaping path must never fall through to `git worktree
 // add` — the error IS the feature.
 
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, lstat } from 'node:fs/promises';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import { pathsFor, STATE_ROOT_POINTER } from './paths.mjs';
 import { append, readAll, EVENT_TYPES, makeId } from './spine.mjs';
 import { gitRun, gitAvailable, currentHead } from './git-exec.mjs';
-import { mintWorktreeInstance } from './worktree-identity.mjs';
+import { mintWorktreeInstance, readWorktreeInstance } from './worktree-identity.mjs';
+import { acquireWorktreeLock } from './worktree-lock.mjs';
+import { readPendingDetach } from './worktree-recovery.mjs';
 
 // Canonical lane-id shape. Identical to the bridge's lane-creation rule
 // (bridge-routes-lanes.mjs imports this — one regex, two enforcement points).
@@ -100,6 +102,23 @@ export function worktreeLaneLockPath(stateRoot, lane) {
 }
 export function worktreeRecoveryLockPath(stateRoot) {
   return join(pathsFor(stateRoot).statePrjDir, 'locks', 'worktree-recovery', 'global.lock');
+}
+
+// Run `fn` while holding a lane's worktree lock (PR-D §3.5). Returns
+//   { acquired:true, value }   — fn ran; lock released
+//   { acquired:false, reason } — the lock was busy past the finite wait; fn skipped
+// Every attachment-dependent WRITER (attach, detach, finalize, operator --recover,
+// force-preflight) funnels through this so a concurrent `kept` vs `abandoned`, or
+// an explicit detach racing the janitor, cannot both act on one worktree.
+export async function withLaneWorktreeLock(stateRoot, lane, fn, opts = {}) {
+  assertLaneSlug(lane);
+  const lock = await acquireWorktreeLock(worktreeLaneLockPath(stateRoot, lane), opts);
+  if (!lock.acquired) return { acquired: false, reason: lock.reason || 'lock-busy' };
+  try {
+    return { acquired: true, value: await fn(lock) };
+  } finally {
+    await lock.release();
+  }
 }
 
 // ── Read side: fold WORKTREE_ATTACHED/DETACHED into the live attachment set ──
@@ -348,97 +367,182 @@ async function removeWorktreeGit(stateRoot, path, { branch = null, force = false
   return { removed: true, branchDeleted, error: null };
 }
 
-// ── Detach: disposition a lane's live worktree ──
+// True iff the leaf at `p` exists (lstat — a broken junction/symlink still
+// "exists" as a link; §3.4/§3.6 wants the leaf, not its target). Rethrows a
+// non-ENOENT stat error (EACCES/EIO) so a probe fault is never read as "gone".
+async function pathExists(p) {
+  try { await lstat(p); return true; }
+  catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
+}
+
+// Resolve a ref to a sha, distinguishing ABSENT (exit 1 — legitimate: a merged
+// branch may already be deleted) from a git FAILURE (spawn error / other exit —
+// refuse, never treat as absent). `rev-parse --verify --quiet` exits 1 on absence.
+async function probeRef(stateRoot, ref) {
+  const r = await gitRun(['rev-parse', '--verify', '--quiet', ref], stateRoot, 3000);
+  if (r.code === 0) return r.stdout.trim() || null;
+  if (r.code === 1) return null;
+  throw new Error(`git rev-parse ${ref} failed (exit ${r.code}): ${(r.stderr || r.error || '').trim()}`);
+}
+
+// The last terminal WORKTREE_DETACHED event id for a lane (idempotent already-
+// detached reporting).
+async function lastTerminalForLane(stateRoot, lane) {
+  const events = await readAll(stateRoot);
+  let id = null;
+  for (const ev of events) if (ev.type === EVENT_TYPES.WORKTREE_DETACHED && (ev.data?.lane === lane)) id = ev.id;
+  return id;
+}
+
+// ── Detach: disposition a lane's live worktree (PR-D intent-first) ──
 //
 // disposition:
 //   merged    — verify the lane branch is an ancestor of the integration ref
 //               (default: the recorded baseRef), then remove the worktree +
-//               branch. Refused if not an ancestor, or if the worktree is
-//               dirty unless `reason` records an explicit override.
+//               branch. Refused if not an ancestor, or if the worktree is dirty
+//               unless `reason` records an explicit override.
 //   abandoned — throw the work away: force-remove the worktree + delete branch.
-//   kept      — release the attachment binding but LEAVE the checkout + branch
-//               on disk for the operator to inspect.
+//   kept      — release the attachment binding but LEAVE the checkout + branch on
+//               disk for the operator to inspect (direct terminal, NO intent).
 //
-// Emits WORKTREE_DETACHED (frozen schemaVersion-1 shape). Returns the detach
-// summary. Throws (no event) on a refused merged disposition.
+// For the REMOVING dispositions (merged|abandoned) this is a two-resource
+// transaction: authorize → append a durable WORKTREE_DETACHING intent → remove
+// the checkout (git) → postcondition (leaf ENOENT) → append the terminal
+// WORKTREE_DETACHED. A crash between the intent and the terminal is recoverable
+// (the intent records the authorization + the physical token). Runs entirely under
+// the per-lane worktree lock. Returns a status-tagged summary; a partial (intent
+// landed, removal/terminal not) reports the committed spine ENVELOPE id(s).
 export async function detachLaneWorktree(stateRoot, { lane, disposition, integrationRef = null, reason = null, by = null }) {
   assertLaneSlug(lane);
   const norm = disposition === 'keep' ? 'kept' : disposition;
   if (!['merged', 'abandoned', 'kept'].includes(norm)) {
     throw new Error(`disposition must be one of merged|abandoned|keep; got ${JSON.stringify(disposition)}`);
   }
+  const locked = await withLaneWorktreeLock(stateRoot, lane, () =>
+    detachInLock(stateRoot, { lane, norm, integrationRef, reason, by }));
+  if (!locked.acquired) {
+    const err = new Error(`another worktree op is in progress for lane "${lane}" — retry after it completes`);
+    err.code = 'EWORKTREEBUSY';
+    throw err;
+  }
+  return locked.value;
+}
 
+async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by }) {
   const att = await liveAttachmentForLane(stateRoot, lane);
-  if (!att) throw new Error(`lane "${lane}" has no live worktree to disposition`);
+  // Idempotent: the terminal already landed → nothing live to disposition.
+  if (!att) {
+    const terminalEventId = await lastTerminalForLane(stateRoot, lane);
+    return { status: 'already-detached', attachmentId: null, lane, disposition: norm, ancestorCheck: 'skipped', eventId: terminalEventId, terminalEventId, path: laneWorktreeRepoRel(lane), branchCleanupWarning: null };
+  }
 
-  // Derive the delete target from the CURRENT state root + validated lane, not
-  // the spine-persisted att.pathAbs (Codex P1): pathAbs is frozen at attach
-  // time, so after a repo move/copy it can point outside this repo — and
-  // removeWorktreeGit ends in a recursive rm. laneWorktreePath re-validates
-  // containment under <stateRoot>/.maddu/worktrees/.
+  // Derive the delete target from the CURRENT state root + validated lane, not the
+  // spine-persisted att.pathAbs (Codex P1): laneWorktreePath re-validates
+  // containment under <stateRoot>/.maddu/worktrees/ before any recursive rm.
   const path = laneWorktreePath(stateRoot, lane);
   const branchRef = att.branchRef || laneBranchRef(lane);
   const branch = laneBranch(lane);
+  const instanceId = att.worktreeInstanceId || null;
 
-  const branchHead = (await gitRun(['rev-parse', '--verify', '--quiet', branchRef], stateRoot, 3000)).stdout.trim() || null;
-  const dirty = (await gitRun(['-C', path, 'status', '--porcelain'], stateRoot, 5000)).stdout.trim().length > 0;
-
-  let ancestorCheck = 'skipped';
-  let intRef = null;
-  let intHead = null;
-  if (norm === 'merged') {
-    intRef = integrationRef || att.baseRef;
-    if (!intRef) throw new Error(`merged needs an integration ref — none recorded on the attachment; pass --integration-ref <ref>`);
-    intHead = (await gitRun(['rev-parse', '--verify', '--quiet', intRef], stateRoot, 3000)).stdout.trim() || null;
-    if (!intHead) throw new Error(`integration ref "${intRef}" does not resolve`);
-    // merge-base --is-ancestor <branchHead> <intHead>: exit 0 ⇒ the lane branch
-    // is already contained in the integration ref. Máddu never runs the merge
-    // — it only verifies the operator did (cooperative posture).
-    const anc = await gitRun(['merge-base', '--is-ancestor', branchHead, intHead], stateRoot, 5000);
-    ancestorCheck = anc.code === 0 ? 'pass' : 'fail';
-    if (ancestorCheck === 'fail') {
-      throw new Error(`lane branch ${branch} is not merged into ${intRef} — merge it first, or use disposition abandoned|keep`);
-    }
-    if (dirty && !reason) {
-      throw new Error(`worktree for "${lane}" has uncommitted changes — commit them, or record an override with --reason "..."`);
-    }
+  // kept — direct terminal, NO intent, NO removal, NO postcondition (§3.2). A lost
+  // single append leaves the checkout intact → a plain retry re-appends.
+  if (norm === 'kept') {
+    const branchHead = await probeRef(stateRoot, branchRef);
+    const st = await gitRun(['-C', path, 'status', '--porcelain'], stateRoot, 5000);
+    const dirty = st.code === 0 ? st.stdout.trim().length > 0 : false; // kept never removes; cleanliness is informational
+    const ev = await append(stateRoot, {
+      type: EVENT_TYPES.WORKTREE_DETACHED, actor: by || att.session, lane,
+      data: {
+        schemaVersion: 1, attachmentId: att.attachmentId, lane, pathRepoRel: att.pathRepoRel,
+        disposition: 'kept', branchHead, integrationRef: null, integrationHead: null,
+        ancestorCheck: 'skipped', dirtyAtDetach: dirty, reason: reason || null, worktreeInstanceId: instanceId,
+      },
+    });
+    return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: 'kept', dirty, ancestorCheck: 'skipped', eventId: ev.id, path: att.pathRepoRel, branchCleanupWarning: null };
   }
 
-  // Git-side unwind. kept leaves everything; merged/abandoned remove the
-  // checkout and delete the branch (merged is safe — it's contained; abandoned
-  // is deliberate discard).
+  // ── removing (merged|abandoned): intent-first ──
+
+  // RESUME a pending intent (crash between intent and terminal): skip re-
+  // authorization and carry the intent's recorded verification (covers the
+  // null-branchHead merged-retry). An UNRECOVERABLE intent (ambiguous / identity
+  // mismatch) routes to the operator, never a silent fresh authorization.
+  const pend = await readPendingDetach(stateRoot);
+  const resume = pend.candidates.find((c) => c.attachmentId === att.attachmentId);
+  const blocked = pend.surfaced.find((s) => s.attachmentId === att.attachmentId && s.reason !== 'post-terminal');
+  let verified, intentEventId;
+  if (resume) {
+    verified = { disposition: resume.disposition, integrationRef: resume.integrationRef, integrationHead: resume.integrationHead, branchHead: resume.branchHead, ancestorCheck: resume.ancestorCheck, dirtyAtDetach: resume.dirtyAtDetach, reason: resume.reason };
+    intentEventId = resume.intentEventId;
+  } else if (blocked) {
+    throw new Error(`lane "${lane}" has an unrecoverable detach intent (${blocked.reason}) — resolve with: maddu lane release ${lane} --worktree --recover`);
+  } else {
+    // A fresh (no-intent) removing detach requires the checkout to be PRESENT: an
+    // absent checkout is the intent-less strand (§3.7) — its physical identity
+    // can't be verified, so route to the audited operator recovery, never auto-
+    // terminalize an attachment whose checkout may have been replaced.
+    if (!(await pathExists(path))) {
+      throw new Error(`checkout for lane "${lane}" is not present — cannot authorize a fresh detach; use: maddu lane release ${lane} --worktree --recover`);
+    }
+    // Authorize fresh — every git probe's exit code is checked (a failed status/
+    // rev-parse REFUSES, never "clean").
+    const branchHead = await probeRef(stateRoot, branchRef);
+    const st = await gitRun(['-C', path, 'status', '--porcelain'], stateRoot, 5000);
+    if (st.code !== 0) throw new Error(`cannot determine cleanliness of worktree for "${lane}" (git status exit ${st.code}: ${(st.stderr || st.error || '').trim()}) — refusing`);
+    const dirty = st.stdout.trim().length > 0;
+    let ancestorCheck = 'skipped', intRef = null, intHead = null;
+    if (norm === 'merged') {
+      // --merged is unverifiable once the branch is gone (no intent to inherit) → refuse.
+      if (!branchHead) throw new Error(`lane branch ${branch} does not resolve — cannot verify a merge; use disposition abandoned|keep, or --recover`);
+      intRef = integrationRef || att.baseRef;
+      if (!intRef) throw new Error(`merged needs an integration ref — none recorded on the attachment; pass --integration-ref <ref>`);
+      intHead = await probeRef(stateRoot, intRef);
+      if (!intHead) throw new Error(`integration ref "${intRef}" does not resolve`);
+      const anc = await gitRun(['merge-base', '--is-ancestor', branchHead, intHead], stateRoot, 5000);
+      if (anc.code === 0) ancestorCheck = 'pass';
+      else if (anc.code === 1) { throw new Error(`lane branch ${branch} is not merged into ${intRef} — merge it first, or use disposition abandoned|keep`); }
+      else throw new Error(`git merge-base --is-ancestor failed (exit ${anc.code}: ${(anc.stderr || anc.error || '').trim()}) — refusing`);
+      if (dirty && !reason) throw new Error(`worktree for "${lane}" has uncommitted changes — commit them, or record an override with --reason "..."`);
+    }
+    const intentId = makeId('wtd');
+    const iev = await append(stateRoot, {
+      type: EVENT_TYPES.WORKTREE_DETACHING, actor: by || att.session, lane,
+      data: {
+        schemaVersion: 1, intentId, attachmentId: att.attachmentId, lane, pathRepoRel: att.pathRepoRel,
+        worktreeInstanceId: instanceId, disposition: norm, integrationRef: intRef, integrationHead: intHead,
+        branchHead, ancestorCheck, dirtyAtDetach: dirty, reason: reason || null,
+      },
+    });
+    intentEventId = iev.id;
+    verified = { disposition: norm, integrationRef: intRef, integrationHead: intHead, branchHead, ancestorCheck, dirtyAtDetach: dirty, reason: reason || null };
+  }
+
+  // Removal (multiple boundaries) + postcondition. A genuinely-present checkout
+  // whose git remove FAILS throws "left intact" (distinct from a partial). A
+  // resume whose checkout is already gone skips removal (best-effort branch delete).
   let branchCleanupWarning = null;
-  if (norm !== 'kept') {
+  if (await pathExists(path)) {
     const g = await removeWorktreeGit(stateRoot, path, { branch, force: true });
-    // Abort BEFORE recording the detach if the CHECKOUT removal failed (Codex
-    // P2) — never drop the attachment while git still tracks the worktree.
-    if (!g.removed) {
-      throw new Error(`cannot ${norm} lane "${lane}": ${g.error} — worktree left intact, not detached`);
-    }
-    // A branch that survived is a lingering ref, not an inconsistency: the
-    // checkout IS gone, so the attachment MUST end. Record the detach and
-    // surface the leftover branch for the operator to delete by hand — never
-    // leave a live attachment pointing at a removed worktree.
+    if (!g.removed) throw new Error(`cannot ${norm} lane "${lane}": ${g.error} — worktree left intact, not detached`);
     if (!g.branchDeleted) branchCleanupWarning = g.error;
+  } else {
+    const rm2 = await gitRun(['branch', '-D', branch], stateRoot, 5000);
+    if (rm2.code !== 0) branchCleanupWarning = `worktree already removed; git branch -D ${branch} failed (${(rm2.stderr || rm2.error || '').trim()})`;
+  }
+  // Postcondition: the leaf must be gone. A SURVIVOR → partial:remove (intent
+  // stands, terminal withheld) — the intent id is what committed.
+  if (await pathExists(path)) {
+    return { status: 'partial', stage: 'remove', committed: [intentEventId], attachmentId: att.attachmentId, lane, disposition: verified.disposition, ancestorCheck: verified.ancestorCheck, path: att.pathRepoRel, branchCleanupWarning };
   }
 
-  const ev = await append(stateRoot, {
-    type: EVENT_TYPES.WORKTREE_DETACHED,
-    actor: by || att.session, lane,
+  const term = await append(stateRoot, {
+    type: EVENT_TYPES.WORKTREE_DETACHED, actor: by || att.session, lane,
     data: {
-      schemaVersion: 1,
-      attachmentId: att.attachmentId,
-      lane,
-      pathRepoRel: att.pathRepoRel,
-      disposition: norm,
-      branchHead,
-      integrationRef: intRef,
-      integrationHead: intHead,
-      ancestorCheck,
-      dirtyAtDetach: dirty,
-      reason: reason || null,
+      schemaVersion: 1, attachmentId: att.attachmentId, lane, pathRepoRel: att.pathRepoRel,
+      disposition: verified.disposition, branchHead: verified.branchHead, integrationRef: verified.integrationRef,
+      integrationHead: verified.integrationHead, ancestorCheck: verified.ancestorCheck, dirtyAtDetach: verified.dirtyAtDetach,
+      reason: verified.reason, worktreeInstanceId: instanceId,
     },
   });
-
-  return { attachmentId: att.attachmentId, lane, disposition: norm, dirty, ancestorCheck, eventId: ev.id, path: att.pathRepoRel, branchCleanupWarning };
+  return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: verified.disposition, dirty: verified.dirtyAtDetach, ancestorCheck: verified.ancestorCheck, eventId: term.id, path: att.pathRepoRel, branchCleanupWarning };
 }
