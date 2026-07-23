@@ -1,6 +1,6 @@
 {
-  "version": "1.10.0",
-  "fingerprint": "66ee0925",
+  "version": "1.11.0",
+  "fingerprint": "a7d55fb0",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1697,10 +1697,30 @@
           "platform": "string",
           "reused": "boolean",
           "schemaVersion": "number",
-          "session": "string"
+          "session": "string",
+          "worktreeInstanceId": "string?"
         }
       },
       "WORKTREE_DETACHED": {
+        "frozen": true,
+        "data": {
+          "ancestorCheck": "string",
+          "attachmentId": "string",
+          "attachmentOwner": "string?",
+          "branchHead": "string|null",
+          "dirtyAtDetach": "boolean",
+          "disposition": "string",
+          "integrationHead": "string|null",
+          "integrationRef": "string|null",
+          "lane": "string",
+          "pathRepoRel": "string",
+          "reason": "string|null",
+          "recoveryActor": "string?",
+          "schemaVersion": "number",
+          "worktreeInstanceId": "string?"
+        }
+      },
+      "WORKTREE_DETACHING": {
         "frozen": true,
         "data": {
           "ancestorCheck": "string",
@@ -1710,10 +1730,12 @@
           "disposition": "string",
           "integrationHead": "string|null",
           "integrationRef": "string|null",
+          "intentId": "string",
           "lane": "string",
           "pathRepoRel": "string",
           "reason": "string|null",
-          "schemaVersion": "number"
+          "schemaVersion": "number",
+          "worktreeInstanceId": "string"
         }
       }
     }

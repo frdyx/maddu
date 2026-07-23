@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.10.0",
+  "x-contractVersion": "1.11.0",
   "type": "object",
   "required": [
     "v",
@@ -201,6 +201,7 @@
         "AUTONOMY_SCORED",
         "AUTONOMY_RECOMMENDATION",
         "WORKTREE_ATTACHED",
+        "WORKTREE_DETACHING",
         "WORKTREE_DETACHED",
         "MODEL_DATASET_SNAPSHOT_RECORDED",
         "MODEL_TRAINING_RUN_STARTED",
@@ -6161,6 +6162,80 @@
               },
               "platform": {
                 "type": "string"
+              },
+              "worktreeInstanceId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WORKTREE_DETACHING"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A removing worktree detach (merged|abandoned) was authorized and begun (durable intent; the attachment stays LIVE until WORKTREE_DETACHED).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "intentId": {
+                "type": "string"
+              },
+              "attachmentId": {
+                "type": "string"
+              },
+              "lane": {
+                "type": "string"
+              },
+              "pathRepoRel": {
+                "type": "string"
+              },
+              "worktreeInstanceId": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string"
+              },
+              "integrationRef": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "integrationHead": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "branchHead": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ancestorCheck": {
+                "type": "string"
+              },
+              "dirtyAtDetach": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }
@@ -6226,6 +6301,15 @@
                   "string",
                   "null"
                 ]
+              },
+              "worktreeInstanceId": {
+                "type": "string"
+              },
+              "recoveryActor": {
+                "type": "string"
+              },
+              "attachmentOwner": {
+                "type": "string"
               }
             }
           }

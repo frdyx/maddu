@@ -14,6 +14,8 @@ import { append, readAll, EVENT_TYPES, hashLine } from '../../template/maddu/run
 import { readReplicaId, resolveWriteReplica, pendingReplicaPath } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
 import { verifySpine } from '../../template/maddu/runtime/lib/verify.mjs';
 import { syncInit, scanSpineForSecrets, importPartitions } from '../../template/maddu/runtime/lib/spine-sync.mjs';
+import { readLineage, classifyOrigin, bootstrapLineageUpgrade, lineagePath } from '../../template/maddu/runtime/lib/replica-lineage.mjs';
+import { writeFile as fsWriteFile } from 'node:fs/promises';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error(`  ✗ ${m}`); } };
@@ -349,6 +351,69 @@ async function main() {
     // .gitattributes marks partition ndjson -text so bytes survive cross-platform.
     const attr = await readFile(join(repo, '.gitattributes'), 'utf8');
     ok(/by-replica.*-text/.test(attr), '.gitattributes marks partition segments -text');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // 5. PR-D §3.1 / test 8b — device-local replica lineage + origin classifier.
+  //    Needs a REAL git repo (lineage lives in $GIT_DIR via --git-common-dir).
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-si-lineage-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await writeFile(join(repo, '.gitignore'), '.maddu/*\n!.maddu/config/\n');
+    await append(repo, { type: TYPE, data: {} });
+
+    // Fresh init writes {current, [], complete:true} — this device is the origin.
+    const res = await syncInit(repo, { mintId: () => 'rep_lin01', now: '2026-01-01T00:00:00Z' });
+    ok(res.ok && res.replicaId === 'rep_lin01', 'lineage: fresh sync init ok');
+    const ln = await readLineage(repo);
+    ok(ln && ln.current === 'rep_lin01' && ln.predecessors.length === 0 && ln.complete === true,
+      `lineage: fresh init writes {current, [], complete:true} (got ${JSON.stringify(ln)})`);
+
+    // The active partition classifies LOCAL; an unlisted source is FOREIGN because
+    // complete:true; a predecessor id is LOCAL.
+    ok((await classifyOrigin(repo, 'rep_lin01')) === 'local', 'classify: current partition → local');
+    ok((await classifyOrigin(repo, 'rep_elsewhere')) === 'foreign', 'classify: unlisted source with complete:true → foreign');
+    const lp = await lineagePath(repo);
+    await fsWriteFile(lp, JSON.stringify({ current: 'rep_lin01', predecessors: ['rep_old00'], complete: true }));
+    ok((await classifyOrigin(repo, 'rep_old00')) === 'local', 'classify: a predecessor id → local');
+
+    // current !== replica.json.replicaId → unverifiable (stale/mis-set lineage).
+    await fsWriteFile(lp, JSON.stringify({ current: 'rep_DIFFERENT', predecessors: [], complete: true }));
+    ok((await classifyOrigin(repo, 'rep_lin01')) === 'unverifiable', 'classify: current≠replica.json → unverifiable');
+
+    // Malformed / missing lineage → unverifiable (fail closed, never foreign).
+    await fsWriteFile(lp, '{ not json');
+    ok((await classifyOrigin(repo, 'rep_lin01')) === 'unverifiable', 'classify: malformed lineage → unverifiable');
+    await rm(lp, { force: true });
+    ok((await classifyOrigin(repo, 'rep_lin01')) === 'unverifiable', 'classify: missing lineage → unverifiable');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // 5b. Upgrade backfill — an already-synced checkout with NO lineage file gets
+  //     {current:existing, predecessors:[], complete:false}; an unlisted source is
+  //     then UNVERIFIABLE (not foreign, because completeness is unknown).
+  {
+    const repo = await mkdtemp(join(tmpdir(), 'maddu-si-upgrade-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await writeFile(join(repo, '.gitignore'), '.maddu/*\n!.maddu/config/\n');
+    await append(repo, { type: TYPE, data: {} });
+    // First init writes a complete lineage; delete it to simulate a pre-PR-D sync.
+    await syncInit(repo, { mintId: () => 'rep_upg01' });
+    const lp = await lineagePath(repo);
+    await rm(lp, { force: true });
+    // Re-running init on an already-synced repo takes the upgrade-backfill path.
+    const again = await syncInit(repo, { mintId: () => 'rep_SHOULD_NOT_MINT' });
+    ok(again.ok && again.already === true, 'upgrade: re-init on a synced repo returns already');
+    const ln = await readLineage(repo);
+    ok(ln && ln.current === 'rep_upg01' && ln.complete === false,
+      `upgrade: backfills {current:existing, [], complete:false} (got ${JSON.stringify(ln)})`);
+    ok((await classifyOrigin(repo, 'rep_upg01')) === 'local', 'upgrade: own partition still classifies local');
+    ok((await classifyOrigin(repo, 'rep_unknown')) === 'unverifiable', 'upgrade: unlisted source → unverifiable (complete:false), never foreign');
+    // The backfill NEVER overwrites a present lineage.
+    await fsWriteFile(lp, JSON.stringify({ current: 'rep_upg01', predecessors: ['rep_keep'], complete: true }));
+    await syncInit(repo, { mintId: () => 'rep_X' });
+    const ln2 = await readLineage(repo);
+    ok(ln2 && ln2.predecessors.includes('rep_keep') && ln2.complete === true, 'upgrade: backfill does not overwrite a present lineage');
     await rm(repo, { recursive: true, force: true });
   }
 

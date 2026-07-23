@@ -121,6 +121,32 @@ async function main() {
     const live = await wt.liveAttachmentForLane(repo, 'git-integration');
     ok('liveAttachmentForLane finds it', live?.attachmentId === r.attachmentId);
 
+    // ── PR-D §3.1: per-worktree physical identity token ──
+    const ident = await import(pathToFileURL(path.join(LIB, 'worktree-identity.mjs')).href);
+    const token1 = r.worktreeInstanceId;
+    ok('attach returns a worktreeInstanceId (hex)', typeof token1 === 'string' && /^[0-9a-f]{32}$/.test(token1 || ''));
+    ok('WORKTREE_ATTACHED carries the token', att?.data?.worktreeInstanceId === token1);
+    ok('readAttachments folds the token through', live?.worktreeInstanceId === token1);
+    // The token lives in the PRIVATE per-worktree git dir (…/.git/worktrees/<n>),
+    // not shared info/ — read it straight back.
+    const read1 = await ident.readWorktreeInstance(repo, wtPath);
+    ok('token is on-disk in the private git dir', read1.state === 'present' && read1.token === token1);
+    // git worktree repair rewrites the link files in place — the token survives.
+    await git(['worktree', 'repair'], repo);
+    const afterRepair = await ident.readWorktreeInstance(repo, wtPath);
+    ok('git worktree repair preserves the token', afterRepair.state === 'present' && afterRepair.token === token1);
+    // A DIFFERENT lane's checkout carries a DISTINCT token (not one shared info/).
+    await writeFile(path.join(repo, '.maddu', 'lanes', 'catalog.json'),
+      JSON.stringify({ schemaVersion: 1, lanes: [{ id: 'git-integration', scope: 'x' }, { id: 'identity-two', scope: 'z' }] }, null, 2));
+    const r3 = await wt.attachLaneWorktree(repo, { lane: 'identity-two', session: 'ses_1', claimEventId: 'evt_i2' });
+    ok('a second lane gets a DISTINCT token (not a shared info/ token)',
+      typeof r3.worktreeInstanceId === 'string' && r3.worktreeInstanceId !== token1);
+    await git(['worktree', 'remove', '--force', path.join(repo, '.maddu', 'worktrees', 'identity-two')], repo);
+    // Absent vs unresolvable states: delete the token file → absent; a bogus path
+    // → unresolvable (§3.1 fails closed on both, never "removed").
+    const missingBogus = await ident.readWorktreeInstance(repo, path.join(repo, '.maddu', 'worktrees', 'does-not-exist'));
+    ok('a vanished checkout reads UNRESOLVABLE (never "removed")', missingBogus.state === 'unresolvable');
+
     // ── the concurrent-attach lock refuses a second in-flight attach ──
     // Simulate a held lock by pre-creating the lock dir on a fresh lane.
     await writeFile(path.join(repo, '.maddu', 'lanes', 'catalog.json'),

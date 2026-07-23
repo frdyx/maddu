@@ -18,6 +18,7 @@ import { isAbsolute, join, resolve, sep } from 'node:path';
 import { pathsFor, STATE_ROOT_POINTER } from './paths.mjs';
 import { append, readAll, EVENT_TYPES, makeId } from './spine.mjs';
 import { gitRun, gitAvailable, currentHead } from './git-exec.mjs';
+import { mintWorktreeInstance } from './worktree-identity.mjs';
 
 // Canonical lane-id shape. Identical to the bridge's lane-creation rule
 // (bridge-routes-lanes.mjs imports this — one regex, two enforcement points).
@@ -86,6 +87,21 @@ export function laneWorktreeRepoRel(id) {
   return `.maddu/worktrees/${id}`;
 }
 
+// ── Worktree lock namespaces (PR-D §3.5) ──
+//
+// The per-lane worktree lock and the global recovery lock live in DISJOINT
+// directories on purpose: `recover` is itself a valid lane slug (LANE_SLUG_RE),
+// so a shared `worktree.<name>.lock` space would make the recovery lock alias the
+// real `recover` lane's lock and deadlock the janitor against itself. Both use
+// the atomic-publish primitive in worktree-lock.mjs.
+export function worktreeLaneLockPath(stateRoot, lane) {
+  assertLaneSlug(lane);
+  return join(pathsFor(stateRoot).statePrjDir, 'locks', 'worktree-lanes', `${lane}.lock`);
+}
+export function worktreeRecoveryLockPath(stateRoot) {
+  return join(pathsFor(stateRoot).statePrjDir, 'locks', 'worktree-recovery', 'global.lock');
+}
+
 // ── Read side: fold WORKTREE_ATTACHED/DETACHED into the live attachment set ──
 //
 // Pure derivation over the spine (same posture as the projector). An
@@ -104,6 +120,7 @@ export async function readAttachments(stateRoot) {
           pathRepoRel: d.pathRepoRel, pathAbs: d.pathAbs,
           branchRef: d.branchRef, baseRef: d.baseRef || null,
           baseHeadAtAttach: d.baseHeadAtAttach || null,
+          worktreeInstanceId: d.worktreeInstanceId || null,
           attachedAt: ev.ts, attachEventId: ev.id,
         });
       }
@@ -227,6 +244,20 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
     const commonDir = (await gitRun(['rev-parse', '--git-common-dir'], stateRoot, 3000)).stdout.trim() || null;
     const attachmentId = makeId('wta');
 
+    // Physical identity (PR-D §3.1): mint a per-worktree token into the checkout's
+    // PRIVATE git dir BEFORE the WORKTREE_ATTACHED append. Load-bearing — if the
+    // token can't be durably written+read-back, roll back the git provisioning and
+    // append NO event (an attachment whose physical identity never persisted could
+    // never be recovery-verified). Done before the ownerCheck early-out so a token
+    // failure never leaves a checkout that a later attach could phantom-reuse.
+    let worktreeInstanceId;
+    try {
+      worktreeInstanceId = await mintWorktreeInstance(stateRoot, path);
+    } catch (e) {
+      await rollbackGit();
+      throw new Error(`lane "${lane}" worktree identity could not be established — rolled back, not attached: ${e.message}`);
+    }
+
     // Cheap early-out (Codex P1): if we've already lost the lane, unwind now
     // and emit NO event at all — the common lost-race case costs no spine churn.
     if (typeof ownerCheck === 'function' && !(await ownerCheck())) {
@@ -248,6 +279,7 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
         baseHeadAtAttach: head.commit,
         created, reused: false, dirty: false,
         gitCommonDir: commonDir, platform: process.platform,
+        worktreeInstanceId,
       },
     });
 
@@ -278,7 +310,7 @@ export async function attachLaneWorktree(stateRoot, { lane, session, claimEventI
 
     return {
       attachmentId, lane, session, path, relPath, branch, branchRef,
-      created, reused: false, eventId: ev.id,
+      created, reused: false, eventId: ev.id, worktreeInstanceId,
     };
   } finally {
     try { await rm(lockDir, { recursive: true, force: true }); } catch {}
