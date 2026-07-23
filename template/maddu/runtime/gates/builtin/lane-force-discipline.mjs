@@ -108,15 +108,19 @@ export default {
       // forceGroup-id bundle. Legacy triples (no forceGroup) skip this.
       const fg = ev.data && ev.data.forceGroup;
       if (fg) {
-        // Reconstruct the pre-force holder from ALL events before the MARKER,
-        // MINUS the bundle's own mutations (every event carrying this forceGroup
-        // — its preempt-releases). This is robust against a forged boundary: an
-        // attacker cannot plant an extra fg-carrying release (same-lane or cross-
-        // lane) to clear the real holder, because ALL fg-events are excluded from
-        // the reconstruction; and a legitimate intervening holder's claim carries
-        // NO forceGroup, so it survives the filter and is correctly recovered.
+        // Reconstruct the pre-force holder from all events before the MARKER,
+        // MINUS the bundle's own preempt-releases (a LANE_RELEASED carrying this
+        // forceGroup). A legitimate bundle's ONLY pre-marker events are those
+        // preempt-releases — the bundle's LANE_CLAIMED is the TRAILING claim,
+        // after the marker. So the filter is bundle-shape-validated, not blanket:
+        //   - a planted LANE_RELEASED with the fg (same/cross-lane) is filtered,
+        //     so it can't clear the real holder;
+        //   - a pre-marker LANE_CLAIMED carrying the fg is NEVER legitimate and is
+        //     NOT filtered, so a forged claim tagged with the fg cannot hide the
+        //     real holder it established;
+        //   - an ordinary intervening claim (no fg) survives and is recovered.
         const evIdx = indexOf.get(ev);
-        const prefix = all.slice(0, evIdx).filter((e) => !(e && e.data && e.data.forceGroup === fg));
+        const prefix = all.slice(0, evIdx).filter((e) => !(e && e.type === EVENT_TYPES.LANE_RELEASED && e.data && e.data.forceGroup === fg));
         const recon = ownersOf(prefix, ev.lane, { syncMode }).holder;
         const reconId = recon ? recon.sessionId : null;
         if (prior !== reconId) {

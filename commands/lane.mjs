@@ -66,7 +66,7 @@ function exitOwnershipFailure(r, lid, sid) {
       const committed = Array.isArray(r.committed) && r.committed.length ? r.committed.join(', ') : 'none';
       console.error(`lane "${lid}" transaction partially applied (stage: ${r.stage}) — state is append-only (no rollback); re-run to complete.`);
       console.error(`  committed events: ${committed}`);
-      console.error(`  current holder: ${r.holder || 'none'}`);
+      console.error(`  holder at decision time: ${r.holder || 'none'} (re-run re-reads current state)`);
       process.exit(1);
       break;
     }
@@ -454,7 +454,7 @@ export default async function lane(argv) {
         const committed = Array.isArray(r.committed) && r.committed.length ? r.committed.join(', ') : 'none';
         console.error(`lane "${lid}" release partially applied (stage: ${r.stage}) — state is append-only (no rollback); re-run.`);
         console.error(`  committed events: ${committed}`);
-        console.error(`  current holder: ${r.holder || 'none'}`);
+        console.error(`  holder at decision time: ${r.holder || 'none'} (re-run re-reads current state)`);
         process.exit(1);
         break;
       }

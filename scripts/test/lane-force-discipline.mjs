@@ -172,6 +172,22 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
   {
+    // Forged-prior via a pre-marker LANE_CLAIMED tagged with the fg: a real
+    // claim by sB carries the forceGroup (forged), so a blanket filter would
+    // erase it and reconstruct sA. The bundle-shape filter removes only
+    // preempt-RELEASES, so sB's claim survives → sB is the holder → hard-fail.
+    const root = await tempRepo('maddu-lfd-fg-forged3-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ev('LANE_CLAIMED', 'L1', 'sB', { forceGroup: 'fg-forged3' }), // real holder sB, forged fg tag
+      ev('LANE_CLAIM_FORCED', 'L1', 'sA', { lane: 'L1', priorSessionId: 'sA', by: 'sA', forceGroup: 'fg-forged3' }),
+      ev('LANE_CLAIMED', 'L1', 'sA', { forceGroup: 'fg-forged3' }),
+    ], 'standard');
+    const r = await run(root);
+    ok('forceGroup: forged prior via pre-marker fg-tagged claim → hard-fail (default)',
+      r.ok === false && /reconstructed pre-force holder/.test(JSON.stringify(r.evidence?.problems)), JSON.stringify(r.evidence?.problems)?.slice(0, 160));
+    await rm(root, { recursive: true, force: true });
+  }
+  {
     // SYNC mode: a holder mismatch is a NON-blocking warn (a late-imported
     // foreign claim can shift the reconstructed holder; the gate cannot prove the
     // writer's local snapshot). ok:true, status:'warn'.

@@ -343,7 +343,8 @@ try {
     let before = await allEventIds(r);
     let res = await own.autoClaimLane(r, { sid: A, lane: 'auto-lane', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim', append: failAfter(1) });
     let landed = await landedSince(r, before);
-    ok('12o. auto-claim fail@cleanup-release → partial, committed==landed(trigger)', res.reason === 'partial' && res.stage === 'cleanup-release' && JSON.stringify(res.committed) === JSON.stringify(landed) && !(await holds(r, A, 'auto-lane')), `${res.stage} committed=${JSON.stringify(res.committed)} landed=${JSON.stringify(landed)}`);
+    // The decision-time holder of 'auto-lane' is the inactive orphan owner B.
+    ok('12o. auto-claim fail@cleanup-release → partial, committed==landed(trigger), holder=B', res.reason === 'partial' && res.stage === 'cleanup-release' && JSON.stringify(res.committed) === JSON.stringify(landed) && res.holder === B && !(await holds(r, A, 'auto-lane')), `${res.stage} committed=${JSON.stringify(res.committed)} landed=${JSON.stringify(landed)} holder=${res.holder}`);
     // And the successful path cleans up the orphan then claims.
     r = await mk();
     res = await own.autoClaimLane(r, { sid: A, lane: 'auto-lane', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim' });
