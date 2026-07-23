@@ -94,13 +94,18 @@ export default {
     if (forced.length === 0) return { ok: true, message: 'no force-claims (skipped)' };
     const syncMode = !!(await readActiveReplicaId(ctx.repoRoot));
     const indexOf = new Map(all.map((e, i) => [e, i]));
-    // Earliest spine index of each forceGroup bundle — its pre-force prefix
-    // boundary (import-stable, unlike contiguity).
-    const earliestOfGroup = new Map();
-    all.forEach((e, i) => {
-      const fg = e && e.data && e.data.forceGroup;
-      if (fg && !earliestOfGroup.has(fg)) earliestOfGroup.set(fg, i);
-    });
+    // The pre-force prefix boundary of a bundle is the earliest of the bundle's
+    // OWN mutation events — a preempt-LANE_RELEASED or the LANE_CLAIM_FORCED
+    // marker, on THIS lane, carrying this forceGroup id. It must NOT be "any
+    // event carrying the id": an attacker forging a marker could also plant an
+    // unrelated earlier event with the same id (or a cross-lane one) to pull the
+    // boundary back before the real holder's claim and reconstruct a false prior
+    // that then matches. Restricting to the bundle's own release/marker events on
+    // the marker's lane closes that (a bare claim carries no forceGroup, so the
+    // real intervening holder is always inside the prefix).
+    const isBundleAnchor = (e, fg, lane) =>
+      e && e.data && e.data.forceGroup === fg && e.lane === lane &&
+      (e.type === EVENT_TYPES.LANE_RELEASED || e.type === EVENT_TYPES.LANE_CLAIM_FORCED);
     const problems = [];
     const warnings = [];
     for (const ev of forced) {
@@ -114,8 +119,16 @@ export default {
       // PR-C strengthened holder check: reconstruct the pre-force holder by
       // forceGroup-id bundle. Legacy triples (no forceGroup) skip this.
       const fg = ev.data && ev.data.forceGroup;
-      if (fg && earliestOfGroup.has(fg)) {
-        const prefix = all.slice(0, earliestOfGroup.get(fg));
+      if (fg) {
+        // Boundary = earliest bundle anchor (preempt-release or marker) for this
+        // forceGroup on this lane. Falls back to the marker's own index if no
+        // preempt-release preceded it (a force over an empty lane emits no
+        // release — though that path degrades to a plain claim and has no marker).
+        let boundary = all.length;
+        for (let i = 0; i < all.length; i++) {
+          if (isBundleAnchor(all[i], fg, ev.lane)) { boundary = i; break; }
+        }
+        const prefix = all.slice(0, boundary);
         const recon = ownersOf(prefix, ev.lane, { syncMode }).holder;
         const reconId = recon ? recon.sessionId : null;
         if (prior !== reconId) {

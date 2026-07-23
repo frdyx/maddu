@@ -43,9 +43,16 @@
 
 import { withCloseLock, isLockFailed } from './session-lifecycle.mjs';
 import { withClaimsLock, isClaimsLockFailed, CLAIMS_LOCK_WAIT_MS } from './lane-claims-lock.mjs';
-import { readAllStrict, append, EVENT_TYPES } from './spine.mjs';
+import { readAllStrict, append as appendEvent, EVENT_TYPES } from './spine.mjs';
 import { readActiveReplicaId } from './spine-append-core.mjs';
 import { reduceSessions, ownersOf, foldOwnership } from './projections.mjs';
+
+// Every primitive takes its appender as an injectable seam (default: the real
+// spine append), mirroring the `nowMs` seam. Production always uses the default;
+// the concurrency/failpoint tests inject a "fail on the Nth append" wrapper to
+// exercise the §3.3a partial-transaction contract at EVERY append boundary. The
+// literal `append(` call sites are preserved so the lane-writer census still
+// recognizes this module as the sole ownership appender.
 
 // One strict snapshot + the session/ownership context, taken INSIDE a held lock.
 // { gate:'ok'|'corrupt', events, syncMode, view, activeIds }. gate:'corrupt'
@@ -104,7 +111,7 @@ async function withOwnershipLock(repoRoot, { closeLock, maxWaitMs = CLAIMS_LOCK_
 // each, both modes) THEN claims — a §3.3a multi-append critical section.
 // { status:'claimed'|'already-claimed'|'unregistered'|'session-closed'|
 //   'spine-corrupt'|'partial'|'lock', ... }
-export async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = Date.now() }) {
+export async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
   const { events, syncMode, view, activeIds } = snap;
@@ -113,6 +120,7 @@ export async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = D
   if (claimant.status !== 'active') return { status: 'session-closed', event: null };
 
   const own = ownersOf(events, lane, { syncMode });
+  const holderId = own.holder ? own.holder.sessionId : null;
   const activeRival = own.owners.find((o) => o.sessionId !== sid && activeIds.has(o.sessionId));
   if (activeRival) return { status: 'already-claimed', event: null, holder: own.holder, rival: activeRival };
 
@@ -120,16 +128,16 @@ export async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = D
   // orphan so the janitor could never see/release it; release each inactive
   // non-self owner explicitly first.
   const inactiveOthers = own.owners.filter((o) => o.sessionId !== sid && !activeIds.has(o.sessionId));
-  const cleanupReleases = [];
+  const committed = [];
   for (const o of inactiveOthers) {
     try {
       const rel = await append(repoRoot, {
         type: EVENT_TYPES.LANE_RELEASED, actor: o.sessionId, lane,
         data: { reason: 'inactive-owner-cleanup', by: sid },
       });
-      cleanupReleases.push(rel.id);
+      committed.push(rel.id);
     } catch (e) {
-      return { status: 'partial', stage: 'cleanup-release', committed: cleanupReleases, error: e };
+      return { status: 'partial', stage: 'cleanup-release', committed, holder: holderId, error: e };
     }
   }
   let event;
@@ -138,9 +146,9 @@ export async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = D
       type: EVENT_TYPES.LANE_CLAIMED, actor: sid, lane, data: { focus: focus || null },
     });
   } catch (e) {
-    return { status: 'partial', stage: 'claim', committed: cleanupReleases, error: e };
+    return { status: 'partial', stage: 'claim', committed, holder: holderId, error: e };
   }
-  return { status: 'claimed', event, cleanupReleases };
+  return { status: 'claimed', event, cleanupReleases: committed };
 }
 
 export async function claimLane(repoRoot, opts) {
@@ -157,7 +165,7 @@ export async function claimLane(repoRoot, opts) {
 // clean — e.g. a live worktree on the lane).
 // { status:'forced'|'unregistered'|'session-closed'|'spine-corrupt'|'partial'|
 //   'refused'|'lock', ... }
-export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reason = null, forceGroup, priorHint = null, preflight, nowMs = Date.now() }) {
+export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reason = null, forceGroup, priorHint = null, preflight, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
   const { events, syncMode, view } = snap;
@@ -166,6 +174,7 @@ export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reas
   if (claimant.status !== 'active') return { status: 'session-closed', event: null };
 
   const own = ownersOf(events, lane, { syncMode });
+  const holderId = own.holder ? own.holder.sessionId : null;
   if (typeof preflight === 'function') {
     const pf = await preflight({ own, snap });
     if (pf && pf.refuse) return { status: pf.status || 'refused', ...pf };
@@ -181,11 +190,14 @@ export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reas
         type: EVENT_TYPES.LANE_CLAIMED, actor: sid, lane, data: { focus: focus || null },
       });
     } catch (e) {
-      return { status: 'partial', stage: 'claim', committed: [], error: e };
+      return { status: 'partial', stage: 'claim', committed: [], holder: holderId, error: e };
     }
     return { status: 'claimed', event, prior: null, preempted: [] };
   }
-  const prior = own.holder ? own.holder.sessionId : (priorHint || null);
+  const prior = holderId || priorHint || null;
+  // `committed` accumulates EVERY landed event id (preempt-releases + marker) so a
+  // later-boundary failure reports the whole partial bundle for operator recovery.
+  const committed = [];
   const preempted = [];
   for (const o of own.owners) {
     if (o.sessionId === sid) continue;
@@ -194,18 +206,19 @@ export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reas
         type: EVENT_TYPES.LANE_RELEASED, actor: o.sessionId, lane,
         data: { reason: 'force-claim-preempt', by: sid, forceGroup },
       });
-      preempted.push(rel.id);
+      preempted.push(rel.id); committed.push(rel.id);
     } catch (e) {
-      return { status: 'partial', stage: 'preempt-release', committed: preempted, error: e };
+      return { status: 'partial', stage: 'preempt-release', committed, holder: holderId, error: e };
     }
   }
   try {
-    await append(repoRoot, {
+    const marker = await append(repoRoot, {
       type: EVENT_TYPES.LANE_CLAIM_FORCED, actor: sid, lane,
       data: { lane, priorSessionId: prior, by: sid, focus: focus || null, reason: reason ?? null, forceGroup },
     });
+    committed.push(marker.id);
   } catch (e) {
-    return { status: 'partial', stage: 'marker', committed: preempted, error: e };
+    return { status: 'partial', stage: 'marker', committed, holder: holderId, error: e };
   }
   let event;
   try {
@@ -214,7 +227,7 @@ export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reas
       data: { focus: focus || null, forcedFrom: prior, forceGroup },
     });
   } catch (e) {
-    return { status: 'partial', stage: 'claim', committed: preempted, error: e };
+    return { status: 'partial', stage: 'claim', committed, holder: holderId, error: e };
   }
   return { status: 'forced', event, prior, preempted, forceGroup };
 }
@@ -231,22 +244,29 @@ export async function forceClaimLane(repoRoot, opts) {
 // holder's worktree). `worktree` (optional): { disposition, readLiveAttach(),
 // detach(liveAttach) }.
 // { status:'released'|'no-owners'|'owned-by-others'|'needs-disposition'|
-//   'no-worktree'|'worktree-not-holder'|'worktree-failed'|'worktree-only'|
-//   'spine-corrupt'|'partial'|'lock', ... }
-export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowMs = Date.now() }) {
+//   'no-worktree'|'worktree-not-holder'|'worktree-failed'|'worktree-read-failed'|
+//   'worktree-only'|'spine-corrupt'|'partial'|'lock', ... }
+export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
   const { events, syncMode } = snap;
   const own = ownersOf(events, lane, { syncMode });
   const isOwner = own.owners.some((o) => o.sessionId === sid);
+  const isHolder = !!(own.holder && own.holder.sessionId === sid);
 
+  // Read the live worktree attachment IN-lock. A read FAILURE fails CLOSED (never
+  // release/disposition on an unknown attachment state) — the pre-PR-C code let
+  // this read throw and abort; swallowing it to null would release a lane despite
+  // a possibly-live worktree.
   let liveAttach = null;
+  let liveAttachError = false;
   if (worktree && typeof worktree.readLiveAttach === 'function') {
-    try { liveAttach = await worktree.readLiveAttach(); } catch { liveAttach = null; }
+    try { liveAttach = await worktree.readLiveAttach(); } catch { liveAttachError = true; }
   }
 
   // Worktree disposition branch (§3.5).
   if (worktree && worktree.disposition !== undefined) {
+    if (liveAttachError) return { status: 'worktree-read-failed', event: null };
     if (!liveAttach) return { status: 'no-worktree', event: null };
     // Only the holder (or, if the claim is already gone, anyone) may
     // disposition — never yank a worktree from another session's live claim. In
@@ -262,19 +282,25 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
     if (!isOwner || own.owners.length === 0) return { status: 'worktree-only', event: null, detachResult };
     let event;
     try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-    catch (e) { return { status: 'partial', stage: 'release', error: e, detachResult }; }
+    catch (e) { return { status: 'partial', stage: 'release', event: null, holder: own.holder ? own.holder.sessionId : null, error: e, detachResult }; }
     return { status: 'released', event, detachResult };
   }
 
   // Plain release.
   if (own.owners.length === 0) return { status: 'no-owners', event: null };
   if (!isOwner) return { status: 'owned-by-others', event: null, holder: own.holder };
-  // A plain release on a lane that still has a live worktree is REFUSED so a
-  // checkout with un-integrated work is never silently orphaned.
-  if (liveAttach) return { status: 'needs-disposition', event: null, liveAttach };
+  // The live worktree belongs to the HOLDER's claim: a plain release by the
+  // HOLDER is refused so a checkout with un-integrated work is never silently
+  // orphaned (and fails CLOSED on a read error). A SUPERSEDED owner withdrawing
+  // its OWN claim doesn't touch the holder's worktree, so it is exempt (§3.5d) —
+  // otherwise it would have no CLI path to withdraw at all.
+  if (isHolder) {
+    if (liveAttachError) return { status: 'worktree-read-failed', event: null };
+    if (liveAttach) return { status: 'needs-disposition', event: null, liveAttach };
+  }
   let event;
   try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-  catch (e) { return { status: 'partial', stage: 'release', error: e }; }
+  catch (e) { return { status: 'partial', stage: 'release', event: null, holder: own.holder ? own.holder.sessionId : null, error: e }; }
   return { status: 'released', event };
 }
 
@@ -290,7 +316,7 @@ export async function releaseLane(repoRoot, opts) {
 // supplies a session-scoped fallback lane. Emits TRIGGER_FIRED + LANE_CLAIMED
 // (plus any inactive-owner cleanup releases) under the §3.3a contract.
 // { claimed:true, lane, event } | { claimed:false, reason }
-export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus = null, triggerId, forPath = null, nowMs = Date.now() }) {
+export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus = null, triggerId, forPath = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { claimed: false, reason: 'spine-corrupt' };
   const { events, syncMode, view, activeIds } = snap;
@@ -298,34 +324,41 @@ export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus
   if (!sess || sess.status !== 'active') return { claimed: false, reason: 'session-not-active' };
   if (ownsAnyLane(events, sid, syncMode)) return { claimed: false, reason: 'already-claimed' };
 
+  const hasActiveRival = (o) => o.owners.some((x) => x.sessionId !== sid && activeIds.has(x.sessionId));
   // Rule #8: if the inferred lane has an active rival owner, fall back to the
-  // session-scoped lane (which no other session can hold).
+  // session-scoped lane.
   let target = lane;
-  const own = ownersOf(events, target, { syncMode });
-  if (own.owners.some((o) => o.sessionId !== sid && activeIds.has(o.sessionId))) {
+  let own = ownersOf(events, target, { syncMode });
+  if (hasActiveRival(own)) {
     target = fallbackLane;
+    own = ownersOf(events, target, { syncMode });
   }
-  // Re-fold the (possibly switched) target's owners for inactive cleanup.
-  const targetOwn = target === lane ? own : ownersOf(events, target, { syncMode });
-  const inactiveOthers = targetOwn.owners.filter((o) => o.sessionId !== sid && !activeIds.has(o.sessionId));
+  // The SAME active-rival refusal MUST apply to the final target — the fallback
+  // lane (`auto/<sid>`) can also be independently owned (e.g. a manual claim on
+  // it). Never evict (default) or knowingly-lose (sync) from the hook: skip.
+  if (hasActiveRival(own)) return { claimed: false, reason: 'target-taken' };
+  const inactiveOthers = own.owners.filter((o) => o.sessionId !== sid && !activeIds.has(o.sessionId));
 
   const firedAt = new Date(nowMs).toISOString();
+  const committed = [];
   try {
-    await append(repoRoot, {
+    const trig = await append(repoRoot, {
       type: EVENT_TYPES.TRIGGER_FIRED, actor: sid,
       data: { triggerId, lane: target, forPath },
     });
+    committed.push(trig.id);
   } catch (e) {
-    return { claimed: false, reason: 'partial', stage: 'trigger', error: e };
+    return { claimed: false, reason: 'partial', stage: 'trigger', committed, error: e };
   }
   for (const o of inactiveOthers) {
     try {
-      await append(repoRoot, {
+      const rel = await append(repoRoot, {
         type: EVENT_TYPES.LANE_RELEASED, actor: o.sessionId, lane: target,
         data: { reason: 'inactive-owner-cleanup', by: sid },
       });
+      committed.push(rel.id);
     } catch (e) {
-      return { claimed: false, reason: 'partial', stage: 'cleanup-release', error: e };
+      return { claimed: false, reason: 'partial', stage: 'cleanup-release', committed, error: e };
     }
   }
   let event;
@@ -336,7 +369,7 @@ export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus
       triggered_by: { kind: 'hook', id: 'auto-claim', fired_at: firedAt },
     });
   } catch (e) {
-    return { claimed: false, reason: 'partial', stage: 'claim', error: e };
+    return { claimed: false, reason: 'partial', stage: 'claim', committed, error: e };
   }
   return { claimed: true, lane: target, event };
 }
@@ -353,7 +386,7 @@ export async function autoClaimLane(repoRoot, opts) {
 // the default delete-by-lane and sync delete-that-owner paths). A failed append
 // stops the loop and leaves the rest for the next round.
 // { status:'ok'|'spine-corrupt'|'lock', released:[{lane,sessionId}], corrupt }
-export async function reapOrphanClaimsIn(repoRoot, { firedAt, nowMs = Date.now() }) {
+export async function reapOrphanClaimsIn(repoRoot, { firedAt, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', released: [], corrupt: 0 };
   const { events, syncMode, activeIds } = snap;

@@ -59,10 +59,17 @@ function exitOwnershipFailure(r, lid, sid) {
       console.error(`spine has malformed lines — lane "${lid}" mutation refused. Run \`maddu verify\`.`);
       process.exit(1);
       break;
-    case 'partial':
+    case 'partial': {
+      // §3.3a operator-recovery surface: stage + committed event ids + the
+      // currently-projected holder, so the operator can see what landed and
+      // whether a re-run is needed (state is append-only — no rollback).
+      const committed = Array.isArray(r.committed) && r.committed.length ? r.committed.join(', ') : 'none';
       console.error(`lane "${lid}" transaction partially applied (stage: ${r.stage}) — state is append-only (no rollback); re-run to complete.`);
+      console.error(`  committed events: ${committed}`);
+      console.error(`  current holder: ${r.holder || 'none'}`);
       process.exit(1);
       break;
+    }
     case 'lock':
       console.error(`lane lock busy — could not serialize the operation on "${lid}". Retry.`);
       process.exit(1);
@@ -92,7 +99,12 @@ async function attachAndReport(wtLib, repoRoot, projections, { lane, sid, focus,
   const stillOwner = async () => {
     const proj = await projections.project(repoRoot);
     const holder = proj.claims.find((c) => c.lane === lane);
-    return !!holder && holder.sessionId === sid;
+    // Require the session be BOTH the current holder AND still active (plan
+    // §3.1): a session closed between the claim and this attach (janitor
+    // auto-close, or a post-close/imported orphan claim) must NOT provision a
+    // worktree bound to a dead session.
+    const active = (proj.sessions || []).some((s) => s.id === sid && s.status === 'active');
+    return !!holder && holder.sessionId === sid && active;
   };
   if (!(await stillOwner())) {
     console.error(`  worktree: lane "${lane}" is no longer held by this session; skipping attach`);
@@ -426,6 +438,12 @@ export default async function lane(argv) {
         break;
       case 'worktree-failed':
         console.error(`  worktree ${dispRaw} refused: ${(r.error && r.error.message) || r.error}`);
+        process.exit(1);
+        break;
+      case 'worktree-read-failed':
+        // Fail CLOSED: could not read the worktree-attachment state, so the
+        // release is refused rather than risk orphaning a live checkout.
+        console.error(`lane "${lid}" worktree state could not be read — release refused (retry, or run maddu doctor). No claim was released.`);
         process.exit(1);
         break;
       case 'spine-corrupt':

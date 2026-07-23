@@ -118,6 +118,58 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
 
+  // ── PR-C forceGroup bundle reconstruction (strengthened holder check) ──
+  // A PR-C force stamps a shared forceGroup on every preempt-release + marker +
+  // claim; the gate reconstructs the pre-force holder over the prefix before the
+  // bundle's earliest OWN anchor and compares it to priorSessionId.
+  const forceTripleFg = (lane, prior, forcer, fg) => [
+    ev('LANE_RELEASED', lane, prior, { reason: 'force-claim-preempt', by: forcer, forceGroup: fg }),
+    ev('LANE_CLAIM_FORCED', lane, forcer, { lane, priorSessionId: prior, by: forcer, forceGroup: fg }),
+    ev('LANE_CLAIMED', lane, forcer, { forcedFrom: prior, forceGroup: fg }),
+  ];
+  {
+    // Legitimate default-mode forceGroup bundle: prior == reconstructed holder → ok.
+    const root = await tempRepo('maddu-lfd-fg-ok-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ...forceTripleFg('L1', 'sA', 'sB', 'fg-legit'),
+    ], 'standard');
+    const r = await run(root);
+    ok('forceGroup: legitimate bundle → ok', r.ok === true && !r.status, r.message);
+    await rm(root, { recursive: true, force: true });
+  }
+  {
+    // Forged-prior exploit: an UNRELATED event carrying the same forceGroup must
+    // NOT pull the prefix boundary back before the real holder. History:
+    // sA claim → unrelated(fg) → sB claim (REAL holder) → marker(prior=sA, fg).
+    // The boundary is the bundle's own release/marker on this lane, so sB is the
+    // reconstructed holder and prior=sA mismatches → hard-fail.
+    const root = await tempRepo('maddu-lfd-fg-forged-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ev('SESSION_HEARTBEAT', null, 'sA', { forceGroup: 'fg-forged' }),
+      ev('LANE_CLAIMED', 'L1', 'sB'),
+      ev('LANE_CLAIM_FORCED', 'L1', 'sA', { lane: 'L1', priorSessionId: 'sA', by: 'sA', forceGroup: 'fg-forged' }),
+      ev('LANE_CLAIMED', 'L1', 'sA', { forceGroup: 'fg-forged' }),
+    ], 'standard');
+    const r = await run(root);
+    ok('forceGroup: forged prior via unrelated fg-event → hard-fail (default)',
+      r.ok === false && /reconstructed pre-force holder/.test(JSON.stringify(r.evidence?.problems)), JSON.stringify(r.evidence?.problems)?.slice(0, 160));
+    await rm(root, { recursive: true, force: true });
+  }
+  {
+    // SYNC mode: a holder mismatch is a NON-blocking warn (a late-imported
+    // foreign claim can shift the reconstructed holder; the gate cannot prove the
+    // writer's local snapshot). ok:true, status:'warn'.
+    const root = await tempRepo('maddu-lfd-fg-sync-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ev('LANE_CLAIMED', 'L1', 'sB'),   // sync: sA is first-claimer holder; a marker claiming prior=sB mismatches
+      ...forceTripleFg('L1', 'sB', 'sC', 'fg-sync'),
+    ], 'standard');
+    await writeFile(join(root, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'replica-self' }) + '\n');
+    const r = await run(root);
+    ok('forceGroup: sync-mode holder mismatch → warn (ok, status warn)', r.ok === true && r.status === 'warn', `ok=${r.ok} status=${r.status}`);
+    await rm(root, { recursive: true, force: true });
+  }
+
   // ── force forbidden (strict) + LIVE force still holding the lane → not-ok ──
   {
     const root = await tempRepo('maddu-lfd-live-', [

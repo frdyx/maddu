@@ -11,7 +11,7 @@
 //
 // Exit 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mkdtemp, mkdir, rm, writeFile, appendFile, chmod, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, appendFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -177,10 +177,13 @@ try {
     ok('9. auto-claim skips instantly on a busy lock', res.claimed === false && res.reason === 'claims-lock-busy', JSON.stringify(res));
   }
 
-  // 10. Fallback-lane collision: two sids sharing a 6-char tail get DISTINCT
-  //     lanes (the fallback is the FULL sid, not a last-6 suffix — plan §5.10).
+  // 10. Fallback-lane collision: two sids sharing the SAME last-6 chars get
+  //     DISTINCT lanes (the fallback is the FULL sid, not a last-6 suffix — plan
+  //     §5.10). The OLD `slice(-6)` impl would map BOTH to `auto/ABCDEF` and
+  //     FAIL this test; the full-sid fallback gives two distinct lanes.
   {
-    const a = 'ses_1111_zzabcd', b = 'ses_2222_yyabcd'; // share the 'yabcd'/'zabcd' tail region (last-6 would collide on 'zabcd'/'yabcd')
+    const a = 'ses_1111_ABCDEF', b = 'ses_2222_ABCDEF'; // identical last-6 'ABCDEF'
+    ok('10. (precondition) the two sids share their last-6 chars', a.slice(-6) === b.slice(-6));
     const r = await freshRepo(); await reg(r, a); await reg(r, b);
     const r1 = await own.autoClaimLane(r, { sid: a, lane: 'frontend', fallbackLane: `auto/${a}`, triggerId: 'hook:auto-claim' });
     // b's inferred lane collides with a's claim, forcing b onto its own fallback.
@@ -203,25 +206,66 @@ try {
     ok('11. project().claims == reduceClaims (single-fold parity)', key(proj.claims) === key(reduced), `${key(proj.claims)} vs ${key(reduced)}`);
   }
 
-  // 12. Partial-failure contract (first-boundary): an unwritable spine → partial,
-  //     no false success. Deeper per-boundary injection (2nd/3rd append) is a
-  //     documented residual — the append primitive has no in-band failpoint hook;
-  //     the recovery-re-snapshot guarantee is covered structurally by §3.3a and
-  //     the fresh-snapshot reads every primitive performs.
+  // 12. §3.3a partial-failure contract at EVERY append boundary, via the
+  //     injectable append seam (a "fail after the Nth append" wrapper). For each
+  //     multi-append writer we assert: the reported stage is correct, committed
+  //     event ids are surfaced, and — critically — NO false success (the actor
+  //     never becomes the reduced holder unless the terminal claim landed).
+  const failAfter = (n) => { let c = 0; return async (repo, payload) => { c += 1; if (c > n) throw new Error(`injected append failure at call ${c}`); return spine.append(repo, payload); }; };
+  const holds = async (repo, sid, lane) => (await claimsOf(repo, false)).some((x) => x.lane === lane && x.sessionId === sid);
   {
+    // CLAIM over an inactive orphan: append #1 = cleanup-release, #2 = claim.
+    const r = await freshRepo(); await reg(r, A); await reg(r, B); await close(r, A);
+    await rawClaim(r, A, 'L1'); // post-close orphan (inactive owner still present)
+    let res = await own.claimLane(r, { sid: B, lane: 'L1', append: failAfter(0) });
+    ok('12a. claim fail@cleanup-release → partial, no false success', res.status === 'partial' && res.stage === 'cleanup-release' && !(await holds(r, B, 'L1')), `${res.status}/${res.stage}`);
+    res = await own.claimLane(r, { sid: B, lane: 'L1', append: failAfter(1) });
+    ok('12b. claim fail@claim → partial, committed release reported, no false success', res.status === 'partial' && res.stage === 'claim' && res.committed.length === 1 && !(await holds(r, B, 'L1')), `${res.status}/${res.stage}/${res.committed?.length}`);
+  }
+  {
+    // FORCE over an active rival: #1 preempt-release, #2 marker, #3 claim.
+    const mk = async () => { const r = await freshRepo(); await reg(r, A); await reg(r, B); await own.claimLane(r, { sid: A, lane: 'L1' }); return r; };
+    let r = await mk();
+    let res = await own.forceClaimLane(r, { sid: B, lane: 'L1', forceGroup: 'fgP', append: failAfter(0) });
+    ok('12c. force fail@preempt-release → partial, no false success', res.status === 'partial' && res.stage === 'preempt-release' && !(await holds(r, B, 'L1')), `${res.status}/${res.stage}`);
+    r = await mk();
+    res = await own.forceClaimLane(r, { sid: B, lane: 'L1', forceGroup: 'fgP', append: failAfter(1) });
+    ok('12d. force fail@marker → partial, committed release, no false success', res.status === 'partial' && res.stage === 'marker' && res.committed.length === 1 && !(await holds(r, B, 'L1')), `${res.status}/${res.stage}/${res.committed?.length}`);
+    r = await mk();
+    res = await own.forceClaimLane(r, { sid: B, lane: 'L1', forceGroup: 'fgP', append: failAfter(2) });
+    ok('12e. force fail@claim → partial, release+marker committed, no false success', res.status === 'partial' && res.stage === 'claim' && res.committed.length === 2 && !(await holds(r, B, 'L1')), `${res.status}/${res.stage}/${res.committed?.length}`);
+    // 12f. RECOVERY re-snapshots: re-run the force with a real appender — A was
+    // already released by the partial, so it degrades to a plain claim (no stale
+    // release replay) and B ends up holding.
+    res = await own.forceClaimLane(r, { sid: B, lane: 'L1', forceGroup: 'fgR' });
+    ok('12f. force recovery re-snapshots → B holds', (res.status === 'forced' || res.status === 'claimed') && (await holds(r, B, 'L1')), res.status);
+  }
+  {
+    // AUTO-CLAIM: #1 TRIGGER_FIRED, #2 LANE_CLAIMED (no inactive owners).
     const r = await freshRepo(); await reg(r, A);
-    const shard = join(r, '.maddu', 'events', '000000000001.ndjson');
-    let injected = true;
-    try { await chmod(shard, 0o444); } catch { injected = false; }
-    const res = await own.claimLane(r, { sid: A, lane: 'L1' });
-    try { await chmod(shard, 0o644); } catch { /* best effort */ }
-    if (injected && res.status === 'partial') {
-      ok('12. unwritable spine → partial (no false success)', res.status === 'partial' && res.stage === 'claim', res.stage);
-    } else {
-      // Windows readonly-attr may not block Node writes in every environment;
-      // don't fail the suite on an un-injectable failpoint — just record it.
-      ok('12. partial-failure path (skipped: failpoint not injectable here)', true, `status=${res.status}`);
-    }
+    let res = await own.autoClaimLane(r, { sid: A, lane: 'frontend', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim', append: failAfter(0) });
+    ok('12g. auto-claim fail@trigger → partial, no false success', res.claimed === false && res.reason === 'partial' && res.stage === 'trigger' && !(await holds(r, A, 'frontend')), `${res.reason}/${res.stage}`);
+    res = await own.autoClaimLane(r, { sid: A, lane: 'frontend', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim', append: failAfter(1) });
+    ok('12h. auto-claim fail@claim → partial, no false success', res.claimed === false && res.reason === 'partial' && res.stage === 'claim' && !(await holds(r, A, 'frontend')), `${res.reason}/${res.stage}`);
+  }
+  {
+    // 12i. Auto-claim fallback lane refusal (P1-1): a manual ACTIVE owner on
+    // auto/<sid> must NOT be evicted/lost-to — the hook skips.
+    const r = await freshRepo(); await reg(r, A); await reg(r, B);
+    await own.claimLane(r, { sid: B, lane: `auto/${A}` });        // B manually owns A's fallback lane
+    await own.claimLane(r, { sid: B, lane: 'frontend' });          // and the inferred lane, forcing fallback
+    const res = await own.autoClaimLane(r, { sid: A, lane: 'frontend', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim' });
+    ok('12i. auto-claim refuses when fallback lane has an active rival', res.claimed === false && res.reason === 'target-taken', JSON.stringify(res));
+    ok('12i. rival B still holds the fallback lane (not evicted)', await holds(r, B, `auto/${A}`));
+  }
+  {
+    // 12j. Worktree read failure fails CLOSED (P1-3): a holder's plain release is
+    // refused when the attachment read throws, rather than orphaning a checkout.
+    const r = await freshRepo(); await reg(r, A);
+    await own.claimLane(r, { sid: A, lane: 'L1' });
+    const worktree = { readLiveAttach: async () => { throw new Error('attachment read boom'); } };
+    const res = await own.releaseLane(r, { sid: A, lane: 'L1', worktree });
+    ok('12j. holder release with unreadable worktree → worktree-read-failed (fail closed)', res.status === 'worktree-read-failed' && (await holds(r, A, 'L1')), `${res.status}`);
   }
 } catch (e) {
   console.error('concurrency harness error:', (e && e.stack) || e);

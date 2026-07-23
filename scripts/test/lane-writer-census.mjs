@@ -54,11 +54,22 @@ async function walk(dir) {
 
 // Find append() call-sites whose payload type (within a bounded window) is an
 // ownership event. Returns the set of ownership types this file appends.
+//
+// `\bappend\s*\(` matches both `append(` and the namespaced `spine.append(`
+// (the `.` before `append` is a word boundary). The type may carry any dotted
+// namespace — `EVENT_TYPES.LANE_CLAIMED`, `spine.EVENT_TYPES.LANE_CLAIMED`, or a
+// bare/quoted `'LANE_CLAIMED'` — hence `(?:[\w$]+\.)*`.
+//
+// RESIDUAL (honest scope): a payload built in a SEPARATE variable and passed as
+// `append(repo, payload)` is not followed by this textual scan. That is a
+// determined obfuscation, not the accidental new inline appender this tripwire
+// guards against (a new writer naturally writes `append(repo, { type:
+// EVENT_TYPES.LANE_CLAIMED, ... })`). Catching arbitrary indirection would need
+// real dataflow analysis; the tripwire is a cheap regression guard, not a proof.
+const APPEND_OWNERSHIP_RE = /\bappend\s*\([\s\S]{0,300}?type\s*:\s*(?:[\w$]+\.)*['"]?(LANE_CLAIMED|LANE_RELEASED|LANE_CLAIM_FORCED)\b/g;
 function ownershipAppendsIn(src) {
   const found = new Set();
-  // Match `append(` (optionally `spine.append(`), then within 300 chars the
-  // first `type:` that is an ownership type (EVENT_TYPES.X or a bare string).
-  const re = /\bappend\s*\([\s\S]{0,300}?type\s*:\s*(?:EVENT_TYPES\.)?['"]?(LANE_CLAIMED|LANE_RELEASED|LANE_CLAIM_FORCED)\b/g;
+  const re = new RegExp(APPEND_OWNERSHIP_RE.source, 'g');
   let m;
   while ((m = re.exec(src)) !== null) found.add(m[1]);
   return found;
@@ -76,6 +87,17 @@ try {
     if (rel === ALLOWLISTED) { helperEmits = emits; continue; }
     if (emits.size > 0) offenders.push({ rel, types: [...emits] });
   }
+
+  // Self-check the detector against the forms Codex flagged as false negatives:
+  // the namespaced `spine.EVENT_TYPES.LANE_*` and a bare-string type must BOTH
+  // be recognized (the bare-variable `append(repo, payload)` is the documented
+  // residual and is expected NOT to match).
+  ok('detector matches namespaced spine.EVENT_TYPES.LANE_CLAIMED',
+    ownershipAppendsIn('await append(repo, { type: spine.EVENT_TYPES.LANE_CLAIMED });').has('LANE_CLAIMED'));
+  ok('detector matches EVENT_TYPES.LANE_RELEASED',
+    ownershipAppendsIn("append(r, {\n type: EVENT_TYPES.LANE_RELEASED });").has('LANE_RELEASED'));
+  ok('detector matches quoted LANE_CLAIM_FORCED',
+    ownershipAppendsIn("append(r, { type: 'LANE_CLAIM_FORCED' });").has('LANE_CLAIM_FORCED'));
 
   ok('some source files were scanned', files.length > 20, `${files.length} files`);
   ok(
