@@ -249,58 +249,63 @@ export async function forceClaimLane(repoRoot, opts) {
 export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
-  const { events, syncMode } = snap;
+  const { events, syncMode, activeIds } = snap;
   const own = ownersOf(events, lane, { syncMode });
   const isOwner = own.owners.some((o) => o.sessionId === sid);
-  const isHolder = !!(own.holder && own.holder.sessionId === sid);
+  const holderId = own.holder ? own.holder.sessionId : null;
 
   // Read the live worktree attachment IN-lock. A read FAILURE fails CLOSED (never
   // release/disposition on an unknown attachment state) — the pre-PR-C code let
   // this read throw and abort; swallowing it to null would release a lane despite
-  // a possibly-live worktree.
+  // a possibly-live worktree. Authorization keys on the ATTACHMENT owner
+  // (liveAttach.session — whoever provisioned the checkout), NOT the current
+  // claim holder: under team-sync a late-imported earlier claim can supersede the
+  // session that attached the worktree, so a holder-based guard would let that
+  // session's plain release orphan its own live checkout.
   let liveAttach = null;
   let liveAttachError = false;
   if (worktree && typeof worktree.readLiveAttach === 'function') {
     try { liveAttach = await worktree.readLiveAttach(); } catch { liveAttachError = true; }
   }
+  const attachOwner = liveAttach && liveAttach.session ? liveAttach.session : null;
+  const ownsAttachment = attachOwner && attachOwner === sid;
+  const attachOwnedByOtherActive = attachOwner && attachOwner !== sid && activeIds.has(attachOwner);
 
   // Worktree disposition branch (§3.5).
   if (worktree && worktree.disposition !== undefined) {
     if (liveAttachError) return { status: 'worktree-read-failed', event: null };
     if (!liveAttach) return { status: 'no-worktree', event: null };
-    // Only the holder (or, if the claim is already gone, anyone) may
-    // disposition — never yank a worktree from another session's live claim. In
-    // sync mode a superseded owner (holder ≠ actor) is likewise refused (§3.5d).
-    const holder = own.holder;
-    if (holder && holder.sessionId !== sid) {
-      return { status: 'worktree-not-holder', event: null, holder };
+    // The ATTACHMENT owner may disposition its own checkout; an ORPHANED
+    // attachment (owner inactive/gone) may be cleaned up by anyone; an
+    // attachment owned by ANOTHER ACTIVE session must NOT be yanked (§3.5d).
+    if (attachOwnedByOtherActive) {
+      return { status: 'worktree-not-holder', event: null, holder: own.holder, attachOwner };
     }
     let detachResult;
     try { detachResult = await worktree.detach(liveAttach); }
     catch (e) { return { status: 'worktree-failed', event: null, error: e }; }
-    // Claim already gone → the disposition WAS the cleanup; no LANE_RELEASED.
-    if (!isOwner || own.owners.length === 0) return { status: 'worktree-only', event: null, detachResult };
+    // Actor holds no claim on the lane → the disposition WAS the cleanup; no
+    // LANE_RELEASED (there is nothing of the actor's to release).
+    if (!isOwner) return { status: 'worktree-only', event: null, detachResult };
     let event;
     try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-    catch (e) { return { status: 'partial', stage: 'release', event: null, holder: own.holder ? own.holder.sessionId : null, error: e, detachResult }; }
+    catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e, detachResult }; }
     return { status: 'released', event, detachResult };
   }
 
   // Plain release.
   if (own.owners.length === 0) return { status: 'no-owners', event: null };
   if (!isOwner) return { status: 'owned-by-others', event: null, holder: own.holder };
-  // The live worktree belongs to the HOLDER's claim: a plain release by the
-  // HOLDER is refused so a checkout with un-integrated work is never silently
-  // orphaned (and fails CLOSED on a read error). A SUPERSEDED owner withdrawing
-  // its OWN claim doesn't touch the holder's worktree, so it is exempt (§3.5d) —
-  // otherwise it would have no CLI path to withdraw at all.
-  if (isHolder) {
-    if (liveAttachError) return { status: 'worktree-read-failed', event: null };
-    if (liveAttach) return { status: 'needs-disposition', event: null, liveAttach };
-  }
+  // Fail CLOSED on an unreadable attachment state: the actor MIGHT own a live
+  // checkout we can't see, so refuse rather than risk orphaning it.
+  if (liveAttachError) return { status: 'worktree-read-failed', event: null };
+  // Refuse a plain release that would orphan the ACTOR'S OWN live checkout —
+  // disposition it first. A live attachment owned by SOMEONE ELSE is untouched
+  // by this actor's release, so a superseded owner may withdraw freely (§3.5d).
+  if (ownsAttachment) return { status: 'needs-disposition', event: null, liveAttach };
   let event;
   try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-  catch (e) { return { status: 'partial', stage: 'release', event: null, holder: own.holder ? own.holder.sessionId : null, error: e }; }
+  catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e }; }
   return { status: 'released', event };
 }
 
@@ -337,6 +342,7 @@ export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus
   // lane (`auto/<sid>`) can also be independently owned (e.g. a manual claim on
   // it). Never evict (default) or knowingly-lose (sync) from the hook: skip.
   if (hasActiveRival(own)) return { claimed: false, reason: 'target-taken' };
+  const holderId = own.holder ? own.holder.sessionId : null;
   const inactiveOthers = own.owners.filter((o) => o.sessionId !== sid && !activeIds.has(o.sessionId));
 
   const firedAt = new Date(nowMs).toISOString();
@@ -348,7 +354,7 @@ export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus
     });
     committed.push(trig.id);
   } catch (e) {
-    return { claimed: false, reason: 'partial', stage: 'trigger', committed, error: e };
+    return { claimed: false, reason: 'partial', stage: 'trigger', committed, holder: holderId, error: e };
   }
   for (const o of inactiveOthers) {
     try {
@@ -358,7 +364,7 @@ export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus
       });
       committed.push(rel.id);
     } catch (e) {
-      return { claimed: false, reason: 'partial', stage: 'cleanup-release', committed, error: e };
+      return { claimed: false, reason: 'partial', stage: 'cleanup-release', committed, holder: holderId, error: e };
     }
   }
   let event;
@@ -369,7 +375,7 @@ export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus
       triggered_by: { kind: 'hook', id: 'auto-claim', fired_at: firedAt },
     });
   } catch (e) {
-    return { claimed: false, reason: 'partial', stage: 'claim', committed, error: e };
+    return { claimed: false, reason: 'partial', stage: 'claim', committed, holder: holderId, error: e };
   }
   return { claimed: true, lane: target, event };
 }

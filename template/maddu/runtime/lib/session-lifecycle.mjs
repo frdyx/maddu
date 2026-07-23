@@ -7,9 +7,12 @@
 // CLOSE lock (session-start composes `withBindingTransaction { withCloseLock {
 // renewIn-or-registerIn + bind } }` with no nested acquisition).
 //
-// GLOBAL LOCK ORDER: claude-binding lock → session-close lock →
-// active-pointer lock (leaf); the spine's own append lock is innermost and
-// independent. No path acquires in reverse.
+// GLOBAL LOCK ORDER (SSOT — extended by PR-C's lane-claims lock):
+//   claude-binding lock → session-close lock → lane-claims lock →
+//   active-pointer lock (leaf); the spine's own append lock is innermost and
+//   independent. No path acquires in reverse. Active-validating lane-ownership
+//   writers (claim / force / auto-claim) take close THEN lane-claims; release and
+//   the janitor orphan pass take lane-claims only (see lane-claims-lock.mjs).
 //
 // PARSE-ACCOUNTING POLICY (one rule for every strict consumer):
 //   parseErrors === 0    → full guarantees. The claim is scoped to ACCIDENTAL

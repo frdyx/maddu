@@ -94,18 +94,6 @@ export default {
     if (forced.length === 0) return { ok: true, message: 'no force-claims (skipped)' };
     const syncMode = !!(await readActiveReplicaId(ctx.repoRoot));
     const indexOf = new Map(all.map((e, i) => [e, i]));
-    // The pre-force prefix boundary of a bundle is the earliest of the bundle's
-    // OWN mutation events — a preempt-LANE_RELEASED or the LANE_CLAIM_FORCED
-    // marker, on THIS lane, carrying this forceGroup id. It must NOT be "any
-    // event carrying the id": an attacker forging a marker could also plant an
-    // unrelated earlier event with the same id (or a cross-lane one) to pull the
-    // boundary back before the real holder's claim and reconstruct a false prior
-    // that then matches. Restricting to the bundle's own release/marker events on
-    // the marker's lane closes that (a bare claim carries no forceGroup, so the
-    // real intervening holder is always inside the prefix).
-    const isBundleAnchor = (e, fg, lane) =>
-      e && e.data && e.data.forceGroup === fg && e.lane === lane &&
-      (e.type === EVENT_TYPES.LANE_RELEASED || e.type === EVENT_TYPES.LANE_CLAIM_FORCED);
     const problems = [];
     const warnings = [];
     for (const ev of forced) {
@@ -120,15 +108,15 @@ export default {
       // forceGroup-id bundle. Legacy triples (no forceGroup) skip this.
       const fg = ev.data && ev.data.forceGroup;
       if (fg) {
-        // Boundary = earliest bundle anchor (preempt-release or marker) for this
-        // forceGroup on this lane. Falls back to the marker's own index if no
-        // preempt-release preceded it (a force over an empty lane emits no
-        // release — though that path degrades to a plain claim and has no marker).
-        let boundary = all.length;
-        for (let i = 0; i < all.length; i++) {
-          if (isBundleAnchor(all[i], fg, ev.lane)) { boundary = i; break; }
-        }
-        const prefix = all.slice(0, boundary);
+        // Reconstruct the pre-force holder from ALL events before the MARKER,
+        // MINUS the bundle's own mutations (every event carrying this forceGroup
+        // — its preempt-releases). This is robust against a forged boundary: an
+        // attacker cannot plant an extra fg-carrying release (same-lane or cross-
+        // lane) to clear the real holder, because ALL fg-events are excluded from
+        // the reconstruction; and a legitimate intervening holder's claim carries
+        // NO forceGroup, so it survives the filter and is correctly recovered.
+        const evIdx = indexOf.get(ev);
+        const prefix = all.slice(0, evIdx).filter((e) => !(e && e.data && e.data.forceGroup === fg));
         const recon = ownersOf(prefix, ev.lane, { syncMode }).holder;
         const reconId = recon ? recon.sessionId : null;
         if (prior !== reconId) {

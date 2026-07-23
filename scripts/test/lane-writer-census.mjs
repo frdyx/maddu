@@ -60,16 +60,37 @@ async function walk(dir) {
 // namespace — `EVENT_TYPES.LANE_CLAIMED`, `spine.EVENT_TYPES.LANE_CLAIMED`, or a
 // bare/quoted `'LANE_CLAIMED'` — hence `(?:[\w$]+\.)*`.
 //
+// The appender may be the bare `append` OR an ALIASED import — a new writer
+// could `import { append as appendEvent } from './spine.mjs'` and call
+// `appendEvent(repo, { type: EVENT_TYPES.LANE_CLAIMED })`. We harvest every such
+// alias from the file's spine import(s) and add it to the call-name alternation
+// (the ownership module itself uses exactly this aliasing pattern), so an aliased
+// raw ownership append no longer evades the scan.
+//
 // RESIDUAL (honest scope): a payload built in a SEPARATE variable and passed as
 // `append(repo, payload)` is not followed by this textual scan. That is a
 // determined obfuscation, not the accidental new inline appender this tripwire
-// guards against (a new writer naturally writes `append(repo, { type:
-// EVENT_TYPES.LANE_CLAIMED, ... })`). Catching arbitrary indirection would need
-// real dataflow analysis; the tripwire is a cheap regression guard, not a proof.
-const APPEND_OWNERSHIP_RE = /\bappend\s*\([\s\S]{0,300}?type\s*:\s*(?:[\w$]+\.)*['"]?(LANE_CLAIMED|LANE_RELEASED|LANE_CLAIM_FORCED)\b/g;
-function ownershipAppendsIn(src) {
+// guards against (a new writer naturally writes the payload inline). Catching
+// arbitrary indirection would need real dataflow analysis; the tripwire is a
+// cheap regression guard, not a proof.
+
+// Harvest append + its import aliases from any `... from '...spine...'` import.
+function appendCallNames(src) {
+  const names = new Set(['append']);
+  const importRe = /import\s*\{([^}]*)\}\s*from\s*['"][^'"]*spine[\w.-]*['"]/g;
+  let im;
+  while ((im = importRe.exec(src)) !== null) {
+    const aliasRe = /\bappend\s+as\s+([A-Za-z_$][\w$]*)/g;
+    let a;
+    while ((a = aliasRe.exec(im[1])) !== null) names.add(a[1]);
+  }
+  return [...names];
+}
+
+function ownershipAppendsIn(src, callNames = appendCallNames(src)) {
   const found = new Set();
-  const re = new RegExp(APPEND_OWNERSHIP_RE.source, 'g');
+  const alt = callNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const re = new RegExp(`\\b(?:${alt})\\s*\\([\\s\\S]{0,300}?type\\s*:\\s*(?:[\\w$]+\\.)*['"]?(LANE_CLAIMED|LANE_RELEASED|LANE_CLAIM_FORCED)\\b`, 'g');
   let m;
   while ((m = re.exec(src)) !== null) found.add(m[1]);
   return found;
@@ -98,6 +119,10 @@ try {
     ownershipAppendsIn("append(r, {\n type: EVENT_TYPES.LANE_RELEASED });").has('LANE_RELEASED'));
   ok('detector matches quoted LANE_CLAIM_FORCED',
     ownershipAppendsIn("append(r, { type: 'LANE_CLAIM_FORCED' });").has('LANE_CLAIM_FORCED'));
+  ok('detector matches an ALIASED append import (append as appendEvent)',
+    ownershipAppendsIn("import { append as appendEvent } from './spine.mjs';\nappendEvent(r, { type: EVENT_TYPES.LANE_CLAIMED });").has('LANE_CLAIMED'));
+  ok('detector ignores an alias when no spine import declares it',
+    !ownershipAppendsIn("appendEvent(r, { type: EVENT_TYPES.LANE_CLAIMED });").has('LANE_CLAIMED'));
 
   ok('some source files were scanned', files.length > 20, `${files.length} files`);
   ok(

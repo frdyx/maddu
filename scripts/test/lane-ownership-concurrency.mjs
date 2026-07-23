@@ -213,6 +213,9 @@ try {
   //     never becomes the reduced holder unless the terminal claim landed).
   const failAfter = (n) => { let c = 0; return async (repo, payload) => { c += 1; if (c > n) throw new Error(`injected append failure at call ${c}`); return spine.append(repo, payload); }; };
   const holds = async (repo, sid, lane) => (await claimsOf(repo, false)).some((x) => x.lane === lane && x.sessionId === sid);
+  const allEventIds = async (repo) => (await spine.readAllStrict(repo)).events.map((e) => e.id);
+  // Ids appended to `repo` after the `before` snapshot — the events that ACTUALLY landed.
+  const landedSince = async (repo, before) => { const now = await allEventIds(repo); return now.slice(before.length); };
   {
     // CLAIM over an inactive orphan: append #1 = cleanup-release, #2 = claim.
     const r = await freshRepo(); await reg(r, A); await reg(r, B); await close(r, A);
@@ -266,6 +269,94 @@ try {
     const worktree = { readLiveAttach: async () => { throw new Error('attachment read boom'); } };
     const res = await own.releaseLane(r, { sid: A, lane: 'L1', worktree });
     ok('12j. holder release with unreadable worktree → worktree-read-failed (fail closed)', res.status === 'worktree-read-failed' && (await holds(r, A, 'L1')), `${res.status}`);
+  }
+  // 12k-12m. Worktree authorization keys on the ATTACHMENT owner (liveAttach.session),
+  //          NOT the current holder (finding 2): a superseded owner that attached a
+  //          worktree must not orphan it, and must be able to disposition its own.
+  const wtOf = (session) => ({ readLiveAttach: async () => ({ session, pathRepoRel: `wt/${session}` }) });
+  {
+    // Actor owns BOTH the claim and the live attachment → plain release refused.
+    const r = await freshRepo(); await reg(r, A);
+    await own.claimLane(r, { sid: A, lane: 'L1' });
+    const res = await own.releaseLane(r, { sid: A, lane: 'L1', worktree: wtOf(A) });
+    ok('12k. owner of a live attachment cannot plain-release (needs-disposition)', res.status === 'needs-disposition', res.status);
+  }
+  {
+    // sync: A holds, B superseded. The live attachment belongs to A. B withdrawing
+    // its own claim is NOT blocked by A's attachment (would-orphan is A's concern).
+    const r = await freshRepo({ sync: true }); await reg(r, A); await reg(r, B);
+    await own.claimLane(r, { sid: A, lane: 'L1' });
+    await rawClaim(r, B, 'L1');
+    const res = await own.releaseLane(r, { sid: B, lane: 'L1', worktree: wtOf(A) });
+    ok('12l. superseded owner withdraws freely when the attachment is another session\'s', res.status === 'released', res.status);
+    // And the reverse: the attachment's OWNER (here A, still holder) is refused.
+    const res2 = await own.releaseLane(r, { sid: A, lane: 'L1', worktree: wtOf(A) });
+    ok('12l. the attachment owner is refused (must disposition)', res2.status === 'needs-disposition', res2.status);
+  }
+  {
+    // Disposition branch: the attachment owner may disposition; another ACTIVE
+    // session may not yank it.
+    const r = await freshRepo({ sync: true }); await reg(r, A); await reg(r, B);
+    await own.claimLane(r, { sid: A, lane: 'L1' });   // A holder
+    await rawClaim(r, B, 'L1');                         // B superseded; B owns the attachment
+    let detached = 0;
+    const wtDisp = (session) => ({ disposition: 'abandoned', readLiveAttach: async () => ({ session, pathRepoRel: `wt/${session}` }), detach: async () => { detached += 1; return { disposition: 'abandoned' }; } });
+    // A (holder) tries to disposition B's attachment → refused.
+    let res = await own.releaseLane(r, { sid: A, lane: 'L1', worktree: wtDisp(B) });
+    ok('12m. holder cannot disposition another active session\'s attachment', res.status === 'worktree-not-holder' && detached === 0, `${res.status}/${detached}`);
+    // B (attachment owner) disposition its own → allowed, and its claim released.
+    res = await own.releaseLane(r, { sid: B, lane: 'L1', worktree: wtDisp(B) });
+    ok('12m. attachment owner disposition its own → allowed', (res.status === 'released' || res.status === 'worktree-only') && detached === 1, `${res.status}/${detached}`);
+  }
+  {
+    // 12n. SYNC MULTI-OWNER force — 2 rival owners → 4 appends (release, release,
+    //      marker, claim). Inject at EACH boundary; assert stage, that committed
+    //      EXACTLY equals the landed events, and the decision-time holder.
+    const mk = async () => {
+      const r = await freshRepo({ sync: true }); await reg(r, A); await reg(r, B); await reg(r, C);
+      await own.claimLane(r, { sid: A, lane: 'L1' });  // A holder (first-claimer)
+      await rawClaim(r, B, 'L1');                       // B superseded owner
+      return r;
+    };
+    const stages = ['preempt-release', 'preempt-release', 'marker', 'claim'];
+    for (let n = 0; n < 4; n++) {
+      const r = await mk();
+      const before = await allEventIds(r);
+      const res = await own.forceClaimLane(r, { sid: C, lane: 'L1', forceGroup: 'fgS', append: failAfter(n) });
+      const landed = await landedSince(r, before);
+      const stageOk = res.status === 'partial' && res.stage === stages[n];
+      const committedOk = JSON.stringify(res.committed) === JSON.stringify(landed);
+      const holderOk = res.holder === A; // decision-time holder (first-claimer)
+      ok(`12n.${n} sync multi-owner force fail@append#${n + 1} (${stages[n]}) → partial, committed==landed, holder`, stageOk && committedOk && holderOk && !(await holds(r, C, 'L1')), `${res.status}/${res.stage} committed=${JSON.stringify(res.committed)} landed=${JSON.stringify(landed)} holder=${res.holder}`);
+    }
+  }
+  {
+    // 12o. AUTO-CLAIM cleanup-release boundary: an inactive orphan on the inferred
+    //      lane forces a cleanup release (trigger, cleanup-release, claim = 3
+    //      appends). Inject at the cleanup-release boundary (#2).
+    const mk = async () => {
+      const r = await freshRepo(); await reg(r, A); await reg(r, B); await close(r, B);
+      await rawClaim(r, B, 'auto-lane');   // B post-close orphan on the target lane
+      return r;
+    };
+    let r = await mk();
+    let before = await allEventIds(r);
+    let res = await own.autoClaimLane(r, { sid: A, lane: 'auto-lane', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim', append: failAfter(1) });
+    let landed = await landedSince(r, before);
+    ok('12o. auto-claim fail@cleanup-release → partial, committed==landed(trigger)', res.reason === 'partial' && res.stage === 'cleanup-release' && JSON.stringify(res.committed) === JSON.stringify(landed) && !(await holds(r, A, 'auto-lane')), `${res.stage} committed=${JSON.stringify(res.committed)} landed=${JSON.stringify(landed)}`);
+    // And the successful path cleans up the orphan then claims.
+    r = await mk();
+    res = await own.autoClaimLane(r, { sid: A, lane: 'auto-lane', fallbackLane: `auto/${A}`, triggerId: 'hook:auto-claim' });
+    ok('12o. auto-claim success cleans orphan + claims', res.claimed === true && res.lane === 'auto-lane' && (await holds(r, A, 'auto-lane')), JSON.stringify(res));
+  }
+  {
+    // 12p. Claim partial reports the decision-time holder (over an inactive orphan).
+    const r = await freshRepo(); await reg(r, A); await reg(r, B); await close(r, A);
+    await rawClaim(r, A, 'L1'); // inactive orphan holder A
+    const before = await allEventIds(r);
+    const res = await own.claimLane(r, { sid: B, lane: 'L1', append: failAfter(1) }); // cleanup lands, claim fails
+    const landed = await landedSince(r, before);
+    ok('12p. claim partial: holder=orphan A, committed==landed', res.status === 'partial' && res.holder === A && JSON.stringify(res.committed) === JSON.stringify(landed), `holder=${res.holder} committed=${JSON.stringify(res.committed)} landed=${JSON.stringify(landed)}`);
   }
 } catch (e) {
   console.error('concurrency harness error:', (e && e.stack) || e);

@@ -433,7 +433,7 @@ export default async function lane(argv) {
         process.exit(3);
         break;
       case 'worktree-not-holder':
-        console.error(`lane "${lid}" is actively claimed by ${r.holder ? r.holder.sessionId : 'another session'}; ${sid} cannot disposition its worktree`);
+        console.error(`lane "${lid}" worktree is held by another active session (${r.attachOwner || (r.holder && r.holder.sessionId) || 'unknown'}); ${sid} cannot disposition it`);
         process.exit(3);
         break;
       case 'worktree-failed':
@@ -450,10 +450,14 @@ export default async function lane(argv) {
         console.error(`spine has malformed lines — release refused. Run \`maddu verify\`.`);
         process.exit(1);
         break;
-      case 'partial':
-        console.error(`lane "${lid}" release partially applied (stage: ${r.stage}) — re-run.`);
+      case 'partial': {
+        const committed = Array.isArray(r.committed) && r.committed.length ? r.committed.join(', ') : 'none';
+        console.error(`lane "${lid}" release partially applied (stage: ${r.stage}) — state is append-only (no rollback); re-run.`);
+        console.error(`  committed events: ${committed}`);
+        console.error(`  current holder: ${r.holder || 'none'}`);
         process.exit(1);
         break;
+      }
       case 'lock':
         console.error(`lane lock busy — could not serialize the release on "${lid}". Retry.`);
         process.exit(1);

@@ -156,6 +156,22 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
   {
+    // Forged-prior via a SAME-LANE planted LANE_RELEASED carrying the fg: it must
+    // ALSO be excluded from reconstruction (all fg-events are the bundle's own),
+    // so the real holder sB survives and the mismatch hard-fails.
+    const root = await tempRepo('maddu-lfd-fg-forged2-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ev('LANE_RELEASED', 'L1', 'sA', { forceGroup: 'fg-forged2' }), // planted same-lane release with fg
+      ev('LANE_CLAIMED', 'L1', 'sB'),
+      ev('LANE_CLAIM_FORCED', 'L1', 'sA', { lane: 'L1', priorSessionId: 'sA', by: 'sA', forceGroup: 'fg-forged2' }),
+      ev('LANE_CLAIMED', 'L1', 'sA', { forceGroup: 'fg-forged2' }),
+    ], 'standard');
+    const r = await run(root);
+    ok('forceGroup: forged prior via same-lane fg-release → hard-fail (default)',
+      r.ok === false && /reconstructed pre-force holder/.test(JSON.stringify(r.evidence?.problems)), JSON.stringify(r.evidence?.problems)?.slice(0, 160));
+    await rm(root, { recursive: true, force: true });
+  }
+  {
     // SYNC mode: a holder mismatch is a NON-blocking warn (a late-imported
     // foreign claim can shift the reconstructed holder; the gate cannot prove the
     // writer's local snapshot). ok:true, status:'warn'.
