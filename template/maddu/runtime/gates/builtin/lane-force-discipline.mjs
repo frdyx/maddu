@@ -38,10 +38,15 @@
 // `ownersOf`) to recover the pre-force holder and compares it to priorSessionId:
 //   - DEFAULT mode: the merged history IS the local history, so a mismatch is a
 //     real discipline violation → hard-fail.
-//   - SYNC mode: a late-imported earlier foreign claim can deterministically
-//     become the reconstructed holder on rebuild; the gate cannot prove the
-//     writer's local snapshot at force time, so a mismatch is a non-blocking
-//     diagnostic (warn), never a hard-fail.
+//   - SYNC mode: the reconstruction is NOT SOUND and is WITHHELD entirely. A
+//     merged replica history can carry independently-authored (or forged)
+//     fg-events; under first-claimer ordering, filtering a planted earlier
+//     preempt-release resurrects an earlier claimant, so a forged prior could
+//     MATCH and pass (and a late-imported reorder could spuriously mismatch).
+//     The gate cannot prove the writer's local snapshot on a merged history, and
+//     forgery detection belongs to the integrity layer (`maddu verify`), not a
+//     discipline gate. Sync mode therefore relies ONLY on the import-stable
+//     prior-once-claimed check.
 //   - Backward compat: pre-PR-C triples carry NO forceGroup → only the
 //     prior-once-claimed check runs (never newly-fails legacy history).
 // The priorSessionId-was-an-ex-claimer sanity check still runs in BOTH modes
@@ -95,7 +100,6 @@ export default {
     const syncMode = !!(await readActiveReplicaId(ctx.repoRoot));
     const indexOf = new Map(all.map((e, i) => [e, i]));
     const problems = [];
-    const warnings = [];
     for (const ev of forced) {
       const prior = ev.data?.priorSessionId;
       if (!prior) { problems.push({ id: ev.id, reason: 'missing priorSessionId' }); continue; }
@@ -104,31 +108,37 @@ export default {
       const evIdx = indexOf.get(ev);
       const matched = all.some((x, i) => i < evIdx && x.type === EVENT_TYPES.LANE_CLAIMED && x.lane === ev.lane && x.actor === prior);
       if (!matched) { problems.push({ id: ev.id, reason: 'no matching prior LANE_CLAIMED' }); continue; }
-      // PR-C strengthened holder check: reconstruct the pre-force holder by
-      // forceGroup-id bundle. Legacy triples (no forceGroup) skip this.
+      // PR-C strengthened holder check — DEFAULT MODE ONLY. Reconstruct the
+      // pre-force holder from all events before the MARKER, minus the bundle's
+      // own preempt-releases (a LANE_RELEASED carrying this forceGroup). A
+      // legitimate bundle's ONLY pre-marker events are those preempt-releases
+      // (its LANE_CLAIMED is the TRAILING claim, after the marker), so:
+      //   - a planted LANE_RELEASED with the fg is filtered → can't clear the
+      //     real holder; last-writer semantics then still select the real
+      //     holder, so a forged prior mismatches → hard-fail;
+      //   - a pre-marker LANE_CLAIMED with the fg is NEVER legitimate and is NOT
+      //     filtered → a forged fg-tagged claim can't hide the holder;
+      //   - an ordinary intervening claim (no fg) survives and is recovered.
+      //
+      // SYNC MODE: the reconstruction is NOT SOUND and is deliberately NOT run.
+      // A merged replica history can carry independently-authored fg-events, and
+      // under first-claimer ordering filtering a (possibly forged) earlier
+      // preempt-release RESURRECTS an earlier claimant as the reconstructed
+      // holder — so a forged prior could MATCH and pass, or a legitimate
+      // late-imported reorder could spuriously mismatch. The gate cannot prove
+      // the writer's local snapshot on a merged history, and forgery detection is
+      // the integrity layer's domain (the hash chain / `maddu verify`), not a
+      // discipline gate's. So in sync mode the strengthened holder check is
+      // withheld entirely; only the import-stable prior-once-claimed check above
+      // governs. (Was a sync "advisory warn" — dropped as unsound: it could be
+      // evaded to no-warn by exactly this planted-release construction.)
       const fg = ev.data && ev.data.forceGroup;
-      if (fg) {
-        // Reconstruct the pre-force holder from all events before the MARKER,
-        // MINUS the bundle's own preempt-releases (a LANE_RELEASED carrying this
-        // forceGroup). A legitimate bundle's ONLY pre-marker events are those
-        // preempt-releases — the bundle's LANE_CLAIMED is the TRAILING claim,
-        // after the marker. So the filter is bundle-shape-validated, not blanket:
-        //   - a planted LANE_RELEASED with the fg (same/cross-lane) is filtered,
-        //     so it can't clear the real holder;
-        //   - a pre-marker LANE_CLAIMED carrying the fg is NEVER legitimate and is
-        //     NOT filtered, so a forged claim tagged with the fg cannot hide the
-        //     real holder it established;
-        //   - an ordinary intervening claim (no fg) survives and is recovered.
-        const evIdx = indexOf.get(ev);
+      if (fg && !syncMode) {
         const prefix = all.slice(0, evIdx).filter((e) => !(e && e.type === EVENT_TYPES.LANE_RELEASED && e.data && e.data.forceGroup === fg));
-        const recon = ownersOf(prefix, ev.lane, { syncMode }).holder;
+        const recon = ownersOf(prefix, ev.lane, { syncMode: false }).holder;
         const reconId = recon ? recon.sessionId : null;
         if (prior !== reconId) {
-          if (syncMode) {
-            warnings.push({ id: ev.id, lane: ev.lane, priorSessionId: prior, reconstructedHolder: reconId, note: 'sync-mode: a late-imported foreign claim may shift the reconstructed holder — advisory only' });
-          } else {
-            problems.push({ id: ev.id, reason: `priorSessionId ${prior} does not match the reconstructed pre-force holder ${reconId ?? 'none'}` });
-          }
+          problems.push({ id: ev.id, reason: `priorSessionId ${prior} does not match the reconstructed pre-force holder ${reconId ?? 'none'}` });
         }
       }
     }
@@ -144,8 +154,7 @@ export default {
         });
       }
     }
-    if (problems.length > 0) return { ok: false, message: `${problems.length} force-claim issue(s)`, evidence: { problems, warnings } };
-    if (warnings.length > 0) return { ok: true, status: 'warn', message: `${forced.length} force-claim(s); ${warnings.length} sync-mode holder advisory`, evidence: { warnings } };
+    if (problems.length > 0) return { ok: false, message: `${problems.length} force-claim issue(s)`, evidence: { problems } };
     return { ok: true, message: `${forced.length} force-claim(s), all with valid priors` };
   },
 };

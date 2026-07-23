@@ -188,17 +188,55 @@ async function main() {
     await rm(root, { recursive: true, force: true });
   }
   {
-    // SYNC mode: a holder mismatch is a NON-blocking warn (a late-imported
-    // foreign claim can shift the reconstructed holder; the gate cannot prove the
-    // writer's local snapshot). ok:true, status:'warn'.
+    // SYNC mode: the reconstruction holder-check is WITHHELD (unsound on a merged
+    // history — a planted preempt-release can resurrect an earlier first-claimer).
+    // Only the import-stable prior-once-claimed check governs; a valid prior
+    // (some earlier claim by that id) passes with NO warn.
     const root = await tempRepo('maddu-lfd-fg-sync-', [
       ev('LANE_CLAIMED', 'L1', 'sA'),
-      ev('LANE_CLAIMED', 'L1', 'sB'),   // sync: sA is first-claimer holder; a marker claiming prior=sB mismatches
+      ev('LANE_CLAIMED', 'L1', 'sB'),
       ...forceTripleFg('L1', 'sB', 'sC', 'fg-sync'),
     ], 'standard');
     await writeFile(join(root, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'replica-self' }) + '\n');
     const r = await run(root);
-    ok('forceGroup: sync-mode holder mismatch → warn (ok, status warn)', r.ok === true && r.status === 'warn', `ok=${r.ok} status=${r.status}`);
+    ok('forceGroup: sync-mode reconstruction withheld → ok, no warn (prior-once-claimed only)', r.ok === true && !r.status, `ok=${r.ok} status=${r.status}`);
+    await rm(root, { recursive: true, force: true });
+  }
+  {
+    // SYNC planted-release exploit (round 4): claim A → planted release A(fg) →
+    // claim B → preempt-release B(fg) → marker prior=A. A default-mode
+    // reconstruction would be fooled (filtering both releases resurrects the sync
+    // first-claimer A). Sync WITHHOLDS reconstruction, so the gate does not
+    // silently "validate" the forged prior — it runs only prior-once-claimed (A
+    // did claim earlier → passes; forgery is the integrity layer's job). Key
+    // assertion: NO false hard-fail and NO pretense of holder validation.
+    const root = await tempRepo('maddu-lfd-fg-sync-planted-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ev('LANE_RELEASED', 'L1', 'sA', { forceGroup: 'fg-planted' }),
+      ev('LANE_CLAIMED', 'L1', 'sB'),
+      ev('LANE_RELEASED', 'L1', 'sB', { reason: 'force-claim-preempt', by: 'sA', forceGroup: 'fg-planted' }),
+      ev('LANE_CLAIM_FORCED', 'L1', 'sA', { lane: 'L1', priorSessionId: 'sA', by: 'sA', forceGroup: 'fg-planted' }),
+      ev('LANE_CLAIMED', 'L1', 'sA', { forceGroup: 'fg-planted' }),
+    ], 'standard');
+    await writeFile(join(root, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'replica-self' }) + '\n');
+    const r = await run(root);
+    ok('forceGroup: sync planted-release exploit → no false-validate, no crash (prior-once-claimed only)', r.ok === true && !r.status, `ok=${r.ok} status=${r.status}`);
+    await rm(root, { recursive: true, force: true });
+  }
+  {
+    // DEFAULT mode with the SAME planted-release construction is SOUND: last-
+    // writer selects sB (the real holder), so prior=sA mismatches → hard-fail.
+    const root = await tempRepo('maddu-lfd-fg-def-planted-', [
+      ev('LANE_CLAIMED', 'L1', 'sA'),
+      ev('LANE_RELEASED', 'L1', 'sA', { forceGroup: 'fg-planted2' }),
+      ev('LANE_CLAIMED', 'L1', 'sB'),
+      ev('LANE_RELEASED', 'L1', 'sB', { reason: 'force-claim-preempt', by: 'sA', forceGroup: 'fg-planted2' }),
+      ev('LANE_CLAIM_FORCED', 'L1', 'sA', { lane: 'L1', priorSessionId: 'sA', by: 'sA', forceGroup: 'fg-planted2' }),
+      ev('LANE_CLAIMED', 'L1', 'sA', { forceGroup: 'fg-planted2' }),
+    ], 'standard');
+    const r = await run(root);
+    ok('forceGroup: default planted-release exploit → hard-fail (last-writer selects real holder sB)',
+      r.ok === false && /reconstructed pre-force holder/.test(JSON.stringify(r.evidence?.problems)), JSON.stringify(r.evidence?.problems)?.slice(0, 160));
     await rm(root, { recursive: true, force: true });
   }
 
