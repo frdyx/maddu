@@ -381,6 +381,46 @@ export default async function lane(argv) {
     // the owner is re-read, so no concurrent claim can slip between them.
     const wtLib = await loadWorktreesLib();
     const dispRaw = flags.worktree;
+
+    // PR-D §3.7 — operator `--recover`: the audited command for a STRANDED lane
+    // (a crash left the checkout removed but the terminal WORKTREE_DETACHED never
+    // landed, or an intent-less legacy strand). The flag IS the operator's
+    // affirmation the checkout is genuinely gone. Active-owner-aware authorization
+    // + a physical-state × origin matrix decide the outcome; a foreign-origin
+    // intent is refused + redirected to its source replica.
+    if (flags.recover) {
+      if (!wtLib?.recoverWorktreeOperator) { console.error('--recover requires a newer maddu runtime (worktrees.mjs not found)'); process.exit(2); }
+      const resolveActive = async (s) => {
+        try { const p = await projections.project(repoRoot); return (p.activeSessions || []).some((x) => x.id === s); } catch { return false; }
+      };
+      const rr = await wtLib.recoverWorktreeOperator(repoRoot, { lane: lid, recoveryActor: sid, confirm: true, resolveActive });
+      switch (rr.status) {
+        case 'recovered':
+          console.log(`recovered  ${lid}  (${rr.mode}${rr.disposition ? `, ${rr.disposition}` : ''})`);
+          if (rr.leftoverPath) console.error(`  leftover checkout at ${rr.leftoverPath} was NOT removed — dispose of it by hand`);
+          if (rr.note) console.error(`  note: ${rr.note}`);
+          return;
+        case 'refused-foreign':
+          console.error(`lane "${lid}" detach intent originates on replica ${rr.sourceReplicaId || '?'} — run --recover THERE (foreign origin; refused locally)`);
+          process.exit(3);
+        case 'refused':
+          console.error(`--recover refused: ${rr.reason}${rr.attachmentOwner ? ` (attachment owner ${rr.attachmentOwner})` : ''}`);
+          process.exit(3);
+        case 'nothing-to-recover':
+          console.log(`lane "${lid}" has no live worktree to recover`);
+          return;
+        case 'lock-busy':
+          console.error(`lane "${lid}" worktree is busy — retry after the in-flight op completes`);
+          process.exit(3);
+        case 'partial':
+          console.error(`--recover incomplete (${rr.stage}): ${rr.error || 'removal/postcondition not satisfied'} — retry`);
+          process.exit(3);
+        default:
+          console.error(`--recover: ${rr.status}`);
+          process.exit(3);
+      }
+    }
+
     if (dispRaw !== undefined) {
       if (!wtLib?.detachLaneWorktree) { console.error('--worktree requires a newer maddu runtime (worktrees.mjs not found)'); process.exit(2); }
       if (dispRaw === true) { console.error('--worktree needs a disposition: merged | abandoned | keep'); process.exit(2); }

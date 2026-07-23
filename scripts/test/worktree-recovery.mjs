@@ -67,7 +67,7 @@ async function main() {
 
   const base = await mkdtemp(path.join(os.tmpdir(), 'maddu-wtrecover-'));
   try {
-    const repo = await setup(base, ['alpha', 'beta', 'gamma', 'delta']);
+    const repo = await setup(base, ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota']);
     if (!repo) { console.log('  [SKIP] git unavailable'); console.log('\nworktree-recovery: skipped'); process.exit(77); }
 
     // ── Test 3: crash-after-intent, instance PRESENT → auto-finalize ──
@@ -143,6 +143,85 @@ async function main() {
       const past = await wt.recoverPendingDetaches(repo, { nowMs: anchorMs + wt.WORKTREE_RECOVER_COOLDOWN_MS + 1000 });
       ok('past cooldown → the present candidate finalizes', past.finalized.some((f) => f.lane === 'delta'));
       ok('past-cooldown finalize removed the checkout', !(await exists(a.path)));
+    }
+
+    // ── §3.7 operator --recover matrix + authorization ──
+    const term = async (repo, aid) => (await spine.readAll(repo)).find((e) => e.type === 'WORKTREE_DETACHED' && e.data.attachmentId === aid);
+    {
+      // absent + intent present → terminalize NO removal, preserve intent disposition,
+      // record recoveryActor + attachmentOwner.
+      const a = await wt.attachLaneWorktree(repo, { lane: 'epsilon', session: 'owner1', claimEventId: 'evt_e' });
+      await seedIntent(spine, repo, a, 'merged');
+      await git(['worktree', 'remove', '--force', a.path], repo); // ABSENT
+      const active = new Set(['owner1']); // owner still active + is actor
+      const r = await wt.recoverWorktreeOperator(repo, { lane: 'epsilon', recoveryActor: 'owner1', resolveActive: (s) => active.has(s) });
+      ok('recover absent+intent → recovered (preserve intent)', r.status === 'recovered' && r.mode === 'absent-preserve-intent' && r.disposition === 'merged');
+      const t = await term(repo, a.attachmentId);
+      ok('recover terminal records recoveryActor + attachmentOwner', t?.data?.recoveryActor === 'owner1' && t?.data?.attachmentOwner === 'owner1' && t?.actor === 'owner1');
+      ok('recover absent → attachment now gone', !(await wt.liveAttachmentForLane(repo, 'epsilon')));
+    }
+    {
+      // present + token MATCH → remove + terminalize.
+      const a = await wt.attachLaneWorktree(repo, { lane: 'zeta', session: 'owner1', claimEventId: 'evt_z' });
+      await seedIntent(spine, repo, a, 'abandoned');
+      const active = new Set(['owner1']);
+      const r = await wt.recoverWorktreeOperator(repo, { lane: 'zeta', recoveryActor: 'owner1', resolveActive: (s) => active.has(s) });
+      ok('recover present+token-match → removed', r.status === 'recovered' && r.mode === 'removed');
+      ok('recover present+match → checkout removed', !(await exists(a.path)));
+    }
+    {
+      // present + token MISMATCH → orphaned-leftover, NEVER removed.
+      const a = await wt.attachLaneWorktree(repo, { lane: 'eta', session: 'owner1', claimEventId: 'evt_h' });
+      await seedIntent(spine, repo, a, 'merged');
+      const loc = await ident.worktreeInstanceDir(repo, a.path);
+      await writeFile(loc.file, 'REPLACED_TOKEN');
+      const active = new Set(['owner1']);
+      const r = await wt.recoverWorktreeOperator(repo, { lane: 'eta', recoveryActor: 'owner1', resolveActive: (s) => active.has(s) });
+      ok('recover present+mismatch → orphaned-leftover, NOT removed', r.status === 'recovered' && r.mode === 'orphaned-leftover' && (await exists(a.path)));
+      const t = await term(repo, a.attachmentId);
+      ok('recover mismatch terminal is disposition:orphaned', t?.data?.disposition === 'orphaned');
+      await git(['worktree', 'remove', '--force', a.path], repo).catch(() => {});
+    }
+    {
+      // Authorization: actor not active → refused; a DIFFERENT active owner → refused;
+      // an INACTIVE (closed) owner → a different ACTIVE operator may recover (test 4b).
+      const a = await wt.attachLaneWorktree(repo, { lane: 'theta', session: 'owner2', claimEventId: 'evt_t' });
+      await seedIntent(spine, repo, a, 'merged');
+      await git(['worktree', 'remove', '--force', a.path], repo); // ABSENT
+      // actor not active → refused
+      const r1 = await wt.recoverWorktreeOperator(repo, { lane: 'theta', recoveryActor: 'ghost', resolveActive: () => false });
+      ok('recover refused when actor not active', r1.status === 'refused' && r1.reason === 'actor-not-active-registered');
+      // owner2 ACTIVE, actor cleaner (active) but not owner → refused (other-active-owner)
+      const r2 = await wt.recoverWorktreeOperator(repo, { lane: 'theta', recoveryActor: 'cleaner', resolveActive: (s) => ['owner2', 'cleaner'].includes(s) });
+      ok('recover refused when a DIFFERENT owner is active', r2.status === 'refused' && r2.reason === 'other-active-owner');
+      // owner2 INACTIVE, cleaner active → allowed (closed-owner recovery)
+      const r3 = await wt.recoverWorktreeOperator(repo, { lane: 'theta', recoveryActor: 'cleaner', resolveActive: (s) => s === 'cleaner' });
+      ok('recover allowed when owner is closed + a different operator is active', r3.status === 'recovered');
+      const t = await term(repo, a.attachmentId);
+      ok('closed-owner recovery records both actor (cleaner) + owner (owner2)', t?.data?.recoveryActor === 'cleaner' && t?.data?.attachmentOwner === 'owner2');
+    }
+
+    // ── CLI: `maddu lane release <lane> --recover --session <active>` end-to-end ──
+    {
+      // An active registered operator session (so resolveActive passes).
+      await spine.append(repo, { type: 'SESSION_REGISTERED', actor: 'op_cli', data: { sessionId: 'op_cli', runtime: 'test', role: 'operator', label: 'op', focus: 'recover' } });
+      const a = await wt.attachLaneWorktree(repo, { lane: 'iota', session: 'op_cli', claimEventId: 'evt_i' });
+      await seedIntent(spine, repo, a, 'merged');
+      await git(['worktree', 'remove', '--force', a.path], repo); // ABSENT strand
+      const BIN = path.resolve(__dirname, '..', '..', 'bin', 'maddu.mjs');
+      const DROP = new Set(['MADDU_STATE_ROOT', 'MADDU_SESSION_ID']);
+      const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP.has(k.toUpperCase())));
+      const r = await new Promise((resolve) => {
+        let c;
+        try { c = spawn(process.execPath, [BIN, 'lane', 'release', 'iota', '--worktree', '--recover', '--session', 'op_cli'], { cwd: repo, env: childEnv }); }
+        catch (e) { return resolve({ code: -1, out: '', err: e.message }); }
+        let out = '', err = '';
+        c.stdout.on('data', (b) => (out += b)); c.stderr.on('data', (b) => (err += b));
+        c.on('close', (code) => resolve({ code, out, err })); c.on('error', (e) => resolve({ code: -1, out: '', err: e.message }));
+      });
+      ok('CLI lane release --recover exits 0', r.code === 0, (r.err || '').trim().slice(0, 160));
+      ok('CLI prints a recovered line', /recovered\s+iota/.test(r.out), r.out.trim().slice(0, 120));
+      ok('CLI --recover cleared the strand (attachment gone)', !(await wt.liveAttachmentForLane(repo, 'iota')));
     }
 
     console.log(`\nworktree-recovery: ${passed} passed, ${failed} failed`);

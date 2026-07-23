@@ -681,3 +681,104 @@ export async function recoverPendingDetaches(stateRoot, { nowMs = Date.now() } =
     await glock.release();
   }
 }
+
+// ── Operator --recover: the audited command for the cases AUTO must not touch ──
+// (PR-D §3.7): an instance-ABSENT-with-intent, an intent-less legacy strand, a
+// present-but-replaced checkout. Active-owner-aware authorization + a physical-
+// state × origin matrix. The `--recover` flag (or an interactive confirm) IS the
+// operator's affirmation. Records BOTH recoveryActor and attachmentOwner on the
+// terminal (honest provenance — never impersonates the closed owner).
+//
+// `resolveActive(sid) → boolean` reports whether a session is currently active +
+// registered (supplied by the CLI/bridge from the sessions projection).
+export async function recoverWorktreeOperator(stateRoot, { lane, recoveryActor, confirm = true, resolveActive }) {
+  assertLaneSlug(lane);
+  if (!confirm) return { status: 'refused', reason: 'confirmation-required', lane };
+  if (typeof resolveActive !== 'function') return { status: 'refused', reason: 'no-session-resolver', lane };
+  const locked = await withLaneWorktreeLock(stateRoot, lane, () => recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }));
+  if (!locked.acquired) return { status: 'lock-busy', lane };
+  return locked.value;
+}
+
+async function isActive(resolveActive, sid) {
+  return sid ? !!(await resolveActive(sid)) : false;
+}
+
+async function terminalRecover(stateRoot, { lane, att, disposition, cand, reason, intentToken, recoveryActor, attachmentOwner }) {
+  return append(stateRoot, {
+    type: EVENT_TYPES.WORKTREE_DETACHED, actor: recoveryActor, lane,
+    data: {
+      schemaVersion: 1, attachmentId: att.attachmentId, lane, pathRepoRel: att.pathRepoRel,
+      disposition, branchHead: cand ? cand.branchHead : null, integrationRef: cand ? cand.integrationRef : null,
+      integrationHead: cand ? cand.integrationHead : null, ancestorCheck: cand ? cand.ancestorCheck : 'skipped',
+      dirtyAtDetach: cand ? cand.dirtyAtDetach : false, reason: reason || 'operator-recover',
+      worktreeInstanceId: intentToken || att.worktreeInstanceId || null,
+      recoveryActor, attachmentOwner,
+    },
+  });
+}
+
+async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) {
+  const att = await liveAttachmentForLane(stateRoot, lane);
+  if (!att) return { status: 'nothing-to-recover', lane };
+  const attachmentOwner = att.session || null;
+
+  // Authorization (§3.7): the actor must be an active registered operator; an
+  // ACTIVE non-actor owner refuses (only that owner may act while active); an
+  // inactive/closed owner lets ANY active operator recover.
+  if (!(await isActive(resolveActive, recoveryActor))) return { status: 'refused', reason: 'actor-not-active-registered', lane };
+  const ownerActive = await isActive(resolveActive, attachmentOwner);
+  if (ownerActive && attachmentOwner !== recoveryActor) {
+    return { status: 'refused', reason: 'other-active-owner', attachmentOwner, lane };
+  }
+
+  // Intent + origin. A FOREIGN-origin intent refuses locally and redirects (owner
+  // auth does NOT establish physical-origin authority) — never terminalize here.
+  const pend = await readPendingDetach(stateRoot);
+  const cand = pend.candidates.find((c) => c.attachmentId === att.attachmentId) || null;
+  const surf = pend.surfaced.find((s) => s.attachmentId === att.attachmentId && s.reason !== 'post-terminal') || null;
+  if (surf && surf.reason === 'foreign-origin') {
+    return { status: 'refused-foreign', lane, attachmentId: att.attachmentId, sourceReplicaId: surf.sourceReplicaId || null, attachmentOwner };
+  }
+  const intentToken = cand ? cand.worktreeInstanceId : (att.worktreeInstanceId || null);
+
+  const path = laneWorktreePath(stateRoot, lane);
+  const present = await pathExists(path);
+  const inst = present ? await readWorktreeInstance(stateRoot, path) : { state: 'absent' };
+  const tokenMatches = present && inst.state === 'present' && !!intentToken && inst.token === intentToken;
+  const prov = { recoveryActor, attachmentOwner };
+
+  // present + token MATCHES the intent → the operator confirmed removal of the
+  // SAME instance → remove + postcondition + terminalize (preserve intent disposition).
+  if (present && tokenMatches) {
+    const g = await removeWorktreeGit(stateRoot, path, { branch: laneBranch(lane), force: true });
+    if (!g.removed) return { status: 'partial', stage: 'remove', lane, error: g.error };
+    if (await pathExists(path)) return { status: 'partial', stage: 'remove', lane };
+    const disposition = cand ? cand.disposition : 'abandoned';
+    const ev = await terminalRecover(stateRoot, { lane, att, disposition, cand, reason: cand ? cand.reason : 'operator-recover-removed', intentToken, ...prov });
+    return { status: 'recovered', mode: 'removed', lane, attachmentId: att.attachmentId, disposition, eventId: ev.id };
+  }
+
+  // present + token MISMATCH / MISSING → a DIFFERENT (or legacy) checkout now sits
+  // at the path → NEVER remove it. Terminalize the attachment as orphaned and
+  // report the leftover directory for the operator to dispose of by hand.
+  if (present && !tokenMatches) {
+    const ev = await terminalRecover(stateRoot, { lane, att, disposition: 'orphaned', reason: 'operator-recover-replaced', intentToken, ...prov });
+    return { status: 'recovered', mode: 'orphaned-leftover', lane, attachmentId: att.attachmentId, leftoverPath: att.pathRepoRel, eventId: ev.id,
+      note: 'a different/unverifiable checkout occupies the lane path — the attachment was terminalized but the directory was NOT removed; dispose of it by hand' };
+  }
+
+  // absent + a matching (candidate) intent → terminalize with NO removal, PRESERVING
+  // the intent's verified disposition (a --merged survives; ancestry was verified at
+  // intent time — no re-ancestry).
+  if (!present && cand) {
+    const ev = await terminalRecover(stateRoot, { lane, att, disposition: cand.disposition, cand, reason: cand.reason, intentToken, ...prov });
+    return { status: 'recovered', mode: 'absent-preserve-intent', lane, attachmentId: att.attachmentId, disposition: cand.disposition, eventId: ev.id };
+  }
+
+  // absent + intent-less (legacy strand, or unverifiable origin treated as legacy)
+  // → a compensating orphaned terminal (mirrors the attach-side orphaned path),
+  // NEVER a merged claim for unverified work.
+  const ev = await terminalRecover(stateRoot, { lane, att, disposition: 'orphaned', reason: 'operator-recover-vanished', intentToken, ...prov });
+  return { status: 'recovered', mode: 'absent-orphaned', lane, attachmentId: att.attachmentId, eventId: ev.id };
+}
