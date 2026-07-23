@@ -262,6 +262,14 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   // claim holder: under team-sync a late-imported earlier claim can supersede the
   // session that attached the worktree, so a holder-based guard would let that
   // session's plain release orphan its own live checkout.
+  // Diff-r2 #1: the attachment read + the disposition/reconcile decision + the
+  // LANE_RELEASED append must run UNDER the per-lane worktree lock, or a plain
+  // release can read a null attachment while an attach is mid-flight (holding the
+  // worktree lock, pre-WORKTREE_ATTACHED) and then release the claim after the
+  // attach commits — a live worktree with no owner. When the hook provides
+  // `withLock`, run the whole body inside it (claims → worktree order; the detach /
+  // reconcile hooks use IN-LOCK variants so they never re-acquire re-entrantly).
+  const body = async () => {
   let liveAttach = null;
   let liveAttachError = false;
   if (worktree && typeof worktree.readLiveAttach === 'function') {
@@ -289,16 +297,20 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
     // boundary failed) leaves the attachment/worktree live — releasing the claim
     // would strand a live worktree with no owner. Propagate the partial WITHOUT
     // LANE_RELEASED. Only 'detached' / 'already-detached' proceed.
-    const dispStatus = detachResult && detachResult.status;
-    if (dispStatus && dispStatus !== 'detached' && dispStatus !== 'already-detached') {
-      return { status: 'worktree-incomplete', event: null, detachResult, committed: detachResult.committed || [] };
+    // Diff-r2 #6: fail CLOSED on ANY status that is not an explicit completion —
+    // a missing/undefined status (runtime skew, malformed result) must NOT release.
+    if (!detachResult || (detachResult.status !== 'detached' && detachResult.status !== 'already-detached')) {
+      return { status: 'worktree-incomplete', event: null, detachResult: detachResult || null, committed: (detachResult && detachResult.committed) || [] };
     }
     // Actor holds no claim on the lane → the disposition WAS the cleanup; no
     // LANE_RELEASED (there is nothing of the actor's to release).
     if (!isOwner) return { status: 'worktree-only', event: null, detachResult };
     let event;
+    // Diff-r2 #8: a release-append failure AFTER a successful detach must report the
+    // detach terminal (and any committed intent) as committed, not [].
+    const detachCommitted = (detachResult && detachResult.eventId) ? [detachResult.eventId] : ((detachResult && detachResult.committed) || []);
     try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-    catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e, detachResult }; }
+    catch (e) { return { status: 'partial', stage: 'release', event: null, committed: detachCommitted, holder: holderId, error: e, detachResult }; }
     return { status: 'released', event, detachResult };
   }
 
@@ -334,6 +346,17 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
   catch (e) { return { status: 'partial', stage: 'release', event: null, committed: reconcileEventId ? [reconcileEventId] : [], holder: holderId, error: e, reconcileEventId }; }
   return { status: 'released', event, reconcileEventId };
+  }; // end body
+
+  // Serialize the attachment-dependent body against a concurrent attach via the
+  // per-lane worktree lock when the hook supports it; else run it directly (an old
+  // lib, or a caller with no worktree hook, has no attachment to race).
+  if (worktree && typeof worktree.withLock === 'function') {
+    const locked = await worktree.withLock(body);
+    if (!locked || locked.acquired === false) return { status: 'worktree-lock-busy', event: null };
+    return locked.value;
+  }
+  return body();
 }
 
 export async function releaseLane(repoRoot, opts) {

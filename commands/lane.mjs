@@ -399,16 +399,21 @@ export default async function lane(argv) {
           console.log(`recovered  ${lid}  (${rr.mode}${rr.disposition ? `, ${rr.disposition}` : ''})`);
           if (rr.leftoverPath) console.error(`  leftover checkout at ${rr.leftoverPath} was NOT removed — dispose of it by hand`);
           if (rr.note) console.error(`  note: ${rr.note}`);
-          // Diff-r1 #9: the attachment is terminalized, but the actor may still HOLD
-          // the lane claim — complete the recovery by releasing it (WORKTREE_DETACHED
-          // → LANE_RELEASED, a two-step multi-append). If the claim belongs to a
-          // now-closed owner (a different operator recovered it), the janitor's
-          // orphan-claim pass reaps it; report only.
-          try {
-            const rel = await own.releaseLane(repoRoot, { sid, lane: lid });
-            if (rel.status === 'released') console.log(`released  ${lid}`);
-            else if (rel.status === 'owned-by-others') console.log(`  (lane claim held by ${rel.holder ? rel.holder.sessionId : 'another session'} — reaped separately)`);
-          } catch { /* best-effort; recovery already succeeded */ }
+          // Diff-r1 #9 / Diff-r2 #7: the attachment is terminalized, but the actor
+          // may still HOLD the lane claim — complete the recovery by releasing it
+          // (WORKTREE_DETACHED → LANE_RELEASED, a two-step multi-append). Report
+          // claim-release failures HONESTLY: only 'released'/'no-owners' complete;
+          // 'owned-by-others' is the documented deferred (janitor-reaped) case;
+          // anything else (busy lock, corrupt spine, partial, throw) means the claim
+          // is still held → nonzero exit with the retry command.
+          let rel;
+          try { rel = await own.releaseLane(repoRoot, { sid, lane: lid }); }
+          catch (e) { rel = { status: 'threw', error: e }; }
+          if (rel.status === 'released') { console.log(`released  ${lid}`); return; }
+          if (rel.status === 'no-owners') return; // claim already gone
+          if (rel.status === 'owned-by-others') { console.log(`  (lane claim held by ${rel.holder ? rel.holder.sessionId : 'another session'} — reaped separately)`); return; }
+          console.error(`  worktree recovered, but the lane claim release is INCOMPLETE (${rel.status}) — re-run: maddu lane release ${lid}`);
+          process.exit(3);
           return;
         }
         case 'refused-foreign':
@@ -442,23 +447,40 @@ export default async function lane(argv) {
     const worktree = wtLib?.liveAttachmentForLane
       ? {
         disposition: dispRaw,
+        // Diff-r2 #1: releaseLaneIn runs its attachment-dependent body under the
+        // per-lane worktree lock via this hook (claims → worktree order). The
+        // detach/reconcile hooks below therefore use the IN-LOCK variants so they
+        // never re-acquire the (non-reentrant) worktree lock. When the lib is too
+        // old to expose withLaneWorktreeLock, omit withLock — releaseLaneIn then
+        // runs the body directly (legacy behaviour).
+        withLock: wtLib.withLaneWorktreeLock
+          ? (fn) => wtLib.withLaneWorktreeLock(repoRoot, lid, fn)
+          : undefined,
         readLiveAttach: () => wtLib.liveAttachmentForLane(repoRoot, lid),
         // PR-D §3.8: a plain release over an actor-owned lane whose detach crashed
         // mid-way (a PRESENT, token-matched pending intent) auto-completes it here
         // instead of blocking on needs-disposition. Targeted to THIS lane only.
-        reconcileAttachment: wtLib.finalizePendingDetach
-          ? (args) => wtLib.finalizePendingDetach(repoRoot, args)
+        reconcileAttachment: (wtLib.finalizePendingDetachInLock || wtLib.finalizePendingDetach)
+          ? (args) => (wtLib.finalizePendingDetachInLock || wtLib.finalizePendingDetach)(repoRoot, args)
           : undefined,
         detach: async () => {
-          const r = await wtLib.detachLaneWorktree(repoRoot, {
+          const detachFn = wtLib.detachLaneWorktreeInLock || wtLib.detachLaneWorktree;
+          const r = await detachFn(repoRoot, {
             lane: lid, disposition: dispRaw,
             integrationRef: typeof flags['integration-ref'] === 'string' ? flags['integration-ref'] : null,
             reason: typeof flags.reason === 'string' ? flags.reason : null,
             by: sid,
           });
-          const kept = r.disposition === 'kept';
-          console.log(`  worktree: ${r.disposition}${r.ancestorCheck === 'pass' ? ' (verified merged)' : ''}${kept ? ` — kept at ${r.path}` : ' — removed'}`);
-          if (r.branchCleanupWarning) console.error(`  note: ${r.branchCleanupWarning} — delete the branch by hand`);
+          // Only announce a COMPLETED disposition; a partial/incomplete is reported
+          // by the release status switch below (Diff-r2 #8 — never print "removed"
+          // for an intent-committed-but-not-finished detach).
+          if (r.status === 'detached' || r.status === 'already-detached') {
+            const kept = r.disposition === 'kept';
+            console.log(`  worktree: ${r.disposition}${r.ancestorCheck === 'pass' ? ' (verified merged)' : ''}${kept ? ` — kept at ${r.path}` : ' — removed'}`);
+            if (r.branchCleanupWarning) console.error(`  note: ${r.branchCleanupWarning} — delete the branch by hand`);
+          } else if (r.note) {
+            console.error(`  worktree: ${r.status}${r.stage ? ` (${r.stage})` : ''} — ${r.note}`);
+          }
           return r;
         },
       }
@@ -513,6 +535,12 @@ export default async function lane(argv) {
         // release is refused rather than risk orphaning a live checkout.
         console.error(`lane "${lid}" worktree state could not be read — release refused (retry, or run maddu doctor). No claim was released.`);
         process.exit(1);
+        break;
+      case 'worktree-lock-busy':
+        // Diff-r2 #1: another worktree op (attach/detach/finalize/recover) holds the
+        // per-lane worktree lock — the release did not touch the claim; retry.
+        console.error(`lane "${lid}" worktree is busy (another op in progress) — no claim released; retry.`);
+        process.exit(3);
         break;
       case 'spine-corrupt':
         console.error(`spine has malformed lines — release refused. Run \`maddu verify\`.`);

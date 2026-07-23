@@ -142,6 +142,26 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
+  // 9. Legacy adoption (Diff-r2 #3): a legacy ATTACHED carries NO worktreeInstanceId;
+  //    its authorized removing detach mints one into the intent. The fold must accept
+  //    the unique intent's token as identity (not identity-mismatch) so the crash is
+  //    resumable/auto-finalizable — the on-disk token is still verified before removal.
+  {
+    const repo = await freshRepo();
+    // legacy ATTACHED: hand-write with NO worktreeInstanceId.
+    await append(repo, { type: 'WORKTREE_ATTACHED', actor: 'ses_owner', lane: 'alpha', data: {
+      schemaVersion: 1, attachmentId: 'wta_legacy', claimEventId: 'evt_c', lane: 'alpha', session: 'ses_owner',
+      pathRepoRel: '.maddu/worktrees/alpha', pathAbs: '/abs/alpha', branchRef: 'refs/heads/maddu/lane/alpha',
+      baseRef: null, baseHeadAtAttach: 'deadbeef', created: true, reused: false, dirty: false,
+      gitCommonDir: '/abs/.git', platform: 'linux' } }); // <- no worktreeInstanceId
+    await detaching(repo, { aid: 'wta_legacy', lane: 'alpha', path: '.maddu/worktrees/alpha', token: 'tok_adopted' });
+    const r = await readPendingDetach(repo);
+    ok(r.candidates.length === 1 && r.candidates[0].attachmentId === 'wta_legacy', 'legacy adoption → a candidate (not identity-mismatch)');
+    ok(r.candidates[0].worktreeInstanceId === 'tok_adopted', 'candidate adopts the intent token as identity');
+    // A DIFFERENT token on the intent when the attachment ALREADY has one is still a mismatch.
+    await rm(repo, { recursive: true, force: true });
+  }
+
   console.log(`worktree-recovery-fold: ${pass}/${pass + fail}`);
   if (fail) process.exit(1);
 }

@@ -429,6 +429,22 @@ export async function detachLaneWorktree(stateRoot, { lane, disposition, integra
   return locked.value;
 }
 
+// Diff-r2 #1: in-lock variants for the inline-release path, which acquires the
+// per-lane worktree lock ONCE (via withLaneWorktreeLock) and must not re-acquire it
+// re-entrantly (the atomic-publish lock is not reentrant). The caller guarantees the
+// lock is already held for `lane`.
+export async function detachLaneWorktreeInLock(stateRoot, { lane, disposition, integrationRef = null, reason = null, by = null }) {
+  assertLaneSlug(lane);
+  const norm = disposition === 'keep' ? 'kept' : disposition;
+  if (!['merged', 'abandoned', 'kept'].includes(norm)) {
+    throw new Error(`disposition must be one of merged|abandoned|keep; got ${JSON.stringify(disposition)}`);
+  }
+  return detachInLock(stateRoot, { lane, norm, integrationRef, reason, by });
+}
+export function finalizePendingDetachInLock(stateRoot, { lane, attachmentId, worktreeInstanceId, triggered_by = null }) {
+  return finalizeInLock(stateRoot, { lane, attachmentId, worktreeInstanceId, triggered_by });
+}
+
 async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by }) {
   // Diff-r1 #2: resolve the live attachment through a strict single-epoch check,
   // not first-wins. Two live WORKTREE_ATTACHED epochs on one lane (no terminal
@@ -466,7 +482,11 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
       ancestorCheck: 'skipped', dirtyAtDetach: dirty, reason: reason || null,
     };
     if (instanceId) data.worktreeInstanceId = instanceId; // Diff-r1 #12: omit when absent
-    const ev = await append(stateRoot, { type: EVENT_TYPES.WORKTREE_DETACHED, actor: by || att.session, lane, data });
+    let ev;
+    try { ev = await append(stateRoot, { type: EVENT_TYPES.WORKTREE_DETACHED, actor: by || att.session, lane, data }); }
+    catch (e) { // Diff-r2 #8: a lost kept terminal is a modelled partial (nothing removed → a plain retry re-appends).
+      return { status: 'partial', stage: 'detached', committed: [], attachmentId: att.attachmentId, lane, disposition: 'kept', path: att.pathRepoRel, error: e && e.message };
+    }
     return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: 'kept', dirty, ancestorCheck: 'skipped', eventId: ev.id, path: att.pathRepoRel, branchCleanupWarning: null };
   }
 
@@ -554,7 +574,13 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
         note: `on-disk worktree identity no longer matches the authorized intent — use maddu lane release ${lane} --worktree --recover` };
     }
     const g = await removeWorktreeGit(stateRoot, path, { branch, force: true });
-    if (!g.removed) throw new Error(`cannot ${norm} lane "${lane}": ${g.error} — worktree left intact, not detached`);
+    // Diff-r2 #8: a genuinely-locked/failed git removal leaves the checkout intact
+    // — the intent already committed, so surface it as a partial carrying the intent
+    // id (not a raw throw that loses provenance and reads as "nothing began").
+    if (!g.removed) {
+      return { status: 'partial', stage: 'remove', reason: 'left-intact', committed: [intentEventId], attachmentId: att.attachmentId, lane, disposition: verified.disposition, path: att.pathRepoRel,
+        note: `git worktree remove failed (${g.error}) — checkout left intact; re-run, or maddu lane release ${lane} --worktree --recover if it is gone` };
+    }
     if (!g.branchDeleted) branchCleanupWarning = g.error;
   } else {
     const rm2 = await gitRun(['branch', '-D', branch], stateRoot, 5000);
@@ -676,18 +702,26 @@ export async function recoverPendingDetaches(stateRoot, { nowMs = Date.now() } =
     for (const c of pend.candidates) {
       const lk = await acquireWorktreeLock(worktreeLaneLockPath(stateRoot, c.lane), { maxWaitMs: 0 });
       if (!lk.acquired) { result.skipped.push({ lane: c.lane, reason: 'lock-busy' }); continue; }
-      const path = laneWorktreePath(stateRoot, c.lane);
-      // Actionable ONLY when the token-matched instance is physically PRESENT. A
-      // missing checkout is instance-absent; a present-but-different checkout is
-      // token-mismatch — BOTH are "invalid before firing" (§3.6/r4-4), so they are
-      // reported for the operator and NEVER contribute a reason to fire the trigger.
-      const inst = (await pathExists(path)) ? await readWorktreeInstance(stateRoot, path) : { state: 'absent' };
-      if (inst.state === 'present' && inst.token === c.worktreeInstanceId) {
-        held.push({ candidate: c, lock: lk });
-      } else {
-        const reason = inst.state !== 'present' ? 'instance-absent' : 'token-mismatch';
-        result.needsOperator.push({ lane: c.lane, attachmentId: c.attachmentId, reason, worktreeInstanceId: c.worktreeInstanceId, attachmentOwner: c.attachmentOwner });
-        await lk.release();
+      // Diff-r2 #2: transfer ownership to `held` ONLY on the actionable path; a
+      // throw during pathExists/readWorktreeInstance (EACCES/EIO) must still release
+      // this lock — the encompassing finally cannot see a lock we never pushed.
+      let keep = false;
+      try {
+        const path = laneWorktreePath(stateRoot, c.lane);
+        // Actionable ONLY when the token-matched instance is physically PRESENT. A
+        // missing checkout is instance-absent; a present-but-different checkout is
+        // token-mismatch — BOTH are "invalid before firing" (§3.6/r4-4), reported
+        // for the operator and NEVER contributing a reason to fire the trigger.
+        const inst = (await pathExists(path)) ? await readWorktreeInstance(stateRoot, path) : { state: 'absent' };
+        if (inst.state === 'present' && inst.token === c.worktreeInstanceId) {
+          held.push({ candidate: c, lock: lk });
+          keep = true;
+        } else {
+          const reason = inst.state !== 'present' ? 'instance-absent' : 'token-mismatch';
+          result.needsOperator.push({ lane: c.lane, attachmentId: c.attachmentId, reason, worktreeInstanceId: c.worktreeInstanceId, attachmentOwner: c.attachmentOwner });
+        }
+      } finally {
+        if (!keep) { try { await lk.release(); } catch { /* best-effort */ } }
       }
     }
 
@@ -781,7 +815,10 @@ async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) 
   const pend = await readPendingDetach(stateRoot);
   const cand = pend.candidates.find((c) => c.attachmentId === att.attachmentId) || null;
   const surfacedForAtt = pend.surfaced.filter((s) => s.attachmentId === att.attachmentId && s.reason !== 'post-terminal');
-  const foreign = surfacedForAtt.find((s) => s.reason === 'foreign-origin');
+  // Diff-r2 #4: refuse on ANY foreign-origin surfaced record for this attachment —
+  // a foreign intent that ALSO tripped a structural check is surfaced under that
+  // reason but still carries origin:'foreign', and must never be terminalized here.
+  const foreign = surfacedForAtt.find((s) => s.reason === 'foreign-origin' || s.origin === 'foreign');
   if (foreign) {
     return { status: 'refused-foreign', lane, attachmentId: att.attachmentId, sourceReplicaId: foreign.sourceReplicaId || null, attachmentOwner };
   }

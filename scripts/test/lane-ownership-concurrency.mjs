@@ -300,7 +300,7 @@ try {
     await own.claimLane(r, { sid: A, lane: 'L1' });   // A holder
     await rawClaim(r, B, 'L1');                         // B superseded; B owns the attachment
     let detached = 0;
-    const wtDisp = (session) => ({ disposition: 'abandoned', readLiveAttach: async () => ({ session, pathRepoRel: `wt/${session}` }), detach: async () => { detached += 1; return { disposition: 'abandoned' }; } });
+    const wtDisp = (session) => ({ disposition: 'abandoned', readLiveAttach: async () => ({ session, pathRepoRel: `wt/${session}` }), detach: async () => { detached += 1; return { status: 'detached', disposition: 'abandoned', eventId: 'evt_detach_stub' }; } });
     // A (holder) tries to disposition B's attachment → refused.
     let res = await own.releaseLane(r, { sid: A, lane: 'L1', worktree: wtDisp(B) });
     ok('12m. holder cannot disposition another active session\'s attachment', res.status === 'worktree-not-holder' && detached === 0, `${res.status}/${detached}`);
