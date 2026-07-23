@@ -9,12 +9,69 @@
 // v1.1.1: `lane claim` accepts a positional lane id; `--session` falls back
 // to MADDU_SESSION_ID. `--lane <id>` flag form is retained.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { parseFlags, requireFlag } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 import { resolveLibDir } from './_libroot.mjs';
+
+// PR-C: load the lane-ownership transaction module + capability-check the
+// serialization primitive. §3.6: `stat` the EXACT lane-claims-lock.mjs —
+// ENOENT-only means an old install missing the lock, so REFUSE the mutation
+// (upgrade required); a present-but-broken file / missing export is a CORRUPT
+// install → throw. Loaded only on the ownership-mutating claim/release/force
+// paths; read-only sub-paths (list, suggest) never reach it.
+async function loadOwnershipLib() {
+  const dir = await resolveLibDir();
+  try {
+    await stat(join(dir, 'lane-claims-lock.mjs'));
+  } catch (e) {
+    if (e && e.code === 'ENOENT') {
+      return { ok: false, message: 'lane ownership requires a newer maddu runtime (lane-claims-lock.mjs not found). Run `maddu upgrade`.' };
+    }
+    throw e; // permission/IO error on a present file → corrupt install, surface it
+  }
+  const mod = await import(pathToFileURL(join(dir, 'lane-ownership.mjs')).href);
+  const proj = await import(pathToFileURL(join(dir, 'projections.mjs')).href);
+  for (const fn of ['claimLane', 'forceClaimLane', 'releaseLane']) {
+    if (typeof mod[fn] !== 'function') throw new Error(`corrupt maddu runtime: lane-ownership.mjs missing ${fn}`);
+  }
+  if (typeof proj.ownersOf !== 'function') throw new Error('corrupt maddu runtime: projections.mjs missing ownersOf');
+  return { ok: true, mod };
+}
+
+// Map the ownership statuses shared by claim + force to a CLI exit. Semantic
+// refusals exit 3; operational/partial/lock failures exit 1 (§3.4 surfacing).
+function exitOwnershipFailure(r, lid, sid) {
+  switch (r.status) {
+    case 'unregistered':
+      console.error(`session ${sid} is not registered or not active — run \`maddu register\` first, then claim lane "${lid}".`);
+      process.exit(3);
+      break;
+    case 'session-closed':
+      console.error(`session ${sid} is closed — cannot claim lane "${lid}" (would orphan the claim).`);
+      console.error('  run `maddu register` to start a fresh session, then claim.');
+      process.exit(3);
+      break;
+    case 'spine-corrupt':
+      console.error(`spine has malformed lines — lane "${lid}" mutation refused. Run \`maddu verify\`.`);
+      process.exit(1);
+      break;
+    case 'partial':
+      console.error(`lane "${lid}" transaction partially applied (stage: ${r.stage}) — state is append-only (no rollback); re-run to complete.`);
+      process.exit(1);
+      break;
+    case 'lock':
+      console.error(`lane lock busy — could not serialize the operation on "${lid}". Retry.`);
+      process.exit(1);
+      break;
+    default:
+      console.error(`lane "${lid}" operation failed (${r.status}).`);
+      process.exit(1);
+  }
+}
 
 // Lazy-load the worktrees lib (cwd-installed → dev-template fallback), so an
 // older install without it degrades gracefully — `--worktree` errors clearly
@@ -221,70 +278,62 @@ export default async function lane(argv) {
       console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
       process.exit(2);
     }
-    const proj = await projections.project(repoRoot);
-    // Prevent orphan claims at the source: a CLOSED session must never hold a
-    // claim. That is exactly how the stale-claim leak arises — a stale
-    // MADDU_SESSION_ID claims a lane after its session closed, so the close
-    // cascade (already past in spine order) never releases it and it lingers
-    // forever. Refuse early; the cure (`maddu session sweep`) handles any that
-    // still slip through (e.g. a session closed concurrently).
-    const claimant = proj.sessions.find((s) => s.id === sid);
-    if (claimant && claimant.status === 'closed') {
-      console.error(`session ${sid} is closed — cannot claim lane "${lid}" (would orphan the claim).`);
-      console.error('  run `maddu register` to start a fresh session, then claim.');
-      process.exit(3);
-    }
-    const existing = proj.claims.find((c) => c.lane === lid);
-    if (existing && existing.sessionId !== sid) {
-      // v1.1.0 Phase 8 — --force pre-empts the prior claim. Emits
-      // LANE_RELEASED (for the prior holder) + LANE_CLAIM_FORCED +
-      // LANE_CLAIMED so the audit trail preserves who got booted.
-      if (flags.force) {
-        // #12a phase 4: a force-claim WITH --worktree over a lane that still
-        // has a LIVE attachment is refused — the prior worktree must be
-        // dispositioned first (`lane release --worktree ...`, phase 5). We do
-        // not silently orphan a checkout that may hold un-integrated work.
-        if (wantWorktree) {
+    // PR-C: the claim decision + append is one serialized, mode-aware
+    // transaction (close→claims lock) — the projection can no longer change
+    // under the decision before the append lands. The closed-session guard,
+    // the active-rival refusal, and inactive-orphan cleanup all live in the
+    // primitive against a fresh in-lock snapshot.
+    const claimLib = await loadOwnershipLib();
+    if (!claimLib.ok) { console.error(claimLib.message); process.exit(2); }
+    const own = claimLib.mod;
+
+    if (flags.force) {
+      // v1.1.0 Phase 8 — --force pre-empts the prior claim(s). The release(s) +
+      // LANE_CLAIM_FORCED marker + LANE_CLAIMED are ONE serialized critical
+      // section stamped with a forceGroup id (§3.4) so the gate reconstructs the
+      // bundle by id, not by fragile spine contiguity.
+      const forceGroup = randomUUID();
+      // #12a phase 4: a force --worktree over a lane with a LIVE attachment is
+      // refused IN-lock (preflight, before any mutation) — the prior worktree
+      // must be dispositioned first; never silently orphan un-integrated work.
+      const preflight = wantWorktree
+        ? async () => {
           const liveAttach = await wtLib.liveAttachmentForLane(repoRoot, lid);
-          if (liveAttach) {
-            console.error(`lane "${lid}" has a live worktree (${liveAttach.pathRepoRel}) held by ${liveAttach.session}`);
-            console.error(`  disposition it first: maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
-            process.exit(3);
-          }
+          return liveAttach ? { refuse: true, status: 'worktree-live', liveAttach } : null;
         }
-        await spine.append(repoRoot, {
-          type: spine.EVENT_TYPES.LANE_RELEASED,
-          actor: existing.sessionId, lane: lid,
-          data: { reason: 'force-claim-preempt', by: sid },
-        });
-        await spine.append(repoRoot, {
-          type: spine.EVENT_TYPES.LANE_CLAIM_FORCED,
-          actor: sid, lane: lid,
-          data: { lane: lid, priorSessionId: existing.sessionId, by: sid, focus: flags.focus || null, reason: typeof flags.reason === 'string' ? flags.reason : null },
-        });
-        const forcedClaimEv = await spine.append(repoRoot, {
-          type: spine.EVENT_TYPES.LANE_CLAIMED,
-          actor: sid, lane: lid,
-          data: { focus: flags.focus || null, forcedFrom: existing.sessionId }
-        });
-        console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${existing.sessionId})`);
+        : undefined;
+      const r = await own.forceClaimLane(repoRoot, {
+        sid, lane: lid, focus: flags.focus || null,
+        reason: typeof flags.reason === 'string' ? flags.reason : null,
+        forceGroup, preflight,
+      });
+      if (r.status === 'forced') {
+        console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${r.prior || 'none'})`);
         // Bind the worktree to THIS forced claim (Codex P2): pass the forced
         // LANE_CLAIMED id so WORKTREE_ATTACHED carries a claimEventId.
-        if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: forcedClaimEv.id });
+        if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: r.event.id });
         return;
       }
-      console.error(`lane "${lid}" already claimed by ${existing.sessionId}`);
-      console.error(`  retry with --force to pre-empt (audit-logged via LANE_CLAIM_FORCED)`);
+      if (r.status === 'worktree-live') {
+        console.error(`lane "${lid}" has a live worktree (${r.liveAttach.pathRepoRel}) held by ${r.liveAttach.session}`);
+        console.error(`  disposition it first: maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
+        process.exit(3);
+      }
+      exitOwnershipFailure(r, lid, sid);
+    }
+
+    const r = await own.claimLane(repoRoot, { sid, lane: lid, focus: flags.focus || null });
+    if (r.status === 'claimed') {
+      console.log(`claimed  ${lid}  by  ${sid}`);
+      if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: r.event.id });
+      return;
+    }
+    if (r.status === 'already-claimed') {
+      console.error(`lane "${lid}" already claimed by ${r.holder ? r.holder.sessionId : 'another active session'}`);
+      console.error('  retry with --force to pre-empt (audit-logged via LANE_CLAIM_FORCED)');
       process.exit(3);
     }
-    const claimEv = await spine.append(repoRoot, {
-      type: spine.EVENT_TYPES.LANE_CLAIMED,
-      actor: sid,
-      lane: lid,
-      data: { focus: flags.focus || null }
-    });
-    console.log(`claimed  ${lid}  by  ${sid}`);
-    if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: claimEv.id });
+    exitOwnershipFailure(r, lid, sid);
     return;
   }
 
@@ -306,72 +355,92 @@ export default async function lane(argv) {
       console.error('--session required (or set MADDU_SESSION_ID, or run `maddu register` first)');
       process.exit(2);
     }
-    const proj = await projections.project(repoRoot);
-    const existing = proj.claims.find((c) => c.lane === lid);
+    const relLib = await loadOwnershipLib();
+    if (!relLib.ok) { console.error(relLib.message); process.exit(2); }
+    const own = relLib.mod;
 
     // v1.93.0 (roadmap #12a phase 5) — disposition a live worktree.
-    // `--worktree <merged|abandoned|keep>`. This runs based on the ATTACHMENT,
-    // not the claim: a session close / janitor auto-close drops the claim
-    // WITHOUT emitting WORKTREE_DETACHED (Codex P2), so an orphaned-but-live
-    // worktree must still be dispositionable or it blocks every future
-    // `claim --worktree` on the lane. Guard: only the claim HOLDER (or, if the
-    // claim is already gone, anyone) may disposition — never yank a worktree
-    // out from under an actively-claiming other session.
+    // `--worktree <merged|abandoned|keep>`. PR-C: the owner re-read + the
+    // worktree op + the LANE_RELEASED append are ONE serialized transaction —
+    // the worktree op runs IN-lock (§3.5) via the detach callback below, after
+    // the owner is re-read, so no concurrent claim can slip between them.
     const wtLib = await loadWorktreesLib();
-    const liveAttach = wtLib?.liveAttachmentForLane ? await wtLib.liveAttachmentForLane(repoRoot, lid) : null;
     const dispRaw = flags.worktree;
     if (dispRaw !== undefined) {
       if (!wtLib?.detachLaneWorktree) { console.error('--worktree requires a newer maddu runtime (worktrees.mjs not found)'); process.exit(2); }
       if (dispRaw === true) { console.error('--worktree needs a disposition: merged | abandoned | keep'); process.exit(2); }
-      if (!liveAttach) {
+    }
+    // Build the worktree hooks (readLiveAttach + detach) the primitive runs
+    // in-lock. Present for a plain release too, so a live attachment refuses the
+    // release ('needs-disposition'); null on an old install (no worktree lib).
+    const worktree = wtLib?.liveAttachmentForLane
+      ? {
+        disposition: dispRaw,
+        readLiveAttach: () => wtLib.liveAttachmentForLane(repoRoot, lid),
+        detach: async () => {
+          const r = await wtLib.detachLaneWorktree(repoRoot, {
+            lane: lid, disposition: dispRaw,
+            integrationRef: typeof flags['integration-ref'] === 'string' ? flags['integration-ref'] : null,
+            reason: typeof flags.reason === 'string' ? flags.reason : null,
+            by: sid,
+          });
+          const kept = r.disposition === 'kept';
+          console.log(`  worktree: ${r.disposition}${r.ancestorCheck === 'pass' ? ' (verified merged)' : ''}${kept ? ` — kept at ${r.path}` : ' — removed'}`);
+          if (r.branchCleanupWarning) console.error(`  note: ${r.branchCleanupWarning} — delete the branch by hand`);
+          return r;
+        },
+      }
+      : null;
+
+    const r = await own.releaseLane(repoRoot, { sid, lane: lid, worktree });
+    switch (r.status) {
+      case 'released':
+        console.log(`released  ${lid}`);
+        return;
+      case 'worktree-only':
+        // Orphaned worktree (claim already gone): the disposition WAS the cleanup.
+        console.log(`released  ${lid}  (claim already gone; worktree dispositioned)`);
+        return;
+      case 'no-owners':
+        console.log(`released  ${lid}  (no active claim)`);
+        return;
+      case 'owned-by-others':
+        console.error(`lane "${lid}" is claimed by ${r.holder ? r.holder.sessionId : 'another session'}; ${sid} cannot release it`);
+        process.exit(3);
+        break;
+      case 'needs-disposition':
+        console.error(`lane "${lid}" has a live worktree (${r.liveAttach.pathRepoRel}) — disposition it first:`);
+        console.error(`  maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
+        process.exit(3);
+        break;
+      case 'no-worktree':
         console.error(`lane "${lid}" has no live worktree to disposition`);
         process.exit(3);
-      }
-      if (existing && existing.sessionId !== sid) {
-        console.error(`lane "${lid}" is actively claimed by ${existing.sessionId}; ${sid} cannot disposition its worktree`);
+        break;
+      case 'worktree-not-holder':
+        console.error(`lane "${lid}" is actively claimed by ${r.holder ? r.holder.sessionId : 'another session'}; ${sid} cannot disposition its worktree`);
         process.exit(3);
-      }
-      try {
-        const r = await wtLib.detachLaneWorktree(repoRoot, {
-          lane: lid, disposition: dispRaw,
-          integrationRef: typeof flags['integration-ref'] === 'string' ? flags['integration-ref'] : null,
-          reason: typeof flags.reason === 'string' ? flags.reason : null,
-          by: sid,
-        });
-        const kept = r.disposition === 'kept';
-        console.log(`  worktree: ${r.disposition}${r.ancestorCheck === 'pass' ? ' (verified merged)' : ''}${kept ? ` — kept at ${r.path}` : ' — removed'}`);
-        if (r.branchCleanupWarning) console.error(`  note: ${r.branchCleanupWarning} — delete the branch by hand`);
-      } catch (e) {
-        console.error(`  worktree ${dispRaw} refused: ${e.message}`);
+        break;
+      case 'worktree-failed':
+        console.error(`  worktree ${dispRaw} refused: ${(r.error && r.error.message) || r.error}`);
         process.exit(1);
-      }
-      // Orphaned worktree (claim already gone): the disposition WAS the cleanup.
-      if (!existing) { console.log(`released  ${lid}  (claim already gone; worktree dispositioned)`); return; }
+        break;
+      case 'spine-corrupt':
+        console.error(`spine has malformed lines — release refused. Run \`maddu verify\`.`);
+        process.exit(1);
+        break;
+      case 'partial':
+        console.error(`lane "${lid}" release partially applied (stage: ${r.stage}) — re-run.`);
+        process.exit(1);
+        break;
+      case 'lock':
+        console.error(`lane lock busy — could not serialize the release on "${lid}". Retry.`);
+        process.exit(1);
+        break;
+      default:
+        console.error(`lane "${lid}" release failed (${r.status}).`);
+        process.exit(1);
     }
-
-    if (!existing) {
-      console.log(`released  ${lid}  (no active claim)`);
-      return;
-    }
-    if (existing.sessionId !== sid) {
-      console.error(`lane "${lid}" is claimed by ${existing.sessionId}; ${sid} cannot release it`);
-      process.exit(3);
-    }
-    // A plain release on a lane that still has a live worktree is REFUSED, so a
-    // checkout with un-integrated work is never silently orphaned.
-    if (dispRaw === undefined && liveAttach) {
-      console.error(`lane "${lid}" has a live worktree (${liveAttach.pathRepoRel}) — disposition it first:`);
-      console.error(`  maddu lane release ${lid} --worktree <merged|abandoned|keep>`);
-      process.exit(3);
-    }
-
-    await spine.append(repoRoot, {
-      type: spine.EVENT_TYPES.LANE_RELEASED,
-      actor: sid,
-      lane: lid,
-      data: {}
-    });
-    console.log(`released  ${lid}`);
     return;
   }
 

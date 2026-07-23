@@ -221,7 +221,7 @@ export async function forceClaimLane(repoRoot, opts) {
 export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowMs = Date.now() }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
-  const { events, syncMode, activeIds } = snap;
+  const { events, syncMode } = snap;
   const own = ownersOf(events, lane, { syncMode });
   const isOwner = own.owners.some((o) => o.sessionId === sid);
 
@@ -234,9 +234,10 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   if (worktree && worktree.disposition !== undefined) {
     if (!liveAttach) return { status: 'no-worktree', event: null };
     // Only the holder (or, if the claim is already gone, anyone) may
-    // disposition — never yank a worktree from an actively-claiming session.
+    // disposition — never yank a worktree from another session's live claim. In
+    // sync mode a superseded owner (holder ≠ actor) is likewise refused (§3.5d).
     const holder = own.holder;
-    if (holder && holder.sessionId !== sid && activeIds.has(holder.sessionId)) {
+    if (holder && holder.sessionId !== sid) {
       return { status: 'worktree-not-holder', event: null, holder };
     }
     let detachResult;
