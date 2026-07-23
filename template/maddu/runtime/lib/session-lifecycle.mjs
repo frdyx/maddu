@@ -50,7 +50,10 @@ function closeLockPath(repoRoot) {
 // contention, or fallbacks meant for a busy lock would bypass the
 // transaction on ordinary errors.
 const LOCK_FAILED = Symbol('close-lock-failed');
-export async function withCloseLock(repoRoot, fn) {
+// maxWaitMs is per-call (PR-C): lifecycle callers use the 3s default, but a
+// close→claims writer that must not stall the editor (auto-claim) passes ~0 so a
+// busy close lock skips instantly instead of blocking on the fixed budget.
+export async function withCloseLock(repoRoot, fn, { maxWaitMs = CLOSE_LOCK_WAIT_MS } = {}) {
   try {
     await mkdir(pathsFor(repoRoot).statePrjDir, { recursive: true });
   } catch {
@@ -63,7 +66,7 @@ export async function withCloseLock(repoRoot, fn) {
       // Boolean-tracked (not value-truthiness): `throw null` / `throw
       // undefined` / `Promise.reject()` must propagate too.
       try { return await fn(); } catch (e) { cbThrew = true; cbError = e; return undefined; }
-    }, { maxWaitMs: CLOSE_LOCK_WAIT_MS });
+    }, { maxWaitMs });
   } catch {
     return LOCK_FAILED;   // acquisition/timeout only — fn never ran
   }
