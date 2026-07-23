@@ -4,6 +4,18 @@ A **session** is a registered agent instance. A **lane** is a mutually-exclusive
 
 The full default lane catalog is in [lanes.md](lanes.md).
 
+> **Ownership is serialized and authorization-gated (v1.113.0).** Every lane
+> writer — CLI `lane claim/release/force`, the bridge routes, the auto-claim
+> hook, and the janitor — decides and appends inside ONE serialized transaction
+> against a fresh snapshot taken under the lane-claims lock, so two writers can
+> never both act on the same stale view. A claim requires an **active,
+> registered session** and refuses if **any active rival** owns the lane; only
+> `--force` may evict an active holder (and stamps an audit-stable `forceGroup`
+> bundle). A **release only clears a claim you actually own** — releasing a lane
+> held by another session is refused, not silently applied. Under team-sync the
+> same rules hold per-owner (first-claimer holds; superseded owners may withdraw
+> only their own claim).
+
 ## Session lifecycle
 
 ```

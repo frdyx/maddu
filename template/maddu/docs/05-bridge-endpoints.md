@@ -73,8 +73,27 @@ instead of fishing fields out of `/bridge/status`.
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/bridge/lanes` | — | `{catalog, claims}` |
-| POST | `/bridge/lanes/claim` | `{lane, sessionId, focus?}` | `{ok, event}` — 409 if already claimed |
-| POST | `/bridge/lanes/release` | `{lane, sessionId}` | `{ok, event}` |
+| POST | `/bridge/lanes/claim` | `{lane, sessionId, focus?}` | `{ok, event}` — 409 if an active rival owns it or the session is unregistered/closed |
+| POST | `/bridge/lanes/release` | `{lane, sessionId}` | `{ok, event}` — 404 if you hold no claim, 409 if another session owns it |
+
+> **v1.113.0 lane-ownership contract (PR-C).** Both routes now run through one
+> serialized, mode-aware ownership transaction, closing the old read-decide-write
+> race:
+>
+> - **`/bridge/lanes/release` is now authorization-gated.** It appends
+>   `LANE_RELEASED` **only if the caller owns the lane** (holder or, under
+>   team-sync, a superseded owner). Previously it released unconditionally, so any
+>   caller could evict any lane's real holder. Non-owners now get **404**
+>   (you hold no claim) or **409** (owned by another session); the real holder is
+>   left intact.
+> - **`/bridge/lanes/claim` now requires an active, REGISTERED session** and
+>   refuses on **any** active rival owner (not just the current holder). An
+>   unregistered or closed `sessionId` → **409** (previously tolerated, which
+>   manufactured an immediately-orphaned claim). **Migration:** register the
+>   session (`POST /bridge/sessions/register`) before claiming.
+> - Shared failure surfacing: **503** lane lock busy · **409** spine malformed
+>   (run `maddu verify`) · **500** `{partial:true, stage}` if an append failed
+>   after an earlier one landed (append-only — re-run to complete).
 
 ## Slice-stop
 

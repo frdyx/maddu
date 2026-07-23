@@ -7,9 +7,12 @@
 // CLOSE lock (session-start composes `withBindingTransaction { withCloseLock {
 // renewIn-or-registerIn + bind } }` with no nested acquisition).
 //
-// GLOBAL LOCK ORDER: claude-binding lock → session-close lock →
-// active-pointer lock (leaf); the spine's own append lock is innermost and
-// independent. No path acquires in reverse.
+// GLOBAL LOCK ORDER (SSOT — extended by PR-C's lane-claims lock):
+//   claude-binding lock → session-close lock → lane-claims lock →
+//   active-pointer lock (leaf); the spine's own append lock is innermost and
+//   independent. No path acquires in reverse. Active-validating lane-ownership
+//   writers (claim / force / auto-claim) take close THEN lane-claims; release and
+//   the janitor orphan pass take lane-claims only (see lane-claims-lock.mjs).
 //
 // PARSE-ACCOUNTING POLICY (one rule for every strict consumer):
 //   parseErrors === 0    → full guarantees. The claim is scoped to ACCIDENTAL
@@ -50,7 +53,10 @@ function closeLockPath(repoRoot) {
 // contention, or fallbacks meant for a busy lock would bypass the
 // transaction on ordinary errors.
 const LOCK_FAILED = Symbol('close-lock-failed');
-export async function withCloseLock(repoRoot, fn) {
+// maxWaitMs is per-call (PR-C): lifecycle callers use the 3s default, but a
+// close→claims writer that must not stall the editor (auto-claim) passes ~0 so a
+// busy close lock skips instantly instead of blocking on the fixed budget.
+export async function withCloseLock(repoRoot, fn, { maxWaitMs = CLOSE_LOCK_WAIT_MS } = {}) {
   try {
     await mkdir(pathsFor(repoRoot).statePrjDir, { recursive: true });
   } catch {
@@ -63,7 +69,7 @@ export async function withCloseLock(repoRoot, fn) {
       // Boolean-tracked (not value-truthiness): `throw null` / `throw
       // undefined` / `Promise.reject()` must propagate too.
       try { return await fn(); } catch (e) { cbThrew = true; cbError = e; return undefined; }
-    }, { maxWaitMs: CLOSE_LOCK_WAIT_MS });
+    }, { maxWaitMs });
   } catch {
     return LOCK_FAILED;   // acquisition/timeout only — fn never ran
   }

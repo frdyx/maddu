@@ -57,6 +57,20 @@ async function appendDuplicateRelease(repo, sessionId) {
   });
 }
 
+// PR-C: `lane claim` now requires an active REGISTERED session (an unregistered
+// claim would orphan). Seed a registration for the explicit id so this test
+// stays focused on release idempotency + verifier classification, not the
+// registration precondition (which session-lifecycle.mjs covers).
+async function registerSession(repo, sessionId) {
+  const spine = await import(pathToFileURL(SPINE_LIB).href);
+  await spine.append(repo, {
+    type: spine.EVENT_TYPES.SESSION_REGISTERED,
+    actor: sessionId,
+    lane: null,
+    data: { role: 'implementer' },
+  });
+}
+
 const root = await mkdtemp(join(tmpdir(), 'maddu-lane-release-'));
 const repo = join(root, 'repo');
 const sessionId = 'ses_20260615141500_aaaaaa';
@@ -73,6 +87,7 @@ try {
   ok('release with no active claim exits 0', res.code === 0, res.stderr.slice(0, 160));
   ok('release with no active claim writes no event', beforeNoop === afterNoop);
 
+  await registerSession(repo, sessionId);
   res = await runMaddu(['lane', 'claim', 'frontend', '--session', sessionId], { cwd: repo });
   ok('lane claim exits 0', res.code === 0, res.stderr.slice(0, 160));
   res = await runMaddu(['lane', 'release', 'frontend', '--session', strangerId], { cwd: repo });
