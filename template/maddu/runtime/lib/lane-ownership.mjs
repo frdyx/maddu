@@ -302,7 +302,23 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   // Refuse a plain release that would orphan the ACTOR'S OWN live checkout —
   // disposition it first. A live attachment owned by SOMEONE ELSE is untouched
   // by this actor's release, so a superseded owner may withdraw freely (§3.5d).
-  if (ownsAttachment) return { status: 'needs-disposition', event: null, liveAttach };
+  // PR-D §3.8: a TARGETED reconcile hook (never a global — it may only touch THIS
+  // lane's attachment, under this actor's claims lock) may auto-complete a
+  // crash-stranded detach whose PRESENT, token-matched instance can be finalized
+  // safely. It fires only for an actor-owned attachment; an absent/intent-less
+  // strand is NOT auto-safe and still returns needs-disposition (operator --recover).
+  if (ownsAttachment) {
+    let reconciled = false;
+    if (worktree && typeof worktree.reconcileAttachment === 'function') {
+      try {
+        const rec = await worktree.reconcileAttachment({ lane, attachmentId: liveAttach.attachmentId, worktreeInstanceId: liveAttach.worktreeInstanceId });
+        reconciled = !!rec && rec.status === 'finalized';
+      } catch { reconciled = false; }
+    }
+    if (!reconciled) return { status: 'needs-disposition', event: null, liveAttach };
+    // The stranded detach is now complete (attachment terminalized) — the actor
+    // may withdraw its claim. Fall through to the LANE_RELEASED append.
+  }
   let event;
   try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
   catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e }; }

@@ -432,6 +432,12 @@ export default async function lane(argv) {
       ? {
         disposition: dispRaw,
         readLiveAttach: () => wtLib.liveAttachmentForLane(repoRoot, lid),
+        // PR-D §3.8: a plain release over an actor-owned lane whose detach crashed
+        // mid-way (a PRESENT, token-matched pending intent) auto-completes it here
+        // instead of blocking on needs-disposition. Targeted to THIS lane only.
+        reconcileAttachment: wtLib.finalizePendingDetach
+          ? (args) => wtLib.finalizePendingDetach(repoRoot, args)
+          : undefined,
         detach: async () => {
           const r = await wtLib.detachLaneWorktree(repoRoot, {
             lane: lid, disposition: dispRaw,

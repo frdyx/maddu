@@ -27,6 +27,7 @@ export const SKIPPABLE_TASKS = new Set([
   'worktree-attach',
   'worktree-coherence',
   'worktree-detach',
+  'worktree-recovery',
   'spine-sync-git',
 ]);
 

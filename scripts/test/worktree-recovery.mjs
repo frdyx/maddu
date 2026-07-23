@@ -67,7 +67,7 @@ async function main() {
 
   const base = await mkdtemp(path.join(os.tmpdir(), 'maddu-wtrecover-'));
   try {
-    const repo = await setup(base, ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota']);
+    const repo = await setup(base, ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'lambda']);
     if (!repo) { console.log('  [SKIP] git unavailable'); console.log('\nworktree-recovery: skipped'); process.exit(77); }
 
     // ── Test 3: crash-after-intent, instance PRESENT → auto-finalize ──
@@ -222,6 +222,38 @@ async function main() {
       ok('CLI lane release --recover exits 0', r.code === 0, (r.err || '').trim().slice(0, 160));
       ok('CLI prints a recovered line', /recovered\s+iota/.test(r.out), r.out.trim().slice(0, 120));
       ok('CLI --recover cleared the strand (attachment gone)', !(await wt.liveAttachmentForLane(repo, 'iota')));
+    }
+
+    // ── §3.8: a PLAIN `lane release` over a crash-stranded PRESENT-instance intent
+    //    auto-completes it (reconcileAttachment hook) instead of needs-disposition. ──
+    {
+      const BIN = path.resolve(__dirname, '..', '..', 'bin', 'maddu.mjs');
+      const DROP = new Set(['MADDU_STATE_ROOT', 'MADDU_SESSION_ID']);
+      const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP.has(k.toUpperCase())));
+      const run = (args) => new Promise((resolve) => {
+        let c;
+        try { c = spawn(process.execPath, [BIN, ...args], { cwd: repo, env: childEnv }); }
+        catch (e) { return resolve({ code: -1, out: '', err: e.message }); }
+        let out = '', err = '';
+        c.stdout.on('data', (b) => (out += b)); c.stderr.on('data', (b) => (err += b));
+        c.on('close', (code) => resolve({ code, out, err })); c.on('error', (e) => resolve({ code: -1, out: '', err: e.message }));
+      });
+      // Claim + attach via the real CLI (op_cli is an active registered session).
+      const claim = await run(['lane', 'claim', 'lambda', '--worktree', '--session', 'op_cli']);
+      ok('CLI claim --worktree provisions lambda', claim.code === 0, (claim.err || '').trim().slice(0, 120));
+      const a = await wt.liveAttachmentForLane(repo, 'lambda');
+      ok('lambda attachment exists with a token', !!a && !!a.worktreeInstanceId);
+      // Simulate a detach that crashed AFTER the intent (checkout still present).
+      await spine.append(repo, { type: 'WORKTREE_DETACHING', lane: 'lambda', data: {
+        schemaVersion: 1, intentId: 'wtd_inline', attachmentId: a.attachmentId, lane: 'lambda', pathRepoRel: a.pathRepoRel,
+        worktreeInstanceId: a.worktreeInstanceId, disposition: 'abandoned', integrationRef: null, integrationHead: null,
+        branchHead: 'f00d', ancestorCheck: 'skipped', dirtyAtDetach: false, reason: null } });
+      // Plain release (no --worktree disposition) — the §3.8 hook finalizes the
+      // present-instance intent, then releases the claim.
+      const rel = await run(['lane', 'release', 'lambda', '--session', 'op_cli']);
+      ok('plain release over a stranded present-intent succeeds (not needs-disposition)', rel.code === 0 && /released\s+lambda/.test(rel.out), (rel.out + rel.err).trim().slice(0, 160));
+      ok('inline finalize terminalized the attachment', !(await wt.liveAttachmentForLane(repo, 'lambda')));
+      ok('inline finalize removed the checkout', !(await exists(a.pathAbs || path.join(repo, '.maddu', 'worktrees', 'lambda'))));
     }
 
     console.log(`\nworktree-recovery: ${passed} passed, ${failed} failed`);
