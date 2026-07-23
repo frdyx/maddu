@@ -395,11 +395,22 @@ export default async function lane(argv) {
       };
       const rr = await wtLib.recoverWorktreeOperator(repoRoot, { lane: lid, recoveryActor: sid, confirm: true, resolveActive });
       switch (rr.status) {
-        case 'recovered':
+        case 'recovered': {
           console.log(`recovered  ${lid}  (${rr.mode}${rr.disposition ? `, ${rr.disposition}` : ''})`);
           if (rr.leftoverPath) console.error(`  leftover checkout at ${rr.leftoverPath} was NOT removed — dispose of it by hand`);
           if (rr.note) console.error(`  note: ${rr.note}`);
+          // Diff-r1 #9: the attachment is terminalized, but the actor may still HOLD
+          // the lane claim — complete the recovery by releasing it (WORKTREE_DETACHED
+          // → LANE_RELEASED, a two-step multi-append). If the claim belongs to a
+          // now-closed owner (a different operator recovered it), the janitor's
+          // orphan-claim pass reaps it; report only.
+          try {
+            const rel = await own.releaseLane(repoRoot, { sid, lane: lid });
+            if (rel.status === 'released') console.log(`released  ${lid}`);
+            else if (rel.status === 'owned-by-others') console.log(`  (lane claim held by ${rel.holder ? rel.holder.sessionId : 'another session'} — reaped separately)`);
+          } catch { /* best-effort; recovery already succeeded */ }
           return;
+        }
         case 'refused-foreign':
           console.error(`lane "${lid}" detach intent originates on replica ${rr.sourceReplicaId || '?'} — run --recover THERE (foreign origin; refused locally)`);
           process.exit(3);
@@ -486,6 +497,17 @@ export default async function lane(argv) {
         console.error(`  worktree ${dispRaw} refused: ${(r.error && r.error.message) || r.error}`);
         process.exit(1);
         break;
+      case 'worktree-incomplete': {
+        // Diff-r1 #8: the detach did not fully complete (a survivor after removal,
+        // or an append boundary failed) — the claim was NOT released. State is
+        // append-only; re-run to finish (or --recover if the checkout is gone).
+        const dr = r.detachResult || {};
+        const committed = Array.isArray(dr.committed) && dr.committed.length ? dr.committed.join(', ') : 'none';
+        console.error(`lane "${lid}" worktree disposition incomplete (stage: ${dr.stage || 'unknown'}) — claim NOT released (state is append-only; re-run).`);
+        console.error(`  committed events: ${committed}`);
+        process.exit(1);
+        break;
+      }
       case 'worktree-read-failed':
         // Fail CLOSED: could not read the worktree-attachment state, so the
         // release is refused rather than risk orphaning a live checkout.

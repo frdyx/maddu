@@ -284,6 +284,15 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
     let detachResult;
     try { detachResult = await worktree.detach(liveAttach); }
     catch (e) { return { status: 'worktree-failed', event: null, error: e }; }
+    // Diff-r1 #8: only a COMPLETED disposition frees the claim. A `partial` (git
+    // reported removal but the ENOENT postcondition found a survivor, or an append
+    // boundary failed) leaves the attachment/worktree live — releasing the claim
+    // would strand a live worktree with no owner. Propagate the partial WITHOUT
+    // LANE_RELEASED. Only 'detached' / 'already-detached' proceed.
+    const dispStatus = detachResult && detachResult.status;
+    if (dispStatus && dispStatus !== 'detached' && dispStatus !== 'already-detached') {
+      return { status: 'worktree-incomplete', event: null, detachResult, committed: detachResult.committed || [] };
+    }
     // Actor holds no claim on the lane → the disposition WAS the cleanup; no
     // LANE_RELEASED (there is nothing of the actor's to release).
     if (!isOwner) return { status: 'worktree-only', event: null, detachResult };
@@ -307,12 +316,14 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   // crash-stranded detach whose PRESENT, token-matched instance can be finalized
   // safely. It fires only for an actor-owned attachment; an absent/intent-less
   // strand is NOT auto-safe and still returns needs-disposition (operator --recover).
-  if (ownsAttachment) {
+  let reconcileEventId = null; // Diff-r1 #11: retained so a release-append failure
+  if (ownsAttachment) {          // reports [detachedEvent.id], not [].
     let reconciled = false;
     if (worktree && typeof worktree.reconcileAttachment === 'function') {
       try {
         const rec = await worktree.reconcileAttachment({ lane, attachmentId: liveAttach.attachmentId, worktreeInstanceId: liveAttach.worktreeInstanceId });
         reconciled = !!rec && rec.status === 'finalized';
+        if (reconciled) reconcileEventId = rec.eventId || null;
       } catch { reconciled = false; }
     }
     if (!reconciled) return { status: 'needs-disposition', event: null, liveAttach };
@@ -321,8 +332,8 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   }
   let event;
   try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-  catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e }; }
-  return { status: 'released', event };
+  catch (e) { return { status: 'partial', stage: 'release', event: null, committed: reconcileEventId ? [reconcileEventId] : [], holder: holderId, error: e, reconcileEventId }; }
+  return { status: 'released', event, reconcileEventId };
 }
 
 export async function releaseLane(repoRoot, opts) {

@@ -11,7 +11,7 @@
 
 import { readAll, EVENT_TYPES } from './spine.mjs';
 import { readPartitionStreamsStrict, hasPartitions, readReplicaId } from './spine-append-core.mjs';
-import { classifyOrigin } from './replica-lineage.mjs';
+import { classifyOrigin, readLineage } from './replica-lineage.mjs';
 
 // Fold the merged, ordered history into attachment lifecycle + open intents.
 // Returns { live, terminated, laneLive, openIntents } where openIntents maps
@@ -31,7 +31,7 @@ function foldLifecycle(events) {
     const aid = d.attachmentId;
     if (!aid) continue;
     if (ev.type === EVENT_TYPES.WORKTREE_ATTACHED) {
-      live.set(aid, { lane: d.lane, pathRepoRel: d.pathRepoRel, worktreeInstanceId: d.worktreeInstanceId || null, session: d.session || null });
+      live.set(aid, { lane: d.lane, pathRepoRel: d.pathRepoRel, worktreeInstanceId: d.worktreeInstanceId || null, session: d.session || null, attachEventId: ev.id });
       laneAdd(d.lane, aid);
     } else if (ev.type === EVENT_TYPES.WORKTREE_DETACHING) {
       if (terminated.has(aid)) { postTerminal.push({ ev, aid }); continue; }
@@ -78,14 +78,35 @@ export async function readPendingDetach(stateRoot) {
   let active = null;
   if (sync) { try { active = await readReplicaId(stateRoot); } catch { active = null; } }
 
-  // Map each DETACHING envelope id → its source partition replicaId + that
+  // Map each worktree-lifecycle envelope id → its source partition replicaId + that
   // stream's strict parse status (source provenance is lost in the merged read).
+  // Diff-r1 #4: BOTH the intent (DETACHING) AND the attachment (ATTACHED) source
+  // must be tracked — a foreign ATTACHED with a local intent must not classify local.
   const sourceByEventId = new Map();
   const parseOkByReplica = new Map();
   for (const s of streams) {
     parseOkByReplica.set(s.replicaId, s.parseErrors === 0);
     for (const ev of s.events) {
-      if (ev && ev.type === EVENT_TYPES.WORKTREE_DETACHING && ev.id) sourceByEventId.set(ev.id, s.replicaId);
+      if (ev && (ev.type === EVENT_TYPES.WORKTREE_DETACHING || ev.type === EVENT_TYPES.WORKTREE_ATTACHED) && ev.id) {
+        sourceByEventId.set(ev.id, s.replicaId);
+      }
+    }
+  }
+
+  // Diff-r1 #4: in sync mode derive the LOCAL replica set from the device-local
+  // lineage FAIL-CLOSED, and require EVERY present local stream to strict-account —
+  // a torn predecessor stream could hide a competing terminal/epoch, so no
+  // candidate may be trusted local until all local streams parse clean.
+  let localStrictOk = true;
+  if (sync) {
+    const lineage = await readLineage(stateRoot);
+    if (lineage && active && lineage.current === active) {
+      const localIds = new Set([lineage.current, ...lineage.predecessors]);
+      for (const s of streams) {
+        if (localIds.has(s.replicaId) && s.parseErrors !== 0) { localStrictOk = false; break; }
+      }
+    } else {
+      localStrictOk = false; // lineage missing / mismatched → nothing verifiably local
     }
   }
 
@@ -112,14 +133,24 @@ export async function readPendingDetach(stateRoot) {
     }
     // Competing live epochs on the same lane → ambiguous.
     if ((laneLive.get(att.lane)?.size || 0) > 1) { surface(intent, 'competing-live-epochs', { sourceReplicaId, attachmentOwner }); continue; }
-    // The source partition must strict-account (parseErrors === 0), else no auto.
+    // The intent's source partition must strict-account (parseErrors === 0), else no auto.
     if (parseOkByReplica.get(sourceReplicaId) !== true) { surface(intent, 'source-parse-gap', { sourceReplicaId, attachmentOwner }); continue; }
 
-    // Origin classification. Flat mode (single machine, no partitions) is local by
-    // construction; sync mode defers to the device-local lineage.
+    // Origin classification (Diff-r1 #4). Flat mode (single machine, no partitions)
+    // is local by construction; sync mode requires the lineage to be trustworthy
+    // (localStrictOk) AND BOTH the intent's source AND the ATTACHMENT's source to
+    // classify local — a foreign attachment can never be auto-removed locally.
+    const attachSource = sourceByEventId.get(att.attachEventId) ?? null;
     let origin;
     if (!sync) origin = 'local';
-    else origin = await classifyOrigin(stateRoot, sourceReplicaId, active);
+    else if (!localStrictOk) origin = 'unverifiable';
+    else {
+      const intentOrigin = await classifyOrigin(stateRoot, sourceReplicaId, active);
+      const attachOrigin = await classifyOrigin(stateRoot, attachSource, active);
+      if (intentOrigin === 'local' && attachOrigin === 'local') origin = 'local';
+      else if (intentOrigin === 'foreign' || attachOrigin === 'foreign') origin = 'foreign';
+      else origin = 'unverifiable';
+    }
 
     if (origin === 'local') {
       candidates.push({ ...intent, sourceReplicaId, attachmentOwner, origin });

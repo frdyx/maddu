@@ -959,8 +959,14 @@ async function handleBridge(req, res, url, ctx) {
       const rec = summary.worktreeRecovery || { finalized: [], needsOperator: [] };
       for (const n of (rec.needsOperator || [])) {
         const owner = n.attachmentOwner ? ` (owner ${n.attachmentOwner})` : '';
-        const where = n.sourceReplicaId ? ` [source replica ${n.sourceReplicaId}]` : '';
-        console.error(`janitor: lane "${n.lane}" worktree needs operator recovery (${n.reason})${owner}${where} — run \`maddu lane release ${n.lane} --worktree --recover\``);
+        // Foreign-origin strands are NOT locally recoverable (§3.7) — emit ONLY a
+        // source-replica redirect, never an executable local `--recover` command.
+        if (n.reason === 'foreign-origin') {
+          console.error(`janitor: lane "${n.lane}" worktree detach intent originates on replica ${n.sourceReplicaId || '?'}${owner} — recover it THERE (foreign origin; no local command)`);
+        } else {
+          const where = n.sourceReplicaId ? ` [source replica ${n.sourceReplicaId}]` : '';
+          console.error(`janitor: lane "${n.lane}" worktree needs operator recovery (${n.reason})${owner}${where} — run \`maddu lane release ${n.lane} --worktree --recover\``);
+        }
       }
       if (summary.staleEmitted > 0 || summary.closedEmitted > 0 || (rec.finalized && rec.finalized.length > 0)) {
         // Force a re-projection so the response includes the events

@@ -21,6 +21,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LIB = path.resolve(__dirname, '..', '..', 'template', 'maddu', 'runtime', 'lib');
+// PR-D: attach now serializes under the per-lane worktree lock. Shorten the finite
+// wait so the "held lock blocks a concurrent attach" assertion doesn't sit 5s.
+// (Read at worktree-lock.mjs module load — set BEFORE the dynamic imports below.)
+process.env.MADDU_WORKTREE_LOCK_WAIT_MS = '300';
 
 let passed = 0, failed = 0;
 function ok(name, cond, extra = '') {
@@ -147,16 +151,17 @@ async function main() {
     const missingBogus = await ident.readWorktreeInstance(repo, path.join(repo, '.maddu', 'worktrees', 'does-not-exist'));
     ok('a vanished checkout reads UNRESOLVABLE (never "removed")', missingBogus.state === 'unresolvable');
 
-    // ── the concurrent-attach lock refuses a second in-flight attach ──
-    // Simulate a held lock by pre-creating the lock dir on a fresh lane.
+    // ── the per-lane worktree lock refuses a second in-flight attach (PR-D #1) ──
+    // Hold the NEW worktree lane lock; a concurrent attach waits the finite budget
+    // then throws "in progress".
     await writeFile(path.join(repo, '.maddu', 'lanes', 'catalog.json'),
       JSON.stringify({ schemaVersion: 1, lanes: [{ id: 'git-integration', scope: 'x' }, { id: 'cockpit-shell', scope: 'y' }] }, null, 2));
-    const lock2 = path.join(repo, '.maddu', 'worktrees', 'cockpit-shell.lock');
-    await mkdir(lock2, { recursive: true });
+    const wl = await import(pathToFileURL(path.join(LIB, 'worktree-lock.mjs')).href);
+    const heldLock = await wl.acquireWorktreeLock(wt.worktreeLaneLockPath(repo, 'cockpit-shell'), { maxWaitMs: 0 });
     let lockBlocked = false;
     try { await wt.attachLaneWorktree(repo, { lane: 'cockpit-shell', session: 'ses_2' }); } catch (e) { lockBlocked = /in progress/.test(e.message); }
-    ok('held lock dir blocks a concurrent attach', lockBlocked);
-    await rm(lock2, { recursive: true, force: true });
+    ok('held worktree lock blocks a concurrent attach', lockBlocked && heldLock.acquired);
+    await heldLock.release();
 
     // ── Codex P2: the pointer is hidden from git status (not dirty) ──
     const status = (await git(['status', '--porcelain'], wtPath)).out;
