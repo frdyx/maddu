@@ -16,6 +16,7 @@ import { append, ensureSpine, EVENT_TYPES, genSessionId, isSid, isRefId, isClaim
 import { registerSessionUnique, closeSessionIfActive } from './session-lifecycle.mjs';
 import { withCloseLock, isLockFailed } from './session-lifecycle.mjs';
 import { project } from './projections.mjs';
+import { claimLane, releaseLane } from './lane-ownership.mjs';
 import { pathsFor } from './paths.mjs';
 import { LANE_SLUG_RE } from './worktrees.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -23,6 +24,21 @@ import { sendJson, readBody } from './http-util.mjs';
 import { redactLeaves } from './secret-scan.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
+
+// Map the lane-ownership statuses shared by claim + release (PR-C) to a bridge
+// error reply. Returns true when it replied, false when the status is
+// route-specific (the caller handles it). 503 lock / 409 spine-corrupt / 500
+// partial mirror the §3.3a surfacing contract.
+function replyOwnershipError(res, r) {
+  switch (r.status) {
+    case 'lock': return reply(res, 503, { error: 'lane lock busy — retry' });
+    case 'spine-corrupt': return reply(res, 409, { error: 'spine has malformed lines — mutation refused; run maddu verify' });
+    case 'partial': return reply(res, 500, { error: 'append failed mid-transaction', partial: true, stage: r.stage });
+    case 'unregistered': return reply(res, 409, { error: 'session not registered or not active — register before claiming' });
+    case 'session-closed': return reply(res, 409, { error: 'session is closed — register a fresh session' });
+    default: return false;
+  }
+}
 
 // ── sessions ──────────────────────────────────────────────────────────
 export async function routeSessions({ req, res, path, repoRoot }) {
@@ -106,31 +122,31 @@ export async function routeLanes({ req, res, path, repoRoot }) {
     // (preserve `auto/…` + ad-hoc). Ownership/locking is unchanged (→ PR-C).
     if (!isRefId(body.sessionId)) return reply(res, 400, { error: 'invalid sessionId (string, [\\w.-]{1,128})' });
     if (!isClaimLane(body.lane)) return reply(res, 400, { error: 'invalid lane (1-128 chars, no control characters)' });
-    const proj = await project(repoRoot);
-    const existing = proj.claims.find((c) => c.lane === body.lane);
-    if (existing && existing.sessionId !== body.sessionId) {
-      return reply(res, 409, { error: 'lane already claimed', currentClaim: existing });
-    }
-    const ev = await append(repoRoot, {
-      type: EVENT_TYPES.LANE_CLAIMED,
-      actor: body.sessionId,
-      lane: body.lane,
-      data: { focus: body.focus || null }
-    });
-    return reply(res, 200, { ok: true, event: ev });
+    // PR-C: serialized, mode-aware claim through the ownership transaction.
+    // Refuses on ANY active rival owner (both modes) and requires an active
+    // REGISTERED session (decision b — an unregistered actor cannot participate
+    // in the close-cascade ordering, so tolerating it would manufacture an
+    // immediately-orphaned "successful" claim). Deliberate contract change.
+    const r = await claimLane(repoRoot, { sid: body.sessionId, lane: body.lane, focus: body.focus || null });
+    if (r.status === 'claimed') return reply(res, 200, { ok: true, event: r.event });
+    if (r.status === 'already-claimed') return reply(res, 409, { error: 'lane already claimed', currentClaim: r.holder });
+    return replyOwnershipError(res, r) || reply(res, 500, { error: 'claim failed', status: r.status });
   }
   if (path === '/bridge/lanes/release' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     if (!body.lane || !body.sessionId) return reply(res, 400, { error: 'lane and sessionId required' });
     if (!isRefId(body.sessionId)) return reply(res, 400, { error: 'invalid sessionId (string, [\\w.-]{1,128})' });
     if (!isClaimLane(body.lane)) return reply(res, 400, { error: 'invalid lane (1-128 chars, no control characters)' });
-    const ev = await append(repoRoot, {
-      type: EVENT_TYPES.LANE_RELEASED,
-      actor: body.sessionId,
-      lane: body.lane,
-      data: {}
-    });
-    return reply(res, 200, { ok: true, event: ev });
+    // PR-C headline fix: release iff the actor OWNS the lane (incl. a superseded
+    // owner). The old route appended LANE_RELEASED unconditionally — in default
+    // mode a release clears the lane, so ANY caller could evict ANY lane's real
+    // holder (an authorization hole, not merely a race). 404 no-owners /
+    // 409 owned-by-others.
+    const r = await releaseLane(repoRoot, { sid: body.sessionId, lane: body.lane });
+    if (r.status === 'released') return reply(res, 200, { ok: true, event: r.event });
+    if (r.status === 'no-owners') return reply(res, 404, { error: 'no active claim on lane held by this session', lane: body.lane });
+    if (r.status === 'owned-by-others') return reply(res, 409, { error: 'lane owned by another session', currentClaim: r.holder });
+    return replyOwnershipError(res, r) || reply(res, 500, { error: 'release failed', status: r.status });
   }
   // Set per-lane defaults: runtime, model, optional provider.
   if (path === '/bridge/lanes/defaults' && req.method === 'POST') {
