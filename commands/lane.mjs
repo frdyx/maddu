@@ -307,10 +307,13 @@ export default async function lane(argv) {
         reason: typeof flags.reason === 'string' ? flags.reason : null,
         forceGroup, preflight,
       });
-      if (r.status === 'forced') {
-        console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${r.prior || 'none'})`);
-        // Bind the worktree to THIS forced claim (Codex P2): pass the forced
-        // LANE_CLAIMED id so WORKTREE_ATTACHED carries a claimEventId.
+      if (r.status === 'forced' || r.status === 'claimed') {
+        // §3.4: --force over a free/self-only lane degrades to an ordinary claim
+        // (status 'claimed', no marker) — report it as a plain claim.
+        if (r.status === 'forced') console.log(`forced-claim  ${lid}  by  ${sid}  (prior: ${r.prior || 'none'})`);
+        else console.log(`claimed  ${lid}  by  ${sid}`);
+        // Bind the worktree to THIS claim (Codex P2): pass the LANE_CLAIMED id
+        // so WORKTREE_ATTACHED carries a claimEventId.
         if (wantWorktree) await attachAndReport(wtLib, repoRoot, projections, { lane: lid, sid, focus: flags.focus, claimEventId: r.event.id });
         return;
       }

@@ -28,14 +28,28 @@
 // window could in principle produce a rare transient false-positive that
 // self-heals on the next run and never corrupts state.
 //
-// NOTE (scoped follow-up): the prior-match below only proves priorSessionId once
-// claimed this lane, not that it was the HOLDER at the force point, and force
-// under team-sync contention needs mode-aware holder semantics. Both are
-// pre-existing gaps orthogonal to the strict-pin scoping fixed here; tracked
-// separately rather than reimplementing a mode-aware prefix reducer inline.
+// STRENGTHENED HOLDER CHECK (PR-C §3.7). A PR-C force stamps a shared
+// `data.forceGroup` id on every preempt-LANE_RELEASED + the LANE_CLAIM_FORCED
+// marker + the trailing LANE_CLAIMED. The gate reconstructs each force's bundle
+// by that id — NOT by spine contiguity, which is not import-stable (sync-merge
+// interleaves partitions by head-ts, so a late-imported foreign event can land
+// between a local release and its marker). It then reduces ownership over the
+// prefix strictly BEFORE the earliest event of that forceGroup (mode-aware
+// `ownersOf`) to recover the pre-force holder and compares it to priorSessionId:
+//   - DEFAULT mode: the merged history IS the local history, so a mismatch is a
+//     real discipline violation → hard-fail.
+//   - SYNC mode: a late-imported earlier foreign claim can deterministically
+//     become the reconstructed holder on rebuild; the gate cannot prove the
+//     writer's local snapshot at force time, so a mismatch is a non-blocking
+//     diagnostic (warn), never a hard-fail.
+//   - Backward compat: pre-PR-C triples carry NO forceGroup → only the
+//     prior-once-claimed check runs (never newly-fails legacy history).
+// The priorSessionId-was-an-ex-claimer sanity check still runs in BOTH modes
+// (that IS import-stable — a claim by that id somewhere in history).
 
 import { readAll, EVENT_TYPES } from '../../lib/spine.mjs';
-import { project } from '../../lib/projections.mjs';
+import { project, ownersOf } from '../../lib/projections.mjs';
+import { readActiveReplicaId } from '../../lib/spine-append-core.mjs';
 import { readGovernance, effectiveValue } from '../../lib/governance.mjs';
 
 // A forced claim is "live" iff the lane is still held by the forcer (present in
@@ -78,16 +92,40 @@ export default {
     const forceAllowed = effectiveValue(gov, 'force-claim-allowed');
     const forced = all.filter((e) => e.type === EVENT_TYPES.LANE_CLAIM_FORCED);
     if (forced.length === 0) return { ok: true, message: 'no force-claims (skipped)' };
+    const syncMode = !!(await readActiveReplicaId(ctx.repoRoot));
     const indexOf = new Map(all.map((e, i) => [e, i]));
+    // Earliest spine index of each forceGroup bundle — its pre-force prefix
+    // boundary (import-stable, unlike contiguity).
+    const earliestOfGroup = new Map();
+    all.forEach((e, i) => {
+      const fg = e && e.data && e.data.forceGroup;
+      if (fg && !earliestOfGroup.has(fg)) earliestOfGroup.set(fg, i);
+    });
     const problems = [];
+    const warnings = [];
     for (const ev of forced) {
       const prior = ev.data?.priorSessionId;
       if (!prior) { problems.push({ id: ev.id, reason: 'missing priorSessionId' }); continue; }
       // The prior must be a session that claimed this lane earlier in the spine
-      // (spine order, not `ts`). This is the pre-existing invariant, unchanged.
+      // (spine order, not `ts`). Import-stable — runs in both modes, unchanged.
       const evIdx = indexOf.get(ev);
       const matched = all.some((x, i) => i < evIdx && x.type === EVENT_TYPES.LANE_CLAIMED && x.lane === ev.lane && x.actor === prior);
-      if (!matched) problems.push({ id: ev.id, reason: 'no matching prior LANE_CLAIMED' });
+      if (!matched) { problems.push({ id: ev.id, reason: 'no matching prior LANE_CLAIMED' }); continue; }
+      // PR-C strengthened holder check: reconstruct the pre-force holder by
+      // forceGroup-id bundle. Legacy triples (no forceGroup) skip this.
+      const fg = ev.data && ev.data.forceGroup;
+      if (fg && earliestOfGroup.has(fg)) {
+        const prefix = all.slice(0, earliestOfGroup.get(fg));
+        const recon = ownersOf(prefix, ev.lane, { syncMode }).holder;
+        const reconId = recon ? recon.sessionId : null;
+        if (prior !== reconId) {
+          if (syncMode) {
+            warnings.push({ id: ev.id, lane: ev.lane, priorSessionId: prior, reconstructedHolder: reconId, note: 'sync-mode: a late-imported foreign claim may shift the reconstructed holder — advisory only' });
+          } else {
+            problems.push({ id: ev.id, reason: `priorSessionId ${prior} does not match the reconstructed pre-force holder ${reconId ?? 'none'}` });
+          }
+        }
+      }
     }
     if (forceAllowed === false) {
       // Only flag force-claims whose eviction is STILL live — a tightened
@@ -101,7 +139,8 @@ export default {
         });
       }
     }
-    if (problems.length === 0) return { ok: true, message: `${forced.length} force-claim(s), all with valid priors` };
-    return { ok: false, message: `${problems.length} force-claim issue(s)`, evidence: { problems } };
+    if (problems.length > 0) return { ok: false, message: `${problems.length} force-claim issue(s)`, evidence: { problems, warnings } };
+    if (warnings.length > 0) return { ok: true, status: 'warn', message: `${forced.length} force-claim(s); ${warnings.length} sync-mode holder advisory`, evidence: { warnings } };
+    return { ok: true, message: `${forced.length} force-claim(s), all with valid priors` };
   },
 };

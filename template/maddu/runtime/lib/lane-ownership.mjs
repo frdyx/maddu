@@ -170,6 +170,21 @@ export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reas
     const pf = await preflight({ own, snap });
     if (pf && pf.refuse) return { status: pf.status || 'refused', ...pf };
   }
+  // §3.4: an empty (or self-only) lane has nothing to preempt — force degrades
+  // to an ordinary claim: NO marker, NO forceGroup, priorSessionId never null.
+  // The marker/bundle only exist when a real rival owner is evicted.
+  const rivals = own.owners.filter((o) => o.sessionId !== sid);
+  if (rivals.length === 0) {
+    let event;
+    try {
+      event = await append(repoRoot, {
+        type: EVENT_TYPES.LANE_CLAIMED, actor: sid, lane, data: { focus: focus || null },
+      });
+    } catch (e) {
+      return { status: 'partial', stage: 'claim', committed: [], error: e };
+    }
+    return { status: 'claimed', event, prior: null, preempted: [] };
+  }
   const prior = own.holder ? own.holder.sessionId : (priorHint || null);
   const preempted = [];
   for (const o of own.owners) {
