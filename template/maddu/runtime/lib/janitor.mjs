@@ -27,10 +27,10 @@
 
 import { stat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { append, EVENT_TYPES, readAllStrict } from './spine.mjs';
-import { readActiveReplicaId } from './spine-append-core.mjs';
-import { reduceSessions, reduceClaims } from './projections.mjs';
+import { EVENT_TYPES, readAllStrict } from './spine.mjs';
+import { reduceSessions } from './projections.mjs';
 import { markSessionStaleIfStill, closeSessionIfActive } from './session-lifecycle.mjs';
+import { reapOrphanClaims } from './lane-ownership.mjs';
 import { pathsFor } from './paths.mjs';
 
 export const DEFAULT_STALE_MS = 30 * 60 * 1000;        // 30 min
@@ -214,56 +214,32 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
   const proj1 = await projections.project(repoRoot);
   const jan = await runJanitor(repoRoot, proj1, nowMs);
 
-  // Pass 2 — orphan-claim reconcile with its OWN fresh strict snapshot
-  // (v1.111.0): a valid force-claim landing during pass 1 must be visible
-  // here (a round-start snapshot would make this pass LESS fresh than main),
-  // and a malformed registration line must not fabricate an orphan (the
-  // tolerant projection would drop the session but keep its parseable claim
-  // → false LANE_RELEASED). parseErrors > 0 → skip the pass with a note;
-  // null (replica mode) → tolerant semantics exactly as main. The remaining
-  // snapshot→append window inside this pass is main's own pre-existing race
-  // (no claim writer takes a lock today) — unwidened here, seeded to the
-  // follow-up lane-surface campaign.
-  // Reported releases derive ONLY from appends that actually happened — a
-  // failed append stops the loop and never reports that claim (or any
-  // unattempted later claim) as released.
-  const released = [];
+  // Pass 2 — orphan-claim reconcile through the serialized ownership
+  // transaction (PR-C: reapOrphanClaims). It takes its OWN fresh strict snapshot
+  // INSIDE the claims lock, so the snapshot→append window main's unlocked pass
+  // used to leave open is now closed. A valid force-claim landing during pass 1
+  // is visible here; a malformed spine (parseErrors > 0) skips the pass; a busy
+  // lock skips this round (best-effort). reapOrphanClaims reaps EVERY inactive
+  // owner incl. superseded (not just winners) — releasing AS the orphaned owner,
+  // correct in both the default (delete-by-lane) and sync (delete-that-owner)
+  // paths. Reported releases derive ONLY from appends that actually landed.
+  let released = [];
   try {
-    const { events, parseErrors } = await readAllStrict(repoRoot);
-    if (typeof parseErrors === 'number' && parseErrors > 0) {
+    const rep = await reapOrphanClaims(repoRoot, { firedAt, nowMs });
+    if (rep.status === 'spine-corrupt') {
       process.stderr.write('[maddu janitor] spine has malformed lines — orphan-claim pass skipped this round (run maddu verify)\n');
+    } else if (rep.status === 'lock') {
+      process.stderr.write('[maddu janitor] lane claims lock busy — orphan-claim pass skipped this round\n');
     } else {
-      const syncMode = !!(await readActiveReplicaId(repoRoot));
-      const view = reduceSessions(events, { nowMs });
-      const activeIds = new Set(view.activeSessions.map((s) => s.id));
-      const claims = reduceClaims(events, { syncMode });
-      const orphaned = claims.filter((c) => typeof c.sessionId === 'string' && c.sessionId.length > 0 && !activeIds.has(c.sessionId));
-      const corrupt = claims.filter((c) => typeof c.sessionId !== 'string' || c.sessionId.length === 0);
-      if (corrupt.length) process.stderr.write(`[maddu janitor] skipping ${corrupt.length} claim(s) with corrupt (non-string) actors — unrecoverable history\n`);
-      for (const c of orphaned) {
-        // Release AS the orphaned owner: correct in both the default
-        // (delete-by-lane) and sync (delete-that-owner) projection paths.
-        try {
-          await append(repoRoot, {
-            type: EVENT_TYPES.LANE_RELEASED,
-            actor: c.sessionId,
-            lane: c.lane,
-            data: { reason: 'orphan-reconcile' },
-            triggered_by: { kind: 'janitor', id: 'sessions', fired_at: firedAt },
-          });
-          released.push(c);
-        } catch {
-          process.stderr.write(`[maddu janitor] orphan release append failed for lane ${c.lane} — remaining claims left for the next round\n`);
-          break;
-        }
-      }
+      if (rep.corrupt) process.stderr.write(`[maddu janitor] skipping ${rep.corrupt} claim(s) with corrupt (non-string) actors — unrecoverable history\n`);
+      released = rep.released || [];
     }
   } catch { /* best-effort pass */ }
 
   return {
     staleDetected: jan.staleEmitted,
     autoClosed: jan.closedEmitted,
-    orphanedClaimsReleased: released.map((c) => ({ lane: c.lane, sessionId: c.sessionId })),
+    orphanedClaimsReleased: released,
     orphanedWorktrees: jan.orphanedWorktrees || [],
   };
 }
