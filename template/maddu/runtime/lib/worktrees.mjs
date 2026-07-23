@@ -21,6 +21,7 @@ import { gitRun, gitAvailable, currentHead } from './git-exec.mjs';
 import { mintWorktreeInstance, readWorktreeInstance } from './worktree-identity.mjs';
 import { acquireWorktreeLock } from './worktree-lock.mjs';
 import { readPendingDetach } from './worktree-recovery.mjs';
+import { isAllowed, withinCooldown } from './gauntlet.mjs';
 
 // Canonical lane-id shape. Identical to the bridge's lane-creation rule
 // (bridge-routes-lanes.mjs imports this — one regex, two enforcement points).
@@ -545,4 +546,138 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
     },
   });
   return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: verified.disposition, dirty: verified.dirtyAtDetach, ancestorCheck: verified.ancestorCheck, eventId: term.id, path: att.pathRepoRel, branchCleanupWarning };
+}
+
+// ── Auto-finalize: positive-removal-only recovery of pending detach intents ──
+// (PR-D §3.6). A crash after WORKTREE_DETACHING but before the terminal, where
+// the token-matched checkout is STILL PRESENT, self-heals inside the janitor
+// sweep. An ABSENT instance is NEVER auto-terminalized (absence cannot be
+// distinguished from a storage outage — the checkout may reappear); it is
+// reported for an audited operator --recover.
+
+export const WORKTREE_RECOVER_COOLDOWN_MS = (() => {
+  const raw = Number(process.env.MADDU_WORKTREE_RECOVER_COOLDOWN_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 60000; // 60s finite default
+})();
+
+// Finalize ONE candidate, assuming the caller already holds this lane's worktree
+// lock (the recovery pass holds it from before TRIGGER_FIRED). Re-reads + re-
+// validates inside the lock. Positive-removal-only: removes + terminalizes ONLY a
+// PRESENT, token-matched instance; an absent/mismatched instance yields
+// needsOperator with no terminal. Throws only if the terminal append itself fails
+// (the caller models that partial).
+async function finalizeInLock(stateRoot, { lane, attachmentId, worktreeInstanceId, triggered_by }) {
+  const pend = await readPendingDetach(stateRoot);
+  const cand = pend.candidates.find((c) => c.attachmentId === attachmentId && c.worktreeInstanceId === worktreeInstanceId);
+  if (!cand) return { status: 'noop', lane, attachmentId }; // terminal landed / no longer a candidate
+
+  const path = laneWorktreePath(stateRoot, lane);
+  if (!(await pathExists(path))) return { status: 'needsOperator', reason: 'instance-absent', lane, attachmentId, worktreeInstanceId };
+  const inst = await readWorktreeInstance(stateRoot, path);
+  if (inst.state !== 'present') return { status: 'needsOperator', reason: inst.state === 'absent' ? 'token-absent' : 'instance-unresolvable', lane, attachmentId, worktreeInstanceId };
+  if (inst.token !== worktreeInstanceId) return { status: 'needsOperator', reason: 'token-mismatch', lane, attachmentId, worktreeInstanceId };
+
+  const g = await removeWorktreeGit(stateRoot, path, { branch: laneBranch(lane), force: true });
+  if (!g.removed) return { status: 'partial', stage: 'remove', lane, attachmentId, error: g.error };
+  if (await pathExists(path)) return { status: 'partial', stage: 'remove', lane, attachmentId }; // survivor
+
+  const term = await append(stateRoot, {
+    type: EVENT_TYPES.WORKTREE_DETACHED, actor: null, lane, triggered_by,
+    data: {
+      schemaVersion: 1, attachmentId, lane, pathRepoRel: cand.pathRepoRel, disposition: cand.disposition,
+      branchHead: cand.branchHead, integrationRef: cand.integrationRef, integrationHead: cand.integrationHead,
+      ancestorCheck: cand.ancestorCheck, dirtyAtDetach: cand.dirtyAtDetach, reason: cand.reason, worktreeInstanceId,
+    },
+  });
+  return { status: 'finalized', lane, attachmentId, eventId: term.id, disposition: cand.disposition, branchCleanupWarning: g.branchDeleted ? null : g.error };
+}
+
+// Standalone finalize (acquires its own lane lock) — for callers outside the
+// janitor pass (e.g. the inline release reconcile hook, §3.8). Idempotent no-op on
+// an already-landed terminal / lock-busy.
+export async function finalizePendingDetach(stateRoot, { lane, attachmentId, worktreeInstanceId, triggered_by = null }) {
+  const locked = await withLaneWorktreeLock(stateRoot, lane, () =>
+    finalizeInLock(stateRoot, { lane, attachmentId, worktreeInstanceId, triggered_by }));
+  if (!locked.acquired) return { status: 'skipped', reason: 'lock-busy', lane, attachmentId };
+  return locked.value;
+}
+
+// The janitor recovery pass (PR-D §3.6). Full rule-#9 gauntlet under the atomic-
+// publish GLOBAL recovery lock; a candidate's per-lane worktree lock is acquired
+// and its instance revalidated PRESENT before TRIGGER_FIRED is appended (and held
+// through the terminal). Returns { finalized, skipped, needsOperator }.
+export async function recoverPendingDetaches(stateRoot, { nowMs = Date.now() } = {}) {
+  const result = { finalized: [], skipped: [], needsOperator: [] };
+  if (!(await isAllowed(stateRoot, 'janitor:worktrees'))) { result.skipped.push({ reason: 'not-allowed' }); return result; }
+
+  const glock = await acquireWorktreeLock(worktreeRecoveryLockPath(stateRoot), { maxWaitMs: 0 });
+  if (!glock.acquired) { result.skipped.push({ reason: 'recovery-lock-busy' }); return result; }
+  try {
+    // Recheck cooldown INSIDE the global lock — parallel sweeps that both passed
+    // an outside check cannot both fire (TOCTOU closed, §3.6/r3-4).
+    if (await withinCooldown(stateRoot, 'janitor:worktrees', WORKTREE_RECOVER_COOLDOWN_MS, { nowMs })) {
+      result.skipped.push({ reason: 'cooldown' }); return result;
+    }
+
+    const pend = await readPendingDetach(stateRoot);
+    // Surface every non-candidate for the operator (foreign/unverifiable/ambiguous).
+    for (const s of pend.surfaced) {
+      if (s.reason === 'post-terminal') continue;
+      result.needsOperator.push({ lane: s.lane, attachmentId: s.attachmentId, reason: s.reason, sourceReplicaId: s.sourceReplicaId ?? null, attachmentOwner: s.attachmentOwner ?? null });
+    }
+
+    // Pre-scan: acquire each candidate's lane lock + confirm a PRESENT instance;
+    // keep the lock ONLY on actionable candidates. An absent instance yields
+    // needsOperator (positive-removal-only) and its lock is released.
+    const held = [];
+    for (const c of pend.candidates) {
+      const lk = await acquireWorktreeLock(worktreeLaneLockPath(stateRoot, c.lane), { maxWaitMs: 0 });
+      if (!lk.acquired) { result.skipped.push({ lane: c.lane, reason: 'lock-busy' }); continue; }
+      const path = laneWorktreePath(stateRoot, c.lane);
+      // Actionable ONLY when the token-matched instance is physically PRESENT. A
+      // missing checkout is instance-absent; a present-but-different checkout is
+      // token-mismatch — BOTH are "invalid before firing" (§3.6/r4-4), so they are
+      // reported for the operator and NEVER contribute a reason to fire the trigger.
+      const inst = (await pathExists(path)) ? await readWorktreeInstance(stateRoot, path) : { state: 'absent' };
+      if (inst.state === 'present' && inst.token === c.worktreeInstanceId) {
+        held.push({ candidate: c, lock: lk });
+      } else {
+        const reason = inst.state !== 'present' ? 'instance-absent' : 'token-mismatch';
+        result.needsOperator.push({ lane: c.lane, attachmentId: c.attachmentId, reason, worktreeInstanceId: c.worktreeInstanceId, attachmentOwner: c.attachmentOwner });
+        await lk.release();
+      }
+    }
+
+    // No present-instance candidate then NO TRIGGER_FIRED (a pure no-op round
+    // burns no cooldown, the honest guarantee of §3.6/r4-4).
+    if (held.length === 0) return result;
+
+    const fired_at = new Date(nowMs).toISOString();
+    const triggered_by = { kind: 'janitor', id: 'worktrees', fired_at };
+    const trig = await append(stateRoot, {
+      type: EVENT_TYPES.TRIGGER_FIRED, actor: null,
+      data: { triggerId: 'janitor:worktrees', reason: 'worktree-recovery', triggered_by },
+    });
+
+    for (const h of held) {
+      const c = h.candidate;
+      try {
+        const r = await finalizeInLock(stateRoot, { lane: c.lane, attachmentId: c.attachmentId, worktreeInstanceId: c.worktreeInstanceId, triggered_by });
+        if (r.status === 'finalized') result.finalized.push({ lane: c.lane, attachmentId: c.attachmentId, eventId: r.eventId, disposition: r.disposition });
+        else if (r.status === 'needsOperator') result.needsOperator.push({ lane: c.lane, attachmentId: c.attachmentId, reason: r.reason });
+        else if (r.status === 'partial') result.skipped.push({ lane: c.lane, reason: 'partial-remove', committed: [trig.id] });
+        // noop then the terminal already landed; nothing to record
+      } catch {
+        // Terminal append failed AFTER removal then the instance is now ABSENT, so
+        // positive-removal-only forbids an auto-retry: report needsOperator, and
+        // the cooldown stands (the trigger honestly recorded an attempted firing).
+        result.needsOperator.push({ lane: c.lane, attachmentId: c.attachmentId, reason: 'terminal-append-failed', committed: [trig.id] });
+      } finally {
+        await h.lock.release();
+      }
+    }
+    return result;
+  } finally {
+    await glock.release();
+  }
 }

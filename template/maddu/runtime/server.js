@@ -951,9 +951,20 @@ async function handleBridge(req, res, url, ctx) {
           console.error(`janitor: lane "${o.lane}" worktree ${o.path} orphaned by auto-close of ${o.session} — disposition with \`maddu lane release ${o.lane} --worktree <merged|abandoned|keep>\``);
         }
       }
-      if (summary.staleEmitted > 0 || summary.closedEmitted > 0) {
+      // PR-D §3.6: surface the worktree detach-recovery outcome. A FINALIZED
+      // present-instance intent appended a terminal, so the attachment is now gone
+      // — force a reprojection (else the response still shows it live). Every
+      // needsOperator case (absent instance, foreign/unverifiable origin, …) prints
+      // the exact audited `--recover` command + the attachment owner.
+      const rec = summary.worktreeRecovery || { finalized: [], needsOperator: [] };
+      for (const n of (rec.needsOperator || [])) {
+        const owner = n.attachmentOwner ? ` (owner ${n.attachmentOwner})` : '';
+        const where = n.sourceReplicaId ? ` [source replica ${n.sourceReplicaId}]` : '';
+        console.error(`janitor: lane "${n.lane}" worktree needs operator recovery (${n.reason})${owner}${where} — run \`maddu lane release ${n.lane} --worktree --recover\``);
+      }
+      if (summary.staleEmitted > 0 || summary.closedEmitted > 0 || (rec.finalized && rec.finalized.length > 0)) {
         // Force a re-projection so the response includes the events
-        // we just appended.
+        // we just appended (session lifecycle AND worktree finalize).
         const proj = await project(repoRoot);
         return sendJson(res, 200, await withTeamSync(proj));
       }
