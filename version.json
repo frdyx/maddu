@@ -1,5 +1,5 @@
 {
-  "version": "1.112.0",
-  "phase": "session-id-validation",
-  "released": "2026-07-22"
+  "version": "1.113.0",
+  "phase": "lane-writer-serialization",
+  "released": "2026-07-23"
 }
