@@ -12,7 +12,7 @@
 import { stat } from 'node:fs/promises';
 import { EVENT_TYPES } from './spine.mjs';
 import { readPartitionStreamsStrict, hasPartitions, readReplicaId, pendingReplicaPath, kWayMergeStreams } from './spine-append-core.mjs';
-import { classifyOrigin, readLineage } from './replica-lineage.mjs';
+import { classifyOrigin, readLineage, bootstrapLineageUpgrade } from './replica-lineage.mjs';
 
 // Fold the merged, ordered history into attachment lifecycle + open intents.
 // Returns { live, terminated, laneLive, openIntents } where openIntents maps
@@ -100,6 +100,14 @@ export async function readPendingDetach(stateRoot) {
   let pendingSync = false;
   try { await stat(pendingReplicaPath(stateRoot)); pendingSync = true; } catch { /* absent */ }
   const sync = (await hasPartitions(stateRoot)) || active != null || pendingSync;
+
+  // Diff-r6 #1: a repo synced BEFORE PR-D has a committed replica.json but NO
+  // device-local lineage file (`maddu upgrade` doesn't run syncInit's backfill), so
+  // its own local attachments would classify UNVERIFIABLE and block every
+  // disposition. Lazily materialize the upgrade lineage ({current:active,
+  // predecessors:[], complete:false}) on first PR-D use — best-effort, idempotent,
+  // never overwrites a present lineage.
+  if (sync && active) { try { await bootstrapLineageUpgrade(stateRoot, active); } catch { /* best-effort */ } }
 
   // Map each worktree-lifecycle envelope id → its source partition replicaId + that
   // stream's strict parse status. Diff-r1 #4: track BOTH the intent (DETACHING) AND

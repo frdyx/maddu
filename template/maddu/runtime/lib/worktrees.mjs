@@ -684,7 +684,11 @@ async function finalizeInLock(stateRoot, { lane, attachmentId, worktreeInstanceI
 
   const g = await removeWorktreeGit(stateRoot, path, { branch: laneBranch(lane), force: true });
   if (!g.removed) return { status: 'partial', stage: 'remove', lane, attachmentId, error: g.error };
-  if (await pathExists(path)) return { status: 'partial', stage: 'remove', lane, attachmentId }; // survivor
+  // Diff-r6 #2: a post-removal probe fault is a modelled partial (the checkout is
+  // already gone), not a raw throw the janitor would mislabel 'terminal-append-failed'.
+  const pc = await probeGone(path);
+  if (pc.error) return { status: 'partial', stage: 'remove', reason: 'postcondition-probe-failed', removed: true, lane, attachmentId, error: pc.error };
+  if (!pc.gone) return { status: 'partial', stage: 'remove', lane, attachmentId }; // survivor
 
   const term = await append(stateRoot, {
     type: EVENT_TYPES.WORKTREE_DETACHED, actor: null, lane, triggered_by,
