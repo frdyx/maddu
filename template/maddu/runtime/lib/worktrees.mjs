@@ -376,6 +376,15 @@ async function pathExists(p) {
   catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
+// Diff-r5 #5: a POST-removal postcondition probe that never throws — returns
+// { gone } (leaf absent?) or { error } when the probe itself faults (EACCES/EIO).
+// After a destructive removal, a probe fault must become a structured partial, not
+// a raw exception that loses the committed intent id.
+async function probeGone(p) {
+  try { return { gone: !(await pathExists(p)) }; }
+  catch (e) { return { error: (e && e.message) || 'stat failed' }; }
+}
+
 // Resolve a ref to a sha, distinguishing ABSENT (exit 1 — legitimate: a merged
 // branch may already be deleted) from a git FAILURE (spawn error / other exit —
 // refuse, never treat as absent). `rev-parse --verify --quiet` exits 1 on absence.
@@ -462,6 +471,21 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
     return { status: 'already-detached', attachmentId: null, lane, disposition: norm, ancestorCheck: 'skipped', eventId: terminalEventId, terminalEventId, path: laneWorktreeRepoRel(lane), branchCleanupWarning: null };
   }
 
+  // Diff-r5 #1: classify the ATTACHMENT origin before ANY disposition (incl. kept).
+  // A FOREIGN attachment imported onto this replica must NOT be terminalized locally
+  // — syncing that terminal back would close the source replica's real attachment
+  // while its checkout remains. Redirect foreign; refuse unverifiable/ambiguous
+  // origin. (No-op in flat/single-machine mode, where every origin is local.) The
+  // `pend` snapshot is reused by the removing resume/blocked checks below.
+  const pend = await readPendingDetach(stateRoot);
+  const attOrigin = pend.attachmentOrigins && pend.attachmentOrigins.get(att.attachmentId);
+  if (attOrigin && attOrigin.origin === 'foreign') {
+    throw new Error(`lane "${lane}" worktree attachment originates on replica ${attOrigin.sourceReplicaId || '?'} — disposition it THERE (foreign origin; refused locally)`);
+  }
+  if (attOrigin && attOrigin.origin === 'unverifiable') {
+    throw new Error(`lane "${lane}" worktree attachment origin is unverifiable — resolve with: maddu lane release ${lane} --worktree --recover`);
+  }
+
   // Derive the delete target from the CURRENT state root + validated lane, not the
   // spine-persisted att.pathAbs (Codex P1): laneWorktreePath re-validates
   // containment under <stateRoot>/.maddu/worktrees/ before any recursive rm.
@@ -495,8 +519,8 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
   // RESUME a pending intent (crash between intent and terminal): skip re-
   // authorization and carry the intent's recorded verification (covers the
   // null-branchHead merged-retry). An UNRECOVERABLE intent (ambiguous / identity
-  // mismatch) routes to the operator, never a silent fresh authorization.
-  const pend = await readPendingDetach(stateRoot);
+  // mismatch) routes to the operator, never a silent fresh authorization. Reuses
+  // the `pend` snapshot read above (Diff-r5 #1).
   const resume = pend.candidates.find((c) => c.attachmentId === att.attachmentId);
   const blocked = pend.surfaced.find((s) => s.attachmentId === att.attachmentId && s.reason !== 'post-terminal');
   let verified, intentEventId, token;
@@ -598,8 +622,13 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
     if (rm2.code !== 0) branchCleanupWarning = `worktree already removed; git branch -D ${branch} failed (${(rm2.stderr || rm2.error || '').trim()})`;
   }
   // Postcondition: the leaf must be gone. A SURVIVOR → partial:remove (intent
-  // stands, terminal withheld) — the intent id is what committed.
-  if (await pathExists(path)) {
+  // stands, terminal withheld). Diff-r5 #5: a probe FAULT after removal is also a
+  // partial (never a raw throw that would lose the committed intent id).
+  const pc = await probeGone(path);
+  if (pc.error) {
+    return { status: 'partial', stage: 'remove', reason: 'postcondition-probe-failed', committed: committedIntent, attachmentId: att.attachmentId, lane, disposition: verified.disposition, path: att.pathRepoRel, branchCleanupWarning, error: pc.error };
+  }
+  if (!pc.gone) {
     return { status: 'partial', stage: 'remove', committed: committedIntent, attachmentId: att.attachmentId, lane, disposition: verified.disposition, ancestorCheck: verified.ancestorCheck, path: att.pathRepoRel, branchCleanupWarning };
   }
 
@@ -876,7 +905,10 @@ async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) 
   if (present && candTokenMatches) {
     const g = await removeWorktreeGit(stateRoot, path, { branch: laneBranch(lane), force: true });
     if (!g.removed) return { status: 'partial', stage: 'remove', lane, error: g.error };
-    if (await pathExists(path)) return { status: 'partial', stage: 'remove', lane };
+    // Diff-r5 #5: a post-removal probe fault is a modelled partial, not a raw throw.
+    const pc = await probeGone(path);
+    if (pc.error) return { status: 'partial', stage: 'remove', reason: 'postcondition-probe-failed', removed: true, committed: [], lane, attachmentId: att.attachmentId, error: pc.error };
+    if (!pc.gone) return { status: 'partial', stage: 'remove', lane };
     // Diff-r4 #5: the destructive removal already happened — a terminal-append
     // failure is a modelled partial, not a raw throw (the CLI reports it; a re-run
     // sees an absent intent-less strand and orphans it).

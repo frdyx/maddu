@@ -291,7 +291,15 @@ export async function readPartitionStreamsStrict(repoRoot) {
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
       .sort();
-  } catch { /* no partitions */ }
+  } catch (e) {
+    // Diff-r5 #3: only ENOENT means "no partitions". An EACCES/EIO enumeration
+    // failure could HIDE partitions — inject a strict-accounting error so a strict
+    // caller (recovery) fails closed (allStreamsStrict === false) instead of
+    // treating an unreadable sync repo as flat.
+    if (!e || e.code !== 'ENOENT') {
+      streams.push({ replicaId: ' by-replica-unreadable', events: [], parseErrors: 1 });
+    }
+  }
   for (const rid of dirs) {
     const s = await parseStreamDir(join(byReplica, rid));
     streams.push({ replicaId: rid, events: s.events, parseErrors: s.parseErrors });

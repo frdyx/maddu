@@ -9,8 +9,9 @@
 // is unambiguous, identity-matched to the live attachment, strict-accountable, and
 // LOCAL-origin. Every other intent is surfaced for an audited operator command.
 
-import { readAll, EVENT_TYPES } from './spine.mjs';
-import { readPartitionStreamsStrict, hasPartitions, readReplicaId } from './spine-append-core.mjs';
+import { stat } from 'node:fs/promises';
+import { EVENT_TYPES } from './spine.mjs';
+import { readPartitionStreamsStrict, hasPartitions, readReplicaId, pendingReplicaPath, kWayMergeStreams } from './spine-append-core.mjs';
 import { classifyOrigin, readLineage } from './replica-lineage.mjs';
 
 // Fold the merged, ordered history into attachment lifecycle + open intents.
@@ -72,13 +73,33 @@ function foldLifecycle(events) {
 //   the terminal can be written WITHOUT re-running ancestry, plus attachmentOwner.
 // surfaced — everything else, tagged with a `reason`, for `--recover` / verify.
 export async function readPendingDetach(stateRoot) {
-  const events = await readAll(stateRoot);
+  // Diff-r5 #4: fold the lifecycle AND account provenance from ONE strict snapshot.
+  // Reading readAll() and readPartitionStreamsStrict() separately is a TOCTOU: a
+  // foreign competing attachment/terminal landing between the two reads could let
+  // the strict read look clean while the fold omits the disqualifier (or vice
+  // versa). Build the merged ordered history from the SAME streams the provenance
+  // uses — a single point-in-time view.
   const streams = await readPartitionStreamsStrict(stateRoot);
+  const mergeInput = streams.filter((s) => s.events.length).map((s) => ({ replicaId: s.replicaId, events: s.events }));
+  // Migration dedup: drop flat ('') events whose id also lives in a real partition
+  // (a readAll racing `sync init`'s rename can otherwise double-count them).
+  const flatStream = mergeInput.find((s) => s.replicaId === '');
+  if (flatStream && mergeInput.some((s) => s.replicaId !== '')) {
+    const partitionIds = new Set();
+    for (const s of mergeInput) if (s.replicaId !== '') for (const e of s.events) partitionIds.add(e.id);
+    flatStream.events = flatStream.events.filter((e) => !partitionIds.has(e.id));
+  }
+  const events = kWayMergeStreams(mergeInput);
   // Diff-r3 #3: derive sync mode FAIL-CLOSED. A committed replica.json means sync
   // even if the by-replica enumeration failed (hasPartitions is tolerant/fail-open).
   let active = null;
   try { active = await readReplicaId(stateRoot); } catch { active = null; }
-  const sync = (await hasPartitions(stateRoot)) || active != null;
+  // Diff-r3 #3 / Diff-r5 #3: sync mode FAIL-CLOSED — a committed replica.json, any
+  // partition dir, OR a pending migration marker all mean sync (never rely solely
+  // on the tolerant/fail-open hasPartitions enumeration).
+  let pendingSync = false;
+  try { await stat(pendingReplicaPath(stateRoot)); pendingSync = true; } catch { /* absent */ }
+  const sync = (await hasPartitions(stateRoot)) || active != null || pendingSync;
 
   // Map each worktree-lifecycle envelope id → its source partition replicaId + that
   // stream's strict parse status. Diff-r1 #4: track BOTH the intent (DETACHING) AND
@@ -215,8 +236,13 @@ export async function readPendingDetach(stateRoot) {
   const attachmentOrigins = new Map();
   for (const [aid, att] of live) {
     const src = sourceByEventId.get(att.attachEventId) ?? null;
-    const origin = sync ? await classifyOrigin(stateRoot, src, active) : 'local';
-    attachmentOrigins.set(aid, { origin, sourceReplicaId: src, ambiguous: ambiguousId(att.attachEventId), byLane: att.lane });
+    const ambiguous = ambiguousId(att.attachEventId);
+    let origin = sync ? await classifyOrigin(stateRoot, src, active) : 'local';
+    // Diff-r5 #2: a cross-partition duplicate attachment id has untrustworthy
+    // provenance (sourceByEventId may have landed on the local copy) → normalize to
+    // UNVERIFIABLE so an intent-less strand is refused, never terminalized locally.
+    if (ambiguous) origin = 'unverifiable';
+    attachmentOrigins.set(aid, { origin, sourceReplicaId: src, ambiguous, byLane: att.lane });
   }
 
   return { mode: sync ? 'sync' : 'flat', candidates, surfaced, attachmentOrigins };
