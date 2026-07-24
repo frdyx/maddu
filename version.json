@@ -1,5 +1,5 @@
 {
-  "version": "1.113.0",
-  "phase": "lane-writer-serialization",
-  "released": "2026-07-23"
+  "version": "1.114.0",
+  "phase": "worktree-two-resource-recovery",
+  "released": "2026-07-24"
 }
