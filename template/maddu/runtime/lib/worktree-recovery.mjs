@@ -99,12 +99,19 @@ export async function readPendingDetach(stateRoot) {
   }
   const ambiguousId = (id) => (idStreamCount.get(id) || 0) > 1;
 
+  // Diff-r4 #1: AUTO candidacy requires EVERY stream — local AND foreign — to
+  // strict-account. The merged fold treats all partitions' lifecycle events as
+  // authoritative, so a torn FOREIGN stream could hide a competing epoch, terminal,
+  // or second intent that would disqualify a local candidate. (Origin
+  // classification below stays INDEPENDENT of this, so a positively-foreign source
+  // is still redirected even amid a parse gap.)
+  const allStreamsStrict = streams.every((s) => s.parseErrors === 0);
+
   // Diff-r1 #4 / Diff-r2 #5: in sync mode derive the LOCAL replica set from the
   // device-local lineage FAIL-CLOSED, and require EVERY present local stream (incl.
-  // the residual flat '') to strict-account — a torn local stream could hide a
-  // competing terminal/epoch, so no candidate may be AUTO-trusted local until all
-  // local streams parse clean. (Diff-r3 #5: this gates AUTO candidacy only — a
-  // POSITIVELY-foreign source is still classified foreign below regardless.)
+  // the residual flat '') to strict-account. (Diff-r3 #5: this gates AUTO local
+  // classification only — a POSITIVELY-foreign source is still classified foreign
+  // below regardless.)
   let localStrictOk = true;
   if (sync) {
     const lineage = await readLineage(stateRoot);
@@ -185,10 +192,14 @@ export async function readPendingDetach(stateRoot) {
     // The intent's source partition must strict-account (parseErrors === 0), else no auto.
     if (parseOkByReplica.get(entry.intentSource) !== true) { surface(entry, 'source-parse-gap'); continue; }
 
-    if (entry.origin === 'local') {
-      candidates.push({ ...intent, sourceReplicaId: entry.intentSource, attachmentOwner, origin: 'local' });
-    } else {
+    if (entry.origin !== 'local') {
       surface(entry, 'unverifiable-origin'); // 'unverifiable' → needsOperator
+    } else if (!allStreamsStrict) {
+      // Diff-r4 #1: a torn stream anywhere (possibly foreign) could hide a competing
+      // lifecycle event — never AUTO-remove until the whole merged history accounts.
+      surface(entry, 'incomplete-accounting');
+    } else {
+      candidates.push({ ...intent, sourceReplicaId: entry.intentSource, attachmentOwner, origin: 'local' });
     }
   }
 
@@ -197,5 +208,16 @@ export async function readPendingDetach(stateRoot) {
     surfaced.push({ intentEventId: ev.id, intentId: ev.data?.intentId || null, attachmentId: aid, lane: ev.data?.lane, pathRepoRel: ev.data?.pathRepoRel, worktreeInstanceId: ev.data?.worktreeInstanceId || null, reason: 'post-terminal' });
   }
 
-  return { mode: sync ? 'sync' : 'flat', candidates, surfaced };
+  // Diff-r4 #2: the ORIGIN of every LIVE attachment, classified independently of any
+  // intent. Operator recovery of an intent-less strand consults this so a healthy
+  // FOREIGN attachment is refused/redirected (never terminalized locally — syncing
+  // that terminal back would close the source replica's real attachment).
+  const attachmentOrigins = new Map();
+  for (const [aid, att] of live) {
+    const src = sourceByEventId.get(att.attachEventId) ?? null;
+    const origin = sync ? await classifyOrigin(stateRoot, src, active) : 'local';
+    attachmentOrigins.set(aid, { origin, sourceReplicaId: src, ambiguous: ambiguousId(att.attachEventId), byLane: att.lane });
+  }
+
+  return { mode: sync ? 'sync' : 'flat', candidates, surfaced, attachmentOrigins };
 }

@@ -487,7 +487,7 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
     catch (e) { // Diff-r2 #8: a lost kept terminal is a modelled partial (nothing removed → a plain retry re-appends).
       return { status: 'partial', stage: 'detached', committed: [], attachmentId: att.attachmentId, lane, disposition: 'kept', path: att.pathRepoRel, error: e && e.message };
     }
-    return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: 'kept', dirty, ancestorCheck: 'skipped', eventId: ev.id, path: att.pathRepoRel, branchCleanupWarning: null };
+    return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: 'kept', dirty, ancestorCheck: 'skipped', eventId: ev.id, committed: [ev.id], path: att.pathRepoRel, branchCleanupWarning: null };
   }
 
   // ── removing (merged|abandoned): intent-first ──
@@ -618,7 +618,10 @@ async function detachInLock(stateRoot, { lane, norm, integrationRef, reason, by 
   catch (e) {
     return { status: 'partial', stage: 'detached', committed: committedIntent, attachmentId: att.attachmentId, lane, disposition: verified.disposition, path: att.pathRepoRel, branchCleanupWarning, error: e && e.message };
   }
-  return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: verified.disposition, dirty: verified.dirtyAtDetach, ancestorCheck: verified.ancestorCheck, eventId: term.id, path: att.pathRepoRel, branchCleanupWarning };
+  // Diff-r4 #4: a successful removing detach committed BOTH the intent and the
+  // terminal — report both so a downstream (LANE_RELEASED) failure reflects every
+  // landed event (a legacy direct detach has no intent → just the terminal).
+  return { status: 'detached', attachmentId: att.attachmentId, lane, disposition: verified.disposition, dirty: verified.dirtyAtDetach, ancestorCheck: verified.ancestorCheck, eventId: term.id, committed: [...committedIntent, term.id], path: att.pathRepoRel, branchCleanupWarning };
 }
 
 // ── Auto-finalize: positive-removal-only recovery of pending detach intents ──
@@ -843,6 +846,18 @@ async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) 
   if (foreign) {
     return { status: 'refused-foreign', lane, attachmentId: att.attachmentId, sourceReplicaId: foreign.sourceReplicaId || null, attachmentOwner };
   }
+  // Diff-r4 #2: classify the ATTACHMENT origin INDEPENDENTLY of any intent — a
+  // healthy FOREIGN attachment with no intent produces no surfaced record, yet its
+  // intent-less strand must NOT be terminalized locally (syncing that terminal back
+  // would close the source replica's real attachment). A FOREIGN attachment origin
+  // refuses+redirects; an UNVERIFIABLE origin refuses (no origin-repair flow exists).
+  const attOrigin = pend.attachmentOrigins && pend.attachmentOrigins.get(att.attachmentId);
+  if (attOrigin && attOrigin.origin === 'foreign') {
+    return { status: 'refused-foreign', lane, attachmentId: att.attachmentId, sourceReplicaId: attOrigin.sourceReplicaId || null, attachmentOwner };
+  }
+  if (attOrigin && attOrigin.origin === 'unverifiable') {
+    return { status: 'refused', reason: 'attachment-origin-unverifiable', lane, attachmentId: att.attachmentId, attachmentOwner };
+  }
   const hasSurfacedIntent = surfacedForAtt.length > 0;
   const prov = { recoveryActor, attachmentOwner };
 
@@ -862,7 +877,12 @@ async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) 
     const g = await removeWorktreeGit(stateRoot, path, { branch: laneBranch(lane), force: true });
     if (!g.removed) return { status: 'partial', stage: 'remove', lane, error: g.error };
     if (await pathExists(path)) return { status: 'partial', stage: 'remove', lane };
-    const ev = await terminalRecover(stateRoot, { lane, att, disposition: cand.disposition, cand, reason: cand.reason, intentToken: cand.worktreeInstanceId, ...prov });
+    // Diff-r4 #5: the destructive removal already happened — a terminal-append
+    // failure is a modelled partial, not a raw throw (the CLI reports it; a re-run
+    // sees an absent intent-less strand and orphans it).
+    let ev;
+    try { ev = await terminalRecover(stateRoot, { lane, att, disposition: cand.disposition, cand, reason: cand.reason, intentToken: cand.worktreeInstanceId, ...prov }); }
+    catch (e) { return { status: 'partial', stage: 'terminal', removed: true, committed: [], lane, attachmentId: att.attachmentId, error: e && e.message, note: 'checkout REMOVED but the recovery terminal append failed — re-run --recover' }; }
     return { status: 'recovered', mode: 'removed', lane, attachmentId: att.attachmentId, disposition: cand.disposition, eventId: ev.id };
   }
 
@@ -870,7 +890,9 @@ async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) 
   // surfaced intent) → a DIFFERENT / unverifiable checkout occupies the path →
   // NEVER remove it. Terminalize the attachment as orphaned; report the leftover.
   if (present && (cand || hasSurfacedIntent)) {
-    const ev = await terminalRecover(stateRoot, { lane, att, disposition: 'orphaned', reason: 'operator-recover-replaced', intentToken: cand ? cand.worktreeInstanceId : null, ...prov });
+    let ev;
+    try { ev = await terminalRecover(stateRoot, { lane, att, disposition: 'orphaned', reason: 'operator-recover-replaced', intentToken: cand ? cand.worktreeInstanceId : null, ...prov }); }
+    catch (e) { return { status: 'partial', stage: 'terminal', removed: false, committed: [], lane, attachmentId: att.attachmentId, error: e && e.message }; }
     return { status: 'recovered', mode: 'orphaned-leftover', lane, attachmentId: att.attachmentId, leftoverPath: att.pathRepoRel, eventId: ev.id,
       note: 'a different/unverifiable checkout occupies the lane path — the attachment was terminalized but the directory was NOT removed; dispose of it by hand' };
   }
@@ -887,13 +909,17 @@ async function recoverInLock(stateRoot, { lane, recoveryActor, resolveActive }) 
   // the intent's verified disposition (a --merged survives; ancestry was verified at
   // intent time — no re-ancestry).
   if (cand) {
-    const ev = await terminalRecover(stateRoot, { lane, att, disposition: cand.disposition, cand, reason: cand.reason, intentToken: cand.worktreeInstanceId, ...prov });
+    let ev;
+    try { ev = await terminalRecover(stateRoot, { lane, att, disposition: cand.disposition, cand, reason: cand.reason, intentToken: cand.worktreeInstanceId, ...prov }); }
+    catch (e) { return { status: 'partial', stage: 'terminal', removed: false, committed: [], lane, attachmentId: att.attachmentId, error: e && e.message }; }
     return { status: 'recovered', mode: 'absent-preserve-intent', lane, attachmentId: att.attachmentId, disposition: cand.disposition, eventId: ev.id };
   }
 
   // absent + intent-less (legacy strand, or unverifiable origin treated as legacy)
   // → a compensating orphaned terminal (mirrors the attach-side orphaned path),
   // NEVER a merged claim for unverified work.
-  const ev = await terminalRecover(stateRoot, { lane, att, disposition: 'orphaned', reason: 'operator-recover-vanished', intentToken: att.worktreeInstanceId || null, ...prov });
+  let ev;
+  try { ev = await terminalRecover(stateRoot, { lane, att, disposition: 'orphaned', reason: 'operator-recover-vanished', intentToken: att.worktreeInstanceId || null, ...prov }); }
+  catch (e) { return { status: 'partial', stage: 'terminal', removed: false, committed: [], lane, attachmentId: att.attachmentId, error: e && e.message }; }
   return { status: 'recovered', mode: 'absent-orphaned', lane, attachmentId: att.attachmentId, eventId: ev.id };
 }

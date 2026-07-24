@@ -306,9 +306,12 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
     // LANE_RELEASED (there is nothing of the actor's to release).
     if (!isOwner) return { status: 'worktree-only', event: null, detachResult };
     let event;
-    // Diff-r2 #8: a release-append failure AFTER a successful detach must report the
-    // detach terminal (and any committed intent) as committed, not [].
-    const detachCommitted = (detachResult && detachResult.eventId) ? [detachResult.eventId] : ((detachResult && detachResult.committed) || []);
+    // Diff-r2 #8 / Diff-r4 #4: a release-append failure AFTER a successful detach must
+    // report EVERY landed detach event (intent + terminal), preferring the detach's
+    // full `committed` array over just its terminal eventId.
+    const detachCommitted = (detachResult && Array.isArray(detachResult.committed) && detachResult.committed.length)
+      ? detachResult.committed
+      : ((detachResult && detachResult.eventId) ? [detachResult.eventId] : []);
     try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
     catch (e) { return { status: 'partial', stage: 'release', event: null, committed: detachCommitted, holder: holderId, error: e, detachResult }; }
     return { status: 'released', event, detachResult };

@@ -406,8 +406,19 @@ export default async function lane(argv) {
           // 'owned-by-others' is the documented deferred (janitor-reaped) case;
           // anything else (busy lock, corrupt spine, partial, throw) means the claim
           // is still held → nonzero exit with the retry command.
+          // Diff-r4 #3: run the claim release UNDER the worktree lock via the same
+          // hooks, so a concurrent same-session `claim --worktree` that attaches a
+          // new checkout in the gap is SEEN (→ needs-disposition) rather than having
+          // its claim silently released by a bare releaseLane.
+          const relWorktree = wtLib.withLaneWorktreeLock ? {
+            withLock: (fn) => wtLib.withLaneWorktreeLock(repoRoot, lid, fn),
+            readLiveAttach: () => wtLib.liveAttachmentForLane(repoRoot, lid),
+            reconcileAttachment: (wtLib.finalizePendingDetachInLock || wtLib.finalizePendingDetach)
+              ? (args) => (wtLib.finalizePendingDetachInLock || wtLib.finalizePendingDetach)(repoRoot, args)
+              : undefined,
+          } : undefined;
           let rel;
-          try { rel = await own.releaseLane(repoRoot, { sid, lane: lid }); }
+          try { rel = await own.releaseLane(repoRoot, { sid, lane: lid, worktree: relWorktree }); }
           catch (e) { rel = { status: 'threw', error: e }; }
           if (rel.status === 'released') { console.log(`released  ${lid}`); return; }
           if (rel.status === 'no-owners') return; // claim already gone
