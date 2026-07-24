@@ -46,6 +46,12 @@ export const DEFAULT_TRIGGERS = [
   // fires when `maddu hooks install` wired the hook AND a session is active; the
   // allowlist entry just permits it. Closes the "forgot to claim a lane" gap.
   'hook:auto-claim',
+  // Auto-finalize a PRESENT-instance pending worktree detach intent (PR-D): a
+  // crash after the durable WORKTREE_DETACHING but before the terminal, where the
+  // token-matched checkout is still on disk, self-heals inside the janitor sweep.
+  // An ABSENT-instance strand is NEVER auto-finalized (positive-removal-only) —
+  // it needs an operator `maddu lane release <lane> --worktree --recover`.
+  'janitor:worktrees',
 ];
 
 export const DEFAULT_JANITOR_CONFIG = { staleAfterMs: 1800000, autoCloseAfterMs: 14400000 };

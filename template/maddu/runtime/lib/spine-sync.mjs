@@ -24,6 +24,7 @@ import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
 import { gitRun as defaultGitRun, gitAvailable as defaultGitAvailable } from './git-exec.mjs';
+import { bootstrapLineageFresh, bootstrapLineageUpgrade } from './replica-lineage.mjs';
 
 const SEG_RE = /^\d{12}\.ndjson$/;
 
@@ -165,7 +166,7 @@ export async function syncInit(repoRoot, opts = {}) {
   return withAppendLock(initLock, () => syncInitBody(repoRoot, opts));
 }
 
-async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null, force = false } = {}) {
+async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null } = {}) {
   const cfgPath = join(repoRoot, '.maddu', 'config', 'replica.json');
 
   // Malformed replica.json is itself a hard sync-config problem — surface it.
@@ -202,10 +203,16 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   if (hits.length) return { ok: false, reason: 'secret', hits };
 
   // Already fully initialised (replica.json is written LAST, so its presence means
-  // migration completed). Just re-ensure the git templates and return — never touch
-  // segments (a fully-synced repo has no residual flat by construction).
-  if (existing && !force) {
+  // migration completed). Just re-ensure the git templates + backfill the
+  // device-local replica lineage for an upgrade (a checkout synced before PR-D has
+  // no lineage file → {current:existing, predecessors:[], complete:false}: its own
+  // partition classifies LOCAL, but with completeness UNKNOWN an unlisted source is
+  // unverifiable, never foreign). Never touch segments (a fully-synced repo has no
+  // residual flat by construction). NOTE: there is deliberately no `force`/rotation
+  // path — replica ROTATION is out of PR-D scope (had no production caller).
+  if (existing) {
     await ensureSyncTemplates(repoRoot);
+    await bootstrapLineageUpgrade(repoRoot, existing);
     return { ok: true, already: true, replicaId: existing };
   }
 
@@ -274,6 +281,15 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
       data: { version: FLAT_LOCK_VERSION },
     });
   }
+  // Device-local replica lineage (PR-D §3.1), written AFTER migration + BEFORE
+  // replica.json activation: a fresh init is the authoritative origin, so
+  // {current:replicaId, predecessors:[], complete:true} — completeness is KNOWN
+  // because this device minted the id. Device-local ($GIT_DIR, never synced) so a
+  // team-sync clone never treats another device's partitions as local. A crash
+  // before activation leaves the lineage naming the pending id, which the resume
+  // re-derives to the same replicaId (idempotent overwrite).
+  await bootstrapLineageFresh(repoRoot, replicaId);
+
   const createdAt = now || new Date().toISOString();
   // Publish ATOMICALLY (temp + rename): a concurrent reader/appender must see either
   // no replica.json or a COMPLETE one — never a half-written file it would reject as

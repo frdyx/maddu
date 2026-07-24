@@ -195,6 +195,7 @@ export const EVENT_DISPOSITIONS = {
   AUTONOMY_SCORED: { disp: 'active' },
   AUTONOMY_RECOMMENDATION: { disp: 'dormant', reason: "fires only on a rung change — a lane's record crossing (or falling from) a trust-ladder threshold" },
   WORKTREE_ATTACHED: { disp: 'dormant', reason: "registered + verifier-covered ahead of the attach flow (roadmap #12a phase 3); emitted once `lane claim --worktree` lands (phase 4)" },
+  WORKTREE_DETACHING: { disp: 'dormant', reason: "PR-D durable detach intent; fires only on a removing (merged|abandoned) `lane release --worktree`, never on kept" },
   WORKTREE_DETACHED: { disp: 'dormant', reason: "registered + verifier-covered ahead of the attach flow (roadmap #12a phase 3); emitted once `lane release --worktree` lands (phase 5)" },
   // SLM-governance MODEL_ family (contract 1.1.0): fires only in repos
   // running an SLM factory through `maddu model` (plan pln_20260706133422_0f60)

@@ -262,6 +262,14 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   // claim holder: under team-sync a late-imported earlier claim can supersede the
   // session that attached the worktree, so a holder-based guard would let that
   // session's plain release orphan its own live checkout.
+  // Diff-r2 #1: the attachment read + the disposition/reconcile decision + the
+  // LANE_RELEASED append must run UNDER the per-lane worktree lock, or a plain
+  // release can read a null attachment while an attach is mid-flight (holding the
+  // worktree lock, pre-WORKTREE_ATTACHED) and then release the claim after the
+  // attach commits — a live worktree with no owner. When the hook provides
+  // `withLock`, run the whole body inside it (claims → worktree order; the detach /
+  // reconcile hooks use IN-LOCK variants so they never re-acquire re-entrantly).
+  const body = async () => {
   let liveAttach = null;
   let liveAttachError = false;
   if (worktree && typeof worktree.readLiveAttach === 'function') {
@@ -284,12 +292,28 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
     let detachResult;
     try { detachResult = await worktree.detach(liveAttach); }
     catch (e) { return { status: 'worktree-failed', event: null, error: e }; }
+    // Diff-r1 #8: only a COMPLETED disposition frees the claim. A `partial` (git
+    // reported removal but the ENOENT postcondition found a survivor, or an append
+    // boundary failed) leaves the attachment/worktree live — releasing the claim
+    // would strand a live worktree with no owner. Propagate the partial WITHOUT
+    // LANE_RELEASED. Only 'detached' / 'already-detached' proceed.
+    // Diff-r2 #6: fail CLOSED on ANY status that is not an explicit completion —
+    // a missing/undefined status (runtime skew, malformed result) must NOT release.
+    if (!detachResult || (detachResult.status !== 'detached' && detachResult.status !== 'already-detached')) {
+      return { status: 'worktree-incomplete', event: null, detachResult: detachResult || null, committed: (detachResult && detachResult.committed) || [] };
+    }
     // Actor holds no claim on the lane → the disposition WAS the cleanup; no
     // LANE_RELEASED (there is nothing of the actor's to release).
     if (!isOwner) return { status: 'worktree-only', event: null, detachResult };
     let event;
+    // Diff-r2 #8 / Diff-r4 #4: a release-append failure AFTER a successful detach must
+    // report EVERY landed detach event (intent + terminal), preferring the detach's
+    // full `committed` array over just its terminal eventId.
+    const detachCommitted = (detachResult && Array.isArray(detachResult.committed) && detachResult.committed.length)
+      ? detachResult.committed
+      : ((detachResult && detachResult.eventId) ? [detachResult.eventId] : []);
     try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-    catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e, detachResult }; }
+    catch (e) { return { status: 'partial', stage: 'release', event: null, committed: detachCommitted, holder: holderId, error: e, detachResult }; }
     return { status: 'released', event, detachResult };
   }
 
@@ -302,11 +326,40 @@ export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowM
   // Refuse a plain release that would orphan the ACTOR'S OWN live checkout —
   // disposition it first. A live attachment owned by SOMEONE ELSE is untouched
   // by this actor's release, so a superseded owner may withdraw freely (§3.5d).
-  if (ownsAttachment) return { status: 'needs-disposition', event: null, liveAttach };
+  // PR-D §3.8: a TARGETED reconcile hook (never a global — it may only touch THIS
+  // lane's attachment, under this actor's claims lock) may auto-complete a
+  // crash-stranded detach whose PRESENT, token-matched instance can be finalized
+  // safely. It fires only for an actor-owned attachment; an absent/intent-less
+  // strand is NOT auto-safe and still returns needs-disposition (operator --recover).
+  let reconcileEventId = null; // Diff-r1 #11: retained so a release-append failure
+  if (ownsAttachment) {          // reports [detachedEvent.id], not [].
+    let reconciled = false;
+    if (worktree && typeof worktree.reconcileAttachment === 'function') {
+      try {
+        const rec = await worktree.reconcileAttachment({ lane, attachmentId: liveAttach.attachmentId, worktreeInstanceId: liveAttach.worktreeInstanceId });
+        reconciled = !!rec && rec.status === 'finalized';
+        if (reconciled) reconcileEventId = rec.eventId || null;
+      } catch { reconciled = false; }
+    }
+    if (!reconciled) return { status: 'needs-disposition', event: null, liveAttach };
+    // The stranded detach is now complete (attachment terminalized) — the actor
+    // may withdraw its claim. Fall through to the LANE_RELEASED append.
+  }
   let event;
   try { event = await append(repoRoot, { type: EVENT_TYPES.LANE_RELEASED, actor: sid, lane, data: {} }); }
-  catch (e) { return { status: 'partial', stage: 'release', event: null, committed: [], holder: holderId, error: e }; }
-  return { status: 'released', event };
+  catch (e) { return { status: 'partial', stage: 'release', event: null, committed: reconcileEventId ? [reconcileEventId] : [], holder: holderId, error: e, reconcileEventId }; }
+  return { status: 'released', event, reconcileEventId };
+  }; // end body
+
+  // Serialize the attachment-dependent body against a concurrent attach via the
+  // per-lane worktree lock when the hook supports it; else run it directly (an old
+  // lib, or a caller with no worktree hook, has no attachment to race).
+  if (worktree && typeof worktree.withLock === 'function') {
+    const locked = await worktree.withLock(body);
+    if (!locked || locked.acquired === false) return { status: 'worktree-lock-busy', event: null };
+    return locked.value;
+  }
+  return body();
 }
 
 export async function releaseLane(repoRoot, opts) {

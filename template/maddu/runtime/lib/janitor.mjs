@@ -190,7 +190,20 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
     } catch { /* older install without worktrees lib → nothing to report */ }
   }
 
-  return { staleEmitted, closedEmitted: closedDone.length, orphanedWorktrees };
+  // PR-D §3.6: positive-removal-only worktree detach recovery runs ONCE here
+  // (the bridge /projection path also calls runJanitor, so this single call
+  // covers it). Full rule-#9 gauntlet + global recovery lock live inside
+  // recoverPendingDetaches; a malformed/absent spine or a busy lock is a
+  // self-skipping no-op. Best-effort — never breaks the session pass.
+  let worktreeRecovery = { finalized: [], skipped: [], needsOperator: [] };
+  try {
+    const { recoverPendingDetaches } = await import('./worktrees.mjs');
+    if (typeof recoverPendingDetaches === 'function') {
+      worktreeRecovery = await recoverPendingDetaches(repoRoot, { nowMs });
+    }
+  } catch { /* older install without the recovery path → nothing to do */ }
+
+  return { staleEmitted, closedEmitted: closedDone.length, orphanedWorktrees, worktreeRecovery };
 }
 
 // Full stale reconciliation — the CLI-side counterpart to the bridge's inline
@@ -241,5 +254,6 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
     autoClosed: jan.closedEmitted,
     orphanedClaimsReleased: released,
     orphanedWorktrees: jan.orphanedWorktrees || [],
+    worktreeRecovery: jan.worktreeRecovery || { finalized: [], skipped: [], needsOperator: [] },
   };
 }

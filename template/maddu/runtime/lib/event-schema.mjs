@@ -77,7 +77,18 @@
 // declares field types; the per-level requirement has one canonical checker),
 // and every consumer labels the event non-authoritative. Additive → minor
 // bump; baseline refreshed with this release.
-export const EVENT_CONTRACT_VERSION = '1.10.0';
+// 1.11.0 (PR-D worktree two-resource recovery) — added WORKTREE_DETACHING (the
+// durable "a removing detach was authorized and begun" intent that makes a
+// crash between the git remove and the terminal WORKTREE_DETACHED recoverable),
+// plus a per-worktree physical-identity token `worktreeInstanceId` on
+// WORKTREE_ATTACHED / WORKTREE_DETACHING / WORKTREE_DETACHED and the recovery
+// provenance pair `recoveryActor` / `attachmentOwner` on WORKTREE_DETACHED (an
+// operator `--recover` records who ran it AND whose attachment it closed, never
+// impersonating the closed owner). All additions are additive and legacy-
+// compatible (spelled `?` — absent on old records → unverifiable/legacy);
+// schemaVersion stays 1 on the two existing frozen shapes. Additive → minor
+// bump; baseline refreshed with this release.
+export const EVENT_CONTRACT_VERSION = '1.11.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -277,8 +288,9 @@ export const EVENT_SCHEMA = {
   DRIFT_FLAGGED: { summary: "Sustained un-returned drift raised a swap/revert/continue flag.", data: { cleared: 'boolean', continue: 'string', deterministic: 'boolean', enriched: 'boolean', menu: 'array', reason: 'string', revert: 'string', runs: 'number', swap: 'string', workerId: 'string', triggered_by: 'object|null' } },
   AUTONOMY_SCORED: { summary: "Per-lane earned-autonomy trust scores were computed over the record.", data: { schemaVersion: 'number', asOf: 'string|null', attribution: 'string', configHash: 'string', totalSlices: 'number', lanes: 'array' }, frozen: true },
   AUTONOMY_RECOMMENDATION: { summary: "An autonomy rung change was recommended (recommend-only).", data: { schemaVersion: 'number', asOf: 'string|null', lane: 'string', fromRung: 'string', toRung: 'string', wilson: 'number', n: 'number', coverage: 'number', recommendation: 'string', muted: 'boolean', mutedReason: 'string|null', configHash: 'string' }, frozen: true },
-  WORKTREE_ATTACHED: { summary: "A worktree checkout was attached to a lane claim.", data: { schemaVersion: 'number', attachmentId: 'string', claimEventId: 'string|null', lane: 'string', session: 'string', pathRepoRel: 'string', pathAbs: 'string', branchRef: 'string', baseRef: 'string|null', baseHeadAtAttach: 'string', created: 'boolean', reused: 'boolean', dirty: 'boolean', gitCommonDir: 'string|null', platform: 'string' }, frozen: true },
-  WORKTREE_DETACHED: { summary: "A worktree was detached from a lane claim with a disposition.", data: { schemaVersion: 'number', attachmentId: 'string', lane: 'string', pathRepoRel: 'string', disposition: 'string', branchHead: 'string|null', integrationRef: 'string|null', integrationHead: 'string|null', ancestorCheck: 'string', dirtyAtDetach: 'boolean', reason: 'string|null' }, frozen: true },
+  WORKTREE_ATTACHED: { summary: "A worktree checkout was attached to a lane claim.", data: { schemaVersion: 'number', attachmentId: 'string', claimEventId: 'string|null', lane: 'string', session: 'string', pathRepoRel: 'string', pathAbs: 'string', branchRef: 'string', baseRef: 'string|null', baseHeadAtAttach: 'string', created: 'boolean', reused: 'boolean', dirty: 'boolean', gitCommonDir: 'string|null', platform: 'string', worktreeInstanceId: 'string?' }, frozen: true },
+  WORKTREE_DETACHING: { summary: "A removing worktree detach (merged|abandoned) was authorized and begun (durable intent; the attachment stays LIVE until WORKTREE_DETACHED).", data: { schemaVersion: 'number', intentId: 'string', attachmentId: 'string', lane: 'string', pathRepoRel: 'string', worktreeInstanceId: 'string', disposition: 'string', integrationRef: 'string|null', integrationHead: 'string|null', branchHead: 'string|null', ancestorCheck: 'string', dirtyAtDetach: 'boolean', reason: 'string|null' }, frozen: true },
+  WORKTREE_DETACHED: { summary: "A worktree was detached from a lane claim with a disposition.", data: { schemaVersion: 'number', attachmentId: 'string', lane: 'string', pathRepoRel: 'string', disposition: 'string', branchHead: 'string|null', integrationRef: 'string|null', integrationHead: 'string|null', ancestorCheck: 'string', dirtyAtDetach: 'boolean', reason: 'string|null', worktreeInstanceId: 'string?', recoveryActor: 'string?', attachmentOwner: 'string?' }, frozen: true },
   // ── SLM-governance MODEL_ family (contract 1.1.0, plan pln_20260706133422_0f60) ──
   // Máddu records an SLM factory's manifests + lifecycle; it never trains,
   // serves, or evaluates. manifestPath/manifestHash are PINNED first-hand at

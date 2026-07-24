@@ -385,11 +385,21 @@ export const EVENT_TYPES = {
   //   WORKTREE_ATTACHED: { schemaVersion, attachmentId, claimEventId, lane, session,
   //                        pathRepoRel, pathAbs, branchRef, baseRef, baseHeadAtAttach,
   //                        created, reused, dirty, gitCommonDir, platform }
+  //   WORKTREE_DETACHING: { schemaVersion, intentId, attachmentId, lane, pathRepoRel,
+  //                        worktreeInstanceId, disposition: merged|abandoned,
+  //                        integrationRef, integrationHead, branchHead,
+  //                        ancestorCheck, dirtyAtDetach, reason }  ← PR-D durable
+  //                        detach intent (removing dispositions only); appended
+  //                        AFTER authorization, BEFORE git removal, so a crash
+  //                        between is recoverable. readAttachments IGNORES it
+  //                        (the attachment stays live until WORKTREE_DETACHED).
   //   WORKTREE_DETACHED: { schemaVersion, attachmentId, lane, pathRepoRel,
   //                        disposition: merged|abandoned|kept|orphaned,
   //                        branchHead, integrationRef, integrationHead,
-  //                        ancestorCheck: pass|fail|skipped, dirtyAtDetach, reason }
+  //                        ancestorCheck: pass|fail|skipped, dirtyAtDetach, reason,
+  //                        worktreeInstanceId?, recoveryActor?, attachmentOwner? }
   WORKTREE_ATTACHED:          'WORKTREE_ATTACHED',
+  WORKTREE_DETACHING:         'WORKTREE_DETACHING',
   WORKTREE_DETACHED:          'WORKTREE_DETACHED',
   // SLM-governance p2 (plan pln_20260706133422_0f60, contract 1.1.0) — the
   // MODEL_ family: Máddu governs an SLM factory's record (hash-pinned

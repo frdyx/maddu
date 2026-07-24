@@ -159,6 +159,11 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
   const worktreeAttachments = new Map();
   const worktreeEverAttached = new Set();
   const worktreeLivePaths = new Map();
+  // PR-D: a durable WORKTREE_DETACHING intent stands between ATTACHED and the
+  // terminal DETACHED. Track which attachments have an OPEN intent so a second
+  // intent (double), an intent with no live ATTACHED (orphan), and an intent
+  // after the terminal (post-detached) are each flagged. Cleared on DETACHED.
+  const worktreePendingDetach = new Set();
   // B2 (v1.13.0) — orchestration-lifecycle anchors. Each family's child events
   // carry the parent id; a child whose parent was never opened is an orphan,
   // exactly like the TASK / WORKER / SCHEDULE checks above. WARN (not FAIL):
@@ -585,6 +590,31 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
           break;
         }
 
+        case 'WORKTREE_DETACHING': {
+          const aid = ev.data?.attachmentId;
+          if (!aid) break; // forward-compat: unshaped intent is not flagged here
+          if (worktreeAttachments.get(aid) === 'detached') {
+            // Intent after the terminal — the lifecycle is already closed.
+            push(issue('FAIL', 'worktree_detaching_post_detached',
+              `${ev.id}: WORKTREE_DETACHING for attachment ${aid} after it was already detached`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (worktreeAttachments.get(aid) !== 'attached') {
+            // No live ATTACHED to authorize a detach of.
+            push(issue('FAIL', 'orphan_worktree_detaching',
+              `${ev.id}: WORKTREE_DETACHING for attachment ${aid} with no prior WORKTREE_ATTACHED`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else if (worktreePendingDetach.has(aid)) {
+            // A second intent for one attachment — the strict fold rejects this
+            // as ambiguous rather than "take the first".
+            push(issue('WARN', 'duplicate_worktree_detaching',
+              `${ev.id}: WORKTREE_DETACHING for attachment ${aid} while a prior detach intent is still open`,
+              { segment: segName, line: lineNo, eventId: ev.id }));
+          } else {
+            worktreePendingDetach.add(aid);
+          }
+          break;
+        }
+
         case 'WORKTREE_DETACHED': {
           const aid = ev.data?.attachmentId;
           if (!aid) break; // forward-compat: unshaped detach is not flagged here
@@ -600,6 +630,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
             }
           } else {
             worktreeAttachments.set(aid, 'detached');
+            worktreePendingDetach.delete(aid);
             const rel = ev.data?.pathRepoRel;
             if (rel && worktreeLivePaths.get(rel) === aid) worktreeLivePaths.delete(rel);
           }

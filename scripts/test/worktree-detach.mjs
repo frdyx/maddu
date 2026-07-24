@@ -82,6 +82,40 @@ async function main() {
       ok('merged: live set empty for lane', !(await wt.liveAttachmentForLane(repo, lane)));
       const det = (await detEvents(repo)).find((e) => e.data.disposition === 'merged');
       ok('merged: WORKTREE_DETACHED shape', det?.data?.ancestorCheck === 'pass' && !!det?.data?.integrationHead && det?.data?.schemaVersion === 1);
+      // PR-D: a removing detach is intent-first — a WORKTREE_DETACHING landed
+      // BEFORE the terminal, both carrying the physical token.
+      const all = await spine.readAll(repo);
+      const iIdx = all.findIndex((e) => e.type === 'WORKTREE_DETACHING' && e.data.attachmentId === a.attachmentId);
+      const tIdx = all.findIndex((e) => e.type === 'WORKTREE_DETACHED' && e.data.attachmentId === a.attachmentId);
+      ok('merged: WORKTREE_DETACHING intent precedes the terminal', iIdx !== -1 && tIdx !== -1 && iIdx < tIdx);
+      ok('merged: intent + terminal carry the worktreeInstanceId', all[iIdx]?.data?.worktreeInstanceId === a.worktreeInstanceId && all[tIdx]?.data?.worktreeInstanceId === a.worktreeInstanceId);
+    }
+
+    // ── PR-D: RESUME a crash-after-intent (intent landed, checkout already gone,
+    //    terminal never appended) — detach finalizes WITHOUT re-running ancestry. ──
+    {
+      const lane = 'harness';
+      const a = await wt.attachLaneWorktree(repo, { lane, session: 's1', claimEventId: 'evt_resume' });
+      await writeFile(path.join(a.path, 'f.txt'), 'work\n');
+      await git(['add', '-A'], a.path);
+      await git(['commit', '-m', 'lane work'], a.path);
+      await git(['merge', '--no-ff', `maddu/lane/${lane}`, '-m', 'merge-resume'], repo);
+      const branchHead = (await git(['rev-parse', '--verify', '--quiet', `refs/heads/maddu/lane/${lane}`], repo)).out.trim();
+      // Hand-write the durable intent (as detach would have, pre-crash), then
+      // simulate the crash: remove the checkout + delete the branch out of band.
+      await spine.append(repo, { type: 'WORKTREE_DETACHING', lane, data: {
+        schemaVersion: 1, intentId: 'wtd_resume', attachmentId: a.attachmentId, lane, pathRepoRel: a.relPath,
+        worktreeInstanceId: a.worktreeInstanceId, disposition: 'merged', integrationRef: 'refs/heads/main',
+        integrationHead: (await git(['rev-parse', 'HEAD'], repo)).out.trim(), branchHead, ancestorCheck: 'pass', dirtyAtDetach: false, reason: null } });
+      await git(['worktree', 'remove', '--force', a.path], repo);
+      await git(['branch', '-D', `maddu/lane/${lane}`], repo);
+      // Resume: no re-ancestry (branch is gone), preserves the merged disposition.
+      const r = await wt.detachLaneWorktree(repo, { lane, disposition: 'merged', by: 's1' });
+      ok('resume: crash-after-intent finalizes to detached', r.status === 'detached' && r.disposition === 'merged');
+      ok('resume: preserves the intent ancestorCheck without re-verifying', r.ancestorCheck === 'pass');
+      ok('resume: attachment no longer live', !(await wt.liveAttachmentForLane(repo, lane)));
+      const term = (await detEvents(repo)).find((e) => e.data.attachmentId === a.attachmentId);
+      ok('resume: exactly one terminal for the attachment carrying the token', !!term && term.data.worktreeInstanceId === a.worktreeInstanceId);
     }
 
     // ── merged refused when the lane branch is NOT an ancestor ──
@@ -147,13 +181,38 @@ async function main() {
       ok('override reason recorded on the detach event', !!det);
     }
 
+    // ── PR-D Diff-r3 #1: a LEGACY (tokenless) attachment detaches DIRECTLY (no
+    //    intent, no minted-token pretense) — honest git-probe-authorized removal. ──
+    {
+      const lane = 'bridge-server';
+      const relPath = `.maddu/worktrees/${lane}`;
+      const realPath = path.join(repo, '.maddu', 'worktrees', lane);
+      await git(['worktree', 'add', '-b', `maddu/lane/${lane}`, realPath], repo);
+      // Hand-write a legacy WORKTREE_ATTACHED with NO worktreeInstanceId.
+      await spine.append(repo, { type: 'WORKTREE_ATTACHED', lane, data: {
+        schemaVersion: 1, attachmentId: 'wta_legacy', claimEventId: 'evt_leg', lane, session: 's1',
+        pathRepoRel: relPath, pathAbs: realPath, branchRef: `refs/heads/maddu/lane/${lane}`,
+        baseRef: 'refs/heads/main', baseHeadAtAttach: 'a'.repeat(40), created: true, reused: false, dirty: false,
+        gitCommonDir: null, platform: process.platform } });
+      const r = await wt.detachLaneWorktree(repo, { lane, disposition: 'abandoned', by: 's1' });
+      ok('legacy abandoned detaches directly (detached)', r.status === 'detached' && r.disposition === 'abandoned');
+      ok('legacy detach removed the checkout', !(await exists(realPath)));
+      const evs = await spine.readAll(repo);
+      ok('legacy detach emitted NO WORKTREE_DETACHING intent', !evs.some((e) => e.type === 'WORKTREE_DETACHING' && e.data.attachmentId === 'wta_legacy'));
+      const term = evs.find((e) => e.type === 'WORKTREE_DETACHED' && e.data.attachmentId === 'wta_legacy');
+      ok('legacy terminal carries NO worktreeInstanceId (honest, no minted pretense)', !!term && term.data.worktreeInstanceId === undefined);
+      ok('legacy attachment no longer live', !(await wt.liveAttachmentForLane(repo, lane)));
+    }
+
     // ── invalid disposition + no-live-attachment errors ──
     let badDisp = false;
     try { await wt.detachLaneWorktree(repo, { lane: 'harness', disposition: 'bogus' }); } catch { badDisp = true; }
     ok('invalid disposition throws', badDisp);
-    let noLive = false;
-    try { await wt.detachLaneWorktree(repo, { lane: 'git-integration', disposition: 'keep' }); } catch (e) { noLive = /no live worktree/.test(e.message); }
-    ok('no-live-attachment throws', noLive);
+    // PR-D: re-detaching an already-terminal lane is IDEMPOTENT (not a throw) —
+    // git-integration was merged-detached above, so a second detach returns
+    // already-detached with the prior terminal's id.
+    const redetach = await wt.detachLaneWorktree(repo, { lane: 'git-integration', disposition: 'keep' });
+    ok('re-detach of an already-detached lane is idempotent (already-detached)', redetach.status === 'already-detached' && !!redetach.terminalEventId);
 
     // ── Codex P1: detach deletes the CURRENT-root path, NEVER the spine-
     // persisted att.pathAbs. Craft a live attachment whose pathAbs points at a
@@ -199,9 +258,11 @@ async function main() {
       const detBefore = (await detEvents(repo)).length;
       let aborted = false;
       try { await wt.detachLaneWorktree(repo, { lane, disposition: 'abandoned', by: 's1' }); }
-      catch (e) { aborted = /not detached|left intact/.test(e.message); }
+      catch (e) { aborted = /not detached|left intact|not present|--recover/.test(e.message); }
       const detAfter = (await detEvents(repo)).length;
-      ok('git-removal failure aborts the detach', aborted);
+      // PR-D: an absent checkout with no intent refuses a FRESH detach and routes
+      // to --recover (never auto-terminalizes an attachment whose checkout is gone).
+      ok('checkout-gone detach is refused (routes to --recover)', aborted);
       ok('no WORKTREE_DETACHED recorded on removal failure', detAfter === detBefore);
       ok('attachment stays live after a failed detach', !!(await wt.liveAttachmentForLane(repo, lane)));
       // Operator-side recovery: checkout is already gone, delete the leftover
