@@ -181,6 +181,29 @@ async function main() {
       ok('override reason recorded on the detach event', !!det);
     }
 
+    // ── PR-D Diff-r3 #1: a LEGACY (tokenless) attachment detaches DIRECTLY (no
+    //    intent, no minted-token pretense) — honest git-probe-authorized removal. ──
+    {
+      const lane = 'bridge-server';
+      const relPath = `.maddu/worktrees/${lane}`;
+      const realPath = path.join(repo, '.maddu', 'worktrees', lane);
+      await git(['worktree', 'add', '-b', `maddu/lane/${lane}`, realPath], repo);
+      // Hand-write a legacy WORKTREE_ATTACHED with NO worktreeInstanceId.
+      await spine.append(repo, { type: 'WORKTREE_ATTACHED', lane, data: {
+        schemaVersion: 1, attachmentId: 'wta_legacy', claimEventId: 'evt_leg', lane, session: 's1',
+        pathRepoRel: relPath, pathAbs: realPath, branchRef: `refs/heads/maddu/lane/${lane}`,
+        baseRef: 'refs/heads/main', baseHeadAtAttach: 'a'.repeat(40), created: true, reused: false, dirty: false,
+        gitCommonDir: null, platform: process.platform } });
+      const r = await wt.detachLaneWorktree(repo, { lane, disposition: 'abandoned', by: 's1' });
+      ok('legacy abandoned detaches directly (detached)', r.status === 'detached' && r.disposition === 'abandoned');
+      ok('legacy detach removed the checkout', !(await exists(realPath)));
+      const evs = await spine.readAll(repo);
+      ok('legacy detach emitted NO WORKTREE_DETACHING intent', !evs.some((e) => e.type === 'WORKTREE_DETACHING' && e.data.attachmentId === 'wta_legacy'));
+      const term = evs.find((e) => e.type === 'WORKTREE_DETACHED' && e.data.attachmentId === 'wta_legacy');
+      ok('legacy terminal carries NO worktreeInstanceId (honest, no minted pretense)', !!term && term.data.worktreeInstanceId === undefined);
+      ok('legacy attachment no longer live', !(await wt.liveAttachmentForLane(repo, lane)));
+    }
+
     // ── invalid disposition + no-live-attachment errors ──
     let badDisp = false;
     try { await wt.detachLaneWorktree(repo, { lane: 'harness', disposition: 'bogus' }); } catch { badDisp = true; }

@@ -74,39 +74,43 @@ function foldLifecycle(events) {
 export async function readPendingDetach(stateRoot) {
   const events = await readAll(stateRoot);
   const streams = await readPartitionStreamsStrict(stateRoot);
-  const sync = await hasPartitions(stateRoot);
+  // Diff-r3 #3: derive sync mode FAIL-CLOSED. A committed replica.json means sync
+  // even if the by-replica enumeration failed (hasPartitions is tolerant/fail-open).
   let active = null;
-  if (sync) { try { active = await readReplicaId(stateRoot); } catch { active = null; } }
+  try { active = await readReplicaId(stateRoot); } catch { active = null; }
+  const sync = (await hasPartitions(stateRoot)) || active != null;
 
   // Map each worktree-lifecycle envelope id → its source partition replicaId + that
-  // stream's strict parse status (source provenance is lost in the merged read).
-  // Diff-r1 #4: BOTH the intent (DETACHING) AND the attachment (ATTACHED) source
-  // must be tracked — a foreign ATTACHED with a local intent must not classify local.
+  // stream's strict parse status. Diff-r1 #4: track BOTH the intent (DETACHING) AND
+  // the attachment (ATTACHED) source. Diff-r3 #4: an id appearing in MORE THAN ONE
+  // source stream (tolerated cross-partition duplicate) has ambiguous provenance —
+  // record it so such a record can never be trusted local.
   const sourceByEventId = new Map();
+  const idStreamCount = new Map();
   const parseOkByReplica = new Map();
   for (const s of streams) {
     parseOkByReplica.set(s.replicaId, s.parseErrors === 0);
     for (const ev of s.events) {
       if (ev && (ev.type === EVENT_TYPES.WORKTREE_DETACHING || ev.type === EVENT_TYPES.WORKTREE_ATTACHED) && ev.id) {
         sourceByEventId.set(ev.id, s.replicaId);
+        idStreamCount.set(ev.id, (idStreamCount.get(ev.id) || 0) + 1);
       }
     }
   }
+  const ambiguousId = (id) => (idStreamCount.get(id) || 0) > 1;
 
-  // Diff-r1 #4: in sync mode derive the LOCAL replica set from the device-local
-  // lineage FAIL-CLOSED, and require EVERY present local stream to strict-account —
-  // a torn predecessor stream could hide a competing terminal/epoch, so no
-  // candidate may be trusted local until all local streams parse clean.
+  // Diff-r1 #4 / Diff-r2 #5: in sync mode derive the LOCAL replica set from the
+  // device-local lineage FAIL-CLOSED, and require EVERY present local stream (incl.
+  // the residual flat '') to strict-account — a torn local stream could hide a
+  // competing terminal/epoch, so no candidate may be AUTO-trusted local until all
+  // local streams parse clean. (Diff-r3 #5: this gates AUTO candidacy only — a
+  // POSITIVELY-foreign source is still classified foreign below regardless.)
   let localStrictOk = true;
   if (sync) {
     const lineage = await readLineage(stateRoot);
     if (lineage && active && lineage.current === active) {
       const localIds = new Set([lineage.current, ...lineage.predecessors]);
       for (const s of streams) {
-        // Diff-r2 #5: the residual flat ('') stream is a LOCAL source during
-        // migration — a parse error there could hide a competing local epoch or
-        // terminal, so it must strict-account too (alongside every lineage-local
-        // partition). Any parse gap in a local stream → nothing verifiably local.
         const isLocal = s.replicaId === '' || localIds.has(s.replicaId);
         if (isLocal && s.parseErrors !== 0) { localStrictOk = false; break; }
       }
@@ -120,65 +124,69 @@ export async function readPendingDetach(stateRoot) {
   const candidates = [];
   const surfaced = [];
 
-  // Diff-r2 #4: classify origin for a (possibly att-less) intent BEFORE any
-  // structural exit, and carry `origin` + the source replica on EVERY surfaced
-  // record. Otherwise a foreign intent that ALSO has a structural defect (duplicate,
-  // identity-mismatch, competing epochs, parse-gap) would be surfaced only as that
-  // defect, and the operator layer — which refuses on origin — could act on it.
+  // A well-formed REMOVING intent (Diff-r3 #2): disposition merged|abandoned, every
+  // identity field present, and a verified ancestry for merged. A malformed / kept /
+  // ancestry-fail intent must never drive a removal.
+  const validRemovingIntent = (it) =>
+    (it.disposition === 'merged' || it.disposition === 'abandoned')
+    && !!it.intentId && !!it.attachmentId && !!it.lane && !!it.pathRepoRel && !!it.worktreeInstanceId
+    && (it.disposition !== 'merged' || it.ancestorCheck === 'pass');
+
+  // Diff-r2 #4 / Diff-r3 #5: classify intent AND attachment origin BEFORE any
+  // structural exit, and INDEPENDENTLY of localStrictOk — a positively-foreign
+  // source must stay foreign (so operator recovery refuses it) even when an
+  // unrelated local stream has a parse gap. localStrictOk only gates AUTO candidacy.
   const classify = async (intent, att) => {
-    const sourceReplicaId = sourceByEventId.get(intent.intentEventId) ?? null;
+    const intentSource = sourceByEventId.get(intent.intentEventId) ?? null;
     const attachSource = att ? (sourceByEventId.get(att.attachEventId) ?? null) : null;
-    let origin;
-    if (!sync) origin = 'local';
-    else if (!localStrictOk) origin = 'unverifiable';
-    else {
-      const io = await classifyOrigin(stateRoot, sourceReplicaId, active);
-      const ao = att ? await classifyOrigin(stateRoot, attachSource, active) : 'unverifiable';
-      if (io === 'local' && ao === 'local') origin = 'local';
-      else if (io === 'foreign' || ao === 'foreign') origin = 'foreign';
-      else origin = 'unverifiable';
+    let io = 'local', ao = 'local';
+    if (sync) {
+      io = await classifyOrigin(stateRoot, intentSource, active);
+      ao = att ? await classifyOrigin(stateRoot, attachSource, active) : 'unverifiable';
     }
-    // The source replica reported to the operator: prefer whichever side is foreign
-    // (so a redirect names the right replica), else the intent's source.
-    return { origin, sourceReplicaId, foreignSource: origin === 'foreign' ? (sourceReplicaId || attachSource) : null };
+    let origin;
+    if (io === 'foreign' || ao === 'foreign') origin = 'foreign';
+    else if (io === 'local' && ao === 'local' && (!sync || localStrictOk)) origin = 'local';
+    else origin = 'unverifiable';
+    const foreignSource = io === 'foreign' ? intentSource : (ao === 'foreign' ? attachSource : null);
+    return { origin, intentSource, foreignSource };
   };
 
   for (const [aid, intents] of openIntents) {
     const att = live.get(aid);
     const attachmentOwner = att ? att.session : null;
-    // Classify each intent first; a foreign origin is carried on every surfaced row.
     const classified = [];
     for (const it of intents) classified.push({ it, ...(await classify(it, att)) });
     const surface = (entry, reason, extra = {}) =>
-      surfaced.push({ ...entry.it, reason, origin: entry.origin, sourceReplicaId: entry.origin === 'foreign' ? (entry.foreignSource ?? entry.sourceReplicaId) : entry.sourceReplicaId, attachmentOwner, ...extra });
+      surfaced.push({ ...entry.it, reason, origin: entry.origin, sourceReplicaId: entry.origin === 'foreign' ? (entry.foreignSource ?? entry.intentSource) : entry.intentSource, attachmentOwner, ...extra });
 
     // >1 open intent for one attachment → ambiguous (never take-first).
     if (classified.length > 1) { for (const e of classified) surface(e, 'ambiguous-duplicate-intent'); continue; }
     const entry = classified[0];
     const intent = entry.it;
 
-    // No live attachment to authorize (should not co-occur with an open intent,
-    // but a forged/torn history could) → surface, never auto.
+    // No live attachment to authorize → surface, never auto.
     if (!att) { surface(entry, 'no-live-attachment'); continue; }
     // A FOREIGN origin refuses locally regardless of any structural detail.
     if (entry.origin === 'foreign') { surface(entry, 'foreign-origin'); continue; }
-    // Identity match. Diff-r2 #3: a LEGACY (tokenless) attachment adopts a token in
-    // its authorized removing detach — the ATTACHED event's token is still null, so
-    // accept the unique intent's token as the identity when lane+path match and the
-    // attachment carries no token. The on-disk token is still verified against the
-    // intent's before any removal (finalize/detach), so the physical safety holds.
-    const legacyAdoption = !att.worktreeInstanceId && !!intent.worktreeInstanceId
-      && intent.lane === att.lane && intent.pathRepoRel === att.pathRepoRel;
-    if (!legacyAdoption && (intent.lane !== att.lane || intent.pathRepoRel !== att.pathRepoRel || intent.worktreeInstanceId !== att.worktreeInstanceId)) {
+    // Diff-r3 #4: an intent OR attachment id present in >1 source stream has
+    // ambiguous provenance — its origin cannot be trusted → never auto.
+    if (ambiguousId(intent.intentEventId) || ambiguousId(att.attachEventId)) { surface(entry, 'provenance-ambiguous'); continue; }
+    // Diff-r3 #2: the intent must be a well-formed removing intent.
+    if (!validRemovingIntent(intent)) { surface(entry, 'invalid-intent'); continue; }
+    // Identity match — intent's {lane,path,token} must equal the live attachment's.
+    // (A legacy tokenless attachment is detached DIRECTLY, never via an intent, so a
+    // DETACHING against a null-token attachment is a mismatch — Diff-r3 #1/#7.)
+    if (intent.lane !== att.lane || intent.pathRepoRel !== att.pathRepoRel || intent.worktreeInstanceId !== att.worktreeInstanceId) {
       surface(entry, 'identity-mismatch'); continue;
     }
     // Competing live epochs on the same lane → ambiguous.
     if ((laneLive.get(att.lane)?.size || 0) > 1) { surface(entry, 'competing-live-epochs'); continue; }
     // The intent's source partition must strict-account (parseErrors === 0), else no auto.
-    if (parseOkByReplica.get(entry.sourceReplicaId) !== true) { surface(entry, 'source-parse-gap'); continue; }
+    if (parseOkByReplica.get(entry.intentSource) !== true) { surface(entry, 'source-parse-gap'); continue; }
 
     if (entry.origin === 'local') {
-      candidates.push({ ...intent, sourceReplicaId: entry.sourceReplicaId, attachmentOwner, origin: 'local' });
+      candidates.push({ ...intent, sourceReplicaId: entry.intentSource, attachmentOwner, origin: 'local' });
     } else {
       surface(entry, 'unverifiable-origin'); // 'unverifiable' → needsOperator
     }

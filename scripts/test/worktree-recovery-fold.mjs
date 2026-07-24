@@ -142,23 +142,36 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
-  // 9. Legacy adoption (Diff-r2 #3): a legacy ATTACHED carries NO worktreeInstanceId;
-  //    its authorized removing detach mints one into the intent. The fold must accept
-  //    the unique intent's token as identity (not identity-mismatch) so the crash is
-  //    resumable/auto-finalizable — the on-disk token is still verified before removal.
+  // 9. Legacy (tokenless) attachment (Diff-r3 #1/#7): a legacy attachment is detached
+  //    DIRECTLY (no intent, no token pretense — minting-then-checking is tautological
+  //    and would remove a replaced checkout). So a DETACHING against a null-token
+  //    attachment is NOT a candidate — it is identity-mismatch (surfaced), never auto.
   {
     const repo = await freshRepo();
-    // legacy ATTACHED: hand-write with NO worktreeInstanceId.
     await append(repo, { type: 'WORKTREE_ATTACHED', actor: 'ses_owner', lane: 'alpha', data: {
       schemaVersion: 1, attachmentId: 'wta_legacy', claimEventId: 'evt_c', lane: 'alpha', session: 'ses_owner',
       pathRepoRel: '.maddu/worktrees/alpha', pathAbs: '/abs/alpha', branchRef: 'refs/heads/maddu/lane/alpha',
       baseRef: null, baseHeadAtAttach: 'deadbeef', created: true, reused: false, dirty: false,
-      gitCommonDir: '/abs/.git', platform: 'linux' } }); // <- no worktreeInstanceId
-    await detaching(repo, { aid: 'wta_legacy', lane: 'alpha', path: '.maddu/worktrees/alpha', token: 'tok_adopted' });
+      gitCommonDir: '/abs/.git', platform: 'linux' } }); // <- no worktreeInstanceId (legacy)
+    await detaching(repo, { aid: 'wta_legacy', lane: 'alpha', path: '.maddu/worktrees/alpha', token: 'tok_forged' });
     const r = await readPendingDetach(repo);
-    ok(r.candidates.length === 1 && r.candidates[0].attachmentId === 'wta_legacy', 'legacy adoption → a candidate (not identity-mismatch)');
-    ok(r.candidates[0].worktreeInstanceId === 'tok_adopted', 'candidate adopts the intent token as identity');
-    // A DIFFERENT token on the intent when the attachment ALREADY has one is still a mismatch.
+    ok(r.candidates.length === 0, 'a DETACHING against a legacy (null-token) attachment is NOT a candidate');
+    ok(r.surfaced.some((s) => s.attachmentId === 'wta_legacy' && s.reason === 'identity-mismatch'), 'it is surfaced as identity-mismatch (never auto)');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // 10. Diff-r3 #2: a malformed removing intent (disposition kept, or merged with
+  //     ancestorCheck!=pass) is NOT a candidate — it is surfaced invalid-intent.
+  {
+    const repo = await freshRepo();
+    await attach(repo, { aid: 'wta_1', lane: 'beta', path: '.maddu/worktrees/beta', token: 'tok_b' });
+    // merged intent but ancestorCheck 'fail' → must not drive a removal.
+    await append(repo, { type: 'WORKTREE_DETACHING', actor: 'ses_owner', lane: 'beta', data: {
+      schemaVersion: 1, intentId: 'wtd_bad', attachmentId: 'wta_1', lane: 'beta', pathRepoRel: '.maddu/worktrees/beta',
+      worktreeInstanceId: 'tok_b', disposition: 'merged', integrationRef: 'refs/heads/main', integrationHead: 'cafe',
+      branchHead: 'f00d', ancestorCheck: 'fail', dirtyAtDetach: false, reason: null } });
+    const r = await readPendingDetach(repo);
+    ok(r.candidates.length === 0 && r.surfaced.some((s) => s.reason === 'invalid-intent'), 'merged intent with ancestorCheck!=pass → invalid-intent, not a candidate');
     await rm(repo, { recursive: true, force: true });
   }
 

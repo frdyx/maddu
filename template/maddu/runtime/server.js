@@ -961,7 +961,9 @@ async function handleBridge(req, res, url, ctx) {
         const owner = n.attachmentOwner ? ` (owner ${n.attachmentOwner})` : '';
         // Foreign-origin strands are NOT locally recoverable (§3.7) — emit ONLY a
         // source-replica redirect, never an executable local `--recover` command.
-        if (n.reason === 'foreign-origin') {
+        // Diff-r3 #8: branch on the ORIGIN (a foreign intent may be surfaced under a
+        // structural reason), not only reason === 'foreign-origin'.
+        if (n.reason === 'foreign-origin' || n.origin === 'foreign') {
           console.error(`janitor: lane "${n.lane}" worktree detach intent originates on replica ${n.sourceReplicaId || '?'}${owner} — recover it THERE (foreign origin; no local command)`);
         } else {
           const where = n.sourceReplicaId ? ` [source replica ${n.sourceReplicaId}]` : '';

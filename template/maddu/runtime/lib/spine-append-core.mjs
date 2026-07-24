@@ -237,7 +237,18 @@ function onWaitStderr(dir) {
 // drift (PR-D r3-b): the tolerant caller ignores `parseErrors` and logs each bad
 // line; the strict caller uses `parseErrors` to refuse auto-recovery on any doubt.
 async function parseStreamDir(dir, { onBadLine = null } = {}) {
-  const segs = await listSegmentsInDir(dir);
+  // Diff-r3 #3: distinguish a genuinely-absent stream (ENOENT → 0 errors, an empty
+  // stream) from an ENUMERATION FAILURE (EACCES/EIO/… → 1 parse error). The tolerant
+  // listSegmentsInDir swallows every error to [], which would let strict callers
+  // report parseErrors:0 for an UNREADABLE partition and treat it as fully accounted.
+  let segs;
+  try {
+    const files = await readdir(dir);
+    segs = files.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { events: [], parseErrors: 0 };
+    return { events: [], parseErrors: 1 };
+  }
   const out = [];
   let parseErrors = 0;
   for (const seg of segs) {
