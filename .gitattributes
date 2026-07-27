@@ -25,3 +25,7 @@ template/maddu/docs/event-schema.json text eol=lf
 # self-check on a fresh clone. Pin to LF.
 scripts/test/__fixtures__/atlas/** text eol=lf
 scripts/test/__fixtures__/atlas-no-index/** text eol=lf
+# Same reason: atlas-vocab.mjs byte-compares this against the real corpus copy
+# whenever the (gitignored) corpus is present, so a CRLF rewrite would make the
+# drift tripwire fire on line endings rather than on real schema drift.
+scripts/test/__fixtures__/atlas-schemas/** text eol=lf

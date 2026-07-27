@@ -2,7 +2,7 @@
 // atlas-vocab test — verify vocabularies and tone mappings
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -47,13 +47,32 @@ function readJson(path) {
   }
 }
 
-// Load schema for verification
-const schemaPath = resolve(__dirname, '../../docs/audit/architecture-atlas/schemas/relationship.schema.json');
-let relationshipSchema;
-try {
-  relationshipSchema = readJson(schemaPath);
-} catch (e) {
-  console.error(`Warning: could not load relationship schema at ${schemaPath}`);
+// Load schema for verification.
+//
+// This reads a TRACKED COPY, not the real corpus. The original pointed at
+// docs/audit/architecture-atlas/schemas/, which is gitignored: present on a
+// workstation that generated the atlas, absent everywhere else. In CI the read
+// failed and — because readJson calls process.exit(2) — the `catch` below it
+// never ran and the ENTIRE suite died at assertion zero. A suite whose inputs
+// exist on exactly one machine is not a test. (Plan deviation #14: every test
+// runs against a tracked fixture.)
+const schemaPath = resolve(__dirname, '__fixtures__/atlas-schemas/relationship.schema.json');
+const relationshipSchema = readJson(schemaPath);
+
+// A tracked copy is only as good as its currency, so pin it to the real thing
+// WHEN the real thing is here. On a workstation holding the corpus this is a
+// byte-level drift tripwire: regenerate the atlas with a changed relationship
+// enum and this goes red, which is the moment the copy needs refreshing. In CI
+// the corpus is absent and the comparison has nothing to say, so it reports
+// that plainly rather than passing silently — the check never disappears, it
+// states which of its two modes it ran in.
+const realSchemaPath = resolve(__dirname, '../../docs/audit/architecture-atlas/schemas/relationship.schema.json');
+if (existsSync(realSchemaPath)) {
+  ok('tracked relationship.schema.json is byte-identical to the real corpus copy (drift tripwire)',
+    readFileSync(realSchemaPath, 'utf-8') === readFileSync(schemaPath, 'utf-8'),
+    'regenerate scripts/test/__fixtures__/atlas-schemas/relationship.schema.json from the corpus');
+} else {
+  ok('real corpus absent — the tracked schema copy is the sole oracle here (expected off a corpus-holding workstation)', true);
 }
 
 // Verify vocabulary lengths
@@ -72,15 +91,18 @@ ok('DETERMINISM length is 5', DETERMINISM.length === 5);
 ok('SIDE_EFFECT length is 8', SIDE_EFFECT.length === 8);
 ok('RELATIONSHIP_TYPES length is 44', RELATIONSHIP_TYPES.length === 44);
 
-// Verify RELATIONSHIP_TYPES against schema
-if (relationshipSchema && relationshipSchema.properties.type.enum) {
-  const schemaTypes = relationshipSchema.properties.type.enum;
-  ok('RELATIONSHIP_TYPES matches schema length',
-    RELATIONSHIP_TYPES.length === schemaTypes.length,
-    `${RELATIONSHIP_TYPES.length} vs schema ${schemaTypes.length}`);
-  ok('RELATIONSHIP_TYPES matches schema values',
-    JSON.stringify(RELATIONSHIP_TYPES.sort()) === JSON.stringify(schemaTypes.sort()));
-}
+// Verify RELATIONSHIP_TYPES against schema. Unconditional now: the schema is a
+// tracked file that readJson exits(2) on if it is missing, so there is no
+// legitimate path where these two assertions should quietly not run. The old
+// `if (relationshipSchema && ...)` guard meant that in CI — the one place the
+// schema was actually absent — the enum cross-check silently vanished and the
+// suite still reported green for whatever it had managed to run.
+const schemaTypes = relationshipSchema.properties.type.enum;
+ok('RELATIONSHIP_TYPES matches schema length',
+  RELATIONSHIP_TYPES.length === schemaTypes.length,
+  `${RELATIONSHIP_TYPES.length} vs schema ${schemaTypes.length}`);
+ok('RELATIONSHIP_TYPES matches schema values',
+  JSON.stringify(RELATIONSHIP_TYPES.sort()) === JSON.stringify(schemaTypes.sort()));
 
 // Verify LIVENESS_STATUS includes dead-confirmed
 ok('LIVENESS_STATUS includes dead-confirmed', LIVENESS_STATUS.includes('dead-confirmed'));

@@ -601,13 +601,20 @@ for (const method of ['POST', 'PUT', 'DELETE']) {
 }
 {
   // The guard must not over-apply: a WELL-FORMED repoRoot still resolves
-  // normally through the exact same functions — real corpus available,
-  // no-index fixture still specifically no_index (not folded into the
-  // generic 'unreadable').
-  const real = await loadAtlasSource(REPO_ROOT);
+  // normally through the exact same functions — corpus available, and the
+  // no-index fixture still specifically no_index (not folded into the generic
+  // 'unreadable').
+  //
+  // FX, not REPO_ROOT. This used to point at the live repo, whose corpus lives
+  // under the gitignored docs/audit/ — so on a workstation that generated the
+  // atlas it resolved available:true, while in CI the very same call correctly
+  // reported the corpus missing and the assertion went red. The property being
+  // pinned is "a well-formed repoRoot resolves normally"; "the checkout happens
+  // to carry a corpus" never was, and is not true anywhere but one machine.
+  const real = await loadAtlasSource(FX);
   const noIndex = await probeAtlas(NOIDX);
-  ok('pinned: the fail-closed guard does not over-apply — a real repoRoot still resolves available:true',
-    real.available === true && real.reason === null);
+  ok('pinned: the fail-closed guard does not over-apply — a well-formed repoRoot still resolves available:true',
+    real.available === true && real.reason === null, `available=${real.available} reason=${real.reason}`);
   ok('pinned: the fail-closed guard does not over-apply — the no-index fixture still reports no_index specifically',
     noIndex.available === false && noIndex.reason === 'no_index');
 }

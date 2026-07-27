@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:maddu:atlas:schema:relationship:v1",
+  "title": "Máddu atlas relationship",
+  "type": "object",
+  "required": ["id", "type", "from", "to", "status", "evidence"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "type": {
+      "enum": [
+        "serves", "realizes", "constrained-by", "enforces", "documents",
+        "conflicts-with", "supersedes", "exposes", "dispatches-to", "calls",
+        "imports", "spawns", "renders", "triggers", "accepts", "returns",
+        "reads", "writes", "appends", "emits", "consumes", "projects-to",
+        "derives", "mirrors", "generates", "redacts", "precedes",
+        "branches-to", "guards", "retries", "halts", "compensates",
+        "recovers", "tests", "verifies", "covers", "observed-by",
+        "evidenced-by", "contains", "owns", "crosses-boundary",
+        "installed-as", "configured-by", "related-to"
+      ]
+    },
+    "from": { "$ref": "common.schema.json#/$defs/canonicalId" },
+    "to": { "$ref": "common.schema.json#/$defs/canonicalId" },
+    "condition": { "type": ["string", "null"] },
+    "transport": { "type": ["string", "null"] },
+    "payload": { "type": ["string", "null"] },
+    "sideEffect": { "enum": ["none", "repository", "spine", "state", "process", "network", "device", "mixed"] },
+    "failureBehavior": { "type": ["string", "null"] },
+    "status": { "$ref": "common.schema.json#/$defs/claimStatus" },
+    "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+    "evidence": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+    "counterEvidence": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+  },
+  "additionalProperties": false
+}
