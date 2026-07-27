@@ -16,3 +16,12 @@ docs/event-schema.md text eol=lf
 docs/event-schema.json text eol=lf
 template/maddu/docs/event-schema.md text eol=lf
 template/maddu/docs/event-schema.json text eol=lf
+
+# Atlas test fixture: generated with LF and content-addressed — every file's
+# sha256 and byte length are recorded in the fixture's own
+# inventory/atlas-index.json, and `atlas-fixture-selfcheck.mjs` recomputes both
+# from the bytes on disk. Under `core.autocrlf=true` a Windows checkout would
+# rewrite these to CRLF, changing every byte length and hash and failing the
+# self-check on a fresh clone. Pin to LF.
+scripts/test/__fixtures__/atlas/** text eol=lf
+scripts/test/__fixtures__/atlas-no-index/** text eol=lf

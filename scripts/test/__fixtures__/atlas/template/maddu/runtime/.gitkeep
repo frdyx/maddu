@@ -1,0 +1,3 @@
+// Placeholder so detectFrameworkLayout(repoRoot) resolves 'source' for this
+// fixture repo root (it requires <repoRoot>/template/maddu/runtime to exist).
+// Content is never read; only presence matters. See bridge-bootstrap.mjs:36-40.

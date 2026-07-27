@@ -1,0 +1,26 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "result": "pass-with-warnings",
+ "counts": {
+  "checks": 12,
+  "passed": 10,
+  "warned": 2,
+  "failed": 0
+ },
+ "warnings": [
+  {
+   "code": "BROKEN_RELATIONSHIP_TARGET",
+   "message": "r:alpha-contains-missing points at an entity that does not exist.",
+   "subject": "r:alpha-contains-missing"
+  },
+  {
+   "code": "UNRESOLVED_EVIDENCE_ID",
+   "message": "E-UNKNOWN-99 cannot be resolved to a locator.",
+   "subject": "urn:maddu:atlas:v1:capability:alpha-claim"
+  }
+ ],
+ "failures": []
+}

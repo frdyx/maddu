@@ -1,0 +1,47 @@
+{
+ "id": "urn:maddu:atlas:v1:flow:docs-consumption",
+ "purpose": "preserve authored-document provenance through generated copies while separating copy fidelity from semantic freshness",
+ "trigger": [
+  "node scripts/generate.mjs",
+  "node scripts/generate.mjs --check"
+ ],
+ "branches": [
+  {
+   "guard": "source or consumer target tree absent",
+   "result": "generator skips mirror"
+  },
+  {
+   "guard": "byte drift",
+   "result": "check/gate fails; write mode regenerates deterministically"
+  }
+ ],
+ "steps": [
+  {
+   "id": "author",
+   "order": 1,
+   "action": "author canonical source bytes",
+   "input": "docs/*.md",
+   "output": "source documents"
+  },
+  {
+   "id": "render",
+   "order": 2,
+   "action": "pure render or EOL-normalized mirror",
+   "input": "authorities",
+   "output": "generated units"
+  },
+  {
+   "id": "compare",
+   "order": 3,
+   "action": "--check compares expected and current bytes",
+   "input": "expected/current",
+   "output": "drift/orphan result"
+  }
+ ],
+ "evidence": [
+  "ev_docs_gen"
+ ],
+ "unresolved": [
+  "No machine rule derives public current-version prose from version.json."
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "id": "simulation:shadow-s2.docs-consumption",
+ "flow": "urn:maddu:atlas:v1:flow:docs-consumption"
+}

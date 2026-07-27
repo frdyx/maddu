@@ -1,0 +1,89 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "flows": [
+  {
+   "id": "urn:maddu:atlas:v1:flow:claim-flow",
+   "source": "flows/claim-flow.json",
+   "sourceVariants": [
+    "flows/claim-flow.json"
+   ],
+   "steps": [
+    "a1",
+    "a2",
+    "a3"
+   ],
+   "determinism": [
+    "D1",
+    "D2",
+    "D3"
+   ],
+   "sideEffects": [
+    "spine",
+    "none",
+    "state"
+   ],
+   "failureInjectionPoints": [
+    {
+     "step": "a1",
+     "transitions": 1
+    }
+   ]
+  },
+  {
+   "id": "urn:maddu:atlas:v1:flow:docs-consumption",
+   "source": "flows/docs-consumption.json",
+   "sourceVariants": [
+    "flows/docs-consumption.json"
+   ],
+   "steps": [
+    "author",
+    "render",
+    "compare"
+   ],
+   "determinism": [],
+   "sideEffects": [],
+   "failureInjectionPoints": []
+  }
+ ],
+ "stateMachines": [
+  {
+   "id": "urn:maddu:atlas:v1:state-machine:alpha",
+   "initialState": "absent",
+   "source": "state-machines/claim-machine.json",
+   "states": [
+    "absent",
+    "held",
+    "released",
+    "stale"
+   ],
+   "transitions": [
+    {
+     "from": "absent",
+     "to": "held",
+     "guard": "lane free"
+    }
+   ]
+  },
+  {
+   "id": "beta-trust",
+   "initialState": "absent",
+   "source": "state-machines/container-machines.json",
+   "states": [
+    "absent",
+    "pending",
+    "approved",
+    "unapproved-enabled"
+   ],
+   "transitions": [
+    {
+     "from": "absent",
+     "to": "pending",
+     "guard": "operator register"
+    }
+   ]
+  }
+ ]
+}

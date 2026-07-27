@@ -1,0 +1,30 @@
+{
+ "schemaVersion": "1.0.0",
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000",
+  "packageVersion": "1.114.0-fixture"
+ },
+ "evidenceCatalog": {
+  "ev_charter": {
+   "path": "CHARTER.md",
+   "lines": "1-40",
+   "method": "static-read",
+   "claim": "Charter mission statement, resolvable mnemonic evidence."
+  },
+  "ev_pkg_manifest": {
+   "path": "commands/_manifest.mjs",
+   "lines": "25-203",
+   "method": "static-read+direct-enumeration",
+   "claim": "String line-range shape — mirrors the real packaging-lifecycle.json exactly."
+  },
+  "evidence:1c05d7ca10ec2dfd": {
+   "path": "docs/audit/architecture-atlas/schemas/evidence.schema.json",
+   "lines": "1-25",
+   "method": "schema-read",
+   "claim": "Canonical-dialect (evidence:<hex>) id, resolvable via the packaging-lifecycle evidenceCatalog shape — proves resolution is dialect-agnostic, not content-hash/mnemonic-only."
+  }
+ },
+ "unknowns": [
+  "Fixture evidence catalog is illustrative, not exhaustive."
+ ]
+}

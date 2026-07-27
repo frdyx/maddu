@@ -1,0 +1,23 @@
+{
+ "schemaVersion": 1,
+ "simulation": "simulation:shadow-s2.claim-flow",
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000",
+  "fixture": "disposable-repo"
+ },
+ "hypothesis": "A second claim on a held lane is refused.",
+ "oracle": "exit code 1 and a conflict payload",
+ "observed": {
+  "exitCode": 1,
+  "events": [
+   "ALPHA_CLAIMED"
+  ],
+  "steps": [
+   "a1",
+   "a2"
+  ]
+ },
+ "counterevidence": [],
+ "cleanup": "disposable repo removed",
+ "disposition": "confirmed"
+}

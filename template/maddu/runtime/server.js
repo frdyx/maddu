@@ -56,6 +56,7 @@ import { routeApprovals } from './lib/bridge-routes-approvals.mjs';
 import { routeImports, routeAuth, routeCheckpoints, routeSchedules } from './lib/bridge-routes-capabilities.mjs';
 import { routeWorkers, routeSkills, routeTasks, routeMailbox, routeMemory } from './lib/bridge-routes-work.mjs';
 import { routeProposals, routeBoss } from './lib/bridge-routes-collab.mjs';
+import { routeAtlas } from './lib/bridge-routes-atlas.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -865,6 +866,9 @@ async function handleBridge(req, res, url, ctx) {
     const n = await rebuildWiki(repoRoot);
     return sendJson(res, 200, { ok: true, pagesWritten: n });
   }
+
+  // ── atlas (reserved namespace, dispatched before plugins) → routeAtlas in ./lib/bridge-routes-atlas.mjs
+  { if (await routeAtlas({ req, res, path, url, repoRoot })) return; }
 
   // ── plugins: enabled plugins claim their own /bridge/* routes ─────────────
   // (e.g. the `comms` plugin owns /bridge/{telegram,discord,email}/*). A

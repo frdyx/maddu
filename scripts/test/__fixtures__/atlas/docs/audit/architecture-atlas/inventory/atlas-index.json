@@ -1,0 +1,228 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000",
+  "repository": "maddu-fixture",
+  "extractor": {
+   "mode": "fixture",
+   "path": "tools/fixture.mjs",
+   "version": "2.0.0"
+  }
+ },
+ "artifactCount": 24,
+ "totalBytes": 282620,
+ "artifacts": [
+  {
+   "path": "../escape.json",
+   "bytes": 42,
+   "class": "..",
+   "extension": "json",
+   "sha256": "bbc8d2d83ebad25b9de7476f3d402af48bf72358c4e56a5b6856620cb4ccefb7"
+  },
+  {
+   "path": "coverage/wave-broken.json",
+   "bytes": 45,
+   "class": "coverage",
+   "extension": "json",
+   "sha256": "1b0e8547e63991ebaeb1427d8996eeec4d86a4f0c5ac1188ad3df5fe51a298a3"
+  },
+  {
+   "path": "domains/capability-matrix.json",
+   "bytes": 933,
+   "class": "domains",
+   "extension": "json",
+   "sha256": "bd2d51885e10b4dd83e51b430bac43dc8deb5ec2b5ad48c12c13afe72110398e"
+  },
+  {
+   "path": "flows/claim-flow.json",
+   "bytes": 1730,
+   "class": "flows",
+   "extension": "json",
+   "sha256": "145765dcffab29e64a8f0affa9fedc389395d075298a5af279915cefc020a5dd"
+  },
+  {
+   "path": "flows/docs-consumption.json",
+   "bytes": 1119,
+   "class": "flows",
+   "extension": "json",
+   "sha256": "7218c80514769c6edfad401ead2b9a4f3040294228eba5c6368a253732c76ccd"
+  },
+  {
+   "path": "flows/free-form-container.json",
+   "bytes": 1312,
+   "class": "flows",
+   "extension": "json",
+   "sha256": "ec74a08d995a595bc869fa617b1a24603e318574679265763d5cef66691e5d9b"
+  },
+  {
+   "path": "inventory/commands.json",
+   "bytes": 908,
+   "class": "inventory",
+   "extension": "json",
+   "sha256": "4f169bb6bbdf860bcc240d9ccf5487b058975ca81260a6722d86c17c2511320f"
+  },
+  {
+   "path": "inventory/liveness.json",
+   "bytes": 9985,
+   "class": "inventory",
+   "extension": "json",
+   "sha256": "a3f203a73e3bc31d5a264df5eab15512ebebe9c5e580e7cd83408cbe70b4b6de"
+  },
+  {
+   "path": "inventory/packaging-lifecycle.json",
+   "bytes": 990,
+   "class": "inventory",
+   "extension": "json",
+   "sha256": "cd684d5b51b28ff0e9256bf6160c3e99d08e59ae7c569e14707f80b0b22a64ca"
+  },
+  {
+   "path": "manifest.json",
+   "bytes": 650,
+   "class": "manifest.json",
+   "extension": "json",
+   "sha256": "7aa86646adefd423b6e4200d23737ad7d1ff1659e419ceecdb72e9191201a7b1"
+  },
+  {
+   "path": "README.md",
+   "bytes": 21377,
+   "class": "README.md",
+   "extension": "md",
+   "sha256": "5b8dedea3d8dcd9bf69209d492b2fb70667f5fb55553815e4dcd0a78bf1d116d"
+  },
+  {
+   "path": "reports/full-narrative-report.md",
+   "bytes": 234028,
+   "class": "reports",
+   "extension": "md",
+   "sha256": "8ffaac14d9e3b9a8be2b73a64eb1de22082973c85d59d434c000997a53acee73"
+  },
+  {
+   "path": "reports/ghost-report.md",
+   "bytes": 128,
+   "class": "reports",
+   "extension": "md",
+   "sha256": "432c17d2186dcb5877c8265650d3979f05ffbb993f78926fb26aca8a1b6aa95d"
+  },
+  {
+   "path": "simulations/flow-simulation-catalog.json",
+   "bytes": 1491,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "1a8808c97d6753d4d457e5d46f443754ef9f4f4c3f1a1a31ea3b035b119a5ce3"
+  },
+  {
+   "path": "simulations/shadow-s2-claim-flow-retry.json",
+   "bytes": 192,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "3c49467331361d53c52b3074462d9c0cdceeda258d85fddacbf29adc7070ef12"
+  },
+  {
+   "path": "simulations/shadow-s2-claim-flow.json",
+   "bytes": 186,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "62597ab7e7711efdc7cbdd2fcc2903ca3d57663fee8f97f0ade88c565c8378d8"
+  },
+  {
+   "path": "simulations/shadow-s2-docs-consumption.json",
+   "bytes": 198,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "048710bef18c4487e5ee11ac675a979c51295185bf08a142c8ba94100189ca6c"
+  },
+  {
+   "path": "simulations/traces/shadow-s2-claim-flow-retry.trace.json",
+   "bytes": 555,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "5d63ccd74e0057e52aec61e90039a454fff71e659792e524dfcc7298e26f13e7"
+  },
+  {
+   "path": "simulations/traces/shadow-s2-claim-flow.trace.json",
+   "bytes": 488,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "b8646d41963a1ccfb9895c9e73a90e0c174acb4c2544c95863279b730962d1ce"
+  },
+  {
+   "path": "simulations/traces/shadow-s2-docs-consumption.trace.json",
+   "bytes": 495,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "0c87b99b1a338a1762b34549a7c13f46da298a5935d8e3295380649d4bc7945a"
+  },
+  {
+   "path": "simulations/traces/shadow-s2-ghost-flow.trace.json",
+   "bytes": 509,
+   "class": "simulations",
+   "extension": "json",
+   "sha256": "f430020a04a2a173a36e622b1820dffb72b086f1ba01f2bb435e9f0b34c2a3c8"
+  },
+  {
+   "path": "state-machines/claim-machine.json",
+   "bytes": 1743,
+   "class": "state-machines",
+   "extension": "json",
+   "sha256": "5bfe44fd559a81b4136b6a1b6b096f9b824981d001ff14b01625bb747a1c1201"
+  },
+  {
+   "path": "state-machines/container-machines.json",
+   "bytes": 3332,
+   "class": "state-machines",
+   "extension": "json",
+   "sha256": "ce1e9675ea3073f42db1cf2ff52373c1829671d70438340f6eac3dc98ca00e8f"
+  },
+  {
+   "path": "tools/fixture-note.mjs",
+   "bytes": 184,
+   "class": "tools",
+   "extension": "mjs",
+   "sha256": "6f6920d9d119f2279684322f2d5a74a048364de8950f0c29c38b000a308e1208"
+  }
+ ],
+ "excludedFromContentAddressing": [
+  {
+   "path": "graph/canonical.entities.ndjson",
+   "reason": "self-generated synthesis output"
+  },
+  {
+   "path": "graph/canonical.relationships.ndjson",
+   "reason": "self-generated synthesis output"
+  },
+  {
+   "path": "reports/findings-register.json",
+   "reason": "self-generated synthesis output"
+  },
+  {
+   "path": "coverage/coverage-vector.json",
+   "reason": "self-generated synthesis output"
+  },
+  {
+   "path": "reports/atlas-validation.json",
+   "reason": "self-generated synthesis output"
+  },
+  {
+   "path": "inventory/atlas-index.json",
+   "reason": "self"
+  }
+ ],
+ "countsByClass": {
+  "..": 1,
+  "coverage": 1,
+  "domains": 1,
+  "flows": 3,
+  "inventory": 3,
+  "manifest.json": 1,
+  "README.md": 1,
+  "reports": 2,
+  "simulations": 8,
+  "state-machines": 2,
+  "tools": 1
+ },
+ "countsByExtension": {
+  "json": 20,
+  "md": 3,
+  "mjs": 1
+ }
+}

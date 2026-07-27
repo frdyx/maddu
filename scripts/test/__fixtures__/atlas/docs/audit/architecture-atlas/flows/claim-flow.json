@@ -1,0 +1,103 @@
+{
+ "id": "urn:maddu:atlas:v1:flow:claim-flow",
+ "name": "Alpha claim flow",
+ "purpose": [
+  "urn:maddu:atlas:v1:purpose:bounded-verification"
+ ],
+ "actors": [
+  "urn:maddu:atlas:v1:mission:core"
+ ],
+ "trigger": {
+  "kind": "CLI",
+  "source": "alpha -> runAlpha"
+ },
+ "preconditions": [
+  "repo is a git repo"
+ ],
+ "inputs": [
+  "lane id"
+ ],
+ "steps": [
+  {
+   "id": "a1",
+   "operation": "urn:maddu:atlas:v1:operation:alpha-write",
+   "reads": [
+    "config"
+   ],
+   "writes": [
+    "alpha.json"
+   ],
+   "emits": [
+    "ALPHA_DONE"
+   ],
+   "calls": [
+    "spine.append"
+   ],
+   "guard": null,
+   "sideEffect": "spine",
+   "determinism": "D1",
+   "failureTransitions": [
+    "Append failure aborts the claim."
+   ],
+   "evidence": [
+    "ev_alpha_op"
+   ]
+  },
+  {
+   "id": "a2",
+   "operation": "urn:maddu:atlas:v1:operation:alpha-write",
+   "reads": [
+    "alpha.json"
+   ],
+   "writes": [],
+   "emits": [],
+   "calls": [],
+   "guard": "claim is not already held",
+   "sideEffect": "none",
+   "determinism": "D2",
+   "failureTransitions": [
+    "Held claim returns conflict."
+   ],
+   "evidence": [
+    "ev_alpha_store"
+   ]
+  },
+  {
+   "id": "a3",
+   "operation": "urn:maddu:atlas:v1:operation:hostile",
+   "reads": [],
+   "writes": [
+    "alpha.json"
+   ],
+   "emits": [],
+   "calls": [],
+   "guard": null,
+   "sideEffect": "state",
+   "determinism": "D3",
+   "failureTransitions": [],
+   "evidence": []
+  }
+ ],
+ "outputs": [
+  "claim record"
+ ],
+ "postconditions": [
+  "claim is held"
+ ],
+ "invariants": [
+  "one holder per lane"
+ ],
+ "tests": [
+  "scripts/test/alpha.mjs"
+ ],
+ "security": [
+  "loopback only"
+ ],
+ "recovery": [
+  "Release the claim and retry."
+ ],
+ "evidence": [
+  "ev_alpha_op"
+ ],
+ "unresolved": []
+}

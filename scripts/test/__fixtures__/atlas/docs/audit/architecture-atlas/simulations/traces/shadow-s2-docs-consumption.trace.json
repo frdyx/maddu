@@ -1,0 +1,22 @@
+{
+ "schemaVersion": 1,
+ "simulation": "simulation:shadow-s2.docs-consumption",
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000",
+  "fixture": "disposable-repo"
+ },
+ "hypothesis": "A byte-drifted generated file fails --check.",
+ "oracle": "non-zero exit and a drift report",
+ "observed": {
+  "exitCode": 1,
+  "events": [],
+  "steps": [
+   "author",
+   "render",
+   "compare"
+  ]
+ },
+ "counterevidence": [],
+ "cleanup": "disposable repo removed",
+ "disposition": "confirmed"
+}

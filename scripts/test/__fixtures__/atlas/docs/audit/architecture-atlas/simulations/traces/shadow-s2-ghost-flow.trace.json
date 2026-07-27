@@ -1,0 +1,20 @@
+{
+ "schemaVersion": 1,
+ "simulation": "simulation:shadow-s2.ghost-flow",
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000",
+  "fixture": "disposable-repo"
+ },
+ "hypothesis": "A capability withdrawn mid-review is fully rolled back.",
+ "oracle": "no residual grant remains",
+ "observed": {
+  "exitCode": 1,
+  "events": [],
+  "steps": []
+ },
+ "counterevidence": [
+  "The shadow fixture for this trace was never captured."
+ ],
+ "cleanup": "disposable repo removed",
+ "disposition": "refuted"
+}

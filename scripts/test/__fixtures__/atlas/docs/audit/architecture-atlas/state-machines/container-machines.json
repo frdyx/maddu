@@ -1,0 +1,171 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "machines": [
+  {
+   "id": "beta-trust",
+   "authority": "descriptor provenance + enabled flags",
+   "states": [
+    {
+     "id": "absent"
+    },
+    {
+     "id": "pending"
+    },
+    {
+     "id": "approved"
+    },
+    {
+     "id": "unapproved-enabled",
+     "invalid": true
+    }
+   ],
+   "transitions": [
+    {
+     "id": "register",
+     "from": "absent",
+     "to": "pending",
+     "guard": "operator register"
+    },
+    {
+     "id": "approve",
+     "from": "pending",
+     "to": "approved",
+     "effect": "BETA_APPROVED"
+    },
+    {
+     "id": "bypass",
+     "from": "pending",
+     "to": "unapproved-enabled",
+     "guard": "generic setEnabled(true) does not inspect provenance"
+    }
+   ],
+   "invariant": "An unapproved descriptor never runs.",
+   "observedViolation": "visibleFor checks enabled and lane only"
+  },
+  {
+   "id": "schedule-fire",
+   "authority": "schedule record + events",
+   "states": [
+    {
+     "id": "not-due"
+    },
+    {
+     "id": "due"
+    },
+    {
+     "id": "receipted"
+    },
+    {
+     "id": "phantom-fired",
+     "invalid": true
+    }
+   ],
+   "transitions": [
+    {
+     "id": "cron-match",
+     "from": "not-due",
+     "to": "due"
+    },
+    {
+     "id": "record",
+     "from": "due",
+     "to": "receipted",
+     "effect": "SCHEDULE_FIRED"
+    },
+    {
+     "id": "command-noop",
+     "from": "receipted",
+     "to": "phantom-fired",
+     "guard": "action.kind command; server callback has no executor"
+    }
+   ],
+   "invariant": "SCHEDULE_FIRED for command means an actual command attempt has a receipt.",
+   "observedViolation": "no spawn/dispatch occurs"
+  },
+  {
+   "id": "model-promotion",
+   "authority": "derived MODEL_* + APPROVAL_* events",
+   "states": [
+    {
+     "id": "experiment"
+    },
+    {
+     "id": "candidate"
+    },
+    {
+     "id": "released"
+    },
+    {
+     "id": "rolled-back"
+    }
+   ],
+   "transitions": [
+    {
+     "id": "propose-candidate",
+     "from": "experiment",
+     "to": "candidate"
+    },
+    {
+     "id": "approve-release",
+     "from": "candidate",
+     "to": "released"
+    },
+    {
+     "id": "rollback",
+     "from": "released",
+     "to": "rolled-back"
+    }
+   ],
+   "invariant": "Forward moves are single-step and approval-bound; rollback is strictly downward.",
+   "authorityStop": "State means governance acceptance, not that deployment occurred."
+  },
+  {
+   "id": "outbox-item",
+   "authority": "provider outbox file until provider response",
+   "states": [
+    {
+     "id": "absent"
+    },
+    {
+     "id": "pending"
+    },
+    {
+     "id": "sent"
+    },
+    {
+     "id": "ambiguous"
+    }
+   ],
+   "transitions": [
+    {
+     "id": "enqueue",
+     "from": "absent",
+     "to": "pending",
+     "guard": "allowlist at enqueue"
+    },
+    {
+     "id": "provider-ok",
+     "from": "pending",
+     "to": "sent",
+     "effect": "local log/event then outbox rewrite"
+    },
+    {
+     "id": "transport-ambiguous",
+     "from": "pending",
+     "to": "ambiguous",
+     "effect": "item usually retained; remote acceptance unknown"
+    },
+    {
+     "id": "retry-ambiguous",
+     "from": "ambiguous",
+     "to": "pending",
+     "risk": "duplicate delivery"
+    }
+   ],
+   "invariant": "Destination is allowlisted at enqueue and send."
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{
+ "schemaVersion": 1,
+ "simulation": "simulation:shadow-s2.claim-flow-retry",
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000",
+  "fixture": "disposable-repo"
+ },
+ "hypothesis": "A retried claim after release succeeds.",
+ "oracle": "exit code 0 and a fresh claim record",
+ "observed": {
+  "exitCode": 0,
+  "events": [
+   "ALPHA_RELEASED",
+   "ALPHA_CLAIMED"
+  ],
+  "steps": [
+   "a1"
+  ]
+ },
+ "counterevidence": [
+  "Step a2 was not exercised on the retry path."
+ ],
+ "cleanup": "disposable repo removed",
+ "disposition": "partial"
+}

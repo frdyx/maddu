@@ -1,0 +1,39 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "flows": [
+  {
+   "id": "experience-export",
+   "steps": [
+    "select ordered event range",
+    "refuse entire export if canonical redaction would change any selected event",
+    "build ATDP with no generation timestamp"
+   ],
+   "failure": "no partial secret-bearing package",
+   "determinism": "byte-identical for same events/since/provenance"
+  },
+  {
+   "id": "experience-export-security-view",
+   "canonicalId": "experience-export",
+   "steps": [
+    "security reviewer opens the export request against the ordered event range",
+    "reviewer independently recomputes canonical redaction over every selected event",
+    "reviewer diffs recomputed redaction against the export-time redaction, byte for byte",
+    "any diff refuses the export and files a security exception, superseding the default path",
+    "a clean diff co-signs the package before it leaves the security-reviewed lane"
+   ],
+   "failure": "a redaction diff refuses the export and is never silently reconciled",
+   "determinism": "byte-identical given the same event range and the same reviewer ruleset"
+  },
+  {
+   "id": "gamma-observe",
+   "steps": [
+    "observe spine tail",
+    "record projection"
+   ],
+   "determinism": "D1"
+  }
+ ]
+}

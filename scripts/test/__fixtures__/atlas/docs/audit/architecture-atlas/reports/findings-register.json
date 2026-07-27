@@ -1,0 +1,143 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "counts": {
+  "total": 7
+ },
+ "findings": [
+  {
+   "id": "FIND-ALPHA-001",
+   "title": "Claim trust is not content-pinned",
+   "category": "security",
+   "severity": "critical",
+   "status": "confirmed",
+   "confidence": 0.99,
+   "subjects": [
+    "urn:maddu:atlas:v1:operation:alpha-write"
+   ],
+   "claim": "The claim writes the holder without pinning the descriptor hash.",
+   "impact": "A descriptor can change after review and still execute.",
+   "recommendation": "Persist a trust record keyed by content hash.",
+   "evidence": [
+    "ev_alpha_op"
+   ],
+   "reversibility": "Disable and restart.",
+   "nextEvidenceAction": "Mutate a descriptor and assert refusal.",
+   "valueTrajectory": "entropic"
+  },
+  {
+   "id": "FIND-ALPHA-002",
+   "title": "Stale claims never expire",
+   "category": "state",
+   "severity": "high",
+   "status": "confirmed",
+   "confidence": 0.95,
+   "subjects": [
+    "urn:maddu:atlas:v1:state-machine:alpha"
+   ],
+   "claim": "No transition leaves the stale state without operator force.",
+   "impact": "A lapsed holder blocks the lane indefinitely.",
+   "recommendation": "Add a bounded expiry transition.",
+   "evidence": [
+    "ev_alpha_op"
+   ],
+   "valueTrajectory": "entropic"
+  },
+  {
+   "id": "FIND-BETA-001",
+   "title": "<img src=x onerror=alert(1)>",
+   "category": "documentation",
+   "severity": "high",
+   "status": "open",
+   "confidence": 0.9,
+   "subjects": [
+    "urn:maddu:atlas:v1:http-route:beta-read"
+   ],
+   "claim": "Hostile title and path ../../../../etc/passwd must render inert.",
+   "impact": "Escaping regression would be exploitable.",
+   "recommendation": "Render via textContent only.",
+   "evidence": [
+    "ev_beta_route"
+   ],
+   "counterEvidence": [
+    "The cockpit never uses innerHTML for atlas data."
+   ]
+  },
+  {
+   "id": "FIND-BETA-002",
+   "title": "Route lacks a determinism class",
+   "category": "determinism",
+   "severity": "medium",
+   "status": "accepted",
+   "confidence": 0.6,
+   "subjects": [
+    "urn:maddu:atlas:v1:flow:gamma-observe"
+   ],
+   "claim": "The gamma flow carries no determinism classification.",
+   "impact": "Simulation cannot bound the flow.",
+   "recommendation": "Classify the flow.",
+   "evidence": []
+  },
+  {
+   "id": "FIND-GAMMA-001",
+   "title": "Observation absence is recorded as unknown",
+   "category": "verification",
+   "severity": "low",
+   "status": "disputed",
+   "confidence": 0.5,
+   "subjects": [
+    "urn:maddu:atlas:v1:test:alpha-fixture"
+   ],
+   "claim": "The fixture is referenced but never observed running.",
+   "impact": "A static reference is not a runtime observation.",
+   "recommendation": "Capture a disposable-repo run.",
+   "evidence": [
+    "ev_alpha_test"
+   ],
+   "counterEvidence": [
+    "The reference is a static mapping only."
+   ],
+   "valueTrajectory": "negentropic"
+  },
+  {
+   "id": "FIND-GAMMA-002",
+   "title": "Diagram catalog is metadata only",
+   "category": "architecture",
+   "severity": "informational",
+   "status": "confirmed",
+   "confidence": 1,
+   "subjects": [
+    "urn:maddu:atlas:v1:bounded-context:beta"
+   ],
+   "claim": "The diagram index carries no diagram bodies.",
+   "impact": "Bodies must be read from the .mmd files.",
+   "recommendation": "Document the split.",
+   "evidence": [
+    "ev_domains",
+    "evidence:deadbeefdeadbeefdeadbeef"
+   ],
+   "valueTrajectory": "entropy-management"
+  },
+  {
+   "id": "FIND-DELTA-001",
+   "title": "Degree-inflation edges lacked a fixture-native label",
+   "category": "reachability",
+   "severity": "medium",
+   "status": "fixed",
+   "confidence": 0.8,
+   "subjects": [
+    "urn:maddu:atlas:v1:bounded-context:alpha"
+   ],
+   "claim": "Earlier fixture drafts used `owns`/`realizes` for degree filler, contaminating domain derivation.",
+   "impact": "Would have produced a false-positive domain assignment for 256 filler entities.",
+   "recommendation": "Use a neutral 'related-to' type for pure degree inflation.",
+   "evidence": [
+    "ev_alpha_op"
+   ],
+   "nextEvidenceAction": null,
+   "valueTrajectory": "negentropic"
+  }
+ ]
+}

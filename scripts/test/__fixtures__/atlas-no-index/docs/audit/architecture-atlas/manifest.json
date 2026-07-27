@@ -1,0 +1,28 @@
+{
+ "schemaVersion": 1,
+ "atlasVersion": "1.0.0",
+ "status": "fixture",
+ "repository": {
+  "name": "maddu-fixture",
+  "commit": "fixt00000000000000000000000000000000000",
+  "version": "1.114.0",
+  "branch": "main",
+  "trackedTreeWasCleanAtStart": true
+ },
+ "startedAt": "2026-07-27T00:00:00.000Z",
+ "completedAt": "2026-07-27T00:10:00.000Z",
+ "environment": {
+  "platform": "fixture"
+ },
+ "semanticModel": {
+  "canonicalEntities": 284,
+  "canonicalRelationships": 275,
+  "materialFlows": 4,
+  "stateMachines": 5
+ },
+ "publication": {
+  "path": "scripts/test/__fixtures__/atlas",
+  "ignoredByRepositoryPolicy": false,
+  "trackedOrCommitted": true
+ }
+}

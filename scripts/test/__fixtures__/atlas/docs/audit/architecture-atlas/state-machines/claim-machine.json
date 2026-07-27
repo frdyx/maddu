@@ -1,0 +1,95 @@
+{
+ "id": "urn:maddu:atlas:v1:state-machine:alpha",
+ "aggregate": "urn:maddu:atlas:v1:capability:alpha-claim",
+ "authority": "Ordered ALPHA_* spine events; alpha.json is a rebuildable projection.",
+ "initialState": "absent",
+ "states": [
+  {
+   "name": "absent",
+   "terminal": false,
+   "temporal": false,
+   "exitOrRecovery": "ALPHA_CLAIMED"
+  },
+  {
+   "name": "held",
+   "terminal": false,
+   "temporal": false,
+   "exitOrRecovery": "ALPHA_RELEASED"
+  },
+  {
+   "name": "released",
+   "terminal": true,
+   "temporal": false,
+   "exitOrRecovery": null
+  },
+  {
+   "name": "stale",
+   "terminal": false,
+   "temporal": true,
+   "exitOrRecovery": "Operator forces release."
+  }
+ ],
+ "transitions": [
+  {
+   "from": "absent",
+   "to": "held",
+   "trigger": "ALPHA_CLAIMED",
+   "guard": "lane free",
+   "actions": [
+    "write claim"
+   ],
+   "idempotent": false,
+   "evidence": [
+    "ev_alpha_op"
+   ]
+  },
+  {
+   "from": "held",
+   "to": "released",
+   "trigger": "ALPHA_RELEASED",
+   "guard": "holder matches",
+   "actions": [
+    "clear claim"
+   ],
+   "idempotent": true,
+   "evidence": [
+    "ev_alpha_op"
+   ]
+  },
+  {
+   "from": "held",
+   "to": "stale",
+   "trigger": "heartbeat lapse",
+   "guard": null,
+   "actions": [],
+   "idempotent": true,
+   "evidence": []
+  },
+  {
+   "from": "stale",
+   "to": "released",
+   "trigger": "ALPHA_RELEASED",
+   "guard": "force",
+   "actions": [
+    "clear claim"
+   ],
+   "idempotent": true,
+   "evidence": [
+    "ev_alpha_op"
+   ]
+  }
+ ],
+ "invalidTransitions": [
+  "released -> held without a new claim."
+ ],
+ "replay": {
+  "mode": "fold ALPHA_* by lane in spine order",
+  "determinism": "D1"
+ },
+ "evidence": [
+  "ev_alpha_op"
+ ],
+ "unresolved": [
+  "No explicit stale-expiry transition."
+ ]
+}

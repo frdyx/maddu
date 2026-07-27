@@ -1,0 +1,99 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "policy": "No aggregate percentage. Each dimension retains its source status, limitations, and unresolved evidence actions.",
+ "summary": {
+  "dimensions": 9,
+  "fragments": 2
+ },
+ "fragments": [
+  {
+   "source": "coverage/wave-a.json",
+   "counts": null,
+   "acceptance": null,
+   "limitations": [
+    "This fragment is intent-only."
+   ],
+   "unresolved": [],
+   "dimensions": [
+    {
+     "dimension": "entity inventory",
+     "status": "validated",
+     "covered": 280,
+     "total": 280
+    },
+    {
+     "dimension": "branch topology",
+     "status": "",
+     "covered": 0,
+     "total": 0
+    },
+    {
+     "name": "canonical mission",
+     "basis": "Charter statement normalized.",
+     "covered": 1,
+     "total": 1,
+     "percent": 100
+    },
+    {
+     "name": "semantic census",
+     "basis": "Deterministic lexical scan.",
+     "covered": 3,
+     "total": 4,
+     "percent": 75,
+     "status": "validated-static"
+    }
+   ]
+  },
+  {
+   "source": "coverage/wave-b.json",
+   "counts": {
+    "entities": 280,
+    "relationships": 275
+   },
+   "acceptance": {
+    "schemaValidated": true
+   },
+   "limitations": [
+    "Runtime observation covers a subset only."
+   ],
+   "unresolved": [
+    "Classify the gamma flow determinism."
+   ],
+   "dimensions": [
+    {
+     "dimension": "relationship closure",
+     "status": "complete-static"
+    },
+    {
+     "dimension": "runtime descriptors",
+     "evidence": "trace corpus",
+     "status": "complete-static-partial-reachability"
+    },
+    {
+     "id": "tracked-files",
+     "actual": 280,
+     "target": 280,
+     "status": "validated"
+    },
+    {
+     "id": "package-published-files",
+     "actual": 64,
+     "target": "all package.json declared roots classified",
+     "status": "mapped"
+    },
+    {
+     "id": "cockpit-files-and-route-ids",
+     "actual": {
+      "files": 10,
+      "routes": 12
+     },
+     "target": "all pinned cockpit files and route metadata",
+     "status": "inventory"
+    }
+   ]
+  }
+ ]
+}

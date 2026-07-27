@@ -1,0 +1,39 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "repository": "maddu-fixture",
+  "commit": "fixt00000000000000000000000000000000000",
+  "extractor": "tools/atlas-commands.mjs@1.0.0"
+ },
+ "commands": [
+  {
+   "verb": "alpha",
+   "purposeGroup": "alpha-core",
+   "tier": "mutating",
+   "evidenceSpans": [
+    {
+     "evidenceId": "ev_4c310f67f3d0d9ac251b",
+     "path": "commands/alpha.mjs",
+     "startLine": 10,
+     "endLine": 40,
+     "method": "static-read",
+     "sha256": "acdc62ff13d001c39f1d5cc7ef82f2c32ff1e0d2a5be840ec362fe4357a2e0fd"
+    }
+   ]
+  },
+  {
+   "verb": "beta",
+   "purposeGroup": "beta-edge",
+   "tier": "read",
+   "evidenceSpans": [
+    {
+     "evidenceId": "ev_beta_no_endline_but_still_valid",
+     "path": "commands/beta.mjs",
+     "startLine": 1,
+     "method": "whole-command-default",
+     "sha256": "2307b1967a01f004c344503198e734ac21861fec26862222ba1de52edfc3e650"
+    }
+   ]
+  }
+ ]
+}

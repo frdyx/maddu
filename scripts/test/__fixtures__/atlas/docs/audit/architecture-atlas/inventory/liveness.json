@@ -1,0 +1,369 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "vocabulary": {
+  "status": [
+   "live-observed",
+   "live-reachable",
+   "conditional",
+   "dormant-by-design",
+   "generated",
+   "compatibility-only",
+   "dead-candidate",
+   "dead-confirmed",
+   "unknown"
+  ],
+  "evidencePlanes": [
+   "current static",
+   "isolated tests",
+   "fixtures",
+   "pinned dogfood aggregate",
+   "dated fleet aggregate",
+   "historical/import evidence"
+  ],
+  "rule": "producer and consumer liveness are independent; absence is never deadness; dead-confirmed requires dual analysis plus sentinel detection"
+ },
+ "deadnessSummary": {
+  "deadConfirmed": 0,
+  "deadCandidates": [
+   "urn:maddu:atlas:v1:gate:alpha-legacy"
+  ],
+  "falsifiedCandidates": [],
+  "unresolvedDynamicOwners": []
+ },
+ "limitations": [
+  "Fleet evidence is a dated aggregate, not a live observation."
+ ],
+ "baseline": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "surfaces": {
+  "commands": [
+   {
+    "id": "urn:maddu:atlas:v1:command:alpha",
+    "uid": "ma_9146bdeb83cf5ca0",
+    "name": "alpha",
+    "status": "live-observed",
+    "owner": "core",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Registry dispatch establishes a supported entry."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ],
+  "bridgeRoutes": [
+   {
+    "id": "urn:maddu:atlas:v1:http-route:beta-read",
+    "uid": "ma_b572a6ec77b8080c",
+    "name": "GET /bridge/beta",
+    "status": "generated",
+    "owner": "bridge",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Statically enumerated handler branch."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    },
+    "tokenRequired": false
+   },
+   {
+    "id": "urn:maddu:atlas:v1:http-route:GET%20%2Fbridge%2Falpha",
+    "uid": "ma_cf6961d9abe12d24",
+    "name": "GET /bridge/alpha",
+    "status": "live-reachable",
+    "owner": "bridge",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Percent-encoded id — display only, never a lookup or path input."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    },
+    "tokenRequired": false
+   }
+  ],
+  "cockpitRoutes": [
+   {
+    "id": "urn:maddu:atlas:v1:cockpit-route:alpha",
+    "uid": "ma_d4fecdcb00ae28b9",
+    "name": "alpha",
+    "status": "live-observed",
+    "owner": "cockpit",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Composition-root RENDERERS bijection."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ],
+  "events": [
+   {
+    "id": "urn:maddu:atlas:v1:event-type:ALPHA_DONE",
+    "uid": "ma_c4aec3b6c0fb96ff",
+    "name": "ALPHA_DONE",
+    "status": "compatibility-only",
+    "owner": "spine",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Retained for backward compatibility."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    },
+    "disposition": "retained"
+   }
+  ],
+  "gates": [
+   {
+    "id": "urn:maddu:atlas:v1:gate:alpha-legacy",
+    "uid": "ma_deb4c4fc26d1fee1",
+    "name": "alpha-legacy",
+    "status": "dead-candidate",
+    "owner": "harness",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "candidate",
+     "rationale": "Registry has no live caller. ../../../../etc/passwd and %2e%2e%2f and NUL[\u0000]end and a quote \" and a backslash \\ together"
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    },
+    "failCapable": true,
+    "required": false
+   }
+  ],
+  "lanes": [
+   {
+    "id": "urn:maddu:atlas:v1:lane:fixture-lane",
+    "uid": "ma_6f868737d09db999",
+    "name": "fixture-lane",
+    "status": "conditional",
+    "owner": "lanes",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Claimed only under an explicit worktree scenario."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ],
+  "operations": [
+   {
+    "id": "urn:maddu:atlas:v1:operation:alpha-write",
+    "uid": "ma_c12b235a341f597c",
+    "name": "alpha-write",
+    "status": "live-observed",
+    "owner": "core",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Dispatched from command:alpha."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ],
+  "pipelines": [
+   {
+    "id": "urn:maddu:atlas:v1:pipeline:fixture-pipeline",
+    "uid": "ma_ad4b03de8604b025",
+    "name": "fixture-pipeline",
+    "status": "live-reachable",
+    "owner": "pipelines",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Statically wired into the default pipeline registry."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ],
+  "plugins": [
+   {
+    "id": "urn:maddu:atlas:v1:plugin:fixture-plugin",
+    "uid": "ma_0acfe8e6c03912c4",
+    "name": "fixture-plugin",
+    "status": "unknown",
+    "owner": "plugins",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Dynamic third-party plugin; liveness cannot be established statically."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ],
+  "stores": [
+   {
+    "id": "urn:maddu:atlas:v1:state-store:alpha",
+    "uid": "ma_8eef0d98e61f8180",
+    "name": "alpha.json",
+    "status": "deprecated",
+    "owner": "core",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Deliberately out-of-vocabulary for liveness — schema-legal, not declared here."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   },
+   {
+    "id": "urn:maddu:atlas:v1:state-store:beta",
+    "uid": "ma_53bc6b7edb6bc41b",
+    "name": "beta.json",
+    "status": "generated",
+    "owner": "core",
+    "activation": "dispatcher-registry",
+    "deadness": {
+     "adjudication": "not-dead",
+     "rationale": "Rebuildable from the spine on demand."
+    },
+    "observations": {
+     "currentStatic": [
+      "fixtures/alpha.mjs"
+     ],
+     "dogfood": "pinned-aggregate-only",
+     "fleet": "dated-aggregate-only",
+     "historical": [],
+     "isolatedRuntimeFixtures": [],
+     "isolatedTestReferences": [
+      "scripts/test/alpha.mjs"
+     ],
+     "qualification": "A test-file reference is static mapping only."
+    }
+   }
+  ]
+ }
+}

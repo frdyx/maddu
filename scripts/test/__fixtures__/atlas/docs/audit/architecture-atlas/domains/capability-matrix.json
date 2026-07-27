@@ -1,0 +1,44 @@
+{
+ "schemaVersion": 1,
+ "snapshot": {
+  "commit": "fixt00000000000000000000000000000000000"
+ },
+ "purposeGroups": {
+  "alpha-core": {
+   "id": "urn:maddu:atlas:v1:capability-group:alpha-core",
+   "boundedContext": "urn:maddu:atlas:v1:bounded-context:alpha",
+   "relevance": "load-bearing"
+  },
+  "beta-edge": {
+   "id": "urn:maddu:atlas:v1:capability-group:beta-edge",
+   "boundedContext": "urn:maddu:atlas:v1:bounded-context:beta",
+   "relevance": "supporting"
+  }
+ },
+ "commands": [
+  {
+   "verb": "alpha",
+   "purposeGroup": "alpha-core",
+   "tier": "mutating",
+   "autoTrigger": false,
+   "surface": "cli",
+   "layer": "core"
+  },
+  {
+   "verb": "beta",
+   "purposeGroup": "beta-edge",
+   "tier": "read",
+   "autoTrigger": false,
+   "surface": "cli",
+   "layer": "edge"
+  },
+  {
+   "verb": "gamma",
+   "purposeGroup": "alpha-core",
+   "tier": "mutating",
+   "autoTrigger": false,
+   "surface": "cli",
+   "layer": "core"
+  }
+ ]
+}
