@@ -7,7 +7,12 @@
 // corrupt IDF), rows carry a `score`, rows deriving from the same originating
 // spine event are collapsed to their best-scoring representative (`also` lists
 // the siblings), and the default ordering is relevance. `order: 'time'`
-// restores the legacy newest-first ordering. Targets:
+// restores the legacy newest-first ORDERING only — deliberately not the
+// legacy MATCHING: candidates are BM25-token-overlap OR whole-phrase
+// substring in both orders (a multi-word query now also surfaces
+// partial-term hits the old all-or-nothing substring missed), and
+// source-event collapse applies in both. Intended additive semantics; the
+// preserved legacy contract is the ordering and the result fields. Targets:
 //   • spine events (any type)
 //   • memory facts (hindsight)
 //   • skill frontmatter + body

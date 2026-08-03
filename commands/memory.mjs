@@ -76,12 +76,22 @@ export default async function memory(argv) {
     const limit = parseInt(flags.limit, 10);
     const lim = Number.isFinite(limit) ? limit : 50;
     // Default to the CURRENT view (hide superseded). --all shows full history.
-    // factsWithTrust (v1.115.0) joins trust states; fall back on older installs.
-    const base = flags.all
-      ? await hindsight.readMemory(repoRoot)
-      : (hindsight.factsWithTrust ? await hindsight.factsWithTrust(repoRoot)
+    // factsWithTrust (v1.115.0) joins trust states; fall back on older
+    // installs. --all joins trust too (Codex r1 minor 10) — raw rows would
+    // hide approval/revocation badges and break `--all --trust <state>`.
+    let base;
+    if (flags.all) {
+      base = await hindsight.readMemory(repoRoot);
+      if (hindsight.trustStates) {
+        const { spine } = await loadSpineLib();
+        const trust = hindsight.trustStates(await spine.readAll(repoRoot));
+        base = base.map((f) => ({ ...f, trust: trust.get(f.id)?.state || 'asserted' }));
+      }
+    } else {
+      base = hindsight.factsWithTrust ? await hindsight.factsWithTrust(repoRoot)
         : hindsight.currentFacts ? await hindsight.currentFacts(repoRoot)
-        : await hindsight.readMemory(repoRoot));
+        : await hindsight.readMemory(repoRoot);
+    }
     let facts = flags.kind ? base.filter((f) => f.kind === flags.kind) : base;
     if (flags.trust && flags.trust !== true) facts = facts.filter((f) => (f.trust || 'asserted') === String(flags.trust));
     facts = facts.slice(-lim);
@@ -140,9 +150,11 @@ export default async function memory(argv) {
     for (const it of packet.items) {
       console.log(`  ${ANSI.pass}fed${ANSI.reset}  ${colorFor(it.kind)}${it.kind.padEnd(11)}${ANSI.reset}  ${it.text}  ${ANSI.dim}score:${it.score} id:${it.id}${ANSI.reset}`);
     }
-    for (const w of packet.withheld) {
+    const listCap = recall.MAX_WITHHELD_LISTED || 20;
+    for (const w of packet.withheld.slice(0, listCap)) {
       console.log(`  ${ANSI.warn}held${ANSI.reset} ${colorFor(w.kind)}${w.kind.padEnd(11)}${ANSI.reset}  ${ANSI.dim}${w.reason}  score:${w.score}  id:${w.id}${ANSI.reset}`);
     }
+    if (packet.withheld.length > listCap) console.log(`  ${ANSI.dim}(+${packet.withheld.length - listCap} more withheld — --json for the full list)${ANSI.reset}`);
     if (!packet.items.length && !packet.withheld.length) console.log('  (nothing relevant — approve facts with `maddu memory approve <id>`)');
     return;
   }

@@ -93,6 +93,20 @@ async function main() {
     ok('rebuild drops hand-edits (documented cost)', !rebuilt.includes(HAND_EDIT));
     ok('rebuild keeps all events in order', evs.every((ev) => rebuilt.includes(`- **Event:** ${ev.id}`)));
 
+    // Codex r1 minor 12: sanitized lane ids (slash → dash) must not produce
+    // phantom "page absent" duplicates — drift maps page→lane from events.
+    {
+      const evSlash = await spine.append(repo, {
+        type: spine.EVENT_TYPES.SLICE_STOP, actor: 'ses_c', lane: 'feature/foo',
+        data: { summary: 'SLICE STOP: sanitized lane seed' }
+      });
+      await wiki.appendSliceStop(repo, evSlash);
+      const d = JSON.parse(cli(repo, ['wiki', 'drift', '--json']).out);
+      const rows = d.pages.filter((p) => p.page === 'lane-feature-foo.md');
+      ok('sanitized lane yields exactly one drift row', rows.length === 1, JSON.stringify(rows));
+      ok('sanitized lane row is clean (no phantom missing)', rows[0]?.missingEvents === 0 && !rows[0]?.missing, JSON.stringify(rows[0]));
+    }
+
     // Usage errors.
     ok('unknown subcommand → exit 2', cli(repo, ['wiki', 'bogus'], true).code === 2);
     ok('unknown flag → exit 2', cli(repo, ['wiki', 'list', '--nope'], true).code === 2);

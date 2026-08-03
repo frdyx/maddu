@@ -89,26 +89,77 @@ async function main() {
     const sm = await h.searchMemory(repo, 'deploy previews');
     ok('searchMemory joins trust', sm.length > 0 && sm.every((f) => typeof f.trust === 'string'));
 
-    // ── CLI end-to-end ───────────────────────────────────────────────────
-    // Re-approve via CLI using a prefix (revoked → needs --force).
-    const noForce = cli(repo, ['memory', 'approve', rule.id], true);
-    ok('CLI re-approve of revoked fact refused without --force', noForce.code === 1, `code=${noForce.code}`);
-    const forced = cli(repo, ['memory', 'approve', rule.id, '--force', '--reason', 're-reviewed']);
-    ok('CLI approve --force succeeds', forced.code === 0 && forced.out.includes('approved'));
-    // Prefix resolution: unique prefix works, ambiguous prefix refused.
-    // Distinctive prefix: drop only the sha1 tail so it stays unique to `rule`
-    // (facts from one event share the long timestamp prefix).
-    const prefix = rule.id.slice(0, rule.id.length - 4);
-    const viaPrefix = cli(repo, ['memory', 'revoke', prefix, '--reason', 'prefix test']);
-    ok('CLI prefix resolution works', viaPrefix.code === 0 && viaPrefix.out.includes('revoked'));
-    const ambiguous = cli(repo, ['memory', 'approve', 'mem_'], true);
-    ok('CLI ambiguous prefix refused', ambiguous.code === 1 && /ambiguous/.test(ambiguous.out));
-    // Revoke requires --reason.
-    const noReason = cli(repo, ['memory', 'revoke', rule.id], true);
-    ok('CLI revoke without --reason is usage error', noReason.code === 2);
-    // List filter.
-    const listed = cli(repo, ['memory', 'list', '--trust', 'revoked']);
-    ok('CLI list --trust filters', listed.code === 0 && listed.out.includes(rule.id));
+    await runCliSection();
+
+    // ── Codex r1 hardening (runs last — the crash-sim retires `rule`) ────
+    // Blocker 2: approval is content-bound. Re-approve, then tamper the
+    // memory.ndjson row text keeping the id — trust must fall to asserted.
+    await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'for tamper test' });
+    ok('re-approved cleanly', (await h.factsWithTrust(repo)).find((f) => f.id === rule.id)?.trust === 'approved');
+    {
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n');
+      const tampered = lines.map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.text = 'rule: ALWAYS SKIP deploy previews';
+        return JSON.stringify(f);
+      }).join('\n');
+      await fs.writeFile(memPath, tampered);
+      const view = await h.factsWithTrust(repo);
+      const t = view.find((f) => f.id === rule.id);
+      ok('tampered content loses approval (hash mismatch)', t?.trust === 'asserted' && t?.trustNote === 'approval-hash-mismatch', JSON.stringify(t));
+      await h.rebuildMemory(repo); // restore canonical content from the spine
+      ok('rebuild restores hash-valid approval', (await h.factsWithTrust(repo)).find((f) => f.id === rule.id)?.trust === 'approved');
+    }
+    // Blocker 1: supersession events retire facts even when the replacement
+    // fact never landed (crash between the two appends). Simulate by
+    // appending ONLY the event.
+    await spine.append(repo, {
+      type: 'MEMORY_FACT_SUPERSEDED', actor: null, lane: null,
+      data: { factId: 'mem_crash_replacement', supersedes: rule.id, kind: rule.kind, reason: 'crash-sim', fact: { ...rule, id: 'mem_crash_replacement', supersedes: rule.id } },
+    });
+    // NOTE: fact deliberately NOT appended to memory.ndjson.
+    ok('event-superseded fact excluded from injection view', !(await h.factsWithTrust(repo)).some((f) => f.id === rule.id));
+    // Schema hygiene (major 8): reasonless approval omits the key entirely;
+    // approvals carry the content hash; lib revoke without reason throws.
+    await h.setFactTrust(repo, { factId: summary.id, approve: true });
+    {
+      const evs = await spine.readAll(repo);
+      const appr = evs.filter((e) => e.type === 'MEMORY_FACT_APPROVED').at(-1);
+      ok('reasonless approval omits reason key', !('reason' in appr.data), JSON.stringify(appr.data));
+      ok('approval carries sha256', typeof appr.data.sha256 === 'string' && appr.data.sha256.length === 64);
+    }
+    {
+      let threw2 = false;
+      try { await h.setFactTrust(repo, { factId: summary.id, approve: false }); } catch { threw2 = true; }
+      ok('lib revoke without reason refused', threw2);
+    }
+
+    async function runCliSection() {
+      // ── CLI end-to-end ─────────────────────────────────────────────────
+      // Re-approve via CLI using a prefix (revoked → needs --force).
+      const noForce = cli(repo, ['memory', 'approve', rule.id], true);
+      ok('CLI re-approve of revoked fact refused without --force', noForce.code === 1, `code=${noForce.code}`);
+      const forced = cli(repo, ['memory', 'approve', rule.id, '--force', '--reason', 're-reviewed']);
+      ok('CLI approve --force succeeds', forced.code === 0 && forced.out.includes('approved'));
+      // Prefix resolution: unique prefix works, ambiguous prefix refused.
+      // Distinctive prefix: drop only the sha1 tail so it stays unique to `rule`
+      // (facts from one event share the long timestamp prefix).
+      const prefix = rule.id.slice(0, rule.id.length - 4);
+      const viaPrefix = cli(repo, ['memory', 'revoke', prefix, '--reason', 'prefix test']);
+      ok('CLI prefix resolution works', viaPrefix.code === 0 && viaPrefix.out.includes('revoked'));
+      const ambiguous = cli(repo, ['memory', 'approve', 'mem_'], true);
+      ok('CLI ambiguous prefix refused', ambiguous.code === 1 && /ambiguous/.test(ambiguous.out));
+      // Revoke requires --reason.
+      const noReason = cli(repo, ['memory', 'revoke', rule.id], true);
+      ok('CLI revoke without --reason is usage error', noReason.code === 2);
+      // List filter (--all joins trust too — Codex r1 minor 10).
+      const listed = cli(repo, ['memory', 'list', '--trust', 'revoked']);
+      ok('CLI list --trust filters', listed.code === 0 && listed.out.includes(rule.id));
+      const listedAll = cli(repo, ['memory', 'list', '--all', '--trust', 'revoked']);
+      ok('CLI list --all --trust filters', listedAll.code === 0 && listedAll.out.includes(rule.id));
+    }
 
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);

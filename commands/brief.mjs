@@ -134,20 +134,28 @@ export default async function command(argv) {
           || (baseCtx.laneClaims || [])[0]?.lane || null;
         recallPacket = recall.buildRecallPacket({ facts, query: '', lane: activeLane, tags });
         if (recallPacket.items.length > 0 && !flags['dry-run']) {
-          await spine.append(repoRoot, {
-            type: spine.EVENT_TYPES.MEMORY_INJECTED,
-            actor: baseCtx.activeSession?.id || null,
-            lane: activeLane,
-            data: {
-              sessionId: baseCtx.activeSession?.id || null,
-              factIds: recallPacket.items.map((it) => it.id),
-              totalBytes: recallPacket.totalBytes,
-              query: '',
+          // FAIL CLOSED (Codex r1 major 4): if the MEMORY_INJECTED witness
+          // cannot be appended, the facts must NOT reach the rendered brief —
+          // an unwitnessed injection is invisible to the critical gate.
+          try {
+            await spine.append(repoRoot, {
+              type: spine.EVENT_TYPES.MEMORY_INJECTED,
+              actor: baseCtx.activeSession?.id || null,
               lane: activeLane,
-            },
-          });
+              data: {
+                sessionId: baseCtx.activeSession?.id || null,
+                factIds: recallPacket.items.map((it) => it.id),
+                totalBytes: recallPacket.totalBytes,
+                query: '',
+                lane: activeLane,
+              },
+            });
+          } catch (err) {
+            console.error(`  memory recall withheld: injection witness could not be recorded (${err.message})`);
+            recallPacket = null;
+          }
         }
-        const trustWithheld = recallPacket.withheld.filter((w) => w.reason === 'not-approved' || w.reason === 'revoked');
+        const trustWithheld = (recallPacket?.withheld || []).filter((w) => w.reason === 'not-approved' || w.reason === 'revoked');
         if (trustWithheld.length > 0 && !flags['dry-run']) {
           await spine.append(repoRoot, {
             type: spine.EVENT_TYPES.MEMORY_INJECTION_REFUSED,

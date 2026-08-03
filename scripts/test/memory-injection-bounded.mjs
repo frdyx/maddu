@@ -57,7 +57,7 @@ async function main() {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
       await spine.append(repo, {
         type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: 100, query: '', lane: null }
+        data: { sessionId: null, factIds: [rule.id], totalBytes: Buffer.byteLength(rule.text, 'utf8'), query: '', lane: null }
       });
       const r = await runGate(gates, repo);
       ok('gate exists and ran', !!r, JSON.stringify(r));
@@ -110,6 +110,75 @@ async function main() {
     try {
       const r = await runGate(gates, repo);
       ok('empty repo passes (no injections)', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+
+  // ── Codex r1 hardening ───────────────────────────────────────────────────
+  // 6) Forged/missing totalBytes cannot pass: bytes are RECOMPUTED.
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      // A giant approved fact whose event claims tiny bytes.
+      const big = { v: 1, id: 'mem_big', ts: '2026-08-01T00:00:00Z', kind: 'rule', text: 'rule: ' + 'x'.repeat(20000), tags: [], source: {} };
+      await h.appendFactIfNew(repo, big);
+      await h.setFactTrust(repo, { factId: 'mem_big', approve: true });
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: ['mem_big'], totalBytes: 100, query: '', lane: null }
+      });
+      const r = await runGate(gates, repo);
+      ok('forged small totalBytes fails on recompute', r && r.ok === false, JSON.stringify(r));
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: [rule.id], query: '', lane: null } // totalBytes missing
+      });
+      const r = await runGate(gates, repo);
+      ok('missing totalBytes is a violation', r && r.ok === false, JSON.stringify(r));
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+  // 7) Unloadable hindsight lib + existing injections → FAIL CLOSED, never
+  //    "all approved" on a check the gate could not perform.
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: [rule.id], totalBytes: 100, query: '', lane: null }
+      });
+      // loadGateLib prefers <repo>/maddu/runtime/lib — plant a corrupt copy.
+      const libDir = path.join(repo, 'maddu', 'runtime', 'lib');
+      await fs.mkdir(libDir, { recursive: true });
+      await fs.writeFile(path.join(libDir, 'hindsight.mjs'), 'this is not valid javascript {{{');
+      const r = await runGate(gates, repo);
+      ok('unloadable trust lib fails closed', r && r.ok === false && /re-derive|refusing/.test(r.message || ''), JSON.stringify(r));
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+  // 8) Tampered fact content invalidates the approval at the gate.
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: [rule.id], totalBytes: 100, query: '', lane: null }
+      });
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.text = 'rule: tampered content rides the old approval';
+        return JSON.stringify(f);
+      });
+      await fs.writeFile(memPath, lines.join('\n'));
+      const r = await runGate(gates, repo);
+      ok('content tamper fails the gate (hash-bound approval)', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 

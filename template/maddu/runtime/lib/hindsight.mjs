@@ -252,8 +252,19 @@ export async function supersede(repoRoot, { priorId, fact, reason = null }) {
 
 export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
 
+// Content hash binding an approval to WHAT was approved (Codex r1 blocker 2):
+// approval is meaningless if bound to a mutable-file row's id alone — editing
+// an approved row's text in memory.ndjson while keeping its id would inject
+// never-approved content. MEMORY_FACT_APPROVED carries sha256(text); the join
+// treats an approval as valid ONLY while the current text matches. The hash
+// is REQUIRED (no legacy exemption — the feature ships with it).
+export function factContentHash(fact) {
+  return createHash('sha256').update(String(fact?.text || ''), 'utf8').digest('hex');
+}
+
 // Pure: fold trust transitions out of an event list. Returns
-// Map<factId, { state: 'approved'|'revoked', ts, reason }> — absent = asserted.
+// Map<factId, { state: 'approved'|'revoked', ts, reason, sha256 }> — absent =
+// asserted. Last event in spine order wins.
 export function trustStates(events) {
   const out = new Map();
   for (const ev of events) {
@@ -264,31 +275,68 @@ export function trustStates(events) {
       state: ev.type === 'MEMORY_FACT_APPROVED' ? 'approved' : 'revoked',
       ts: ev.ts || null,
       reason: ev.data?.reason || null,
+      sha256: ev.data?.sha256 || null,
     });
   }
   return out;
 }
 
-// Current facts joined with their trust state. Each fact gains
-// `trust: 'asserted'|'approved'|'revoked'` (superseded facts are already
-// excluded by currentFacts; historical views can join trustStates themselves).
+// Pure: fact ids retired by MEMORY_FACT_SUPERSEDED EVENTS (Codex r1 blocker
+// 1): the fact-file back-pointer view (currentFacts) misses a supersession
+// whose event landed but whose replacement fact never did (crash between the
+// two appends) — leaving a retired-on-the-spine fact "current" and
+// injectable. The spine wins (hard rule 2), so the injection-safety join
+// retires from events too.
+export function supersededByEvents(events) {
+  const out = new Set();
+  for (const ev of events) {
+    if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.supersedes) out.add(ev.data.supersedes);
+  }
+  return out;
+}
+
+// Current facts joined with their trust state — THE injection-safety view
+// (recall packet + memory-injection-bounded gate both build on it). A fact is
+// `approved` ONLY if: an approval event is its latest trust transition AND
+// the event's sha256 matches the current text (tamper → falls back to
+// asserted). Facts retired by a MEMORY_FACT_SUPERSEDED event are excluded
+// even when the fact file missed the replacement (spine wins).
 export async function factsWithTrust(repoRoot) {
   const [facts, events] = await Promise.all([currentFacts(repoRoot), readAll(repoRoot)]);
   const trust = trustStates(events);
-  return facts.map((f) => ({ ...f, trust: trust.get(f.id)?.state || 'asserted' }));
+  const retired = supersededByEvents(events);
+  return facts
+    .filter((f) => !retired.has(f.id))
+    .map((f) => {
+      const t = trust.get(f.id);
+      if (!t) return { ...f, trust: 'asserted' };
+      if (t.state === 'approved' && t.sha256 !== factContentHash(f)) {
+        // Approval bound to different content — never inject silently.
+        return { ...f, trust: 'asserted', trustNote: 'approval-hash-mismatch' };
+      }
+      return { ...f, trust: t.state };
+    });
 }
 
 // Record an approval/revocation. Refuses unknown fact ids so trust events
-// can't dangle; caller resolves id prefixes before this point.
+// can't dangle; caller resolves id prefixes before this point. Revocation
+// requires a reason (witnessed); a null/absent reason is OMITTED from the
+// event (schema: `reason: string?` — absent or string, never null).
 export async function setFactTrust(repoRoot, { factId, approve, reason = null, actor = null }) {
   const all = await readMemory(repoRoot);
   const fact = all.find((f) => f.id === factId);
   if (!fact) throw new Error(`unknown fact id: ${factId}`);
+  if (!approve && !reason) throw new Error('revocation requires a reason');
   await append(repoRoot, {
     type: approve ? 'MEMORY_FACT_APPROVED' : 'MEMORY_FACT_REVOKED',
     actor,
     lane: fact.source?.lane || null,
-    data: { factId, kind: fact.kind, reason },
+    data: {
+      factId,
+      kind: fact.kind,
+      ...(reason ? { reason } : {}),
+      ...(approve ? { sha256: factContentHash(fact) } : {}),
+    },
   });
   return fact;
 }

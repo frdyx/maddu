@@ -191,7 +191,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `LEARN_JUDGED` | A correction candidate was judged by a worker. | `candidateId: string`, `category: string`, `destination: string`, `verdict: string`, `workerId: string` |
 | `LEARN_CORRECTION_WRITTEN` | A typed correction was written to an agent file or memory. | `agent: string`, `category: string`, `correctionId: string`, `destination: string`, `file: string`, `memory: string`, `target: string` |
 | `MEMORY_FACT_SUPERSEDED` | A memory fact was superseded by a newer fact. | `fact: object`, `factId: string`, `kind: string`, `reason: string`, `supersedes: string` |
-| `MEMORY_FACT_APPROVED` | An operator approved a memory fact for recall injection. | `factId: string`, `kind: string`, `reason: string?` |
+| `MEMORY_FACT_APPROVED` | An operator approved a memory fact for recall injection (sha256 binds the approval to the approved content). | `factId: string`, `kind: string`, `reason: string?`, `sha256: string` |
 | `MEMORY_FACT_REVOKED` | An operator revoked a memory fact from recall. | `factId: string`, `kind: string`, `reason: string` |
 | `MEMORY_INJECTED` | Approved memory facts were injected into an agent brief (bounded recall packet). | `factIds: array`, `lane: string\|null`, `query: string`, `sessionId: string\|null`, `totalBytes: number` |
 | `MEMORY_INJECTION_REFUSED` | Context-relevant memory facts were withheld from injection (trust or budget). | `refused: array`, `reason: string`, `sessionId: string\|null` |

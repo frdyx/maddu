@@ -6,7 +6,16 @@
 // `rebuildWiki` will re-emit the canonical record.
 //
 // Drift detection: a page is "drifted" if its mtime is older than the most
-// recent SLICE_STOP event for that lane (i.e. the page is missing entries).
+// recent SLICE_STOP event for that lane (i.e. the page is missing entries),
+// or if event-marker membership shows absent blocks.
+//
+// Idempotency scope (documented limits, Codex r1 minor 13): the page-scan
+// guard is per-process read-then-append, not atomic — Máddu's single-writer
+// model (one session per repo; spine appends are lock-serialized upstream)
+// is what makes it safe. Running `wiki sync` concurrently with a live
+// slice-stop can double-append a block; don't. A hand-edit that pastes an
+// exact `- **Event:** <id>` marker is treated as that event being present —
+// the operator asserted it. `rebuild --force` is the recovery for both.
 
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -118,19 +127,27 @@ export async function computeDrift(repoRoot) {
   const events = await readAll(repoRoot);
   const lastByLane = new Map();
   const idsByPage = new Map();
+  // Forward page→lane map from the events themselves (Codex r1 minor 12):
+  // pageFor() sanitizes lane ids, so reverse-parsing a filename is lossy for
+  // lanes like `feature/foo` (page lane-feature-foo.md). The events know the
+  // real lane; filename parsing is only the fallback for orphan pages.
+  const laneByPage = new Map();
   for (const ev of events) {
     if (ev.type !== 'SLICE_STOP') continue;
     const lane = ev.lane || null;
     const prev = lastByLane.get(lane);
     if (!prev || ev.ts > prev) lastByLane.set(lane, ev.ts);
     const page = pageFor(lane);
+    laneByPage.set(page, lane);
     if (!idsByPage.has(page)) idsByPage.set(page, []);
     idsByPage.get(page).push(ev.id);
   }
   const wiki = await listWiki(repoRoot);
   const out = [];
   for (const w of wiki) {
-    const lane = w.page === 'general.md' ? null : w.page.replace(/^lane-/, '').replace(/\.md$/, '');
+    const lane = laneByPage.has(w.page) ? laneByPage.get(w.page)
+      : w.page === 'general.md' ? null
+      : w.page.replace(/^lane-/, '').replace(/\.md$/, '');
     const lastSlice = lastByLane.get(lane) || null;
     const drifted = lastSlice && lastSlice > w.mtime;
     const text = (await readPage(repoRoot, w.page)) || '';

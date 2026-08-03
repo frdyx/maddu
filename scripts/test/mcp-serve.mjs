@@ -52,7 +52,7 @@ async function hashTree(root) {
   return h.digest('hex');
 }
 
-function rpcDialogue(repo, messages, timeoutMs = 20000) {
+function rpcDialogue(repo, messages, expectedResponses, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const ch = spawn(process.execPath, [BIN, 'mcp', 'serve'], { cwd: repo, stdio: ['pipe', 'pipe', 'pipe'] });
     const responses = [];
@@ -69,7 +69,7 @@ function rpcDialogue(repo, messages, timeoutMs = 20000) {
         if (line) { try { responses.push(JSON.parse(line)); } catch { responses.push({ __unparseable: line }); } }
       }
       // All expected responses in → close stdin so the server exits.
-      if (responses.length >= messages.filter((m) => m.id !== undefined).length + 1) ch.stdin.end();
+      if (responses.length >= expectedResponses) ch.stdin.end();
     });
     ch.on('close', () => { clearTimeout(timer); resolve({ responses, stderr }); });
     ch.on('error', (e) => { clearTimeout(timer); reject(e); });
@@ -113,8 +113,14 @@ async function main() {
       { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'status', arguments: {} } },
       { jsonrpc: '2.0', id: 8, method: 'no/such/method' },
       '{ not json',
+      // Codex r1 minor 14: valid JSON, invalid JSON-RPC shape → -32600 with
+      // id null; never a crash, never silently dropped as a "notification".
+      'null',
+      '{}',
+      '[1]',
     ];
-    const { responses } = await rpcDialogue(repo, dialogue);
+    // Expected: 8 id-replies + 1 parse error + 3 invalid-request errors.
+    const { responses } = await rpcDialogue(repo, dialogue, 12);
     const byId = new Map(responses.filter((r) => r.id !== undefined && r.id !== null).map((r) => [r.id, r]));
 
     // initialize
@@ -145,6 +151,9 @@ async function main() {
     // errors
     ok('unknown method → -32601', byId.get(8)?.error?.code === -32601, JSON.stringify(byId.get(8)));
     ok('parse error → -32700 with null id', responses.some((r) => r.error?.code === -32700 && r.id === null));
+    const invalids = responses.filter((r) => r.error?.code === -32600);
+    ok('three invalid-shape messages → three -32600 with null id', invalids.length === 3 && invalids.every((r) => r.id === null), JSON.stringify(invalids));
+    ok('server survived the garbage (still answered everything)', responses.length === 12, `${responses.length}`);
 
     // THE READ-ONLY PROOF.
     const after = await integritySurfaces();

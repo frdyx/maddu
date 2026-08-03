@@ -5356,7 +5356,7 @@
       "then": {
         "properties": {
           "data": {
-            "description": "An operator approved a memory fact for recall injection.",
+            "description": "An operator approved a memory fact for recall injection (sha256 binds the approval to the approved content).",
             "type": "object",
             "additionalProperties": true,
             "properties": {
@@ -5367,6 +5367,9 @@
                 "type": "string"
               },
               "reason": {
+                "type": "string"
+              },
+              "sha256": {
                 "type": "string"
               }
             }

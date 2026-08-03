@@ -45,9 +45,18 @@ const byteLen = (s) => Buffer.byteLength(String(s || ''), 'utf8');
 //   lane:   active lane id (boosts same-lane facts)
 //   tags:   context tags (exact-match boost against fact tags)
 //   budget: { maxItems, maxBytes } — clamped to the exported caps, never above
+// Clamp a budget field to [0, hardMax]. 0 is a VALID budget ("feed nothing")
+// — Codex r1: `Number(0) || MAX` silently expanded zero budgets to the hard
+// maxima. Absent/non-numeric → the hard max; negative → 0.
+function clampBudget(raw, hardMax) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return hardMax;
+  return Math.min(Math.max(0, Math.floor(n)), hardMax);
+}
+
 export function buildRecallPacket({ facts = [], query = '', lane = null, tags = [], budget = {} } = {}) {
-  const maxItems = Math.min(Number(budget.maxItems) || MAX_RECALL_ITEMS, MAX_RECALL_ITEMS);
-  const maxBytes = Math.min(Number(budget.maxBytes) || MAX_RECALL_BYTES, MAX_RECALL_BYTES);
+  const maxItems = clampBudget(budget.maxItems ?? MAX_RECALL_ITEMS, MAX_RECALL_ITEMS);
+  const maxBytes = clampBudget(budget.maxBytes ?? MAX_RECALL_BYTES, MAX_RECALL_BYTES);
   const qTokens = tokenize(query || '');
   const ctxTags = (tags || []).map((t) => String(t).toLowerCase());
 
@@ -101,7 +110,9 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
     lane: lane || null,
     budget: { maxItems, maxBytes },
     items,
-    withheld: withheld.slice(0, MAX_WITHHELD_LISTED),
+    // FULL withheld list — the refusal witness must not lose typed reasons
+    // (Codex r1 minor 9). Display surfaces cap with MAX_WITHHELD_LISTED.
+    withheld,
     withheldTotal: withheld.length,
     totalBytes,
   };

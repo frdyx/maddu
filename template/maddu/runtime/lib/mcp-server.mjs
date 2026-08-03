@@ -143,13 +143,19 @@ function invalidParams(msg) {
 // Handle one parsed JSON-RPC message. Returns the response object, or null
 // for notifications (no id → nothing goes back on the wire).
 export async function handleMessage(repoRoot, msg, { serverVersion = '0.0.0' } = {}) {
+  // Invalid-request law (Codex r1 minor 14): valid JSON that is not a valid
+  // JSON-RPC request — null, numbers, arrays, {} — must answer -32600 with
+  // id null (per spec), never throw and never be silently swallowed as a
+  // "notification". Only a WELL-FORMED request without an id is a
+  // notification.
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)
+      || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
+    const id = (msg && typeof msg === 'object' && !Array.isArray(msg) && msg.id !== undefined) ? msg.id : null;
+    return { jsonrpc: '2.0', id, error: { code: -32600, message: 'invalid request' } };
+  }
   const isNotification = msg.id === undefined || msg.id === null;
   const reply = (result) => (isNotification ? null : { jsonrpc: '2.0', id: msg.id, result });
   const fail = (code, message) => (isNotification ? null : { jsonrpc: '2.0', id: msg.id, error: { code, message } });
-
-  if (msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
-    return fail(-32600, 'invalid request');
-  }
   if (msg.method === 'initialize') {
     return reply({
       protocolVersion: MCP_PROTOCOL_VERSION,

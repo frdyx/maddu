@@ -90,6 +90,17 @@ async function main() {
     const boosted = R.buildRecallPacket({ facts, lane: 'deploy' });
     ok('lane boost feeds same-lane fact', boosted.items.some((it) => it.id === 'f_deploy'));
     ok('budget clamped to exported caps', R.buildRecallPacket({ facts, budget: { maxItems: 999, maxBytes: 1e9 } }).budget.maxItems === R.MAX_RECALL_ITEMS);
+    // Codex r1 major 3: zero is a VALID budget — must not expand to the max.
+    const zero = R.buildRecallPacket({ facts, budget: { maxItems: 0, maxBytes: 0 } });
+    ok('zero budget feeds nothing', zero.items.length === 0 && zero.budget.maxItems === 0 && zero.budget.maxBytes === 0, JSON.stringify(zero.budget));
+    ok('zero budget withholds with budget reasons', zero.withheld.every((w) => w.reason.startsWith('budget-')) && zero.withheldTotal >= 1);
+  }
+  {
+    // Codex r1 minor 9: withheld list is FULL — typed reasons never truncate
+    // out of the refusal witness (display surfaces cap separately).
+    const many = Array.from({ length: 30 }, (_, i) => fact(`f_w${i}`, 'rule', `rule: unapproved law ${i}`, 'asserted'));
+    const p = R.buildRecallPacket({ facts: many });
+    ok('withheld carries every typed reason', p.withheld.length === 30 && p.withheldTotal === 30, `${p.withheld.length}/${p.withheldTotal}`);
   }
 
   // ── end-to-end through the CLI ─────────────────────────────────────────

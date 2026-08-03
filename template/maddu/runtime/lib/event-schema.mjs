@@ -98,8 +98,11 @@
 // MEMORY_INJECTION_REFUSED: bounded recall-injection witnesses mirroring the
 // skill-injection pair. Only approved facts are injectable (recall.mjs is the
 // single eligibility seam; the critical memory-injection-bounded gate
-// re-verifies every injection row). Additive → minor bump; baseline refresh
-// at the next release.
+// re-verifies every injection row). Codex r1 hardening (same unreleased
+// bump): MEMORY_FACT_APPROVED gains required `sha256` — the approval is bound
+// to the approved CONTENT, so a hand-edited memory.ndjson row with a
+// preserved id can never ride an old approval into agent context. Additive →
+// minor bump; baseline refresh at the next release.
 export const EVENT_CONTRACT_VERSION = '1.13.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
@@ -282,7 +285,7 @@ export const EVENT_SCHEMA = {
   LEARN_JUDGED: { summary: "A correction candidate was judged by a worker.", data: { candidateId: 'string', category: 'string', destination: 'string', verdict: 'string', workerId: 'string' } },
   LEARN_CORRECTION_WRITTEN: { summary: "A typed correction was written to an agent file or memory.", data: { agent: 'string', category: 'string', correctionId: 'string', destination: 'string', file: 'string', memory: 'string', target: 'string' } },
   MEMORY_FACT_SUPERSEDED: { summary: "A memory fact was superseded by a newer fact.", data: { fact: 'object', factId: 'string', kind: 'string', reason: 'string', supersedes: 'string' } },
-  MEMORY_FACT_APPROVED: { summary: "An operator approved a memory fact for recall injection.", data: { factId: 'string', kind: 'string', reason: 'string?' } },
+  MEMORY_FACT_APPROVED: { summary: "An operator approved a memory fact for recall injection (sha256 binds the approval to the approved content).", data: { factId: 'string', kind: 'string', reason: 'string?', sha256: 'string' } },
   MEMORY_FACT_REVOKED: { summary: "An operator revoked a memory fact from recall.", data: { factId: 'string', kind: 'string', reason: 'string' } },
   MEMORY_INJECTED: { summary: "Approved memory facts were injected into an agent brief (bounded recall packet).", data: { factIds: 'array', lane: 'string|null', query: 'string', sessionId: 'string|null', totalBytes: 'number' } },
   MEMORY_INJECTION_REFUSED: { summary: "Context-relevant memory facts were withheld from injection (trust or budget).", data: { refused: 'array', reason: 'string', sessionId: 'string|null' } },
