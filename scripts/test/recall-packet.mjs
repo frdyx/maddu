@@ -133,6 +133,12 @@ async function main() {
     const giantId = fact('f_' + 'i'.repeat(100000), 'rule', 'rule: tiny text', 'approved');
     const p5 = R.buildRecallPacket({ facts: [giantId] });
     ok('giant-id fact withheld on bytes', p5.items.length === 0 && p5.withheldByReason['budget-bytes'] === 1, JSON.stringify(p5.withheldByReason));
+    // r5 major 4: one corrupt row (tags as object, object text) must not
+    // throw and take down the whole packet — the good fact still feeds.
+    const corrupt = { v: 1, id: 'f_corrupt', ts: '2026-08-01T00:00:00Z', kind: 'rule', text: { evil: true }, tags: {}, source: {}, trust: 'asserted' };
+    const good = fact('f_good', 'rule', 'rule: healthy law', 'approved');
+    const p6 = R.buildRecallPacket({ facts: [corrupt, good] });
+    ok('corrupt row does not break the packet', p6.items.some((it) => it.id === 'f_good'), JSON.stringify(p6.items.map((i) => i.id)));
   }
 
   // ── end-to-end through the CLI ─────────────────────────────────────────

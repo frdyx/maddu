@@ -147,7 +147,13 @@ export default async function command(argv) {
           // the detection gap; maddu's single-writer model closes the rest.
           const fresh = await hindsight.factsWithTrust(repoRoot);
           recallPacket = recall.buildRecallPacket({ facts: fresh, query: '', lane: activeLane, tags });
-          const hashById = new Map(fresh.filter((f) => f.trust === 'approved').map((f) => [f.id, hindsight.factContentHash(f)]));
+          // The witness references the APPROVAL EVENT by id (r5 major 2) so
+          // validation survives cross-partition team-sync reordering.
+          const trustMap = hindsight.trustStates(await spine.readAll(repoRoot));
+          const hashById = new Map(fresh.filter((f) => f.trust === 'approved').map((f) => [f.id, {
+            sha256: hindsight.factContentHash(f),
+            approvalEvent: trustMap.get(f.id)?.evId || null,
+          }]));
           // FAIL CLOSED (Codex r1 major 4): if the MEMORY_INJECTED witness
           // cannot be appended, the facts must NOT reach the rendered brief —
           // an unwitnessed injection is invisible to the critical gate.
@@ -160,7 +166,7 @@ export default async function command(argv) {
                 data: {
                   sessionId: baseCtx.activeSession?.id || null,
                   factIds: recallPacket.items.map((it) => it.id),
-                  facts: recallPacket.items.map((it) => ({ id: it.id, sha256: hashById.get(it.id) || null })),
+                  facts: recallPacket.items.map((it) => ({ id: it.id, ...(hashById.get(it.id) || { sha256: null, approvalEvent: null }) })),
                   totalBytes: recallPacket.totalBytes,
                   query: '',
                   lane: activeLane,

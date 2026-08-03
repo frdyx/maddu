@@ -29,66 +29,95 @@ export default {
   severity: 'critical',
   description: 'Every MEMORY_INJECTED event (full spine, uncapped) stays within cap (≤8 facts, ≤16KB claimed) and every fed fact carried a live approval whose content-hash matches the witness at injection time.',
   run: async (ctx) => {
+    // VALIDATION BY REFERENCE (Codex r5 major 2): each witness row names its
+    // approval EVENT (`approvalEvent`), so the check survives cross-partition
+    // team-sync merges that reorder events by (ts, replicaId). The hard law:
+    // the referenced approval must exist and bind THIS fact to THIS content
+    // hash. Ordering (approval before injection in readAll order) is enforced
+    // as a hard violation when broken WITHOUT a valid reference, and as a
+    // WARN when the reference is valid but appears later — a legitimate
+    // cross-partition reorder and an approve-after-feed sequence are
+    // indistinguishable from the merged spine, so it surfaces, never hides.
     const events = await ctx.spine.readAll(ctx.repoRoot);
+    const approvalsById = new Map(); // approval event id → {factId, sha256, index}
+    const revocations = new Map();   // factId → [indices]
+    events.forEach((ev, i) => {
+      if (ev.type === 'MEMORY_FACT_APPROVED' && ev.data?.factId) {
+        approvalsById.set(ev.id, { factId: ev.data.factId, sha256: typeof ev.data.sha256 === 'string' ? ev.data.sha256 : null, index: i });
+      } else if (ev.type === 'MEMORY_FACT_REVOKED' && ev.data?.factId) {
+        if (!revocations.has(ev.data.factId)) revocations.set(ev.data.factId, []);
+        revocations.get(ev.data.factId).push(i);
+      }
+    });
     let injectionCount = 0;
     const violations = [];
-    const approvalHash = new Map(); // factId → sha256 while approved (fold state)
-    const retired = new Set();      // factId → superseded at this point
-    for (const ev of events) {
-      if (ev.type === 'MEMORY_FACT_APPROVED' && ev.data?.factId) {
-        approvalHash.set(ev.data.factId, typeof ev.data.sha256 === 'string' ? ev.data.sha256 : null);
-      } else if (ev.type === 'MEMORY_FACT_REVOKED' && ev.data?.factId) {
-        approvalHash.delete(ev.data.factId);
-      } else if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.supersedes) {
-        retired.add(ev.data.supersedes);
-      } else if (ev.type === 'MEMORY_INJECTED') {
-        injectionCount += 1;
-        const d = ev.data || {};
-        if (!Array.isArray(d.factIds)) {
-          violations.push({ ts: ev.ts, reason: 'factIds not array' });
+    const reorders = [];
+    events.forEach((ev, i) => {
+      if (ev.type !== 'MEMORY_INJECTED') return;
+      injectionCount += 1;
+      const d = ev.data || {};
+      if (!Array.isArray(d.factIds)) {
+        violations.push({ ts: ev.ts, reason: 'factIds not array' });
+        return;
+      }
+      if (d.factIds.length > MAX_ITEMS) {
+        violations.push({ ts: ev.ts, reason: `factIds.length=${d.factIds.length} > ${MAX_ITEMS}` });
+      }
+      if (typeof d.totalBytes !== 'number' || !Number.isFinite(d.totalBytes)) {
+        violations.push({ ts: ev.ts, reason: `totalBytes missing/non-numeric (${JSON.stringify(d.totalBytes)})` });
+      } else if (d.totalBytes > MAX_TOTAL_BYTES) {
+        violations.push({ ts: ev.ts, reason: `claimed totalBytes ${d.totalBytes} > ${MAX_TOTAL_BYTES}` });
+      }
+      const factRows = Array.isArray(d.facts) ? d.facts : null;
+      if (!factRows) {
+        violations.push({ ts: ev.ts, reason: 'facts[] (per-fact approval references) missing from witness' });
+        return;
+      }
+      const rowIds = new Set(factRows.map((r) => r?.id));
+      if (rowIds.size !== d.factIds.length || !d.factIds.every((id) => rowIds.has(id))) {
+        violations.push({ ts: ev.ts, reason: 'facts[]/factIds mismatch' });
+      }
+      for (const row of factRows) {
+        if (typeof row?.id !== 'string' || typeof row?.sha256 !== 'string' || typeof row?.approvalEvent !== 'string') {
+          violations.push({ ts: ev.ts, reason: `witness row incomplete (${JSON.stringify(row).slice(0, 100)})` });
           continue;
         }
-        if (d.factIds.length > MAX_ITEMS) {
-          violations.push({ ts: ev.ts, reason: `factIds.length=${d.factIds.length} > ${MAX_ITEMS}` });
-        }
-        if (typeof d.totalBytes !== 'number' || !Number.isFinite(d.totalBytes)) {
-          violations.push({ ts: ev.ts, reason: `totalBytes missing/non-numeric (${JSON.stringify(d.totalBytes)})` });
-        } else if (d.totalBytes > MAX_TOTAL_BYTES) {
-          violations.push({ ts: ev.ts, reason: `claimed totalBytes ${d.totalBytes} > ${MAX_TOTAL_BYTES}` });
-        }
-        const factRows = Array.isArray(d.facts) ? d.facts : null;
-        if (!factRows) {
-          violations.push({ ts: ev.ts, reason: 'facts[] (per-fact approval hashes) missing from witness' });
+        const appr = approvalsById.get(row.approvalEvent);
+        if (!appr) {
+          violations.push({ ts: ev.ts, reason: `fact ${row.id}: referenced approval ${row.approvalEvent} not found on the spine` });
           continue;
         }
-        const rowIds = new Set(factRows.map((r) => r?.id));
-        if (rowIds.size !== d.factIds.length || !d.factIds.every((id) => rowIds.has(id))) {
-          violations.push({ ts: ev.ts, reason: 'facts[]/factIds mismatch' });
+        if (appr.factId !== row.id || appr.sha256 !== row.sha256) {
+          violations.push({ ts: ev.ts, reason: `fact ${row.id}: approval reference mismatch (binds ${appr.factId}@${String(appr.sha256).slice(0, 12)}…, witness claims ${row.id}@${row.sha256.slice(0, 12)}…)` });
+          continue;
         }
-        for (const row of factRows) {
-          const fid = row?.id;
-          if (typeof fid !== 'string' || typeof row?.sha256 !== 'string') {
-            violations.push({ ts: ev.ts, reason: `witness row malformed (${JSON.stringify(row).slice(0, 80)})` });
-            continue;
-          }
-          if (retired.has(fid) || !approvalHash.has(fid)) {
-            violations.push({ ts: ev.ts, reason: `fact ${fid} was not approved (or already superseded) at injection time` });
-          } else if (approvalHash.get(fid) !== row.sha256) {
-            violations.push({ ts: ev.ts, reason: `fact ${fid} fed with content-hash ${row.sha256.slice(0, 12)}… but the live approval at that time bound ${String(approvalHash.get(fid)).slice(0, 12)}…` });
-          }
+        if (appr.index > i) {
+          reorders.push({ ts: ev.ts, reason: `fact ${row.id}: valid approval ${row.approvalEvent} appears AFTER the injection in merged order — cross-partition reorder or approve-after-feed` });
+        } else if ((revocations.get(row.id) || []).some((ri) => ri > appr.index && ri < i)) {
+          // Liveness: the referenced approval was REVOKED before this feed —
+          // a revoked-then-rewritten fact's old content must not ride its
+          // old (matching) approval reference.
+          violations.push({ ts: ev.ts, reason: `fact ${row.id}: referenced approval ${row.approvalEvent} was revoked before this injection` });
         }
       }
-    }
+    });
     if (injectionCount === 0) {
       return { ok: true, message: 'no memory injections recorded (skipped)' };
     }
+    if (violations.length === 0 && reorders.length === 0) {
+      return { ok: true, message: `${injectionCount} injection event(s), all bounded and approval-referenced with matching content hashes` };
+    }
     if (violations.length === 0) {
-      return { ok: true, message: `${injectionCount} injection event(s), all bounded and hash-authorized at injection time` };
+      return {
+        ok: false, status: 'warn',
+        message: `${reorders.length} injection(s) whose valid approval appears later in merged order — verify team-sync partitions or investigate approve-after-feed`,
+        evidence: { reorders: reorders.slice(0, 10) },
+      };
     }
     return {
       ok: false,
       message: `${violations.length} violation(s) across ${injectionCount} injection event(s)`,
-      evidence: { violations: violations.slice(0, 10), totalViolations: violations.length },
+      evidence: { violations: violations.slice(0, 10), totalViolations: violations.length, reorders: reorders.slice(0, 5) },
     };
   },
 };

@@ -54,12 +54,19 @@ async function main() {
     return { repo, rule };
   }
 
-  const inject = (repo, rule, over = {}) => spine.append(repo, {
+  // Witness rows reference the approval EVENT (r5 major 2); the helper
+  // resolves the latest approval for the fact ('evt_missing' when none —
+  // which the gate must flag).
+  async function lastApprovalId(repo, factId) {
+    const evs = await spine.readAll(repo);
+    return evs.filter((e) => e.type === 'MEMORY_FACT_APPROVED' && e.data?.factId === factId).at(-1)?.id || 'evt_missing';
+  }
+  const inject = async (repo, rule, over = {}) => spine.append(repo, {
     type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
     data: {
       sessionId: null,
       factIds: [rule.id],
-      facts: [{ id: rule.id, sha256: h.factContentHash(rule) }],
+      facts: [{ id: rule.id, sha256: h.factContentHash(rule), approvalEvent: await lastApprovalId(repo, rule.id) }],
       totalBytes: h.factContentBytes(rule),
       query: '', lane: null,
       ...over,
@@ -106,9 +113,10 @@ async function main() {
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      const apprId = await lastApprovalId(repo, rule.id);
       await inject(repo, rule, {
         factIds: Array.from({ length: 9 }, () => rule.id),
-        facts: Array.from({ length: 9 }, () => ({ id: rule.id, sha256: h.factContentHash(rule) })),
+        facts: Array.from({ length: 9 }, () => ({ id: rule.id, sha256: h.factContentHash(rule), approvalEvent: apprId })),
       });
       const r = await runGate(gates, repo);
       ok('over-cap rows fails', r && r.ok === false, JSON.stringify(r));
@@ -174,17 +182,23 @@ async function main() {
         return JSON.stringify(f);
       });
       await fs.writeFile(memPath, lines.join('\n'));
+      // Epoch-A approval id captured BEFORE revocation (the historical
+      // witness references it).
+      const evsA = await spine.readAll(repo);
+      const apprA = evsA.filter((e) => e.type === 'MEMORY_FACT_APPROVED' && e.data?.factId === rule.id)[0].id;
       const ruleB = (await h.readMemory(repo)).find((f) => f.id === rule.id);
       await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'epoch B' });
       let r = await runGate(gates, repo);
       ok('epoch-A witness green after reapproval with new content', green(r), JSON.stringify(r));
-      // A feed recording the OLD hash under the NEW approval epoch → red.
+      // A NEW feed of the OLD content referencing the (revoked) epoch-A
+      // approval → red: the reference matches but was revoked before this
+      // injection (liveness check).
       await spine.append(repo, {
         type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], facts: [{ id: rule.id, sha256: h.factContentHash(rule) }], totalBytes: h.factContentBytes(rule), query: '', lane: null }
+        data: { sessionId: null, factIds: [rule.id], facts: [{ id: rule.id, sha256: h.factContentHash(rule), approvalEvent: apprA }], totalBytes: h.factContentBytes(rule), query: '', lane: null }
       });
       r = await runGate(gates, repo);
-      ok('stale-hash feed under new epoch fails', r && r.ok === false, JSON.stringify(r));
+      ok('stale feed on revoked epoch-A approval fails', r && r.ok === false, JSON.stringify(r));
       // And an honest epoch-B feed is green again in a fresh repo state:
       // (covered implicitly by case 1's law; here just confirm hash equality)
       ok('epoch-B hash differs from epoch-A', h.factContentHash(ruleB) !== h.factContentHash(rule));

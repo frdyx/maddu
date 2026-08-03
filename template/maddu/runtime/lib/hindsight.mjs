@@ -265,14 +265,13 @@ export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
 // string be swapped for an arbitrary object under the same hash. A fact that
 // is not well-formed is NEVER approvable and never resolves to `approved`.
 const FACT_KEYS = new Set(['v', 'id', 'ts', 'kind', 'text', 'tags', 'source', 'supersedes']);
-const SOURCE_KEYS = new Set(['event', 'lane', 'actor', 'candidate']);
 const strOrNull = (x) => x === undefined || x === null || typeof x === 'string';
 
 export function isWellFormedFact(f) {
   if (!f || typeof f !== 'object' || Array.isArray(f)) return false;
-  // STRICT keys (Codex r4 blocker 2): unknown properties are rejected — an
-  // extra `payload` field would ride `...f` spreads past a hash that cannot
-  // cover keys it does not know about.
+  // STRICT top-level keys (Codex r4 blocker 2): unknown properties are
+  // rejected — an extra `payload` field would ride spreads past a hash that
+  // cannot cover keys it does not know about.
   for (const k of Object.keys(f)) if (!FACT_KEYS.has(k)) return false;
   if (typeof f.id !== 'string' || typeof f.text !== 'string' || typeof f.kind !== 'string') return false;
   if (!strOrNull(f.ts)) return false;
@@ -280,27 +279,40 @@ export function isWellFormedFact(f) {
   if (f.v !== undefined && typeof f.v !== 'number') return false;
   if (f.tags !== undefined && !(Array.isArray(f.tags) && f.tags.every((t) => typeof t === 'string'))) return false;
   if (f.source !== undefined) {
+    // Source keys are writer-defined (r5 major 3: learn writes
+    // candidate/slug/session, vendor origin/file/dir, evolve
+    // recId/detector/evidence[]) — so keys are free but VALUES are typed:
+    // JSON primitives or bounded string arrays, ≤16 keys, no nesting. The
+    // whole-fact canonical hash below covers every one of them.
     if (typeof f.source !== 'object' || f.source === null || Array.isArray(f.source)) return false;
-    for (const k of Object.keys(f.source)) if (!SOURCE_KEYS.has(k)) return false;
-    if (!strOrNull(f.source.lane) || !strOrNull(f.source.event) || !strOrNull(f.source.actor) || !strOrNull(f.source.candidate)) return false;
+    const keys = Object.keys(f.source);
+    if (keys.length > 16) return false;
+    for (const k of keys) {
+      const v = f.source[k];
+      const okVal = v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+        || (Array.isArray(v) && v.length <= 64 && v.every((x) => typeof x === 'string'));
+      if (!okVal) return false;
+    }
   }
   return true;
 }
 
 export function canonicalFactContent(fact) {
-  // No coercion — callers guarantee well-formedness (isWellFormedFact).
-  // Covers every emitted/selection field: id (emitted, and its bytes count
-  // against budgets — r4 major 5), ts (tie-breaks), actor (emitted by
-  // searchMemory — r4 blocker 2). `candidate` is allowed but never emitted.
+  // WHOLE-FACT deterministic serialization (Codex r5 blocker 1 ended the
+  // field-enumeration whack-a-mole: supersedes/candidate/v were consumed but
+  // unhashed). Fixed literal key order; source keys sorted; undefined
+  // normalized to null. isWellFormedFact strictly bounds the keyspace, so
+  // this is injective over validated facts.
+  const src = fact.source || {};
   return JSON.stringify({
     id: fact.id,
-    text: fact.text,
     kind: fact.kind,
-    ts: fact.ts ?? null,
+    source: Object.fromEntries(Object.keys(src).sort().map((k) => [k, src[k] ?? null])),
+    supersedes: fact.supersedes ?? null,
     tags: Array.isArray(fact.tags) ? fact.tags : [],
-    lane: fact.source?.lane ?? null,
-    sourceEvent: fact.source?.event ?? null,
-    actor: fact.source?.actor ?? null,
+    text: fact.text,
+    ts: fact.ts ?? null,
+    v: fact.v ?? null,
   });
 }
 
@@ -340,6 +352,7 @@ export function trustStates(events) {
       ts: ev.ts || null,
       reason: ev.data?.reason || null,
       sha256: ev.data?.sha256 || null,
+      evId: ev.id || null,
     });
   }
   return out;

@@ -82,8 +82,14 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
   const ctxTags = (tags || []).slice(0, 32).map((t) => capStr(t, 64).toLowerCase());
 
   // Score every fact against the context. Corpus stats over ALL facts so IDF
-  // stays honest (same law as search.mjs).
-  const docs = facts.map((f) => ({ f, tokens: tokenize(`${f.text} ${(f.tags || []).join(' ')}`) }));
+  // stays honest (same law as search.mjs). Type-guarded (Codex r5 major 4):
+  // one corrupt row (tags:{}, object text) is demoted by trustFor upstream
+  // but must not THROW here and take down brief/bridge/MCP recall entirely.
+  const docs = facts.filter(Boolean).map((f) => {
+    const text = typeof f.text === 'string' ? f.text : '';
+    const tagList = Array.isArray(f.tags) ? f.tags.filter((t) => typeof t === 'string') : [];
+    return { f, tokens: tokenize(`${text} ${tagList.join(' ')}`) };
+  });
   const stats = buildCorpusStats(docs.map((d) => d.tokens));
   const scored = [];
   for (const { f, tokens } of docs) {
@@ -121,7 +127,7 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
     }
     totalBytes += bytes;
     items.push({
-      id: f.id, kind: f.kind, text: f.text, score,
+      id: f.id, kind: f.kind, text: typeof f.text === 'string' ? f.text : '', score,
       trust: 'approved',
       sourceEvent: f.source?.event || null,
       lane: f.source?.lane || null,

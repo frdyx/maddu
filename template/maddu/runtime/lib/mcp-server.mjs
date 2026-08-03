@@ -145,7 +145,8 @@ async function callTool(repoRoot, name, args = {}) {
     const capList = (xs, n, len) => (Array.isArray(xs) ? xs.slice(0, n).map((x) => cap(typeof x === 'string' ? x : JSON.stringify(x), len)) : []);
     const goal = proj.goal && typeof proj.goal === 'object'
       ? {
-          text: cap(proj.goal.text ?? proj.goal.goal, 500),
+          // Projections store the declaration as `objective` (r5 minor 5).
+          text: cap(proj.goal.objective ?? proj.goal.text ?? proj.goal.goal, 500),
           constraints: capList(proj.goal.constraints, 10, 200),
           success: capList(proj.goal.success, 10, 200),
         }

@@ -172,6 +172,23 @@ async function main() {
       ok('searchMemory rows bounded', rows.every((r) => JSON.stringify(r).length < 4096));
       await h.rebuildMemory(repo);
     }
+    // r5 blocker 1: the WHOLE fact is hashed — supersedes and source.candidate
+    // edits void the approval too.
+    {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'for supersedes tamper' });
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.supersedes = summary.id; // rewire retirement
+        return JSON.stringify(f);
+      }).join('\n');
+      await fs.writeFile(memPath, lines);
+      const t = (await h.readMemory(repo)).find((f) => f.id === rule.id);
+      const tv = h.trustFor(t, h.trustStates(await spine.readAll(repo)));
+      ok('supersedes tamper voids approval (whole-fact hash)', tv.trust === 'asserted' && tv.trustNote === 'approval-hash-mismatch', JSON.stringify(tv));
+      await h.rebuildMemory(repo);
+    }
     // r3 blocker 1: ts is part of the canonical surface — editing it voids
     // the approval (it drives selection tie-breaks and is emitted).
     {

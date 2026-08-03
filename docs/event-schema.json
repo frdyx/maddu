@@ -5417,7 +5417,7 @@
       "then": {
         "properties": {
           "data": {
-            "description": "Approved memory facts were injected into an agent brief (bounded recall packet; facts[] records each fed fact's approval content-hash).",
+            "description": "Approved memory facts were injected into an agent brief (bounded recall packet; facts[] rows {id, sha256, approvalEvent} bind each fed fact to its approval event and content-hash).",
             "type": "object",
             "additionalProperties": true,
             "properties": {
