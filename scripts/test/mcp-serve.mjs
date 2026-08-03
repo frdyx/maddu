@@ -126,6 +126,9 @@ async function main() {
       '{"jsonrpc":"2.0","id":null,"method":"ping"}',
       // Codex r8 minor 3: ids must be strings or numbers — false is invalid.
       '{"jsonrpc":"2.0","id":false,"method":"ping"}',
+      // Codex r9 minor 2: an invalid ENVELOPE with an invalid id must answer
+      // id:null, never echo the bogus id.
+      '{"jsonrpc":"1.0","id":false,"method":"ping"}',
       // Codex r2 major 5: caller-controlled limit is clamped — limit:0 must
       // not dump the whole corpus.
       { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'memory_search', arguments: { query: 'read-only', limit: 0 } } },
@@ -134,7 +137,7 @@ async function main() {
       { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'wiki_read', arguments: { page: 'lane-bigpage.md' } } },
     ];
     // Expected: 10 id-replies + 1 parse error + 5 invalid-request errors.
-    const { responses } = await rpcDialogue(repo, dialogue, 16);
+    const { responses } = await rpcDialogue(repo, dialogue, 17);
     const byId = new Map(responses.filter((r) => r.id !== undefined && r.id !== null).map((r) => [r.id, r]));
 
     // initialize
@@ -166,12 +169,12 @@ async function main() {
     ok('unknown method → -32601', byId.get(8)?.error?.code === -32601, JSON.stringify(byId.get(8)));
     ok('parse error → -32700 with null id', responses.some((r) => r.error?.code === -32700 && r.id === null));
     const invalids = responses.filter((r) => r.error?.code === -32600);
-    ok('five invalid messages → five -32600 with null id', invalids.length === 5 && invalids.every((r) => r.id === null), JSON.stringify(invalids));
+    ok('six invalid messages → six -32600 with null id', invalids.length === 6 && invalids.every((r) => r.id === null), JSON.stringify(invalids));
     const clamped = parse(byId.get(9));
     ok('limit:0 clamps instead of dumping the corpus', Array.isArray(clamped) && clamped.length >= 1 && clamped.length <= 200, `${clamped?.length}`);
     const bigPage = parse(byId.get(10));
     ok('wiki_read byte-caps large pages', bigPage?.truncated === true && Buffer.byteLength(bigPage?.text || '', 'utf8') <= 65536 && bigPage?.totalBytes > 65536, JSON.stringify({ t: bigPage?.truncated, len: bigPage?.text?.length, total: bigPage?.totalBytes }));
-    ok('server survived the garbage (still answered everything)', responses.length === 16, `${responses.length}`);
+    ok('server survived the garbage (still answered everything)', responses.length === 17, `${responses.length}`);
 
     // THE READ-ONLY PROOF.
     const after = await integritySurfaces();

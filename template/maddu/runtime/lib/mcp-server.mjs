@@ -182,7 +182,10 @@ export async function handleMessage(repoRoot, msg, { serverVersion = '0.0.0' } =
   // notification.
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)
       || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
-    const id = (msg && typeof msg === 'object' && !Array.isArray(msg) && msg.id !== undefined && msg.id !== null) ? msg.id : null;
+    // Echo the id only when it is itself VALID (r9 minor 2): an invalid
+    // envelope with id:false/{}/[] answers with id null, never an echo.
+    const id = (msg && typeof msg === 'object' && !Array.isArray(msg)
+      && (typeof msg.id === 'string' || typeof msg.id === 'number')) ? msg.id : null;
     return { jsonrpc: '2.0', id, error: { code: -32600, message: 'invalid request' } };
   }
   // MCP 2024-11-05 forbids null request ids (r2 minor 6), and JSON-RPC ids

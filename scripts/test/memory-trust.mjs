@@ -154,6 +154,11 @@ async function main() {
       // the state change succeeds; the success print can't throw.
       const revTampered = cli(repo, ['memory', 'revoke', rule.id, '--reason', 'tampered content']);
       ok('CLI revoke of tampered fact exits 0', revTampered.code === 0 && revTampered.out.includes('revoked'), `code=${revTampered.code} ${revTampered.out}`);
+      // r9 major 1: cross-corpus search survives the malformed row too.
+      const searchLib = await loadLib('search.mjs');
+      let crossOk = true;
+      try { await searchLib.search(repo, 'deploy'); } catch { crossOk = false; }
+      ok('cross-corpus search survives a malformed row', crossOk);
       await h.rebuildMemory(repo);
     }
     // r4 blocker 2: unknown extra keys make a fact malformed — a smuggled

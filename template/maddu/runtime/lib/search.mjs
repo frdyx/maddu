@@ -140,14 +140,17 @@ export async function search(repoRoot, query, { kinds = null, limit = 50, order 
     const trust = trustStates(await readAll(repoRoot));
     const docs = [];
     for (const f of facts) {
-      const blob = `${f.text} ${(f.tags || []).join(' ')}`;
+      // Type-guarded (Codex r9 major 1): one malformed row (object text)
+      // must not throw and take down cross-corpus search for every query.
+      const text = typeof f.text === 'string' ? f.text : '';
+      const blob = `${text} ${(Array.isArray(f.tags) ? f.tags.filter((t) => typeof t === 'string') : []).join(' ')}`;
       docs.push({
         blob,
         tokens: tokenize(blob),
         row: {
-          kind: 'memory', id: f.id, ts: f.ts, lane: f.source?.lane || null,
-          title: f.kind + ': ' + (f.text || '').slice(0, 80),
-          snippet: snippet(f.text, q),
+          kind: 'memory', id: f.id, ts: typeof f.ts === 'string' ? f.ts : null, lane: typeof f.source?.lane === 'string' ? f.source.lane : null,
+          title: f.kind + ': ' + text.slice(0, 80),
+          snippet: snippet(text, q),
           actor: f.source?.actor || null,
           sourceEvent: f.source?.event || null,
           // Caps mirror searchMemory's shaping (r4 major 8): a huge tag

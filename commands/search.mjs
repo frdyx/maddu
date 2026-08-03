@@ -36,9 +36,13 @@ export default async function searchCmd(argv) {
   const repoRoot = await resolveRepoRoot(paths);
   const kinds = flags.kinds ? String(flags.kinds).split(',').map((x) => x.trim()).filter(Boolean) : null;
   const limit = parseInt(flags.limit, 10);
+  // Fallback for a newer global CLI over an older installed runtime lib
+  // (Codex r9 minor 3): pre-relevance search.mjs exports no ORDERS — degrade
+  // to the known set (the old lib ignores the order option and time-sorts).
+  const orders = search.ORDERS || ['relevance', 'time'];
   const order = flags.sort ? String(flags.sort) : 'relevance';
-  if (!search.ORDERS.includes(order)) {
-    console.error(`--sort must be one of: ${search.ORDERS.join(', ')}`);
+  if (!orders.includes(order)) {
+    console.error(`--sort must be one of: ${orders.join(', ')}`);
     process.exit(2);
   }
   const out = await search.search(repoRoot, query, {
