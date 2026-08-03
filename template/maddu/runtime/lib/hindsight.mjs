@@ -499,7 +499,9 @@ export async function searchMemory(repoRoot, query, { kind = null, limit = 50 } 
       const at = q ? text.toLowerCase().indexOf(q) : -1;
       if (at > 1800) {
         const start = Math.max(0, at - 100);
-        row.matchSnippet = (start > 0 ? '…' : '') + text.slice(start, at + q.length + 100) + (at + q.length + 100 < text.length ? '…' : '');
+        // Window capped at 400 chars (r6 minor 5): a query-sized window would
+        // let a huge query bypass the row-shaping byte bound.
+        row.matchSnippet = ((start > 0 ? '…' : '') + text.slice(start, at + q.length + 100)).slice(0, 400) + (at + q.length + 100 < text.length ? '…' : '');
       }
     }
     return row;

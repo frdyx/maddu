@@ -100,7 +100,10 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
     if (score <= 0) continue; // not relevant to this context at all
     scored.push({ f, score: Number(score.toFixed(4)) });
   }
-  scored.sort((a, b) => (b.score - a.score) || ((b.f.ts || '').localeCompare(a.f.ts || '')));
+  // Safe ts access (r6 major 3): a malformed ts:{} on ONE row must not throw
+  // in the tie-break and take down the whole packet.
+  const tsOf = (f) => (typeof f.ts === 'string' ? f.ts : '');
+  scored.sort((a, b) => (b.score - a.score) || tsOf(b.f).localeCompare(tsOf(a.f)));
 
   const items = [];
   const withheld = [];
@@ -129,9 +132,9 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
     items.push({
       id: f.id, kind: f.kind, text: typeof f.text === 'string' ? f.text : '', score,
       trust: 'approved',
-      sourceEvent: f.source?.event || null,
-      lane: f.source?.lane || null,
-      ts: f.ts || null,
+      sourceEvent: typeof f.source?.event === 'string' ? f.source.event : null,
+      lane: typeof f.source?.lane === 'string' ? f.source.lane : null,
+      ts: typeof f.ts === 'string' ? f.ts : null,
       reason: 'fed',
     });
   }

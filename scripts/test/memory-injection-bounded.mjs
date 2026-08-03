@@ -198,7 +198,10 @@ async function main() {
         data: { sessionId: null, factIds: [rule.id], facts: [{ id: rule.id, sha256: h.factContentHash(rule), approvalEvent: apprA }], totalBytes: h.factContentBytes(rule), query: '', lane: null }
       });
       r = await runGate(gates, repo);
-      ok('stale feed on revoked epoch-A approval fails', r && r.ok === false, JSON.stringify(r));
+      // r6 major 2: ordering anomalies on a merged spine are WARN (visible,
+      // never a false critical) — "revoked-between" is indistinguishable
+      // from a legitimate cross-partition reorder.
+      ok('stale feed on revoked epoch-A approval surfaces as WARN', r && r.status === 'warn', JSON.stringify(r));
       // And an honest epoch-B feed is green again in a fresh repo state:
       // (covered implicitly by case 1's law; here just confirm hash equality)
       ok('epoch-B hash differs from epoch-A', h.factContentHash(ruleB) !== h.factContentHash(rule));
@@ -223,6 +226,27 @@ async function main() {
       ok('post-injection tamper: gate stays green (authorized at time)', green(r), JSON.stringify(r));
       const view = await h.factsWithTrust(repo);
       ok('post-injection tamper: recall surface demotes the row', view.find((f) => f.id === rule.id)?.trust !== 'approved');
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+
+  // 10b) r6 blocker 1 — supersession between approval and feed is DETECTED
+  //      (WARN): retired content reaching agent context never passes silently.
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      const apprA = await lastApprovalId(repo, rule.id);
+      await h.supersede(repo, {
+        priorId: rule.id,
+        fact: { v: 1, id: 'mem_replacement', ts: '2026-08-02T00:00:00Z', kind: rule.kind, text: 'rule: replaced law', tags: [], source: {} },
+        reason: 'replaced',
+      });
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: [rule.id], facts: [{ id: rule.id, sha256: h.factContentHash(rule), approvalEvent: apprA }], totalBytes: h.factContentBytes(rule), query: '', lane: null }
+      });
+      const r = await runGate(gates, repo);
+      ok('superseded-between feed surfaces as WARN (never silent green)', r && r.status === 'warn', JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 

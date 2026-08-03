@@ -41,12 +41,16 @@ export default {
     const events = await ctx.spine.readAll(ctx.repoRoot);
     const approvalsById = new Map(); // approval event id → {factId, sha256, index}
     const revocations = new Map();   // factId → [indices]
+    const supersessions = new Map(); // superseded factId → [indices] (r6 blocker 1)
     events.forEach((ev, i) => {
       if (ev.type === 'MEMORY_FACT_APPROVED' && ev.data?.factId) {
         approvalsById.set(ev.id, { factId: ev.data.factId, sha256: typeof ev.data.sha256 === 'string' ? ev.data.sha256 : null, index: i });
       } else if (ev.type === 'MEMORY_FACT_REVOKED' && ev.data?.factId) {
         if (!revocations.has(ev.data.factId)) revocations.set(ev.data.factId, []);
         revocations.get(ev.data.factId).push(i);
+      } else if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.supersedes) {
+        if (!supersessions.has(ev.data.supersedes)) supersessions.set(ev.data.supersedes, []);
+        supersessions.get(ev.data.supersedes).push(i);
       }
     });
     let injectionCount = 0;
@@ -91,13 +95,20 @@ export default {
           violations.push({ ts: ev.ts, reason: `fact ${row.id}: approval reference mismatch (binds ${appr.factId}@${String(appr.sha256).slice(0, 12)}…, witness claims ${row.id}@${row.sha256.slice(0, 12)}…)` });
           continue;
         }
+        // TEMPORAL ordering on a merged spine is advisory (Codex r6 major 2:
+        // team-sync merges by (ts, replicaId), so "between" cannot be proven
+        // causal). One consistent rule: hash-binding by reference is the hard
+        // law above; every ordering anomaly — approval-after-feed,
+        // revoked-between, superseded-between — surfaces as WARN: detected
+        // and named, never a false critical, never hidden.
         if (appr.index > i) {
           reorders.push({ ts: ev.ts, reason: `fact ${row.id}: valid approval ${row.approvalEvent} appears AFTER the injection in merged order — cross-partition reorder or approve-after-feed` });
         } else if ((revocations.get(row.id) || []).some((ri) => ri > appr.index && ri < i)) {
-          // Liveness: the referenced approval was REVOKED before this feed —
-          // a revoked-then-rewritten fact's old content must not ride its
-          // old (matching) approval reference.
-          violations.push({ ts: ev.ts, reason: `fact ${row.id}: referenced approval ${row.approvalEvent} was revoked before this injection` });
+          reorders.push({ ts: ev.ts, reason: `fact ${row.id}: a revocation appears between approval ${row.approvalEvent} and this injection in merged order — stale feed or cross-partition reorder` });
+        } else if ((supersessions.get(row.id) || []).some((si) => si > appr.index && si < i)) {
+          // r6 blocker 1: a supersession retiring the fact between approval
+          // and feed means retired content may have reached agent context.
+          reorders.push({ ts: ev.ts, reason: `fact ${row.id}: a supersession retires this fact between approval ${row.approvalEvent} and this injection in merged order — retired feed or cross-partition reorder` });
         }
       }
     });

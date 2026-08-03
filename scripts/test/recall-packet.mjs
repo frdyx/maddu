@@ -139,6 +139,10 @@ async function main() {
     const good = fact('f_good', 'rule', 'rule: healthy law', 'approved');
     const p6 = R.buildRecallPacket({ facts: [corrupt, good] });
     ok('corrupt row does not break the packet', p6.items.some((it) => it.id === 'f_good'), JSON.stringify(p6.items.map((i) => i.id)));
+    // r6 major 3: a malformed ts:{} must not throw in the sort tie-break.
+    const corruptTs = { v: 1, id: 'f_badts', ts: {}, kind: 'rule', text: 'rule: bad clock', tags: [], source: {}, trust: 'asserted' };
+    const p7 = R.buildRecallPacket({ facts: [corruptTs, good] });
+    ok('malformed ts does not break the packet', p7.items.some((it) => it.id === 'f_good'), JSON.stringify(p7.items.map((i) => i.id)));
   }
 
   // ── end-to-end through the CLI ─────────────────────────────────────────

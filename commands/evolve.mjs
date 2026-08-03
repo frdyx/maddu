@@ -118,7 +118,9 @@ export default async function evolve(argv) {
     if (destination === 'memory') {
       const fact = hindsight.buildCorrectionFact({
         correctionId, text, category: 'evolve',
-        source: { recId: rec.recId, detector: rec.detector, evidence: rec.evidence },
+        // Evidence sample capped at 64 (isWellFormedFact's array bound) so an
+        // adopted fact stays approvable for recall (Codex r6 minor 4).
+        source: { recId: rec.recId, detector: rec.detector, evidence: (rec.evidence || []).slice(0, 64) },
       });
       await spine.append(repoRoot, {
         type: spine.EVENT_TYPES.LEARN_CORRECTION_WRITTEN,
