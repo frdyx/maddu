@@ -58,7 +58,12 @@ export async function loadSpineLib() {
   // older install (callers fall back to their legacy direct appends).
   let sessionLifecycle = null;
   try { sessionLifecycle = await import(pathToFileURL(join(dir, 'session-lifecycle.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay, sessionLifecycle };
+  // recall.mjs (v1.115.0, memory-recall track) — the bounded trust-gated
+  // recall packet. Optional-load so `brief --for-agent` degrades to a brief
+  // without the recall section on older installs.
+  let recall = null;
+  try { recall = await import(pathToFileURL(join(dir, 'recall.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay, sessionLifecycle, recall };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,

@@ -119,7 +119,50 @@ export default async function command(argv) {
         });
       }
     }
-    const ctxWithSkills = { ...baseCtx, injectedSkills: injected };
+    // v1.115.0 memory-recall track — bounded, trust-gated fact recall.
+    // Mirrors the skill-injection pattern above: recall.mjs is the single
+    // eligibility seam (approved-only, rows+bytes hard caps), MEMORY_INJECTED
+    // witnesses what was fed, MEMORY_INJECTION_REFUSED witnesses what was
+    // withheld (never silently dropped). Older installs without the libs
+    // degrade to a brief without the recall section.
+    let recallPacket = null;
+    try {
+      const { hindsight, recall } = await loadSpineLib();
+      if (hindsight?.factsWithTrust && recall?.buildRecallPacket) {
+        const facts = await hindsight.factsWithTrust(repoRoot);
+        const activeLane = (baseCtx.laneClaims || []).find((c) => c.sessionId === baseCtx.activeSession?.id)?.lane
+          || (baseCtx.laneClaims || [])[0]?.lane || null;
+        recallPacket = recall.buildRecallPacket({ facts, query: '', lane: activeLane, tags });
+        if (recallPacket.items.length > 0 && !flags['dry-run']) {
+          await spine.append(repoRoot, {
+            type: spine.EVENT_TYPES.MEMORY_INJECTED,
+            actor: baseCtx.activeSession?.id || null,
+            lane: activeLane,
+            data: {
+              sessionId: baseCtx.activeSession?.id || null,
+              factIds: recallPacket.items.map((it) => it.id),
+              totalBytes: recallPacket.totalBytes,
+              query: '',
+              lane: activeLane,
+            },
+          });
+        }
+        const trustWithheld = recallPacket.withheld.filter((w) => w.reason === 'not-approved' || w.reason === 'revoked');
+        if (trustWithheld.length > 0 && !flags['dry-run']) {
+          await spine.append(repoRoot, {
+            type: spine.EVENT_TYPES.MEMORY_INJECTION_REFUSED,
+            actor: baseCtx.activeSession?.id || null,
+            lane: activeLane,
+            data: {
+              sessionId: baseCtx.activeSession?.id || null,
+              reason: [...new Set(trustWithheld.map((w) => w.reason))].join(','),
+              refused: trustWithheld.map((w) => ({ id: w.id, kind: w.kind, reason: w.reason })),
+            },
+          });
+        }
+      }
+    } catch { /* recall failure never breaks the brief */ }
+    const ctxWithSkills = { ...baseCtx, injectedSkills: injected, recallPacket };
     const block = agentCtxMod.renderAgentContextText(ctxWithSkills);
     process.stdout.write(block);
     return;

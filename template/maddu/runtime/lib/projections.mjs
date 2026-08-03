@@ -130,6 +130,9 @@ export async function project(repoRoot) {
   // v0.19 Phase 3 — skill auto-injection ledger.
   //   skillInjections: [{ ts, sessionId, skillIds[], triggers[], tags[], totalBytes }]
   const skillInjections = [];
+  // v1.115.0 (memory-recall track) — bounded memory recall ledger.
+  //   memoryInjections: [{ ts, sessionId, factIds[], totalBytes, lane }]
+  const memoryInjections = [];
   // Oversight surface — skill-injection refusals (the URL-swap payoff made visible).
   //   skillRefusals: [{ ts, sessionId, reason, refused[{ id, provenance, reason }] }]
   // Raw payload only — no derived strings, no wall-clock math. The bridge/CLI map
@@ -787,6 +790,16 @@ export async function project(repoRoot) {
       }
       // v0.18 Phase 4 — token ledger.
       // v0.19 Phase 3 — skill auto-injection event.
+      case 'MEMORY_INJECTED': {
+        memoryInjections.push({
+          ts: ev.ts,
+          sessionId: ev.data?.sessionId || ev.actor || null,
+          factIds: Array.isArray(ev.data?.factIds) ? ev.data.factIds.slice() : [],
+          totalBytes: typeof ev.data?.totalBytes === 'number' ? ev.data.totalBytes : null,
+          lane: ev.data?.lane || null,
+        });
+        break;
+      }
       case 'SKILL_INJECTED': {
         skillInjections.push({
           ts: ev.ts,
@@ -960,6 +973,8 @@ export async function project(repoRoot) {
     tokenLedger: tokenLedger.slice(),
     // v0.19 Phase 3 — skill auto-injection ledger (cap 200 most recent).
     skillInjections: skillInjections.slice(-200),
+    // v1.115.0 memory-recall ledger (cap 200 most recent).
+    memoryInjections: memoryInjections.slice(-200),
     // Oversight surface — skill-injection refusals (cap 200 most recent).
     skillRefusals: skillRefusals.slice(-200),
   };
@@ -1029,7 +1044,7 @@ export function projectionDefaults() {
     openFollowups: [], sessionsTree: {},
     janitor: { lastRunAt: null, staleSessions: [], autoClosedTotal: 0 },
     teams: [], pipelines: [], advisors: [], tokenLedger: [], skillInjections: [],
-    skillRefusals: [],
+    skillRefusals: [], memoryInjections: [],
   };
 }
 

@@ -142,6 +142,19 @@ export function renderAgentContextText(ctx) {
       lines.push(`  ${s.id}  ${s.summary || '—'}`);
     }
   }
+  // v1.115.0 memory-recall track — approved facts fed back into context.
+  // Only `trust: approved` facts ever appear here (recall.mjs is the single
+  // eligibility seam; the memory-injection-bounded gate re-verifies bounds).
+  if (ctx.recallPacket?.items?.length) {
+    lines.push('');
+    lines.push(`Recalled facts (approved, ${ctx.recallPacket.items.length} of budget ${ctx.recallPacket.budget?.maxItems ?? '?'}):`);
+    for (const it of ctx.recallPacket.items) {
+      lines.push(`  [${it.kind}] ${it.text}${it.lane ? `  (lane:${it.lane})` : ''}`);
+    }
+    if (ctx.recallPacket.withheldTotal > 0) {
+      lines.push(`  (${ctx.recallPacket.withheldTotal} relevant fact(s) withheld — \`maddu memory recall\` to review)`);
+    }
+  }
   if (ctx.sessionsTreeSummary?.total) {
     lines.push('');
     lines.push(`Session tree: ${ctx.sessionsTreeSummary.total} total, ${ctx.sessionsTreeSummary.activeRoots.length} active root(s)`);
