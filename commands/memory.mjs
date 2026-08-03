@@ -193,7 +193,9 @@ export default async function memory(argv) {
       factId: fact.id, approve,
       reason: (flags.reason && flags.reason !== true) ? String(flags.reason) : null,
     });
-    console.log(`${approve ? 'approved' : 'revoked'} ${fact.id}  ${ANSI.dim}${fact.kind}: ${(fact.text || '').slice(0, 70)}${ANSI.reset}`);
+    // String() guard (Codex r8 minor 2): revoking a tampered fact whose text
+    // is no longer a string must still exit 0 — the state change succeeded.
+    console.log(`${approve ? 'approved' : 'revoked'} ${fact.id}  ${ANSI.dim}${String(fact.kind ?? '')}: ${String(typeof fact.text === 'string' ? fact.text : JSON.stringify(fact.text) ?? '').slice(0, 70)}${ANSI.reset}`);
     return;
   }
 

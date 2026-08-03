@@ -150,6 +150,10 @@ async function main() {
       // with an approved badge or unknown keys.
       const smSurvives = await h.searchMemory(repo, 'deploy');
       ok('searchMemory survives a malformed row', Array.isArray(smSurvives));
+      // r8 minor 2: revoking the tampered (object-text) fact must exit 0 —
+      // the state change succeeds; the success print can't throw.
+      const revTampered = cli(repo, ['memory', 'revoke', rule.id, '--reason', 'tampered content']);
+      ok('CLI revoke of tampered fact exits 0', revTampered.code === 0 && revTampered.out.includes('revoked'), `code=${revTampered.code} ${revTampered.out}`);
       await h.rebuildMemory(repo);
     }
     // r4 blocker 2: unknown extra keys make a fact malformed — a smuggled

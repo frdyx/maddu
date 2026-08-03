@@ -103,12 +103,18 @@ export default {
         // and named, never a false critical, never hidden.
         if (appr.index > i) {
           reorders.push({ ts: ev.ts, reason: `fact ${row.id}: valid approval ${row.approvalEvent} appears AFTER the injection in merged order — cross-partition reorder or approve-after-feed` });
-        } else if ((revocations.get(row.id) || []).some((ri) => ri > appr.index && ri < i)) {
-          reorders.push({ ts: ev.ts, reason: `fact ${row.id}: a revocation appears between approval ${row.approvalEvent} and this injection in merged order — stale feed or cross-partition reorder` });
-        } else if ((supersessions.get(row.id) || []).some((si) => si > appr.index && si < i)) {
-          // r6 blocker 1: a supersession retiring the fact between approval
-          // and feed means retired content may have reached agent context.
-          reorders.push({ ts: ev.ts, reason: `fact ${row.id}: a supersession retires this fact between approval ${row.approvalEvent} and this injection in merged order — retired feed or cross-partition reorder` });
+        } else {
+          // Independent checks (Codex r8 minor 1): a fact both superseded AND
+          // revoked between approval and feed records BOTH anomalies — an
+          // else-chain suppressed the earlier one and misnamed the WARN.
+          if ((revocations.get(row.id) || []).some((ri) => ri > appr.index && ri < i)) {
+            reorders.push({ ts: ev.ts, reason: `fact ${row.id}: a revocation appears between approval ${row.approvalEvent} and this injection in merged order — stale feed or cross-partition reorder` });
+          }
+          if ((supersessions.get(row.id) || []).some((si) => si > appr.index && si < i)) {
+            // r6 blocker 1: a supersession retiring the fact between approval
+            // and feed means retired content may have reached agent context.
+            reorders.push({ ts: ev.ts, reason: `fact ${row.id}: a supersession retires this fact between approval ${row.approvalEvent} and this injection in merged order — retired feed or cross-partition reorder` });
+          }
         }
       }
     });

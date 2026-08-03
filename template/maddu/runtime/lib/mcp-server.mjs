@@ -185,11 +185,12 @@ export async function handleMessage(repoRoot, msg, { serverVersion = '0.0.0' } =
     const id = (msg && typeof msg === 'object' && !Array.isArray(msg) && msg.id !== undefined && msg.id !== null) ? msg.id : null;
     return { jsonrpc: '2.0', id, error: { code: -32600, message: 'invalid request' } };
   }
-  // MCP 2024-11-05 forbids null request ids (r2 minor 6): an explicit
-  // `id: null` is a malformed REQUEST answering -32600 — only a message
-  // WITHOUT an id key is a notification.
-  if ('id' in msg && msg.id === null) {
-    return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request: null id is forbidden (omit id for notifications)' } };
+  // MCP 2024-11-05 forbids null request ids (r2 minor 6), and JSON-RPC ids
+  // must be strings or numbers (r8 minor 3: false/{}/[] were accepted and
+  // echoed). Any present-but-invalid id → -32600 with id null; only a
+  // message WITHOUT an id key is a notification.
+  if ('id' in msg && typeof msg.id !== 'string' && typeof msg.id !== 'number') {
+    return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request: id must be a string or number (omit id for notifications)' } };
   }
   const isNotification = !('id' in msg);
   const reply = (result) => (isNotification ? null : { jsonrpc: '2.0', id: msg.id, result });
