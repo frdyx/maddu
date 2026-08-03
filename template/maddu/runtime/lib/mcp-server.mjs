@@ -83,9 +83,13 @@ async function callTool(repoRoot, name, args = {}) {
     if (typeof args.query !== 'string' || !args.query.trim()) {
       throw invalidParams('query (string) is required');
     }
+    // Clamp caller-controlled limit (r2 major 5): 0/negative/huge values must
+    // never dump the whole corpus into agent context (searchMemory clamps
+    // too — defense at both layers).
+    const lim = Number.isFinite(Number(args.limit)) ? Math.min(Math.max(1, Math.floor(Number(args.limit))), 200) : 50;
     return searchMemory(repoRoot, args.query, {
       kind: typeof args.kind === 'string' ? args.kind : null,
-      limit: Number.isFinite(args.limit) ? args.limit : 50,
+      limit: lim,
     });
   }
   if (name === 'recall_packet') {
@@ -150,10 +154,16 @@ export async function handleMessage(repoRoot, msg, { serverVersion = '0.0.0' } =
   // notification.
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)
       || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
-    const id = (msg && typeof msg === 'object' && !Array.isArray(msg) && msg.id !== undefined) ? msg.id : null;
+    const id = (msg && typeof msg === 'object' && !Array.isArray(msg) && msg.id !== undefined && msg.id !== null) ? msg.id : null;
     return { jsonrpc: '2.0', id, error: { code: -32600, message: 'invalid request' } };
   }
-  const isNotification = msg.id === undefined || msg.id === null;
+  // MCP 2024-11-05 forbids null request ids (r2 minor 6): an explicit
+  // `id: null` is a malformed REQUEST answering -32600 — only a message
+  // WITHOUT an id key is a notification.
+  if ('id' in msg && msg.id === null) {
+    return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request: null id is forbidden (omit id for notifications)' } };
+  }
+  const isNotification = !('id' in msg);
   const reply = (result) => (isNotification ? null : { jsonrpc: '2.0', id: msg.id, result });
   const fail = (code, message) => (isNotification ? null : { jsonrpc: '2.0', id: msg.id, error: { code, message } });
   if (msg.method === 'initialize') {

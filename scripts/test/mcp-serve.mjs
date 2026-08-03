@@ -118,9 +118,15 @@ async function main() {
       'null',
       '{}',
       '[1]',
+      // Codex r2 minor 6: MCP forbids null request ids — explicit id:null is
+      // a malformed REQUEST (-32600), not a notification.
+      '{"jsonrpc":"2.0","id":null,"method":"ping"}',
+      // Codex r2 major 5: caller-controlled limit is clamped — limit:0 must
+      // not dump the whole corpus.
+      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'memory_search', arguments: { query: 'read-only', limit: 0 } } },
     ];
-    // Expected: 8 id-replies + 1 parse error + 3 invalid-request errors.
-    const { responses } = await rpcDialogue(repo, dialogue, 12);
+    // Expected: 9 id-replies + 1 parse error + 4 invalid-request errors.
+    const { responses } = await rpcDialogue(repo, dialogue, 14);
     const byId = new Map(responses.filter((r) => r.id !== undefined && r.id !== null).map((r) => [r.id, r]));
 
     // initialize
@@ -152,8 +158,10 @@ async function main() {
     ok('unknown method → -32601', byId.get(8)?.error?.code === -32601, JSON.stringify(byId.get(8)));
     ok('parse error → -32700 with null id', responses.some((r) => r.error?.code === -32700 && r.id === null));
     const invalids = responses.filter((r) => r.error?.code === -32600);
-    ok('three invalid-shape messages → three -32600 with null id', invalids.length === 3 && invalids.every((r) => r.id === null), JSON.stringify(invalids));
-    ok('server survived the garbage (still answered everything)', responses.length === 12, `${responses.length}`);
+    ok('four invalid messages → four -32600 with null id', invalids.length === 4 && invalids.every((r) => r.id === null), JSON.stringify(invalids));
+    const clamped = parse(byId.get(9));
+    ok('limit:0 clamps instead of dumping the corpus', Array.isArray(clamped) && clamped.length >= 1 && clamped.length <= 200, `${clamped?.length}`);
+    ok('server survived the garbage (still answered everything)', responses.length === 14, `${responses.length}`);
 
     // THE READ-ONLY PROOF.
     const after = await integritySurfaces();

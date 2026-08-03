@@ -82,10 +82,12 @@ export default async function memory(argv) {
     let base;
     if (flags.all) {
       base = await hindsight.readMemory(repoRoot);
-      if (hindsight.trustStates) {
+      if (hindsight.trustStates && hindsight.trustFor) {
         const { spine } = await loadSpineLib();
         const trust = hindsight.trustStates(await spine.readAll(repoRoot));
-        base = base.map((f) => ({ ...f, trust: trust.get(f.id)?.state || 'asserted' }));
+        // Same hash-validated resolution as every other surface (r2 major 4)
+        // — a tampered row never wears an approved badge, even under --all.
+        base = base.map((f) => ({ ...f, ...hindsight.trustFor(f, trust) }));
       }
     } else {
       base = hindsight.factsWithTrust ? await hindsight.factsWithTrust(repoRoot)

@@ -252,14 +252,42 @@ export async function supersede(repoRoot, { priorId, fact, reason = null }) {
 
 export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
 
-// Content hash binding an approval to WHAT was approved (Codex r1 blocker 2):
-// approval is meaningless if bound to a mutable-file row's id alone — editing
-// an approved row's text in memory.ndjson while keeping its id would inject
-// never-approved content. MEMORY_FACT_APPROVED carries sha256(text); the join
-// treats an approval as valid ONLY while the current text matches. The hash
-// is REQUIRED (no legacy exemption — the feature ships with it).
+// Canonical consumed-content serialization (Codex r1 blocker 2 + r2 blocker
+// 1): approval must bind to EVERYTHING agent context consumes or selection
+// keys on — text, kind, tags, lane, sourceEvent — not text alone, or a
+// mutable-file edit to `source.lane`/`tags` smuggles unapproved content (or
+// forces selection) past a text-only hash. The SAME serialization is the
+// byte measure for recall budgets and the gate's recompute (r2 blocker 2:
+// counting text bytes only let a tiny fact carry megabytes in its lane).
+export function canonicalFactContent(fact) {
+  return JSON.stringify({
+    text: String(fact?.text || ''),
+    kind: String(fact?.kind || ''),
+    tags: Array.isArray(fact?.tags) ? fact.tags.map(String) : [],
+    lane: fact?.source?.lane ?? null,
+    sourceEvent: fact?.source?.event ?? null,
+  });
+}
+
 export function factContentHash(fact) {
-  return createHash('sha256').update(String(fact?.text || ''), 'utf8').digest('hex');
+  return createHash('sha256').update(canonicalFactContent(fact), 'utf8').digest('hex');
+}
+
+export function factContentBytes(fact) {
+  return Buffer.byteLength(canonicalFactContent(fact), 'utf8');
+}
+
+// Single trust-resolution law (r2 major 4): EVERY surface that shows a trust
+// badge must apply the same hash validation — `approved` is only reportable
+// while the current content matches the approval's sha256. Raw trustStates
+// output is never a display state on its own.
+export function trustFor(fact, trustMap) {
+  const t = trustMap.get(fact.id);
+  if (!t) return { trust: 'asserted' };
+  if (t.state === 'approved' && t.sha256 !== factContentHash(fact)) {
+    return { trust: 'asserted', trustNote: 'approval-hash-mismatch' };
+  }
+  return { trust: t.state };
 }
 
 // Pure: fold trust transitions out of an event list. Returns
@@ -307,15 +335,7 @@ export async function factsWithTrust(repoRoot) {
   const retired = supersededByEvents(events);
   return facts
     .filter((f) => !retired.has(f.id))
-    .map((f) => {
-      const t = trust.get(f.id);
-      if (!t) return { ...f, trust: 'asserted' };
-      if (t.state === 'approved' && t.sha256 !== factContentHash(f)) {
-        // Approval bound to different content — never inject silently.
-        return { ...f, trust: 'asserted', trustNote: 'approval-hash-mismatch' };
-      }
-      return { ...f, trust: t.state };
-    });
+    .map((f) => ({ ...f, ...trustFor(f, trust) }));
 }
 
 // Record an approval/revocation. Refuses unknown fact ids so trust events
@@ -392,7 +412,11 @@ export async function searchMemory(repoRoot, query, { kind = null, limit = 50 } 
       f.tags.some((t) => t.toLowerCase().includes(q))
     );
   }
-  // Join trust states (v1.115.0) so every memory surface shows them.
+  // Clamp limit (r2 major 5): slice(-0) is slice(0) — the whole corpus; and
+  // callers (MCP) pass caller-controlled values.
+  const lim = Number.isFinite(Number(limit)) ? Math.min(Math.max(1, Math.floor(Number(limit))), 1000) : 50;
+  // Join trust states with hash validation (r2 major 4) — a tampered row
+  // must never wear an `approved` badge on ANY surface.
   const trust = trustStates(await readAll(repoRoot));
-  return out.slice(-limit).map((f) => ({ ...f, trust: trust.get(f.id)?.state || 'asserted' }));
+  return out.slice(-lim).map((f) => ({ ...f, ...trustFor(f, trust) }));
 }

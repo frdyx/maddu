@@ -5465,6 +5465,9 @@
               "refused": {
                 "type": "array"
               },
+              "refusedTotal": {
+                "type": "number"
+              },
               "reason": {
                 "type": "string"
               },

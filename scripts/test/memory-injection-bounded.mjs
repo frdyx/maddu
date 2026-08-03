@@ -57,7 +57,7 @@ async function main() {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
       await spine.append(repo, {
         type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: Buffer.byteLength(rule.text, 'utf8'), query: '', lane: null }
+        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
       });
       const r = await runGate(gates, repo);
       ok('gate exists and ran', !!r, JSON.stringify(r));

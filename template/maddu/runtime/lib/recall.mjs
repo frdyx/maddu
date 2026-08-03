@@ -18,10 +18,16 @@
 // across runtimes.
 
 import { tokenize, buildCorpusStats, scoreBM25, tagBoostFor, laneBoostFor } from './relevance.mjs';
+import { factContentBytes } from './hindsight.mjs';
 
 export const MAX_RECALL_ITEMS = 8;
 export const MAX_RECALL_BYTES = 16384; // hard packet cap, below the 24KB skill budget
-export const MAX_WITHHELD_LISTED = 20;
+export const MAX_WITHHELD_LISTED = 20;   // display-surface row cap
+export const MAX_WITHHELD_ROWS = 100;    // hard packet cap (r2 blocker 2: an
+// unbounded withheld list made bridge/MCP responses corpus-sized and
+// attacker-expandable). withheldByReason carries COMPLETE counts, so no
+// typed reason is ever lost even when rows truncate; entries are sanitized
+// (id/kind length-capped) so a tampered row can't bloat the packet.
 
 // With no query, the packet is a standing rules/constraints digest: kinds
 // carry a base weight so operational law outranks narrative recall.
@@ -37,7 +43,14 @@ const KIND_WEIGHT = {
   summary: 0,
 };
 
-const byteLen = (s) => Buffer.byteLength(String(s || ''), 'utf8');
+// Byte measure = the canonical consumed-content serialization (text + kind +
+// tags + lane + sourceEvent) — the SAME string the approval hash covers, so
+// the budget counts everything agent context actually receives (r2 blocker
+// 2: a 9-byte text with megabytes in `lane` must not report totalBytes: 9).
+const factBytes = factContentBytes;
+const capStr = (s, n) => String(s ?? '').slice(0, n);
+const withheldEntry = (f, score, reason) =>
+  ({ id: capStr(f.id, 128), kind: capStr(f.kind, 32), trust: f.trust || 'asserted', score, reason });
 
 // buildRecallPacket({ facts, query, lane, tags, budget }) → packet.
 //   facts:  hindsight.factsWithTrust output (each fact carries `trust`)
@@ -77,20 +90,25 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
 
   const items = [];
   const withheld = [];
+  const withheldByReason = {};
   let totalBytes = 0;
+  const hold = (f, score, reason) => {
+    withheldByReason[reason] = (withheldByReason[reason] || 0) + 1;
+    if (withheld.length < MAX_WITHHELD_ROWS) withheld.push(withheldEntry(f, score, reason));
+  };
   for (const { f, score } of scored) {
     const trust = f.trust || 'asserted';
     if (trust !== 'approved') {
-      withheld.push({ id: f.id, kind: f.kind, trust, score, reason: trust === 'revoked' ? 'revoked' : 'not-approved' });
+      hold(f, score, trust === 'revoked' ? 'revoked' : 'not-approved');
       continue;
     }
     if (items.length >= maxItems) {
-      withheld.push({ id: f.id, kind: f.kind, trust, score, reason: 'budget-rows' });
+      hold(f, score, 'budget-rows');
       continue;
     }
-    const bytes = byteLen(f.text);
+    const bytes = factBytes(f);
     if (totalBytes + bytes > maxBytes) {
-      withheld.push({ id: f.id, kind: f.kind, trust, score, reason: 'budget-bytes' });
+      hold(f, score, 'budget-bytes');
       continue;
     }
     totalBytes += bytes;
@@ -110,10 +128,12 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
     lane: lane || null,
     budget: { maxItems, maxBytes },
     items,
-    // FULL withheld list — the refusal witness must not lose typed reasons
-    // (Codex r1 minor 9). Display surfaces cap with MAX_WITHHELD_LISTED.
+    // Rows hard-capped at MAX_WITHHELD_ROWS (bounded packet), entries
+    // sanitized; withheldByReason carries COMPLETE per-reason counts so the
+    // refusal witness never loses a typed reason (r1 minor 9 + r2 blocker 2).
     withheld,
-    withheldTotal: withheld.length,
+    withheldByReason,
+    withheldTotal: Object.values(withheldByReason).reduce((a, b) => a + b, 0),
     totalBytes,
   };
 }

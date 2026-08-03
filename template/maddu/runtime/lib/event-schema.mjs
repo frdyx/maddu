@@ -288,7 +288,7 @@ export const EVENT_SCHEMA = {
   MEMORY_FACT_APPROVED: { summary: "An operator approved a memory fact for recall injection (sha256 binds the approval to the approved content).", data: { factId: 'string', kind: 'string', reason: 'string?', sha256: 'string' } },
   MEMORY_FACT_REVOKED: { summary: "An operator revoked a memory fact from recall.", data: { factId: 'string', kind: 'string', reason: 'string' } },
   MEMORY_INJECTED: { summary: "Approved memory facts were injected into an agent brief (bounded recall packet).", data: { factIds: 'array', lane: 'string|null', query: 'string', sessionId: 'string|null', totalBytes: 'number' } },
-  MEMORY_INJECTION_REFUSED: { summary: "Context-relevant memory facts were withheld from injection (trust or budget).", data: { refused: 'array', reason: 'string', sessionId: 'string|null' } },
+  MEMORY_INJECTION_REFUSED: { summary: "Context-relevant memory facts were withheld from injection (trust or budget).", data: { refused: 'array', refusedTotal: 'number?', reason: 'string', sessionId: 'string|null' } },
   BRIEFING_CURATED: { summary: "A curated orient/handoff briefing persisted its original for retrieval.", data: { briefingId: 'string', dropped: 'string', handoff: 'object', kind: 'string', orient: 'string', originalRef: 'string' } },
   BRIDGE_ORIGIN_REJECTED: { summary: "The bridge rejected a request with a non-loopback Host/Origin.", data: { host: 'string|null', method: 'string', origin: 'string|null', path: 'string', reason: 'string' } },
   BRIDGE_CROSS_WORKSPACE: { summary: "A bridge request selected a workspace other than the active one.", data: { active: 'string', method: 'string', path: 'string', workspace: 'string' } },

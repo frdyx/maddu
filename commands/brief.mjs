@@ -128,12 +128,16 @@ export default async function command(argv) {
     let recallPacket = null;
     try {
       const { hindsight, recall } = await loadSpineLib();
-      if (hindsight?.factsWithTrust && recall?.buildRecallPacket) {
+      // r2 major 3: --dry-run must not become an unwitnessed agent-context
+      // path — under dry-run no fact text renders at all (the operator
+      // inspection surface is `maddu memory recall`, which has no injection
+      // semantics). Witnessed or absent; never silent.
+      if (!flags['dry-run'] && hindsight?.factsWithTrust && recall?.buildRecallPacket) {
         const facts = await hindsight.factsWithTrust(repoRoot);
         const activeLane = (baseCtx.laneClaims || []).find((c) => c.sessionId === baseCtx.activeSession?.id)?.lane
           || (baseCtx.laneClaims || [])[0]?.lane || null;
         recallPacket = recall.buildRecallPacket({ facts, query: '', lane: activeLane, tags });
-        if (recallPacket.items.length > 0 && !flags['dry-run']) {
+        if (recallPacket.items.length > 0) {
           // FAIL CLOSED (Codex r1 major 4): if the MEMORY_INJECTED witness
           // cannot be appended, the facts must NOT reach the rendered brief —
           // an unwitnessed injection is invisible to the critical gate.
@@ -156,17 +160,24 @@ export default async function command(argv) {
           }
         }
         const trustWithheld = (recallPacket?.withheld || []).filter((w) => w.reason === 'not-approved' || w.reason === 'revoked');
-        if (trustWithheld.length > 0 && !flags['dry-run']) {
-          await spine.append(repoRoot, {
-            type: spine.EVENT_TYPES.MEMORY_INJECTION_REFUSED,
-            actor: baseCtx.activeSession?.id || null,
-            lane: activeLane,
-            data: {
-              sessionId: baseCtx.activeSession?.id || null,
-              reason: [...new Set(trustWithheld.map((w) => w.reason))].join(','),
-              refused: trustWithheld.map((w) => ({ id: w.id, kind: w.kind, reason: w.reason })),
-            },
-          });
+        const trustWithheldTotal = (recallPacket?.withheldByReason?.['not-approved'] || 0) + (recallPacket?.withheldByReason?.['revoked'] || 0);
+        if (trustWithheldTotal > 0) {
+          // Refusal witness stays fail-open by design (safe asymmetry, per
+          // Codex r2: withheld content is NOT rendered either way). Rows are
+          // the packet's sanitized capped list; counts are complete.
+          try {
+            await spine.append(repoRoot, {
+              type: spine.EVENT_TYPES.MEMORY_INJECTION_REFUSED,
+              actor: baseCtx.activeSession?.id || null,
+              lane: activeLane,
+              data: {
+                sessionId: baseCtx.activeSession?.id || null,
+                reason: [...new Set(trustWithheld.map((w) => w.reason))].join(',') || 'not-approved',
+                refused: trustWithheld.map((w) => ({ id: w.id, kind: w.kind, reason: w.reason })),
+                refusedTotal: trustWithheldTotal,
+              },
+            });
+          } catch { /* witness-only; nothing withheld ever renders */ }
         }
       }
     } catch { /* recall failure never breaks the brief */ }

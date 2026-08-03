@@ -100,7 +100,22 @@ async function main() {
     // out of the refusal witness (display surfaces cap separately).
     const many = Array.from({ length: 30 }, (_, i) => fact(`f_w${i}`, 'rule', `rule: unapproved law ${i}`, 'asserted'));
     const p = R.buildRecallPacket({ facts: many });
-    ok('withheld carries every typed reason', p.withheld.length === 30 && p.withheldTotal === 30, `${p.withheld.length}/${p.withheldTotal}`);
+    ok('withheld rows present under the hard cap', p.withheld.length === 30 && p.withheldTotal === 30, `${p.withheld.length}/${p.withheldTotal}`);
+    ok('withheldByReason counts complete', p.withheldByReason['not-approved'] === 30, JSON.stringify(p.withheldByReason));
+    // r2 blocker 2: the packet is BOUNDED — rows cap at MAX_WITHHELD_ROWS,
+    // counts stay complete, entries are length-sanitized.
+    const flood = Array.from({ length: 250 }, (_, i) => fact(`f_x${i}`.padEnd(400, 'z'), 'k'.repeat(500), `rule: flood ${i}`, 'asserted'));
+    const fp = R.buildRecallPacket({ facts: flood.map((f) => ({ ...f, kind: 'rule' })) });
+    ok('withheld rows hard-capped', fp.withheld.length === R.MAX_WITHHELD_ROWS, `${fp.withheld.length}`);
+    ok('withheldTotal counts beyond the cap', fp.withheldTotal === 250);
+    ok('withheld entries sanitized (id capped)', fp.withheld.every((w) => w.id.length <= 128));
+  }
+  {
+    // r2 blocker 2: byte budget measures the CANONICAL consumed content —
+    // a tiny text with a megabyte lane must not fit under a tiny totalBytes.
+    const smuggle = fact('f_smuggle', 'rule', 'rule: ok', 'approved', { source: { lane: 'x'.repeat(20000) } });
+    const p2 = R.buildRecallPacket({ facts: [smuggle] });
+    ok('lane bytes count against the budget', p2.items.length === 0 && p2.withheldByReason['budget-bytes'] === 1, JSON.stringify({ items: p2.items.length, by: p2.withheldByReason }));
   }
 
   // ── end-to-end through the CLI ─────────────────────────────────────────
@@ -128,10 +143,12 @@ async function main() {
     const injected = events.filter((e) => e.type === 'MEMORY_INJECTED');
     ok('MEMORY_INJECTED emitted with factIds', injected.length >= 1 && injected.at(-1).data.factIds.includes(rule.id));
 
-    // --dry-run emits nothing new.
+    // --dry-run emits nothing new AND renders no fact text (r2 major 3:
+    // never an unwitnessed agent-context path — witnessed or absent).
     const before = (await spine.readAll(repo)).length;
-    execFileSync(process.execPath, [BIN, 'brief', '--for-agent', '--dry-run'], { cwd: repo, encoding: 'utf8' });
+    const dry = execFileSync(process.execPath, [BIN, 'brief', '--for-agent', '--dry-run'], { cwd: repo, encoding: 'utf8' });
     ok('--dry-run emits no events', (await spine.readAll(repo)).length === before);
+    ok('--dry-run renders no recalled facts', !dry.includes('Recalled facts') && !dry.includes('never bypass the trust gate'));
 
     // `memory recall` inspection surface.
     const rec = execFileSync(process.execPath, [BIN, 'memory', 'recall', '--json'], { cwd: repo, encoding: 'utf8' });

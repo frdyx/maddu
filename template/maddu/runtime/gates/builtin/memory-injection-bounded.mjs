@@ -46,11 +46,14 @@ export default {
     let deriveError = null;
     try {
       const h = await loadGateLib(ctx.repoRoot, 'hindsight.mjs');
-      if (!h?.factsWithTrust) throw new Error('hindsight.factsWithTrust unavailable');
+      if (!h?.factsWithTrust || !h?.factContentBytes) throw new Error('hindsight trust surface unavailable');
+      // Byte measure = the canonical consumed-content serialization (same
+      // string the approval hash covers) — text-only counting let a tiny
+      // fact carry megabytes in its lane/tags (Codex r2 blocker 2).
       approvedBytes = new Map(
         (await h.factsWithTrust(ctx.repoRoot))
           .filter((f) => f.trust === 'approved')
-          .map((f) => [f.id, Buffer.byteLength(String(f.text || ''), 'utf8')])
+          .map((f) => [f.id, h.factContentBytes(f)])
       );
     } catch (err) {
       deriveError = err.message || String(err);
