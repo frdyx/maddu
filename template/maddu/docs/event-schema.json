@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.11.0",
+  "x-contractVersion": "1.13.0",
   "type": "object",
   "required": [
     "v",
@@ -182,6 +182,10 @@
         "LEARN_JUDGED",
         "LEARN_CORRECTION_WRITTEN",
         "MEMORY_FACT_SUPERSEDED",
+        "MEMORY_FACT_APPROVED",
+        "MEMORY_FACT_REVOKED",
+        "MEMORY_INJECTED",
+        "MEMORY_INJECTION_REFUSED",
         "BRIEFING_CURATED",
         "BRIDGE_ORIGIN_REJECTED",
         "BRIDGE_CROSS_WORKSPACE",
@@ -5335,6 +5339,137 @@
               },
               "supersedes": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MEMORY_FACT_APPROVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An operator approved a memory fact for recall injection.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "factId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MEMORY_FACT_REVOKED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An operator revoked a memory fact from recall.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "factId": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MEMORY_INJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Approved memory facts were injected into an agent brief (bounded recall packet).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "factIds": {
+                "type": "array"
+              },
+              "lane": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "query": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "totalBytes": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MEMORY_INJECTION_REFUSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Context-relevant memory facts were withheld from injection (trust or budget).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "refused": {
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }

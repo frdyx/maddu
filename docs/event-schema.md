@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.11.0` · **Event types:** 186
+**Contract version:** `1.13.0` · **Event types:** 190
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (186)
+## Events (190)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -191,6 +191,10 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `LEARN_JUDGED` | A correction candidate was judged by a worker. | `candidateId: string`, `category: string`, `destination: string`, `verdict: string`, `workerId: string` |
 | `LEARN_CORRECTION_WRITTEN` | A typed correction was written to an agent file or memory. | `agent: string`, `category: string`, `correctionId: string`, `destination: string`, `file: string`, `memory: string`, `target: string` |
 | `MEMORY_FACT_SUPERSEDED` | A memory fact was superseded by a newer fact. | `fact: object`, `factId: string`, `kind: string`, `reason: string`, `supersedes: string` |
+| `MEMORY_FACT_APPROVED` | An operator approved a memory fact for recall injection. | `factId: string`, `kind: string`, `reason: string?` |
+| `MEMORY_FACT_REVOKED` | An operator revoked a memory fact from recall. | `factId: string`, `kind: string`, `reason: string` |
+| `MEMORY_INJECTED` | Approved memory facts were injected into an agent brief (bounded recall packet). | `factIds: array`, `lane: string\|null`, `query: string`, `sessionId: string\|null`, `totalBytes: number` |
+| `MEMORY_INJECTION_REFUSED` | Context-relevant memory facts were withheld from injection (trust or budget). | `refused: array`, `reason: string`, `sessionId: string\|null` |
 | `BRIEFING_CURATED` | A curated orient/handoff briefing persisted its original for retrieval. | `briefingId: string`, `dropped: string`, `handoff: object`, `kind: string`, `orient: string`, `originalRef: string` |
 | `BRIDGE_ORIGIN_REJECTED` | The bridge rejected a request with a non-loopback Host/Origin. | `host: string\|null`, `method: string`, `origin: string\|null`, `path: string`, `reason: string` |
 | `BRIDGE_CROSS_WORKSPACE` | A bridge request selected a workspace other than the active one. | `active: string`, `method: string`, `path: string`, `workspace: string` |

@@ -88,7 +88,19 @@
 // compatible (spelled `?` — absent on old records → unverifiable/legacy);
 // schemaVersion stays 1 on the two existing frozen shapes. Additive → minor
 // bump; baseline refreshed with this release.
-export const EVENT_CONTRACT_VERSION = '1.11.0';
+// 1.12.0 (memory-recall track, Phase 3) — added MEMORY_FACT_APPROVED and
+// MEMORY_FACT_REVOKED: event-sourced fact trust states. Every extracted fact
+// is implicitly `asserted` (no event); operator approval makes it eligible
+// for recall injection, revocation excludes it. Trust lives on the spine so
+// it survives rebuildMemory and is never inferred from kind/actor/chain.
+// Additive → minor bump; baseline refresh at the next release.
+// 1.13.0 (memory-recall track, Phase 4) — added MEMORY_INJECTED and
+// MEMORY_INJECTION_REFUSED: bounded recall-injection witnesses mirroring the
+// skill-injection pair. Only approved facts are injectable (recall.mjs is the
+// single eligibility seam; the critical memory-injection-bounded gate
+// re-verifies every injection row). Additive → minor bump; baseline refresh
+// at the next release.
+export const EVENT_CONTRACT_VERSION = '1.13.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -270,6 +282,10 @@ export const EVENT_SCHEMA = {
   LEARN_JUDGED: { summary: "A correction candidate was judged by a worker.", data: { candidateId: 'string', category: 'string', destination: 'string', verdict: 'string', workerId: 'string' } },
   LEARN_CORRECTION_WRITTEN: { summary: "A typed correction was written to an agent file or memory.", data: { agent: 'string', category: 'string', correctionId: 'string', destination: 'string', file: 'string', memory: 'string', target: 'string' } },
   MEMORY_FACT_SUPERSEDED: { summary: "A memory fact was superseded by a newer fact.", data: { fact: 'object', factId: 'string', kind: 'string', reason: 'string', supersedes: 'string' } },
+  MEMORY_FACT_APPROVED: { summary: "An operator approved a memory fact for recall injection.", data: { factId: 'string', kind: 'string', reason: 'string?' } },
+  MEMORY_FACT_REVOKED: { summary: "An operator revoked a memory fact from recall.", data: { factId: 'string', kind: 'string', reason: 'string' } },
+  MEMORY_INJECTED: { summary: "Approved memory facts were injected into an agent brief (bounded recall packet).", data: { factIds: 'array', lane: 'string|null', query: 'string', sessionId: 'string|null', totalBytes: 'number' } },
+  MEMORY_INJECTION_REFUSED: { summary: "Context-relevant memory facts were withheld from injection (trust or budget).", data: { refused: 'array', reason: 'string', sessionId: 'string|null' } },
   BRIEFING_CURATED: { summary: "A curated orient/handoff briefing persisted its original for retrieval.", data: { briefingId: 'string', dropped: 'string', handoff: 'object', kind: 'string', orient: 'string', originalRef: 'string' } },
   BRIDGE_ORIGIN_REJECTED: { summary: "The bridge rejected a request with a non-loopback Host/Origin.", data: { host: 'string|null', method: 'string', origin: 'string|null', path: 'string', reason: 'string' } },
   BRIDGE_CROSS_WORKSPACE: { summary: "A bridge request selected a workspace other than the active one.", data: { active: 'string', method: 'string', path: 'string', workspace: 'string' } },

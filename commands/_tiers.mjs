@@ -66,6 +66,10 @@ export default {
   // never fire without a human-attributable invocation (the approval ride is
   // always-on, and a scheduled promote would defeat its point).
   model:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  // v1.115.0 (memory-recall track) — wiki CLI. `list`/`drift`/`page` read, but
+  // `sync`/`rebuild` rewrite .maddu/wiki pages: any write path ⇒ whole verb
+  // mutating + auto-trigger forbidden.
+  wiki:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers
   // framework bytes into other repos, so the verb is mutating + auto-trigger
   // forbidden (same convention as trust/mcp/plugin: any write path → mutating).
@@ -78,7 +82,11 @@ export default {
   lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
-  memory:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
+  // v1.115.0 (memory-recall track): flipped read-only → mutating. The verb was
+  // declared read-only while `supersede`/`extract` already wrote, and Phase 3
+  // adds approve/revoke (spine events). Same escaped-gauntlet fix as `spine`:
+  // any write path anywhere in the verb ⇒ the whole verb is mutating.
+  memory:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   phase:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   register:     { tier: 'mutating',  autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   review:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },

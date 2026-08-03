@@ -267,6 +267,25 @@ export const EVENT_TYPES = {
   // chain survives a `rebuildMemory` replay (events are the source of truth).
   //   MEMORY_FACT_SUPERSEDED: { factId, supersedes, kind, reason }
   MEMORY_FACT_SUPERSEDED:     'MEMORY_FACT_SUPERSEDED',
+  // v1.115.0 (memory-recall track) — fact trust states. Every extracted fact
+  // starts implicitly `asserted` (no event). Operator approval flips it
+  // injectable; revocation excludes it from recall. Trust lives on the spine
+  // so it survives a rebuildMemory replay and is never inferred from the
+  // fact's kind, actor, or hash-chain membership.
+  //   MEMORY_FACT_APPROVED: { factId, kind, reason }
+  //   MEMORY_FACT_REVOKED:  { factId, kind, reason }
+  MEMORY_FACT_APPROVED:       'MEMORY_FACT_APPROVED',
+  MEMORY_FACT_REVOKED:        'MEMORY_FACT_REVOKED',
+  // v1.115.0 (memory-recall track) — bounded recall injection witnesses,
+  // mirroring SKILL_INJECTED / SKILL_INJECTION_REFUSED. One MEMORY_INJECTED
+  // per `brief --for-agent` call that feeds ≥1 approved fact; one
+  // MEMORY_INJECTION_REFUSED when ≥1 context-relevant fact was withheld for
+  // trust reasons (witnessed, never silently dropped). The critical
+  // `memory-injection-bounded` gate re-verifies every MEMORY_INJECTED row.
+  //   MEMORY_INJECTED:          { sessionId, factIds, totalBytes, query, lane }
+  //   MEMORY_INJECTION_REFUSED: { sessionId, reason, refused }
+  MEMORY_INJECTED:            'MEMORY_INJECTED',
+  MEMORY_INJECTION_REFUSED:   'MEMORY_INJECTION_REFUSED',
   // v1.9.0 — reversible briefings (retrieve-on-demand / CCR). A curated
   // orient/handoff briefing persists its full original so dropped detail stays
   // retrievable via `maddu learn retrieve <briefingId>`.

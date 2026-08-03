@@ -118,9 +118,11 @@ export function extractFromSliceStop(ev) {
   }));
 }
 
-export async function ensureMemoryFile(repoRoot) {
+async function ensureMemoryFile(repoRoot) {
   const paths = pathsFor(repoRoot);
-  await mkdir(paths.statePrjDir, { recursive: true });
+  // Phase 1 fix (memory-recall track): mkdir the directory the file actually
+  // lives in (.maddu) — this previously created the unrelated .maddu/state.
+  await mkdir(paths.state, { recursive: true });
   const p = memoryPath(repoRoot);
   try { await stat(p); } catch { await writeFile(p, ''); }
   return p;
@@ -241,6 +243,56 @@ export async function supersede(repoRoot, { priorId, fact, reason = null }) {
   return next;
 }
 
+// ── v1.115.0 fact trust states (memory-recall track) ────────────────────────
+// Every fact is implicitly `asserted` when extracted (no event). Operator
+// approval (MEMORY_FACT_APPROVED) makes it eligible for recall injection;
+// revocation (MEMORY_FACT_REVOKED) excludes it. Last event in spine order
+// wins. Trust is event-sourced — it survives rebuildMemory — and is NEVER
+// inferred from a fact's kind, actor, or hash-chain membership.
+
+export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
+
+// Pure: fold trust transitions out of an event list. Returns
+// Map<factId, { state: 'approved'|'revoked', ts, reason }> — absent = asserted.
+export function trustStates(events) {
+  const out = new Map();
+  for (const ev of events) {
+    if (ev.type !== 'MEMORY_FACT_APPROVED' && ev.type !== 'MEMORY_FACT_REVOKED') continue;
+    const factId = ev.data?.factId;
+    if (!factId) continue;
+    out.set(factId, {
+      state: ev.type === 'MEMORY_FACT_APPROVED' ? 'approved' : 'revoked',
+      ts: ev.ts || null,
+      reason: ev.data?.reason || null,
+    });
+  }
+  return out;
+}
+
+// Current facts joined with their trust state. Each fact gains
+// `trust: 'asserted'|'approved'|'revoked'` (superseded facts are already
+// excluded by currentFacts; historical views can join trustStates themselves).
+export async function factsWithTrust(repoRoot) {
+  const [facts, events] = await Promise.all([currentFacts(repoRoot), readAll(repoRoot)]);
+  const trust = trustStates(events);
+  return facts.map((f) => ({ ...f, trust: trust.get(f.id)?.state || 'asserted' }));
+}
+
+// Record an approval/revocation. Refuses unknown fact ids so trust events
+// can't dangle; caller resolves id prefixes before this point.
+export async function setFactTrust(repoRoot, { factId, approve, reason = null, actor = null }) {
+  const all = await readMemory(repoRoot);
+  const fact = all.find((f) => f.id === factId);
+  if (!fact) throw new Error(`unknown fact id: ${factId}`);
+  await append(repoRoot, {
+    type: approve ? 'MEMORY_FACT_APPROVED' : 'MEMORY_FACT_REVOKED',
+    actor,
+    lane: fact.source?.lane || null,
+    data: { factId, kind: fact.kind, reason },
+  });
+  return fact;
+}
+
 // Re-extract the entire spine — truncates memory.ndjson and rebuilds. Used by
 // `maddu memory extract --rebuild`. v1.9.0: also replays correction facts
 // carried on LEARN_CORRECTION_WRITTEN events (destination:'memory'), so
@@ -292,5 +344,7 @@ export async function searchMemory(repoRoot, query, { kind = null, limit = 50 } 
       f.tags.some((t) => t.toLowerCase().includes(q))
     );
   }
-  return out.slice(-limit);
+  // Join trust states (v1.115.0) so every memory surface shows them.
+  const trust = trustStates(await readAll(repoRoot));
+  return out.slice(-limit).map((f) => ({ ...f, trust: trust.get(f.id)?.state || 'asserted' }));
 }
