@@ -117,6 +117,18 @@ async function main() {
     const p2 = R.buildRecallPacket({ facts: [smuggle] });
     ok('lane bytes count against the budget', p2.items.length === 0 && p2.withheldByReason['budget-bytes'] === 1, JSON.stringify({ items: p2.items.length, by: p2.withheldByReason }));
   }
+  {
+    // r3 major 3: the packet is bounded END-TO-END — caller-controlled
+    // query/lane/tags are clamped before use and before echo.
+    const p3 = R.buildRecallPacket({ facts: [], query: 'q'.repeat(1e6), lane: 'l'.repeat(1e6), tags: Array.from({ length: 500 }, () => 't'.repeat(5000)) });
+    ok('echoed query clamped', p3.query.length <= 512, `${p3.query.length}`);
+    ok('echoed lane clamped', p3.lane.length <= 128, `${p3.lane.length}`);
+    ok('zero-fact packet stays small', JSON.stringify(p3).length < 4096, `${JSON.stringify(p3).length}`);
+    // r3 minor 8: the tamper signal survives into withheld entries.
+    const noted = { ...fact('f_note', 'rule', 'rule: was approved once', 'asserted'), trustNote: 'approval-hash-mismatch' };
+    const p4 = R.buildRecallPacket({ facts: [noted] });
+    ok('withheld entry carries trustNote', p4.withheld[0]?.note === 'approval-hash-mismatch', JSON.stringify(p4.withheld));
+  }
 
   // ── end-to-end through the CLI ─────────────────────────────────────────
   const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'maddu-recall-'));

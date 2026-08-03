@@ -24,7 +24,7 @@
 // tripwire that would justify .maddu/index/ when corpora outgrow scanning.
 
 import { readAll } from './spine.mjs';
-import { readMemory } from './hindsight.mjs';
+import { readMemory, trustStates, trustFor } from './hindsight.mjs';
 import { listSkills, readSkill } from './skills.mjs';
 import { listLaneMailboxes, readMailbox } from './mailbox.mjs';
 import { tokenize, buildCorpusStats, scoreBM25, tagBoostFor, laneBoostFor } from './relevance.mjs';
@@ -63,11 +63,19 @@ function collapseBySource(rows) {
     if (!held) { bySource.set(key, r); out.push(r); continue; }
     if (r.score > held.score) {
       r.also = [...(held.also || []), { kind: held.kind, id: held.id }];
+      r.alsoTotal = (held.alsoTotal || held.also?.length || 0) + 1;
       bySource.set(key, r);
       out[out.indexOf(held)] = r;
     } else {
+      held.alsoTotal = (held.alsoTotal || held.also?.length || 0) + 1;
       held.also = [...(held.also || []), { kind: r.kind, id: r.id }];
     }
+  }
+  // Cap sibling metadata (r3 major 5): one slice-stop with many extracted
+  // facts must not make a limit:1 result corpus-sized. alsoTotal keeps the
+  // honest count.
+  for (const r of out) {
+    if (r.also && r.also.length > 10) r.also = r.also.slice(0, 10);
   }
   return out;
 }
@@ -75,6 +83,9 @@ function collapseBySource(rows) {
 export async function search(repoRoot, query, { kinds = null, limit = 50, order = 'relevance', lane = null } = {}) {
   const q = (query || '').trim().toLowerCase();
   if (!q) return { query, results: [], count: 0 };
+  // Clamp caller-controlled limit (r3 major 5): negative values reach
+  // slice(0, -1) (nearly the whole corpus) and huge values return all of it.
+  const lim = Number.isFinite(Number(limit)) ? Math.min(Math.max(1, Math.floor(Number(limit))), 500) : 50;
   const want = new Set(kinds && kinds.length ? kinds : KINDS);
   const qTokens = tokenize(q);
   const results = [];
@@ -123,6 +134,10 @@ export async function search(repoRoot, query, { kinds = null, limit = 50, order 
   // 2) memory facts
   if (want.has('memory')) {
     const facts = await readMemory(repoRoot);
+    // Trust label on every memory result (r3 minor 7): "searchable ≠
+    // injectable" only holds if a consuming agent can SEE that a result is
+    // asserted, not approved. Hash-validated via trustFor, like every surface.
+    const trust = trustStates(await readAll(repoRoot));
     const docs = [];
     for (const f of facts) {
       const blob = `${f.text} ${(f.tags || []).join(' ')}`;
@@ -135,7 +150,8 @@ export async function search(repoRoot, query, { kinds = null, limit = 50, order 
           snippet: snippet(f.text, q),
           actor: f.source?.actor || null,
           sourceEvent: f.source?.event || null,
-          tags: f.tags || []
+          tags: f.tags || [],
+          ...trustFor(f, trust)
         }
       });
     }
@@ -198,5 +214,5 @@ export async function search(repoRoot, query, { kinds = null, limit = 50, order 
   } else {
     collapsed.sort((a, b) => (b.score - a.score) || (b.ts || '').localeCompare(a.ts || ''));
   }
-  return { query, count: collapsed.length, results: collapsed.slice(0, limit) };
+  return { query, count: collapsed.length, results: collapsed.slice(0, lim) };
 }

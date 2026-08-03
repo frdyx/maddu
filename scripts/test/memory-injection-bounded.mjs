@@ -160,14 +160,33 @@ async function main() {
       ok('unloadable trust lib fails closed', r && r.ok === false && /re-derive|refusing/.test(r.message || ''), JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
-  // 8) Tampered fact content invalidates the approval at the gate.
+  // 8) r3 major 2 — AUTHORIZATION AT INJECTION TIME: a fact legitimately
+  //    approved, injected, and LATER revoked must NOT red the gate; tamper
+  //    detection lives on the recall surface (trustFor), which the same
+  //    scenario must still catch.
   {
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
       await spine.append(repo, {
         type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: 100, query: '', lane: null }
+        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
+      });
+      await h.setFactTrust(repo, { factId: rule.id, approve: false, reason: 'went stale later' });
+      const r = await runGate(gates, repo);
+      ok('legit revoke-after-injection stays green', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+  {
+    // Tamper AFTER a witnessed injection: gate green (feed was authorized at
+    // the time), but the RECALL surface demotes the tampered row so it can
+    // never be fed again — assert both halves of the split.
+    const { repo, rule } = await seedRepo();
+    try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
       });
       const memPath = path.join(repo, '.maddu', 'memory.ndjson');
       const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
@@ -178,7 +197,22 @@ async function main() {
       });
       await fs.writeFile(memPath, lines.join('\n'));
       const r = await runGate(gates, repo);
-      ok('content tamper fails the gate (hash-bound approval)', r && r.ok === false, JSON.stringify(r));
+      ok('post-injection tamper: gate stays green (authorized at time)', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+      const view = await h.factsWithTrust(repo);
+      ok('post-injection tamper: recall surface demotes the row', view.find((f) => f.id === rule.id)?.trust !== 'approved');
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+  // 9) Injection BEFORE any approval (ordering matters, not just presence).
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      await spine.append(repo, {
+        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
+      });
+      await h.setFactTrust(repo, { factId: rule.id, approve: true }); // approval AFTER the feed
+      const r = await runGate(gates, repo);
+      ok('approval after the fact does not launder the injection', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 

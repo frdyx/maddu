@@ -18,9 +18,11 @@
 // reaching agent context: exactly the "integrity ledger becomes an automated
 // truth amplifier" failure this track exists to prevent.
 //
-// Trust re-verification note: a fact legitimately injected and LATER revoked,
-// superseded, or content-edited flags here — intended. The gate answers
-// "would today's spine authorize what was fed?".
+// Semantics (r3 major 2): the gate answers "was every feed AUTHORIZED WHEN
+// IT HAPPENED, within bounds?" — a fact legitimately revoked/superseded/
+// retagged AFTER a witnessed injection does not red the gate retroactively.
+// Live tamper detection is the recall path's job (hindsight.trustFor demotes
+// hash-mismatched facts before they can be fed again).
 
 import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
@@ -65,38 +67,54 @@ export default {
         evidence: { deriveError, injectionCount: injections.length },
       };
     }
+    // AUTHORIZATION AT INJECTION TIME (Codex r3 major 2): each injection is
+    // judged against the trust state AS OF that event — a fact legitimately
+    // approved, injected, and LATER revoked/superseded/retagged must not turn
+    // the gate permanently red. Chronological fold over the spine: approvals
+    // (with their hash) and revocations toggle state; supersession events
+    // retire ids. Live tamper is the recall path's job (trustFor); this
+    // gate answers "was every feed authorized when it happened, within
+    // bounds?" — plus a claim/recompute cross-check where content is
+    // provably unchanged (all facts still currently approved).
     const violations = [];
-    for (const ev of injections) {
-      const inj = { ts: ev.ts, factIds: ev.data?.factIds, totalBytes: ev.data?.totalBytes };
-      if (!Array.isArray(inj.factIds)) {
-        violations.push({ ts: inj.ts, reason: 'factIds not array' });
-        continue;
-      }
-      if (inj.factIds.length > MAX_ITEMS) {
-        violations.push({ ts: inj.ts, reason: `factIds.length=${inj.factIds.length} > ${MAX_ITEMS}` });
-      }
-      if (typeof inj.totalBytes !== 'number' || !Number.isFinite(inj.totalBytes)) {
-        violations.push({ ts: inj.ts, reason: `totalBytes missing/non-numeric (${JSON.stringify(inj.totalBytes)})` });
-      }
-      let recomputed = 0;
-      for (const fid of inj.factIds) {
-        const bytes = approvedBytes.get(fid);
-        if (bytes === undefined) {
-          violations.push({ ts: inj.ts, reason: `fact ${fid} not currently approved` });
-        } else {
-          recomputed += bytes;
+    const approvedAt = new Map();   // factId → true while approved (walk state)
+    const retired = new Set();      // factId → superseded at this point
+    for (const ev of events) {
+      if (ev.type === 'MEMORY_FACT_APPROVED' && ev.data?.factId) {
+        approvedAt.set(ev.data.factId, true);
+      } else if (ev.type === 'MEMORY_FACT_REVOKED' && ev.data?.factId) {
+        approvedAt.delete(ev.data.factId);
+      } else if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.supersedes) {
+        retired.add(ev.data.supersedes);
+      } else if (ev.type === 'MEMORY_INJECTED') {
+        const inj = { ts: ev.ts, factIds: ev.data?.factIds, totalBytes: ev.data?.totalBytes };
+        if (!Array.isArray(inj.factIds)) {
+          violations.push({ ts: inj.ts, reason: 'factIds not array' });
+          continue;
         }
-      }
-      if (recomputed > MAX_TOTAL_BYTES) {
-        violations.push({ ts: inj.ts, reason: `recomputed bytes ${recomputed} > ${MAX_TOTAL_BYTES} (claimed ${inj.totalBytes})` });
-      }
-      // Witness integrity: fact text is immutable per id (idempotent ids;
-      // supersession mints new ids; tamper already fails the hash check), so
-      // an honest witness's claim equals the recompute EXACTLY — any
-      // mismatch means the witness lies about what was fed.
-      if (typeof inj.totalBytes === 'number' && Number.isFinite(inj.totalBytes)
-          && inj.factIds.every((fid) => approvedBytes.has(fid)) && inj.totalBytes !== recomputed) {
-        violations.push({ ts: inj.ts, reason: `claimed totalBytes ${inj.totalBytes} != recomputed ${recomputed} — witness mismatch` });
+        if (inj.factIds.length > MAX_ITEMS) {
+          violations.push({ ts: inj.ts, reason: `factIds.length=${inj.factIds.length} > ${MAX_ITEMS}` });
+        }
+        if (typeof inj.totalBytes !== 'number' || !Number.isFinite(inj.totalBytes)) {
+          violations.push({ ts: inj.ts, reason: `totalBytes missing/non-numeric (${JSON.stringify(inj.totalBytes)})` });
+        } else if (inj.totalBytes > MAX_TOTAL_BYTES) {
+          violations.push({ ts: inj.ts, reason: `claimed totalBytes ${inj.totalBytes} > ${MAX_TOTAL_BYTES}` });
+        }
+        for (const fid of inj.factIds) {
+          if (!approvedAt.get(fid) || retired.has(fid)) {
+            violations.push({ ts: inj.ts, reason: `fact ${fid} was not approved (or already superseded) at injection time` });
+          }
+        }
+        // Cross-check claim vs recompute ONLY when every injected fact is
+        // STILL currently approved + hash-valid — content is then provably
+        // the content that was fed, so an honest claim matches exactly.
+        if (typeof inj.totalBytes === 'number' && Number.isFinite(inj.totalBytes)
+            && inj.factIds.every((fid) => approvedBytes.has(fid))) {
+          const recomputed = inj.factIds.reduce((n, fid) => n + approvedBytes.get(fid), 0);
+          if (inj.totalBytes !== recomputed) {
+            violations.push({ ts: inj.ts, reason: `claimed totalBytes ${inj.totalBytes} != recomputed ${recomputed} — witness mismatch` });
+          }
+        }
       }
     }
     if (violations.length === 0) {

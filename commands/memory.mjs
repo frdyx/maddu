@@ -48,7 +48,8 @@ function printFact(f) {
   const c = colorFor(f.kind);
   const tags = f.tags.length ? `  ${ANSI.dim}${f.tags.join(' ')}${ANSI.reset}` : '';
   const trust = f.trust === 'approved' ? `  ${ANSI.pass}✓approved${ANSI.reset}`
-    : f.trust === 'revoked' ? `  ${ANSI.fail}✗revoked${ANSI.reset}` : '';
+    : f.trust === 'revoked' ? `  ${ANSI.fail}✗revoked${ANSI.reset}`
+    : f.trustNote ? `  ${ANSI.fail}⚠${f.trustNote}${ANSI.reset}` : '';
   console.log(`${ANSI.dim}${fmtTime(f.ts)}${ANSI.reset}  ${c}${f.kind.padEnd(11)}${ANSI.reset}  ${f.text}${tags}${trust}`);
   const prov = f.source?.event || f.source?.candidate || (f.supersedes ? `supersedes ${f.supersedes}` : '—');
   console.log(`              ${ANSI.dim}from ${prov}  ·  id:${f.id}${ANSI.reset}`);
@@ -154,7 +155,7 @@ export default async function memory(argv) {
     }
     const listCap = recall.MAX_WITHHELD_LISTED || 20;
     for (const w of packet.withheld.slice(0, listCap)) {
-      console.log(`  ${ANSI.warn}held${ANSI.reset} ${colorFor(w.kind)}${w.kind.padEnd(11)}${ANSI.reset}  ${ANSI.dim}${w.reason}  score:${w.score}  id:${w.id}${ANSI.reset}`);
+      console.log(`  ${ANSI.warn}held${ANSI.reset} ${colorFor(w.kind)}${w.kind.padEnd(11)}${ANSI.reset}  ${ANSI.dim}${w.reason}${w.note ? `  ${ANSI.fail}⚠${w.note}${ANSI.dim}` : ''}  score:${w.score}  id:${w.id}${ANSI.reset}`);
     }
     if (packet.withheld.length > listCap) console.log(`  ${ANSI.dim}(+${packet.withheld.length - listCap} more withheld — --json for the full list)${ANSI.reset}`);
     if (!packet.items.length && !packet.withheld.length) console.log('  (nothing relevant — approve facts with `maddu memory approve <id>`)');

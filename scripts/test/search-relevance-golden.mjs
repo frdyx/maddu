@@ -177,6 +177,18 @@ async function main() {
       ok('rows carry numeric score', out.results.every((r) => typeof r.score === 'number'));
     }
 
+    // ── r3 major 5 / minor 7: limit clamps, also cap, trust labels ───────
+    {
+      const neg = await searchLib.search(repo, 'SLICE STOP', { limit: -1 });
+      ok('negative limit clamps to 1 (never slice(0,-1))', neg.results.length === 1, `${neg.results.length}`);
+      const huge = await searchLib.search(repo, 'SLICE STOP', { limit: 9999999 });
+      ok('huge limit clamps to 500', huge.results.length <= 500);
+      const all = await searchLib.search(repo, 'atomic swap', { limit: 20 });
+      ok('also arrays capped at 10', all.results.every((r) => !r.also || r.also.length <= 10));
+      const memRows = (await searchLib.search(repo, 'atomic swap', { kinds: ['memory'], limit: 10 })).results;
+      ok('memory results carry trust labels', memRows.length > 0 && memRows.every((r) => typeof r.trust === 'string'), JSON.stringify(memRows.map((r) => r.trust)));
+    }
+
     // ── CLI end-to-end ───────────────────────────────────────────────────
     {
       const outRel = execFileSync(process.execPath, [BIN, 'search', 'atomic', 'swap'], { cwd: repo, encoding: 'utf8' });

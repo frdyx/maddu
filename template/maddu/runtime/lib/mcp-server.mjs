@@ -102,12 +102,24 @@ async function callTool(repoRoot, name, args = {}) {
     });
   }
   if (name === 'wiki_read') {
+    // Bounded like every other tool (r3 major 6): a naturally large or
+    // hand-edited page must not consume arbitrary agent context in one call.
+    const MAX_PAGE_BYTES = 65536;
+    const MAX_PAGE_LIST = 200;
     if (typeof args.page === 'string' && args.page) {
       const text = await readPage(repoRoot, args.page);
       if (text === null) throw invalidParams(`no wiki page "${args.page}"`);
-      return { page: args.page, text };
+      const buf = Buffer.from(text, 'utf8');
+      const truncated = buf.byteLength > MAX_PAGE_BYTES;
+      return {
+        page: args.page,
+        text: truncated ? buf.subarray(0, MAX_PAGE_BYTES).toString('utf8') : text,
+        totalBytes: buf.byteLength,
+        ...(truncated ? { truncated: true, note: 'page exceeds 64KB — read the file directly or use narrower tooling' } : {}),
+      };
     }
-    return { pages: await listWiki(repoRoot) };
+    const pages = await listWiki(repoRoot);
+    return { pages: pages.slice(0, MAX_PAGE_LIST), pagesTotal: pages.length };
   }
   if (name === 'atlas_query') {
     let atlas = null;

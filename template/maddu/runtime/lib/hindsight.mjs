@@ -259,13 +259,33 @@ export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
 // forces selection) past a text-only hash. The SAME serialization is the
 // byte measure for recall budgets and the gate's recompute (r2 blocker 2:
 // counting text bytes only let a tiny fact carry megabytes in its lane).
+// Type well-formedness (Codex r3 blocker 1): the canonical serialization is
+// injective ONLY over well-typed facts — `String(hugeObject)` and
+// `String('[object Object]')` collide, so coercion would let an approved
+// string be swapped for an arbitrary object under the same hash. A fact that
+// is not well-formed is NEVER approvable and never resolves to `approved`.
+export function isWellFormedFact(f) {
+  return !!f && typeof f === 'object' && !Array.isArray(f)
+    && typeof f.id === 'string'
+    && typeof f.text === 'string'
+    && typeof f.kind === 'string'
+    && (f.ts === undefined || f.ts === null || typeof f.ts === 'string')
+    && (f.tags === undefined || (Array.isArray(f.tags) && f.tags.every((t) => typeof t === 'string')))
+    && (f.source === undefined || (typeof f.source === 'object' && f.source !== null && !Array.isArray(f.source)
+        && (f.source.lane === undefined || f.source.lane === null || typeof f.source.lane === 'string')
+        && (f.source.event === undefined || f.source.event === null || typeof f.source.event === 'string')));
+}
+
 export function canonicalFactContent(fact) {
+  // No coercion — callers guarantee well-formedness (isWellFormedFact);
+  // includes ts because it drives selection tie-breaks and is emitted.
   return JSON.stringify({
-    text: String(fact?.text || ''),
-    kind: String(fact?.kind || ''),
-    tags: Array.isArray(fact?.tags) ? fact.tags.map(String) : [],
-    lane: fact?.source?.lane ?? null,
-    sourceEvent: fact?.source?.event ?? null,
+    text: fact.text,
+    kind: fact.kind,
+    ts: fact.ts ?? null,
+    tags: Array.isArray(fact.tags) ? fact.tags : [],
+    lane: fact.source?.lane ?? null,
+    sourceEvent: fact.source?.event ?? null,
   });
 }
 
@@ -284,8 +304,9 @@ export function factContentBytes(fact) {
 export function trustFor(fact, trustMap) {
   const t = trustMap.get(fact.id);
   if (!t) return { trust: 'asserted' };
-  if (t.state === 'approved' && t.sha256 !== factContentHash(fact)) {
-    return { trust: 'asserted', trustNote: 'approval-hash-mismatch' };
+  if (t.state === 'approved') {
+    if (!isWellFormedFact(fact)) return { trust: 'asserted', trustNote: 'malformed-fact' };
+    if (t.sha256 !== factContentHash(fact)) return { trust: 'asserted', trustNote: 'approval-hash-mismatch' };
   }
   return { trust: t.state };
 }
@@ -346,6 +367,7 @@ export async function setFactTrust(repoRoot, { factId, approve, reason = null, a
   const all = await readMemory(repoRoot);
   const fact = all.find((f) => f.id === factId);
   if (!fact) throw new Error(`unknown fact id: ${factId}`);
+  if (approve && !isWellFormedFact(fact)) throw new Error(`fact ${factId} is not well-formed — refusing to approve (non-string fields defeat the content hash)`);
   if (!approve && !reason) throw new Error('revocation requires a reason');
   await append(repoRoot, {
     type: approve ? 'MEMORY_FACT_APPROVED' : 'MEMORY_FACT_REVOKED',
@@ -416,7 +438,25 @@ export async function searchMemory(repoRoot, query, { kind = null, limit = 50 } 
   // callers (MCP) pass caller-controlled values.
   const lim = Number.isFinite(Number(limit)) ? Math.min(Math.max(1, Math.floor(Number(limit))), 1000) : 50;
   // Join trust states with hash validation (r2 major 4) — a tampered row
-  // must never wear an `approved` badge on ANY surface.
+  // must never wear an `approved` badge on ANY surface — and shape row SIZE
+  // (r3 major 4): one multi-megabyte tampered field must not ride a
+  // limit:1 search into agent context. Truncation is display-shaping only;
+  // the trust hash was computed against the REAL row above.
   const trust = trustStates(await readAll(repoRoot));
-  return out.slice(-lim).map((f) => ({ ...f, ...trustFor(f, trust) }));
+  const capStr = (s, n) => { const v = String(s ?? ''); return v.length > n ? v.slice(0, n) : v; };
+  return out.slice(-lim).map((f) => {
+    const shaped = {
+      ...f,
+      text: capStr(f.text, 2000),
+      tags: (Array.isArray(f.tags) ? f.tags : []).slice(0, 32).map((t) => capStr(t, 64)),
+      source: {
+        event: capStr(f.source?.event, 128) || null,
+        lane: capStr(f.source?.lane, 128) || null,
+        actor: capStr(f.source?.actor, 128) || null,
+      },
+      ...trustFor(f, trust),
+    };
+    if (typeof f.text === 'string' && f.text.length > 2000) shaped.textTruncated = true;
+    return shaped;
+  });
 }

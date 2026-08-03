@@ -129,6 +129,41 @@ async function main() {
       ok('searchMemory never badges tampered row approved', !sm2.some((f) => f.id === rule.id && f.trust === 'approved'));
       await h.rebuildMemory(repo);
     }
+    // r3 blocker 1: non-string tamper (object text) cannot ride a string
+    // approval — the canonical form is injective only over well-typed facts,
+    // so a malformed row is demoted, and a malformed fact is unapprovable.
+    {
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.text = { huge: 'x'.repeat(50000) };
+        return JSON.stringify(f);
+      }).join('\n');
+      await fs.writeFile(memPath, lines);
+      const t = (await h.factsWithTrust(repo)).find((f) => f.id === rule.id);
+      ok('object-text tamper demoted as malformed', t?.trust === 'asserted' && t?.trustNote === 'malformed-fact', JSON.stringify({ trust: t?.trust, note: t?.trustNote }));
+      let threwMal = false;
+      try { await h.setFactTrust(repo, { factId: rule.id, approve: true }); } catch { threwMal = true; }
+      ok('malformed fact refused approval', threwMal);
+      await h.rebuildMemory(repo);
+    }
+    // r3 blocker 1: ts is part of the canonical surface — editing it voids
+    // the approval (it drives selection tie-breaks and is emitted).
+    {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'for ts tamper' });
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.ts = '2099-01-01T00:00:00Z';
+        return JSON.stringify(f);
+      }).join('\n');
+      await fs.writeFile(memPath, lines);
+      const t = (await h.factsWithTrust(repo)).find((f) => f.id === rule.id);
+      ok('ts tamper voids approval', t?.trust === 'asserted' && t?.trustNote === 'approval-hash-mismatch');
+      await h.rebuildMemory(repo);
+    }
     // Blocker 1: supersession events retire facts even when the replacement
     // fact never landed (crash between the two appends). Simulate by
     // appending ONLY the event.

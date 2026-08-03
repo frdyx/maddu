@@ -94,6 +94,9 @@ async function main() {
     const rule = (await h.readMemory(repo)).find((f) => f.kind === 'rule');
     await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'seed' });
     if (wiki?.appendSliceStop) await wiki.appendSliceStop(repo, ev);
+    // A legitimately large hand-edited page for the wiki_read byte-cap probe.
+    await fs.mkdir(path.join(repo, '.maddu', 'wiki'), { recursive: true });
+    await fs.writeFile(path.join(repo, '.maddu', 'wiki', 'lane-bigpage.md'), '# big\n' + 'z'.repeat(100000));
 
     const integritySurfaces = async () => [
       await hashTree(path.join(repo, '.maddu', 'events')),
@@ -124,9 +127,12 @@ async function main() {
       // Codex r2 major 5: caller-controlled limit is clamped — limit:0 must
       // not dump the whole corpus.
       { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'memory_search', arguments: { query: 'read-only', limit: 0 } } },
+      // Codex r3 major 6: wiki_read is byte-capped (the seed wrote a >64KB
+      // hand-edited page below).
+      { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'wiki_read', arguments: { page: 'lane-bigpage.md' } } },
     ];
-    // Expected: 9 id-replies + 1 parse error + 4 invalid-request errors.
-    const { responses } = await rpcDialogue(repo, dialogue, 14);
+    // Expected: 10 id-replies + 1 parse error + 4 invalid-request errors.
+    const { responses } = await rpcDialogue(repo, dialogue, 15);
     const byId = new Map(responses.filter((r) => r.id !== undefined && r.id !== null).map((r) => [r.id, r]));
 
     // initialize
@@ -161,7 +167,9 @@ async function main() {
     ok('four invalid messages → four -32600 with null id', invalids.length === 4 && invalids.every((r) => r.id === null), JSON.stringify(invalids));
     const clamped = parse(byId.get(9));
     ok('limit:0 clamps instead of dumping the corpus', Array.isArray(clamped) && clamped.length >= 1 && clamped.length <= 200, `${clamped?.length}`);
-    ok('server survived the garbage (still answered everything)', responses.length === 14, `${responses.length}`);
+    const bigPage = parse(byId.get(10));
+    ok('wiki_read byte-caps large pages', bigPage?.truncated === true && Buffer.byteLength(bigPage?.text || '', 'utf8') <= 65536 && bigPage?.totalBytes > 65536, JSON.stringify({ t: bigPage?.truncated, len: bigPage?.text?.length, total: bigPage?.totalBytes }));
+    ok('server survived the garbage (still answered everything)', responses.length === 15, `${responses.length}`);
 
     // THE READ-ONLY PROOF.
     const after = await integritySurfaces();

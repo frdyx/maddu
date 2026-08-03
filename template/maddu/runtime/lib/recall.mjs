@@ -50,7 +50,10 @@ const KIND_WEIGHT = {
 const factBytes = factContentBytes;
 const capStr = (s, n) => String(s ?? '').slice(0, n);
 const withheldEntry = (f, score, reason) =>
-  ({ id: capStr(f.id, 128), kind: capStr(f.kind, 32), trust: f.trust || 'asserted', score, reason });
+  ({ id: capStr(f.id, 128), kind: capStr(f.kind, 32), trust: f.trust || 'asserted', score, reason,
+     // Surface the tamper/malformed signal (r3 minor 8): an approval voided
+     // by a hash mismatch must be distinguishable from never-approved.
+     ...(f.trustNote ? { note: capStr(f.trustNote, 64) } : {}) });
 
 // buildRecallPacket({ facts, query, lane, tags, budget }) → packet.
 //   facts:  hindsight.factsWithTrust output (each fact carries `trust`)
@@ -70,8 +73,13 @@ function clampBudget(raw, hardMax) {
 export function buildRecallPacket({ facts = [], query = '', lane = null, tags = [], budget = {} } = {}) {
   const maxItems = clampBudget(budget.maxItems ?? MAX_RECALL_ITEMS, MAX_RECALL_ITEMS);
   const maxBytes = clampBudget(budget.maxBytes ?? MAX_RECALL_BYTES, MAX_RECALL_BYTES);
-  const qTokens = tokenize(query || '');
-  const ctxTags = (tags || []).map((t) => String(t).toLowerCase());
+  // Caller-controlled inputs are clamped BEFORE use and before echo (r3
+  // major 3): a bounded packet is bounded end-to-end — two one-megabyte
+  // query/lane arguments must not make a zero-fact response 2MB.
+  const q = capStr(query, 512);
+  const laneClamped = lane == null ? null : capStr(lane, 128);
+  const qTokens = tokenize(q || '');
+  const ctxTags = (tags || []).slice(0, 32).map((t) => capStr(t, 64).toLowerCase());
 
   // Score every fact against the context. Corpus stats over ALL facts so IDF
   // stays honest (same law as search.mjs).
@@ -82,7 +90,7 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
     let score = (KIND_WEIGHT[f.kind] ?? 0);
     if (qTokens.length) score += scoreBM25(tokens, qTokens, stats);
     score += tagBoostFor(ctxTags, f.tags || []);
-    score += laneBoostFor(f.source?.lane || null, lane);
+    score += laneBoostFor(f.source?.lane || null, laneClamped);
     if (score <= 0) continue; // not relevant to this context at all
     scored.push({ f, score: Number(score.toFixed(4)) });
   }
@@ -124,8 +132,8 @@ export function buildRecallPacket({ facts = [], query = '', lane = null, tags = 
 
   return {
     v: 1,
-    query: query || '',
-    lane: lane || null,
+    query: q || '',
+    lane: laneClamped,
     budget: { maxItems, maxBytes },
     items,
     // Rows hard-capped at MAX_WITHHELD_ROWS (bounded packet), entries

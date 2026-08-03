@@ -131,38 +131,61 @@ export async function computeDrift(repoRoot) {
   // pageFor() sanitizes lane ids, so reverse-parsing a filename is lossy for
   // lanes like `feature/foo` (page lane-feature-foo.md). The events know the
   // real lane; filename parsing is only the fallback for orphan pages.
-  const laneByPage = new Map();
+  // r3 minor 9: pageFor's sanitizer can COLLIDE distinct lanes onto one
+  // filename (`feature/foo` and `feature-foo` → lane-feature-foo.md), so
+  // page→lanes is a Set. Drift accounting for a collided page unions the
+  // lanes' events (idsByPage is already page-keyed) and takes the max
+  // lastSlice; the row names every colliding lane.
+  const lanesByPage = new Map();
   for (const ev of events) {
     if (ev.type !== 'SLICE_STOP') continue;
     const lane = ev.lane || null;
     const prev = lastByLane.get(lane);
     if (!prev || ev.ts > prev) lastByLane.set(lane, ev.ts);
     const page = pageFor(lane);
-    laneByPage.set(page, lane);
+    if (!lanesByPage.has(page)) lanesByPage.set(page, new Set());
+    lanesByPage.get(page).add(lane);
     if (!idsByPage.has(page)) idsByPage.set(page, []);
     idsByPage.get(page).push(ev.id);
   }
   const wiki = await listWiki(repoRoot);
   const out = [];
   for (const w of wiki) {
-    const lane = laneByPage.has(w.page) ? laneByPage.get(w.page)
-      : w.page === 'general.md' ? null
-      : w.page.replace(/^lane-/, '').replace(/\.md$/, '');
-    const lastSlice = lastByLane.get(lane) || null;
+    const pageLanes = lanesByPage.has(w.page) ? [...lanesByPage.get(w.page)]
+      : w.page === 'general.md' ? [null]
+      : [w.page.replace(/^lane-/, '').replace(/\.md$/, '')];
+    const lane = pageLanes[0];
+    const lastSlice = pageLanes.map((l) => lastByLane.get(l) || '').sort().at(-1) || null;
     const drifted = lastSlice && lastSlice > w.mtime;
     const text = (await readPage(repoRoot, w.page)) || '';
     const present = new Set(
       text.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- **Event:** ')).map((l) => l.slice('- **Event:** '.length))
     );
     const missingEvents = (idsByPage.get(w.page) || []).filter((id) => !present.has(id));
-    out.push({ ...w, lane, lastSlice, drifted: !!drifted || missingEvents.length > 0, missingEvents: missingEvents.length });
-    lastByLane.delete(lane);
+    out.push({
+      ...w, lane, lastSlice,
+      drifted: !!drifted || missingEvents.length > 0,
+      missingEvents: missingEvents.length,
+      ...(pageLanes.length > 1 ? { laneCollision: pageLanes } : {}),
+    });
+    // Consume EVERY lane this page serves — a collided sibling must not
+    // re-emit as a phantom "page absent" row below.
+    for (const l of pageLanes) lastByLane.delete(l);
     idsByPage.delete(w.page);
   }
-  // Missing pages: lanes with slice-stops but no page yet.
+  // Missing pages: lanes with slice-stops but no page yet (one row per PAGE
+  // — collided absent lanes share a row).
+  const emittedMissing = new Set();
   for (const [lane, lastSlice] of lastByLane.entries()) {
     const page = pageFor(lane);
-    out.push({ page, bytes: 0, mtime: null, lane, lastSlice, drifted: true, missing: true, missingEvents: (idsByPage.get(page) || []).length });
+    if (emittedMissing.has(page)) continue;
+    emittedMissing.add(page);
+    const pageLanes = lanesByPage.has(page) ? [...lanesByPage.get(page)] : [lane];
+    out.push({
+      page, bytes: 0, mtime: null, lane, lastSlice, drifted: true, missing: true,
+      missingEvents: (idsByPage.get(page) || []).length,
+      ...(pageLanes.length > 1 ? { laneCollision: pageLanes } : {}),
+    });
   }
   return out;
 }
