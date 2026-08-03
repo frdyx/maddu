@@ -1,0 +1,31 @@
+{
+  "comment": "Golden relevance queries for scripts/test/search-relevance-golden.mjs. Each query names the seed (see SEEDS in the test) whose document must surface in the top 5 (Recall@5) — directly, via sourceEvent, or via a collapsed `also` sibling. Thresholds asserted by the test: Recall@5 >= 0.85, MRR >= 0.6.",
+  "thresholds": { "recallAt5": 0.85, "mrr": 0.6, "p95LatencyMs": 1500 },
+  "queries": [
+    { "name": "deploy-exact-phrase", "query": "tar-over-ssh atomic swap", "expect": "deploy" },
+    { "name": "deploy-shuffled", "query": "atomic deploy swap", "expect": "deploy" },
+    { "name": "deploy-single-term", "query": "rsync", "expect": "deploy" },
+    { "name": "tokenizer-dotted-file", "query": "hindsight.mjs", "expect": "tokenizer" },
+    { "name": "tokenizer-bare-word", "query": "hindsight extraction dotted", "expect": "tokenizer" },
+    { "name": "tokenizer-multiword", "query": "tokenizer keeps dotted tokens", "expect": "tokenizer" },
+    { "name": "goldens-exact", "query": "byte-identical golden snapshots", "expect": "goldens" },
+    { "name": "goldens-shuffled", "query": "snapshots cockpit byte-identical", "expect": "goldens" },
+    { "name": "goldens-single", "query": "playwright", "expect": "goldens" },
+    { "name": "sessions-lock", "query": "session registration lock", "expect": "sessions" },
+    { "name": "sessions-serialize", "query": "serializes concurrent register", "expect": "sessions" },
+    { "name": "wiki-drift", "query": "wiki drift mtime", "expect": "wiki" },
+    { "name": "wiki-pages", "query": "lane wiki pages append-only", "expect": "wiki" },
+    { "name": "redaction-boundary", "query": "secret redaction write boundary", "expect": "redaction" },
+    { "name": "redaction-pattern", "query": "redactleaves canonical redactor", "expect": "redaction" },
+    { "name": "lanes-claims", "query": "lane claims catalog json", "expect": "lanes" },
+    { "name": "lanes-ownership", "query": "ownership no two agents", "expect": "lanes" },
+    { "name": "bridge-token", "query": "loopback capability token csrf", "expect": "bridge" },
+    { "name": "bridge-origin", "query": "origin guard 4177", "expect": "bridge" },
+    { "name": "memory-kind-filter", "query": "atomic swap", "kinds": ["memory"], "expect": "deploy" },
+    { "name": "slice-kind-filter", "query": "golden snapshots", "kinds": ["slice"], "expect": "goldens" },
+    { "name": "skill-title", "query": "deploy checklist", "expect": "skill-deploy" },
+    { "name": "skill-tag-boost", "query": "deploy", "kinds": ["skill"], "expect": "skill-deploy" },
+    { "name": "skill-body", "query": "verify DRYRUN preview before swap", "expect": "skill-deploy" },
+    { "name": "skill-bm25", "query": "bm25 scoring parameters", "expect": "skill-bm25" }
+  ]
+}

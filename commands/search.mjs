@@ -2,6 +2,10 @@
 //
 // Usage:
 //   maddu search <query> [--kinds event,slice,memory,skill,mailbox,inbox] [--limit N]
+//                        [--sort relevance|time]
+//
+// Default ordering is BM25 relevance (memory-recall track, Phase 2);
+// `--sort time` restores the legacy newest-first ordering.
 
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot } from './_spine.mjs';
@@ -32,9 +36,15 @@ export default async function searchCmd(argv) {
   const repoRoot = await resolveRepoRoot(paths);
   const kinds = flags.kinds ? String(flags.kinds).split(',').map((x) => x.trim()).filter(Boolean) : null;
   const limit = parseInt(flags.limit, 10);
+  const order = flags.sort ? String(flags.sort) : 'relevance';
+  if (!search.ORDERS.includes(order)) {
+    console.error(`--sort must be one of: ${search.ORDERS.join(', ')}`);
+    process.exit(2);
+  }
   const out = await search.search(repoRoot, query, {
     kinds,
-    limit: Number.isFinite(limit) ? limit : 50
+    limit: Number.isFinite(limit) ? limit : 50,
+    order
   });
   console.log(`${ANSI.bold}SEARCH "${query}"  (${out.count} match${out.count === 1 ? '' : 'es'})${ANSI.reset}`);
   if (out.count === 0) { console.log('  (no matches)'); return; }
@@ -45,9 +55,11 @@ export default async function searchCmd(argv) {
       console.log(`           ${ANSI.dim}${r.snippet}${ANSI.reset}`);
     }
     const meta = [];
+    if (order !== 'time' && typeof r.score === 'number') meta.push(`score:${r.score.toFixed(2)}`);
     if (r.lane) meta.push(`lane:${r.lane}`);
     if (r.actor) meta.push(`actor:${r.actor.length > 24 ? r.actor.slice(0, 24) + '…' : r.actor}`);
     if (r.sourceEvent) meta.push(`src:${r.sourceEvent}`);
+    if (r.also && r.also.length) meta.push(`also:${r.also.map((a) => a.kind).join(',')}`);
     if (r.id && r.kind !== 'event') meta.push(`id:${r.id}`);
     if (meta.length) console.log(`           ${ANSI.dim}${meta.join('  ·  ')}${ANSI.reset}`);
   }
