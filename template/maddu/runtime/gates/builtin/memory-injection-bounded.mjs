@@ -119,9 +119,12 @@ export default {
       return { ok: true, message: `${injectionCount} injection event(s), all bounded and approval-referenced with matching content hashes` };
     }
     if (violations.length === 0) {
+      // Name the ACTUAL anomaly (Codex r7 minor 2): doctor/audit surface only
+      // this message, so it must not claim "approval-after" for a
+      // revoked-/superseded-between sequence.
       return {
         ok: false, status: 'warn',
-        message: `${reorders.length} injection(s) whose valid approval appears later in merged order — verify team-sync partitions or investigate approve-after-feed`,
+        message: `${reorders.length} temporal ordering anomaly(ies) on merged order — ${reorders[0].reason}${reorders.length > 1 ? ` (+${reorders.length - 1} more in evidence)` : ''}`,
         evidence: { reorders: reorders.slice(0, 10) },
       };
     }

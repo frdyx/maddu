@@ -199,7 +199,13 @@ export default async function command(argv) {
           } catch { /* witness-only; nothing withheld ever renders */ }
         }
       }
-    } catch { /* recall failure never breaks the brief */ }
+    } catch {
+      // FAIL CLOSED on ANY recall-path error (Codex r7 major 1): a throw
+      // after the packet was built but before the witness appended must not
+      // leave a populated packet to render unwitnessed. The brief itself
+      // survives; the recall section is witnessed or absent — never silent.
+      recallPacket = null;
+    }
     const ctxWithSkills = { ...baseCtx, injectedSkills: injected, recallPacket };
     const block = agentCtxMod.renderAgentContextText(ctxWithSkills);
     process.stdout.write(block);
