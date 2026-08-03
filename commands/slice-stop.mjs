@@ -259,10 +259,23 @@ export default async function sliceStop(argv) {
     for (const n of ev.data.next) console.log(`    - ${n}`);
   }
 
-  // Hindsight: auto-extract facts from this slice-stop into .maddu/memory.ndjson.
+  // Materialize projections: hindsight memory + wiki, through the ONE shared
+  // seam both transports use (memory-recall track, Phase 1 — before this, CLI
+  // stops never reached the wiki). Falls back to hindsight-only on installs
+  // that predate slice-materialize.mjs. Never fatal to the stop.
   try {
-    const added = await hindsight.extractEvent(repoRoot, ev);
-    if (added > 0) console.log(`  hindsight: ${added} fact(s) → .maddu/state/memory.ndjson`);
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    const materialize = await loadLibOptional('slice-materialize.mjs');
+    if (materialize?.materializeSliceStop) {
+      const m = await materialize.materializeSliceStop(repoRoot, ev);
+      if (m.memory.added > 0) console.log(`  hindsight: ${m.memory.added} fact(s) → .maddu/memory.ndjson`);
+      if (m.memory.error) console.error(`  hindsight failed (non-fatal): ${m.memory.error}`);
+      if (m.wiki.appended) console.log(`  wiki: ${m.wiki.page} updated`);
+      if (m.wiki.error) console.error(`  wiki failed (non-fatal): ${m.wiki.error}`);
+    } else {
+      const added = await hindsight.extractEvent(repoRoot, ev);
+      if (added > 0) console.log(`  hindsight: ${added} fact(s) → .maddu/memory.ndjson`);
+    }
   } catch (err) {
     console.error(`  hindsight failed (non-fatal): ${err.message}`);
   }

@@ -55,6 +55,10 @@ function renderBlock(ev) {
   return lines.join('\n');
 }
 
+// The exact marker line renderBlock emits per event — the idempotency key.
+// Event ids are unique and the match is full-line, so it cannot prefix-collide.
+function eventMarker(evId) { return `- **Event:** ${evId}`; }
+
 export async function appendSliceStop(repoRoot, ev) {
   if (!ev || ev.type !== 'SLICE_STOP') return null;
   const dir = await ensureWikiDir(repoRoot);
@@ -62,14 +66,22 @@ export async function appendSliceStop(repoRoot, ev) {
   const file = join(dir, page);
   const block = renderBlock(ev);
   let prefix = '';
+  let existing = null;
   try {
-    await stat(file);
+    existing = await readFile(file, 'utf8');
   } catch {
     const title = ev.lane ? `# Lane: ${ev.lane}` : '# General';
     prefix = `${title}\n\nAuto-updated by the Máddu Wiki Updater on every slice-stop.\n\n`;
   }
+  // Idempotency (memory-recall track, Phase 1): the same event never lands
+  // twice — CLI and bridge both route through materializeSliceStop, and
+  // `wiki sync` replays the whole spine through this same guard. Page-scan
+  // (not a sidecar seen-ids file) so hand-edited/deleted pages self-heal.
+  if (existing !== null && existing.split('\n').some((l) => l.trim() === eventMarker(ev.id))) {
+    return { page, file, appended: false, skipped: 'duplicate' };
+  }
   await appendFile(file, prefix + block);
-  return { page, file };
+  return { page, file, appended: true, skipped: null };
 }
 
 export async function listWiki(repoRoot) {
@@ -98,14 +110,22 @@ export async function readPage(repoRoot, page) {
 
 // A page is drifted if a SLICE_STOP for that lane has a ts greater than
 // the page's mtime. Returns one entry per page with drift count + last-slice.
+// Phase 1 (memory-recall track): drift is now also MEMBERSHIP-based — each
+// entry carries `missingEvents` (slice-stop events for that page with no
+// `- **Event:** <id>` marker in the page text), which catches the historical
+// CLI-only stops an mtime comparison can never see.
 export async function computeDrift(repoRoot) {
   const events = await readAll(repoRoot);
   const lastByLane = new Map();
+  const idsByPage = new Map();
   for (const ev of events) {
     if (ev.type !== 'SLICE_STOP') continue;
     const lane = ev.lane || null;
     const prev = lastByLane.get(lane);
     if (!prev || ev.ts > prev) lastByLane.set(lane, ev.ts);
+    const page = pageFor(lane);
+    if (!idsByPage.has(page)) idsByPage.set(page, []);
+    idsByPage.get(page).push(ev.id);
   }
   const wiki = await listWiki(repoRoot);
   const out = [];
@@ -113,14 +133,37 @@ export async function computeDrift(repoRoot) {
     const lane = w.page === 'general.md' ? null : w.page.replace(/^lane-/, '').replace(/\.md$/, '');
     const lastSlice = lastByLane.get(lane) || null;
     const drifted = lastSlice && lastSlice > w.mtime;
-    out.push({ ...w, lane, lastSlice, drifted: !!drifted });
+    const text = (await readPage(repoRoot, w.page)) || '';
+    const present = new Set(
+      text.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- **Event:** ')).map((l) => l.slice('- **Event:** '.length))
+    );
+    const missingEvents = (idsByPage.get(w.page) || []).filter((id) => !present.has(id));
+    out.push({ ...w, lane, lastSlice, drifted: !!drifted || missingEvents.length > 0, missingEvents: missingEvents.length });
     lastByLane.delete(lane);
+    idsByPage.delete(w.page);
   }
   // Missing pages: lanes with slice-stops but no page yet.
   for (const [lane, lastSlice] of lastByLane.entries()) {
-    out.push({ page: pageFor(lane), bytes: 0, mtime: null, lane, lastSlice, drifted: true, missing: true });
+    const page = pageFor(lane);
+    out.push({ page, bytes: 0, mtime: null, lane, lastSlice, drifted: true, missing: true, missingEvents: (idsByPage.get(page) || []).length });
   }
   return out;
+}
+
+// Append-missing-only backfill (Phase 1): replay every SLICE_STOP through the
+// idempotent appendSliceStop. Existing blocks and operator hand-edits survive;
+// only absent events append (in spine order). Contrast rebuildWiki, which is
+// the destructive truncate-and-replay.
+export async function syncWiki(repoRoot) {
+  const events = await readAll(repoRoot);
+  let appended = 0, skipped = 0;
+  for (const ev of events) {
+    if (ev.type !== 'SLICE_STOP') continue;
+    const r = await appendSliceStop(repoRoot, ev);
+    if (r?.appended) appended += 1;
+    else if (r?.skipped === 'duplicate') skipped += 1;
+  }
+  return { appended, skipped };
 }
 
 // Replay the entire spine and rewrite every wiki page from scratch.

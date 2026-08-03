@@ -73,6 +73,7 @@
     "trust": "36-trust-audit.md",
     "upgrade": "14-upgrading.md",
     "usage": "27-transcript-import.md",
+    "wiki": "08-slice-stop-ritual.md",
     "worker": "11-runtimes-and-mcp.md",
     "workspace": "19-multi-workspace.md"
   }

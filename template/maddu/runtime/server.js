@@ -18,7 +18,9 @@ import { project } from './lib/projections.mjs';
 import { runJanitor } from './lib/janitor.mjs';
 import { buildAgentContext, renderAgentContextText } from './lib/agent-context.mjs';
 import { buildOrientation, renderHandoff } from './lib/handoff.mjs';
-import { readMemory, searchMemory, extractEvent } from './lib/hindsight.mjs';
+import { readMemory, searchMemory, extractEvent, factsWithTrust } from './lib/hindsight.mjs';
+import { buildRecallPacket } from './lib/recall.mjs';
+import { materializeSliceStop } from './lib/slice-materialize.mjs';
 import { totalUnread as mailboxTotalUnread } from './lib/mailbox.mjs';
 import { listSkills } from './lib/skills.mjs';
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
@@ -622,12 +624,11 @@ async function handleBridge(req, res, url, ctx) {
         reason: body.reason || null
       }
     });
-    // Slice δ — Hindsight + Wiki Updater fire on every slice-stop.
-    let memoryAdded = 0;
-    let wikiPage = null;
-    try { memoryAdded = await extractEvent(repoRoot, ev); } catch {}
-    try { const w = await wikiAppend(repoRoot, ev); if (w) wikiPage = w.page; } catch {}
-    return sendJson(res, 200, { ok: true, event: ev, memoryAdded, wikiPage });
+    // Slice δ — Hindsight + Wiki fire through the shared materializer (Phase 1,
+    // memory-recall track): same idempotent path the CLI ritual uses. Response
+    // keys (`memoryAdded`, `wikiPage`) unchanged for cockpit compat.
+    const m = await materializeSliceStop(repoRoot, ev);
+    return sendJson(res, 200, { ok: true, event: ev, memoryAdded: m?.memory.added ?? 0, wikiPage: m?.wiki.page ?? null });
   }
 
   // ── inbox ─────────────────────────────────────────────────────────────
@@ -821,6 +822,19 @@ async function handleBridge(req, res, url, ctx) {
     if (!q.trim()) return sendJson(res, 200, { query: q, results: [], count: 0, kinds: SEARCH_KINDS });
     const out = await crossSearch(repoRoot, q, { kinds, limit });
     return sendJson(res, 200, { ...out, kinds: SEARCH_KINDS });
+  }
+
+  // ── recall (memory-recall track) ──────────────────────────────────────
+  // Read-only view of the SAME bounded trust-gated packet `brief --for-agent`
+  // injects (recall.mjs is the single eligibility seam). Never emits events —
+  // inspection is not injection.
+  if (path === '/bridge/recall' && req.method === 'GET') {
+    const q = url.searchParams.get('q') || '';
+    const lane = url.searchParams.get('lane') || null;
+    const tagsParam = url.searchParams.get('tags');
+    const tags = tagsParam ? tagsParam.split(',').map((x) => x.trim()).filter(Boolean) : [];
+    const facts = await factsWithTrust(repoRoot);
+    return sendJson(res, 200, buildRecallPacket({ facts, query: q, lane, tags }));
   }
 
   // ── workers / skills / tasks / mailbox / memory → routes in ./lib/bridge-routes-work.mjs

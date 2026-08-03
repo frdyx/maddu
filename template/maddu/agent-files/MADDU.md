@@ -135,6 +135,7 @@ runtime descriptor, see `maddu runtime list`). Reserve ad-hoc
 | "learn from my mistakes", "what went wrong", "review past failures", "mine my sessions" | `/maddu-learn` (→ `learn run`/`digest`: judges failure→success pairs and **auto-writes** project facts) |
 | "am I claiming done without proof", "hedged completions", "did we verify what we shipped", "reflect on slice quality" | `/maddu-learn` (→ `learn scan`: **read-only** report of hedged-completion-without-observed-proof slices; writes nothing) |
 | "what corrections do we have", "learned project facts" | `/maddu-memory` (then `--kind correction`) |
+| "wiki", "lane wiki", "is the wiki up to date", "backfill the wiki" | `maddu wiki drift` (then `maddu wiki sync` to backfill missing entries) |
 | "blueprint this project", "export how we built X", "make a reusable handoff/recipe", "reproduce this as a system" | `/maddu-blueprint` |
 | "what shortcuts did we take", "technical debt", "deferred work", "what needs upgrading" | `/maddu-debt` |
 | "architecture drift", "did we break the layering", "diagram the architecture", "import boundaries", "module dependencies" | `/maddu-architecture` |

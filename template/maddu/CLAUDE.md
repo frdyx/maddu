@@ -234,7 +234,7 @@ is a real verb you can call directly. Run `maddu help` for flags.
 - **Orient & state:** `maddu orient` · `maddu brief` · `maddu status` · `maddu register` · `maddu insights` · `maddu experience`
 - **Plan & coordinate:** `maddu plan` · `maddu goal` · `maddu phase` · `maddu loop` · `maddu coordinator` · `maddu team` · `maddu pipeline` · `maddu handoff`
 - **Do the work:** `maddu slice` · `maddu slice-stop` · `maddu review` · `maddu advise` · `maddu suggest` · `maddu search` · `maddu task`
-- **Memory & learning:** `maddu memory` · `maddu learn` · `maddu skill` · `maddu blueprint` · `maddu debt` · `maddu evolve`
+- **Memory & learning:** `maddu memory` · `maddu learn` · `maddu skill` · `maddu blueprint` · `maddu debt` · `maddu evolve` · `maddu wiki`
 - **Tools (audited subprocess wrappers):** `maddu git` · `maddu test` · `maddu self-test` · `maddu format` · `maddu lint` · `maddu install`
 - **Capabilities & governance:** `maddu mcp` · `maddu plugin` · `maddu governance` · `maddu trust` · `maddu audit` · `maddu architecture` · `maddu model`
 - **Accounting:** `maddu cost` · `maddu log` · `maddu help`
