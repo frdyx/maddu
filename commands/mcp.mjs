@@ -15,6 +15,9 @@
 //   maddu mcp templates show <template>               (v1.1.0)
 //   maddu mcp install <template> [--name <override>]  (v1.1.0)
 //   maddu mcp uninstall <name>                        (v1.1.0 — alias of remove)
+//   maddu mcp serve                                   (v1.115.0 — Máddu AS a
+//     read-only MCP stdio server: memory_search, recall_packet, wiki_read,
+//     atlas_query, status. Register in an MCP client as `maddu mcp serve`.)
 
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve as pathResolve } from 'node:path';
@@ -91,6 +94,21 @@ export default async function mcpCmd(argv) {
   if (!sub) {
     console.error('Usage: maddu mcp <list|show|register|enable|disable|test|remove|visible> [flags]');
     process.exit(2);
+  }
+
+  if (sub === 'serve') {
+    // Read-only MCP stdio facade (memory-recall track, Phase 5). The server
+    // never writes the spine — the conformance fixture hash-proves it.
+    const { pathToFileURL } = await import('node:url');
+    const { resolveLibDir } = await import('./_libroot.mjs');
+    const dir = await resolveLibDir();
+    let mcpServer;
+    try { mcpServer = await import(pathToFileURL(join(dir, 'mcp-server.mjs')).href); }
+    catch { console.error('maddu mcp serve: this install predates the MCP facade — upgrade first'); process.exit(1); }
+    let version = '0.0.0';
+    try { version = JSON.parse(await readFile(join(FRAMEWORK_ROOT, 'version.json'), 'utf8')).version; } catch {}
+    await mcpServer.serveMcp(repoRoot, { serverVersion: version });
+    return;
   }
 
   if (sub === 'list') {
