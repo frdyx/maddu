@@ -146,6 +146,30 @@ async function main() {
       let threwMal = false;
       try { await h.setFactTrust(repo, { factId: rule.id, approve: true }); } catch { threwMal = true; }
       ok('malformed fact refused approval', threwMal);
+      // Search survives the corrupt row (r4 major 4) and never emits it
+      // with an approved badge or unknown keys.
+      const smSurvives = await h.searchMemory(repo, 'deploy');
+      ok('searchMemory survives a malformed row', Array.isArray(smSurvives));
+      await h.rebuildMemory(repo);
+    }
+    // r4 blocker 2: unknown extra keys make a fact malformed — a smuggled
+    // `payload` cannot ride an approved id — and searchMemory rows are
+    // whitelisted, never spreading unknown properties.
+    {
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'for payload tamper' });
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.payload = 'x'.repeat(100000);
+        return JSON.stringify(f);
+      }).join('\n');
+      await fs.writeFile(memPath, lines);
+      const t = (await h.factsWithTrust(repo)).find((f) => f.id === rule.id);
+      ok('extra-key tamper demoted as malformed', t?.trust !== 'approved' && t?.trustNote === 'malformed-fact', JSON.stringify({ trust: t?.trust, note: t?.trustNote }));
+      const rows = await h.searchMemory(repo, 'deploy previews');
+      ok('searchMemory rows are whitelisted (no payload key)', rows.every((r) => !('payload' in r)));
+      ok('searchMemory rows bounded', rows.every((r) => JSON.stringify(r).length < 4096));
       await h.rebuildMemory(repo);
     }
     // r3 blocker 1: ts is part of the canonical surface — editing it voids

@@ -107,12 +107,15 @@ async function callTool(repoRoot, name, args = {}) {
     const MAX_PAGE_BYTES = 65536;
     const MAX_PAGE_LIST = 200;
     if (typeof args.page === 'string' && args.page) {
-      const text = await readPage(repoRoot, args.page);
-      if (text === null) throw invalidParams(`no wiki page "${args.page}"`);
+      // Never reflect the raw caller argument (r4 major 6): a megabyte page
+      // name that sanitizes to an existing file must not echo back whole.
+      const pageName = args.page.slice(0, 256);
+      const text = await readPage(repoRoot, pageName);
+      if (text === null) throw invalidParams(`no wiki page "${pageName.slice(0, 64)}"`);
       const buf = Buffer.from(text, 'utf8');
       const truncated = buf.byteLength > MAX_PAGE_BYTES;
       return {
-        page: args.page,
+        page: pageName,
         text: truncated ? buf.subarray(0, MAX_PAGE_BYTES).toString('utf8') : text,
         totalBytes: buf.byteLength,
         ...(truncated ? { truncated: true, note: 'page exceeds 64KB — read the file directly or use narrower tooling' } : {}),
@@ -135,13 +138,25 @@ async function callTool(repoRoot, name, args = {}) {
   }
   if (name === 'status') {
     const proj = await project(repoRoot);
+    // Shaped like every other tool (r4 major 7): goal/phase/claims are
+    // operator-authored unbounded structures — cap before they reach agent
+    // context.
+    const cap = (s, n) => { const v = String(s ?? ''); return v.length > n ? v.slice(0, n) + '…' : v; };
+    const capList = (xs, n, len) => (Array.isArray(xs) ? xs.slice(0, n).map((x) => cap(typeof x === 'string' ? x : JSON.stringify(x), len)) : []);
+    const goal = proj.goal && typeof proj.goal === 'object'
+      ? {
+          text: cap(proj.goal.text ?? proj.goal.goal, 500),
+          constraints: capList(proj.goal.constraints, 10, 200),
+          success: capList(proj.goal.success, 10, 200),
+        }
+      : proj.goal ? cap(proj.goal, 500) : null;
     return {
-      goal: proj.goal || null,
-      phase: proj.phase || null,
-      lastEventId: proj.lastEventId || null,
+      goal,
+      phase: proj.phase && typeof proj.phase === 'object' ? cap(JSON.stringify(proj.phase), 500) : cap(proj.phase, 200) || null,
+      lastEventId: cap(proj.lastEventId, 128) || null,
       eventCount: proj.eventCount ?? null,
       activeSessions: Object.values(proj.sessions || {}).filter((s) => s.status === 'active').length,
-      laneClaims: (proj.claims || []).map((c) => ({ lane: c.lane, sessionId: c.sessionId })),
+      laneClaims: (proj.claims || []).slice(0, 50).map((c) => ({ lane: cap(c.lane, 128), sessionId: cap(c.sessionId, 128) })),
       searchKinds: SEARCH_KINDS,
     };
   }

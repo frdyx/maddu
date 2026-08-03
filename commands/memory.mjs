@@ -50,7 +50,9 @@ function printFact(f) {
   const trust = f.trust === 'approved' ? `  ${ANSI.pass}✓approved${ANSI.reset}`
     : f.trust === 'revoked' ? `  ${ANSI.fail}✗revoked${ANSI.reset}`
     : f.trustNote ? `  ${ANSI.fail}⚠${f.trustNote}${ANSI.reset}` : '';
-  console.log(`${ANSI.dim}${fmtTime(f.ts)}${ANSI.reset}  ${c}${f.kind.padEnd(11)}${ANSI.reset}  ${f.text}${tags}${trust}`);
+  const truncMark = f.textTruncated ? `${ANSI.warn}…[truncated]${ANSI.reset}` : '';
+  console.log(`${ANSI.dim}${fmtTime(f.ts)}${ANSI.reset}  ${c}${f.kind.padEnd(11)}${ANSI.reset}  ${f.text}${truncMark}${tags}${trust}`);
+  if (f.matchSnippet) console.log(`              ${ANSI.dim}match: ${f.matchSnippet}${ANSI.reset}`);
   const prov = f.source?.event || f.source?.candidate || (f.supersedes ? `supersedes ${f.supersedes}` : '—');
   console.log(`              ${ANSI.dim}from ${prov}  ·  id:${f.id}${ANSI.reset}`);
 }

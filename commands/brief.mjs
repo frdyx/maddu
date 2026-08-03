@@ -138,22 +138,35 @@ export default async function command(argv) {
           || (baseCtx.laneClaims || [])[0]?.lane || null;
         recallPacket = recall.buildRecallPacket({ facts, query: '', lane: activeLane, tags });
         if (recallPacket.items.length > 0) {
+          // TOCTOU shrink (Codex r4 blocker 1): re-derive trust IMMEDIATELY
+          // before witnessing and rebuild the packet from the fresh view — a
+          // fact revoked/superseded between selection and witness must not
+          // render. Full atomicity across two files is impossible; the fresh
+          // rebuild plus per-fact approval hashes ON THE WITNESS (verified by
+          // the gate against the approval state at that spine position) close
+          // the detection gap; maddu's single-writer model closes the rest.
+          const fresh = await hindsight.factsWithTrust(repoRoot);
+          recallPacket = recall.buildRecallPacket({ facts: fresh, query: '', lane: activeLane, tags });
+          const hashById = new Map(fresh.filter((f) => f.trust === 'approved').map((f) => [f.id, hindsight.factContentHash(f)]));
           // FAIL CLOSED (Codex r1 major 4): if the MEMORY_INJECTED witness
           // cannot be appended, the facts must NOT reach the rendered brief —
           // an unwitnessed injection is invisible to the critical gate.
           try {
-            await spine.append(repoRoot, {
-              type: spine.EVENT_TYPES.MEMORY_INJECTED,
-              actor: baseCtx.activeSession?.id || null,
-              lane: activeLane,
-              data: {
-                sessionId: baseCtx.activeSession?.id || null,
-                factIds: recallPacket.items.map((it) => it.id),
-                totalBytes: recallPacket.totalBytes,
-                query: '',
+            if (recallPacket.items.length > 0) {
+              await spine.append(repoRoot, {
+                type: spine.EVENT_TYPES.MEMORY_INJECTED,
+                actor: baseCtx.activeSession?.id || null,
                 lane: activeLane,
-              },
-            });
+                data: {
+                  sessionId: baseCtx.activeSession?.id || null,
+                  factIds: recallPacket.items.map((it) => it.id),
+                  facts: recallPacket.items.map((it) => ({ id: it.id, sha256: hashById.get(it.id) || null })),
+                  totalBytes: recallPacket.totalBytes,
+                  query: '',
+                  lane: activeLane,
+                },
+              });
+            }
           } catch (err) {
             console.error(`  memory recall withheld: injection witness could not be recorded (${err.message})`);
             recallPacket = null;

@@ -128,6 +128,11 @@ async function main() {
     const noted = { ...fact('f_note', 'rule', 'rule: was approved once', 'asserted'), trustNote: 'approval-hash-mismatch' };
     const p4 = R.buildRecallPacket({ facts: [noted] });
     ok('withheld entry carries trustNote', p4.withheld[0]?.note === 'approval-hash-mismatch', JSON.stringify(p4.withheld));
+    // r4 major 5: fact ids are emitted, so their bytes count — a giant-id
+    // approved fact must not slip under the byte budget.
+    const giantId = fact('f_' + 'i'.repeat(100000), 'rule', 'rule: tiny text', 'approved');
+    const p5 = R.buildRecallPacket({ facts: [giantId] });
+    ok('giant-id fact withheld on bytes', p5.items.length === 0 && p5.withheldByReason['budget-bytes'] === 1, JSON.stringify(p5.withheldByReason));
   }
 
   // ── end-to-end through the CLI ─────────────────────────────────────────
@@ -154,6 +159,9 @@ async function main() {
     events = await spine.readAll(repo);
     const injected = events.filter((e) => e.type === 'MEMORY_INJECTED');
     ok('MEMORY_INJECTED emitted with factIds', injected.length >= 1 && injected.at(-1).data.factIds.includes(rule.id));
+    // r4 blocker 1: the witness records each fed fact's approval hash.
+    const wRow = injected.at(-1).data.facts?.find((x) => x.id === rule.id);
+    ok('witness carries per-fact sha256', typeof wRow?.sha256 === 'string' && wRow.sha256.length === 64, JSON.stringify(injected.at(-1).data.facts));
 
     // --dry-run emits nothing new AND renders no fact text (r2 major 3:
     // never an unwitnessed agent-context path — witnessed or absent).

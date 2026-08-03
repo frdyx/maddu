@@ -150,7 +150,9 @@ export async function search(repoRoot, query, { kinds = null, limit = 50, order 
           snippet: snippet(f.text, q),
           actor: f.source?.actor || null,
           sourceEvent: f.source?.event || null,
-          tags: f.tags || [],
+          // Caps mirror searchMemory's shaping (r4 major 8): a huge tag
+          // array on one asserted row must not ride a limit:1 result.
+          tags: (Array.isArray(f.tags) ? f.tags.filter((t) => typeof t === 'string') : []).slice(0, 32).map((t) => t.slice(0, 64)),
           ...trustFor(f, trust)
         }
       });
@@ -177,7 +179,7 @@ export async function search(repoRoot, query, { kinds = null, limit = 50, order 
         row: {
           kind: 'skill', id: s.id, ts: s.updated || s.created || null, lane: null,
           title: s.title, snippet: snippet(text, q),
-          tags: s.tags
+          tags: (Array.isArray(s.tags) ? s.tags.filter((t) => typeof t === 'string') : []).slice(0, 32).map((t) => t.slice(0, 64))
         }
       });
     }

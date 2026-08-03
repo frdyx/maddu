@@ -264,28 +264,43 @@ export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
 // `String('[object Object]')` collide, so coercion would let an approved
 // string be swapped for an arbitrary object under the same hash. A fact that
 // is not well-formed is NEVER approvable and never resolves to `approved`.
+const FACT_KEYS = new Set(['v', 'id', 'ts', 'kind', 'text', 'tags', 'source', 'supersedes']);
+const SOURCE_KEYS = new Set(['event', 'lane', 'actor', 'candidate']);
+const strOrNull = (x) => x === undefined || x === null || typeof x === 'string';
+
 export function isWellFormedFact(f) {
-  return !!f && typeof f === 'object' && !Array.isArray(f)
-    && typeof f.id === 'string'
-    && typeof f.text === 'string'
-    && typeof f.kind === 'string'
-    && (f.ts === undefined || f.ts === null || typeof f.ts === 'string')
-    && (f.tags === undefined || (Array.isArray(f.tags) && f.tags.every((t) => typeof t === 'string')))
-    && (f.source === undefined || (typeof f.source === 'object' && f.source !== null && !Array.isArray(f.source)
-        && (f.source.lane === undefined || f.source.lane === null || typeof f.source.lane === 'string')
-        && (f.source.event === undefined || f.source.event === null || typeof f.source.event === 'string')));
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return false;
+  // STRICT keys (Codex r4 blocker 2): unknown properties are rejected — an
+  // extra `payload` field would ride `...f` spreads past a hash that cannot
+  // cover keys it does not know about.
+  for (const k of Object.keys(f)) if (!FACT_KEYS.has(k)) return false;
+  if (typeof f.id !== 'string' || typeof f.text !== 'string' || typeof f.kind !== 'string') return false;
+  if (!strOrNull(f.ts)) return false;
+  if (f.supersedes !== undefined && typeof f.supersedes !== 'string') return false;
+  if (f.v !== undefined && typeof f.v !== 'number') return false;
+  if (f.tags !== undefined && !(Array.isArray(f.tags) && f.tags.every((t) => typeof t === 'string'))) return false;
+  if (f.source !== undefined) {
+    if (typeof f.source !== 'object' || f.source === null || Array.isArray(f.source)) return false;
+    for (const k of Object.keys(f.source)) if (!SOURCE_KEYS.has(k)) return false;
+    if (!strOrNull(f.source.lane) || !strOrNull(f.source.event) || !strOrNull(f.source.actor) || !strOrNull(f.source.candidate)) return false;
+  }
+  return true;
 }
 
 export function canonicalFactContent(fact) {
-  // No coercion — callers guarantee well-formedness (isWellFormedFact);
-  // includes ts because it drives selection tie-breaks and is emitted.
+  // No coercion — callers guarantee well-formedness (isWellFormedFact).
+  // Covers every emitted/selection field: id (emitted, and its bytes count
+  // against budgets — r4 major 5), ts (tie-breaks), actor (emitted by
+  // searchMemory — r4 blocker 2). `candidate` is allowed but never emitted.
   return JSON.stringify({
+    id: fact.id,
     text: fact.text,
     kind: fact.kind,
     ts: fact.ts ?? null,
     tags: Array.isArray(fact.tags) ? fact.tags : [],
     lane: fact.source?.lane ?? null,
     sourceEvent: fact.source?.event ?? null,
+    actor: fact.source?.actor ?? null,
   });
 }
 
@@ -426,37 +441,54 @@ export async function readMemory(repoRoot) {
 export async function searchMemory(repoRoot, query, { kind = null, limit = 50 } = {}) {
   const all = await readMemory(repoRoot);
   const q = (query || '').toLowerCase();
+  // Type-guarded filtering (r4 major 4): one corrupt row (object text,
+  // non-array tags) must not throw and disable the whole search surface.
+  const safeText = (f) => (typeof f.text === 'string' ? f.text : '');
+  const safeTags = (f) => (Array.isArray(f.tags) ? f.tags.filter((t) => typeof t === 'string') : []);
   let out = all;
-  if (kind) out = out.filter((f) => f.kind === kind);
+  if (kind) out = out.filter((f) => f && f.kind === kind);
   if (q) {
-    out = out.filter((f) =>
-      f.text.toLowerCase().includes(q) ||
-      f.tags.some((t) => t.toLowerCase().includes(q))
-    );
+    out = out.filter((f) => f && (
+      safeText(f).toLowerCase().includes(q) ||
+      safeTags(f).some((t) => t.toLowerCase().includes(q))
+    ));
   }
   // Clamp limit (r2 major 5): slice(-0) is slice(0) — the whole corpus; and
   // callers (MCP) pass caller-controlled values.
   const lim = Number.isFinite(Number(limit)) ? Math.min(Math.max(1, Math.floor(Number(limit))), 1000) : 50;
-  // Join trust states with hash validation (r2 major 4) — a tampered row
-  // must never wear an `approved` badge on ANY surface — and shape row SIZE
-  // (r3 major 4): one multi-megabyte tampered field must not ride a
-  // limit:1 search into agent context. Truncation is display-shaping only;
-  // the trust hash was computed against the REAL row above.
+  // Join trust states with hash validation (r2 major 4) and emit WHITELISTED
+  // rows only (r4 blocker 2): `...f` spreads carried unknown, unhashed
+  // properties (a megabyte `payload`) into MCP under an approved badge. Rows
+  // are shaped for size (r3 major 4); a match beyond the text cap gets a
+  // matchSnippet window so the hit stays visible (r4 minor 9). Trust is
+  // computed on the RAW row before shaping.
   const trust = trustStates(await readAll(repoRoot));
   const capStr = (s, n) => { const v = String(s ?? ''); return v.length > n ? v.slice(0, n) : v; };
   return out.slice(-lim).map((f) => {
-    const shaped = {
-      ...f,
-      text: capStr(f.text, 2000),
-      tags: (Array.isArray(f.tags) ? f.tags : []).slice(0, 32).map((t) => capStr(t, 64)),
+    const text = safeText(f);
+    const row = {
+      v: typeof f.v === 'number' ? f.v : 1,
+      id: capStr(f.id, 256),
+      ts: strOrNull(f.ts) ? (f.ts ?? null) : null,
+      kind: capStr(f.kind, 64),
+      text: capStr(text, 2000),
+      tags: safeTags(f).slice(0, 32).map((t) => capStr(t, 64)),
       source: {
         event: capStr(f.source?.event, 128) || null,
         lane: capStr(f.source?.lane, 128) || null,
         actor: capStr(f.source?.actor, 128) || null,
       },
+      ...(typeof f.supersedes === 'string' ? { supersedes: capStr(f.supersedes, 256) } : {}),
       ...trustFor(f, trust),
     };
-    if (typeof f.text === 'string' && f.text.length > 2000) shaped.textTruncated = true;
-    return shaped;
+    if (text.length > 2000) {
+      row.textTruncated = true;
+      const at = q ? text.toLowerCase().indexOf(q) : -1;
+      if (at > 1800) {
+        const start = Math.max(0, at - 100);
+        row.matchSnippet = (start > 0 ? '…' : '') + text.slice(start, at + q.length + 100) + (at + q.length + 100 < text.length ? '…' : '');
+      }
+    }
+    return row;
   });
 }

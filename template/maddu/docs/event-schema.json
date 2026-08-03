@@ -5417,11 +5417,14 @@
       "then": {
         "properties": {
           "data": {
-            "description": "Approved memory facts were injected into an agent brief (bounded recall packet).",
+            "description": "Approved memory facts were injected into an agent brief (bounded recall packet; facts[] records each fed fact's approval content-hash).",
             "type": "object",
             "additionalProperties": true,
             "properties": {
               "factIds": {
+                "type": "array"
+              },
+              "facts": {
                 "type": "array"
               },
               "lane": {

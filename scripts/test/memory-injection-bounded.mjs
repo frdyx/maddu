@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // Phase 4 (memory-recall track) — memory-injection-bounded gate fixture.
+// Hardened across Codex rounds: r1 (bounds + fail-closed), r3
+// (authorization-at-injection-time), r4 (per-fact approval hashes on the
+// witness — pure spine fold, no epoch confusion).
 //
-// Paired-fixture convention: the critical gate must PASS on a legitimate
-// injection (approved fact, within caps) and FAIL on each violation class —
-// over-cap rows, over-cap bytes, and an injected fact that is not currently
-// approved. Events are appended via spine.append (the only writer).
+// The critical gate must PASS legitimate lifecycles (approved feed;
+// revoke-after-feed; reapprove-with-new-content-after-feed) and FAIL every
+// violation class: no approval at feed time, approval AFTER the feed,
+// hash mismatch (revoke–edit–reapprove laundering), over-cap rows, over-cap
+// claimed bytes, missing totalBytes, missing facts[] witness rows.
 
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -50,144 +54,149 @@ async function main() {
     return { repo, rule };
   }
 
-  // 1) Legitimate injection → gate green.
+  const inject = (repo, rule, over = {}) => spine.append(repo, {
+    type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
+    data: {
+      sessionId: null,
+      factIds: [rule.id],
+      facts: [{ id: rule.id, sha256: h.factContentHash(rule) }],
+      totalBytes: h.factContentBytes(rule),
+      query: '', lane: null,
+      ...over,
+    }
+  });
+
+  const green = (r) => r && (r.ok === true || r.status === 'ok');
+
+  // 1) Legitimate feed → green.
   {
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
-      });
+      await inject(repo, rule);
       const r = await runGate(gates, repo);
       ok('gate exists and ran', !!r, JSON.stringify(r));
-      ok('legit injection passes', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+      ok('legit injection passes', green(r), JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 
-  // 2) Unapproved fact injected → gate red.
+  // 2) No approval at feed time → red.
   {
     const { repo, rule } = await seedRepo();
     try {
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: 100, query: '', lane: null }
-      });
+      await inject(repo, rule);
       const r = await runGate(gates, repo);
       ok('unapproved fact fails the gate', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 
-  // 3) Over-cap rows → red.  4) Over-cap bytes → red.
+  // 3) Approval AFTER the feed does not launder it → red.
   {
     const { repo, rule } = await seedRepo();
     try {
+      await inject(repo, rule);
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: Array.from({ length: 9 }, () => rule.id), totalBytes: 100, query: '', lane: null }
-      });
       const r = await runGate(gates, repo);
-      ok('over-cap rows fails the gate', r && r.ok === false, JSON.stringify(r));
-    } finally { await fs.rm(repo, { recursive: true, force: true }); }
-  }
-  {
-    const { repo, rule } = await seedRepo();
-    try {
-      await h.setFactTrust(repo, { factId: rule.id, approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: 999999, query: '', lane: null }
-      });
-      const r = await runGate(gates, repo);
-      ok('over-cap bytes fails the gate', r && r.ok === false, JSON.stringify(r));
+      ok('approval after the fact does not launder', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 
-  // 5) No injections → clean skip-style pass.
+  // 4) Over-cap rows → red.
   {
-    const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'maddu-mib-empty-'));
+    const { repo, rule } = await seedRepo();
     try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await inject(repo, rule, {
+        factIds: Array.from({ length: 9 }, () => rule.id),
+        facts: Array.from({ length: 9 }, () => ({ id: rule.id, sha256: h.factContentHash(rule) })),
+      });
       const r = await runGate(gates, repo);
-      ok('empty repo passes (no injections)', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+      ok('over-cap rows fails', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 
-  // ── Codex r1 hardening ───────────────────────────────────────────────────
-  // 6) Forged/missing totalBytes cannot pass: bytes are RECOMPUTED.
+  // 5) Claimed bytes over cap → red.  6) Missing totalBytes → red.
+  // 7) Missing facts[] → red.
   {
     const { repo, rule } = await seedRepo();
     try {
-      // A giant approved fact whose event claims tiny bytes.
-      const big = { v: 1, id: 'mem_big', ts: '2026-08-01T00:00:00Z', kind: 'rule', text: 'rule: ' + 'x'.repeat(20000), tags: [], source: {} };
-      await h.appendFactIfNew(repo, big);
-      await h.setFactTrust(repo, { factId: 'mem_big', approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: ['mem_big'], totalBytes: 100, query: '', lane: null }
-      });
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await inject(repo, rule, { totalBytes: 999999 });
       const r = await runGate(gates, repo);
-      ok('forged small totalBytes fails on recompute', r && r.ok === false, JSON.stringify(r));
+      ok('claimed bytes over cap fails', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
   {
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], query: '', lane: null } // totalBytes missing
-      });
+      await inject(repo, rule, { totalBytes: undefined });
       const r = await runGate(gates, repo);
-      ok('missing totalBytes is a violation', r && r.ok === false, JSON.stringify(r));
+      ok('missing totalBytes fails', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
-  // 7) Unloadable hindsight lib + existing injections → FAIL CLOSED, never
-  //    "all approved" on a check the gate could not perform.
   {
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: 100, query: '', lane: null }
-      });
-      // loadGateLib prefers <repo>/maddu/runtime/lib — plant a corrupt copy.
-      const libDir = path.join(repo, 'maddu', 'runtime', 'lib');
-      await fs.mkdir(libDir, { recursive: true });
-      await fs.writeFile(path.join(libDir, 'hindsight.mjs'), 'this is not valid javascript {{{');
+      await inject(repo, rule, { facts: undefined });
       const r = await runGate(gates, repo);
-      ok('unloadable trust lib fails closed', r && r.ok === false && /re-derive|refusing/.test(r.message || ''), JSON.stringify(r));
+      ok('missing facts[] witness fails', r && r.ok === false, JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
-  // 8) r3 major 2 — AUTHORIZATION AT INJECTION TIME: a fact legitimately
-  //    approved, injected, and LATER revoked must NOT red the gate; tamper
-  //    detection lives on the recall surface (trustFor), which the same
-  //    scenario must still catch.
+
+  // 8) Legit revoke AFTER a witnessed feed → stays green (r3 major 2).
   {
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
-      });
+      await inject(repo, rule);
       await h.setFactTrust(repo, { factId: rule.id, approve: false, reason: 'went stale later' });
       const r = await runGate(gates, repo);
-      ok('legit revoke-after-injection stays green', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+      ok('legit revoke-after-injection stays green', green(r), JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
+
+  // 9) r4 major 3 — revoke, edit content, reapprove: the historical witness
+  //    (hash of epoch-A content) must STAY GREEN; and a NEW feed claiming
+  //    epoch-A hash under the epoch-B approval must fail.
   {
-    // Tamper AFTER a witnessed injection: gate green (feed was authorized at
-    // the time), but the RECALL surface demotes the tampered row so it can
-    // never be fed again — assert both halves of the split.
     const { repo, rule } = await seedRepo();
     try {
       await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await inject(repo, rule); // epoch A feed
+      await h.setFactTrust(repo, { factId: rule.id, approve: false, reason: 'rewriting' });
+      const memPath = path.join(repo, '.maddu', 'memory.ndjson');
+      const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
+        if (!l.trim()) return l;
+        const f = JSON.parse(l);
+        if (f.id === rule.id) f.text = 'rule: gate seed law, revised and much longer than before it was revised';
+        return JSON.stringify(f);
+      });
+      await fs.writeFile(memPath, lines.join('\n'));
+      const ruleB = (await h.readMemory(repo)).find((f) => f.id === rule.id);
+      await h.setFactTrust(repo, { factId: rule.id, approve: true, reason: 'epoch B' });
+      let r = await runGate(gates, repo);
+      ok('epoch-A witness green after reapproval with new content', green(r), JSON.stringify(r));
+      // A feed recording the OLD hash under the NEW approval epoch → red.
       await spine.append(repo, {
         type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
+        data: { sessionId: null, factIds: [rule.id], facts: [{ id: rule.id, sha256: h.factContentHash(rule) }], totalBytes: h.factContentBytes(rule), query: '', lane: null }
       });
+      r = await runGate(gates, repo);
+      ok('stale-hash feed under new epoch fails', r && r.ok === false, JSON.stringify(r));
+      // And an honest epoch-B feed is green again in a fresh repo state:
+      // (covered implicitly by case 1's law; here just confirm hash equality)
+      ok('epoch-B hash differs from epoch-A', h.factContentHash(ruleB) !== h.factContentHash(rule));
+    } finally { await fs.rm(repo, { recursive: true, force: true }); }
+  }
+
+  // 10) Tamper AFTER a witnessed feed: gate green; recall surface demotes.
+  {
+    const { repo, rule } = await seedRepo();
+    try {
+      await h.setFactTrust(repo, { factId: rule.id, approve: true });
+      await inject(repo, rule);
       const memPath = path.join(repo, '.maddu', 'memory.ndjson');
       const lines = (await fs.readFile(memPath, 'utf8')).split('\n').map((l) => {
         if (!l.trim()) return l;
@@ -197,22 +206,18 @@ async function main() {
       });
       await fs.writeFile(memPath, lines.join('\n'));
       const r = await runGate(gates, repo);
-      ok('post-injection tamper: gate stays green (authorized at time)', r && (r.ok === true || r.status === 'ok'), JSON.stringify(r));
+      ok('post-injection tamper: gate stays green (authorized at time)', green(r), JSON.stringify(r));
       const view = await h.factsWithTrust(repo);
       ok('post-injection tamper: recall surface demotes the row', view.find((f) => f.id === rule.id)?.trust !== 'approved');
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
-  // 9) Injection BEFORE any approval (ordering matters, not just presence).
+
+  // 11) Empty repo → clean skip-style pass.
   {
-    const { repo, rule } = await seedRepo();
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'maddu-mib-empty-'));
     try {
-      await spine.append(repo, {
-        type: spine.EVENT_TYPES.MEMORY_INJECTED, actor: null,
-        data: { sessionId: null, factIds: [rule.id], totalBytes: h.factContentBytes(rule), query: '', lane: null }
-      });
-      await h.setFactTrust(repo, { factId: rule.id, approve: true }); // approval AFTER the feed
       const r = await runGate(gates, repo);
-      ok('approval after the fact does not launder the injection', r && r.ok === false, JSON.stringify(r));
+      ok('empty repo passes (no injections)', green(r), JSON.stringify(r));
     } finally { await fs.rm(repo, { recursive: true, force: true }); }
   }
 
