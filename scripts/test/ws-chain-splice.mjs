@@ -147,6 +147,20 @@ try {
     await writeLines(fix, baseLines);
   }
 
+  // ── (B6) r7-F2: a VALID-JSON unterminated trailer is torn, not committed ─
+  {
+    const ls = [...baseLines];
+    const tail = { v: 1, id: 'evt_unterminated', ts: new Date().toISOString(), type: 'GOAL_SET', actor: null, lane: null, data: { objective: 'in-flight' } };
+    tail.prev_hash = core.hashLine(ls[ls.length - 1]);
+    // Write WITHOUT the trailing newline — complete JSON, uncommitted line.
+    await writeFile(segPath(fix), ls.join('\n') + '\n' + JSON.stringify(tail));
+    const v = await verifySpine(fix, {});
+    ok('valid-JSON unterminated trailer → FAIL torn_trailing_line (verify agrees with the writers)',
+      v.issues.some((i) => i.level === 'FAIL' && i.kind === 'torn_trailing_line'),
+      kinds(v).filter((k) => k.startsWith('FAIL')).join(','));
+    await writeLines(fix, baseLines);
+  }
+
   // ── (C) empty-string ws is malformed ────────────────────────────────────
   {
     const ls = [...baseLines];

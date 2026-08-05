@@ -275,20 +275,27 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       const thisPrev = prevLineHash;
       prevLineHash = hashLine(line);
 
+      // ─── Committed-record boundary (diff-funnel r7-F2) ───
+      // A nonempty UNTERMINATED trailer is torn whether or not it parses: a
+      // complete-looking JSON object whose newline never landed is not part
+      // of the committed record (the S2 identity law, the authority scan,
+      // and the writers all exclude it), and processing it here would make
+      // verify bless what every writer ignores. Classified BEFORE parsing.
+      const isUnterminatedTrailer = isLastSegment && !fileEndsWithNewline && i === lines.length - 1;
+      if (isUnterminatedTrailer) {
+        push(issue('FAIL', 'torn_trailing_line',
+          `${segName}:${lineNo}: trailing line is unterminated (missing final newline) — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event is not part of the committed record. Remediation: if the JSON is complete, append the missing newline; otherwise trim the partial line. Then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
+          { segment: segName, line: lineNo }));
+        continue;
+      }
+
       // ─── Parseability ───
       let ev;
       try { ev = JSON.parse(line); }
       catch (err) {
-        const isTornTrailer = isLastSegment && !fileEndsWithNewline && i === lines.length - 1;
-        if (isTornTrailer) {
-          push(issue('FAIL', 'torn_trailing_line',
-            `${segName}:${lineNo}: trailing line is truncated/unterminated JSON — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event was never durably committed. Remediation: manually trim the final partial line, then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
-            { segment: segName, line: lineNo }));
-        } else {
-          push(issue('FAIL', 'unparseable',
-            `${segName}:${lineNo}: ${err.message}`,
-            { segment: segName, line: lineNo }));
-        }
+        push(issue('FAIL', 'unparseable',
+          `${segName}:${lineNo}: ${err.message}`,
+          { segment: segName, line: lineNo }));
         continue;
       }
       if (!ev || typeof ev !== 'object') {
@@ -1224,7 +1231,10 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
       let txt;
       try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
       const lines = txt.split('\n');
-      for (let li = 0; li < lines.length; li++) {
+      // Committed elements only (r7-F2): an unterminated trailer is not part
+      // of the record — the chain scan already FAILs it as torn.
+      const committedN = txt.endsWith('\n') ? lines.length : lines.length - 1;
+      for (let li = 0; li < committedN; li++) {
         const line = lines[li];
         if (!line.trim()) continue;
         // PARSE is authoritative (diff-funnel r6-F1: any substring prefilter

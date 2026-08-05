@@ -355,6 +355,10 @@ try {
     const a1 = mkAnchor('evt_a1', g1, 'repA'), a2 = mkAnchor('evt_a2', g2, 'repB');
     await mkPart('repA', [g1, JSON.stringify(a1)]);
     await mkPart('repB', [g2, JSON.stringify(a2)]);
+    // The ceremony runs from an ATTACHED replica (r7-F1: an unattached
+    // clone refuses every write, ceremonies included).
+    await mkdir(join(fix, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(fix, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }) + '\n');
     const { appendWsResolutionOnce } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
     const mkRes = (sel, conflicts) => ({ v: 1, id: 'evt_r1', ts: '2026-04-01T00:00:00.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: sel, conflicts } });
     const badBind = await appendWsResolutionOnce(fix, mkRes(wsFromLine(g1), [{ eventId: 'evt_a1', genesisHash: hashLine(g1), spineIdentity: wsFromLine(g1) }]));
@@ -399,6 +403,49 @@ try {
     await writeFile(seg1(fix), genesisLine + '\n');
     const rDone = await resolveIdentityForAppend(fix);
     ok('completed genesis derives the true identity', rDone.ws === wsFromLine(genesisLine));
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r7-F1: an unattached clone refuses/drops EVERY write ────────────────
+  {
+    const fix = await freshFix();
+    // A normal fresh clone of a synced repo: partitions + a valid anchor,
+    // but no device-local replica.json.
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    const g1 = JSON.stringify({ v: 1, id: 'evt_g1', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const anchor1 = JSON.stringify({ v: 1, id: 'evt_a1', ts: '2026-01-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(g1), genesis: { replicaId: 'repA', segment: '000000000001.ndjson', line: 1, hash: hashLine(g1) } }, prev_hash: hashLine(g1) });
+    await writeFile(join(d, '000000000001.ndjson'), g1 + '\n' + anchor1 + '\n');
+    const { resolveWriteReplica: rwr, appendWsResolutionOnce: awro } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    ok('write funnel resolves { unattached } for a clone without replica.json', (await rwr(fix)).unattached === true);
+    const { pathToFileURL } = await import('node:url');
+    const spineMod = await import(pathToFileURL(join(process.cwd(), 'template/maddu/runtime/lib/spine.mjs')).href);
+    let code = null;
+    try { await spineMod.append(fix, { type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 } }); }
+    catch (e) { code = e.code; }
+    ok('ordinary append refuses with REPLICA_UNATTACHED (never a stray flat write)', code === 'REPLICA_UNATTACHED');
+    const cerOut = await awro(fix, { v: 1, id: 'evt_r', ts: '2026-01-01T00:00:02.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: wsFromLine(g1), conflicts: [] } });
+    ok('the ceremony also refuses on an unattached clone', typeof cerOut.invalid === 'string' && /replica identity/.test(cerOut.invalid), JSON.stringify(cerOut));
+    const { readdir: rdd } = await import('node:fs/promises');
+    const flatSegs = (await rdd(join(fix, '.maddu', 'events'))).filter((f) => /^\d{12}\.ndjson$/.test(f));
+    ok('no flat segment was created by the refused writes', flatSegs.length === 0, flatSegs.join(','));
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r7-F2: nominations never resolve to an unterminated element ─────────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    // The genesis is COMPLETE valid JSON but its newline never landed.
+    await writeFile(join(d, '000000000001.ndjson'), genesisLine);
+    ok('readPartitionLineAt refuses the unterminated final element',
+      (await readPartitionLineAt(fix, 'repA', '000000000001.ndjson', 1)).state === 'absent');
+    const nom = { spineIdentity: wsFromLine(genesisLine), genesis: { replicaId: 'repA', segment: '000000000001.ndjson', line: 1, hash: hashLine(genesisLine) } };
+    ok('a nomination of the unterminated line does NOT verify (uncommitted authority)',
+      (await verifyAnchorNomination(fix, nom)).ok === false);
+    await writeFile(join(d, '000000000001.ndjson'), genesisLine + '\n');
+    ok('the same nomination verifies once the newline lands', (await verifyAnchorNomination(fix, nom)).ok === true);
     await rm(fix, { recursive: true, force: true });
   }
 

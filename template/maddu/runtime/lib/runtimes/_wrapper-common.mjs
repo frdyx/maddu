@@ -103,6 +103,7 @@ export async function appendTokenUsage(repoRoot, payload) {
   const waitMs = Number.isFinite(rawWait) && rawWait > defaultWaitMs ? rawWait : defaultWaitMs;
   const w = await resolveWriteReplica(repoRoot, { timeoutMs: waitMs });
   if (w.pending) return null; // migration in flight — drop this token event
+  if (w.unattached) return null; // r7-F1: unattached clone — never write a flat event that can't be Git-carried
   if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
 
   // Default flat path — through the SHARED locked+chained primitive (audit P1) so
@@ -116,6 +117,7 @@ export async function appendTokenUsage(repoRoot, payload) {
     const outcome = await appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs: waitMs });
     if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev, { maxWaitMs: waitMs });
     if (outcome.pending) return null;
+    if (outcome.unattached) return null;
     return outcome.ev;
   } catch {
     return null; // contention past budget / transient — drop, never block the worker

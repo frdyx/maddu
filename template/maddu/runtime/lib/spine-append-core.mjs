@@ -371,6 +371,13 @@ export async function readPartitionLineAt(repoRoot, replicaId, segment, lineNo) 
   try {
     const txt = await readFile(join(partitionDir(repoRoot, replicaId), segment), 'utf8');
     const lines = txt.split('\n');
+    // COMMITTED elements only (diff-funnel r7-F2): a nominated/cutover
+    // position must never resolve to an unterminated final element — a
+    // valid-JSON line whose newline hasn't landed is not part of the
+    // record, and validating an anchor/head against it would bless
+    // uncommitted authority.
+    const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+    if (!Number.isInteger(lineNo) || lineNo < 1 || lineNo > committed) return { state: 'absent' };
     const line = lines[lineNo - 1];
     return line && line.trim() ? { state: 'ok', line } : { state: 'absent' };
   } catch (e) {
@@ -818,6 +825,7 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
 export async function appendWsResolutionOnce(repoRoot, ev) {
   const w = await resolveWriteReplica(repoRoot);
   if (w.pending) return { retry: true };
+  if (w.unattached) return { invalid: 'this checkout has sync partitions but no replica identity — run `maddu spine sync init` first' };
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const dir = w.id ? partitionDir(repoRoot, w.id) : eventsDir;
   await mkdir(dir, { recursive: true });
@@ -826,7 +834,7 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
       // Flat funnel: a migration may have committed while we waited — never
       // strand the ceremony in an orphaned flat segment.
       const w2 = await resolveWriteReplica(repoRoot, { timeoutMs: 0 });
-      if (w2.id || w2.pending) return { retry: true };
+      if (w2.id || w2.pending || w2.unattached) return { retry: true };
     }
     const scan = await scanWsAuthorityEvents(repoRoot);
     const law = resolveWsAuthority(scan);
@@ -934,7 +942,16 @@ async function readCommittedTolerant(repoRoot) {
 export async function resolveWriteReplica(repoRoot, { timeoutMs = 5000, pollMs = 25 } = {}) {
   const committed = await readCommittedTolerant(repoRoot);
   if (committed) return { id: committed };
-  if (!(await pendingReplicaExists(repoRoot))) return { flat: true };
+  if (!(await pendingReplicaExists(repoRoot))) {
+    // { unattached } — segment-bearing partitions exist but this checkout has
+    // no replica identity (a fresh clone of a synced repo, or a deleted
+    // replica.json). Flat writes here are never Git-carried and silently
+    // diverge from the team's record, so EVERY write path refuses/drops
+    // centrally (diff-funnel r7-F1: a needAnchor-only guard let ordinary
+    // appends, ceremonies, and wrapper events through). Reads are untouched.
+    if (await wsModeIsPartitioned(repoRoot)) return { unattached: true };
+    return { flat: true };
+  }
   // A migration is publishing — wait for it to commit replica.json, then use it. A
   // partial replica.json mid-publish reads as null here (tolerant) → keep waiting.
   let waited = 0;
@@ -1280,6 +1297,7 @@ export async function appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs = I
       const w = await resolveWriteReplica(repoRoot, { timeoutMs: 0 });
       if (w.id) return { reroute: w.id };
       if (w.pending) return { pending: true };
+      if (w.unattached) return { unattached: true }; // r7-F1: never write flat into an unattached clone
       const prevLine = await lastEventLineInDir(eventsDir);
       ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
       const line = JSON.stringify(ev);

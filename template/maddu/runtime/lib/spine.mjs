@@ -666,6 +666,13 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       if (wGate.pending) {
         throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
       }
+      if (wGate.unattached) {
+        // r7-F1: sync partitions without a replica identity (a fresh clone).
+        // Refuse EVERY write — a flat append here is never Git-carried.
+        const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+        err.code = 'REPLICA_UNATTACHED';
+        throw err;
+      }
       idr = await resolveIdentityForAppend(repoRoot);
       if ((idr.needAnchor || idr.refuse) && gateTry < 3) {
         const wNow = await resolveWriteReplica(repoRoot);
@@ -800,6 +807,11 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     const w = await resolveWriteReplica(repoRoot);
     if (w.id) return credit(await appendPartitioned(repoRoot, w.id, ev));
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
+    if (w.unattached) {
+      const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+      err.code = 'REPLICA_UNATTACHED';
+      throw err;
+    }
 
     // Test seam (no-op in production): fired exactly ONCE, after the outer resolve
     // returned flat and BEFORE appendFlatChained's non-waiting re-resolve — the
@@ -820,6 +832,11 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     try {
       const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
       if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev));
+      if (outcome.unattached) {
+        const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+        err.code = 'REPLICA_UNATTACHED';
+        throw err;
+      }
       if (outcome.pending) {                             // migration began in the resolve→lock window → retry
         // Test seam (no-op in production): acknowledge that the inner re-resolve
         // observed {pending}, so a deterministic test can act AFTER the retry.
