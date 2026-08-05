@@ -158,6 +158,21 @@ export async function handle({ path, method, res, sendJson }) {
       ta.statusCode === 200 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${ta.statusCode}`);
   }
 
+  // ── (E3) r5 regressions: checkpoint idempotency + trust-audit refusal ───
+  {
+    const del = await call('DELETE', '/bridge/checkpoints/never-existed-fixture-cp', {});
+    ok('DELETE nonexistent checkpoint → 200 declared idempotent, no breach',
+      del.statusCode === 200 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${del.statusCode}`);
+    // The fixture has no package.json → auditRepo refuses (ok:false). The
+    // route must NOT mint a TRUST_AUDIT_RAN (a fake clean audit) and must
+    // declare the refusal instead of breaching.
+    const ta = await call('POST', '/bridge/trust/audit', {});
+    ok('trust-audit refusal → 200, NO fake TRUST_AUDIT_RAN, no breach',
+      ta.statusCode === 200
+      && (await spineEvents(fix, 'TRUST_AUDIT_RAN')).length === 0
+      && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${ta.statusCode}`);
+  }
+
   // ── (F) plugin routes (fixture plugin installed at setup, pre-cache) ────
   {
     const noopRes = await call('POST', '/bridge/wtest/noop', {});
