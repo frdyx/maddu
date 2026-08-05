@@ -1082,8 +1082,14 @@ async function parseStreamDir(dir, { onBadLine = null } = {}) {
     const lines = text.split('\n');
     // Committed elements only (diff-funnel r8-F1): a nonempty unterminated
     // final element is not part of the record even when it parses — reads
-    // must agree with the writers and the verifier about what exists.
+    // must agree with the writers and the verifier about what exists. It
+    // still COUNTS as a parse error (r9-F1): strict callers must see the
+    // accounting gap, never treat a torn stream as fully accounted.
     const committed = text.endsWith('\n') ? lines.length : lines.length - 1;
+    if (committed < lines.length && lines[committed].trim()) {
+      parseErrors++;
+      if (onBadLine) onBadLine(seg, new Error('unterminated final element (torn tail — not part of the committed record)'));
+    }
     for (let i = 0; i < committed; i++) {
       const line = lines[i];
       if (!line.trim()) continue;

@@ -921,7 +921,16 @@ export async function readAllStrict(repoRoot) {
       if (err && err.code === 'ENOENT') return { events: await readAllPartitioned(repoRoot), parseErrors: null };
       throw err;
     }
-    for (const line of text.split('\n')) {
+    const lines = text.split('\n');
+    // Committed elements only (diff-funnel r9-F1): a nonempty unterminated
+    // final element is NOT part of the record even when it parses — and a
+    // STRICT reader must also COUNT it, so integrity-sensitive callers see
+    // the accounting gap instead of treating a torn stream as fully
+    // accounted.
+    const committed = text.endsWith('\n') ? lines.length : lines.length - 1;
+    if (committed < lines.length && lines[committed].trim()) parseErrors++;
+    for (let i = 0; i < committed; i++) {
+      const line = lines[i];
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }
       catch { parseErrors++; }

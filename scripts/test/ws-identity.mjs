@@ -469,6 +469,27 @@ try {
     const all = await spineMod.readAll(fix);
     ok('readAll excludes the torn tail (reads agree with writers and verify)',
       all.length === 1 && all[0].id === 'evt_genesis', `len=${all.length}`);
+    // r9-F1: the STRICT reader excludes it too AND counts the accounting gap.
+    const strict = await spineMod.readAllStrict(fix);
+    ok('readAllStrict excludes the torn tail AND counts it as a parse error',
+      strict.events.length === 1 && strict.parseErrors === 1,
+      `events=${strict.events.length} parseErrors=${strict.parseErrors}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r9-F1: the partitioned strict reader counts a torn stream too ───────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    // committed genesis + valid-JSON torn tail (no newline)
+    await writeFile(join(d, '000000000001.ndjson'), genesisLine + '\n' + genesisLine.replace('evt_genesis', 'evt_torn'));
+    const { readPartitionStreamsStrict } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    const streams = await readPartitionStreamsStrict(fix);
+    const repA = streams.find((s) => s.replicaId === 'repA');
+    ok('partitioned strict read: torn tail excluded and counted (never "fully accounted")',
+      repA && repA.events.length === 1 && repA.parseErrors === 1,
+      repA ? `events=${repA.events.length} parseErrors=${repA.parseErrors}` : 'no stream');
     await rm(fix, { recursive: true, force: true });
   }
 
