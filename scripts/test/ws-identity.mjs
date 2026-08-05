@@ -368,6 +368,40 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r6-F1: escaped type values cannot evade the authority scan ──────────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    const g1 = JSON.stringify({ v: 1, id: 'evt_g1', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    // Hand-craft an anchor whose TYPE value is JSON-escaped — parses to
+    // WS_IDENTITY_ANCHORED while the raw bytes never contain the marker.
+    const escapedAnchor = `{"v":1,"id":"evt_esc_a","ts":"2026-01-01T00:00:01.000Z","type":"\\u0057S_IDENTITY_ANCHORED","actor":null,"lane":null,"data":{"v":1,"spineIdentity":"${wsFromLine(g1)}","genesis":{"replicaId":"repA","segment":"000000000001.ndjson","line":1,"hash":"${hashLine(g1)}"}},"prev_hash":"${hashLine(g1)}"}`;
+    ok('harness sanity: escaped type parses to the authority type without the raw marker',
+      JSON.parse(escapedAnchor).type === 'WS_IDENTITY_ANCHORED' && !escapedAnchor.includes('"WS_IDENTITY_'));
+    await writeFile(join(d, '000000000001.ndjson'), g1 + '\n' + escapedAnchor + '\n');
+    const s = await scanWsAuthorityEvents(fix);
+    ok('escaped-type anchor is FOUND by the scan (parse is authoritative)', s.anchors.length === 1, `anchors=${s.anchors.length}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r6-F2: an unterminated flat genesis never poisons the identity ──────
+  {
+    const fix = await freshFix();
+    // A writer is mid-append of the very first line: bytes present, no newline.
+    await writeFile(seg1(fix), genesisLine.slice(0, Math.floor(genesisLine.length / 2)));
+    ok('unterminated first line → genesis ABSENT (not yet part of the record)',
+      (await readFlatGenesisLine(fix)).state === 'absent');
+    const rT = await resolveIdentityForAppend(fix);
+    ok('resolution stays bootstrap over an in-flight genesis (no poisoned cache)',
+      rT.ws === null && rT.bootstrap === true && (await readIdentityCache(fix)).state === 'absent', JSON.stringify(rT));
+    // The write completes — derivation now uses the REAL committed line.
+    await writeFile(seg1(fix), genesisLine + '\n');
+    const rDone = await resolveIdentityForAppend(fix);
+    ok('completed genesis derives the true identity', rDone.ws === wsFromLine(genesisLine));
+    await rm(fix, { recursive: true, force: true });
+  }
+
   // ── r5-F2: the fingerprint stat-reuse fast path provably skips reads ────
   {
     const fix = await freshFix();

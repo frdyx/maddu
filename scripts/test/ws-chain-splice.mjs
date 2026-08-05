@@ -112,6 +112,23 @@ try {
     // here, but the fixture files changed sizes).
   }
 
+  // ── (B5) r6-F1: a JSON-ESCAPED ws key cannot evade the sweep ────────────
+  {
+    // `"ws"` parses to a top-level `ws` while the raw bytes never
+    // contain the quoted key — a substring prefilter would skip it entirely.
+    const ls = [...baseLines];
+    const escaped = `{"v":1,"id":"evt_escaped_splice","ts":"${new Date().toISOString()}","type":"GOAL_SET","actor":null,"lane":null,"data":{"objective":"planted"},"\\u0077s":"ws_${'f'.repeat(16)}","prev_hash":"${core.hashLine(ls[ls.length - 1])}"}`;
+    const sanity = JSON.parse(escaped);
+    ok('harness sanity: escaped key parses to a top-level ws the raw bytes never show',
+      sanity.ws === 'ws_' + 'f'.repeat(16) && !escaped.includes('"ws"'));
+    ls.push(escaped);
+    await writeLines(fix, ls);
+    const v = await verifySpine(fix, {});
+    ok('escaped-ws-key splice still → FAIL ws_mismatch (parse is authoritative)',
+      hasFail(v, 'ws_mismatch'), kinds(v).filter((k) => k.includes('ws')).join(','));
+    await writeLines(fix, baseLines);
+  }
+
   // ── (B4) r5-F1: malformed cutover rows FAIL, never crash verify ─────────
   {
     // A "resolution" with a valid binding shape but garbage cutover rows —

@@ -273,7 +273,15 @@ async function authorityDeltaState(repoRoot, cachedFp, currentFp) {
         if (bytesRead !== buf.length) return 'rescan'; // short read — never advance past unread bytes
         const chunk = buf.toString('utf8');
         if (!chunk.endsWith('\n')) return 'rescan'; // boundary not line-aligned after all — defensive
-        if (chunk.includes('"WS_IDENTITY_')) return 'rescan';
+        // PARSE is authoritative (r6-F1: escaped type values evade the raw
+        // marker). Any authority event OR unparseable line in the delta →
+        // full rescan (which applies the strict scan's own rules).
+        for (const dl of chunk.split('\n')) {
+          if (!dl.trim()) continue;
+          let dev;
+          try { dev = JSON.parse(dl); } catch { return 'rescan'; }
+          if (dev?.type === 'WS_IDENTITY_ANCHORED' || dev?.type === 'WS_IDENTITY_RESOLVED') return 'rescan';
+        }
       } finally { await fh.close(); }
     } catch { return 'rescan'; }
   }
@@ -342,7 +350,14 @@ export async function readFlatGenesisLine(repoRoot) {
   if (!segs.length) return { state: 'absent' };
   try {
     const txt = await readFile(join(eventsDir, segs[0]), 'utf8');
-    const line = txt.split('\n').find((l) => l.trim());
+    // COMMITTED elements only (diff-funnel r6-F2): an unterminated first
+    // line is an in-flight write — deriving from its partial bytes would
+    // cache a poisoned identity that permanently mismatches the real
+    // genesis once the newline lands. Until a complete line exists the
+    // workspace is still bootstrap.
+    const lines = txt.split('\n');
+    const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+    const line = lines.slice(0, committed).find((l) => l.trim());
     return line ? { state: 'ok', line } : { state: 'absent' };
   } catch (e) { return { state: 'unresolvable', error: e?.message || String(e) }; }
 }
@@ -382,7 +397,11 @@ export async function findMergeFirstGenesis(repoRoot) {
     let txt;
     try { txt = await readFile(join(byReplica, id, segs[0]), 'utf8'); }
     catch (e) { return { state: 'unresolvable', error: `partition ${id}: ${e?.message || e}` }; }
-    const line = txt.split('\n').find((l) => l.trim());
+    // COMMITTED elements only (r6-F2): never nominate an in-flight
+    // unterminated first line — its bytes are not yet part of the record.
+    const allLines = txt.split('\n');
+    const committedN = txt.endsWith('\n') ? allLines.length : allLines.length - 1;
+    const line = allLines.slice(0, committedN).find((l) => l.trim());
     if (!line) continue;
     let ts = null;
     try { ts = JSON.parse(line)?.ts ?? null; } catch { return { state: 'unresolvable', error: `partition ${id}: malformed first line` }; }
@@ -447,14 +466,21 @@ export async function scanWsAuthorityEvents(repoRoot) {
       const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
       for (let i = 0; i < committed; i++) {
         const line = lines[i];
-        if (!line.includes('"WS_IDENTITY_')) continue;
+        if (!line.trim()) continue;
+        // PARSE is authoritative (diff-funnel r6-F1: a substring prefilter
+        // can be evaded with JSON escapes — `"WS_IDENTITY_ANCHORED"`
+        // parses to the authority type while the raw bytes never contain
+        // the marker). The marker substring is used ONLY to classify an
+        // unparseable complete line: marker-bearing garbage is corrupt
+        // authority state → unresolvable; other garbage is the chain
+        // verifier's domain.
         let ev;
         try { ev = JSON.parse(line); }
         catch {
-          // A COMPLETE (newline-terminated) marker-bearing line that fails
-          // to parse is corrupt authority state → unresolvable, never a
-          // silent skip.
-          throw scanUnresolvable(`${source}/${seg}`, `malformed authority-candidate line ${i + 1}`);
+          if (line.includes('"WS_IDENTITY_')) {
+            throw scanUnresolvable(`${source}/${seg}`, `malformed authority-candidate line ${i + 1}`);
+          }
+          continue;
         }
         if (ev?.type === 'WS_IDENTITY_ANCHORED') anchors.push(ev);
         else if (ev?.type === 'WS_IDENTITY_RESOLVED') resolutions.push(ev);
@@ -690,7 +716,10 @@ export async function findIncompatibleWsStamp(repoRoot, authority, grandfather =
       const lines = txt.split('\n');
       const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
       for (let i = 0; i < committed; i++) {
-        if (!lines[i].includes('"ws"')) continue;
+        if (!lines[i].trim()) continue;
+        // PARSE is authoritative (r6-F1: an escaped `ws` key evades any raw
+        // substring check); unparseable complete lines are the chain
+        // verifier's domain.
         let ev;
         try { ev = JSON.parse(lines[i]); } catch { continue; }
         if (!ev || typeof ev.ws !== 'string' || !WS_ID_RE.test(ev.ws) || ev.ws === authority) continue;

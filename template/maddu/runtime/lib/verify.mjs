@@ -1226,10 +1226,11 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
       const lines = txt.split('\n');
       for (let li = 0; li < lines.length; li++) {
         const line = lines[li];
-        // Prefilter on the quoted key alone — `"ws":` would let valid JSON
-        // with whitespace before the colon (`"ws" : ...`) slip past the sweep
-        // entirely (diff-funnel r1-F3); the parse below is the real filter.
-        if (!line.includes('"ws"')) continue;
+        if (!line.trim()) continue;
+        // PARSE is authoritative (diff-funnel r6-F1: any substring prefilter
+        // — even on the bare quoted key — is evadable with JSON escapes like
+        // an escaped key (backslash-u0077 then s), which parses to a top-level `ws` the raw bytes never
+        // show). Lines that fail to parse already FAILed the chain scan.
         let ev;
         try { ev = JSON.parse(line); } catch { continue; }
         if (!ev || !('ws' in ev)) continue;
