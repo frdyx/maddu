@@ -139,11 +139,20 @@ export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = I
   });
   let waited = 0;
   let nullReads = 0;
+  let epermRetries = 0;
   for (;;) {
     let fh = null;
     try {
       fh = await open(lockPath, 'wx'); // O_CREAT | O_EXCL — atomic arbiter
     } catch (e) {
+      // Windows transient (AV scan / a concurrent rename touching the parent
+      // dir): open can EPERM/EACCES briefly without any real permission
+      // problem — the same class of error graceful-fs retries. A bounded
+      // retry keeps the arbiter honest; a PERSISTENT denial still throws.
+      if (e && (e.code === 'EPERM' || e.code === 'EACCES') && ++epermRetries <= 20) {
+        await sleep(POLL_MS);
+        continue;
+      }
       if (!e || e.code !== 'EEXIST') throw e;
       const rec = await readLock(lockPath);
       let reclaimed = false;
