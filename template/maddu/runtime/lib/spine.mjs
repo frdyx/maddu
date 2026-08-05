@@ -702,10 +702,23 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
         // the re-resolution rescans (the anchor now exists → authority) and
         // caches with a pre-scan fingerprint, so cache-only readers (the
         // token wrapper's no-scan freshness law) can stamp immediately
-        // post-bootstrap instead of going ws-less until the next append.
+        // post-bootstrap. Every non-{ws} outcome PROPAGATES (diff-funnel
+        // r3-F2: a peer anchor arriving right after publication is a real
+        // conflict — overwriting that freeze with a fallback clean cache and
+        // stamping the pre-conflict identity would append what verify then
+        // FAILs as ws_anchor_conflict/ws_mismatch).
         const idr2 = await resolveIdentityForAppend(repoRoot);
-        if (idr2.ws) wsStamp = idr2.ws;
-        else await writeIdentityCache(repoRoot, { spineIdentity: wsStamp, mode: 'sync' }).catch(() => {});
+        if (idr2.conflict) {
+          const err = new Error(`spine append: conflicting workspace-identity anchors (${idr2.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+          err.code = 'WS_IDENTITY_CONFLICT';
+          throw err;
+        }
+        if (!idr2.ws) {
+          const err = new Error(`spine append: workspace identity unresolvable — ${idr2.refuse || 'anchor bootstrap did not converge'}`);
+          err.code = 'WS_IDENTITY_UNRESOLVABLE';
+          throw err;
+        }
+        wsStamp = idr2.ws;
       }
     } else if (idr.ws) {
       wsStamp = idr.ws;

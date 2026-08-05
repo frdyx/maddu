@@ -269,6 +269,50 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r3-F1: a VALID unterminated authority event is not yet committed ────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    const g1 = JSON.stringify({ v: 1, id: 'evt_g1', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const anchorLine = JSON.stringify({ v: 1, id: 'evt_a1', ts: '2026-01-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(g1), genesis: { replicaId: 'repA', segment: '000000000001.ndjson', line: 1, hash: hashLine(g1) } }, prev_hash: hashLine(g1) });
+    // The anchor body is COMPLETE valid JSON — but its newline hasn't landed.
+    await writeFile(join(d, '000000000001.ndjson'), g1 + '\n' + anchorLine);
+    const s1 = await scanWsAuthorityEvents(fix);
+    ok('valid-JSON unterminated anchor is NOT adopted (not yet part of the record)', s1.anchors.length === 0);
+    await writeFile(join(d, '000000000001.ndjson'), g1 + '\n' + anchorLine + '\n');
+    const s2 = await scanWsAuthorityEvents(fix);
+    ok('the same anchor IS adopted once newline-terminated', s2.anchors.length === 1);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r3-F4: an anchor that contradicts stamped history is refused ────────
+  {
+    const fix = await freshFix();
+    const { publishWsAnchorOnce } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    const mkPart = async (rep, lines) => {
+      const d = join(fix, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    // Local partition: genesis + an event already stamped with the LOCAL identity.
+    const gLocal = JSON.stringify({ v: 1, id: 'evt_gl', ts: '2026-06-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const localWs = wsFromLine(gLocal);
+    const stamped = JSON.stringify({ v: 1, id: 'evt_s1', ts: '2026-06-01T00:00:01.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 }, ws: localWs, prev_hash: hashLine(gLocal) });
+    await mkPart('repLocal', [gLocal, stamped]);
+    // A peer partition whose genesis sorts merge-FIRST (earlier ts) — the
+    // nomination would derive the PEER identity and invalidate the stamped
+    // local history the moment the anchor lands.
+    const gPeer = JSON.stringify({ v: 1, id: 'evt_gp', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    await mkPart('repPeer', [gPeer]);
+    const pub = await publishWsAnchorOnce(fix, 'repLocal', () => { throw new Error('must not build — refusal expected'); });
+    ok('anchor contradicting stamped history is REFUSED (irreversible — never published)',
+      typeof pub.unresolvable === 'string' && pub.unresolvable.includes(localWs), JSON.stringify(pub).slice(0, 160));
+    const post = await scanWsAuthorityEvents(fix);
+    ok('nothing was published on refusal', post.anchors.length === 0);
+    await rm(fix, { recursive: true, force: true });
+  }
+
   // ── r2-F4: the ceremony append is atomic + idempotent at the core ───────
   {
     const fix = await freshFix();

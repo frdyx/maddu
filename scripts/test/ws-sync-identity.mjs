@@ -112,6 +112,9 @@ try {
     ok('stamping resumes with the selected identity', resumed.ws === flatWs);
     ok('idempotent ceremony is a declared no-op invocation (exit 0)',
       run(fix, ['spine', 'identity', 'resolve', '--keep', flatWs]).status === 0);
+    // r3-F5: a MISMATCHED idempotent request is a refusal, never a quiet 0.
+    ok('post-resolution --keep of the LOSING identity is refused (exit != 0)',
+      run(fix, ['spine', 'identity', 'resolve', '--keep', peerWs]).status !== 0);
   }
 
   // ── (D) residual-flat continuation: incompatible → NAMED fatal ──────────

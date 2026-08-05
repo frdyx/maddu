@@ -414,18 +414,22 @@ export async function scanWsAuthorityEvents(repoRoot) {
       try { txt = await readFile(join(dir, seg), 'utf8'); }
       catch (e) { throw scanUnresolvable(`${source}/${seg}`, e?.message || String(e)); }
       const lines = txt.split('\n');
-      for (let i = 0; i < lines.length; i++) {
+      // An UNTERMINATED final element is an in-flight write and is not yet
+      // part of the record — excluded BEFORE parsing (diff-funnel r3-F1: a
+      // complete-looking anchor body that merely lacks its trailing newline
+      // parses fine, but adopting it would let a writer stamp from
+      // authority the committed-size law deliberately excludes).
+      const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+      for (let i = 0; i < committed; i++) {
         const line = lines[i];
         if (!line.includes('"WS_IDENTITY_')) continue;
         let ev;
         try { ev = JSON.parse(line); }
         catch {
-          // A marker-bearing line that fails to parse: a COMPLETE line
-          // (newline-terminated — not the file's final element) is corrupt
-          // authority state → unresolvable. An unterminated final element is
-          // an in-flight write → not yet part of the record, skip.
-          if (i < lines.length - 1) throw scanUnresolvable(`${source}/${seg}`, `malformed authority-candidate line ${i + 1}`);
-          continue;
+          // A COMPLETE (newline-terminated) marker-bearing line that fails
+          // to parse is corrupt authority state → unresolvable, never a
+          // silent skip.
+          throw scanUnresolvable(`${source}/${seg}`, `malformed authority-candidate line ${i + 1}`);
         }
         if (ev?.type === 'WS_IDENTITY_ANCHORED') anchors.push(ev);
         else if (ev?.type === 'WS_IDENTITY_RESOLVED') resolutions.push(ev);
@@ -583,6 +587,45 @@ export async function resolveIdentityForAppend(repoRoot) {
   };
 }
 
+// Sweep every stored line for a ws stamp that differs from `proposed` —
+// bootstrap-only (never on the hot path). Returns {id, ws} of the first
+// offender or null. Torn tails are skipped exactly like the authority scan
+// (not yet part of the record); malformed complete lines are the chain
+// verifier's domain, not the identity law's.
+async function findForeignWsStamp(repoRoot, proposed) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const sweepDir = async (dir) => {
+    let names = [];
+    try { names = (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); }
+    catch { return null; }
+    for (const seg of names) {
+      let txt;
+      try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
+      const lines = txt.split('\n');
+      const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+      for (let i = 0; i < committed; i++) {
+        if (!lines[i].includes('"ws"')) continue;
+        let ev;
+        try { ev = JSON.parse(lines[i]); } catch { continue; }
+        if (ev && typeof ev.ws === 'string' && WS_ID_RE.test(ev.ws) && ev.ws !== proposed) {
+          return { id: ev.id ?? null, ws: ev.ws };
+        }
+      }
+    }
+    return null;
+  };
+  const flatHit = await sweepDir(eventsDir);
+  if (flatHit) return flatHit;
+  const byReplica = join(eventsDir, 'by-replica');
+  let ids = [];
+  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
+  for (const id of ids.sort()) {
+    const hit = await sweepDir(join(byReplica, id));
+    if (hit) return hit;
+  }
+  return null;
+}
+
 // Publish the one-time WS_IDENTITY_ANCHORED — serialized AND idempotent
 // (diff-funnel r1 follow-up: concurrent first S2 writers each resolving
 // `needAnchor` must not publish duplicate anchors — worse, ones nominating
@@ -608,8 +651,19 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     const mf = await findMergeFirstGenesis(repoRoot);
     if (mf.state === 'absent') return { bootstrap: true }; // empty partition — the caller's event IS the genesis
     if (mf.state === 'unresolvable') return { unresolvable: mf.error };
+    const proposed = wsFromLine(mf.text);
+    // History-compatibility sweep (diff-funnel r3-F4): an anchor is
+    // IRREVERSIBLE (append-only) — publishing one whose identity contradicts
+    // events already ws-stamped in this workspace (e.g. S2-stamped flat
+    // history migrated into an anchorless older sync workspace whose peer
+    // genesis sorts merge-first) would make verify FAIL ws_mismatch on the
+    // entire migrated history the moment it lands. Refuse instead.
+    const foreign = await findForeignWsStamp(repoRoot, proposed);
+    if (foreign) {
+      return { unresolvable: `existing event ${foreign.id} is stamped ${foreign.ws} but the merge-first nomination derives ${proposed} — resolve the histories before anchoring (an anchor is irreversible)` };
+    }
     const ev = buildEv({
-      spineIdentity: wsFromLine(mf.text),
+      spineIdentity: proposed,
       genesis: { replicaId: mf.replicaId, segment: mf.segment, line: mf.line, hash: hashLine(mf.text) },
     });
     const prevLine = await lastEventLineInDir(dir);
@@ -882,7 +936,7 @@ export async function readPartitionStreamsStrict(repoRoot) {
     // caller (recovery) fails closed (allStreamsStrict === false) instead of
     // treating an unreadable sync repo as flat.
     if (!e || e.code !== 'ENOENT') {
-      streams.push({ replicaId: ' by-replica-unreadable', events: [], parseErrors: 1 });
+      streams.push({ replicaId: '\u0000by-replica-unreadable', events: [], parseErrors: 1 });
     }
   }
   for (const rid of dirs) {

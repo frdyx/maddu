@@ -305,12 +305,23 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
     if (!replicaId) return { ok: false, reason: 'mint-collision' };
   }
 
-  // Write the pending marker FIRST. From here a concurrent append() sees it and —
-  // crucially — does NOT write into the partition; it WAITS for replica.json (the
-  // completion signal) before touching the partition. So migration needs no lock:
-  // no writer can interleave with the renames. readAll still sees the in-progress
-  // partition + residual flat (readActiveReplicaId), so reads stay consistent.
+  // Write the pending marker FIRST — and UNDER the flat funnel lock, held
+  // from here through migration and activation (diff-funnel r3-F3): a flat
+  // writer's in-lock marker recheck and its appendFile are one critical
+  // section, so publishing the marker inside the same funnel closes the
+  // TOCTOU where the marker landed between a writer's recheck and its write
+  // (which stranded that write — worst case a ceremony's WS_IDENTITY_RESOLVED
+  // — in a residual flat segment migration had already snapshotted past).
+  // Lock order stays flat → partition (publishWsAnchorOnce / the cutover
+  // seed take the partition lock NESTED under this), matching
+  // continueResidualMigration. From the marker on, a concurrent append()
+  // WAITS for replica.json (the completion signal) before touching the
+  // partition; readAll still sees the in-progress partition + residual flat
+  // (readActiveReplicaId), so reads stay consistent.
   await mkdir(join(repoRoot, '.maddu', 'config'), { recursive: true });
+  const flatFunnelDir = join(repoRoot, '.maddu', 'events');
+  await mkdir(flatFunnelDir, { recursive: true });
+  return withAppendLock(join(flatFunnelDir, '.append.lock'), async () => {
   await writeFile(pendingReplicaPath(repoRoot), JSON.stringify({ replicaId }) + '\n');
 
   // Anchors recheck AFTER the marker: once the marker exists, any in-flight
@@ -464,6 +475,7 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   const result = { ok: true, replicaId, migrated };
   if (strandedFlat.length) result.strandedFlat = strandedFlat;
   return result;
+  }); // end of the flat-funnel critical section opened at the pending-marker write (r3-F3)
 }
 
 // Validate the partitions that git placed on disk (git is a dumb transport). This

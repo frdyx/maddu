@@ -110,11 +110,20 @@ export default async function spine(argv) {
       catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
       const law = core.resolveWsAuthority({ anchors, resolutions });
       if (!law.conflict) {
-        console.log(`nothing to resolve — ${law.authority ? `authority is ${law.authority}` : 'no anchors exist yet'}`);
-        // Declared no-op: an idempotent ceremony invocation appends nothing.
-        const { loadLibOptional } = await import('./_libroot.mjs');
-        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
-        return;
+        // Idempotent success ONLY when the selection matches the resolved
+        // authority (diff-funnel r3-F5: `--keep ws_B` against an authority
+        // of ws_A — or an anchorless workspace — is a refused mismatch, not
+        // a quiet exit-0 no-op).
+        if (law.authority && law.authority === keep) {
+          console.log(`nothing to resolve — authority is ${keep}`);
+          const { loadLibOptional } = await import('./_libroot.mjs');
+          (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
+          return;
+        }
+        console.error(law.authority
+          ? `refused: nothing to resolve, and the authority is ${law.authority} — not ${keep}`
+          : `refused: nothing to resolve — no anchors exist yet`);
+        process.exit(2);
       }
       if (!law.identities.includes(keep)) {
         console.error(`refused: --keep ${keep} is not among the conflicting identities (${law.identities.join(', ')}) — the ceremony selects an EXISTING identity, never a new one`);
@@ -404,6 +413,17 @@ export default async function spine(argv) {
     }
     const { flags } = parseFlags(rest.slice(1));
     const res = await lib.spineSync.syncInit(repoRoot);
+    // S1 witness classification runs BEFORE the output-format branch
+    // (diff-funnel r3-F6: the --json early exit skipped it, so a successful
+    // residual continuation false-breached in JSON mode). Failures exit
+    // non-zero and never breach; a fresh init's cutover/anchor/migration
+    // writes are classified where they happen (core primitives).
+    if (res.ok && res.already) {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      const movedSegs = res.continuation?.status === 'migrated' ? (res.continuation.segments || []) : [];
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.(
+        movedSegs.length ? 'host-file:residual-migration' : 'idempotent-already-synced');
+    }
     if (flags.json) {
       process.stdout.write(JSON.stringify(res, null, 2) + '\n');
       process.exit(res.ok ? 0 : 1);
@@ -427,20 +447,11 @@ export default async function spine(argv) {
       process.exit(1);
     }
     if (res.already) {
-      const { loadLibOptional } = await import('./_libroot.mjs');
+      // (Witness classification already ran above, before the format branch.)
       const moved = res.continuation?.status === 'migrated' ? (res.continuation.segments || []) : [];
+      console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
       if (moved.length) {
-        // The continuation RENAMED residual flat segments into the partition —
-        // a real host-file mutation with no spine append (nothing new was
-        // written, existing history moved home). Honest declared class, never
-        // "idempotent" (diff-funnel r1-F5).
-        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('host-file:residual-migration');
-        console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
         console.log(`  ${levelTag('PASS')}  residual flat segment(s) migrated into the partition: ${moved.join(', ')}`);
-      } else {
-        // Declared no-op: sync init on an already-synced checkout.
-        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-synced');
-        console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
       }
     } else {
       console.log(`${levelTag('PASS')}  team-sync initialised`);
