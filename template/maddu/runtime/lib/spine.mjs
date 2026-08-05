@@ -655,11 +655,24 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     // second anchor after the init publishes its own — resolveWriteReplica
     // already embodies the wait-for-activation law, so reuse it; a genuine
     // stall surfaces as the same refusal the write path below would give).
-    const wGate = await resolveWriteReplica(repoRoot);
-    if (wGate.pending) {
-      throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+    // The gate is a small RETRY LOOP: a sync-init can complete BETWEEN the
+    // funnel resolution and the identity resolution (neither holds a lock),
+    // leaving `wGate` stale — mid-transition outcomes (needAnchor/refuse)
+    // whose funnel has since changed re-run the gate against the settled
+    // world instead of failing on a snapshot that no longer exists.
+    let wGate, idr;
+    for (let gateTry = 0; ; gateTry++) {
+      wGate = await resolveWriteReplica(repoRoot);
+      if (wGate.pending) {
+        throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+      }
+      idr = await resolveIdentityForAppend(repoRoot);
+      if ((idr.needAnchor || idr.refuse) && gateTry < 3) {
+        const wNow = await resolveWriteReplica(repoRoot);
+        if ((wNow.id || null) !== (wGate.id || null) || wNow.pending) continue; // the world moved — re-run
+      }
+      break;
     }
-    const idr = await resolveIdentityForAppend(repoRoot);
     if (idr.conflict) {
       const err = new Error(`spine append: conflicting workspace-identity anchors (${idr.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
       err.code = 'WS_IDENTITY_CONFLICT';
@@ -675,7 +688,10 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       // landed while we raced is adopted, a conflict freezes, and only a
       // still-anchorless workspace publishes (exactly once).
       if (!wGate.id) {
-        const err = new Error('spine append: workspace identity unresolvable — needAnchor outside sync mode');
+        // Partitioned identity with a flat write funnel = a checkout that
+        // has partitions but no replica identity (a fresh clone of a synced
+        // repo). It must not publish anchors or write at all.
+        const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
         err.code = 'WS_IDENTITY_UNRESOLVABLE';
         throw err;
       }
