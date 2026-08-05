@@ -307,13 +307,25 @@ export default async function learnCmd(argv) {
     }
     const result = fed.federate(local, foreignByRepo);
 
+    // Mutation-witness (Codex diff r2 F1): branch-local no-ops on the three
+    // append-free success returns ONLY — the --adopt path below appends
+    // LEARN_CORRECTION_WRITTEN and stays unexcused.
+    const witnessFedNoop = async (reason) => {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.(reason);
+    };
+
     if (flags.json) {
+      // JSON is report-only by design (it returns unconditionally, --adopt or
+      // not) — an append-free success.
+      await witnessFedNoop('federation-sync:json-report');
       process.stdout.write(JSON.stringify({ ...result, localCount: local.length, siblingsRead: read }, null, 2) + '\n');
       return;
     }
 
     console.log(`maddu learn sync  ${C.dim}${read} sibling repo(s) read · ${local.length} local lesson(s)${C.reset}`);
     if (!result.portable.length) {
+      await witnessFedNoop('federation-sync:nothing-portable');
       console.log(result.siloed
         ? `  ${C.dim}no NEW portable lessons (${result.siloed} single-repo lesson(s) stayed siloed)${C.reset}`
         : `  ${C.dim}no portable lessons found across the fleet${C.reset}`);
@@ -325,6 +337,7 @@ export default async function learnCmd(argv) {
       console.log(`      ${C.dim}${p.reason} · from ${p.sources.join(', ')}${C.reset}`);
     }
     if (!flags.adopt) {
+      await witnessFedNoop('federation-sync:preview-only');
       console.log(`\n  ${C.dim}preview only — adopt into CLAUDE.md (approval-only): maddu learn sync --adopt${C.reset}`);
       return;
     }

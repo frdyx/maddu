@@ -183,7 +183,7 @@ export default {
   handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['show'] },
   // hooks install/remove write a HOST file (.claude/settings.json); `hooks fire`
   // is invoked by Claude Code's hook system (external), not a Máddu auto-trigger.
-  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['status'] },
+  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'status', 'list'] },
   // v1.4.0 — plugin loader: capabilities that live outside the core. list/info
   // are read-only-shaped but the verb dispatches into enable/disable writes, so
   // the verb is mutating; auto-trigger forbidden (operator-explicit, like mcp).

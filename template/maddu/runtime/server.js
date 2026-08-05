@@ -391,6 +391,12 @@ async function handleBridge(req, res, url, ctx) {
   // These live under ~/.config/maddu/global/ and are not bound to any one
   // workspace, so they bypass resolveRequestWorkspace just like the
   // /bridge/_workspaces routes above.
+  // S1 declared no-op (Codex diff r2 F3): every mutating /_global/* route
+  // edits that MACHINE-SCOPE config — no workspace spine owns it. (The parse
+  // POST is exempt read; the declaration is harmless there.)
+  if (path.startsWith('/bridge/_global/') && req.method !== 'GET') {
+    witnessNoop('machine-scope:global-config');
+  }
   if (path === '/bridge/_global/schedules' && req.method === 'GET') {
     const schedules = await listGlobalSchedules();
     return sendJson(res, 200, { schedules });

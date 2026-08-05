@@ -102,6 +102,20 @@ try {
     }
   }
 
+  // ── (C3) zero-credit hook-fire regression (Codex diff r2 F2) ────────────
+  // A successful session-start fire APPENDS (register) — the containment
+  // excuse must not cover it: with credits suppressed the run must BREACH,
+  // proving a deleted happy-path append can never hide behind the noop.
+  {
+    const fireBreach = run(fix, ['hooks', 'fire', 'session-start'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
+    ok('zero-credit hooks fire session-start BREACHES (happy-path append is not excused)',
+      fireBreach.status === 1 && (await spoolRows(fix)).length === 1, `exit=${fireBreach.status}`);
+    run(fix, ['plan', 'list']); // drain
+    const fireClean = run(fix, ['hooks', 'fire', 'session-start']);
+    ok('normal hooks fire session-start exits 0 clean (append credits)',
+      fireClean.status === 0 && (await spoolRows(fix)).length === 0, `exit=${fireClean.status}`);
+  }
+
   // ── (D) credit-leak regression (delta-based counts) ─────────────────────
   const baseEvents = (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length;
   const b2 = run(fix, ['goal', 'set', '--objective', 'e2e-three'], { __MADDU_TEST_ZERO_CREDIT__: '1' });

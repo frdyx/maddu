@@ -142,6 +142,22 @@ export async function handle({ path, method, res, sendJson }) {
       res.statusCode === 200 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${res.statusCode}`);
   }
 
+  // ── (E2) r2-F3 route families: machine-scope / derived-state / batch ────
+  {
+    // DELETE of a nonexistent id: exercises the machine-scope declaration
+    // path with ZERO real-world effect (never writes the operator's actual
+    // ~/.config/maddu/global from a test).
+    const g = await call('DELETE', '/bridge/_global/schedules/witness-fixture-never-exists');
+    ok('global schedule DELETE (machine-scope) 2xx, no breach',
+      g.statusCode === 200 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${g.statusCode}`);
+    const me = await call('POST', '/bridge/memory/extract', {});
+    ok('memory/extract POST (derived-state) 2xx, no breach',
+      me.statusCode === 200 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${me.statusCode}`);
+    const ta = await call('POST', '/bridge/mcp/test-all', {});
+    ok('mcp/test-all POST (empty batch) 2xx, no breach',
+      ta.statusCode === 200 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 0, `status=${ta.statusCode}`);
+  }
+
   // ── (F) plugin routes (fixture plugin installed at setup, pre-cache) ────
   {
     const noopRes = await call('POST', '/bridge/wtest/noop', {});
