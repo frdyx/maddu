@@ -183,6 +183,8 @@ export const EVENT_DISPOSITIONS = {
   BRIDGE_ORIGIN_REJECTED: { disp: 'active' },
   BRIDGE_CROSS_WORKSPACE: { disp: 'dormant', reason: "fires only when a request targets a non-active workspace (multi-workspace bridge)" },
   SPINE_CUTOVER: { disp: 'dormant', reason: "fires only when a fresh sync partition is minted (spine sync init)" },
+  WS_IDENTITY_ANCHORED: { disp: 'dormant', reason: "fires once per sync workspace — the first S2-aware writer publishes the in-band identity anchor; absent in flat mode (pure derivation) and after the anchor exists" },
+  WS_IDENTITY_RESOLVED: { disp: 'dormant', reason: "fires only in the operator's anchor-conflict ceremony (spine identity resolve) — absent unless two offline first-writers raced the bootstrap" },
   DISCIPLINE_SKIPPED: { disp: 'dormant', reason: "fires only when a discipline bypass is witnessed (enforcement off / self-disable / hook uninstalled) — absent in a healthy disciplined run" },
   MUTATION_UNWITNESSED: { disp: 'dormant', reason: "fires only when a mutating seam exits successfully with zero spine appends and no declared no-op (the mutation-witness guard's breach witness) — absent in a healthy witnessed run" },
   ENFORCEMENT_ERROR: { disp: 'dormant', reason: "fires only when the enforcement path throws and falls open — absent unless there's an enforcement bug" },

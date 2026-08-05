@@ -69,7 +69,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
-import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION } from './spine-append-core.mjs';
+import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -1132,7 +1132,97 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     await scanChain(eventsDir, { referential: true });
   }
 
+  // ── Workspace-identity post-pass (S2, v1.117.0) ──
+  // ONE authority for the whole workspace, resolved OUTSIDE the per-partition
+  // chain scans (plan-review r1-F3: an internally-consistent foreign partition
+  // must not pass) — anchors when present, flat derivation otherwise — then
+  // every ws-bearing line in every chain is compared against it. Runs as a
+  // separate pass over the SHARED strict enumerators in spine-append-core
+  // (r2-F2), after the chain scans so chain issues stay primary. Forward-only:
+  // ws-less legacy events are untouched.
+  await wsIdentityPass(repoRoot, push, { partitioned: nonEmptyParts.length > 0, eventsDir });
+
   return result;
+}
+
+// The S2 identity checks. FAIL kinds:
+//   ws_identity_unverifiable — an anchor's nominated position is missing or
+//     mismatched, the authority scan itself failed, or ws-bearing events
+//     exist with no derivable authority (never a silent skip; r2-F2).
+//   ws_anchor_conflict — conflicting anchors without a binding resolution
+//     (or conflicting resolutions).
+//   ws_mismatch — an event's ws differs from the workspace authority (the
+//     splice signal), or is an empty string (presence-byte lesson: absent
+//     and empty must be distinguishable — empty is malformed).
+// WARN kinds:
+//   ws_cache_stale — identity.json disagrees with the resolved authority
+//     (cache, never authority).
+async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
+  let anchors = [], resolutions = [];
+  try { ({ anchors, resolutions } = await scanWsAuthorityEvents(repoRoot)); }
+  catch (e) {
+    push(issue('FAIL', 'ws_identity_unverifiable', `authority scan failed: ${e?.message || e}`));
+    return;
+  }
+
+  // Anchor nominations must survive a re-read (position + hash + derivation).
+  for (const a of anchors) {
+    const v = await verifyAnchorNomination(repoRoot, a.data);
+    if (!v.ok) push(issue('FAIL', 'ws_identity_unverifiable', `anchor ${a.id}: ${v.reason}`, { eventId: a.id }));
+  }
+
+  let flatWs = null;
+  if (!partitioned) {
+    const g = await readFlatGenesisLine(repoRoot);
+    if (g.state === 'ok') flatWs = wsFromLine(g.line);
+    else if (g.state === 'unresolvable') {
+      // Only fatal if identity is actually at stake (ws-bearing events exist).
+      flatWs = { unresolvable: g.error };
+    }
+  }
+
+  const law = resolveWsAuthority({ anchors, resolutions, flatWs: typeof flatWs === 'string' ? flatWs : null });
+  if (law.conflict) {
+    push(issue('FAIL', 'ws_anchor_conflict', `conflicting workspace-identity anchors: ${law.identities.join(', ')} — resolve with \`maddu spine identity resolve --keep <ws_...>\``));
+  }
+  const authority = law.conflict ? null : law.authority;
+
+  // Sweep every stored line for a ws stamp (cheap substring prefilter; lines
+  // that fail to parse already FAILed in the chain scan above).
+  const sweep = async (dir) => {
+    let segs = [];
+    try { segs = (await readdir(dir)).filter((f) => SEGMENT_RE.test(f)).sort(); } catch { return; }
+    for (const seg of segs) {
+      let txt;
+      try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
+      for (const line of txt.split('\n')) {
+        if (!line.includes('"ws":')) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (!ev || !('ws' in ev)) continue;
+        if (ev.ws === '' || !WS_ID_RE.test(String(ev.ws))) {
+          push(issue('FAIL', 'ws_mismatch', `event ${ev.id}: malformed ws ${JSON.stringify(ev.ws)} (absent ≠ empty)`, { eventId: ev.id }));
+          continue;
+        }
+        if (authority && ev.ws !== authority) {
+          push(issue('FAIL', 'ws_mismatch', `event ${ev.id}: ws ${ev.ws} ≠ workspace authority ${authority} (cross-workspace splice signal)`, { eventId: ev.id }));
+        } else if (!authority && !law.conflict) {
+          const why = flatWs && flatWs.unresolvable ? `genesis unresolvable: ${flatWs.unresolvable}` : 'no derivable authority';
+          push(issue('FAIL', 'ws_identity_unverifiable', `event ${ev.id} carries ws ${ev.ws} but the workspace has ${why}`, { eventId: ev.id }));
+        }
+      }
+    }
+  };
+  await sweep(eventsDir);
+  for (const rid of await listPartitionIds(repoRoot)) await sweep(partitionDir(repoRoot, rid));
+
+  // Cache honesty (never authority).
+  if (authority) {
+    const c = await readIdentityCache(repoRoot);
+    if (c.state === 'present' && !c.conflict && c.spineIdentity !== authority) {
+      push(issue('WARN', 'ws_cache_stale', `identity.json caches ${c.spineIdentity} but the resolved authority is ${authority} — the next append re-resolves`));
+    }
+  }
 }
 
 // audit P3 — the verified-read the recency/success GATES use as their authority.

@@ -109,6 +109,7 @@ export function toLogRecord(ev, observedNano) {
   push('maddu.lane', ev.lane);
   if ('prev_hash' in ev) push('maddu.prev_hash', ev.prev_hash);
   if (ev.triggered_by != null) push('maddu.triggered_by', ev.triggered_by);
+  if ('ws' in ev) push('maddu.ws', ev.ws); // S2 workspace identity — exported, not silently dropped
   const data = ev.data || {};
   if (data.schemaVersion != null) push('maddu.schemaVersion', data.schemaVersion);
   const session = data.session || data.sessionId;

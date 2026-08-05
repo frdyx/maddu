@@ -126,6 +126,7 @@ export function renderEventSchemaMarkdown(schema, version, envelope) {
     type: 'One of the event types below.', actor: 'Session/worker id, or null.',
     lane: 'Lane id, or null.', prev_hash: 'Chain link to the prior line (absent pre-chain, null on genesis).',
     triggered_by: 'Object provenance ({ kind, id, … }) or null.', data: 'Per-type payload — see below.',
+    ws: 'Workspace identity (`ws_` + 16 hex of the genesis line\'s sha256). Optional, forward-only like `prev_hash`: absent on legacy and genesis/bootstrap lines. Rides inside the stored line, so it is inside `prev_hash` — anti-splice across workspaces.',
   };
   const mdType = (ty) => `\`${ty.replace(/\|/g, '\\|')}\``;
   const L = [];

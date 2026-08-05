@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned } from './spine-append-core.mjs';
+import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned, resolveIdentityForAppend, writeIdentityCache } from './spine-append-core.mjs';
 import { redactDataPayload } from './secret-scan.mjs';
 // Mutation-witness credit (buzz-steals S1): every SUCCESSFUL logical append
 // credits the active witness context exactly once — counted here (not in the
@@ -316,6 +316,8 @@ export const EVENT_TYPES = {
   // partition to the post-cutover strict rules even without a migrated FRAMEWORK
   // marker. data: { version }
   SPINE_CUTOVER:              'SPINE_CUTOVER',
+  WS_IDENTITY_ANCHORED:       'WS_IDENTITY_ANCHORED',
+  WS_IDENTITY_RESOLVED:       'WS_IDENTITY_RESOLVED',
   // audit P2 — self-discipline honesty. A mutating tool was let through WITHOUT a
   // discipline check (enforcement off, a self-disable attempt, or the enforcement
   // hook uninstalled), so a bypass always leaves a witness. Emitted best-effort at
@@ -611,9 +613,52 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // actor/lane/triggered_by carry ids by construction.
   data = redactDataPayload(data);
   const paths = await ensureSpine(repoRoot);
+
+  // ── Workspace identity (S2): pre-stamp gate + stamping ──
+  // The ws-authority event types are exempt BY PROTOCOL (they are ws-less —
+  // the anchor precedes stamping, and the resolution must be appendable
+  // WHILE conflicted; this exemption is also the natural recursion guard for
+  // the anchor publication below). Everything else resolves the identity:
+  //   conflict → refuse with a stable code (Codex plan r6 advisory 1) so the
+  //     dispatcher's ceremony exception can key on it;
+  //   needAnchor → publish WS_IDENTITY_ANCHORED first (once), then stamp;
+  //   bootstrap → this IS the genesis line; it stays ws-less (self-reference).
+  let wsStamp = null;
+  const WS_EXEMPT = type === EVENT_TYPES.WS_IDENTITY_ANCHORED || type === EVENT_TYPES.WS_IDENTITY_RESOLVED;
+  if (!WS_EXEMPT) {
+    const idr = await resolveIdentityForAppend(repoRoot);
+    if (idr.conflict) {
+      const err = new Error(`spine append: conflicting workspace-identity anchors (${idr.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+      err.code = 'WS_IDENTITY_CONFLICT';
+      throw err;
+    }
+    if (idr.refuse) {
+      const err = new Error(`spine append: workspace identity unresolvable — ${idr.refuse}`);
+      err.code = 'WS_IDENTITY_UNRESOLVABLE';
+      throw err;
+    }
+    if (idr.needAnchor) {
+      await append(repoRoot, {
+        type: EVENT_TYPES.WS_IDENTITY_ANCHORED,
+        actor, lane: null,
+        data: { v: 1, spineIdentity: idr.needAnchor.spineIdentity, genesis: idr.needAnchor.genesis },
+      });
+      await writeIdentityCache(repoRoot, { spineIdentity: idr.needAnchor.spineIdentity }).catch(() => {});
+      wsStamp = idr.needAnchor.spineIdentity;
+    } else if (idr.ws) {
+      wsStamp = idr.ws;
+    }
+    // idr.bootstrap → wsStamp stays null: the genesis line is ws-less.
+  }
+
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
   if (triggered_by) ev.triggered_by = triggered_by;
+  // Stamped INSIDE the stored line (after triggered_by, before prev_hash) —
+  // it rides into prev_hash with zero new hashing code. Caller-supplied `ws`
+  // is impossible by construction: the destructured signature above never
+  // accepts one.
+  if (wsStamp) ev.ws = wsStamp;
 
   // ── Sync mode (#12c): partitioned append ──
   // Write to this replica's partition under the funnel (prev_hash computed inside

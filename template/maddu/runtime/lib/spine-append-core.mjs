@@ -80,6 +80,273 @@ export function partitionDir(repoRoot, replicaId) {
   return join(repoRoot, '.maddu', 'events', 'by-replica', replicaId);
 }
 
+// ── Workspace identity (buzz-steals S2, v1.117.0) ───────────────────────────
+// `ws` = the workspace's content-derived identity: `ws_` + 16 hex of the
+// GENESIS line's sha256 (exact hashLine semantics — UTF-8 string, trailing CR
+// stripped). Never minted, never random: flat mode derives it from the first
+// stored line of the lowest segment (immutable in an append-only spine,
+// retroactively identical for every existing workspace); sync mode resolves
+// it from the in-band WS_IDENTITY_ANCHORED event (position+hash-pinned
+// nomination — the merge-first line is NOT stable as partitions join, so the
+// anchor freezes it; Codex plan-review r2-F1). Genesis/bootstrap lines are
+// deliberately ws-less: an identity cannot be the hash of a line containing
+// it (r3-F1).
+//
+// This section is stdlib-only and lives HERE (not spine.mjs) so the
+// standalone token wrapper can stamp `ws` without breaking its import
+// contract. `.maddu/events/identity.json` is a CACHE, never authority, never
+// committed (worktree-identity.mjs durability discipline: atomic tmp+rename,
+// exact read-back, three-state read failing toward "unverifiable, never
+// foreign").
+
+export const WS_ID_RE = /^ws_[a-f0-9]{16}$/;
+
+export function wsFromLine(line) {
+  return 'ws_' + hashLine(line).slice(0, 16);
+}
+
+export function identityCachePath(repoRoot) {
+  // Safe filename: every segment enumerator filters /^\d{12}\.ndjson$/, and
+  // both gitignore policies leave .maddu/events/* untracked.
+  return join(repoRoot, '.maddu', 'events', 'identity.json');
+}
+
+// Three-state cache read: {state:'present', spineIdentity, conflict} |
+// {state:'absent'} | {state:'unresolvable', error}. Malformed content is
+// UNRESOLVABLE (never guessed, never treated as foreign).
+export async function readIdentityCache(repoRoot) {
+  let txt;
+  try { txt = await readFile(identityCachePath(repoRoot), 'utf8'); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return { state: 'absent' };
+    return { state: 'unresolvable', error: e?.message || String(e) };
+  }
+  try {
+    const j = JSON.parse(txt);
+    if (j && typeof j.spineIdentity === 'string' && WS_ID_RE.test(j.spineIdentity)) {
+      return { state: 'present', spineIdentity: j.spineIdentity, conflict: j.conflict === true };
+    }
+    return { state: 'unresolvable', error: 'identity.json malformed (no valid spineIdentity)' };
+  } catch { return { state: 'unresolvable', error: 'identity.json is not JSON' }; }
+}
+
+// Atomic cache write + exact read-back (a torn cache must never survive).
+export async function writeIdentityCache(repoRoot, { spineIdentity, conflict = false }) {
+  if (!WS_ID_RE.test(String(spineIdentity || '')) && !conflict) {
+    throw new Error(`writeIdentityCache: invalid spineIdentity ${JSON.stringify(spineIdentity)}`);
+  }
+  const p = identityCachePath(repoRoot);
+  const tmp = p + '.tmp';
+  const body = JSON.stringify({ v: 1, spineIdentity: spineIdentity ?? null, conflict }) + '\n';
+  await mkdir(join(repoRoot, '.maddu', 'events'), { recursive: true });
+  await writeFile(tmp, body);
+  const { rename } = await import('node:fs/promises');
+  await rename(tmp, p);
+  const back = await readFile(p, 'utf8');
+  if (back !== body) throw new Error('writeIdentityCache: read-back mismatch');
+}
+
+// Mode predicate — pinned to VERIFIER reality (plan-review r2-F2): ANY
+// numeric-segment-bearing partition under by-replica ⇒ partitioned mode,
+// including fresh clones without replica.json and workspaces with residual
+// flat data.
+export async function wsModeIsPartitioned(repoRoot) {
+  const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
+  let ids = [];
+  try { ids = await readdir(byReplica); } catch { return false; }
+  for (const id of ids) {
+    if (!isValidReplicaId(id)) continue;
+    if ((await listSegmentsInDir(join(byReplica, id))).length > 0) return true;
+  }
+  return false;
+}
+
+// STRICT flat-genesis read (one shared enumerator — plan-review r2-F2: the
+// identity path never uses the malformed-line-discarding stream readers).
+// Returns {state:'ok', line} | {state:'absent'} | {state:'unresolvable', error}.
+export async function readFlatGenesisLine(repoRoot) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  let segs = [];
+  try { segs = (await readdir(eventsDir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return { state: 'absent' };
+    return { state: 'unresolvable', error: e?.message || String(e) };
+  }
+  if (!segs.length) return { state: 'absent' };
+  try {
+    const txt = await readFile(join(eventsDir, segs[0]), 'utf8');
+    const line = txt.split('\n').find((l) => l.trim());
+    return line ? { state: 'ok', line } : { state: 'absent' };
+  } catch (e) { return { state: 'unresolvable', error: e?.message || String(e) }; }
+}
+
+// Read one exact stored line by partition position (anchor nomination target
+// / verify re-read). lineNo is 1-based within the named segment.
+export async function readPartitionLineAt(repoRoot, replicaId, segment, lineNo) {
+  if (!isValidReplicaId(replicaId) || !/^\d{12}\.ndjson$/.test(String(segment))) {
+    return { state: 'unresolvable', error: 'invalid nomination position' };
+  }
+  try {
+    const txt = await readFile(join(partitionDir(repoRoot, replicaId), segment), 'utf8');
+    const lines = txt.split('\n');
+    const line = lines[lineNo - 1];
+    return line && line.trim() ? { state: 'ok', line } : { state: 'absent' };
+  } catch (e) {
+    return e && e.code === 'ENOENT'
+      ? { state: 'absent' }
+      : { state: 'unresolvable', error: e?.message || String(e) };
+  }
+}
+
+// The merge-first genesis candidate for anchor NOMINATION (writer-only, at
+// anchor-publication time — verify never re-derives from the evolving
+// partition set once an anchor exists). Only numeric by-replica positions
+// are nominable (r3-F3: residual flat segments are not Git-carried by sync,
+// so a peer could receive the anchor without its line). Deterministic:
+// smallest (ts, replicaId) head among partition first-lines.
+export async function findMergeFirstGenesis(repoRoot) {
+  const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
+  let ids = [];
+  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch { return { state: 'absent' }; }
+  let best = null;
+  for (const id of ids.sort()) {
+    const segs = await listSegmentsInDir(join(byReplica, id));
+    if (!segs.length) continue;
+    let txt;
+    try { txt = await readFile(join(byReplica, id, segs[0]), 'utf8'); }
+    catch (e) { return { state: 'unresolvable', error: `partition ${id}: ${e?.message || e}` }; }
+    const line = txt.split('\n').find((l) => l.trim());
+    if (!line) continue;
+    let ts = null;
+    try { ts = JSON.parse(line)?.ts ?? null; } catch { return { state: 'unresolvable', error: `partition ${id}: malformed first line` }; }
+    if (typeof ts !== 'string') return { state: 'unresolvable', error: `partition ${id}: first line has no ts` };
+    if (!best || ts < best.ts || (ts === best.ts && id < best.replicaId)) {
+      best = { replicaId: id, segment: segs[0], line: 1, text: line, ts };
+    }
+  }
+  return best ? { state: 'ok', ...best } : { state: 'absent' };
+}
+
+// Verify an anchor's nomination: the referenced position must exist and hash
+// to genesis.hash, and the derived ws must equal the anchored spineIdentity.
+export async function verifyAnchorNomination(repoRoot, data) {
+  const g = data?.genesis;
+  if (!g || typeof g.replicaId !== 'string' || typeof g.segment !== 'string'
+    || !Number.isInteger(g.line) || typeof g.hash !== 'string'
+    || !WS_ID_RE.test(String(data?.spineIdentity || ''))) {
+    return { ok: false, reason: 'malformed anchor' };
+  }
+  const r = await readPartitionLineAt(repoRoot, g.replicaId, g.segment, g.line);
+  if (r.state !== 'ok') return { ok: false, reason: `nominated position ${r.state}${r.error ? `: ${r.error}` : ''}` };
+  if (hashLine(r.line) !== g.hash) return { ok: false, reason: 'nominated line hash mismatch' };
+  if (wsFromLine(r.line) !== data.spineIdentity) return { ok: false, reason: 'derived identity mismatch' };
+  return { ok: true };
+}
+
+// Scan every stored line for the two ws-authority event types (bootstrap /
+// conflict recheck only — never on the per-append hot path). Cheap substring
+// prefilter before parse; malformed candidate lines are UNRESOLVABLE (r2-F2:
+// never a silent skip).
+export async function scanWsAuthorityEvents(repoRoot) {
+  const anchors = [], resolutions = [];
+  const scanDir = async (dir, source) => {
+    for (const seg of await listSegmentsInDir(dir)) {
+      let txt;
+      try { txt = await readFile(join(dir, seg), 'utf8'); }
+      catch (e) { throw Object.assign(new Error(`ws scan: ${source}/${seg}: ${e?.message || e}`), { code: 'WS_SCAN_UNRESOLVABLE' }); }
+      for (const line of txt.split('\n')) {
+        if (!line.includes('"WS_IDENTITY_')) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; } // non-event text containing the token
+        if (ev?.type === 'WS_IDENTITY_ANCHORED') anchors.push(ev);
+        else if (ev?.type === 'WS_IDENTITY_RESOLVED') resolutions.push(ev);
+      }
+    }
+  };
+  await scanDir(join(repoRoot, '.maddu', 'events'), 'flat');
+  const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
+  let ids = [];
+  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
+  for (const id of ids) await scanDir(join(byReplica, id), id);
+  return { anchors, resolutions };
+}
+
+// Pure authority law shared by writers and verify (r1-F3: ONE authority,
+// outside any per-partition scan):
+//   no anchors → { authority: flatWs ?? null }
+//   anchors agreeing → { authority }
+//   conflicting anchors + a resolution binding ALL of them selecting an
+//   EXISTING identity → { authority: selected }
+//   else → { conflict: true, identities }
+export function resolveWsAuthority({ anchors = [], resolutions = [], flatWs = null } = {}) {
+  const ids = [...new Set(anchors.map((a) => a?.data?.spineIdentity).filter((x) => WS_ID_RE.test(String(x || ''))))];
+  if (ids.length === 0) return { authority: flatWs };
+  if (ids.length === 1) return { authority: ids[0] };
+  const anchorIds = new Set(anchors.map((a) => a?.id).filter(Boolean));
+  const valid = resolutions.filter((r) => {
+    const sel = r?.data?.selected;
+    const bound = Array.isArray(r?.data?.conflicts) ? r.data.conflicts.map((c) => c?.eventId).filter(Boolean) : [];
+    return WS_ID_RE.test(String(sel || '')) && ids.includes(sel) && [...anchorIds].every((a) => bound.includes(a));
+  });
+  const selections = [...new Set(valid.map((r) => r.data.selected))];
+  if (selections.length === 1) return { authority: selections[0], resolved: true };
+  return { conflict: true, identities: ids };
+}
+
+// Writer-side identity resolution (r1-F2: WRITER-ONLY — reads never call
+// this; verify uses the read-only pieces above). Fast path is the cache; the
+// scan runs only at bootstrap or while a conflict is cached. Returns:
+//   { ws }                       — stamp this
+//   { ws: null, bootstrap: true }— fresh flat spine, first line is ws-less
+//   { needAnchor: {spineIdentity, genesis} } — sync mode, caller publishes
+//     WS_IDENTITY_ANCHORED (ws-less) then stamps spineIdentity
+//   { refuse: reason }           — residual flat present (r3-F3) or
+//     unresolvable genesis with identity at stake (r2-F2)
+//   { conflict: identities }     — only WS_IDENTITY_RESOLVED may append
+export async function resolveIdentityForAppend(repoRoot) {
+  const cache = await readIdentityCache(repoRoot);
+  if (cache.state === 'present' && !cache.conflict) return { ws: cache.spineIdentity };
+  if (cache.state === 'unresolvable') return { refuse: `identity cache unresolvable: ${cache.error}` };
+
+  const partitioned = await wsModeIsPartitioned(repoRoot);
+  if (!partitioned) {
+    const g = await readFlatGenesisLine(repoRoot);
+    if (g.state === 'absent') return { ws: null, bootstrap: true };
+    if (g.state === 'unresolvable') return { refuse: `flat genesis unresolvable: ${g.error}` };
+    const ws = wsFromLine(g.line);
+    await writeIdentityCache(repoRoot, { spineIdentity: ws });
+    return { ws };
+  }
+
+  // Sync mode: anchors are the authority.
+  let scan;
+  try { scan = await scanWsAuthorityEvents(repoRoot); }
+  catch (e) { return { refuse: e?.message || String(e) }; }
+  const law = resolveWsAuthority(scan);
+  if (law.conflict) {
+    await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true }).catch(() => {});
+    return { conflict: law.identities };
+  }
+  if (law.authority) {
+    await writeIdentityCache(repoRoot, { spineIdentity: law.authority });
+    return { ws: law.authority };
+  }
+  // No anchor yet — this writer publishes it. Residual flat data blocks
+  // nomination (finish the migration first; r3-F3).
+  const flatResidual = await readFlatGenesisLine(repoRoot);
+  if (flatResidual.state === 'ok') return { refuse: 'residual flat segments present — finish `spine sync init` migration before S2 writes' };
+  if (flatResidual.state === 'unresolvable') return { refuse: `residual flat unresolvable: ${flatResidual.error}` };
+  const mf = await findMergeFirstGenesis(repoRoot);
+  if (mf.state === 'absent') return { ws: null, bootstrap: true }; // empty partition — bootstrap lines are ws-less
+  if (mf.state === 'unresolvable') return { refuse: `merge-first genesis unresolvable: ${mf.error}` };
+  return {
+    needAnchor: {
+      spineIdentity: wsFromLine(mf.text),
+      genesis: { replicaId: mf.replicaId, segment: mf.segment, line: mf.line, hash: hashLine(mf.text) },
+    },
+  };
+}
+
 // The pending-migration marker (written by `spine sync init` while it migrates the
 // legacy segments into a partition, before replica.json exists). It names the target
 // replicaId so an in-flight append routes to that partition and blocks on its funnel

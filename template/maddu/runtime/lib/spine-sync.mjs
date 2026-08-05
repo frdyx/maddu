@@ -19,7 +19,7 @@
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, wsFromLine, hashLine, writeIdentityCache } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -117,6 +117,63 @@ async function ensureMarkerBlock(file, begin, end, body) {
 // preserved verbatim). Refuses to overwrite an existing partition segment (an
 // inconsistent state) rather than clobber history. Idempotent: with no flat
 // segments left it is a no-op, which is what makes a re-run resume cleanly.
+// S2 (r4-F4/r5-F3): safe continuation of a stranded residual-flat migration
+// in an ALREADY-activated workspace. Locking order is FIXED: flat append
+// lock → active partition append lock (nested) — live partition appends use
+// the partition lock, so the compatibility re-read inside both locks cannot
+// race a concurrent append into a fork. Returns
+//   { status:'migrated', segments } |
+//   { status:'fatal', reason, remedy }.
+// Safe means: no partition segment-name collision AND the residual chain's
+// first prev_hash links the partition's CURRENT last stored line (it chains
+// cleanly onto the tail). Residual segments written against the OLD
+// pre-migration flat tail can never satisfy that — they get the named fatal.
+async function continueResidualMigration(repoRoot, replicaId, residualSegs) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const pdir = partitionDir(repoRoot, replicaId);
+  const flatLock = join(eventsDir, '.append.lock');
+  const partLock = join(pdir, '.append.lock');
+  const FATAL_REMEDY = 'inspect the residual segment(s) under .maddu/events/ — if their events are already represented in the partition, archive them out of .maddu/events/; otherwise re-append their events through `maddu` verbs and archive the files';
+  try {
+    return await withAppendLock(flatLock, async () =>
+      withAppendLock(partLock, async () => {
+        // Re-read INSIDE both locks (the pre-lock listing may be stale).
+        const flats = await listSegs(eventsDir);
+        if (!flats.length) return { status: 'migrated', segments: [] };
+        const partSegs = await listSegs(pdir);
+        for (const f of flats) {
+          if (partSegs.includes(f)) {
+            return { status: 'fatal', reason: `segment name ${f} collides with an existing partition segment`, remedy: FATAL_REMEDY };
+          }
+        }
+        // Tail compatibility: first residual line must chain onto the
+        // partition's current last line.
+        const firstFlatTxt = await readFile(join(eventsDir, flats[0]), 'utf8');
+        const firstLine = firstFlatTxt.split('\n').find((l) => l.trim());
+        if (!firstLine) return { status: 'fatal', reason: `residual segment ${flats[0]} is empty/unreadable`, remedy: FATAL_REMEDY };
+        let firstPrev = null;
+        try { firstPrev = JSON.parse(firstLine)?.prev_hash ?? null; }
+        catch { return { status: 'fatal', reason: `residual segment ${flats[0]} first line is malformed`, remedy: FATAL_REMEDY }; }
+        let tailLine = null;
+        for (let i = partSegs.length - 1; i >= 0 && tailLine === null; i--) {
+          const lines = (await readFile(join(pdir, partSegs[i]), 'utf8')).split('\n').filter((l) => l.trim());
+          if (lines.length) tailLine = lines[lines.length - 1];
+        }
+        if (!tailLine || firstPrev !== hashLine(tailLine)) {
+          return { status: 'fatal', reason: 'residual chain does not link the partition tail (written against the pre-migration flat tail)', remedy: FATAL_REMEDY };
+        }
+        const moved = [];
+        for (const f of flats) {
+          await rename(join(eventsDir, f), join(pdir, f));
+          moved.push(f);
+        }
+        return { status: 'migrated', segments: moved };
+      }, { maxWaitMs: 10000 }), { maxWaitMs: 10000 });
+  } catch (e) {
+    return { status: 'fatal', reason: `continuation locking failed: ${e?.message || e}`, remedy: FATAL_REMEDY };
+  }
+}
+
 async function migrateFlatInto(repoRoot, replicaId) {
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const partDir = partitionDir(repoRoot, replicaId);
@@ -213,6 +270,21 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   if (existing) {
     await ensureSyncTemplates(repoRoot);
     await bootstrapLineageUpgrade(repoRoot, existing);
+    // ── S2 residual-flat continuation (plan-review r4-F4 / r5-F3) ──
+    // Pre-existing residual flat segments in an ALREADY-activated workspace
+    // (the funnel race the init-time barrier can't reach retroactively) used
+    // to be permanently stranded behind this early return. Attempt a SAFE
+    // continuation: flat lock AND active partition lock acquired in that
+    // fixed order (live partition appends serialize on the latter), tail
+    // compatibility re-read INSIDE both locks, rename only when every
+    // residual segment (a) has no name collision in the partition and
+    // (b) chains onto the partition's CURRENT tail. Anything else is a NAMED
+    // fatal with the manual remedy — never a silent strand.
+    const residual = await listSegs(join(repoRoot, '.maddu', 'events'));
+    if (residual.length) {
+      const cont = await continueResidualMigration(repoRoot, existing, residual);
+      return { ok: true, already: true, replicaId: existing, continuation: cont };
+    }
     return { ok: true, already: true, replicaId: existing };
   }
 
@@ -281,6 +353,48 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
       data: { version: FLAT_LOCK_VERSION },
     });
   }
+  // ── Workspace-identity anchor bootstrap (S2, plan-review r4-F2) ──
+  // Runs for EVERY first-time or resumed init, OUTSIDE the empty-partition
+  // branch, BEFORE replica.json publishes. Nomination target is this
+  // partition's first line: a NON-empty migration nominates the migrated old
+  // flat genesis (its derivation equals the workspace's prior flat identity,
+  // so already-ws-stamped migrated events stay consistent); an empty
+  // migration nominates the cutover just seeded. A workspace-wide anchor
+  // already present (peer partitions in a clone; a crash-resumed init that
+  // got this far last time) is ADOPTED, never duplicated — idempotent
+  // resumes by construction.
+  try {
+    const { anchors, resolutions } = await scanWsAuthorityEvents(repoRoot);
+    const law = resolveWsAuthority({ anchors, resolutions });
+    if (law.conflict) {
+      // Pre-existing conflict (merged clones): freeze — the ceremony is the
+      // only way forward; init still completes (identity work is additive).
+      await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true }).catch(() => {});
+    } else if (law.authority) {
+      await writeIdentityCache(repoRoot, { spineIdentity: law.authority }).catch(() => {});
+    } else {
+      const firstSegs = await listSegs(pdir);
+      if (firstSegs.length) {
+        const txt = await readFile(join(pdir, firstSegs[0]), 'utf8');
+        const genesisLine = txt.split('\n').find((l) => l.trim());
+        if (genesisLine) {
+          const spineIdentity = wsFromLine(genesisLine);
+          const anchorTs = now || new Date().toISOString();
+          await appendPartitioned(repoRoot, replicaId, {
+            v: 1,
+            id: makeId('evt', anchorTs),
+            ts: anchorTs,
+            type: 'WS_IDENTITY_ANCHORED',
+            actor: null,
+            lane: null,
+            data: { v: 1, spineIdentity, genesis: { replicaId, segment: firstSegs[0], line: 1, hash: hashLine(genesisLine) } },
+          });
+          await writeIdentityCache(repoRoot, { spineIdentity }).catch(() => {});
+        }
+      }
+    }
+  } catch { /* identity bootstrap is additive — a failure here never blocks sync init; the first S2 append retries it */ }
+
   // Device-local replica lineage (PR-D §3.1), written AFTER migration + BEFORE
   // replica.json activation: a fresh init is the authoritative origin, so
   // {current:replicaId, predecessors:[], complete:true} — completeness is KNOWN

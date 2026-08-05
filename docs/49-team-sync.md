@@ -19,9 +19,23 @@ this document exists in your repo and every code path described here is inert.
   the spine exactly as before — same bytes, same projection, for *every*
   history. Sync-mode logic (partitioned reads, reconciliation) is scoped behind
   the replica check.
-- **No contract change.** The [published event contract](event-schema.md) stays
-  at its current MAJOR. The replica identity rides in the *path*
-  (`by-replica/<replicaId>/`), never in the event envelope.
+- **Contract stays at its current MAJOR.** The [published event
+  contract](event-schema.md) has only grown minor-additively. The REPLICA
+  identity (which checkout wrote a line) still rides in the *path*
+  (`by-replica/<replicaId>/`), never in the envelope. Since v1.117.0 (S2) the
+  envelope additionally carries an optional **workspace** identity `ws` —
+  which *workspace* a line belongs to, shared by ALL replicas of one
+  workspace (derived from the genesis line; in sync mode frozen by the
+  in-band `WS_IDENTITY_ANCHORED` event, published once by the first S2-aware
+  writer). It rides inside the stored line — and therefore inside
+  `prev_hash` — so a line spliced in from another workspace's spine cannot
+  re-chain without wholesale recompute. Forward-only: ws-less legacy events
+  verify exactly as before. Conflicting anchors (two offline first-writers
+  racing the one-time bootstrap) freeze S2 writes until the operator's
+  forward-only ceremony: `maddu spine identity resolve --keep <ws_...>`.
+  Note: the OTS time-pin composition applies to FLAT mode only (team sync
+  and OTS anchors are deliberately incompatible); in sync mode splice
+  detection comes from the in-band anchor + Git-carried partitions.
 - **Reconciliation is pure projection.** Conflict resolution (below) is
   computed at read time from the merged order. It writes **zero** events.
 

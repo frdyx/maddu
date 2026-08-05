@@ -16,6 +16,8 @@
 //                                          #   record-intact + independently checkable
 
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSecretScan } from './_tools.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveSessionId } from './_spine.mjs';
@@ -57,7 +59,81 @@ export default async function spine(argv) {
   const repoRoot = await resolveRepoRoot(lib.paths);
 
   if (!sub) {
-    console.error('Usage: maddu spine <verify|show|oversight|anchor|sync|import> [args]');
+    console.error('Usage: maddu spine <verify|show|oversight|anchor|identity|sync|import> [args]');
+    process.exit(2);
+  }
+
+  // ── workspace identity (S2, v1.117.0) ──
+  // `identity show` — read-only resolution readout (authority, mode, cache).
+  // `identity resolve --keep <ws_...>` — the forward-only anchor-conflict
+  // ceremony: appends WS_IDENTITY_RESOLVED binding EVERY known conflicting
+  // anchor and selecting one EXISTING identity. spine.append's pre-stamp gate
+  // exempts the ceremony type, so it is appendable WHILE conflicted.
+  if (sub === 'identity') {
+    const verb = rest[0];
+    const { flags } = parseFlags(rest.slice(1));
+    const core = await import(pathToFileURL(join(await (await import('./_libroot.mjs')).resolveLibDir(), 'spine-append-core.mjs')).href);
+    if (verb === 'show') {
+      let anchors = [], resolutions = [];
+      try { ({ anchors, resolutions } = await core.scanWsAuthorityEvents(repoRoot)); }
+      catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+      const partitioned = await core.wsModeIsPartitioned(repoRoot);
+      let flatWs = null;
+      if (!partitioned) {
+        const g = await core.readFlatGenesisLine(repoRoot);
+        if (g.state === 'ok') flatWs = core.wsFromLine(g.line);
+      }
+      const law = core.resolveWsAuthority({ anchors, resolutions, flatWs });
+      const cache = await core.readIdentityCache(repoRoot);
+      if (flags.json) {
+        console.log(JSON.stringify({ mode: partitioned ? 'sync' : 'flat', authority: law.conflict ? null : law.authority, conflict: !!law.conflict, identities: law.identities || null, anchors: anchors.length, resolutions: resolutions.length, cache }, null, 2));
+        process.exit(law.conflict ? 1 : 0);
+      }
+      console.log(`mode:      ${partitioned ? 'sync (anchor authority)' : 'flat (genesis derivation)'}`);
+      if (law.conflict) {
+        console.log(`${levelTag('FAIL')}  CONFLICTING anchors: ${law.identities.join(', ')}`);
+        console.log(`  resolve with: maddu spine identity resolve --keep <ws_...>`);
+        process.exit(1);
+      }
+      console.log(`authority: ${law.authority || '(none yet — first S2 append establishes it)'}`);
+      console.log(`anchors:   ${anchors.length}  ·  resolutions: ${resolutions.length}  ·  cache: ${cache.state}${cache.state === 'present' ? ` (${cache.spineIdentity}${cache.conflict ? ', conflict-frozen' : ''})` : ''}`);
+      return;
+    }
+    if (verb === 'resolve') {
+      const keep = typeof flags.keep === 'string' ? flags.keep : null;
+      if (!keep || !core.WS_ID_RE.test(keep)) {
+        console.error('Usage: maddu spine identity resolve --keep <ws_...> (a currently-anchored identity — never a new one)');
+        process.exit(2);
+      }
+      let anchors = [], resolutions = [];
+      try { ({ anchors, resolutions } = await core.scanWsAuthorityEvents(repoRoot)); }
+      catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+      const law = core.resolveWsAuthority({ anchors, resolutions });
+      if (!law.conflict) {
+        console.log(`nothing to resolve — ${law.authority ? `authority is ${law.authority}` : 'no anchors exist yet'}`);
+        // Declared no-op: an idempotent ceremony invocation appends nothing.
+        const { loadLibOptional } = await import('./_libroot.mjs');
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
+        return;
+      }
+      if (!law.identities.includes(keep)) {
+        console.error(`refused: --keep ${keep} is not among the conflicting identities (${law.identities.join(', ')}) — the ceremony selects an EXISTING identity, never a new one`);
+        process.exit(2);
+      }
+      const conflicts = anchors
+        .map((a) => ({ eventId: a.id, spineIdentity: a?.data?.spineIdentity ?? null, genesisHash: a?.data?.genesis?.hash ?? null }))
+        .sort((x, y) => String(x.eventId).localeCompare(String(y.eventId)));
+      const ev = await lib.spine.append(repoRoot, {
+        type: lib.spine.EVENT_TYPES.WS_IDENTITY_RESOLVED,
+        actor: await resolveSessionId(repoRoot, flags, lib.sessionActive).catch(() => null),
+        lane: null,
+        data: { selected: keep, conflicts },
+      });
+      await core.writeIdentityCache(repoRoot, { spineIdentity: keep }).catch(() => {});
+      console.log(`${levelTag('PASS')}  resolved — authority: ${keep}  (${conflicts.length} anchor(s) bound; event ${ev.id})`);
+      return;
+    }
+    console.error('Usage: maddu spine identity <show | resolve --keep <ws_...>> [--json]');
     process.exit(2);
   }
 
