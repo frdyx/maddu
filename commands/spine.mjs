@@ -111,21 +111,32 @@ export default async function spine(argv) {
       const law = core.resolveWsAuthority({ anchors, resolutions });
       if (!law.conflict) {
         // Idempotent success ONLY when the selection matches the resolved
-        // authority (diff-funnel r3-F5: `--keep ws_B` against an authority
-        // of ws_A — or an anchorless workspace — is a refused mismatch, not
-        // a quiet exit-0 no-op).
+        // authority (diff-funnel r3-F5) AND the grandfather already covers
+        // every losing stamp (r15-F1: pre-adoption offline work beyond the
+        // bound heads makes a matching --keep a cutover EXTENSION, not a
+        // no-op — fall through to the ceremony, which appends a
+        // same-selection resolution with fresh heads).
         if (law.authority && law.authority === keep) {
-          console.log(`nothing to resolve — authority is ${keep}`);
-          const { loadLibOptional } = await import('./_libroot.mjs');
-          (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
-          return;
+          const uncovered = law.resolved
+            ? await core.findIncompatibleWsStamp(repoRoot, keep, core.buildWsGrandfather(anchors, resolutions))
+            : null;
+          if (!uncovered) {
+            console.log(`nothing to resolve — authority is ${keep}`);
+            const { loadLibOptional } = await import('./_libroot.mjs');
+            (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
+            return;
+          }
+          // fall through: extension ceremony
+        } else {
+          console.error(law.authority
+            ? `refused: nothing to resolve, and the authority is ${law.authority} — not ${keep}`
+            : `refused: nothing to resolve — no anchors exist yet`);
+          process.exit(2);
         }
-        console.error(law.authority
-          ? `refused: nothing to resolve, and the authority is ${law.authority} — not ${keep}`
-          : `refused: nothing to resolve — no anchors exist yet`);
-        process.exit(2);
       }
-      if (!law.identities.includes(keep)) {
+      // (The extension fall-through arrives here RESOLVED — law.identities
+      // only exists in conflict state; the selection already matched above.)
+      if (law.conflict && !law.identities.includes(keep)) {
         console.error(`refused: --keep ${keep} is not among the conflicting identities (${law.identities.join(', ')}) — the ceremony selects an EXISTING identity, never a new one`);
         process.exit(2);
       }

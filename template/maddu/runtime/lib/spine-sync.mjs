@@ -19,7 +19,7 @@
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache, publishWsAnchorOnce, computeAuthorityFingerprint, findIncompatibleWsStamp, buildWsGrandfather } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache, publishWsAnchorOnce, computeAuthorityFingerprint, findIncompatibleWsStamp, buildWsGrandfather, maybeExtendWsCutoverLocked } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -818,6 +818,31 @@ export async function syncGit(repoRoot, opts = {}) {
           return { fail: { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed: committedIn, steps } };
         }
         pulledIn = true;
+        // Cutover EXTENSION (diff-funnel r15-F1), still under the SAME lock:
+        // if the pulled resolution's heads predate this checkout's own
+        // pre-adoption offline work (losing stamps beyond the bound heads —
+        // legitimately appended before this checkout learned of the
+        // ceremony), append a same-selection extension with fresh heads and
+        // commit it NOW, so the grandfathered coverage travels with this
+        // sync instead of leaving unhealable post-cutover mismatches.
+        const extTs = new Date().toISOString();
+        const ext = await maybeExtendWsCutoverLocked(repoRoot, partitionDir(repoRoot, replicaId), (selected, conflicts) => ({
+          v: 1, id: makeId('evt', extTs), ts: extTs,
+          type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null,
+          data: { selected, conflicts },
+        }));
+        if (ext.unresolvable) {
+          return { fail: { ok: false, reason: 'import-failed', detail: `cutover-extension scan failed: ${ext.unresolvable}`, committed: committedIn, steps } };
+        }
+        if (ext.extended) {
+          const segsNow = await listSegs(join(repoRoot, myDirRel));
+          const extPaths = segsNow.map((s) => `${myDirRel}/${s}`);
+          const add2 = await gitRun(['add', '--', ...extPaths], repoRoot, 20000);
+          if (add2.code !== 0) return { fail: { ok: false, reason: 'git-add-failed', detail: (add2.stderr || add2.error || '').trim(), committed: committedIn, steps } };
+          const commit2 = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...extPaths], repoRoot, 20000);
+          if (commit2.code !== 0) return { fail: { ok: false, reason: 'git-commit-failed', detail: (commit2.stderr || commit2.error || '').trim(), committed: committedIn, steps } };
+          committedIn = true;
+        }
       }
       return { committed: committedIn, uncommittedMeta, hasUpstream: hasUpstreamIn, pulled: pulledIn };
     }, { maxWaitMs: 60000 });

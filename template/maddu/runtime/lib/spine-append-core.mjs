@@ -822,6 +822,44 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
 //   { retry: true }      — the write funnel moved under us (migration) —
 //                          re-resolve and call again
 // Throws WS_SCAN_UNRESOLVABLE from the strict scan.
+// The exact per-partition chain heads RIGHT NOW — the cutover a resolution
+// (or extension) binds. Caller must hold the funnel lock that fences writes.
+async function collectPartitionHeadsLocked(repoRoot) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const cutover = [];
+  const byReplica = join(eventsDir, 'by-replica');
+  let rids = [];
+  try { rids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
+  for (const rid of rids.sort()) {
+    const pdir = partitionDir(repoRoot, rid);
+    let segsIn = [];
+    try { segsIn = (await readdir(pdir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { continue; }
+    let head = null;
+    for (let si = segsIn.length - 1; si >= 0 && !head; si--) {
+      let txt = '';
+      try { txt = await readFile(join(pdir, segsIn[si]), 'utf8'); } catch { continue; }
+      const lines = txt.split('\n');
+      const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+      for (let li = committed - 1; li >= 0; li--) {
+        if (lines[li].trim()) { head = { replicaId: rid, segment: segsIn[si], line: li + 1, hash: hashLine(lines[li]) }; break; }
+      }
+    }
+    if (head) cutover.push(head);
+  }
+  return cutover;
+}
+
+// Inline chained append into `dir` — caller MUST hold dir's append lock.
+async function appendLineLocked(dir, ev, site) {
+  const prevLine = await lastEventLineInDir(dir);
+  ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
+  const line = JSON.stringify(ev);
+  if (line.includes('\n')) throw new Error(`${site}: serialized event contains a raw newline`);
+  const seg = await currentSegmentInDir(dir);
+  await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
+  return ev;
+}
+
 export async function appendWsResolutionOnce(repoRoot, ev) {
   const w = await resolveWriteReplica(repoRoot);
   if (w.pending) return { retry: true };
@@ -838,7 +876,23 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
     }
     const scan = await scanWsAuthorityEvents(repoRoot);
     const law = resolveWsAuthority(scan);
-    if (!law.conflict) return { already: law.authority ?? null };
+    if (!law.conflict) {
+      // Cutover EXTENSION (diff-funnel r15-F1): a checkout that appended
+      // losing-stamped work OFFLINE — before it learned of the resolution —
+      // holds legitimate events beyond the bound heads. A SAME-selection
+      // re-ceremony is then not "already resolved": it appends a further
+      // resolution with FRESH heads, widening the grandfather union to cover
+      // the pre-adoption work. Anything else (different selection, no
+      // uncovered stamps, single-anchor authority) stays {already}.
+      const uncovered = law.resolved && law.authority && law.authority === ev?.data?.selected
+        ? await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions))
+        : null;
+      if (!uncovered) return { already: law.authority ?? null };
+      const binding = validateResolutionBinding(scan.anchors, ev.data);
+      if (!binding.ok) return { invalid: binding.reason };
+      ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };
+      return { ev: await appendLineLocked(dir, ev, 'appendWsResolutionOnce'), extended: true };
+    }
     if (!law.identities.includes(ev?.data?.selected)) {
       return { invalid: `selected ${JSON.stringify(ev?.data?.selected)} is not among the conflicting identities (${law.identities.join(', ')})` };
     }
@@ -849,35 +903,32 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
     // grandfather law tolerates LOSING-identity stamps at-or-before these
     // heads — the only way a both-sides-stamped conflict can ever resolve in
     // an append-only spine.
-    const cutover = [];
-    const byReplica = join(eventsDir, 'by-replica');
-    let rids = [];
-    try { rids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
-    for (const rid of rids.sort()) {
-      const pdir = partitionDir(repoRoot, rid);
-      let segsIn = [];
-      try { segsIn = (await readdir(pdir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { continue; }
-      let head = null;
-      for (let si = segsIn.length - 1; si >= 0 && !head; si--) {
-        let txt = '';
-        try { txt = await readFile(join(pdir, segsIn[si]), 'utf8'); } catch { continue; }
-        const lines = txt.split('\n');
-        const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
-        for (let li = committed - 1; li >= 0; li--) {
-          if (lines[li].trim()) { head = { replicaId: rid, segment: segsIn[si], line: li + 1, hash: hashLine(lines[li]) }; break; }
-        }
-      }
-      if (head) cutover.push(head);
-    }
-    ev.data = { ...ev.data, cutover };
-    const prevLine = await lastEventLineInDir(dir);
-    ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
-    const line = JSON.stringify(ev);
-    if (line.includes('\n')) throw new Error('appendWsResolutionOnce: serialized event contains a raw newline');
-    const seg = await currentSegmentInDir(dir);
-    await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
-    return { ev };
+    ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };
+    return { ev: await appendLineLocked(dir, ev, 'appendWsResolutionOnce') };
   });
+}
+
+// Cutover-extension check for callers ALREADY HOLDING the active funnel lock
+// (syncGit's post-pull step — diff-funnel r15-F1): when the pulled resolution's
+// heads predate this checkout's pre-adoption offline work, append a
+// same-selection extension with fresh heads so the work is grandfathered
+// BEFORE it is shared. `buildEv(selected, conflicts)` mints the envelope (this
+// module has no id generator). Returns { extended: false } when the
+// grandfather already covers everything (or no resolved authority exists).
+export async function maybeExtendWsCutoverLocked(repoRoot, dir, buildEv) {
+  let scan;
+  try { scan = await scanWsAuthorityEvents(repoRoot); }
+  catch (e) { return { unresolvable: e?.message || String(e) }; }
+  const law = resolveWsAuthority(scan);
+  if (law.conflict || !law.resolved || !law.authority) return { extended: false };
+  const gf = buildWsGrandfather(scan.anchors, scan.resolutions);
+  const uncovered = await findIncompatibleWsStamp(repoRoot, law.authority, gf);
+  if (!uncovered) return { extended: false };
+  const ev = buildEv(law.authority, canonicalAnchorConflicts(scan.anchors));
+  ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };
+  await appendLineLocked(dir, ev, 'maybeExtendWsCutoverLocked');
+  await writeIdentityCache(repoRoot, { spineIdentity: law.authority, mode: 'sync' }).catch(() => {});
+  return { extended: true, ev };
 }
 
 // The pending-migration marker (written by `spine sync init` while it migrates the

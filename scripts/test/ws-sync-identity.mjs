@@ -183,6 +183,59 @@ try {
     await rm(fix2, { recursive: true, force: true });
   }
 
+  // ── (H) r15-F1: pre-adoption offline work heals via a cutover EXTENSION ─
+  // B legitimately stamped work OFFLINE before learning of A's resolution —
+  // those stamps sit beyond the pulled cutover. A same-selection re-ceremony
+  // must append an EXTENSION with fresh heads (never a quiet "already"),
+  // after which verify is green and stamping continues under A.
+  {
+    const fixH = await mkdtemp(join(tmpdir(), 'ws-extension-'));
+    await mkdir(join(fixH, '.maddu', 'config'), { recursive: true });
+    const mkPart = async (rep, lines) => {
+      const d = join(fixH, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    const mkSide = (rep, ts) => {
+      const g = JSON.stringify({ v: 1, id: `evt_g_${rep}`, ts, type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+      const ws = core.wsFromLine(g);
+      const anchor = { v: 1, id: `evt_a_${rep}`, ts, type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: ws, genesis: { replicaId: rep, segment: '000000000001.ndjson', line: 1, hash: core.hashLine(g) } }, prev_hash: core.hashLine(g) };
+      return { g, ws, anchor };
+    };
+    const A = mkSide('repA', '2026-01-01T00:00:00.000Z');
+    const B = mkSide('repB', '2026-01-02T00:00:00.000Z');
+    // A's side resolved the conflict binding B at its ANCHOR head (line 2).
+    const binding = core.canonicalAnchorConflicts([A.anchor, B.anchor]);
+    const resolution = { v: 1, id: 'evt_res_a', ts: '2026-01-03T00:00:00.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: A.ws, conflicts: binding, cutover: [
+      { replicaId: 'repA', segment: '000000000001.ndjson', line: 2, hash: core.hashLine(JSON.stringify(A.anchor)) },
+      { replicaId: 'repB', segment: '000000000001.ndjson', line: 2, hash: core.hashLine(JSON.stringify(B.anchor)) },
+    ] }, prev_hash: core.hashLine(JSON.stringify(A.anchor)) };
+    await mkPart('repA', [A.g, JSON.stringify(A.anchor), JSON.stringify(resolution)]);
+    // B's pre-adoption OFFLINE work: a B-stamped event BEYOND the bound head.
+    const offline = { v: 1, id: 'evt_offline_b', ts: '2026-01-02T12:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { offline: true }, ws: B.ws, prev_hash: core.hashLine(JSON.stringify(B.anchor)) };
+    await mkPart('repB', [B.g, JSON.stringify(B.anchor), JSON.stringify(offline)]);
+    await writeFile(join(fixH, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repB' }) + '\n');
+
+    const vH0 = await verifySpine(fixH, {});
+    ok('pre-adoption offline stamp is red before the extension', hasFail(vH0, 'ws_mismatch'));
+    const ext = run(fixH, ['spine', 'identity', 'resolve', '--keep', A.ws]);
+    ok('same-selection re-ceremony (extension) exits 0', ext.status === 0, (ext.stdout + ext.stderr).trim().split('\n').pop());
+    const { resolutions: resH } = await core.scanWsAuthorityEvents(fixH);
+    ok('an EXTENSION resolution with fresh heads was appended', resH.length === 2
+      && resH.some((r) => Array.isArray(r.data.cutover) && r.data.cutover.some((h) => h.replicaId === 'repB' && h.line >= 3)),
+      JSON.stringify(resH.map((r) => r.data.cutover)).slice(0, 200));
+    const vH1 = await verifySpine(fixH, {});
+    ok('verify is FULLY green after the extension (offline work grandfathered)', vH1.counts.FAIL === 0,
+      vH1.issues.filter((i) => i.level === 'FAIL').map((i) => i.kind).join(','));
+    const resumedH = await spine.append(fixH, { type: 'GOAL_DECLARED', actor: null, lane: null, data: { post: 1 } });
+    ok('stamping continues under the selected authority after the extension', resumedH.ws === A.ws);
+    const again = run(fixH, ['spine', 'identity', 'resolve', '--keep', A.ws]);
+    ok('a covered re-ceremony is back to the idempotent no-op (exit 0)', again.status === 0 && /nothing to resolve/.test(again.stdout));
+    const { resolutions: resH2 } = await core.scanWsAuthorityEvents(fixH);
+    ok('the idempotent re-run appended nothing', resH2.length === 2);
+    await rm(fixH, { recursive: true, force: true });
+  }
+
   // ── (D) residual-flat continuation: incompatible → NAMED fatal ──────────
   {
     const stray = JSON.stringify({ v: 1, id: 'evt_stray', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'stray' }, prev_hash: 'f'.repeat(64) });
