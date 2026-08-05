@@ -174,17 +174,37 @@ export async function writeIdentityCache(repoRoot, { spineIdentity, conflict = f
   }
 }
 
-// The authority-relevant file fingerprint: byte sizes of every numeric
-// segment (flat + every partition). Append-only files mean any new event —
-// including a pulled peer anchor — changes a size or adds a path, so a cache
-// carrying a matching fingerprint provably saw every stored byte its scan
-// covered. Sizes, never mtimes (S1 lesson: rename preserves mtime).
+// The authority-relevant file fingerprint: COMMITTED byte sizes of every
+// numeric segment (flat + every partition). "Committed" = the offset just
+// past the last complete (newline-terminated) line — a torn/in-flight tail
+// write is deliberately NOT covered, so fingerprint boundaries are always
+// line-aligned and a marker can never straddle two delta windows
+// (diff-funnel r2-F1: raw stat sizes let `"WS_IDENTI` / `TY_ANCHORED"` split
+// across consecutive deltas, hiding a completed anchor forever). Sizes,
+// never mtimes (S1 lesson: rename preserves mtime). An entry of -1 means
+// "could not determine" and always forces a rescan.
+async function committedSizeOf(path) {
+  let st;
+  try { st = await stat(path); } catch { return -1; }
+  if (st.size === 0) return 0;
+  const window = Math.min(st.size, 65536);
+  let fh;
+  try { fh = await open(path, 'r'); } catch { return -1; }
+  try {
+    const buf = Buffer.alloc(window);
+    const { bytesRead } = await fh.read(buf, 0, window, st.size - window);
+    if (bytesRead !== window) return -1;
+    const idx = buf.lastIndexOf(0x0a);
+    if (idx === -1) return st.size > window ? -1 : 0; // no newline: whole file is one unterminated line
+    return st.size - (window - idx - 1);
+  } catch { return -1; } finally { await fh.close().catch(() => {}); }
+}
 export async function computeAuthorityFingerprint(repoRoot) {
   const segs = {};
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const addDir = async (dir, prefix) => {
     for (const s of await listSegmentsInDir(dir)) {
-      try { segs[`${prefix}${s}`] = (await stat(join(dir, s))).size; } catch { segs[`${prefix}${s}`] = -1; }
+      segs[`${prefix}${s}`] = await committedSizeOf(join(dir, s));
     }
   };
   await addDir(eventsDir, 'flat:');
@@ -198,18 +218,23 @@ export async function computeAuthorityFingerprint(repoRoot) {
 function fpEqual(a, b) {
   const ka = Object.keys(a?.segs || {}), kb = Object.keys(b?.segs || {});
   if (ka.length !== kb.length) return false;
-  for (const k of ka) if (a.segs[k] !== b.segs[k]) return false;
+  for (const k of ka) {
+    if (a.segs[k] < 0 || b.segs[k] < 0) return false; // undeterminable never matches
+    if (a.segs[k] !== b.segs[k]) return false;
+  }
   return true;
 }
 
-// Delta freshness check for a clean sync-mode cache: read ONLY the bytes that
-// grew since the cached fingerprint and look for authority-event lines.
-//   'fresh'  — no new bytes at all (fingerprint identical)
-//   'clean'  — new bytes exist but carry no authority event (cache still valid;
-//              caller refreshes the stored fingerprint)
+// Delta freshness check for a clean sync-mode cache: read ONLY the complete
+// lines that landed since the cached fingerprint and look for authority-event
+// markers. Both boundaries are committed (line-aligned) offsets, so every
+// delta holds whole lines — no overlap window needed, no straddled marker.
+//   'fresh'  — no new committed bytes at all (fingerprint identical)
+//   'clean'  — new lines exist but carry no authority event (cache still
+//              valid; caller refreshes the stored fingerprint)
 //   'rescan' — an authority event appeared in the delta, a segment shrank or
-//              vanished (append-only violated — full rescan decides), or the
-//              delta could not be read
+//              vanished (append-only violated — full rescan decides), a size
+//              was undeterminable, or the delta could not be read exactly
 async function authorityDeltaState(repoRoot, cachedFp, currentFp) {
   if (fpEqual(cachedFp, currentFp)) return 'fresh';
   const old = cachedFp?.segs || {};
@@ -228,12 +253,39 @@ async function authorityDeltaState(repoRoot, cachedFp, currentFp) {
       const fh = await open(rel, 'r');
       try {
         const buf = Buffer.alloc(size - prev);
-        await fh.read(buf, 0, buf.length, prev);
-        if (buf.toString('utf8').includes('"WS_IDENTITY_')) return 'rescan';
+        const { bytesRead } = await fh.read(buf, 0, buf.length, prev);
+        if (bytesRead !== buf.length) return 'rescan'; // short read — never advance past unread bytes
+        const chunk = buf.toString('utf8');
+        if (!chunk.endsWith('\n')) return 'rescan'; // boundary not line-aligned after all — defensive
+        if (chunk.includes('"WS_IDENTITY_')) return 'rescan';
       } finally { await fh.close(); }
     } catch { return 'rescan'; }
   }
   return 'clean';
+}
+
+// Read-only cache freshness for callers that must never scan (the token
+// wrapper — diff-funnel r2-F5): the same mode/fingerprint/delta law as the
+// writer's fast path, with NO cache rewrite and NO authority scan.
+//   {state:'fresh', ws} — provably-current clean cache, stamp this
+//   {state:'conflict'}  — cached freeze, caller drops
+//   {state:'unknown'}   — absent/unresolvable/mode-less/unprovable cache —
+//                         treat as absent, emit ws-less
+export async function readFreshCachedIdentity(repoRoot) {
+  let c;
+  try { c = await readIdentityCache(repoRoot); } catch { return { state: 'unknown' }; }
+  if (c.state !== 'present') return { state: 'unknown' };
+  if (c.conflict) return { state: 'conflict' };
+  if (c.mode === 'flat') {
+    return (await wsModeIsPartitioned(repoRoot)) ? { state: 'unknown' } : { state: 'fresh', ws: c.spineIdentity };
+  }
+  if (c.mode === 'sync' && c.fp) {
+    if (!(await wsModeIsPartitioned(repoRoot))) return { state: 'unknown' };
+    const cur = await computeAuthorityFingerprint(repoRoot);
+    const d = await authorityDeltaState(repoRoot, c.fp, cur);
+    if (d === 'fresh' || d === 'clean') return { state: 'fresh', ws: c.spineIdentity };
+  }
+  return { state: 'unknown' };
 }
 
 // Mode predicate — pinned to VERIFIER reality (plan-review r2-F2): ANY
@@ -335,19 +387,46 @@ export async function verifyAnchorNomination(repoRoot, data) {
 
 // Scan every stored line for the two ws-authority event types (bootstrap /
 // conflict recheck only — never on the per-append hot path). Cheap substring
-// prefilter before parse; malformed candidate lines are UNRESOLVABLE (r2-F2:
-// never a silent skip).
+// prefilter before parse. STRICT / fail-closed (diff-funnel r2-F3: a
+// swallowed EACCES or a torn marker-bearing line must never make an anchor
+// silently disappear from the law): only ENOENT reads as "no segments"; any
+// other directory/read error, and any marker-bearing line that fails to
+// parse as a COMPLETE line, throws WS_SCAN_UNRESOLVABLE. A torn tail WITHOUT
+// the marker is skipped — it is not yet part of the record (no newline), and
+// the committed-size fingerprint law guarantees it gets re-read whole once
+// terminated.
 export async function scanWsAuthorityEvents(repoRoot) {
   const anchors = [], resolutions = [];
+  const scanUnresolvable = (where, detail) =>
+    Object.assign(new Error(`ws scan: ${where}: ${detail}`), { code: 'WS_SCAN_UNRESOLVABLE' });
+  const strictSegs = async (dir, source) => {
+    let names;
+    try { names = await readdir(dir); }
+    catch (e) {
+      if (e && e.code === 'ENOENT') return [];
+      throw scanUnresolvable(source, e?.message || String(e));
+    }
+    return names.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+  };
   const scanDir = async (dir, source) => {
-    for (const seg of await listSegmentsInDir(dir)) {
+    for (const seg of await strictSegs(dir, source)) {
       let txt;
       try { txt = await readFile(join(dir, seg), 'utf8'); }
-      catch (e) { throw Object.assign(new Error(`ws scan: ${source}/${seg}: ${e?.message || e}`), { code: 'WS_SCAN_UNRESOLVABLE' }); }
-      for (const line of txt.split('\n')) {
+      catch (e) { throw scanUnresolvable(`${source}/${seg}`, e?.message || String(e)); }
+      const lines = txt.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         if (!line.includes('"WS_IDENTITY_')) continue;
         let ev;
-        try { ev = JSON.parse(line); } catch { continue; } // non-event text containing the token
+        try { ev = JSON.parse(line); }
+        catch {
+          // A marker-bearing line that fails to parse: a COMPLETE line
+          // (newline-terminated — not the file's final element) is corrupt
+          // authority state → unresolvable. An unterminated final element is
+          // an in-flight write → not yet part of the record, skip.
+          if (i < lines.length - 1) throw scanUnresolvable(`${source}/${seg}`, `malformed authority-candidate line ${i + 1}`);
+          continue;
+        }
         if (ev?.type === 'WS_IDENTITY_ANCHORED') anchors.push(ev);
         else if (ev?.type === 'WS_IDENTITY_RESOLVED') resolutions.push(ev);
       }
@@ -356,8 +435,11 @@ export async function scanWsAuthorityEvents(repoRoot) {
   await scanDir(join(repoRoot, '.maddu', 'events'), 'flat');
   const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
   let ids = [];
-  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
-  for (const id of ids) await scanDir(join(byReplica, id), id);
+  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); }
+  catch (e) {
+    if (!(e && e.code === 'ENOENT')) throw scanUnresolvable('by-replica', e?.message || String(e));
+  }
+  for (const id of ids.sort()) await scanDir(join(byReplica, id), id);
   return { anchors, resolutions };
 }
 
@@ -537,6 +619,49 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     const seg = await currentSegmentInDir(dir);
     await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
     return { published: ev, ws: wsFromLine(mf.text) };
+  });
+}
+
+// Append a WS_IDENTITY_RESOLVED ceremony event ATOMICALLY: fresh scan,
+// conflict check, binding validation, idempotency, and the inline append all
+// happen under the active write funnel's lock (diff-funnel r2-F4: validating
+// outside the lock let two concurrent ceremonies both pass and append
+// duplicate — or worse, conflicting — resolutions). Outcomes:
+//   { ev }               — appended (ev carries prev_hash)
+//   { already: ws|null } — no unresolved conflict exists (a raced ceremony
+//                          won, or nothing was conflicted) — nothing appended
+//   { invalid: reason }  — the binding/selection fails the law — refused
+//   { retry: true }      — the write funnel moved under us (migration) —
+//                          re-resolve and call again
+// Throws WS_SCAN_UNRESOLVABLE from the strict scan.
+export async function appendWsResolutionOnce(repoRoot, ev) {
+  const w = await resolveWriteReplica(repoRoot);
+  if (w.pending) return { retry: true };
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const dir = w.id ? partitionDir(repoRoot, w.id) : eventsDir;
+  await mkdir(dir, { recursive: true });
+  return withAppendLock(join(dir, '.append.lock'), async () => {
+    if (!w.id) {
+      // Flat funnel: a migration may have committed while we waited — never
+      // strand the ceremony in an orphaned flat segment.
+      const w2 = await resolveWriteReplica(repoRoot, { timeoutMs: 0 });
+      if (w2.id || w2.pending) return { retry: true };
+    }
+    const scan = await scanWsAuthorityEvents(repoRoot);
+    const law = resolveWsAuthority(scan);
+    if (!law.conflict) return { already: law.authority ?? null };
+    if (!law.identities.includes(ev?.data?.selected)) {
+      return { invalid: `selected ${JSON.stringify(ev?.data?.selected)} is not among the conflicting identities (${law.identities.join(', ')})` };
+    }
+    const binding = validateResolutionBinding(scan.anchors, ev.data);
+    if (!binding.ok) return { invalid: binding.reason };
+    const prevLine = await lastEventLineInDir(dir);
+    ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
+    const line = JSON.stringify(ev);
+    if (line.includes('\n')) throw new Error('appendWsResolutionOnce: serialized event contains a raw newline');
+    const seg = await currentSegmentInDir(dir);
+    await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
+    return { ev };
   });
 }
 

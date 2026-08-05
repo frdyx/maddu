@@ -24,7 +24,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { resolveWriteReplica, appendPartitioned, appendFlatChained, readIdentityCache } from '../spine-append-core.mjs';
+import { resolveWriteReplica, appendPartitioned, appendFlatChained, readFreshCachedIdentity } from '../spine-append-core.mjs';
 import { redactDataPayload, redactText } from '../secret-scan.mjs';
 import { envActingSid } from '../id-grammar.mjs';
 
@@ -61,17 +61,19 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (typeof payload.cacheCreation === 'number') ev.data.cacheCreation = payload.cacheCreation;
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
 
-  // Workspace identity (S2): CACHE-ONLY read — the wrapper is best-effort and
-  // never scans/derives (its standalone contract forbids the heavier
-  // machinery, and a drop is acceptable by design). Absent/unresolvable
-  // cache → the event goes out ws-less, tolerated forward-only like
-  // prev_hash. A cached CONFLICT drops the event entirely (settled design:
-  // a frozen workspace refuses best-effort writes rather than spreading
-  // either identity or growing an ambiguous ws-less tail).
+  // Workspace identity (S2): CACHE-ONLY, freshness-proven read (r2-F5) — the
+  // wrapper never scans/derives (its standalone contract forbids the heavier
+  // machinery, and a drop is acceptable by design). readFreshCachedIdentity
+  // applies the mode/fingerprint/delta law without any authority scan:
+  //   fresh    → stamp the proven-current identity
+  //   conflict → drop the event entirely (a frozen workspace refuses
+  //              best-effort writes rather than spreading either identity)
+  //   unknown  → absent/mode-less/unprovable cache — emit ws-less, tolerated
+  //              forward-only like prev_hash
   try {
-    const idc = await readIdentityCache(repoRoot);
-    if (idc.state === 'present' && idc.conflict) return null; // frozen — drop, never block
-    if (idc.state === 'present' && idc.spineIdentity) ev.ws = idc.spineIdentity;
+    const idf = await readFreshCachedIdentity(repoRoot);
+    if (idf.state === 'conflict') return null; // frozen — drop, never block
+    if (idf.state === 'fresh') ev.ws = idf.ws;
   } catch { /* best-effort */ }
 
   // This append bypasses spine.append(), so it applies the same write-boundary

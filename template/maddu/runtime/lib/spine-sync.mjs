@@ -19,7 +19,7 @@
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache, publishWsAnchorOnce, computeAuthorityFingerprint } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -376,48 +376,59 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   // and adopted, never duplicated — idempotent resumes by construction.
   {
     const WS_REMEDY = 'fix the reported partition/anchor state (or restore the missing bytes), then re-run `maddu spine sync init` — the pending marker keeps this resumable';
+    const wsFail = (message) => ({ ok: false, reason: 'ws-identity-bootstrap-failed', message, remedy: WS_REMEDY });
+    // (1) Verify what already exists — an unverifiable pre-existing anchor is
+    // a named failure BEFORE we add anything.
     let scan;
     try { scan = await scanWsAuthorityEvents(repoRoot); }
-    catch (e) {
-      return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `authority scan failed: ${e?.message || e}`, remedy: WS_REMEDY };
-    }
+    catch (e) { return wsFail(`authority scan failed: ${e?.message || e}`); }
     for (const a of scan.anchors) {
       const v = await verifyAnchorNomination(repoRoot, a.data);
-      if (!v.ok) {
-        return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `existing anchor ${a.id} does not verify: ${v.reason}`, remedy: WS_REMEDY };
-      }
+      if (!v.ok) return wsFail(`existing anchor ${a.id} does not verify: ${v.reason}`);
     }
+    // (2) Publish only when anchorless — through the ONE serialized law
+    // (diff-funnel r2-F2: a direct appendPartitioned from a pre-lock scan
+    // could double-publish against a racing writer, and nominating this
+    // partition's first line instead of the canonical merge-first candidate
+    // mis-anchors a clone joining an existing anchorless workspace).
     const law = resolveWsAuthority(scan);
-    if (law.conflict) {
-      // Pre-existing conflict among VERIFIED anchors (merged clones): freeze —
-      // the ceremony is the only way forward; init still completes (a frozen
-      // workspace is a defined state; an authority-less one is not).
-      await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true, mode: 'sync' }).catch(() => {});
-    } else if (law.authority) {
-      await writeIdentityCache(repoRoot, { spineIdentity: law.authority, mode: 'sync' }).catch(() => {});
-    } else {
-      const firstSegs = await listSegs(pdir);
-      const txt = firstSegs.length ? await readFile(join(pdir, firstSegs[0]), 'utf8').catch(() => '') : '';
-      const genesisLine = txt.split('\n').find((l) => l.trim());
-      if (!genesisLine) {
-        return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `partition ${replicaId} has no readable genesis line to nominate`, remedy: WS_REMEDY };
-      }
-      const spineIdentity = wsFromLine(genesisLine);
+    if (!law.conflict && !law.authority) {
       const anchorTs = now || new Date().toISOString();
+      let pub;
       try {
-        await appendPartitioned(repoRoot, replicaId, {
+        pub = await publishWsAnchorOnce(repoRoot, replicaId, ({ spineIdentity, genesis }) => ({
           v: 1,
           id: makeId('evt', anchorTs),
           ts: anchorTs,
           type: 'WS_IDENTITY_ANCHORED',
           actor: null,
           lane: null,
-          data: { v: 1, spineIdentity, genesis: { replicaId, segment: firstSegs[0], line: 1, hash: hashLine(genesisLine) } },
-        });
-      } catch (e) {
-        return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `anchor append failed: ${e?.message || e}`, remedy: WS_REMEDY };
-      }
-      await writeIdentityCache(repoRoot, { spineIdentity, mode: 'sync' }).catch(() => {});
+          data: { v: 1, spineIdentity, genesis },
+        }));
+      } catch (e) { return wsFail(`anchor publication failed: ${e?.message || e}`); }
+      if (pub.unresolvable) return wsFail(`anchor publication failed: ${pub.unresolvable}`);
+      if (pub.bootstrap) return wsFail(`partition ${replicaId} has no genesis line to nominate`);
+      // adopted / published / conflict — all resolved by the post-verify below.
+    }
+    // (3) FRESH post-verify before activation: whatever the workspace holds
+    // NOW (our anchor, an adopted one, or a raced conflict) must verify and
+    // resolve — activation without a defined identity state is forbidden
+    // (r1-F4). A verified conflict IS a defined state: freeze + ceremony.
+    const fpPre2 = await computeAuthorityFingerprint(repoRoot).catch(() => null); // pre-scan: makes the final cache provably fresh
+    let scan2;
+    try { scan2 = await scanWsAuthorityEvents(repoRoot); }
+    catch (e) { return wsFail(`post-publication authority scan failed: ${e?.message || e}`); }
+    for (const a of scan2.anchors) {
+      const v = await verifyAnchorNomination(repoRoot, a.data);
+      if (!v.ok) return wsFail(`anchor ${a.id} does not verify after bootstrap: ${v.reason}`);
+    }
+    const law2 = resolveWsAuthority(scan2);
+    if (law2.conflict) {
+      await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true, mode: 'sync' }).catch(() => {});
+    } else if (law2.authority) {
+      await writeIdentityCache(repoRoot, { spineIdentity: law2.authority, mode: 'sync', fp: fpPre2 }).catch(() => {});
+    } else {
+      return wsFail('no identity authority exists after the anchor bootstrap');
     }
   }
 

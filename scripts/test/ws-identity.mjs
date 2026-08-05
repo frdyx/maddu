@@ -14,7 +14,7 @@ import {
   writeIdentityCache, wsModeIsPartitioned, readFlatGenesisLine,
   readPartitionLineAt, findMergeFirstGenesis, verifyAnchorNomination,
   resolveWsAuthority, resolveIdentityForAppend,
-  canonicalAnchorConflicts, validateResolutionBinding,
+  canonicalAnchorConflicts, validateResolutionBinding, scanWsAuthorityEvents,
 } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
 
 let passed = 0, failed = 0;
@@ -217,6 +217,82 @@ try {
     const r5 = await resolveIdentityForAppend(fix);
     ok('non-authority byte growth stays on the fast path (delta scan, fingerprint refreshed)',
       r5.ws === wsFromLine(g1), JSON.stringify(r5));
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r2-F1: torn writes can never hide an anchor from the fingerprint ────
+  {
+    const fix = await freshFix();
+    const mkPart = async (rep, content) => {
+      const d = join(fix, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), content);
+    };
+    const g1 = JSON.stringify({ v: 1, id: 'evt_g1', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const anchor1 = { v: 1, id: 'evt_a1', ts: '2026-01-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(g1), genesis: { replicaId: 'repA', segment: '000000000001.ndjson', line: 1, hash: hashLine(g1) } }, prev_hash: hashLine(g1) };
+    await mkPart('repA', g1 + '\n' + JSON.stringify(anchor1) + '\n');
+    ok('torn setup: clean resolve caches with fingerprint', (await resolveIdentityForAppend(fix)).ws === wsFromLine(g1));
+    // A peer's conflicting anchor arrives TORN mid-marker (`..."WS_IDENTI`),
+    // then completes in a later observation — the classic straddle.
+    const g2 = JSON.stringify({ v: 1, id: 'evt_g2', ts: '2026-02-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const a2line = JSON.stringify({ v: 1, id: 'evt_a2', ts: '2026-02-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(g2), genesis: { replicaId: 'repB', segment: '000000000001.ndjson', line: 1, hash: hashLine(g2) } }, prev_hash: hashLine(g2) });
+    const cut = a2line.indexOf('"WS_IDENTITY_') + 9; // split INSIDE the marker
+    await mkPart('repB', g2 + '\n' + a2line.slice(0, cut)); // torn tail, no newline
+    const rTorn = await resolveIdentityForAppend(fix);
+    ok('torn-tail observation: identity unchanged (torn line is not yet part of the record)',
+      rTorn.ws === wsFromLine(g1), JSON.stringify(rTorn));
+    // The write completes. The committed-size law re-reads the WHOLE line —
+    // the straddled marker cannot slip between two deltas.
+    await mkPart('repB', g2 + '\n' + a2line + '\n');
+    const rDone = await resolveIdentityForAppend(fix);
+    ok('completed anchor detected after the torn window → conflict (never hidden)',
+      Array.isArray(rDone.conflict) && rDone.conflict.length === 2, JSON.stringify(rDone));
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r2-F3: the authority scan fails CLOSED ──────────────────────────────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    // A COMPLETE (newline-terminated) marker-bearing line that is not valid
+    // JSON = corrupt authority state → the scan throws, never skips.
+    await writeFile(join(d, '000000000001.ndjson'), '{"type":"WS_IDENTITY_ANCHORED",broken}\n' + genesisLine + '\n');
+    let code = null;
+    try { await scanWsAuthorityEvents(fix); } catch (e) { code = e.code; }
+    ok('complete malformed authority-candidate line → WS_SCAN_UNRESOLVABLE (fail closed)', code === 'WS_SCAN_UNRESOLVABLE');
+    // The same content as an UNTERMINATED final element is an in-flight
+    // write — skipped, not fatal.
+    await writeFile(join(d, '000000000001.ndjson'), genesisLine + '\n' + '{"type":"WS_IDENTITY_ANCHORED",half');
+    const s = await scanWsAuthorityEvents(fix);
+    ok('unterminated in-flight tail is skipped (not yet part of the record)', s.anchors.length === 0);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r2-F4: the ceremony append is atomic + idempotent at the core ───────
+  {
+    const fix = await freshFix();
+    const mkPart = async (rep, lines) => {
+      const d = join(fix, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    const g1 = JSON.stringify({ v: 1, id: 'evt_g1', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const g2 = JSON.stringify({ v: 1, id: 'evt_g2', ts: '2026-02-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const mkAnchor = (id, gline, rep) => ({ v: 1, id, ts: '2026-03-01T00:00:00.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(gline), genesis: { replicaId: rep, segment: '000000000001.ndjson', line: 1, hash: hashLine(gline) } }, prev_hash: hashLine(gline) });
+    const a1 = mkAnchor('evt_a1', g1, 'repA'), a2 = mkAnchor('evt_a2', g2, 'repB');
+    await mkPart('repA', [g1, JSON.stringify(a1)]);
+    await mkPart('repB', [g2, JSON.stringify(a2)]);
+    const { appendWsResolutionOnce } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    const mkRes = (sel, conflicts) => ({ v: 1, id: 'evt_r1', ts: '2026-04-01T00:00:00.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: sel, conflicts } });
+    const badBind = await appendWsResolutionOnce(fix, mkRes(wsFromLine(g1), [{ eventId: 'evt_a1', genesisHash: hashLine(g1), spineIdentity: wsFromLine(g1) }]));
+    ok('atomic ceremony refuses a partial binding', typeof badBind.invalid === 'string', JSON.stringify(badBind));
+    const goodBind = canonicalAnchorConflicts([a1, a2]);
+    const first = await appendWsResolutionOnce(fix, mkRes(wsFromLine(g1), goodBind));
+    ok('atomic ceremony appends under the lock (chained into the funnel)', !!first.ev && 'prev_hash' in first.ev, JSON.stringify(first).slice(0, 120));
+    const second = await appendWsResolutionOnce(fix, mkRes(wsFromLine(g1), goodBind));
+    ok('a raced duplicate ceremony gets {already} — nothing appended twice',
+      'already' in second && second.already === wsFromLine(g1), JSON.stringify(second));
     await rm(fix, { recursive: true, force: true });
   }
 

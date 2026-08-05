@@ -133,6 +133,15 @@ export default async function spine(argv) {
           data: { selected: keep, conflicts },
         });
       } catch (e) {
+        // A raced ceremony that lost to an identical resolution is
+        // idempotent success, not a refusal (r2-F4: the atomic path reports
+        // the resolved authority on the `already` outcome).
+        if (e?.code === 'WS_RESOLUTION_INVALID' && e.resolvedAuthority === keep) {
+          console.log(`nothing to resolve — authority is ${keep}`);
+          const { loadLibOptional } = await import('./_libroot.mjs');
+          (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
+          return;
+        }
         console.error(`refused: ${e?.message || e}`);
         process.exit(1);
       }

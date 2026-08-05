@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned, resolveIdentityForAppend, writeIdentityCache, scanWsAuthorityEvents, resolveWsAuthority, validateResolutionBinding, publishWsAnchorOnce } from './spine-append-core.mjs';
+import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned, resolveIdentityForAppend, writeIdentityCache, publishWsAnchorOnce, appendWsResolutionOnce } from './spine-append-core.mjs';
 import { redactDataPayload } from './secret-scan.mjs';
 // Mutation-witness credit (buzz-steals S1): every SUCCESSFUL logical append
 // credits the active witness context exactly once — counted here (not in the
@@ -643,26 +643,10 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       err.code = 'WS_ANCHOR_RESTRICTED';
       throw err;
     }
-    if (type === EVENT_TYPES.WS_IDENTITY_RESOLVED) {
-      const scan = await scanWsAuthorityEvents(repoRoot); // fresh — never a cached view
-      const law = resolveWsAuthority(scan);
-      if (!law.conflict) {
-        const err = new Error('spine append: WS_IDENTITY_RESOLVED refused — no unresolved anchor conflict exists');
-        err.code = 'WS_RESOLUTION_INVALID';
-        throw err;
-      }
-      if (!law.identities.includes(data?.selected)) {
-        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — selected ${JSON.stringify(data?.selected)} is not among the conflicting identities (${law.identities.join(', ')})`);
-        err.code = 'WS_RESOLUTION_INVALID';
-        throw err;
-      }
-      const binding = validateResolutionBinding(scan.anchors, data);
-      if (!binding.ok) {
-        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — ${binding.reason}`);
-        err.code = 'WS_RESOLUTION_INVALID';
-        throw err;
-      }
-    }
+    // WS_IDENTITY_RESOLVED is validated + appended ATOMICALLY under the
+    // write funnel's lock (appendWsResolutionOnce below, after the envelope
+    // is built) — validating here, outside the lock, would let concurrent
+    // ceremonies race the same conflict (diff-funnel r2-F4).
     // Both types append ws-less with NO recursive identity resolution.
   } else {
     // Wait out any in-flight `spine sync init` BEFORE resolving identity
@@ -713,7 +697,16 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
         throw err;
       }
       wsStamp = pub.adopted || pub.ws || null; // bootstrap → null (this event IS the genesis)
-      if (wsStamp) await writeIdentityCache(repoRoot, { spineIdentity: wsStamp, mode: 'sync' }).catch(() => {});
+      if (wsStamp) {
+        // Converge the cache to a PROVABLY-fresh state (with fingerprint):
+        // the re-resolution rescans (the anchor now exists → authority) and
+        // caches with a pre-scan fingerprint, so cache-only readers (the
+        // token wrapper's no-scan freshness law) can stamp immediately
+        // post-bootstrap instead of going ws-less until the next append.
+        const idr2 = await resolveIdentityForAppend(repoRoot);
+        if (idr2.ws) wsStamp = idr2.ws;
+        else await writeIdentityCache(repoRoot, { spineIdentity: wsStamp, mode: 'sync' }).catch(() => {});
+      }
     } else if (idr.ws) {
       wsStamp = idr.ws;
     }
@@ -750,6 +743,29 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // One credit per LOGICAL event: every success return funnels through here,
   // so the pending/ENOENT retries below can never double-count.
   const credit = (out) => { witnessSpineAppend(); return out; };
+
+  // The ceremony type takes the ATOMIC path: scan + law + binding +
+  // idempotency + inline append in one critical section (r2-F4).
+  if (type === EVENT_TYPES.WS_IDENTITY_RESOLVED) {
+    for (let i = 0; i < 3; i++) {
+      const out = await appendWsResolutionOnce(repoRoot, ev);
+      if (out.retry) continue;
+      if (out.invalid) {
+        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — ${out.invalid}`);
+        err.code = 'WS_RESOLUTION_INVALID';
+        throw err;
+      }
+      if ('already' in out) {
+        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — no unresolved anchor conflict exists${out.already ? ` (authority already ${out.already})` : ''}`);
+        err.code = 'WS_RESOLUTION_INVALID';
+        err.resolvedAuthority = out.already;
+        throw err;
+      }
+      return credit(out.ev);
+    }
+    throw new Error(STALL_MSG);
+  }
+
   let enoentRetries = 0;
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);

@@ -107,7 +107,9 @@ async function scenarioWsStamp() {
     const tmp = await mkdtemp(join(tmpdir(), 'maddu-wrap-ws-'));
     await mkdir(join(tmp, '.maddu', 'events'), { recursive: true });
     const wsId = 'ws_' + 'a'.repeat(16);
-    await writeIdentityCache(tmp, { spineIdentity: wsId });
+    // mode:'flat' makes the cache PROVABLY fresh in a flat fixture (r2-F5:
+    // a mode-less/unprovable cache is treated as absent → ws-less emit).
+    await writeIdentityCache(tmp, { spineIdentity: wsId, mode: 'flat' });
     const res = await runWrapper({
       wrapper: join(WRAPPER_DIR, 'codex-wrapper.mjs'),
       fakeProvider: await mkFake(tmp),
@@ -133,6 +135,25 @@ async function scenarioWsStamp() {
     await new Promise((r) => setTimeout(r, 80));
     const ev = (await readSpine(tmp)).find((e) => e.type === 'TOKEN_USAGE_REPORTED');
     ok('cached conflict → event DROPPED (frozen workspace refuses best-effort writes)', !ev, ev ? `unexpected event ws=${ev.ws}` : '');
+    await rm(tmp, { recursive: true, force: true });
+  }
+
+  {
+    // r2-F5: a mode-less (legacy / version-skew) cache is UNPROVABLE — the
+    // wrapper treats it as absent and emits ws-less rather than trusting a
+    // possibly-obsolete identity.
+    const tmp = await mkdtemp(join(tmpdir(), 'maddu-wrap-wsl-'));
+    await mkdir(join(tmp, '.maddu', 'events'), { recursive: true });
+    await writeIdentityCache(tmp, { spineIdentity: 'ws_' + 'b'.repeat(16) }); // no mode, no fp
+    const res = await runWrapper({
+      wrapper: join(WRAPPER_DIR, 'codex-wrapper.mjs'),
+      fakeProvider: await mkFake(tmp),
+      env: { MADDU_REPO_ROOT: tmp, MADDU_WORKER_ID: 'wrk_test_wsl', MADDU_SESSION_ID: 'ses_test_wsl' },
+    });
+    ok('mode-less-cache wrapper exits 0', res.code === 0, `exit=${res.code} stderr=${res.stderr.slice(0, 200)}`);
+    await new Promise((r) => setTimeout(r, 80));
+    const ev = (await readSpine(tmp)).find((e) => e.type === 'TOKEN_USAGE_REPORTED');
+    ok('unprovable cache → event emitted ws-less (treated as absent)', ev && !('ws' in ev), ev ? `ws=${ev.ws}` : 'no event');
     await rm(tmp, { recursive: true, force: true });
   }
 }
