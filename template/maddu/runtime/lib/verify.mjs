@@ -1196,6 +1196,15 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
   const grandfather = buildWsGrandfather(anchors, resolutions);
   for (const r of validWsResolutions(anchors, resolutions)) {
     for (const h of Array.isArray(r?.data?.cutover) ? r.data.cutover : []) {
+      // Malformed rows FAIL, never throw (diff-funnel r5-F1: a tampered
+      // imported resolution must degrade to ws_identity_unverifiable —
+      // buildWsGrandfather already excludes such rows from the grandfather).
+      const wellFormed = h && typeof h === 'object' && typeof h.replicaId === 'string'
+        && typeof h.segment === 'string' && Number.isInteger(h.line) && typeof h.hash === 'string';
+      if (!wellFormed) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `resolution ${r.id}: malformed cutover row ${JSON.stringify(h).slice(0, 80)}`, { eventId: r.id }));
+        continue;
+      }
       const rr = await readPartitionLineAt(repoRoot, h.replicaId, h.segment, h.line);
       if (rr.state !== 'ok' || hashLine(rr.line) !== h.hash) {
         push(issue('FAIL', 'ws_identity_unverifiable', `resolution ${r.id}: cutover head ${h.replicaId}/${h.segment}:${h.line} ${rr.state !== 'ok' ? rr.state : 'hash mismatch'}`, { eventId: r.id }));

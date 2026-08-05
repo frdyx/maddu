@@ -167,6 +167,19 @@ try {
     ok('a POST-cutover losing stamp stays red (grandfather is position-bound)',
       vE2.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_mismatch' && String(i.detail).includes('evt_post_b')),
       vE2.issues.filter((i) => i.level === 'FAIL').map((i) => `${i.kind}`).join(','));
+    // r5-F1: a VALID-binding duplicate resolution carrying MALFORMED cutover
+    // rows degrades to FAIL ws_identity_unverifiable — never a verify crash.
+    const dA = join(fix2, '.maddu', 'events', 'by-replica', 'repA');
+    const txtA = await import('node:fs/promises').then((fs) => fs.readFile(join(dA, '000000000001.ndjson'), 'utf8'));
+    const lastA = txtA.split('\n').filter(Boolean).pop();
+    const goodBinding = resE[0].data.conflicts;
+    const junk = JSON.stringify({ v: 1, id: 'evt_junk_res2', ts: '2026-03-02T00:00:00.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: A.ws, conflicts: goodBinding, cutover: [null, 'garbage', { replicaId: 42 }] }, prev_hash: core.hashLine(lastA) });
+    await writeFile(join(dA, '000000000001.ndjson'), txtA + junk + '\n');
+    let crashed = false, vE3 = null;
+    try { vE3 = await verifySpine(fix2, {}); } catch { crashed = true; }
+    ok('malformed cutover rows on a VALID resolution → FAIL ws_identity_unverifiable, never a crash',
+      !crashed && vE3.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_identity_unverifiable' && /malformed cutover row/.test(String(i.detail))),
+      crashed ? 'THREW' : vE3.issues.filter((i) => i.level === 'FAIL').map((i) => i.kind).join(','));
     await rm(fix2, { recursive: true, force: true });
   }
 

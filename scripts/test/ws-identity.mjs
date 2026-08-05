@@ -368,6 +368,28 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r5-F2: the fingerprint stat-reuse fast path provably skips reads ────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    await writeFile(join(d, '000000000001.ndjson'), genesisLine + '\n');
+    const { computeAuthorityFingerprint } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    const fp1 = await computeAuthorityFingerprint(fix);
+    const key = Object.keys(fp1.segs).find((k) => k.startsWith('repA/'));
+    ok('fingerprint entries carry {raw, committed}', key && Number.isInteger(fp1.segs[key].raw) && fp1.segs[key].committed === fp1.segs[key].raw);
+    // Poison the committed value while keeping raw truthful: if the reuse
+    // branch runs (raw unchanged → no re-read), the poison survives — the
+    // proof that unchanged segments are statted, never opened.
+    const poisoned = { segs: { ...fp1.segs, [key]: { raw: fp1.segs[key].raw, committed: 7 } } };
+    const fp2 = await computeAuthorityFingerprint(fix, poisoned);
+    ok('unchanged raw size reuses the committed value WITHOUT a read (r5-F2 proof)', fp2.segs[key].committed === 7, JSON.stringify(fp2.segs[key]));
+    await writeFile(join(d, '000000000001.ndjson'), genesisLine + '\n' + genesisLine.replace('evt_genesis', 'evt_more') + '\n');
+    const fp3 = await computeAuthorityFingerprint(fix, poisoned);
+    ok('a grown segment is re-measured (poison discarded)', fp3.segs[key].committed === fp3.segs[key].raw && fp3.segs[key].committed > fp1.segs[key].raw);
+    await rm(fix, { recursive: true, force: true });
+  }
+
   console.log(`\nws-identity: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 } catch (err) {

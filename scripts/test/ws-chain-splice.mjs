@@ -112,6 +112,24 @@ try {
     // here, but the fixture files changed sizes).
   }
 
+  // ── (B4) r5-F1: malformed cutover rows FAIL, never crash verify ─────────
+  {
+    // A "resolution" with a valid binding shape but garbage cutover rows —
+    // verify must degrade to ws_identity_unverifiable, not throw. (Flat
+    // fixture: the lone anchorless resolution is not VALID under the law, so
+    // only the crash-resistance is asserted here; the row-shape FAIL path is
+    // exercised through the sync fixtures in ws-sync-identity.)
+    const ls = [...baseLines];
+    const junkRes = { v: 1, id: 'evt_junk_res', ts: new Date().toISOString(), type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: authority, conflicts: [], cutover: [null, 'garbage', { replicaId: 42 }, { replicaId: 'repZ', segment: '000000000001.ndjson', line: 1, hash: 'f'.repeat(64) }] } };
+    junkRes.prev_hash = core.hashLine(ls[ls.length - 1]);
+    ls.push(JSON.stringify(junkRes));
+    await writeLines(fix, ls);
+    let crashed = false, vJ = null;
+    try { vJ = await verifySpine(fix, {}); } catch { crashed = true; }
+    ok('malformed cutover rows never crash verify (fail-closed degradation)', !crashed && vJ !== null, crashed ? 'THREW' : '');
+    await writeLines(fix, baseLines);
+  }
+
   // ── (C) empty-string ws is malformed ────────────────────────────────────
   {
     const ls = [...baseLines];

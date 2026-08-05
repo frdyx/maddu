@@ -611,7 +611,7 @@ export async function resolveIdentityForAppend(repoRoot) {
   } else if (cache.state === 'present' && !cache.conflict) {
     if (cache.mode === 'flat' && !partitioned) return { ws: cache.spineIdentity };
     if (cache.mode === 'sync' && partitioned && cache.fp) {
-      const currentFp = await computeAuthorityFingerprint(repoRoot);
+      const currentFp = await computeAuthorityFingerprint(repoRoot, cache.fp); // stat-reuse fast path (r5-F2)
       const delta = await authorityDeltaState(repoRoot, cache.fp, currentFp);
       if (delta === 'fresh') return { ws: cache.spineIdentity };
       if (delta === 'clean') {
