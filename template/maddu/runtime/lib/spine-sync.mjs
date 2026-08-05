@@ -738,43 +738,71 @@ export async function syncGit(repoRoot, opts = {}) {
   // 1. Stage ONLY this replica's numeric segment files. Peers' partitions arrive
   //    already-committed via pull; a stray non-segment *.ndjson (which the secret
   //    scan does NOT cover) and unrelated user work are never swept in.
+  // The whole snapshot construction — segment enumeration, torn-tail check,
+  // staging, and the pathspec commit — runs UNDER the active partition's
+  // append lock (diff-funnel r13-F1): `git add` racing a writer mid-append
+  // could commit a segment blob cut before the trailing newline, and the
+  // pre-push audit's prefix-extension rule would happily publish that torn
+  // blob to every peer. Under the lock the files are whole-line by
+  // construction; a segment torn by a CRASH (no writer active) is refused
+  // with the repair remedy rather than shared.
   const myDirRel = `.maddu/events/by-replica/${replicaId}`;
-  const mySegs = await listSegs(join(repoRoot, myDirRel));
-  const stagePaths = mySegs.map((s) => `${myDirRel}/${s}`);
-  // The sync-managed ignore/attr files must land ONCE so peers track partitions —
-  // but only when UNTRACKED, so a user's own edits to a pre-existing (tracked)
-  // .gitignore/.gitattributes are never folded into a spine-sync commit.
-  const uncommittedMeta = [];
-  for (const f of ['.gitignore', '.gitattributes']) {
-    if (!(await dirExists(join(repoRoot, f)))) continue;
-    const tracked = await gitRun(['ls-files', '--error-unmatch', '--', f], repoRoot, 5000);
-    if (tracked.code === 0) continue; // already tracked → not ours to commit
-    // Untracked → first share, but ONLY if the file is the maddu-managed block
-    // and nothing else. A user's pre-existing untracked .gitignore rules must
-    // NOT be published by sync — flag it for the operator to commit themselves.
-    const content = await readFile(join(repoRoot, f), 'utf8').catch(() => '');
-    if (isSyncManagedOnlyDotfile(f, content)) stagePaths.push(f);
-    else uncommittedMeta.push(f);
-  }
+  const commitLockPath = join(partitionDir(repoRoot, replicaId), '.append.lock');
+  await mkdir(partitionDir(repoRoot, replicaId), { recursive: true });
+  let commitOutcome;
+  try {
+    commitOutcome = await withAppendLock(commitLockPath, async () => {
+      const mySegs = await listSegs(join(repoRoot, myDirRel));
+      for (const s of mySegs) {
+        const txt = await readFile(join(repoRoot, myDirRel, s), 'utf8').catch(() => null);
+        if (txt === null) return { fail: { ok: false, reason: 'git-add-failed', detail: `segment ${s} unreadable`, steps } };
+        if (txt.length && !txt.endsWith('\n')) {
+          return { fail: { ok: false, reason: 'torn-segment', detail: `segment ${s} ends with an unterminated line (a crashed write) — append the missing newline if the JSON is complete, otherwise trim the partial line, then re-run \`maddu spine sync\``, steps } };
+        }
+      }
+      const stagePaths = mySegs.map((s) => `${myDirRel}/${s}`);
+      // The sync-managed ignore/attr files must land ONCE so peers track partitions —
+      // but only when UNTRACKED, so a user's own edits to a pre-existing (tracked)
+      // .gitignore/.gitattributes are never folded into a spine-sync commit.
+      const uncommittedMeta = [];
+      for (const f of ['.gitignore', '.gitattributes']) {
+        if (!(await dirExists(join(repoRoot, f)))) continue;
+        const tracked = await gitRun(['ls-files', '--error-unmatch', '--', f], repoRoot, 5000);
+        if (tracked.code === 0) continue; // already tracked → not ours to commit
+        // Untracked → first share, but ONLY if the file is the maddu-managed block
+        // and nothing else. A user's pre-existing untracked .gitignore rules must
+        // NOT be published by sync — flag it for the operator to commit themselves.
+        const content = await readFile(join(repoRoot, f), 'utf8').catch(() => '');
+        if (isSyncManagedOnlyDotfile(f, content)) stagePaths.push(f);
+        else uncommittedMeta.push(f);
+      }
 
-  let committed = false;
-  if (stagePaths.length) {
-    const add = await gitRun(['add', '--', ...stagePaths], repoRoot, 20000);
-    if (add.code !== 0) return { ok: false, reason: 'git-add-failed', detail: (add.stderr || add.error || '').trim(), steps };
-    // 0 = our paths have no staged changes; 1 = they do; anything else is a real
-    // git error we surface (never silently skip a commit of pending spine data).
-    const diff = await gitRun(['diff', '--cached', '--quiet', '--', ...stagePaths], repoRoot, 10000);
-    if (diff.code === 1) {
-      // Commit ONLY our pathspec, under the canonical subject the pre-push audit
-      // recognizes as sync-owned — never fold in unrelated staged work. Hooks are
-      // NOT bypassed: repo policy applies and a hook failure surfaces cleanly.
-      const commit = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...stagePaths], repoRoot, 20000);
-      if (commit.code !== 0) return { ok: false, reason: 'git-commit-failed', detail: (commit.stderr || commit.error || '').trim(), steps };
-      committed = true;
-    } else if (diff.code !== 0) {
-      return { ok: false, reason: 'git-status-failed', detail: (diff.stderr || diff.error || '').trim(), steps };
-    }
+      let committedIn = false;
+      if (stagePaths.length) {
+        const add = await gitRun(['add', '--', ...stagePaths], repoRoot, 20000);
+        if (add.code !== 0) return { fail: { ok: false, reason: 'git-add-failed', detail: (add.stderr || add.error || '').trim(), steps } };
+        // 0 = our paths have no staged changes; 1 = they do; anything else is a real
+        // git error we surface (never silently skip a commit of pending spine data).
+        const diff = await gitRun(['diff', '--cached', '--quiet', '--', ...stagePaths], repoRoot, 10000);
+        if (diff.code === 1) {
+          // Commit ONLY our pathspec, under the canonical subject the pre-push audit
+          // recognizes as sync-owned — never fold in unrelated staged work. Hooks are
+          // NOT bypassed: repo policy applies and a hook failure surfaces cleanly.
+          const commit = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...stagePaths], repoRoot, 20000);
+          if (commit.code !== 0) return { fail: { ok: false, reason: 'git-commit-failed', detail: (commit.stderr || commit.error || '').trim(), steps } };
+          committedIn = true;
+        } else if (diff.code !== 0) {
+          return { fail: { ok: false, reason: 'git-status-failed', detail: (diff.stderr || diff.error || '').trim(), steps } };
+        }
+      }
+      return { committed: committedIn, uncommittedMeta };
+    }, { maxWaitMs: 60000 });
+  } catch (e) {
+    return { ok: false, reason: 'git-busy', detail: `append funnel contended: ${e?.message || e}`, steps };
   }
+  if (commitOutcome.fail) return commitOutcome.fail;
+  const committed = commitOutcome.committed;
+  const uncommittedMeta = commitOutcome.uncommittedMeta;
   steps.push({ step: 'commit', committed });
 
   // Upstream presence gates the network hops — a local-only repo (no tracking

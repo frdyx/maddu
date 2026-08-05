@@ -254,17 +254,34 @@ try {
       if (args[0] === 'diff') return { code: 1, stdout: '', stderr: '' }; // "changes staged" → commit runs
       return { code: 0, stdout: '', stderr: '' };
     };
-    let sawPullWhileHeld = null;
+    let sawPullWhileHeld = null, sawCommitWhileHeld = null;
+    let commitRan = false;
+    const fakeGit2 = async (args) => {
+      if (args[0] === 'add' || args[0] === 'commit') commitRan = true;
+      return fakeGit(args);
+    };
     let p;
     await withAppendLock(lockPath, async () => {
-      p = sync.syncGit(fixG, { gitRun: fakeGit, gitAvailable: async () => true, push: false }); // NOT awaited — must block on OUR lock
-      await new Promise((r) => setTimeout(r, 400)); // give the pull every chance to run unfenced
+      p = sync.syncGit(fixG, { gitRun: fakeGit2, gitAvailable: async () => true, push: false }); // NOT awaited — must block on OUR lock
+      await new Promise((r) => setTimeout(r, 400)); // give the phases every chance to run unfenced
       sawPullWhileHeld = pullRan;
+      sawCommitWhileHeld = commitRan; // r13-F1: the snapshot commit is fenced too
     }); // lock releases here; syncGit may now proceed
     const res = await p;
+    ok('the snapshot commit did NOT run while the append lock was held (r13-F1)', sawCommitWhileHeld === false, `commitWhileHeld=${sawCommitWhileHeld}`);
     ok('the pull did NOT run while the append lock was held (fenced)', sawPullWhileHeld === false, `pullWhileHeld=${sawPullWhileHeld}`);
     ok('the pull ran after the lock released and sync completed', pullRan === true && res.ok === true,
       JSON.stringify({ pulled: res.pulled, ok: res.ok, reason: res.reason }).slice(0, 120));
+    // r13-F1: a crashed-torn segment is refused before staging, never shared.
+    const pdirG = core2.partitionDir(fixG, attG.replicaId);
+    const segsG = (await import('node:fs/promises').then((fs) => fs.readdir(pdirG))).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+    const segGPath = join(pdirG, segsG[segsG.length - 1]);
+    const origTxt = await readFile(segGPath, 'utf8');
+    await writeFile(segGPath, origTxt + '{"v":1,"id":"evt_torn_share"'); // torn tail
+    const resTorn = await sync.syncGit(fixG, { gitRun: fakeGit, gitAvailable: async () => true, push: false });
+    ok('a crashed-torn segment refuses the sync commit (torn-segment, never pushed)',
+      resTorn.ok === false && resTorn.reason === 'torn-segment', JSON.stringify({ reason: resTorn.reason }).slice(0, 80));
+    await writeFile(segGPath, origTxt);
     await rm(fixG, { recursive: true, force: true });
   }
 
