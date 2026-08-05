@@ -1,6 +1,6 @@
 {
-  "version": "1.13.0",
-  "fingerprint": "5c1a2b76",
+  "version": "1.14.0",
+  "fingerprint": "4a520601",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -977,6 +977,22 @@
           "run_id": "string",
           "schemaVersion": "number",
           "seed": "number"
+        }
+      },
+      "MUTATION_UNWITNESSED": {
+        "frozen": false,
+        "data": {
+          "breachId": "string",
+          "breachTs": "string",
+          "exitCode": "number|null",
+          "label": "string",
+          "method": "string|null",
+          "path": "string|null",
+          "sessionId": "string|null",
+          "sub": "string|null",
+          "surface": "string",
+          "verb": "string|null",
+          "via": "string"
         }
       },
       "PENDING_ACTION_DRAINED": {

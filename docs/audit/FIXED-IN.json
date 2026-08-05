@@ -1,5 +1,12 @@
 [
  {
+  "symptom": "Nothing proved a mutating seam RECORDED at all: a CLI verb or bridge write route could mutate and exit 0 silently — the prev_hash chain protects recorded history, but silent non-recording was invisible (the runtime complement to the static tier census was missing).",
+  "area": "mutation-witness / spine / bridge / command-tiers",
+  "fixed_in": "1.116.0",
+  "consumer_impact": "A mutating seam that exits 0 with zero spine appends and no declared no-op now breaches: MUTATION_UNWITNESSED on the spine (CLI via a crash-safe breach spool drained by the next dispatcher run; bridge inline after 2xx), exit forced to 1, and the command-tier-discipline census reds while evidence is undrained. ~40 append-free success paths carry declared reasons; readShapes in _tiers.mjs keep read-shaped invocations of mutating verbs breach-free; plugins declare via the extended handler result. Contract 1.13.0 -> 1.14.0 (new event type). Inert on pre-1.116.0 installs.",
+  "ledger_ref": "plan pln_20260805152106_44d2 phase s1-mutation-witness; plan Codex-SOUND 6 rounds (27 findings), diff Codex-CLEAN 6 rounds (23 findings: 17 blocker, 5 major, 1 minor)"
+ },
+ {
   "symptom": "Memory was write-only and unsafe to feed back: CLI slice-stops never updated the wiki (462 of 726 live stops missing at fix time — only the bridge route ran the updater, and appendSliceStop had no idempotency), cross-corpus search was substring-match sorted by timestamp (relevance buried under recency), and extracted facts — 726 of 935 being auto-promoted regex summaries — had no trust model, so nothing could safely inject them into agent briefs.",
   "area": "runtime/lib (hindsight trust states + recall packet + relevance/search + slice-materialize + wiki + mcp-server) · commands (memory approve/revoke/recall, wiki, brief, mcp serve, search) · gates/builtin/memory-injection-bounded",
   "fixed_in": "1.115.0",
