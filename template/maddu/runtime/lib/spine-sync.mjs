@@ -738,14 +738,17 @@ export async function syncGit(repoRoot, opts = {}) {
   // 1. Stage ONLY this replica's numeric segment files. Peers' partitions arrive
   //    already-committed via pull; a stray non-segment *.ndjson (which the secret
   //    scan does NOT cover) and unrelated user work are never swept in.
-  // The whole snapshot construction — segment enumeration, torn-tail check,
-  // staging, and the pathspec commit — runs UNDER the active partition's
-  // append lock (diff-funnel r13-F1): `git add` racing a writer mid-append
-  // could commit a segment blob cut before the trailing newline, and the
-  // pre-push audit's prefix-extension rule would happily publish that torn
-  // blob to every peer. Under the lock the files are whole-line by
-  // construction; a segment torn by a CRASH (no writer active) is refused
-  // with the repair remedy rather than shared.
+  // The whole snapshot-and-merge phase — segment enumeration, torn-tail
+  // check, staging, the pathspec commit, the upstream probe, AND the pull —
+  // runs UNDER ONE uninterrupted hold of the active partition's append lock
+  // (diff-funnel r13-F1 + r14-F1): `git add` racing a writer mid-append
+  // could commit a segment blob cut before the trailing newline (the
+  // pre-push audit's prefix-extension rule would publish that torn blob),
+  // and any gap before the pull would let a local append land just before
+  // peer AUTHORITY bytes whose cutover binds the pre-append head. Under the
+  // lock the files are whole-line by construction; a segment torn by a
+  // CRASH (no writer active) is refused with the repair remedy rather than
+  // shared.
   const myDirRel = `.maddu/events/by-replica/${replicaId}`;
   const commitLockPath = join(partitionDir(repoRoot, replicaId), '.append.lock');
   await mkdir(partitionDir(repoRoot, replicaId), { recursive: true });
@@ -795,7 +798,28 @@ export async function syncGit(repoRoot, opts = {}) {
           return { fail: { ok: false, reason: 'git-status-failed', detail: (diff.stderr || diff.error || '').trim(), steps } };
         }
       }
-      return { committed: committedIn, uncommittedMeta };
+      // ── 2. Upstream probe + pull, INSIDE the SAME critical section ──
+      // (diff-funnel r14-F1: releasing the lock between the snapshot commit
+      // and the pull left a gap where a concurrent writer could append an
+      // A-stamped event at H+1 just before the pull delivered a resolution
+      // whose cutover binds head H — an unhealable post-cutover losing
+      // stamp. One uninterrupted lock covers snapshot → probe → pull; peer
+      // AUTHORITY bytes can never interleave with a local append. r12-F1's
+      // rationale for fencing the pull itself also lives here. Appends wait
+      // (or best-effort callers drop) for the phase's duration — a
+      // workspace receiving new authority SHOULD quiesce.)
+      const upstream = await gitRun(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, 5000);
+      const hasUpstreamIn = upstream.code === 0 && upstream.stdout.trim().length > 0;
+      let pulledIn = false;
+      if (doPull && hasUpstreamIn) {
+        const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
+        if (pull.code !== 0) {
+          await gitRun(['merge', '--abort'], repoRoot, 10000);
+          return { fail: { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed: committedIn, steps } };
+        }
+        pulledIn = true;
+      }
+      return { committed: committedIn, uncommittedMeta, hasUpstream: hasUpstreamIn, pulled: pulledIn };
     }, { maxWaitMs: 60000 });
   } catch (e) {
     return { ok: false, reason: 'git-busy', detail: `append funnel contended: ${e?.message || e}`, steps };
@@ -803,45 +827,9 @@ export async function syncGit(repoRoot, opts = {}) {
   if (commitOutcome.fail) return commitOutcome.fail;
   const committed = commitOutcome.committed;
   const uncommittedMeta = commitOutcome.uncommittedMeta;
+  const hasUpstream = commitOutcome.hasUpstream;
+  const pulled = commitOutcome.pulled;
   steps.push({ step: 'commit', committed });
-
-  // Upstream presence gates the network hops — a local-only repo (no tracking
-  // branch) still commits, and reports pull/push as skipped rather than erroring.
-  const upstream = await gitRun(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, 5000);
-  const hasUpstream = upstream.code === 0 && upstream.stdout.trim().length > 0;
-
-  // 2. Pull peers' partitions. Disjoint author dirs + merge=binary → never a
-  //    conflict; if one somehow arises, abort OUR merge (we guaranteed above the
-  //    tree was clean of a user operation) and report it — never push over it.
-  //    The pull runs UNDER the active partition's append lock (diff-funnel
-  //    r12-F1): peer bytes can carry AUTHORITY events (an anchor, a
-  //    B-selecting resolution with a cutover), and landing them between a
-  //    local writer's in-lock ws revalidation and its appendFile would let a
-  //    stale stamp slip past the r11 final gate through a partition the gate
-  //    doesn't cover. Appends wait (or best-effort callers drop) for the
-  //    pull's duration — a workspace receiving new authority SHOULD quiesce.
-  let pulled = false;
-  if (doPull && hasUpstream) {
-    const partLockPath = join(partitionDir(repoRoot, replicaId), '.append.lock');
-    await mkdir(partitionDir(repoRoot, replicaId), { recursive: true }); // the lock's home (mirrors appendPartitioned)
-    let pullOutcome;
-    try {
-      pullOutcome = await withAppendLock(partLockPath, async () => {
-        const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
-        if (pull.code !== 0) {
-          await gitRun(['merge', '--abort'], repoRoot, 10000);
-          return { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed, steps };
-        }
-        return null;
-      }, { maxWaitMs: 60000 });
-    } catch (e) {
-      // Could not acquire the append funnel (a long-held local write) —
-      // refuse the pull rather than apply peer authority unfenced.
-      return { ok: false, reason: 'git-busy', detail: `append funnel contended: ${e?.message || e}`, committed, steps };
-    }
-    if (pullOutcome) return pullOutcome;
-    pulled = true;
-  }
   steps.push({ step: 'pull', pulled });
 
   // 3. Validate the merged set before sharing further. A fork / structural fail /

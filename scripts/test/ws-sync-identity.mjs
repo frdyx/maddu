@@ -256,8 +256,19 @@ try {
     };
     let sawPullWhileHeld = null, sawCommitWhileHeld = null;
     let commitRan = false;
+    let probeAppendBlocked = null; // r14-F1: continuity — the lock must still be held at the upstream probe
     const fakeGit2 = async (args) => {
       if (args[0] === 'add' || args[0] === 'commit') commitRan = true;
+      if (args.join(' ').includes('@{u}') && probeAppendBlocked === null) {
+        // Between snapshot and pull there must be NO gap: an append attempted
+        // right now must fail to acquire the funnel.
+        try {
+          await core2.appendPartitioned(fixG, attG.replicaId,
+            { v: 1, id: 'evt_probe_gap', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 } },
+            { maxWaitMs: 250 });
+          probeAppendBlocked = false;
+        } catch { probeAppendBlocked = true; }
+      }
       return fakeGit(args);
     };
     let p;
@@ -272,6 +283,8 @@ try {
     ok('the pull did NOT run while the append lock was held (fenced)', sawPullWhileHeld === false, `pullWhileHeld=${sawPullWhileHeld}`);
     ok('the pull ran after the lock released and sync completed', pullRan === true && res.ok === true,
       JSON.stringify({ pulled: res.pulled, ok: res.ok, reason: res.reason }).slice(0, 120));
+    ok('NO gap between snapshot and pull — an append at the upstream probe is lock-blocked (r14-F1)',
+      probeAppendBlocked === true, `probeAppendBlocked=${probeAppendBlocked}`);
     // r13-F1: a crashed-torn segment is refused before staging, never shared.
     const pdirG = core2.partitionDir(fixG, attG.replicaId);
     const segsG = (await import('node:fs/promises').then((fs) => fs.readdir(pdirG))).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
