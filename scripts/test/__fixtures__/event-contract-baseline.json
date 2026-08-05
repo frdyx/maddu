@@ -1,6 +1,6 @@
 {
-  "version": "1.11.0",
-  "fingerprint": "a7d55fb0",
+  "version": "1.13.0",
+  "fingerprint": "5c1a2b76",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -799,6 +799,23 @@
           "transport": "string"
         }
       },
+      "MEMORY_FACT_APPROVED": {
+        "frozen": false,
+        "data": {
+          "factId": "string",
+          "kind": "string",
+          "reason": "string?",
+          "sha256": "string"
+        }
+      },
+      "MEMORY_FACT_REVOKED": {
+        "frozen": false,
+        "data": {
+          "factId": "string",
+          "kind": "string",
+          "reason": "string"
+        }
+      },
       "MEMORY_FACT_SUPERSEDED": {
         "frozen": false,
         "data": {
@@ -807,6 +824,26 @@
           "kind": "string",
           "reason": "string",
           "supersedes": "string"
+        }
+      },
+      "MEMORY_INJECTED": {
+        "frozen": false,
+        "data": {
+          "factIds": "array",
+          "facts": "array",
+          "lane": "string|null",
+          "query": "string",
+          "sessionId": "string|null",
+          "totalBytes": "number"
+        }
+      },
+      "MEMORY_INJECTION_REFUSED": {
+        "frozen": false,
+        "data": {
+          "reason": "string",
+          "refused": "array",
+          "refusedTotal": "number?",
+          "sessionId": "string|null"
         }
       },
       "MODEL_CHECKPOINT_REGISTERED": {
