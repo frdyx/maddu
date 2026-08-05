@@ -146,8 +146,22 @@ async function continueResidualMigration(repoRoot, replicaId, residualSegs) {
             return { status: 'fatal', reason: `segment name ${f} collides with an existing partition segment`, remedy: FATAL_REMEDY };
           }
         }
+        // Committed-element law (diff-funnel r10-F1): NEVER rename a torn
+        // residual segment into the partition — a valid-JSON tail whose
+        // newline was lost in a crashed append would become the partition's
+        // poisoned active tail (verify: torn_trailing_line; every later
+        // append: TORN_TAIL). Every residual segment must end with '\n'.
+        for (const f of flats) {
+          let txt;
+          try { txt = await readFile(join(eventsDir, f), 'utf8'); }
+          catch (e) { return { status: 'fatal', reason: `residual segment ${f} unreadable: ${e?.message || e}`, remedy: FATAL_REMEDY }; }
+          if (txt.length && !txt.endsWith('\n')) {
+            return { status: 'fatal', reason: `residual segment ${f} ends with an unterminated line (a crashed write) — append the missing newline if the JSON is complete, otherwise trim the partial line`, remedy: FATAL_REMEDY };
+          }
+        }
         // Tail compatibility: first residual line must chain onto the
-        // partition's current last line.
+        // partition's current last COMMITTED line (a torn partition tail is
+        // equally fatal — the residual would chain past an uncommitted line).
         const firstFlatTxt = await readFile(join(eventsDir, flats[0]), 'utf8');
         const firstLine = firstFlatTxt.split('\n').find((l) => l.trim());
         if (!firstLine) return { status: 'fatal', reason: `residual segment ${flats[0]} is empty/unreadable`, remedy: FATAL_REMEDY };
@@ -156,7 +170,11 @@ async function continueResidualMigration(repoRoot, replicaId, residualSegs) {
         catch { return { status: 'fatal', reason: `residual segment ${flats[0]} first line is malformed`, remedy: FATAL_REMEDY }; }
         let tailLine = null;
         for (let i = partSegs.length - 1; i >= 0 && tailLine === null; i--) {
-          const lines = (await readFile(join(pdir, partSegs[i]), 'utf8')).split('\n').filter((l) => l.trim());
+          const txt = await readFile(join(pdir, partSegs[i]), 'utf8');
+          if (txt.length && !txt.endsWith('\n')) {
+            return { status: 'fatal', reason: `partition segment ${partSegs[i]} ends with an unterminated line (a crashed write) — repair it before continuing the migration`, remedy: FATAL_REMEDY };
+          }
+          const lines = txt.split('\n').filter((l) => l.trim());
           if (lines.length) tailLine = lines[lines.length - 1];
         }
         if (!tailLine || firstPrev !== hashLine(tailLine)) {

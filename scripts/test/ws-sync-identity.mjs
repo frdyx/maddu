@@ -196,6 +196,43 @@ try {
     await rm(join(fix, '.maddu', 'events', '000000000001.ndjson'), { force: true });
   }
 
+  // ── (D2) r10-F1: a TORN residual segment is never renamed in ────────────
+  {
+    // The residual chains perfectly onto the partition tail — but its final
+    // newline was lost in a crashed append. Renaming it in would poison the
+    // partition's active tail; the continuation must go fatal instead.
+    const spineLib = await import(toUrl(join(LIB, 'spine.mjs')));
+    const fixT = await mkdtemp(join(tmpdir(), 'ws-torn-resid-'));
+    run(fixT, ['init']);
+    run(fixT, ['goal', 'set', '--objective', 'torn-residual-fixture']);
+    const attT = await sync.syncInit(fixT);
+    ok('torn-residual fixture attaches', attT.ok === true);
+    // Build a residual that chains onto the partition tail, then tear it.
+    const pdirT = join(fixT, '.maddu', 'events', 'by-replica', attT.replicaId);
+    const segsT = (await import('node:fs/promises').then((fs) => fs.readdir(pdirT))).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+    const tailTxt = await readFile(join(pdirT, segsT[segsT.length - 1]), 'utf8');
+    const tailLine = tailTxt.split('\n').filter(Boolean).pop();
+    const resEv = { v: 1, id: 'evt_resid_torn', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 }, prev_hash: core.hashLine(tailLine) };
+    const nextSeg = String(Number(segsT[segsT.length - 1].slice(0, 12)) + 1).padStart(12, '0') + '.ndjson';
+    await writeFile(join(fixT, '.maddu', 'events', nextSeg), JSON.stringify(resEv)); // NO trailing newline
+    const contRes = await sync.syncInit(fixT);
+    ok('torn residual → residual-migration-fatal (never renamed into the partition)',
+      contRes.ok === false && contRes.reason === 'residual-migration-fatal' && /unterminated/.test(String(contRes.message)),
+      JSON.stringify(contRes).slice(0, 160));
+    ok('the torn residual segment stayed in the flat dir',
+      await readFile(join(fixT, '.maddu', 'events', nextSeg), 'utf8').then(() => true).catch(() => false));
+    // Repair (append the newline) → the continuation now migrates it.
+    await writeFile(join(fixT, '.maddu', 'events', nextSeg), JSON.stringify(resEv) + '\n');
+    const contOk = await sync.syncInit(fixT);
+    ok('repaired residual migrates cleanly', contOk.ok === true && contOk.continuation?.status === 'migrated'
+      && contOk.continuation.segments.includes(nextSeg), JSON.stringify(contOk).slice(0, 160));
+    const vT = await verifySpine(fixT, {});
+    ok('post-continuation verify green', vT.counts.FAIL === 0,
+      vT.issues.filter((i) => i.level === 'FAIL').map((i) => i.kind).join(','));
+    void spineLib;
+    await rm(fixT, { recursive: true, force: true });
+  }
+
   // ── (F) r8-F2: REPLICA_UNATTACHED never deadlocks its own recovery ──────
   // An unattached checkout (replica.json removed) with a pending S1 breach
   // row: the drain fails with REPLICA_UNATTACHED on every invocation — the
