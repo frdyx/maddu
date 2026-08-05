@@ -802,10 +802,32 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     throw new Error(STALL_MSG);
   }
 
+  // One bounded restamp (diff-funnel r11-F1): the primitives re-validate the
+  // ws stamp INSIDE the append lock, so a ceremony/anchor that raced us
+  // surfaces as WS_IDENTITY_MISMATCH here — re-resolve once and restamp with
+  // the settled authority instead of hard-failing a healable verb. A
+  // conflict or unresolvable outcome still propagates.
+  let wsRestamped = false;
+  const restampOrRethrow = async (err) => {
+    if (err?.code !== 'WS_IDENTITY_MISMATCH' || wsRestamped) throw err;
+    wsRestamped = true;
+    const idrR = await resolveIdentityForAppend(repoRoot);
+    if (idrR.conflict) {
+      const e = new Error(`spine append: conflicting workspace-identity anchors (${idrR.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+      e.code = 'WS_IDENTITY_CONFLICT';
+      throw e;
+    }
+    if (idrR.ws) { ev.ws = idrR.ws; return; }
+    if (idrR.bootstrap) { delete ev.ws; return; }
+    throw err;
+  };
   let enoentRetries = 0;
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);
-    if (w.id) return credit(await appendPartitioned(repoRoot, w.id, ev));
+    if (w.id) {
+      try { return credit(await appendPartitioned(repoRoot, w.id, ev)); }
+      catch (err) { await restampOrRethrow(err); continue; }
+    }
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
     if (w.unattached) {
       const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
@@ -852,6 +874,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       // enough — a PERSISTENT ENOENT (a genuinely broken FS, not a migration) then
       // surfaces the real error instead of hot-spinning.
       if (err && err.code === 'ENOENT' && ++enoentRetries <= 3) continue;
+      if (err && err.code === 'WS_IDENTITY_MISMATCH') { await restampOrRethrow(err); continue; }
       throw err;
     }
   }

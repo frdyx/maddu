@@ -493,6 +493,49 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r11-F1: the in-lock final gate fences a stale stamp ─────────────────
+  {
+    const fix = await freshFix();
+    const { appendPartitioned, publishWsAnchorOnce } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    void publishWsAnchorOnce;
+    const mkPart = async (rep, lines) => {
+      const d = join(fix, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    const gA = JSON.stringify({ v: 1, id: 'evt_gA', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const wsA = wsFromLine(gA);
+    const anchorA = { v: 1, id: 'evt_aA', ts: '2026-01-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsA, genesis: { replicaId: 'repA', segment: '000000000001.ndjson', line: 1, hash: hashLine(gA) } }, prev_hash: hashLine(gA) };
+    await mkPart('repA', [gA, JSON.stringify(anchorA)]);
+    const r0 = await resolveIdentityForAppend(fix);
+    ok('r11 fixture: writer resolves and would stamp A', r0.ws === wsA);
+    // BETWEEN the writer's resolution and its locked append, a peer anchor
+    // arrives AND the ceremony resolves the conflict to B with a cutover.
+    const gB = JSON.stringify({ v: 1, id: 'evt_gB', ts: '2026-02-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const wsB = wsFromLine(gB);
+    const anchorB = { v: 1, id: 'evt_aB', ts: '2026-02-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsB, genesis: { replicaId: 'repB', segment: '000000000001.ndjson', line: 1, hash: hashLine(gB) } }, prev_hash: hashLine(gB) };
+    const binding = canonicalAnchorConflicts([anchorA, anchorB]);
+    const cutover = [
+      { replicaId: 'repA', segment: '000000000001.ndjson', line: 2, hash: hashLine(JSON.stringify(anchorA)) },
+      { replicaId: 'repB', segment: '000000000001.ndjson', line: 2, hash: hashLine(JSON.stringify(anchorB)) },
+    ];
+    const resolution = { v: 1, id: 'evt_res', ts: '2026-02-01T00:00:02.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: wsB, conflicts: binding, cutover }, prev_hash: hashLine(JSON.stringify(anchorB)) };
+    await mkPart('repB', [gB, JSON.stringify(anchorB), JSON.stringify(resolution)]);
+    let code = null;
+    try {
+      await appendPartitioned(fix, 'repA', { v: 1, id: 'evt_stale', ts: '2026-03-01T00:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 }, ws: wsA });
+    } catch (e) { code = e.code; }
+    ok('the locked append REFUSES the stale A stamp (in-lock final gate — r11-F1)', code === 'WS_IDENTITY_MISMATCH');
+    // spine.append heals by restamping with the settled authority.
+    await mkdir(join(fix, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(fix, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }) + '\n');
+    const { pathToFileURL } = await import('node:url');
+    const spineMod = await import(pathToFileURL(join(process.cwd(), 'template/maddu/runtime/lib/spine.mjs')).href);
+    const healed = await spineMod.append(fix, { type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 2 } });
+    ok('a fresh append stamps the SETTLED authority (B) after the ceremony', healed.ws === wsB, `ws=${healed.ws}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
   // ── r5-F2: the fingerprint stat-reuse fast path provably skips reads ────
   {
     const fix = await freshFix();

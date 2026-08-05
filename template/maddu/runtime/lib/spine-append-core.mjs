@@ -1267,6 +1267,29 @@ async function preflightWsStamp(repoRoot, ev, site) {
   }
 }
 
+// The FINAL ws gate, run INSIDE the append lock (diff-funnel r11-F1): a
+// writer that resolved and stamped identity A before the lock can otherwise
+// append AFTER a ceremony that — under this same lock — selected B and
+// recorded its cutover, landing a post-cutover losing stamp that no
+// grandfather tolerates and no further ceremony can heal. Re-resolution here
+// is fingerprint-fast when nothing changed (cache read + stats) and rescans
+// exactly when authority bytes moved. The pre-lock cache preflight above
+// stays as the cheap early refusal — it is never the final word.
+async function assertWsStampCurrent(repoRoot, ev, site) {
+  if (typeof ev?.ws !== 'string') return;
+  const idr = await resolveIdentityForAppend(repoRoot);
+  if (idr.conflict) {
+    const err = new Error(`${site}: workspace identity became conflict-frozen — run \`maddu spine identity resolve --keep <ws_...>\``);
+    err.code = 'WS_IDENTITY_CONFLICT';
+    throw err;
+  }
+  if (!idr.ws || idr.ws !== ev.ws) {
+    const err = new Error(`${site}: ws stamp ${ev.ws} is stale — the workspace authority is now ${idr.ws ?? (idr.refuse ? `unresolvable (${idr.refuse})` : 'unresolved')}`);
+    err.code = 'WS_IDENTITY_MISMATCH';
+    throw err;
+  }
+}
+
 export async function appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs = Infinity } = {}) {
   if (!isValidReplicaId(replicaId)) {
     throw new Error(`appendPartitioned: invalid replicaId "${replicaId}"`);
@@ -1278,6 +1301,7 @@ export async function appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs = I
   return withAppendLock(
     lockPath,
     async () => {
+      await assertWsStampCurrent(repoRoot, ev, 'appendPartitioned'); // r11-F1: the final gate, under the lock
       const prevLine = await lastEventLineInDir(dir);
       ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
       const line = JSON.stringify(ev);
@@ -1325,6 +1349,7 @@ export async function appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs = I
       if (w.id) return { reroute: w.id };
       if (w.pending) return { pending: true };
       if (w.unattached) return { unattached: true }; // r7-F1: never write flat into an unattached clone
+      await assertWsStampCurrent(repoRoot, ev, 'appendFlatChained'); // r11-F1: the final gate, under the lock
       const prevLine = await lastEventLineInDir(eventsDir);
       ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
       const line = JSON.stringify(ev);
