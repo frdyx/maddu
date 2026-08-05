@@ -233,6 +233,41 @@ try {
     await rm(fixT, { recursive: true, force: true });
   }
 
+  // ── (G) r12-F1: the pull is fenced by the active partition's funnel ─────
+  // Peer bytes can carry AUTHORITY events; landing them between a writer's
+  // in-lock ws revalidation and its appendFile would bypass the r11 final
+  // gate. syncGit's pull must therefore WAIT for the append lock.
+  {
+    const fixG = await mkdtemp(join(tmpdir(), 'ws-pullfence-'));
+    run(fixG, ['init']);
+    run(fixG, ['goal', 'set', '--objective', 'pull-fence-fixture']);
+    const attG = await sync.syncInit(fixG);
+    ok('pull-fence fixture attaches', attG.ok === true);
+    const { withAppendLock } = await import(toUrl(join(LIB, 'append-lock.mjs')));
+    const core2 = core;
+    const lockPath = join(core2.partitionDir(fixG, attG.replicaId), '.append.lock');
+    let pullRan = false;
+    const fakeGit = async (args) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('@{u}')) return { code: 0, stdout: 'origin/main', stderr: '' };
+      if (args[0] === 'pull') { pullRan = true; return { code: 0, stdout: '', stderr: '' }; }
+      if (args[0] === 'diff') return { code: 1, stdout: '', stderr: '' }; // "changes staged" → commit runs
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    let sawPullWhileHeld = null;
+    let p;
+    await withAppendLock(lockPath, async () => {
+      p = sync.syncGit(fixG, { gitRun: fakeGit, gitAvailable: async () => true, push: false }); // NOT awaited — must block on OUR lock
+      await new Promise((r) => setTimeout(r, 400)); // give the pull every chance to run unfenced
+      sawPullWhileHeld = pullRan;
+    }); // lock releases here; syncGit may now proceed
+    const res = await p;
+    ok('the pull did NOT run while the append lock was held (fenced)', sawPullWhileHeld === false, `pullWhileHeld=${sawPullWhileHeld}`);
+    ok('the pull ran after the lock released and sync completed', pullRan === true && res.ok === true,
+      JSON.stringify({ pulled: res.pulled, ok: res.ok, reason: res.reason }).slice(0, 120));
+    await rm(fixG, { recursive: true, force: true });
+  }
+
   // ── (F) r8-F2: REPLICA_UNATTACHED never deadlocks its own recovery ──────
   // An unattached checkout (replica.json removed) with a pending S1 breach
   // row: the drain fails with REPLICA_UNATTACHED on every invocation — the

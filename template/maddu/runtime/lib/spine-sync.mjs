@@ -785,13 +785,33 @@ export async function syncGit(repoRoot, opts = {}) {
   // 2. Pull peers' partitions. Disjoint author dirs + merge=binary → never a
   //    conflict; if one somehow arises, abort OUR merge (we guaranteed above the
   //    tree was clean of a user operation) and report it — never push over it.
+  //    The pull runs UNDER the active partition's append lock (diff-funnel
+  //    r12-F1): peer bytes can carry AUTHORITY events (an anchor, a
+  //    B-selecting resolution with a cutover), and landing them between a
+  //    local writer's in-lock ws revalidation and its appendFile would let a
+  //    stale stamp slip past the r11 final gate through a partition the gate
+  //    doesn't cover. Appends wait (or best-effort callers drop) for the
+  //    pull's duration — a workspace receiving new authority SHOULD quiesce.
   let pulled = false;
   if (doPull && hasUpstream) {
-    const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
-    if (pull.code !== 0) {
-      await gitRun(['merge', '--abort'], repoRoot, 10000);
-      return { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed, steps };
+    const partLockPath = join(partitionDir(repoRoot, replicaId), '.append.lock');
+    await mkdir(partitionDir(repoRoot, replicaId), { recursive: true }); // the lock's home (mirrors appendPartitioned)
+    let pullOutcome;
+    try {
+      pullOutcome = await withAppendLock(partLockPath, async () => {
+        const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
+        if (pull.code !== 0) {
+          await gitRun(['merge', '--abort'], repoRoot, 10000);
+          return { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed, steps };
+        }
+        return null;
+      }, { maxWaitMs: 60000 });
+    } catch (e) {
+      // Could not acquire the append funnel (a long-held local write) —
+      // refuse the pull rather than apply peer authority unfenced.
+      return { ok: false, reason: 'git-busy', detail: `append funnel contended: ${e?.message || e}`, committed, steps };
     }
+    if (pullOutcome) return pullOutcome;
     pulled = true;
   }
   steps.push({ step: 'pull', pulled });
