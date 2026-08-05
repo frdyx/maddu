@@ -285,12 +285,19 @@ export default {
       }
       failures.push(...censusBridge(serverSrc, routeSources));
     } catch {} // older install without the runtime tree beside commands — presence checks own that
-    // Runtime backstop (witnessed-or-absent): undrained breach spool rows red
-    // the gate until the next dispatcher run lifts them onto the spine.
+    // Runtime backstop (witnessed-or-absent): undrained breach spool rows,
+    // live/stale claims, AND quarantined .corrupt rows all red the gate —
+    // quarantine is evidence that persists until an operator disposes of it,
+    // never a one-warning-then-green (Codex diff-review r1 F6).
     try {
       const spool = (await import('node:fs/promises')).readdir;
-      const rows = (await spool(join(ctx.repoRoot, '.maddu', 'state', 'mutation-breaches'))).filter((n) => n.endsWith('.json'));
+      const names = await spool(join(ctx.repoRoot, '.maddu', 'state', 'mutation-breaches'));
+      const rows = names.filter((n) => n.endsWith('.json'));
+      const corrupt = names.filter((n) => n.endsWith('.corrupt'));
+      const claims = names.filter((n) => /\.json\.draining\./.test(n));
       if (rows.length) failures.push(`${rows.length} undrained mutation-breach spool row(s) — run any maddu command to drain, then investigate the breaching seam`);
+      if (claims.length) failures.push(`${claims.length} in-flight/stale drain claim(s) — a drainer may have died; reclaim runs on the next drain`);
+      if (corrupt.length) failures.push(`${corrupt.length} quarantined .corrupt breach row(s) [${corrupt.slice(0, 3).join(', ')}] — unparseable evidence; inspect and remove manually`);
     } catch {}
 
     const orch = cmds.filter((c) => tiers[c].layer === 'orchestration').length;

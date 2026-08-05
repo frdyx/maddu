@@ -77,18 +77,44 @@ try {
     drained.length === 1 && drained[0].data.via === 'breach-drain' && drained[0].data.breachId === spooledId
     && drained[0].data.verb === 'goal' && drained[0].data.surface === 'cli');
 
-  // ── (D) credit-leak regression ──────────────────────────────────────────
+  // ── (C2) `mailbox read` is NOT a read shape (Codex diff r1 F1) ──────────
+  // It appends MAILBOX_READ — its append is its witness; a zero-credit run
+  // must therefore breach like any other silent mutation.
+  {
+    run(fix, ['mailbox', 'send', 'harness', '--subject', 'witness fixture message']);
+    const findMsg = async () => {
+      const seg = await readFile(join(fix, '.maddu', 'events', '000000000001.ndjson'), 'utf8');
+      const sent = seg.split('\n').filter(Boolean).map((l) => JSON.parse(l)).reverse().find((e) => e.type === 'MAILBOX_SENT');
+      return sent?.data?.messageId ?? sent?.data?.id ?? null;
+    };
+    const msgId = await findMsg();
+    if (msgId) {
+      const readClean = run(fix, ['mailbox', 'read', 'harness', '--id', msgId]);
+      ok('mailbox read (appending) exits 0 clean', readClean.status === 0 && (await spoolRows(fix)).length === 0, `exit=${readClean.status}`);
+      run(fix, ['mailbox', 'send', 'harness', '--subject', 'second fixture message']);
+      const msg2 = await findMsg();
+      const readBreach = run(fix, ['mailbox', 'read', 'harness', '--id', msg2], { __MADDU_TEST_ZERO_CREDIT__: '1' });
+      ok('zero-credit mailbox read BREACHES (not excused as a read shape)',
+        readBreach.status === 1 && (await spoolRows(fix)).length === 1, `exit=${readBreach.status}`);
+      run(fix, ['plan', 'list']); // drain the deliberate breach
+    } else {
+      ok('mailbox fixture message located', false, 'MAILBOX_SENT not found');
+    }
+  }
+
+  // ── (D) credit-leak regression (delta-based counts) ─────────────────────
+  const baseEvents = (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length;
   const b2 = run(fix, ['goal', 'set', '--objective', 'e2e-three'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
   ok('second forced breach spooled', b2.status === 1 && (await spoolRows(fix)).length === 1);
   const b3 = run(fix, ['goal', 'set', '--objective', 'e2e-four'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
   const rows3 = await spoolRows(fix);
   const events3 = await spineEvents(fix, 'MUTATION_UNWITNESSED');
   ok('drain-carrying run drains the OLD breach yet still breaches ITSELF (drain never shields the command)',
-    b3.status === 1 && rows3.length === 1 && events3.length === 2,
-    `exit=${b3.status} spool=${rows3.length} events=${events3.length}`);
+    b3.status === 1 && rows3.length === 1 && events3.length === baseEvents + 1,
+    `exit=${b3.status} spool=${rows3.length} events=${events3.length} base=${baseEvents}`);
   // settle: drain the residue so the fixture ends clean
   run(fix, ['plan', 'list']);
-  ok('residue drained', (await spoolRows(fix)).length === 0 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 3);
+  ok('residue drained', (await spoolRows(fix)).length === 0 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === baseEvents + 2);
 
   // ── (E) inertness on a PRE-S1 install ───────────────────────────────────
   // Simulate an old runtime tree faithfully: no mutation-witness.mjs AND a

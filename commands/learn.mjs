@@ -222,12 +222,14 @@ export default async function learnCmd(argv) {
     // re-runs idempotent; the vendor directory is never written. Preview by
     // default; --adopt appends facts + a VENDOR_MEMORY_IMPORTED event each
     // (fact carried on the event, so rebuilds replay it).
-    // Mutation-witness declared no-op: preview mode and the no-vendor-dir
-    // path are graceful zero-append successes; --adopt's appends also credit.
-    {
+    // Mutation-witness (Codex diff-review r1 F2): the no-op is declared ONLY
+    // in the genuinely append-free branches below (no vendor dir / nothing
+    // fresh / preview) — never up here, where it would permanently excuse the
+    // --adopt path whose VENDOR_MEMORY_IMPORTED appends must stay witnessed.
+    const witnessSyncNoop = async (reason) => {
       const { loadLibOptional } = await import('./_libroot.mjs');
-      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('vendor-sync-preview-or-empty');
-    }
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.(reason);
+    };
     const vm = await loadLib('vendor-memory.mjs');
     const hindsight = await loadLib('hindsight.mjs');
     if (!vm?.readVendorMemories || !hindsight?.appendFactIfNew) {
@@ -237,6 +239,7 @@ export default async function learnCmd(argv) {
     const dirOverride = typeof flags.dir === 'string' ? flags.dir : null;
     const { dir, memories } = await vm.readVendorMemories(repoRoot, { dir: dirOverride });
     if (!dir) {
+      await witnessSyncNoop('vendor-sync:no-vendor-dir');
       console.log(`maddu learn sync  ${C.dim}no Claude Code memory directory found for this repo (nothing to import)${C.reset}`);
       return;
     }
@@ -250,10 +253,11 @@ export default async function learnCmd(argv) {
         facts: fresh.map((c) => ({ id: c.fact.id, file: c.memory.file, name: c.memory.name })),
         adopted: !!flags.adopt,
       }, null, 2) + '\n');
-      if (!flags.adopt) return;
+      if (!flags.adopt) { await witnessSyncNoop('vendor-sync:preview-only'); return; }
     } else {
       console.log(`maddu learn sync  ${C.dim}claude-memory: ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} in ${dir}${C.reset}`);
       if (!fresh.length) {
+        await witnessSyncNoop('vendor-sync:nothing-fresh');
         console.log(`  ${C.dim}nothing new — ${candidates.length} already imported (content-hash match)${C.reset}`);
         return;
       }
@@ -261,11 +265,13 @@ export default async function learnCmd(argv) {
         console.log(`  ${C.green}+${C.reset} ${c.memory.file}  ${C.dim}${(c.memory.description || c.memory.name || '').slice(0, 70)}${C.reset}`);
       }
       if (!flags.adopt) {
+        await witnessSyncNoop('vendor-sync:preview-only');
         console.log(`\n  ${C.dim}preview only — import as kind:'vendor' facts: maddu learn sync --from-claude-memory --adopt${C.reset}`);
         return;
       }
     }
     let imported = 0;
+    if (!fresh.length) await witnessSyncNoop('vendor-sync:nothing-fresh'); // --adopt with zero fresh facts
     for (const c of fresh) {
       await spine.append(repoRoot, {
         type: spine.EVENT_TYPES.VENDOR_MEMORY_IMPORTED,

@@ -226,9 +226,14 @@ export function reclaimStaleClaimsSync(stateRoot, { now = Date.now() } = {}) {
   return reclaimed;
 }
 
+// Every row that is EVIDENCE: drainable spool rows, live claims, and
+// quarantined .corrupt rows (Codex diff-review r1 F6 — a quarantined row must
+// keep redding the census until an operator disposes of it, never vanish
+// after its first warning). `.drained` consume-markers are excluded — they
+// are cleanup debt, not evidence.
 export function listBreachesSync(stateRoot) {
   const dir = breachDir(stateRoot);
-  try { return readdirSync(dir).filter((n) => n.endsWith('.json') || CLAIM_RE.test(n)); }
+  try { return readdirSync(dir).filter((n) => n.endsWith('.json') || n.endsWith('.corrupt') || CLAIM_RE.test(n)); }
   catch { return []; }
 }
 
@@ -239,11 +244,25 @@ export function listBreachesSync(stateRoot) {
 // Returns { drained, failed, remaining, errors } — a failure restores the
 // claim (rename back) and reports the error so the caller can apply the
 // pinned recovery exception (Codex r5 F1) or abort dispatch.
-export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn) {
+//
+// breachId idempotency (Codex diff-review r1 F5 — "at-least-once with
+// dedupe" must be IMPLEMENTED, not aspirational): the crash window is
+// append-succeeded → unlink-failed. Two layers close it:
+//   1. `hasBreachId(id)` (optional, injected — bin supplies a spine scan):
+//      a claimed row whose breachId is ALREADY on the spine is cleaned up
+//      without a second append.
+//   2. after a successful append the claim is renamed to `<base>.drained`
+//      BEFORE unlink — an unlink failure leaves a consumed marker that
+//      reclaim NEVER renames back and later drains only clean up.
+export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasBreachId = null } = {}) {
   const dir = breachDir(stateRoot);
   reclaimStaleClaimsSync(stateRoot);
   let names = [];
   try { names = await readdir(dir); } catch { return { drained: 0, failed: 0, remaining: 0, errors: [] }; }
+  // Consumed markers from a prior unlink failure: cleanup only, never re-drain.
+  for (const n of names.filter((x) => x.endsWith('.drained'))) {
+    try { await unlink(join(dir, n)); } catch {}
+  }
   const spool = names.filter((n) => n.endsWith('.json'));
   let drained = 0, failed = 0;
   const errors = [];
@@ -270,20 +289,32 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn) {
       continue;
     }
     try {
-      await appendFn({
-        type: 'MUTATION_UNWITNESSED',
-        actor: row.sessionId || null,
-        lane: null,
-        data: {
-          breachId: row.breachId, breachTs: row.breachTs ?? null,
-          surface: row.surface ?? 'cli', label: row.label ?? '(unlabeled)',
-          verb: row.verb ?? null, sub: row.sub ?? null,
-          method: row.method ?? null, path: row.path ?? null,
-          exitCode: Number.isInteger(row.exitCode) ? row.exitCode : null,
-          sessionId: row.sessionId ?? null, via: 'breach-drain',
-        },
-      });
-      try { await unlink(join(dir, claimed)); } catch {} // crash window here = at-least-once, deduped by breachId
+      // Idempotency layer 1: skip an already-drained breachId (a prior run
+      // crashed between append and unlink) — clean up, count as drained.
+      let alreadyOnSpine = false;
+      if (typeof hasBreachId === 'function') {
+        try { alreadyOnSpine = await hasBreachId(row.breachId); } catch {}
+      }
+      if (!alreadyOnSpine) {
+        await appendFn({
+          type: 'MUTATION_UNWITNESSED',
+          actor: row.sessionId || null,
+          lane: null,
+          data: {
+            breachId: row.breachId, breachTs: row.breachTs ?? null,
+            surface: row.surface ?? 'cli', label: row.label ?? '(unlabeled)',
+            verb: row.verb ?? null, sub: row.sub ?? null,
+            method: row.method ?? null, path: row.path ?? null,
+            exitCode: Number.isInteger(row.exitCode) ? row.exitCode : null,
+            sessionId: row.sessionId ?? null, via: 'breach-drain',
+          },
+        });
+      }
+      // Idempotency layer 2: consume-marker rename BEFORE unlink — an unlink
+      // failure leaves `<base>.drained`, which is never re-drained.
+      const drainedName = `${name}.drained`;
+      try { await rename(join(dir, claimed), join(dir, drainedName)); } catch {}
+      try { await unlink(join(dir, drainedName)); } catch {}
       drained++;
     } catch (err) {
       try { await rename(join(dir, claimed), join(dir, name)); } catch {}

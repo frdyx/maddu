@@ -188,16 +188,27 @@ function matchesReadShape(shape, rest) {
   return true;
 }
 
+// THE one invocation-shape classifier — shared by arming AND drain-failure
+// handling (Codex diff-review r1 F7: a divergent drain classifier treated
+// every mixed-tier verb as mutating and blocked `plan list` on a broken
+// drain). Returns 'read' | 'mutating' | null (unknown verb → guard inert).
+async function resolveInvocationMode(raw, rest) {
+  let tiers = null;
+  try { tiers = (await import(pathToFileURL(join(repoRoot, 'commands', '_tiers.mjs')).href)).default; } catch {}
+  const entry = tiers?.[raw];
+  if (!entry) return null;
+  const isRead = entry.tier === 'read-only'
+    || (Array.isArray(entry.readShapes) && entry.readShapes.some((s) => matchesReadShape(s, rest)));
+  return isRead ? 'read' : 'mutating';
+}
+
 async function armCommandWitness(ws, raw, rest) {
   try {
     if (!ws.lib) return;
-    let tiers = null;
-    try { tiers = (await import(pathToFileURL(join(repoRoot, 'commands', '_tiers.mjs')).href)).default; } catch {}
-    const entry = tiers?.[raw];
-    if (!entry) return; // unknown tier → guard stays inert (census owns parity)
+    const mode = await resolveInvocationMode(raw, rest);
+    if (mode === null) return; // unknown tier → guard stays inert (census owns parity)
     const subRaw = Array.isArray(rest) && typeof rest[0] === 'string' && /^[a-z][a-z0-9-]{0,31}$/i.test(rest[0]) ? rest[0].toLowerCase() : null;
-    const isRead = entry.tier === 'read-only'
-      || (Array.isArray(entry.readShapes) && entry.readShapes.some((s) => matchesReadShape(s, rest)));
+    const isRead = mode === 'read';
     // Grammar-gated session attribution (sid-surface-census: raw session-env
     // reads must be inline-gated; a malformed inherited id is dropped to null).
     const isRefId = (v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v);
@@ -223,23 +234,31 @@ async function drainMutationBreaches(ws, raw, rest) {
   try {
     const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env);
     if (!stateRoot) return;
-    if (ws.lib.listBreachesSync(stateRoot).length === 0) return;
+    // Drainable rows only gate the drain itself; claims/quarantine are the
+    // census gate's evidence.
+    if (!ws.lib.listBreachesSync(stateRoot).some((n) => n.endsWith('.json'))) return;
     const spine = await loadOptionalLib('spine.mjs');
     if (!spine) { res = { failed: 1, errors: [{ error: 'spine lib unloadable' }] }; }
-    else res = await ws.lib.drainBreachesToSpine(stateRoot, stateRoot, (spec) => spine.append(stateRoot, spec));
+    else {
+      // breachId idempotency (r1 F5): a crashed prior drain may have appended
+      // without unlinking — scan the spine before re-appending. Drains with
+      // rows are rare; a full read here is acceptable.
+      const hasBreachId = async (id) => {
+        try {
+          const all = await spine.readAll(stateRoot);
+          return all.some((e) => e.type === 'MUTATION_UNWITNESSED' && e.data?.breachId === id);
+        } catch { return false; }
+      };
+      res = await ws.lib.drainBreachesToSpine(stateRoot, stateRoot, (spec) => spine.append(stateRoot, spec), { hasBreachId });
+    }
   } catch (err) { res = { failed: 1, errors: [{ error: err?.message || String(err) }] }; }
   if (!res || !res.failed) return;
   const isCeremony = raw === 'spine' && rest[0] === 'identity' && rest[1] === 'resolve';
   const conflictOnly = Array.isArray(res.errors) && res.errors.length > 0 && res.errors.every((e) => e.code === 'WS_IDENTITY_CONFLICT');
   if (isCeremony && conflictOnly) return;
   const detail = res.errors?.[0]?.error ?? 'unknown';
-  let mutating = true;
-  try {
-    const tiers = (await import(pathToFileURL(join(repoRoot, 'commands', '_tiers.mjs')).href)).default;
-    const entry = tiers?.[raw];
-    mutating = !entry || entry.tier === 'mutating';
-  } catch {}
-  if (mutating) {
+  const mode = await resolveInvocationMode(raw, rest); // shared classifier (r1 F7)
+  if (mode !== 'read') {
     console.error(`maddu: mutation-breach drain failed (${res.failed} row(s): ${detail}) — spool retained; resolve before mutating`);
     process.exit(1);
   }

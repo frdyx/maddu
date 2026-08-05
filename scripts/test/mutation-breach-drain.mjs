@@ -164,7 +164,7 @@ try {
     await rm(fix2, { recursive: true, force: true });
   }
 
-  // ── (F) unparseable spool rows quarantined ──────────────────────────────
+  // ── (F) unparseable spool rows quarantined — and STAY VISIBLE ───────────
   {
     const fix = await freshFix();
     await writeFile(join(spoolDir(fix), 'br_garbage.json'), 'not json{{{');
@@ -172,7 +172,30 @@ try {
     const names = await readdir(spoolDir(fix));
     ok('garbage row → .corrupt quarantine, failed count, never appended',
       r.failed === 1 && r.drained === 0 && names.length === 1 && names[0].endsWith('.corrupt'));
-    ok('listBreachesSync surfaces spool + claims', listBreachesSync(fix).length === 0); // .corrupt is not a drainable row
+    ok('quarantined evidence stays visible to the census (r1 F6)',
+      listBreachesSync(fix).length === 1 && listBreachesSync(fix)[0].endsWith('.corrupt'));
+    const r2 = await drainBreachesToSpine(fix, fix, async () => { throw new Error('must not append'); });
+    ok('a later drain never re-drains quarantine', r2.drained === 0 && r2.failed === 0
+      && (await readdir(spoolDir(fix))).some((n) => n.endsWith('.corrupt')));
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── (G) breachId idempotency across a crashed drain (r1 F5) ─────────────
+  {
+    const fix = await freshFix();
+    const [id] = spoolBreach(fix, 1);
+    // Layer 1: a prior drain appended this breachId but crashed before
+    // unlink — hasBreachId reports it on the spine; NO second append.
+    let appends = 0;
+    const r = await drainBreachesToSpine(fix, fix, async () => { appends++; }, { hasBreachId: async (b) => b === id });
+    ok('already-on-spine breachId is cleaned up without a second append',
+      r.drained === 1 && appends === 0 && (await readdir(spoolDir(fix))).length === 0, `appends=${appends}`);
+    // Layer 2: a leftover consume-marker is cleanup-only, never re-drained.
+    await writeFile(join(spoolDir(fix), 'br_left.json.drained'), '{}');
+    let appends2 = 0;
+    const r2 = await drainBreachesToSpine(fix, fix, async () => { appends2++; });
+    ok('.drained consume-marker is removed without appending',
+      appends2 === 0 && r2.failed === 0 && (await readdir(spoolDir(fix))).length === 0);
     await rm(fix, { recursive: true, force: true });
   }
 

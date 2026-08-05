@@ -152,6 +152,15 @@ export default async function globalCmd(argv) {
   const rest = argv.slice(2);
   if (!verb || !sub) { printHelp(); process.exit(2); }
 
+  // Mutation-witness declared no-op (Codex diff-review r1 F3): every write
+  // this verb performs targets the MACHINE-SCOPE global config
+  // (~/.config/maddu/global) — no workspace spine owns those mutations.
+  // Read subverbs are already read shapes; the declaration is harmless there.
+  {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('machine-scope:global-config');
+  }
+
   const lib = await loadGlobalLib();
 
   if (verb === 'cron')   return await cron(sub, rest, lib);

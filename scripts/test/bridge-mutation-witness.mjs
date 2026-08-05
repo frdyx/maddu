@@ -162,24 +162,36 @@ export async function handle({ path, method, res, sendJson }) {
       throwRes.statusCode === 500 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === 1);
   }
 
-  // ── (G) inline-append failure → spool fallback ──────────────────────────
+  // ── (G) inline-append failure → spool fallback (Codex diff r1 F8) ───────
   {
-    // Point the request at a workspace whose events DIR is an unwritable
-    // FILE — append throws, the sync spool fallback must catch the breach.
+    // A workspace whose events path is a FILE: the silent plugin route
+    // returns 2xx there, the breach's inline append throws (mkdir over a
+    // file), and the sync spool fallback must catch it — response unchanged.
     const broken = await mkdtemp(join(tmpdir(), 'mw-bridge-broken-'));
-    await mkdir(join(broken, '.maddu'), { recursive: true });
+    await mkdir(join(broken, '.maddu', 'plugins', 'wtest'), { recursive: true });
     await writeFile(join(broken, '.maddu', 'events'), 'not a directory');
-    // fixture plugin lives in `fix`; use a silent-route request against the
-    // broken workspace via the workspace header.
+    await writeFile(join(broken, '.maddu', 'plugins', 'wtest', 'plugin.json'), JSON.stringify({
+      name: 'wtest', version: '1.0.0', description: 'S1 witness fixture plugin', server: 'server.mjs', trusted: true,
+    }));
+    await writeFile(join(broken, '.maddu', 'plugins', 'wtest', 'server.mjs'), `
+export async function handle({ path, method, res, sendJson }) {
+  if (path === '/bridge/wtest/silent' && method === 'POST') { sendJson(res, 200, { ok: true }); return true; }
+  return false;
+}
+`);
+    await mkdir(join(broken, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(broken, '.maddu', 'config', 'plugins.json'), JSON.stringify({ enabled: ['wtest'] }));
     ctx.workspaces.set('broken', broken);
     const res = fakeRes();
     await handleRequest(fakeReq('POST', '/bridge/wtest/silent', { body: {}, headers: { 'x-maddu-bridge-token': TOKEN, 'x-maddu-workspace': 'broken' } }), res, ctx, opts);
-    // The plugin is discovered per-repoRoot: `broken` has no plugins, so the
-    // route 404s there — fall back to a first-party silent scenario instead:
-    // wiki/rebuild declares a noop, so instead assert the spool fallback via
-    // the recordBridgeBreach seam indirectly — a 404 never breaches:
-    ok('broken-workspace request without a 2xx never breaches (spool stays empty)',
-      (await spoolRows(broken)).length === 0, `status=${res.statusCode}`);
+    const spooled = await spoolRows(broken);
+    ok('inline-append failure falls back to ONE sync spool row', res.statusCode === 200 && spooled.length === 1, `status=${res.statusCode} spool=${spooled.length}`);
+    if (spooled.length === 1) {
+      const row = JSON.parse(await readFile(join(broken, '.maddu', 'state', 'mutation-breaches', spooled[0]), 'utf8'));
+      ok('fallback row carries via:inline-append-failed + the route path',
+        row.via === 'inline-append-failed' && row.path === '/bridge/wtest/silent' && row.surface === 'bridge');
+    }
+    ok('fallback never rewrites the completed response', JSON.parse(res.body).ok === true);
     await rm(broken, { recursive: true, force: true });
   }
 
