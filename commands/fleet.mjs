@@ -301,6 +301,13 @@ async function applyDelivery(rows, up, srcVersion, flags) {
     process.exit(2);
   }
   if (targets.length === 0) {
+    // Mutation-witness declared no-op (Codex diff r4 F5): a run with nothing
+    // eligible is a graceful append-free success — an excuse, not a
+    // delegation.
+    {
+      const mw = await loadLibOptional('mutation-witness.mjs');
+      mw?.witnessNoop?.('fleet-apply:no-eligible-targets');
+    }
     console.log(`${C.green}✓${C.reset} no eligible behind repos to deliver to.`);
     return;
   }
@@ -356,6 +363,14 @@ async function applyDelivery(rows, up, srcVersion, flags) {
 
     console.log(`${C.green}✓ delivered${C.reset} ${C.dim}(${snap.files.length} byte(s) snapshotted · doctor green)${C.reset}`);
     results.push({ id: r.id, delivered: true, doctorOk: true, halted: false });
+  }
+
+  // All-skipped run (every target became busy / snapshot-failed before any
+  // delegation): a graceful append-free success (r4 F5) — the delivered
+  // paths already declared via witnessDelegatedRun.
+  if (!results.some((r) => r.delivered) && !halted) {
+    const mw = await loadLibOptional('mutation-witness.mjs');
+    mw?.witnessNoop?.('fleet-apply:nothing-delivered');
   }
 
   const summary = up.summarizeApply(results);

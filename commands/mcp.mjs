@@ -214,6 +214,13 @@ export default async function mcpCmd(argv) {
   }
 
   if (sub === 'test') {
+    // Mutation-witness declared no-op (Codex diff r4 F3): per-server test
+    // events credit when they fire; an empty/disabled registry legitimately
+    // appends nothing (conditional-batch posture).
+    {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('empty-or-conditional-batch:mcp-test');
+    }
     const name = rest[0];
     if (!name) {
       const results = await mcp.testAll(repoRoot);

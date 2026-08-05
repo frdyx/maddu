@@ -166,7 +166,7 @@ export async function rollback(repoRoot, id, { apply = false, by = null, mode = 
 
 export async function removeCheckpoint(repoRoot, id, by = null) {
   const cp = await readCheckpoint(repoRoot, id);
-  if (!cp) return; // idempotent
+  if (!cp) return { removed: false }; // idempotent — caller declares the no-op (S1)
   // Best-effort: delete the tag.
   try { await gitRun(['tag', '-d', cp.tag], repoRoot, 3000); } catch {}
   // Best-effort: remove the worktree.
@@ -179,6 +179,7 @@ export async function removeCheckpoint(repoRoot, id, by = null) {
     type: EVENT_TYPES.CHECKPOINT_REMOVED,
     actor: by, lane: cp.lane, data: { id }
   });
+  return { removed: true };
 }
 
 export async function checkpointsForLane(repoRoot, lane) {

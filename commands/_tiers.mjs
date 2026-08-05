@@ -54,7 +54,7 @@ export default {
   // so the verb is mutating + auto-trigger forbidden. Recommend-only contract:
   // it never writes governance config.
   autonomy:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: [], requiredFlags: ['--no-emit'] }] },
-  approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
+  approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', { tokens: ['migrate-legacy-decisions'], requiredFlags: ['--dry-run'] }] },
   focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'status'] },
   auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['where', 'list', 'keys'] },
   brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
@@ -89,17 +89,17 @@ export default {
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers
   // framework bytes into other repos, so the verb is mutating + auto-trigger
   // forbidden (same convention as trust/mcp/plugin: any write path → mutating).
-  fleet:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)'] },
+  fleet:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', { tokens: ['upgrade'], requiredFlags: ['--plan'] }] },
   global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: ['cron', 'list'] }, { tokens: ['cron', 'show'] }, { tokens: ['policy', 'list'] }] },
   goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['show'] },
-  import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'rejections'] },
+  import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'rejections', 'scan'] },
   export:       { tier: 'read-only', autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   init:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
   // `mailbox read` is NOT a read shape (Codex diff-review r1 F1): it appends
   // a MAILBOX_READ spine event — its append is its witness.
   mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['counts', 'list'] },
-  mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show', 'visible'] },
+  mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show', 'visible', 'serve', 'templates'] },
   // v1.115.0 (memory-recall track): flipped read-only → mutating. The verb was
   // declared read-only while `supersede`/`extract` already wrote, and Phase 3
   // adds approve/revoke (spine events). Same escaped-gauntlet fix as `spine`:
@@ -108,7 +108,10 @@ export default {
   phase:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['show'] },
   register:     { tier: 'mutating',  autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   review:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['(bare)', 'status', 'list'] },
-  runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show', 'detect'] },
+  // `runtime detect` is NOT a read shape (Codex diff r4 F1): detection
+  // appends RUNTIME_DETECTED — its append is its witness; the empty
+  // detect-all batch declares a conditional no-op in the arm.
+  runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
   schedule:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show', 'parse'] },
   search:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
@@ -126,7 +129,7 @@ export default {
   stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   task:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show'] },
-  upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: [], requiredFlags: ['--dry-run'] }] },
   worker:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
   workspace:    { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
   // v0.18 — discovery surface (read-only).
@@ -138,7 +141,7 @@ export default {
   advise:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   cost:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v0.19.1 — retroactive transcript import populates the ledger.
-  usage:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  usage:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: ['import'], requiredFlags: ['--dry-run'] }] },
   // v1.1.0 Phase 1 — default tools. All mutating; auto-trigger forbidden
   // (the slash command path is the explicit-invocation surface).
   // git needs no readShapes: the audited wrapper appends TOOL_INVOKED/

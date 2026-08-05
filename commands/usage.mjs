@@ -225,6 +225,13 @@ export default async function usage(argv) {
       console.error(result.message);
       process.exit(1);
     }
+    // Mutation-witness declared no-op (Codex diff r4 F8): a normal run that
+    // imported zero rows (no transcripts / fully deduplicated) is a graceful
+    // append-free success; the dry-run shape is read-classified in _tiers.
+    if (!result.dryRun && result.imported === 0) {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-nothing-to-import');
+    }
     const tag = result.dryRun ? '[dry-run] ' : '';
     console.log(`${tag}Claude Code transcript import:`);
     console.log(`  files examined: ${result.files_examined}`);

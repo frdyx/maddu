@@ -106,6 +106,13 @@ export default async function runtime(argv) {
     const name = rest[0];
     if (!name) {
       const results = await runtimes.detectAll(repoRoot);
+      // Mutation-witness (Codex diff r4 F1): per-runtime probes append
+      // RUNTIME_DETECTED (credited); only the EMPTY batch is legitimately
+      // append-free.
+      if (!results.length) {
+        const { loadLibOptional } = await import('./_libroot.mjs');
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('empty-batch:runtime-detect-all');
+      }
       console.log(`${ANSI.bold}DETECT ALL  (${results.length})${ANSI.reset}`);
       for (const r of results) console.log(`  ${r.name.padEnd(18)}  ${healthBadge(r)}`);
       return;

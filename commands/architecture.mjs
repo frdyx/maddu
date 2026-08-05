@@ -72,6 +72,14 @@ export default async function architecture(argv) {
 
   // ── mass (structural mass: monoliths + duplicate code) ──────────────────────
   if (sub === 'mass') {
+    // Mutation-witness (Codex diff r4 F4): the report path is read-only and
+    // the --baseline path writes derived state — both append-free successes,
+    // declared branch-locally.
+    {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      const mw = await loadLibOptional('mutation-witness.mjs');
+      mw?.witnessNoop?.(flags.baseline === true ? 'derived-state-write:mass-baseline' : 'read-only-report:architecture-mass');
+    }
     const mopts = arch.massOptions(contract);
     const massFailOn = (flags['fail-on'] && arch.FAIL_ON.has(String(flags['fail-on']))) ? String(flags['fail-on']) : mopts.failOn;
     const scan = await arch.scanMass(repoRoot, { maxLines: mopts.maxLines, ignore: mopts.ignore });
