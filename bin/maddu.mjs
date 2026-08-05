@@ -234,9 +234,13 @@ async function drainMutationBreaches(ws, raw, rest) {
   try {
     const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env);
     if (!stateRoot) return;
-    // Drainable rows only gate the drain itself; claims/quarantine are the
-    // census gate's evidence.
-    if (!ws.lib.listBreachesSync(stateRoot).some((n) => n.endsWith('.json'))) return;
+    // The drain runs when bare rows OR claim files exist (Codex diff r3 F1:
+    // a crashed drainer leaves ONLY `<id>.json.draining.…` — the fast path
+    // must still enter so reclaim can rename it back and this run drains
+    // it). Quarantined .corrupt rows alone never trigger a drain — they are
+    // the census gate's evidence, not drainable work.
+    const spoolNames = ws.lib.listBreachesSync(stateRoot);
+    if (!spoolNames.some((n) => n.endsWith('.json') || /\.json\.draining\./.test(n))) return;
     const spine = await loadOptionalLib('spine.mjs');
     if (!spine) { res = { failed: 1, errors: [{ error: 'spine lib unloadable' }] }; }
     else {

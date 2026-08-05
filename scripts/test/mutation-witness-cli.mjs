@@ -130,6 +130,31 @@ try {
   run(fix, ['plan', 'list']);
   ok('residue drained', (await spoolRows(fix)).length === 0 && (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length === baseEvents + 2);
 
+  // ── (D2) claim-only spool still drains (Codex diff r3 F1) ───────────────
+  // A crashed drainer leaves only a claim file; the next dispatcher run must
+  // reclaim (dead PID) and drain it — a stranded breach record defeats the
+  // liveness guarantee.
+  {
+    const { hostname } = await import('node:os');
+    const preEvents = (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length;
+    const crash = run(fix, ['goal', 'set', '--objective', 'e2e-claim-crash'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
+    const [row] = await spoolRows(fix);
+    ok('claim-crash fixture: breach spooled', crash.status === 1 && !!row);
+    const host = hostname().replace(/-/g, '_').slice(0, 32);
+    const deadPid = 999999897;
+    const { rename } = await import('node:fs/promises');
+    await rename(
+      join(spoolDir(fix), row),
+      join(spoolDir(fix), `${row}.draining.${Date.now()}-${host}-${deadPid}-feedf00d`)
+    );
+    const drainRun2 = run(fix, ['plan', 'list']);
+    const after = await spoolRows(fix);
+    const postEvents = (await spineEvents(fix, 'MUTATION_UNWITNESSED')).length;
+    ok('claim-only spool: next run reclaims the dead-PID claim and drains exactly once',
+      drainRun2.status === 0 && after.length === 0 && postEvents === preEvents + 1,
+      `exit=${drainRun2.status} spool=${after.length} events=${postEvents} pre=${preEvents}`);
+  }
+
   // ── (E) inertness on a PRE-S1 install ───────────────────────────────────
   // Simulate an old runtime tree faithfully: no mutation-witness.mjs AND a
   // spine.mjs without the import/credits (the pair ships together — deleting
