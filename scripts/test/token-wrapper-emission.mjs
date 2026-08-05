@@ -83,8 +83,58 @@ async function scenarioClaude() {
     ok('claude row has model', typeof d.model === 'string' && d.model.includes('claude'));
     ok('claude row has inputTokens=1200', d.inputTokens === 1200);
     ok('claude row has cacheRead=800', d.cacheRead === 800);
+    ok('claude row is ws-less without identity cache (S2 cache-only stamp)', !('ws' in tokenEvents[0]));
   }
   await rm(tmp, { recursive: true, force: true });
+}
+
+// S2: wrapper events carry the workspace identity from the CACHE only —
+// present cache stamps, cached conflict withholds (frozen workspace must not
+// spread either identity). The absent-cache → ws-less case is asserted in
+// scenarioClaude above.
+async function scenarioWsStamp() {
+  const { writeIdentityCache } = await import(
+    new URL('../../template/maddu/runtime/lib/spine-append-core.mjs', import.meta.url).href
+  );
+  const NL = String.raw`'\n'`;
+  const mkFake = async (tmp) => {
+    const fake = join(tmp, 'fake-codex.mjs');
+    await writeFile(fake, `process.stdout.write(JSON.stringify({ model: 'gpt-5', usage: { prompt_tokens: 10, completion_tokens: 4 } }) + ${NL});`);
+    return fake;
+  };
+
+  {
+    const tmp = await mkdtemp(join(tmpdir(), 'maddu-wrap-ws-'));
+    await mkdir(join(tmp, '.maddu', 'events'), { recursive: true });
+    const wsId = 'ws_' + 'a'.repeat(16);
+    await writeIdentityCache(tmp, { spineIdentity: wsId });
+    const res = await runWrapper({
+      wrapper: join(WRAPPER_DIR, 'codex-wrapper.mjs'),
+      fakeProvider: await mkFake(tmp),
+      env: { MADDU_REPO_ROOT: tmp, MADDU_WORKER_ID: 'wrk_test_ws', MADDU_SESSION_ID: 'ses_test_ws' },
+    });
+    ok('ws-stamp wrapper exits 0', res.code === 0, `exit=${res.code} stderr=${res.stderr.slice(0, 200)}`);
+    await new Promise((r) => setTimeout(r, 80));
+    const ev = (await readSpine(tmp)).find((e) => e.type === 'TOKEN_USAGE_REPORTED');
+    ok('cached identity → event carries ws (inside the stored line)', ev && ev.ws === wsId, ev ? `ws=${ev.ws}` : 'no event');
+    await rm(tmp, { recursive: true, force: true });
+  }
+
+  {
+    const tmp = await mkdtemp(join(tmpdir(), 'maddu-wrap-wsc-'));
+    await mkdir(join(tmp, '.maddu', 'events'), { recursive: true });
+    await writeIdentityCache(tmp, { spineIdentity: null, conflict: true });
+    const res = await runWrapper({
+      wrapper: join(WRAPPER_DIR, 'codex-wrapper.mjs'),
+      fakeProvider: await mkFake(tmp),
+      env: { MADDU_REPO_ROOT: tmp, MADDU_WORKER_ID: 'wrk_test_wsc', MADDU_SESSION_ID: 'ses_test_wsc' },
+    });
+    ok('conflict-cache wrapper exits 0', res.code === 0, `exit=${res.code} stderr=${res.stderr.slice(0, 200)}`);
+    await new Promise((r) => setTimeout(r, 80));
+    const ev = (await readSpine(tmp)).find((e) => e.type === 'TOKEN_USAGE_REPORTED');
+    ok('cached conflict → stamp withheld (event still emitted, ws-less)', ev && !('ws' in ev), ev ? `ws=${ev.ws}` : 'no event');
+    await rm(tmp, { recursive: true, force: true });
+  }
 }
 
 async function scenarioCodex() {
@@ -175,6 +225,7 @@ await scenarioClaude();
 await scenarioCodex();
 await scenarioGemini();
 await scenarioGarbageInput();
+await scenarioWsStamp();
 
 console.log('');
 if (failed > 0) {
