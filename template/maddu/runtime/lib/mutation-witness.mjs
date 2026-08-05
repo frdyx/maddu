@@ -109,7 +109,13 @@ export async function withMutationWitness(label, fn, opts = {}) {
 
 // Called by spine.mjs on every SUCCESSFUL logical append (once per event,
 // regardless of the retry loop). Inert when no context is active.
+// GUARDED TEST-ONLY seam (invocation-receipts `_testBeforeRename` precedent;
+// nothing outside scripts/test/ sets it): __MADDU_TEST_ZERO_CREDIT__=1
+// suppresses credits so a spawned-CLI test can force a deterministic breach
+// on a command that really appends — the only way to exercise the
+// spool→drain path end-to-end without shipping a deliberately silent verb.
 export function witnessSpineAppend() {
+  if (process.env.__MADDU_TEST_ZERO_CREDIT__ === '1') return;
   const ctx = currentWitness();
   if (ctx) ctx.appends++;
 }
@@ -244,10 +250,20 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn) {
   for (const name of spool) {
     const claimed = claimName(name);
     try { await rename(join(dir, name), join(dir, claimed)); } catch { continue; } // another drainer won
+    // Read and parse are distinct failure classes: a TRANSIENT read error
+    // (Windows AV holding a just-renamed file) restores the claim so the row
+    // survives for the next drain; only a PARSE failure quarantines — a
+    // valid row must never land in .corrupt over a transient EPERM.
+    let raw = null;
+    try { raw = await readFile(join(dir, claimed), 'utf8'); } catch (err) {
+      try { await rename(join(dir, claimed), join(dir, name)); } catch {}
+      failed++; errors.push({ name, error: err?.message || String(err), code: err?.code ?? null });
+      continue;
+    }
     let row = null;
-    try { row = JSON.parse(await readFile(join(dir, claimed), 'utf8')); } catch {}
+    try { row = JSON.parse(raw); } catch {}
     if (!row || typeof row.breachId !== 'string') {
-      // Unreadable spool row: not silently dropped — renamed to .corrupt for
+      // Unparseable spool row: not silently dropped — renamed to .corrupt for
       // the census to surface, never drained as a guessed event.
       try { await rename(join(dir, claimed), join(dir, `${name}.corrupt`)); } catch {}
       failed++; errors.push({ name, error: 'unparseable spool row' });

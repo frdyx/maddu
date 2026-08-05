@@ -70,6 +70,14 @@ export default async function workspace(argv) {
   const rest = argv.slice(1);
   if (!sub) { printHelp(); process.exit(2); }
 
+  // Mutation-witness declared no-op: add/remove/activate mutate the
+  // DEVICE-GLOBAL workspace registry (%APPDATA%/maddu) — no workspace spine
+  // owns that mutation (census-audited machine-scope exception).
+  if (sub === 'add' || sub === 'remove' || sub === 'activate' || sub === 'role') {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('machine-scope:workspace-registry');
+  }
+
   const ws = await loadWorkspacesLib();
 
   if (sub === 'list') {

@@ -116,21 +116,32 @@ Docs:
 // unchanged. Ordering law (plan-review r1 F1): (1) register the inert exit
 // handler → (2) arm receipts → (3) drain with NO witness ctx active →
 // (4) create/arm the command ctx → (5) dispatch inside runWithWitness.
-async function loadOptionalLib(name) {
-  // MUST mirror commands/_libroot.mjs#resolveLibDir resolution order exactly:
-  // the witness lib holds process-wide state (the ALS store + CLI fallback
-  // ctx), so bin and the command handlers must import the SAME module
-  // instance. cwd-first (installed repo) → install-layout relative to bin →
-  // source-checkout template. A divergent order imports two instances and
-  // every credit lands in the wrong one (found by the S1 calibration pass).
-  for (const p of [
-    join(process.cwd(), 'maddu', 'runtime', 'lib', name),         // installed repo at cwd (what commands resolve)
-    join(repoRoot, 'runtime', 'lib', name),                       // consumer install (bin = <repo>/maddu/bin)
-    join(repoRoot, 'template', 'maddu', 'runtime', 'lib', name),  // source checkout
+// Resolve the ONE runtime-lib directory this invocation's commands will use —
+// MUST mirror commands/_libroot.mjs#resolveLibDir: cwd-installed repo first,
+// then the layout relative to this bin. Two rules matter:
+//   1. SAME DIR, not same name: the witness lib holds process-wide state, so
+//      bin and the command handlers must import the same module instance (a
+//      divergent order imported two instances and every credit landed in the
+//      wrong one — found by the S1 calibration pass).
+//   2. NO cross-dir fallback for the witness itself: if the chosen dir's
+//      runtime predates S1 (no mutation-witness.mjs), its spine never
+//      credits — arming a guard from a NEWER tree would false-breach every
+//      appending verb on that old install. Missing in the chosen dir ⇒ inert.
+import { statSync } from 'node:fs';
+function pickLibDir() {
+  for (const d of [
+    join(process.cwd(), 'maddu', 'runtime', 'lib'),         // installed repo at cwd (what commands resolve)
+    join(repoRoot, 'runtime', 'lib'),                       // consumer install (bin = <repo>/maddu/bin)
+    join(repoRoot, 'template', 'maddu', 'runtime', 'lib'),  // source checkout
   ]) {
-    try { return await import(pathToFileURL(p).href); } catch {}
+    try { if (statSync(d).isDirectory()) return d; } catch {}
   }
   return null;
+}
+async function loadOptionalLib(name) {
+  const dir = pickLibDir();
+  if (!dir) return null;
+  try { return await import(pathToFileURL(join(dir, name)).href); } catch { return null; }
 }
 
 async function prepareMutationWitness(ws) {
@@ -187,10 +198,13 @@ async function armCommandWitness(ws, raw, rest) {
     const subRaw = Array.isArray(rest) && typeof rest[0] === 'string' && /^[a-z][a-z0-9-]{0,31}$/i.test(rest[0]) ? rest[0].toLowerCase() : null;
     const isRead = entry.tier === 'read-only'
       || (Array.isArray(entry.readShapes) && entry.readShapes.some((s) => matchesReadShape(s, rest)));
+    // Grammar-gated session attribution (sid-surface-census: raw session-env
+    // reads must be inline-gated; a malformed inherited id is dropped to null).
+    const isRefId = (v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v);
     const ctx = ws.lib.createWitnessContext(`cli:${raw}${subRaw ? ' ' + subRaw : ''}`, {
       mode: isRead ? 'read' : 'mutating',
       surface: 'cli', verb: raw, sub: subRaw,
-      sessionId: process.env.MADDU_SESSION_ID ?? null,
+      sessionId: isRefId(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null,
     });
     ws.lib.armCliWitness(ctx);
     ws.ctx = ctx;

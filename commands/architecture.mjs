@@ -40,6 +40,10 @@ export default async function architecture(argv) {
 
   // ── init ──────────────────────────────────────────────────────────────────
   if (sub === 'init') {
+    // Mutation-witness declared no-op: writes the architecture contract
+    // (.maddu/config) — a config write with no spine event.
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('control-plane-config-write:architecture');
     const cfgPath = join(repoRoot, '.maddu', 'config', 'architecture.json');
     if (await exists(cfgPath) && flags.force !== true) {
       console.error(`maddu architecture: ${cfgPath} already exists — re-run with --force to overwrite.`);
@@ -98,6 +102,9 @@ export default async function architecture(argv) {
 
   // ── baseline ────────────────────────────────────────────────────────────────
   if (sub === 'baseline') {
+    // Declared no-op: writes the drift baseline (state artifact, no spine event).
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('derived-state-write:architecture-baseline');
     const ts = new Date().toISOString();
     const { path, count } = await arch.writeBaseline(repoRoot, result, ts);
     if (json) process.stdout.write(JSON.stringify({ baseline: path, count }, null, 2) + '\n');

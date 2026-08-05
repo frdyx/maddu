@@ -971,6 +971,9 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { page, body });
   }
   if (path === '/bridge/wiki/rebuild' && req.method === 'POST') {
+    // S1 declared no-op: wiki pages are DERIVED state (renderings of spine
+    // slice-stops) — same rationale as the CLI's wiki sync/rebuild.
+    witnessNoop('derived-state-write:wiki-pages');
     const n = await rebuildWiki(repoRoot);
     return sendJson(res, 200, { ok: true, pagesWritten: n });
   }

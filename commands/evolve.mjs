@@ -79,6 +79,13 @@ export default async function evolve(argv) {
   }
 
   // adopt
+  // Mutation-witness declared no-op: adoption writes through existing
+  // non-spine paths (memory facts / agent-file / printed drafts); paths that
+  // DO append (skill save) also credit — witnessed either way.
+  {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('derived-or-host-file-write:evolve-adopt');
+  }
   const recId = positional[0];
   if (!recId) { console.error('Usage: maddu evolve adopt <rec-id> [--json]'); process.exit(2); }
   const rec = plan.recommendations.find((r) => r.recId === recId);

@@ -75,7 +75,7 @@ export default {
   // mutating + auto-trigger forbidden (the autonomy/fleet convention: any
   // write path -> mutating). Recommend-never-apply contract: nothing fires
   // without the operator typing `adopt`.
-  evolve:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['plan'] },
+  evolve:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['plan', 'list'] },
   // SLM-governance phase 3 (plan pln_20260706133422_0f60) — every write
   // sub-verb appends MODEL_* events (and promote appends APPROVAL_REQUESTED),
   // so the verb is mutating; auto-trigger forbidden because promotion must
@@ -119,7 +119,7 @@ export default {
   // (commands/spine.mjs → lib.spineSync.syncGit/syncInit). Declaring it read-only
   // let those mutations escape the Rule-9 trigger gauntlet. Any-write-subverb ⇒
   // the top-level verb is mutating; it is operator-invoked, never auto-fired.
-  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['verify', 'show', 'oversight', { tokens: ['anchor'], requiredFlags: ['--status'] }] },
+  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['verify', 'show', 'oversight', { tokens: ['anchor'], requiredFlags: ['--status'] }, { tokens: ['anchor'], requiredFlags: ['--verify'] }] },
   start:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },

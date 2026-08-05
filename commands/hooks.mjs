@@ -453,6 +453,17 @@ export default async function hooks(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
 
+  // Mutation-witness declared no-op (unconditional): this verb's own writes
+  // target the HOST file (.claude/settings.json) and `hooks fire` runs
+  // inside fail-open containment that may legitimately exit 0 having
+  // appended nothing (missing bootstrap env must never block a tool call).
+  // When a fire path DOES append (in-process register), the counter also
+  // credits — witnessed either way.
+  try {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('host-file-write-or-containment:claude-hooks');
+  } catch {}
+
   // ── fire: the runtime entrypoint the installed hooks call ──
   // Handled BEFORE the shared bootstrap: each event bootstraps inside its own
   // fail-open containment (a bootstrap failure must never block a tool call,

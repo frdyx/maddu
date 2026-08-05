@@ -213,6 +213,12 @@ export default async function spine(argv) {
 
     // Default: stamp now.
     const r = await sa.stampAnchor(repoRoot, { eventId: typeof flags.event === 'string' ? flags.event : null, spineLib: lib.spine });
+    if (r.ok && r.already) {
+      // Mutation-witness declared no-op: idempotent lost-race/current stamp —
+      // declared BEFORE the --json emit path exits.
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-anchored');
+    }
     if (flags.json) emit(r, r.ok ? 0 : 1);
     if (!r.ok) { printAnchorRefusal(r); process.exit(1); }
     if (r.already) {
@@ -325,6 +331,9 @@ export default async function spine(argv) {
       process.exit(1);
     }
     if (res.already) {
+      // Declared no-op: sync init on an already-synced checkout.
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-synced');
       console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
     } else {
       console.log(`${levelTag('PASS')}  team-sync initialised`);

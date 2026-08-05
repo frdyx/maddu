@@ -222,6 +222,12 @@ export default async function learnCmd(argv) {
     // re-runs idempotent; the vendor directory is never written. Preview by
     // default; --adopt appends facts + a VENDOR_MEMORY_IMPORTED event each
     // (fact carried on the event, so rebuilds replay it).
+    // Mutation-witness declared no-op: preview mode and the no-vendor-dir
+    // path are graceful zero-append successes; --adopt's appends also credit.
+    {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('vendor-sync-preview-or-empty');
+    }
     const vm = await loadLib('vendor-memory.mjs');
     const hindsight = await loadLib('hindsight.mjs');
     if (!vm?.readVendorMemories || !hindsight?.appendFactIfNew) {
