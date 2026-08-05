@@ -65,11 +65,13 @@ export async function appendTokenUsage(repoRoot, payload) {
   // never scans/derives (its standalone contract forbids the heavier
   // machinery, and a drop is acceptable by design). Absent/unresolvable
   // cache → the event goes out ws-less, tolerated forward-only like
-  // prev_hash. A cached conflict also withholds the stamp (a frozen
-  // workspace must not spread either identity).
+  // prev_hash. A cached CONFLICT drops the event entirely (settled design:
+  // a frozen workspace refuses best-effort writes rather than spreading
+  // either identity or growing an ambiguous ws-less tail).
   try {
     const idc = await readIdentityCache(repoRoot);
-    if (idc.state === 'present' && !idc.conflict && idc.spineIdentity) ev.ws = idc.spineIdentity;
+    if (idc.state === 'present' && idc.conflict) return null; // frozen — drop, never block
+    if (idc.state === 'present' && idc.spineIdentity) ev.ws = idc.spineIdentity;
   } catch { /* best-effort */ }
 
   // This append bypasses spine.append(), so it applies the same write-boundary

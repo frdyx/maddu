@@ -1196,10 +1196,19 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
       let txt;
       try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
       for (const line of txt.split('\n')) {
-        if (!line.includes('"ws":')) continue;
+        // Prefilter on the quoted key alone — `"ws":` would let valid JSON
+        // with whitespace before the colon (`"ws" : ...`) slip past the sweep
+        // entirely (diff-funnel r1-F3); the parse below is the real filter.
+        if (!line.includes('"ws"')) continue;
         let ev;
         try { ev = JSON.parse(line); } catch { continue; }
         if (!ev || !('ws' in ev)) continue;
+        if (ev.type === 'WS_IDENTITY_ANCHORED' || ev.type === 'WS_IDENTITY_RESOLVED') {
+          // Authority events are ws-less BY PROTOCOL (they precede/suspend
+          // stamping) — any ws on one is a violation, whatever its value.
+          push(issue('FAIL', 'ws_mismatch', `authority event ${ev.id} (${ev.type}) carries a ws stamp — anchors/resolutions are ws-less by protocol`, { eventId: ev.id }));
+          continue;
+        }
         if (ev.ws === '' || !WS_ID_RE.test(String(ev.ws))) {
           push(issue('FAIL', 'ws_mismatch', `event ${ev.id}: malformed ws ${JSON.stringify(ev.ws)} (absent ≠ empty)`, { eventId: ev.id }));
           continue;

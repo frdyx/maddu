@@ -89,8 +89,9 @@ try {
     const peerWs = core.wsFromLine(pg);
     const pa = { v: 1, id: 'evt_peer_anchor', ts: '2026-02-01T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: peerWs, genesis: { replicaId: 'peerX', segment: '000000000001.ndjson', line: 1, hash: core.hashLine(pg) } }, prev_hash: core.hashLine(pg) };
     await writeFile(join(d, '000000000001.ndjson'), pg + '\n' + JSON.stringify(pa) + '\n');
-    // Invalidate the (now stale-clean) cache so the writer re-scans.
-    await rm(core.identityCachePath(fix), { force: true });
+    // NO cache invalidation here — the r1-F1 regression proof: the writer's
+    // fingerprint check must detect the pulled conflicting anchor THROUGH the
+    // stale-clean cache.
 
     const vC = await verifySpine(fix, {});
     ok('conflicting anchors → FAIL ws_anchor_conflict', hasFail(vC, 'ws_anchor_conflict'));
@@ -118,10 +119,11 @@ try {
     const stray = JSON.stringify({ v: 1, id: 'evt_stray', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'stray' }, prev_hash: 'f'.repeat(64) });
     await writeFile(join(fix, '.maddu', 'events', '000000000001.ndjson'), stray + '\n');
     const res = await sync.syncInit(fix);
-    ok('already-activated init reports the continuation outcome', res.ok === true && res.already === true && !!res.continuation);
-    ok('incompatible residual → NAMED fatal with remedy (never silent)',
-      res.continuation.status === 'fatal' && typeof res.continuation.remedy === 'string' && res.continuation.remedy.length > 0,
-      res.continuation.reason);
+    ok('incompatible residual → init FAILS with the named reason (r1-F5: never exit-0 "already")',
+      res.ok === false && res.reason === 'residual-migration-fatal', JSON.stringify(res).slice(0, 160));
+    ok('the fatal carries the remedy (never silent)',
+      typeof res.remedy === 'string' && res.remedy.length > 0 && res.continuation?.status === 'fatal',
+      res.message);
     await rm(join(fix, '.maddu', 'events', '000000000001.ndjson'), { force: true });
   }
 

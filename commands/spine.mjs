@@ -120,16 +120,24 @@ export default async function spine(argv) {
         console.error(`refused: --keep ${keep} is not among the conflicting identities (${law.identities.join(', ')}) — the ceremony selects an EXISTING identity, never a new one`);
         process.exit(2);
       }
-      const conflicts = anchors
-        .map((a) => ({ eventId: a.id, spineIdentity: a?.data?.spineIdentity ?? null, genesisHash: a?.data?.genesis?.hash ?? null }))
-        .sort((x, y) => String(x.eventId).localeCompare(String(y.eventId)));
-      const ev = await lib.spine.append(repoRoot, {
-        type: lib.spine.EVENT_TYPES.WS_IDENTITY_RESOLVED,
-        actor: await resolveSessionId(repoRoot, flags, lib.sessionActive).catch(() => null),
-        lane: null,
-        data: { selected: keep, conflicts },
-      });
-      await core.writeIdentityCache(repoRoot, { spineIdentity: keep }).catch(() => {});
+      // Canonical binding: exact {eventId, genesisHash, spineIdentity} tuples
+      // in canonical order — spine.append re-validates this against a fresh
+      // anchor scan (the shared validateResolutionBinding law).
+      const conflicts = core.canonicalAnchorConflicts(anchors);
+      let ev;
+      try {
+        ev = await lib.spine.append(repoRoot, {
+          type: lib.spine.EVENT_TYPES.WS_IDENTITY_RESOLVED,
+          actor: await resolveSessionId(repoRoot, flags, lib.sessionActive).catch(() => null),
+          lane: null,
+          data: { selected: keep, conflicts },
+        });
+      } catch (e) {
+        console.error(`refused: ${e?.message || e}`);
+        process.exit(1);
+      }
+      const partitioned2 = await core.wsModeIsPartitioned(repoRoot);
+      await core.writeIdentityCache(repoRoot, { spineIdentity: keep, mode: partitioned2 ? 'sync' : 'flat' }).catch(() => {});
       console.log(`${levelTag('PASS')}  resolved — authority: ${keep}  (${conflicts.length} anchor(s) bound; event ${ev.id})`);
       return;
     }
@@ -401,16 +409,30 @@ export default async function spine(argv) {
         console.error(`  Archive or remove the anchors first if you want team-sync on this repo.`);
       } else if (res.reason === 'config-invalid') {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
+      } else if (res.reason === 'ws-identity-bootstrap-failed' || res.reason === 'residual-migration-fatal') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
+        if (res.remedy) console.error(`  remedy: ${res.remedy}`);
       } else {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.reason}`);
       }
       process.exit(1);
     }
     if (res.already) {
-      // Declared no-op: sync init on an already-synced checkout.
       const { loadLibOptional } = await import('./_libroot.mjs');
-      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-synced');
-      console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
+      const moved = res.continuation?.status === 'migrated' ? (res.continuation.segments || []) : [];
+      if (moved.length) {
+        // The continuation RENAMED residual flat segments into the partition —
+        // a real host-file mutation with no spine append (nothing new was
+        // written, existing history moved home). Honest declared class, never
+        // "idempotent" (diff-funnel r1-F5).
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('host-file:residual-migration');
+        console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
+        console.log(`  ${levelTag('PASS')}  residual flat segment(s) migrated into the partition: ${moved.join(', ')}`);
+      } else {
+        // Declared no-op: sync init on an already-synced checkout.
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-synced');
+        console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
+      }
     } else {
       console.log(`${levelTag('PASS')}  team-sync initialised`);
       console.log(`  replicaId: ${ANSI.accent}${res.replicaId}${ANSI.reset}  ${ANSI.dim}(this checkout's identity — never committed)${ANSI.reset}`);

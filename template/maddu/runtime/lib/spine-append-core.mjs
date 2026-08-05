@@ -111,9 +111,14 @@ export function identityCachePath(repoRoot) {
   return join(repoRoot, '.maddu', 'events', 'identity.json');
 }
 
-// Three-state cache read: {state:'present', spineIdentity, conflict} |
-// {state:'absent'} | {state:'unresolvable', error}. Malformed content is
-// UNRESOLVABLE (never guessed, never treated as foreign).
+// Three-state cache read: {state:'present', spineIdentity, conflict, mode, fp}
+// | {state:'absent'} | {state:'unresolvable', error}. Malformed content is
+// UNRESOLVABLE (never guessed, never treated as foreign). A CONFLICT cache is
+// a first-class present state — {spineIdentity:null, conflict:true} — so the
+// freeze survives the cache round-trip and appends refuse with the stable
+// WS_IDENTITY_CONFLICT code, never a spurious "unresolvable" (diff-funnel
+// r1-F1: an unresolvable conflict cache defeated the S1 drain's ceremony
+// recovery exception).
 export async function readIdentityCache(repoRoot) {
   let txt;
   try { txt = await readFile(identityCachePath(repoRoot), 'utf8'); }
@@ -123,27 +128,112 @@ export async function readIdentityCache(repoRoot) {
   }
   try {
     const j = JSON.parse(txt);
+    const mode = j?.mode === 'flat' || j?.mode === 'sync' ? j.mode : null;
+    const fp = j?.fp && typeof j.fp === 'object' ? j.fp : null;
+    if (j && j.conflict === true) {
+      return { state: 'present', spineIdentity: null, conflict: true, mode, fp };
+    }
     if (j && typeof j.spineIdentity === 'string' && WS_ID_RE.test(j.spineIdentity)) {
-      return { state: 'present', spineIdentity: j.spineIdentity, conflict: j.conflict === true };
+      return { state: 'present', spineIdentity: j.spineIdentity, conflict: false, mode, fp };
     }
     return { state: 'unresolvable', error: 'identity.json malformed (no valid spineIdentity)' };
   } catch { return { state: 'unresolvable', error: 'identity.json is not JSON' }; }
 }
 
 // Atomic cache write + exact read-back (a torn cache must never survive).
-export async function writeIdentityCache(repoRoot, { spineIdentity, conflict = false }) {
+// `mode`/`fp` are the staleness guard (r1-F1): `fp` is the authority-relevant
+// file fingerprint captured BEFORE the scan that produced this identity, so
+// bytes that arrive during/after the scan always land in the next append's
+// delta window (over-scan, never under-scan). Writers that resolve without a
+// pre-scan fingerprint pass fp:null — the next append rescans once and
+// converges.
+export async function writeIdentityCache(repoRoot, { spineIdentity, conflict = false, mode = null, fp = null }) {
   if (!WS_ID_RE.test(String(spineIdentity || '')) && !conflict) {
     throw new Error(`writeIdentityCache: invalid spineIdentity ${JSON.stringify(spineIdentity)}`);
   }
   const p = identityCachePath(repoRoot);
-  const tmp = p + '.tmp';
-  const body = JSON.stringify({ v: 1, spineIdentity: spineIdentity ?? null, conflict }) + '\n';
+  // Unique tmp per write: concurrent cachers sharing one tmp path race the
+  // rename (the loser ENOENTs on a tmp the winner already renamed away).
+  const tmp = `${p}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  const body = JSON.stringify({ v: 1, spineIdentity: conflict ? null : spineIdentity, conflict, mode, fp }) + '\n';
   await mkdir(join(repoRoot, '.maddu', 'events'), { recursive: true });
   await writeFile(tmp, body);
-  const { rename } = await import('node:fs/promises');
-  await rename(tmp, p);
+  const { rename, rm } = await import('node:fs/promises');
+  try { await rename(tmp, p); }
+  catch (e) { await rm(tmp, { force: true }).catch(() => {}); throw e; }
   const back = await readFile(p, 'utf8');
-  if (back !== body) throw new Error('writeIdentityCache: read-back mismatch');
+  if (back !== body) {
+    // A concurrent writer may have won the last rename — that is a benign
+    // race for a last-writer-wins cache. Only a TORN/invalid file is fatal.
+    try {
+      const j = JSON.parse(back);
+      const valid = j?.conflict === true || (typeof j?.spineIdentity === 'string' && WS_ID_RE.test(j.spineIdentity));
+      if (valid) return;
+    } catch { /* fall through to throw */ }
+    throw new Error('writeIdentityCache: read-back mismatch');
+  }
+}
+
+// The authority-relevant file fingerprint: byte sizes of every numeric
+// segment (flat + every partition). Append-only files mean any new event —
+// including a pulled peer anchor — changes a size or adds a path, so a cache
+// carrying a matching fingerprint provably saw every stored byte its scan
+// covered. Sizes, never mtimes (S1 lesson: rename preserves mtime).
+export async function computeAuthorityFingerprint(repoRoot) {
+  const segs = {};
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const addDir = async (dir, prefix) => {
+    for (const s of await listSegmentsInDir(dir)) {
+      try { segs[`${prefix}${s}`] = (await stat(join(dir, s))).size; } catch { segs[`${prefix}${s}`] = -1; }
+    }
+  };
+  await addDir(eventsDir, 'flat:');
+  const byReplica = join(eventsDir, 'by-replica');
+  let ids = [];
+  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
+  for (const id of ids.sort()) await addDir(join(byReplica, id), `${id}/`);
+  return { segs };
+}
+
+function fpEqual(a, b) {
+  const ka = Object.keys(a?.segs || {}), kb = Object.keys(b?.segs || {});
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (a.segs[k] !== b.segs[k]) return false;
+  return true;
+}
+
+// Delta freshness check for a clean sync-mode cache: read ONLY the bytes that
+// grew since the cached fingerprint and look for authority-event lines.
+//   'fresh'  — no new bytes at all (fingerprint identical)
+//   'clean'  — new bytes exist but carry no authority event (cache still valid;
+//              caller refreshes the stored fingerprint)
+//   'rescan' — an authority event appeared in the delta, a segment shrank or
+//              vanished (append-only violated — full rescan decides), or the
+//              delta could not be read
+async function authorityDeltaState(repoRoot, cachedFp, currentFp) {
+  if (fpEqual(cachedFp, currentFp)) return 'fresh';
+  const old = cachedFp?.segs || {};
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  for (const key of Object.keys(old)) {
+    if (!(key in (currentFp.segs || {}))) return 'rescan'; // segment vanished
+  }
+  for (const [key, size] of Object.entries(currentFp.segs || {})) {
+    const prev = old[key] ?? 0;
+    if (size === prev) continue;
+    if (size < prev || prev < 0 || size < 0) return 'rescan';
+    const rel = key.startsWith('flat:')
+      ? join(eventsDir, key.slice(5))
+      : join(eventsDir, 'by-replica', key.slice(0, key.indexOf('/')), key.slice(key.indexOf('/') + 1));
+    try {
+      const fh = await open(rel, 'r');
+      try {
+        const buf = Buffer.alloc(size - prev);
+        await fh.read(buf, 0, buf.length, prev);
+        if (buf.toString('utf8').includes('"WS_IDENTITY_')) return 'rescan';
+      } finally { await fh.close(); }
+    } catch { return 'rescan'; }
+  }
+  return 'clean';
 }
 
 // Mode predicate — pinned to VERIFIER reality (plan-review r2-F2): ANY
@@ -282,15 +372,52 @@ export function resolveWsAuthority({ anchors = [], resolutions = [], flatWs = nu
   const ids = [...new Set(anchors.map((a) => a?.data?.spineIdentity).filter((x) => WS_ID_RE.test(String(x || ''))))];
   if (ids.length === 0) return { authority: flatWs };
   if (ids.length === 1) return { authority: ids[0] };
-  const anchorIds = new Set(anchors.map((a) => a?.id).filter(Boolean));
   const valid = resolutions.filter((r) => {
     const sel = r?.data?.selected;
-    const bound = Array.isArray(r?.data?.conflicts) ? r.data.conflicts.map((c) => c?.eventId).filter(Boolean) : [];
-    return WS_ID_RE.test(String(sel || '')) && ids.includes(sel) && [...anchorIds].every((a) => bound.includes(a));
+    return WS_ID_RE.test(String(sel || '')) && ids.includes(sel)
+      && validateResolutionBinding(anchors, r?.data).ok;
   });
   const selections = [...new Set(valid.map((r) => r.data.selected))];
   if (selections.length === 1) return { authority: selections[0], resolved: true };
   return { conflict: true, identities: ids };
+}
+
+// The canonical binding a resolution must carry: EVERY conflicting anchor as
+// an exact {eventId, genesisHash, spineIdentity} tuple, in canonical order
+// (eventId, genesisHash, spineIdentity — plan-review r6 advisory 4:
+// cross-partition duplicate eventIds are tolerated by design, the full tuple
+// disambiguates them). Byte-wise comparison, never a locale collation.
+const tupleCmp = (x, y) => (x.eventId < y.eventId ? -1 : x.eventId > y.eventId ? 1
+  : x.genesisHash < y.genesisHash ? -1 : x.genesisHash > y.genesisHash ? 1
+    : x.spineIdentity < y.spineIdentity ? -1 : x.spineIdentity > y.spineIdentity ? 1 : 0);
+export function canonicalAnchorConflicts(anchors) {
+  return anchors.map((a) => ({
+    eventId: String(a?.id ?? ''),
+    genesisHash: String(a?.data?.genesis?.hash ?? ''),
+    spineIdentity: String(a?.data?.spineIdentity ?? ''),
+  })).sort(tupleCmp);
+}
+
+// Strict binding law (diff-funnel r1-F2: an event-ID-only subset check let a
+// hash-unbound or forged binding resolve a conflict). The stored `conflicts`
+// array must DEEP-EQUAL the canonical anchor tuple list — same length, exact
+// tuples, canonical order; duplicates included, extras rejected.
+export function validateResolutionBinding(anchors, data) {
+  const want = canonicalAnchorConflicts(anchors);
+  const got = Array.isArray(data?.conflicts) ? data.conflicts : null;
+  if (!got || got.length !== want.length) {
+    return { ok: false, reason: `binding must cover the ${want.length} conflicting anchor(s) exactly (got ${got ? got.length : 'no'} row(s))` };
+  }
+  for (let i = 0; i < want.length; i++) {
+    const g = got[i];
+    if (!g || typeof g !== 'object'
+      || g.eventId !== want[i].eventId
+      || g.genesisHash !== want[i].genesisHash
+      || g.spineIdentity !== want[i].spineIdentity) {
+      return { ok: false, reason: `binding row ${i} does not match the canonical anchor set (exact {eventId, genesisHash, spineIdentity} tuples in canonical order required)` };
+    }
+  }
+  return { ok: true };
 }
 
 // Writer-side identity resolution (r1-F2: WRITER-ONLY — reads never call
@@ -305,30 +432,57 @@ export function resolveWsAuthority({ anchors = [], resolutions = [], flatWs = nu
 //   { conflict: identities }     — only WS_IDENTITY_RESOLVED may append
 export async function resolveIdentityForAppend(repoRoot) {
   const cache = await readIdentityCache(repoRoot);
-  if (cache.state === 'present' && !cache.conflict) return { ws: cache.spineIdentity };
-  if (cache.state === 'unresolvable') return { refuse: `identity cache unresolvable: ${cache.error}` };
-
   const partitioned = await wsModeIsPartitioned(repoRoot);
+  // Cache discipline (diff-funnel r1-F1): the cache is NEVER authority.
+  //   unresolvable → DISCARD and re-resolve (a corrupt cache must not block
+  //     writes — that would promote it to authority);
+  //   clean flat cache → trust only while the mode is still flat (the flat
+  //     genesis is immutable in an append-only spine);
+  //   clean sync cache → trust only when the authority fingerprint proves no
+  //     unscanned bytes exist; a byte-growth delta free of authority events
+  //     refreshes the fingerprint; anything else rescans;
+  //   conflict cache → NEVER a fast path: rescan (a pulled resolution must be
+  //     able to thaw the freeze), and refuse via the law below if still
+  //     conflicted.
+  if (cache.state === 'unresolvable') {
+    const { rm } = await import('node:fs/promises');
+    await rm(identityCachePath(repoRoot), { force: true }).catch(() => {});
+  } else if (cache.state === 'present' && !cache.conflict) {
+    if (cache.mode === 'flat' && !partitioned) return { ws: cache.spineIdentity };
+    if (cache.mode === 'sync' && partitioned && cache.fp) {
+      const currentFp = await computeAuthorityFingerprint(repoRoot);
+      const delta = await authorityDeltaState(repoRoot, cache.fp, currentFp);
+      if (delta === 'fresh') return { ws: cache.spineIdentity };
+      if (delta === 'clean') {
+        await writeIdentityCache(repoRoot, { spineIdentity: cache.spineIdentity, mode: 'sync', fp: currentFp }).catch(() => {});
+        return { ws: cache.spineIdentity };
+      }
+    }
+    // stale mode, missing fingerprint, or a rescan-worthy delta → fall through
+  }
+
   if (!partitioned) {
     const g = await readFlatGenesisLine(repoRoot);
     if (g.state === 'absent') return { ws: null, bootstrap: true };
     if (g.state === 'unresolvable') return { refuse: `flat genesis unresolvable: ${g.error}` };
     const ws = wsFromLine(g.line);
-    await writeIdentityCache(repoRoot, { spineIdentity: ws });
+    await writeIdentityCache(repoRoot, { spineIdentity: ws, mode: 'flat' }).catch(() => {}); // cache is never authority — a write failure must not block the append
     return { ws };
   }
 
-  // Sync mode: anchors are the authority.
+  // Sync mode: anchors are the authority. Fingerprint BEFORE the scan so any
+  // byte that lands during it stays inside the next append's delta window.
+  const fpBefore = await computeAuthorityFingerprint(repoRoot);
   let scan;
   try { scan = await scanWsAuthorityEvents(repoRoot); }
   catch (e) { return { refuse: e?.message || String(e) }; }
   const law = resolveWsAuthority(scan);
   if (law.conflict) {
-    await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true }).catch(() => {});
+    await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true, mode: 'sync' }).catch(() => {});
     return { conflict: law.identities };
   }
   if (law.authority) {
-    await writeIdentityCache(repoRoot, { spineIdentity: law.authority });
+    await writeIdentityCache(repoRoot, { spineIdentity: law.authority, mode: 'sync', fp: fpBefore }).catch(() => {});
     return { ws: law.authority };
   }
   // No anchor yet — this writer publishes it. Residual flat data blocks
@@ -345,6 +499,45 @@ export async function resolveIdentityForAppend(repoRoot) {
       genesis: { replicaId: mf.replicaId, segment: mf.segment, line: mf.line, hash: hashLine(mf.text) },
     },
   };
+}
+
+// Publish the one-time WS_IDENTITY_ANCHORED — serialized AND idempotent
+// (diff-funnel r1 follow-up: concurrent first S2 writers each resolving
+// `needAnchor` must not publish duplicate anchors — worse, ones nominating
+// different merge-first candidates, manufacturing a conflict out of thin
+// air). Under the partition's append lock we re-run the authority law: an
+// anchor that landed while we waited is ADOPTED; a conflict freezes; only a
+// still-anchorless workspace nominates and appends — inline, because
+// appendPartitioned is not reentrant (we hold its lock).
+// `buildEv` receives the merge-first nomination and returns the ws-less
+// anchor event (id/ts minted by the caller — this module has no id
+// generator).
+export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
+  if (!isValidReplicaId(replicaId)) return { unresolvable: `invalid replicaId "${replicaId}"` };
+  const dir = partitionDir(repoRoot, replicaId);
+  await mkdir(dir, { recursive: true });
+  return withAppendLock(join(dir, '.append.lock'), async () => {
+    let scan;
+    try { scan = await scanWsAuthorityEvents(repoRoot); }
+    catch (e) { return { unresolvable: e?.message || String(e) }; }
+    const law = resolveWsAuthority(scan);
+    if (law.conflict) return { conflict: law.identities };
+    if (law.authority) return { adopted: law.authority };
+    const mf = await findMergeFirstGenesis(repoRoot);
+    if (mf.state === 'absent') return { bootstrap: true }; // empty partition — the caller's event IS the genesis
+    if (mf.state === 'unresolvable') return { unresolvable: mf.error };
+    const ev = buildEv({
+      spineIdentity: wsFromLine(mf.text),
+      genesis: { replicaId: mf.replicaId, segment: mf.segment, line: mf.line, hash: hashLine(mf.text) },
+    });
+    const prevLine = await lastEventLineInDir(dir);
+    ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
+    const line = JSON.stringify(ev);
+    if (line.includes('\n')) throw new Error('publishWsAnchorOnce: serialized event contains a raw newline');
+    const seg = await currentSegmentInDir(dir);
+    await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
+    return { published: ev, ws: wsFromLine(mf.text) };
+  });
 }
 
 // The pending-migration marker (written by `spine sync init` while it migrates the
@@ -670,10 +863,39 @@ export async function readAllPartitioned(repoRoot) {
 // Returns the same `ev` (now carrying prev_hash), matching spine.append()'s return.
 // `maxWaitMs` bounds the funnel wait for best-effort callers (see acquireAppendLock);
 // strict callers omit it (Infinity) so an event is never dropped.
+// Preflight EVERY ws-bearing write at the primitive layer (plan-review r6
+// advisory 3 / diff-funnel r1-F1: a gate only in spine.append misses the
+// wrapper's direct primitive calls). Cheap cache-only check — the cache is
+// not authority, so absent/unresolvable tolerates (spine.append resolves
+// before stamping; the wrapper only stamps FROM the cache) — but a cached
+// conflict must freeze and a cached different identity must refuse. ws-less
+// events (bootstrap/anchor/resolution/legacy) skip by definition.
+async function preflightWsStamp(repoRoot, ev, site) {
+  if (typeof ev?.ws !== 'string') return;
+  if (!WS_ID_RE.test(ev.ws)) {
+    const err = new Error(`${site}: malformed ws stamp ${JSON.stringify(ev.ws)}`);
+    err.code = 'WS_IDENTITY_MISMATCH';
+    throw err;
+  }
+  const c = await readIdentityCache(repoRoot);
+  if (c.state !== 'present') return;
+  if (c.conflict) {
+    const err = new Error(`${site}: workspace identity is conflict-frozen — run \`maddu spine identity resolve --keep <ws_...>\``);
+    err.code = 'WS_IDENTITY_CONFLICT';
+    throw err;
+  }
+  if (c.spineIdentity !== ev.ws) {
+    const err = new Error(`${site}: ws stamp ${ev.ws} ≠ cached workspace identity ${c.spineIdentity}`);
+    err.code = 'WS_IDENTITY_MISMATCH';
+    throw err;
+  }
+}
+
 export async function appendPartitioned(repoRoot, replicaId, ev, { maxWaitMs = Infinity } = {}) {
   if (!isValidReplicaId(replicaId)) {
     throw new Error(`appendPartitioned: invalid replicaId "${replicaId}"`);
   }
+  await preflightWsStamp(repoRoot, ev, 'appendPartitioned');
   const dir = partitionDir(repoRoot, replicaId);
   await mkdir(dir, { recursive: true });
   const lockPath = join(dir, '.append.lock');
@@ -715,6 +937,7 @@ export async function appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs = I
   // The lock file lives inside eventsDir, so the dir must exist before withAppendLock
   // opens it (mirrors appendPartitioned's mkdir). Self-sufficient for the token
   // wrapper, which may run before ensureSpine on a very fresh repo.
+  await preflightWsStamp(repoRoot, ev, 'appendFlatChained');
   await mkdir(eventsDir, { recursive: true });
   const lockPath = join(eventsDir, '.append.lock');
   return withAppendLock(

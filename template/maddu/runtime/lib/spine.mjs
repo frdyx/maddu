@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned, resolveIdentityForAppend, writeIdentityCache } from './spine-append-core.mjs';
+import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned, resolveIdentityForAppend, writeIdentityCache, scanWsAuthorityEvents, resolveWsAuthority, validateResolutionBinding, publishWsAnchorOnce } from './spine-append-core.mjs';
 import { redactDataPayload } from './secret-scan.mjs';
 // Mutation-witness credit (buzz-steals S1): every SUCCESSFUL logical append
 // credits the active witness context exactly once — counted here (not in the
@@ -615,17 +615,66 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   const paths = await ensureSpine(repoRoot);
 
   // ── Workspace identity (S2): pre-stamp gate + stamping ──
-  // The ws-authority event types are exempt BY PROTOCOL (they are ws-less —
-  // the anchor precedes stamping, and the resolution must be appendable
-  // WHILE conflicted; this exemption is also the natural recursion guard for
-  // the anchor publication below). Everything else resolves the identity:
+  // The two ws-authority event types are ws-less BY PROTOCOL (the anchor
+  // precedes stamping; the resolution must be appendable WHILE conflicted) —
+  // but neither is a free pass (diff-funnel r1-F2):
+  //   WS_IDENTITY_ANCHORED — internal bootstrap capability ONLY. The public
+  //     API refuses it outright: anchors are published exclusively by the
+  //     needAnchor recursion below and by sync-init's core-primitive path.
+  //   WS_IDENTITY_RESOLVED — validated HERE against a fresh re-read of the
+  //     current anchor set: there must BE an unresolved conflict, `selected`
+  //     must be an existing conflicting identity, and the binding must
+  //     deep-equal the canonical anchor tuple list (validateResolutionBinding
+  //     — exact {eventId, genesisHash, spineIdentity} tuples, canonical
+  //     order, no extras).
+  // Everything else resolves the identity:
   //   conflict → refuse with a stable code (Codex plan r6 advisory 1) so the
   //     dispatcher's ceremony exception can key on it;
   //   needAnchor → publish WS_IDENTITY_ANCHORED first (once), then stamp;
   //   bootstrap → this IS the genesis line; it stays ws-less (self-reference).
   let wsStamp = null;
-  const WS_EXEMPT = type === EVENT_TYPES.WS_IDENTITY_ANCHORED || type === EVENT_TYPES.WS_IDENTITY_RESOLVED;
-  if (!WS_EXEMPT) {
+  const WS_AUTHORITY_TYPE = type === EVENT_TYPES.WS_IDENTITY_ANCHORED || type === EVENT_TYPES.WS_IDENTITY_RESOLVED;
+  if (WS_AUTHORITY_TYPE) {
+    if (type === EVENT_TYPES.WS_IDENTITY_ANCHORED) {
+      // Anchors are published ONLY by the serialized bootstrap
+      // (publishWsAnchorOnce below / sync-init's core-primitive path) —
+      // never through the public API, and never at all while conflicted.
+      const err = new Error('spine append: WS_IDENTITY_ANCHORED is published only by the identity bootstrap, never by callers');
+      err.code = 'WS_ANCHOR_RESTRICTED';
+      throw err;
+    }
+    if (type === EVENT_TYPES.WS_IDENTITY_RESOLVED) {
+      const scan = await scanWsAuthorityEvents(repoRoot); // fresh — never a cached view
+      const law = resolveWsAuthority(scan);
+      if (!law.conflict) {
+        const err = new Error('spine append: WS_IDENTITY_RESOLVED refused — no unresolved anchor conflict exists');
+        err.code = 'WS_RESOLUTION_INVALID';
+        throw err;
+      }
+      if (!law.identities.includes(data?.selected)) {
+        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — selected ${JSON.stringify(data?.selected)} is not among the conflicting identities (${law.identities.join(', ')})`);
+        err.code = 'WS_RESOLUTION_INVALID';
+        throw err;
+      }
+      const binding = validateResolutionBinding(scan.anchors, data);
+      if (!binding.ok) {
+        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — ${binding.reason}`);
+        err.code = 'WS_RESOLUTION_INVALID';
+        throw err;
+      }
+    }
+    // Both types append ws-less with NO recursive identity resolution.
+  } else {
+    // Wait out any in-flight `spine sync init` BEFORE resolving identity
+    // (duplicate-anchor race: an append resolving mid-migration sees an
+    // anchorless partial partition, takes `needAnchor`, and would publish a
+    // second anchor after the init publishes its own — resolveWriteReplica
+    // already embodies the wait-for-activation law, so reuse it; a genuine
+    // stall surfaces as the same refusal the write path below would give).
+    const wGate = await resolveWriteReplica(repoRoot);
+    if (wGate.pending) {
+      throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+    }
     const idr = await resolveIdentityForAppend(repoRoot);
     if (idr.conflict) {
       const err = new Error(`spine append: conflicting workspace-identity anchors (${idr.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
@@ -638,13 +687,33 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       throw err;
     }
     if (idr.needAnchor) {
-      await append(repoRoot, {
+      // Serialized + idempotent under the partition lock: an anchor that
+      // landed while we raced is adopted, a conflict freezes, and only a
+      // still-anchorless workspace publishes (exactly once).
+      if (!wGate.id) {
+        const err = new Error('spine append: workspace identity unresolvable — needAnchor outside sync mode');
+        err.code = 'WS_IDENTITY_UNRESOLVABLE';
+        throw err;
+      }
+      const anchorTs = new Date().toISOString();
+      const pub = await publishWsAnchorOnce(repoRoot, wGate.id, ({ spineIdentity, genesis }) => ({
+        v: 1, id: genId(anchorTs), ts: anchorTs,
         type: EVENT_TYPES.WS_IDENTITY_ANCHORED,
         actor, lane: null,
-        data: { v: 1, spineIdentity: idr.needAnchor.spineIdentity, genesis: idr.needAnchor.genesis },
-      });
-      await writeIdentityCache(repoRoot, { spineIdentity: idr.needAnchor.spineIdentity }).catch(() => {});
-      wsStamp = idr.needAnchor.spineIdentity;
+        data: { v: 1, spineIdentity, genesis },
+      }));
+      if (pub.conflict) {
+        const err = new Error(`spine append: conflicting workspace-identity anchors (${pub.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+        err.code = 'WS_IDENTITY_CONFLICT';
+        throw err;
+      }
+      if (pub.unresolvable) {
+        const err = new Error(`spine append: workspace identity unresolvable — ${pub.unresolvable}`);
+        err.code = 'WS_IDENTITY_UNRESOLVABLE';
+        throw err;
+      }
+      wsStamp = pub.adopted || pub.ws || null; // bootstrap → null (this event IS the genesis)
+      if (wsStamp) await writeIdentityCache(repoRoot, { spineIdentity: wsStamp, mode: 'sync' }).catch(() => {});
     } else if (idr.ws) {
       wsStamp = idr.ws;
     }

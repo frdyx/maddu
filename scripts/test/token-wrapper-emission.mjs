@@ -123,16 +123,16 @@ async function scenarioWsStamp() {
   {
     const tmp = await mkdtemp(join(tmpdir(), 'maddu-wrap-wsc-'));
     await mkdir(join(tmp, '.maddu', 'events'), { recursive: true });
-    await writeIdentityCache(tmp, { spineIdentity: null, conflict: true });
+    await writeIdentityCache(tmp, { spineIdentity: null, conflict: true, mode: 'sync' });
     const res = await runWrapper({
       wrapper: join(WRAPPER_DIR, 'codex-wrapper.mjs'),
       fakeProvider: await mkFake(tmp),
       env: { MADDU_REPO_ROOT: tmp, MADDU_WORKER_ID: 'wrk_test_wsc', MADDU_SESSION_ID: 'ses_test_wsc' },
     });
-    ok('conflict-cache wrapper exits 0', res.code === 0, `exit=${res.code} stderr=${res.stderr.slice(0, 200)}`);
+    ok('conflict-cache wrapper exits 0 (never blocks the worker)', res.code === 0, `exit=${res.code} stderr=${res.stderr.slice(0, 200)}`);
     await new Promise((r) => setTimeout(r, 80));
     const ev = (await readSpine(tmp)).find((e) => e.type === 'TOKEN_USAGE_REPORTED');
-    ok('cached conflict → stamp withheld (event still emitted, ws-less)', ev && !('ws' in ev), ev ? `ws=${ev.ws}` : 'no event');
+    ok('cached conflict → event DROPPED (frozen workspace refuses best-effort writes)', !ev, ev ? `unexpected event ws=${ev.ws}` : '');
     await rm(tmp, { recursive: true, force: true });
   }
 }

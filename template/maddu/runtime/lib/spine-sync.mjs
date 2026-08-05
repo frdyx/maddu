@@ -19,7 +19,7 @@
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, wsFromLine, hashLine, writeIdentityCache } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -283,6 +283,12 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
     const residual = await listSegs(join(repoRoot, '.maddu', 'events'));
     if (residual.length) {
       const cont = await continueResidualMigration(repoRoot, existing, residual);
+      if (cont.status === 'fatal') {
+        // A fatal continuation is a FAILURE, never "already in sync mode"
+        // (diff-funnel r1-F5: reporting it ok:true stranded the residual
+        // history silently behind an exit-0 no-op).
+        return { ok: false, reason: 'residual-migration-fatal', message: cont.reason, remedy: cont.remedy, replicaId: existing, continuation: cont };
+      }
       return { ok: true, already: true, replicaId: existing, continuation: cont };
     }
     return { ok: true, already: true, replicaId: existing };
@@ -353,47 +359,67 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
       data: { version: FLAT_LOCK_VERSION },
     });
   }
-  // ── Workspace-identity anchor bootstrap (S2, plan-review r4-F2) ──
+  // ── Workspace-identity anchor bootstrap (S2, plan-review r4-F2; hardened
+  // diff-funnel r1-F4) ──
   // Runs for EVERY first-time or resumed init, OUTSIDE the empty-partition
-  // branch, BEFORE replica.json publishes. Nomination target is this
-  // partition's first line: a NON-empty migration nominates the migrated old
-  // flat genesis (its derivation equals the workspace's prior flat identity,
-  // so already-ws-stamped migrated events stay consistent); an empty
-  // migration nominates the cutover just seeded. A workspace-wide anchor
-  // already present (peer partitions in a clone; a crash-resumed init that
-  // got this far last time) is ADOPTED, never duplicated — idempotent
-  // resumes by construction.
-  try {
-    const { anchors, resolutions } = await scanWsAuthorityEvents(repoRoot);
-    const law = resolveWsAuthority({ anchors, resolutions });
-    if (law.conflict) {
-      // Pre-existing conflict (merged clones): freeze — the ceremony is the
-      // only way forward; init still completes (identity work is additive).
-      await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true }).catch(() => {});
-    } else if (law.authority) {
-      await writeIdentityCache(repoRoot, { spineIdentity: law.authority }).catch(() => {});
-    } else {
-      const firstSegs = await listSegs(pdir);
-      if (firstSegs.length) {
-        const txt = await readFile(join(pdir, firstSegs[0]), 'utf8');
-        const genesisLine = txt.split('\n').find((l) => l.trim());
-        if (genesisLine) {
-          const spineIdentity = wsFromLine(genesisLine);
-          const anchorTs = now || new Date().toISOString();
-          await appendPartitioned(repoRoot, replicaId, {
-            v: 1,
-            id: makeId('evt', anchorTs),
-            ts: anchorTs,
-            type: 'WS_IDENTITY_ANCHORED',
-            actor: null,
-            lane: null,
-            data: { v: 1, spineIdentity, genesis: { replicaId, segment: firstSegs[0], line: 1, hash: hashLine(genesisLine) } },
-          });
-          await writeIdentityCache(repoRoot, { spineIdentity }).catch(() => {});
-        }
+  // branch, BEFORE replica.json publishes — and is a HARD precondition:
+  // activation without a verified identity authority (or a cached conflict
+  // awaiting the ceremony) would let this checkout stamp events into a
+  // permanently unverifiable workspace. Failure returns a NAMED reason and
+  // leaves the pending marker in place, so a re-run resumes exactly here.
+  // Nomination target is this partition's first line: a NON-empty migration
+  // nominates the migrated old flat genesis (its derivation equals the
+  // workspace's prior flat identity, so already-ws-stamped migrated events
+  // stay consistent); an empty migration nominates the cutover just seeded.
+  // A workspace-wide anchor already present (peer partitions in a clone; a
+  // crash-resumed init that got this far last time) is nomination-VERIFIED
+  // and adopted, never duplicated — idempotent resumes by construction.
+  {
+    const WS_REMEDY = 'fix the reported partition/anchor state (or restore the missing bytes), then re-run `maddu spine sync init` — the pending marker keeps this resumable';
+    let scan;
+    try { scan = await scanWsAuthorityEvents(repoRoot); }
+    catch (e) {
+      return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `authority scan failed: ${e?.message || e}`, remedy: WS_REMEDY };
+    }
+    for (const a of scan.anchors) {
+      const v = await verifyAnchorNomination(repoRoot, a.data);
+      if (!v.ok) {
+        return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `existing anchor ${a.id} does not verify: ${v.reason}`, remedy: WS_REMEDY };
       }
     }
-  } catch { /* identity bootstrap is additive — a failure here never blocks sync init; the first S2 append retries it */ }
+    const law = resolveWsAuthority(scan);
+    if (law.conflict) {
+      // Pre-existing conflict among VERIFIED anchors (merged clones): freeze —
+      // the ceremony is the only way forward; init still completes (a frozen
+      // workspace is a defined state; an authority-less one is not).
+      await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true, mode: 'sync' }).catch(() => {});
+    } else if (law.authority) {
+      await writeIdentityCache(repoRoot, { spineIdentity: law.authority, mode: 'sync' }).catch(() => {});
+    } else {
+      const firstSegs = await listSegs(pdir);
+      const txt = firstSegs.length ? await readFile(join(pdir, firstSegs[0]), 'utf8').catch(() => '') : '';
+      const genesisLine = txt.split('\n').find((l) => l.trim());
+      if (!genesisLine) {
+        return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `partition ${replicaId} has no readable genesis line to nominate`, remedy: WS_REMEDY };
+      }
+      const spineIdentity = wsFromLine(genesisLine);
+      const anchorTs = now || new Date().toISOString();
+      try {
+        await appendPartitioned(repoRoot, replicaId, {
+          v: 1,
+          id: makeId('evt', anchorTs),
+          ts: anchorTs,
+          type: 'WS_IDENTITY_ANCHORED',
+          actor: null,
+          lane: null,
+          data: { v: 1, spineIdentity, genesis: { replicaId, segment: firstSegs[0], line: 1, hash: hashLine(genesisLine) } },
+        });
+      } catch (e) {
+        return { ok: false, reason: 'ws-identity-bootstrap-failed', message: `anchor append failed: ${e?.message || e}`, remedy: WS_REMEDY };
+      }
+      await writeIdentityCache(repoRoot, { spineIdentity, mode: 'sync' }).catch(() => {});
+    }
+  }
 
   // Device-local replica lineage (PR-D §3.1), written AFTER migration + BEFORE
   // replica.json activation: a fresh init is the authoritative origin, so

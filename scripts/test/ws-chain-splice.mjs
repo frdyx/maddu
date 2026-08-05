@@ -80,6 +80,38 @@ try {
     await writeLines(fix, baseLines); // restore
   }
 
+  // ── (B2) r1-F3: the sweep must not be JSON-syntax-sensitive ─────────────
+  {
+    // Same splice, but the ws key is written `"ws" : ` (valid JSON the old
+    // `"ws":` substring prefilter skipped entirely).
+    const ls = [...baseLines];
+    const spaced = `{"v":1,"id":"evt_spaced_splice","ts":"${new Date().toISOString()}","type":"GOAL_SET","actor":null,"lane":null,"data":{"objective":"planted"},"ws" : "ws_${'f'.repeat(16)}","prev_hash":"${core.hashLine(ls[ls.length - 1])}"}`;
+    JSON.parse(spaced); // harness sanity: it IS valid JSON
+    ls.push(spaced);
+    await writeLines(fix, ls);
+    const v = await verifySpine(fix, {});
+    ok('whitespace-before-colon ws splice still → FAIL ws_mismatch (prefilter is not the filter)',
+      hasFail(v, 'ws_mismatch'), kinds(v).filter((k) => k.includes('ws')).join(','));
+    await writeLines(fix, baseLines);
+  }
+
+  // ── (B3) r1-F3: authority events are ws-less BY PROTOCOL ────────────────
+  {
+    const ls = [...baseLines];
+    const fakeAnchor = { v: 1, id: 'evt_ws_anchor', ts: new Date().toISOString(), type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: authority, genesis: { replicaId: 'repX', segment: '000000000001.ndjson', line: 1, hash: 'a'.repeat(64) } }, ws: authority };
+    fakeAnchor.prev_hash = core.hashLine(ls[ls.length - 1]);
+    ls.push(JSON.stringify(fakeAnchor));
+    await writeLines(fix, ls);
+    const v = await verifySpine(fix, {});
+    ok('a ws-BEARING anchor → FAIL (anchors/resolutions are ws-less by protocol)',
+      v.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_mismatch' && /carries a ws stamp/.test(String(i.detail))),
+      kinds(v).filter((k) => k.includes('ws')).join(','));
+    await writeLines(fix, baseLines);
+    // Restore the clean cache state the later scenarios expect (the planted
+    // anchor may have frozen it via a writer running in between — none does
+    // here, but the fixture files changed sizes).
+  }
+
   // ── (C) empty-string ws is malformed ────────────────────────────────────
   {
     const ls = [...baseLines];
