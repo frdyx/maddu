@@ -260,6 +260,15 @@ async function drainMutationBreaches(ws, raw, rest) {
   const isCeremony = raw === 'spine' && rest[0] === 'identity' && rest[1] === 'resolve';
   const conflictOnly = Array.isArray(res.errors) && res.errors.length > 0 && res.errors.every((e) => e.code === 'WS_IDENTITY_CONFLICT');
   if (isCeremony && conflictOnly) return;
+  // Second pinned recovery exception (diff-funnel r8-F2): on an UNATTACHED
+  // clone (sync partitions, no replica identity) every append — including
+  // the drain's — refuses with REPLICA_UNATTACHED, and the one command that
+  // repairs that state is `spine sync init`. Blocking it on the drain would
+  // deadlock the recovery exactly like the conflict/ceremony case. The spool
+  // is retained and drains on the first invocation after attachment.
+  const isSyncInit = raw === 'spine' && rest[0] === 'sync' && rest[1] === 'init';
+  const unattachedOnly = Array.isArray(res.errors) && res.errors.length > 0 && res.errors.every((e) => e.code === 'REPLICA_UNATTACHED');
+  if (isSyncInit && unattachedOnly) return;
   const detail = res.errors?.[0]?.error ?? 'unknown';
   const mode = await resolveInvocationMode(raw, rest); // shared classifier (r1 F7)
   if (mode !== 'read') {

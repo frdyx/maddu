@@ -1007,15 +1007,30 @@ async function lastEventLineInDir(dir) {
     if (st.size === 0) continue;
     const readLen = Math.min(st.size, 65536);
     const fh = await open(p, 'r');
+    let tailText = null;
     try {
       const buf = Buffer.alloc(readLen);
       await fh.read(buf, 0, readLen, st.size - readLen);
-      const lines = buf.toString('utf8').split('\n').filter((l) => l.trim());
-      if (lines.length) return lines[lines.length - 1];
+      tailText = buf.toString('utf8');
     } finally { await fh.close(); }
-    // Pathological single line > 64 KB — full read fallback.
-    const lines = (await readFile(p, 'utf8')).split('\n').filter((l) => l.trim());
+    // Refuse a torn active tail (diff-funnel r8-F1): under the append lock
+    // no concurrent writer can be mid-append, so a nonempty file that does
+    // not end in '\n' is a crashed write. Hashing/chaining onto that
+    // uncommitted line — and then possibly rolling segments past it — would
+    // bury it as an interior "committed" event the identity law excludes.
+    // Permanent until the operator repairs it (append the missing newline
+    // if the JSON is complete, else trim the partial line).
+    if (!tailText.endsWith('\n')) {
+      const err = new Error(`spine append: segment ${segs[i]} ends with an unterminated line (a crashed write) — repair it before appending: append the missing newline if the JSON is complete, otherwise trim the partial line, then re-run \`maddu spine verify\``);
+      err.code = 'TORN_TAIL';
+      throw err;
+    }
+    const lines = tailText.split('\n').filter((l) => l.trim());
     if (lines.length) return lines[lines.length - 1];
+    // Pathological single line > 64 KB — full read fallback.
+    const full = await readFile(p, 'utf8');
+    const fullLines = full.split('\n').filter((l) => l.trim());
+    if (fullLines.length) return fullLines[fullLines.length - 1];
   }
   return null;
 }
@@ -1064,7 +1079,13 @@ async function parseStreamDir(dir, { onBadLine = null } = {}) {
     let text;
     try { text = await readFile(join(dir, seg), 'utf8'); }
     catch { parseErrors++; continue; } // an unreadable segment is an accounting gap
-    for (const line of text.split('\n')) {
+    const lines = text.split('\n');
+    // Committed elements only (diff-funnel r8-F1): a nonempty unterminated
+    // final element is not part of the record even when it parses — reads
+    // must agree with the writers and the verifier about what exists.
+    const committed = text.endsWith('\n') ? lines.length : lines.length - 1;
+    for (let i = 0; i < committed; i++) {
+      const line = lines[i];
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }
       catch (err) { parseErrors++; if (onBadLine) onBadLine(seg, err); }

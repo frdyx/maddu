@@ -416,13 +416,21 @@ export default async function spine(argv) {
     // S1 witness classification runs BEFORE the output-format branch
     // (diff-funnel r3-F6: the --json early exit skipped it, so a successful
     // residual continuation false-breached in JSON mode). Failures exit
-    // non-zero and never breach; a fresh init's cutover/anchor/migration
-    // writes are classified where they happen (core primitives).
+    // non-zero and never breach.
     if (res.ok && res.already) {
       const { loadLibOptional } = await import('./_libroot.mjs');
       const movedSegs = res.continuation?.status === 'migrated' ? (res.continuation.segments || []) : [];
       (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.(
         movedSegs.length ? 'host-file:residual-migration' : 'idempotent-already-synced');
+    } else if (res.ok) {
+      // Fresh activation writes REAL spine events (cutover/anchor) through
+      // the core primitives, which never credit the witness — declare the
+      // raw write honestly (r8 follow-up: the fresh path was an
+      // uncalibrated S1 false breach; census-pinned like init's genesis).
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      const mwl = await loadLibOptional('mutation-witness.mjs');
+      const witnessRaw = typeof mwl?.witnessRawWrite === 'function' ? mwl.witnessRawWrite : () => {};
+      witnessRaw('sync-init-activation'); // census-pinned raw spine write
     }
     if (flags.json) {
       process.stdout.write(JSON.stringify(res, null, 2) + '\n');

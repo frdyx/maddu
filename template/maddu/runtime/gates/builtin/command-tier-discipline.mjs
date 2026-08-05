@@ -174,11 +174,15 @@ export function censusReadShapes(cmds, tiers, sources) {
 // (c) Pinned direct-writer exceptions: init's three genesis writes each carry
 // a witnessRaw annotation; fleet's delegated child-mutation declares itself
 // BEFORE the spawn.
-export function censusPinnedExceptions(initSrc, fleetSrc) {
+export function censusPinnedExceptions(initSrc, fleetSrc, spineSrc = null) {
   const problems = [];
   if (initSrc != null) {
     const raws = (initSrc.match(/witnessRaw\('init-genesis'\)/g) || []).length;
     if (raws !== 3) problems.push(`init.mjs: expected exactly 3 witnessRaw('init-genesis') annotations, found ${raws}`);
+  }
+  if (spineSrc != null) {
+    const raws = (spineSrc.match(/witnessRaw\('sync-init-activation'\)/g) || []).length;
+    if (raws !== 1) problems.push(`spine.mjs: expected exactly 1 witnessRaw('sync-init-activation') annotation (the fresh sync-init activation), found ${raws}`);
   }
   if (fleetSrc != null) {
     const decl = fleetSrc.indexOf('witnessDelegatedRun(');
@@ -273,10 +277,11 @@ export default {
     failures.push(...censusDispatcherArity(src));
     const shapeCensus = censusReadShapes(cmds, tiers, shapeSources);
     failures.push(...shapeCensus.stale);
-    let initSrc = null, fleetSrc = null;
+    let initSrc = null, fleetSrc = null, spineCmdSrc = null;
     try { initSrc = await readFile(join(r.commandsDir, 'init.mjs'), 'utf8'); } catch {}
     try { fleetSrc = await readFile(join(r.commandsDir, 'fleet.mjs'), 'utf8'); } catch {}
-    failures.push(...censusPinnedExceptions(initSrc, fleetSrc));
+    try { spineCmdSrc = await readFile(join(r.commandsDir, 'spine.mjs'), 'utf8'); } catch {}
+    failures.push(...censusPinnedExceptions(initSrc, fleetSrc, spineCmdSrc));
     try {
       const serverSrc = await readFile(join(r.runtimeDir, 'server.js'), 'utf8');
       const routeSources = [];

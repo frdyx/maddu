@@ -886,7 +886,13 @@ export async function readAll(repoRoot) {
       if (err && err.code === 'ENOENT') return readAllPartitioned(repoRoot);
       throw err;
     }
-    for (const line of text.split('\n')) {
+    const lines = text.split('\n');
+    // Committed elements only (diff-funnel r8-F1): a nonempty unterminated
+    // final element is not part of the record even when it parses — reads
+    // must agree with the writers and the verifier about what exists.
+    const committed = text.endsWith('\n') ? lines.length : lines.length - 1;
+    for (let i = 0; i < committed; i++) {
+      const line = lines[i];
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }
       catch (err) { console.error(`spine: bad line in ${seg}:`, err.message); }

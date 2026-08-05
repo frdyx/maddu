@@ -196,6 +196,37 @@ try {
     await rm(join(fix, '.maddu', 'events', '000000000001.ndjson'), { force: true });
   }
 
+  // ── (F) r8-F2: REPLICA_UNATTACHED never deadlocks its own recovery ──────
+  // An unattached checkout (replica.json removed) with a pending S1 breach
+  // row: the drain fails with REPLICA_UNATTACHED on every invocation — the
+  // pinned exception must let exactly `spine sync init` through, re-attach,
+  // and the spool drains on the next invocation.
+  {
+    const fix3 = await mkdtemp(join(tmpdir(), 'ws-unatt-'));
+    run(fix3, ['init']);
+    run(fix3, ['goal', 'set', '--objective', 'unattached-fixture']);
+    const att = await sync.syncInit(fix3);
+    ok('recovery fixture attaches', att.ok === true, JSON.stringify(att).slice(0, 120));
+    await rm(join(fix3, '.maddu', 'config', 'replica.json'), { force: true });
+    const mw = await import(toUrl(join(LIB, 'mutation-witness.mjs')));
+    const bid = mw.recordBreachSync({ stateRoot: fix3, ctx: { surface: 'cli', label: 'test-breach', verb: 'test', sub: null, method: null, path: null, sessionId: null }, via: 'test-fixture' });
+    ok('fixture breach row spooled', typeof bid === 'string');
+    const blocked = run(fix3, ['goal', 'set', '--objective', 'must-block']);
+    ok('a mutating verb is blocked while the drain fails unattached', blocked.status !== 0);
+    const reinit = run(fix3, ['spine', 'sync', 'init']);
+    ok('`spine sync init` gets through the pinned drain exception (exit 0)', reinit.status === 0,
+      (reinit.stdout + reinit.stderr).trim().split('\n').pop());
+    ok('re-attached (replica.json present)', await readFile(join(fix3, '.maddu', 'config', 'replica.json'), 'utf8').then(() => true).catch(() => false));
+    const after = run(fix3, ['goal', 'set', '--objective', 'post-attach']);
+    ok('the next invocation drains the spool and proceeds (exit 0)', after.status === 0,
+      (after.stdout + after.stderr).trim().split('\n').pop());
+    ok('spool is empty after the post-attach drain', mw.listBreachesSync(fix3).filter((n) => n.endsWith('.json')).length === 0);
+    const spineMod2 = await import(toUrl(join(LIB, 'spine.mjs')));
+    const drained = (await spineMod2.readAll(fix3)).some((e) => e.type === 'MUTATION_UNWITNESSED' && e.data?.breachId === bid);
+    ok('the breach landed on the spine after attachment (retained, never lost)', drained);
+    await rm(fix3, { recursive: true, force: true });
+  }
+
   await rm(fix, { recursive: true, force: true });
   console.log(`\nws-sync-identity: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

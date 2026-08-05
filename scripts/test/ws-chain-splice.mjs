@@ -161,6 +161,28 @@ try {
     await writeLines(fix, baseLines);
   }
 
+  // ── (B7) r8-F1: a torn tail buried by rollover is STILL torn ────────────
+  {
+    // Simulate the old buggy writer: segment 1 ends with a valid-JSON
+    // unterminated line, and segment 2 chains onto it (the rollover buried
+    // the torn line in a NON-final segment). Verify must still classify it
+    // torn — committed-ness is per-segment, not by global position.
+    const ls = [...baseLines];
+    const torn = { v: 1, id: 'evt_buried_torn', ts: new Date().toISOString(), type: 'GOAL_SET', actor: null, lane: null, data: { objective: 'in-flight' } };
+    torn.prev_hash = core.hashLine(ls[ls.length - 1]);
+    const tornLine = JSON.stringify(torn);
+    await writeFile(segPath(fix), ls.join('\n') + '\n' + tornLine); // no trailing newline
+    const seg2 = join(fix, '.maddu', 'events', '000000000002.ndjson');
+    const next = { v: 1, id: 'evt_after_roll', ts: new Date().toISOString(), type: 'GOAL_SET', actor: null, lane: null, data: { objective: 'post-roll' }, prev_hash: core.hashLine(tornLine) };
+    await writeFile(seg2, JSON.stringify(next) + '\n');
+    const v = await verifySpine(fix, {});
+    ok('a torn tail in a NON-final segment still FAILs torn_trailing_line (r8-F1)',
+      v.issues.some((i) => i.level === 'FAIL' && i.kind === 'torn_trailing_line' && String(i.detail).includes('000000000001')),
+      kinds(v).filter((k) => k.startsWith('FAIL')).join(','));
+    await rm(seg2, { force: true });
+    await writeLines(fix, baseLines);
+  }
+
   // ── (C) empty-string ws is malformed ────────────────────────────────────
   {
     const ls = [...baseLines];

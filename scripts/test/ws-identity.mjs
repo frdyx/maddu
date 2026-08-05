@@ -449,6 +449,29 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r8-F1: writers refuse a torn active tail; reads exclude it ──────────
+  {
+    const fix = await freshFix();
+    // A crashed write left a torn tail (complete JSON, no newline) at the
+    // active flat segment.
+    const committedLine = genesisLine;
+    const tornLine = genesisLine.replace('evt_genesis', 'evt_torn');
+    await writeFile(seg1(fix), committedLine + '\n' + tornLine);
+    const { appendFlatChained } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    let code = null;
+    try {
+      await appendFlatChained(fix, join(fix, '.maddu', 'events'),
+        { v: 1, id: 'evt_next', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: {} });
+    } catch (e) { code = e.code; }
+    ok('append onto a torn active tail is REFUSED (TORN_TAIL — never chain/bury it)', code === 'TORN_TAIL');
+    const { pathToFileURL } = await import('node:url');
+    const spineMod = await import(pathToFileURL(join(process.cwd(), 'template/maddu/runtime/lib/spine.mjs')).href);
+    const all = await spineMod.readAll(fix);
+    ok('readAll excludes the torn tail (reads agree with writers and verify)',
+      all.length === 1 && all[0].id === 'evt_genesis', `len=${all.length}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
   // ── r5-F2: the fingerprint stat-reuse fast path provably skips reads ────
   {
     const fix = await freshFix();

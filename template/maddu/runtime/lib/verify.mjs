@@ -257,7 +257,6 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     // interior line (which means real data loss in the middle of history): the
     // torn trailer is the only event never durably committed, and the operator
     // can safely trim it. We flag it distinctly so the remediation differs.
-    const isLastSegment = segName === segs[segs.length - 1];
     const fileEndsWithNewline = text.endsWith('\n');
     let evCount = 0;
     let firstTs = null;
@@ -275,13 +274,16 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       const thisPrev = prevLineHash;
       prevLineHash = hashLine(line);
 
-      // ─── Committed-record boundary (diff-funnel r7-F2) ───
+      // ─── Committed-record boundary (diff-funnel r7-F2, widened r8-F1) ───
       // A nonempty UNTERMINATED trailer is torn whether or not it parses: a
       // complete-looking JSON object whose newline never landed is not part
       // of the committed record (the S2 identity law, the authority scan,
       // and the writers all exclude it), and processing it here would make
-      // verify bless what every writer ignores. Classified BEFORE parsing.
-      const isUnterminatedTrailer = isLastSegment && !fileEndsWithNewline && i === lines.length - 1;
+      // verify bless what every writer ignores. Classified BEFORE parsing —
+      // and in EVERY segment, not only the globally last one (r8-F1: a torn
+      // tail buried by a segment rollover must not become "committed" by
+      // position).
+      const isUnterminatedTrailer = !fileEndsWithNewline && i === lines.length - 1;
       if (isUnterminatedTrailer) {
         push(issue('FAIL', 'torn_trailing_line',
           `${segName}:${lineNo}: trailing line is unterminated (missing final newline) — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event is not part of the committed record. Remediation: if the JSON is complete, append the missing newline; otherwise trim the partial line. Then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
