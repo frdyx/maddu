@@ -40,6 +40,10 @@ export default async function architecture(argv) {
 
   // ── init ──────────────────────────────────────────────────────────────────
   if (sub === 'init') {
+    // Mutation-witness declared no-op: writes the architecture contract
+    // (.maddu/config) — a config write with no spine event.
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('control-plane-config-write:architecture');
     const cfgPath = join(repoRoot, '.maddu', 'config', 'architecture.json');
     if (await exists(cfgPath) && flags.force !== true) {
       console.error(`maddu architecture: ${cfgPath} already exists — re-run with --force to overwrite.`);
@@ -68,6 +72,14 @@ export default async function architecture(argv) {
 
   // ── mass (structural mass: monoliths + duplicate code) ──────────────────────
   if (sub === 'mass') {
+    // Mutation-witness (Codex diff r4 F4): the report path is read-only and
+    // the --baseline path writes derived state — both append-free successes,
+    // declared branch-locally.
+    {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      const mw = await loadLibOptional('mutation-witness.mjs');
+      mw?.witnessNoop?.(flags.baseline === true ? 'derived-state-write:mass-baseline' : 'read-only-report:architecture-mass');
+    }
     const mopts = arch.massOptions(contract);
     const massFailOn = (flags['fail-on'] && arch.FAIL_ON.has(String(flags['fail-on']))) ? String(flags['fail-on']) : mopts.failOn;
     const scan = await arch.scanMass(repoRoot, { maxLines: mopts.maxLines, ignore: mopts.ignore });
@@ -98,6 +110,9 @@ export default async function architecture(argv) {
 
   // ── baseline ────────────────────────────────────────────────────────────────
   if (sub === 'baseline') {
+    // Declared no-op: writes the drift baseline (state artifact, no spine event).
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('derived-state-write:architecture-baseline');
     const ts = new Date().toISOString();
     const { path, count } = await arch.writeBaseline(repoRoot, result, ts);
     if (json) process.stdout.write(JSON.stringify({ baseline: path, count }, null, 2) + '\n');

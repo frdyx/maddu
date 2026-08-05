@@ -221,8 +221,20 @@ async function resolveWorkRootFrom(paths, payloadCwd, repoRoot) {
   return null;
 }
 
+// Declared-excuse helper for fire arms' append-free exits (containment,
+// graceful skips). Fail-open: never blocks a hook.
+async function hookFireNoop(reason) {
+  try {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.(reason);
+  } catch {}
+}
+
 async function fireSessionStart() {
   let note = 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.';
+  // Hoisted so the post-containment verdict below can see whether a session
+  // append actually happened on this run.
+  let sidOut = null;
   try {
     seamThrow('bootstrap');
     const { paths, spine, projections, sessionActive, sessionLifecycle } = await loadSpineLib();
@@ -382,7 +394,13 @@ async function fireSessionStart() {
     note = (sid
       ? `Máddu session ${sid} auto-registered (recorded in the spine). Claim a lane before editing (\`maddu lane claim <lane>\`) and run \`maddu slice-stop\` at each slice boundary — no --session needed, it resolves the active session.${concurrentClause}`
       : 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.') + disciplineLine;
+    sidOut = sid;
   } catch { /* CONTAINMENT: any error → the fallback note, exit 0 */ }
+  // Witness (r2 F2): a run that registered/renewed a session appended and is
+  // credited; ONLY the append-free outcomes (containment, failed
+  // registration) declare an excuse — deleting the happy-path append would
+  // now breach, exactly as it should.
+  if (!sidOut) await hookFireNoop('hook-fire:session-start-containment-or-unregistered');
   try {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note },
@@ -392,6 +410,9 @@ async function fireSessionStart() {
 }
 
 async function fireSessionEnd() {
+  // Hoisted close-outcome flag: only append-free outcomes declare an excuse
+  // (r2 F2) — a real close appends SESSION_CLOSED and is credited.
+  let closedHappened = false;
   try {
     seamThrow('bootstrap');
     const { paths, spine, sessionLifecycle } = await loadSpineLib();
@@ -406,7 +427,10 @@ async function fireSessionEnd() {
       : (payload.session_id || null);
     // No payload / no binding infra → close NOTHING (never close an
     // unattributed session; the janitor sweep is the leak backstop).
-    if (!claudeId || !disc || !sessionLifecycle || !disc.withBindingTransaction) process.exit(0);
+    if (!claudeId || !disc || !sessionLifecycle || !disc.withBindingTransaction) {
+      await hookFireNoop('hook-fire:session-end-nothing-to-close');
+      process.exit(0);
+    }
     const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
     let uncommitted = 0;
     try {
@@ -438,6 +462,7 @@ async function fireSessionEnd() {
           },
         }));
       const status = sessionLifecycle.isLockFailed(res) ? 'lock' : res.status;
+      if (status === 'closed') closedHappened = true;
       // Unbind only on terminal statuses — a lock/spine-corrupt result leaves
       // an ACTIVE session; deleting its binding would orphan it.
       if (status === 'closed' || status === 'already-closed' || status === 'missing') {
@@ -445,6 +470,10 @@ async function fireSessionEnd() {
       }
     });
   } catch { /* CONTAINMENT: never block Claude's session end */ }
+  // Witness (r2 F2): a real close appended (credited); everything else —
+  // no binding, freshness skip, already-closed, containment — is a graceful
+  // append-free outcome and declares itself.
+  if (!closedHappened) await hookFireNoop('hook-fire:session-end-graceful-or-containment');
   process.exit(0);
 }
 
@@ -452,6 +481,15 @@ export default async function hooks(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { printHelp(); return; }
   const sub = argv[0];
   const rest = argv.slice(1);
+
+  // Mutation-witness placement (Codex diff r2 F2): NO unconditional
+  // declaration here — the session-start/end fire happy paths APPEND
+  // (register/renew/close events) and must stay witnessed by those appends;
+  // a blanket excuse would hide exactly the silent non-recording this guard
+  // exists to catch. Declarations live in the specific append-free branches:
+  // fire containment/graceful exits (hookFireNoop below), the per-tool /
+  // per-compaction conditional-append arms, and the install/remove host-file
+  // arm.
 
   // ── fire: the runtime entrypoint the installed hooks call ──
   // Handled BEFORE the shared bootstrap: each event bootstraps inside its own
@@ -466,6 +504,11 @@ export default async function hooks(argv) {
       return fireSessionEnd();
     }
     if (event === 'pre-tool-use') {
+      // Mutation-witness declared no-op (per-tool gate): the REQUIRED record
+      // for an allow verdict is nothing; auto-claim / DISCIPLINE_SKIPPED
+      // appends are conditional side-records that also credit when they fire
+      // (same conditional-append posture as /bridge/projection's janitor).
+      await hookFireNoop('hook-fire:pre-tool-use-gate (conditional append)');
       // Enforce Máddu's session rituals before a mutating edit. First auto-claim
       // a lane (so agentic work is never un-laned), then evaluate discipline and
       // either allow, nudge (additionalContext), or block (permissionDecision:
@@ -595,6 +638,10 @@ export default async function hooks(argv) {
       process.exit(0);
     }
     if (event === 'pre-compact') {
+      // Mutation-witness declared no-op (per-compaction): the checkpoint
+      // append is conditional (and credits when it fires); containment exits
+      // are append-free by design.
+      await hookFireNoop('hook-fire:pre-compact (conditional append)');
       // FAILS OPEN by design: whatever goes wrong, exit 0 so compaction is
       // never blocked (exit 2 would block it) and the session never breaks.
       // Bootstrap runs INSIDE the containment.
@@ -693,6 +740,10 @@ export default async function hooks(argv) {
 
   // ── install / remove ──
   if (sub === 'install' || sub === 'remove' || sub === 'uninstall') {
+    // Mutation-witness declared no-op: writes the HOST file
+    // (.claude/settings.json) — no spine event exists for it (r2 F2: the
+    // declaration is arm-local, never verb-wide).
+    await hookFireNoop('host-file-write:claude-settings');
     const { flags } = parseFlags(rest);
     // `uninstall` is an alias for `remove` — it's the off-switch operators reach
     // for when the discipline hook needs to come out fast, so both names work.

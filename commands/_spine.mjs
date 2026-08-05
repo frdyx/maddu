@@ -63,7 +63,14 @@ export async function loadSpineLib() {
   // without the recall section on older installs.
   let recall = null;
   try { recall = await import(pathToFileURL(join(dir, 'recall.mjs')).href); } catch {}
-  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay, sessionLifecycle, recall };
+  // mutation-witness.mjs (v1.116.0, buzz-steals S1) — declared-excuse and
+  // raw-write witness APIs for commands with legitimately zero-append success
+  // paths (idempotent early-returns, delegated mutations, init genesis).
+  // Optional-load: on an older install the calls below are no-ops (the guard
+  // is inert there anyway).
+  let mutationWitness = null;
+  try { mutationWitness = await import(pathToFileURL(join(dir, 'mutation-witness.mjs')).href); } catch {}
+  return { paths, spine, projections, hindsight, mailbox, skills, search, runtimes, mcp, schedule, checkpoints, auth, imports, sessionActive, approvals, verify, spineSync, bridgeBuilders, spineAnchor, verifyReplay, sessionLifecycle, recall, mutationWitness };
 }
 
 // v1.93.0 (roadmap #12a phase 1): commands bind STATE (spine, sessions,

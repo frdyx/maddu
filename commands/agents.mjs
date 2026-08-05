@@ -137,6 +137,11 @@ export default async function agents(argv) {
   }
 
   if (sub === 'register' || sub === 'unregister') {
+    // Mutation-witness declared no-op: this verb edits MACHINE-SCOPE agent
+    // instruction files (~/.claude/CLAUDE.md etc.) — no workspace spine owns
+    // that mutation (census-audited machine-scope exception).
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('machine-scope:agent-files');
     const { flags } = parseFlags(rest);
     const removing = sub === 'unregister' || !!flags.remove;
     const targets = await resolveTargets(lib, flags);

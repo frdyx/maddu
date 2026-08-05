@@ -156,6 +156,10 @@ export default async function ciCmd(argv) {
 
   // ── pin ─────────────────────────────────────────────────────────────────--
   if (sub === 'pin') {
+    // Mutation-witness declared no-op: pin writes the required-gate profile
+    // (maddu.json / .maddu/config/ci.json) — a config write, no spine event.
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('control-plane-config-write:ci-pin');
     // audit P4 — pin ONLY fail-capable gates (severity !== 'warn'). A warn-severity
     // gate can never red `maddu ci`, so pinning it as "required" is a misnomer that
     // re-introduces the green-because-wrong-scope hole. Pinning keys on severity,

@@ -30,23 +30,39 @@
 // to frame orchestration as opt-in (an honest fire-rate), NOT as "dead" — so a
 // future audit can't re-raise "orchestration unused" as a false-alarm finding.
 // `command-tier-discipline` requires a valid `layer` on every command.
+//
+// `readShapes` (v1.116.0, mutation-witness S1): the tier is per-VERB ("any
+// write path ⇒ the whole verb is mutating"), but ~40 read-shaped invocations
+// live under mutating verbs (`plan list`, bare `memory`, `trust list`,
+// `spine verify`, …). The mutation-witness guard breaches a MUTATING seam
+// that exits 0 with zero spine appends and no declared no-op — these shapes
+// declare which invocations of a mutating verb are READ-shaped (armed in
+// read mode: counted, never breached). An entry is either a string (single
+// leading token; the sentinel '(bare)' = no token-shaped first arg) or
+// `{ tokens: [...], requiredFlags: [...] }` — the invocation's leading
+// tokens must equal `tokens` exactly AND every listed flag must be present.
+// ANYTHING UNMATCHED IS MUTATING (mutation-wins precedence). The
+// command-tier-discipline census verifies every declared shape token appears
+// in the verb's source (stale claim = FAIL) and scans its arm with the
+// mutation-signal heuristics (WARN). Shapes affect ONLY the witness guard —
+// never the Rule-9 trigger gauntlet, which stays keyed on the verb tier.
 
 export default {
-  agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  agents:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'detect', 'status', 'list'] },
   // v1.92.0 — `autonomy` reads the whole spine but appends AUTONOMY_SCORED /
   // AUTONOMY_RECOMMENDATION report events by default (--no-emit for read-only),
   // so the verb is mutating + auto-trigger forbidden. Recommend-only contract:
   // it never writes governance config.
-  autonomy:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  autonomy:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: [], requiredFlags: ['--no-emit'] }] },
+  approval:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', { tokens: ['migrate-legacy-decisions'], requiredFlags: ['--dry-run'] }] },
+  focus:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'status'] },
+  auth:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['where', 'list', 'keys'] },
   brief:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
-  checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  checkpoint:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
   // v1.87.0 — bare `ci` is read-only (headless gate run, no spine writes), but
   // `ci pin` writes the required-gate profile (maddu.json / .maddu/config), so
   // the verb is mutating + auto-trigger forbidden (fleet/trust convention).
-  ci:           { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  ci:           { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'run'] },
   doctor:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   events:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   // EXP phase 1 — the experience ledger: pure spine→trajectory projection.
@@ -59,70 +75,78 @@ export default {
   // mutating + auto-trigger forbidden (the autonomy/fleet convention: any
   // write path -> mutating). Recommend-never-apply contract: nothing fires
   // without the operator typing `adopt`.
-  evolve:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  evolve:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['(bare)', 'plan', 'list'] },
   // SLM-governance phase 3 (plan pln_20260706133422_0f60) — every write
   // sub-verb appends MODEL_* events (and promote appends APPROVAL_REQUESTED),
   // so the verb is mutating; auto-trigger forbidden because promotion must
   // never fire without a human-attributable invocation (the approval ride is
   // always-on, and a scheduled promote would defeat its point).
-  model:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  model:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'status'] },
   // v1.115.0 (memory-recall track) — wiki CLI. `list`/`drift`/`page` read, but
   // `sync`/`rebuild` rewrite .maddu/wiki pages: any write path ⇒ whole verb
   // mutating + auto-trigger forbidden.
-  wiki:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  wiki:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['(bare)', 'list', 'drift', 'page'] },
   // v1.83.0 — bare `fleet` is read-only, but `fleet upgrade --apply` delivers
   // framework bytes into other repos, so the verb is mutating + auto-trigger
   // forbidden (same convention as trust/mcp/plugin: any write path → mutating).
-  fleet:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  fleet:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', { tokens: ['upgrade'], requiredFlags: ['--plan'] }] },
+  global:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: ['cron', 'list'] }, { tokens: ['cron', 'show'] }, { tokens: ['policy', 'list'] }] },
+  goal:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['show'] },
+  import:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'rejections', 'scan'] },
   export:       { tier: 'read-only', autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   init:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  lane:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
+  // `mailbox read` is NOT a read shape (Codex diff-review r1 F1): it appends
+  // a MAILBOX_READ spine event — its append is its witness.
+  mailbox:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['counts', 'list'] },
+  mcp:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show', 'visible', 'serve', 'templates'] },
   // v1.115.0 (memory-recall track): flipped read-only → mutating. The verb was
   // declared read-only while `supersede`/`extract` already wrote, and Phase 3
   // adds approve/revoke (spine events). Same escaped-gauntlet fix as `spine`:
   // any write path anywhere in the verb ⇒ the whole verb is mutating.
-  memory:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
-  phase:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  memory:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['(bare)', 'list', 'history', 'recall', 'search'] },
+  phase:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['show'] },
   register:     { tier: 'mutating',  autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
-  review:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
-  runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  schedule:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  review:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['(bare)', 'status', 'list'] },
+  // `runtime detect` is NOT a read shape (Codex diff r4 F1): detection
+  // appends RUNTIME_DETECTED — its append is its witness; the empty
+  // detect-all batch declares a conditional no-op in the arm.
+  runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
+  schedule:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show', 'parse'] },
   search:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
-  session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  skill:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
-  slice:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
+  skill:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show'] },
+  slice:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['show'] },
   'slice-stop': { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  sources:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  sources:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'status'] },
   // audit P4 — `spine` has mutating subverbs: `spine sync` git-commits/pulls/
   // pushes this replica's partition and `spine sync init` mints replica metadata
   // (commands/spine.mjs → lib.spineSync.syncGit/syncInit). Declaring it read-only
   // let those mutations escape the Rule-9 trigger gauntlet. Any-write-subverb ⇒
   // the top-level verb is mutating; it is operator-invoked, never auto-fired.
-  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['verify', 'show', 'oversight', { tokens: ['anchor'], requiredFlags: ['--status'] }, { tokens: ['anchor'], requiredFlags: ['--verify'] }] },
   start:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
-  task:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
-  upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  worker:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
-  workspace:    { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  task:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show'] },
+  upgrade:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: [], requiredFlags: ['--dry-run'] }] },
+  worker:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
+  workspace:    { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
   // v0.18 — discovery surface (read-only).
   help:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   suggest:      { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v0.18 Phase 4 — architectural backbone.
-  team:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
-  pipeline:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
+  team:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration', readShapes: ['status'] },
+  pipeline:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration', readShapes: ['list'] },
   advise:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   cost:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v0.19.1 — retroactive transcript import populates the ledger.
-  usage:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  usage:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: [{ tokens: ['import'], requiredFlags: ['--dry-run'] }] },
   // v1.1.0 Phase 1 — default tools. All mutating; auto-trigger forbidden
   // (the slash command path is the explicit-invocation surface).
+  // git needs no readShapes: the audited wrapper appends TOOL_INVOKED/
+  // TOOL_COMPLETED on every run, so even read-shaped git subverbs credit the
+  // witness counter.
   git:          { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   test:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   'self-test':  { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
@@ -130,23 +154,23 @@ export default {
   lint:         { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   install:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
   // v1.1.0 Phase 3 — governance tier control surface.
-  governance:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  governance:   { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['show'] },
   // v1.1.0 Phase 4 — receipt log viewer.
   log:          { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.1.0 Phase 5 — plan persistence.
-  plan:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  plan:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show', 'kanban'] },
   // v1.1.0 Phase 6 — loops.
-  loop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
+  loop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration', readShapes: ['status'] },
   // v1.1.0 Phase 7 — coordinator primitive.
   coordinator:  { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'orchestration' },
   // v1.2.0 Phase 1 — supply-chain trust audit + pinning. `audit/list/verify/report`
   // are read-only-shaped but the verb dispatches into write paths too (pin/unpin),
   // so the verb itself is mutating; auto-trigger forbidden (operator explicit).
-  trust:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  trust:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'verify', 'report'] },
   // v1.2.1 F2 — bridges list/kill-all is operator-explicit only.
   // `list` is read-only-shaped but the verb dispatches into kill-all too,
   // so the verb itself is mutating; auto-trigger forbidden.
-  bridges:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  bridges:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
   // v1.3.0 — framework-coherence self-audit. Read-only (scans source, appends
   // one best-effort AUDIT_REPORT timeline event); safe to auto-trigger so the
   // drift check can run on a schedule every release.
@@ -159,18 +183,18 @@ export default {
   orient:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
   // v1.6.0 — curated cross-session handoff. `set` writes a HANDOFF_SET event;
   // mutating, operator/agent-explicit.
-  handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  handoff:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['show'] },
   // hooks install/remove write a HOST file (.claude/settings.json); `hooks fire`
   // is invoked by Claude Code's hook system (external), not a Máddu auto-trigger.
-  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
+  hooks:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'status', 'list'] },
   // v1.4.0 — plugin loader: capabilities that live outside the core. list/info
   // are read-only-shaped but the verb dispatches into enable/disable writes, so
   // the verb is mutating; auto-trigger forbidden (operator-explicit, like mcp).
-  plugin:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  plugin:       { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'info'] },
   // v1.9.0 — failure-learning. `run` spawns a judgment worker + writes
   // corrections (agent-file + memory); mutating and auto-trigger forbidden
   // (operator/agent-explicit, like advise). `digest` is the read-only fallback.
-  learn:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  learn:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['digest', 'list', 'show', 'retrieve'] },
   // v1.12.0 — portable project-blueprint export. Reads transcripts + spine and
   // writes a brief artifact under .maddu/state/blueprints/; no spine mutation.
   blueprint:    { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
@@ -181,5 +205,5 @@ export default {
   // v1.18.0 — architecture-drift. `init`/`baseline` write the contract/baseline,
   // so the verb is mutating + auto-trigger forbidden (operator-explicit). The
   // AUTO path is the read-only `architecture-drift` gate (doctor/audit).
-  architecture: { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core' },
+  architecture: { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['scan', 'diagram'] },
 };

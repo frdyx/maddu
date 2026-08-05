@@ -506,9 +506,14 @@ export default async function lane(argv) {
         // Orphaned worktree (claim already gone): the disposition WAS the cleanup.
         console.log(`released  ${lid}  (claim already gone; worktree dispositioned)`);
         return;
-      case 'no-owners':
+      case 'no-owners': {
+        // Mutation-witness declared no-op: releasing an unclaimed lane is a
+        // graceful success that appends nothing by design.
+        const { loadLibOptional } = await import('./_libroot.mjs');
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-active-claim');
         console.log(`released  ${lid}  (no active claim)`);
         return;
+      }
       case 'owned-by-others':
         console.error(`lane "${lid}" is claimed by ${r.holder ? r.holder.sessionId : 'another session'}; ${sid} cannot release it`);
         process.exit(3);

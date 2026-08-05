@@ -20,6 +20,12 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // unaffected.
 import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned } from './spine-append-core.mjs';
 import { redactDataPayload } from './secret-scan.mjs';
+// Mutation-witness credit (buzz-steals S1): every SUCCESSFUL logical append
+// credits the active witness context exactly once — counted here (not in the
+// core primitives) so the retry loop below can't double-count, and so the
+// worker token-wrapper's child-process appends (ALS-invisible by design)
+// stay out of the parent's ledger. Import direction is spine → witness only.
+import { witnessSpineAppend } from './mutation-witness.mjs';
 export { hashLine };
 
 const ROLL_BYTES = 10 * 1024 * 1024;
@@ -316,6 +322,7 @@ export const EVENT_TYPES = {
   // the hook-handler seam (discipline.mjs stays spine-less). data:
   //   { reason, tool, sessionId, enforcement, blocked? }
   DISCIPLINE_SKIPPED:         'DISCIPLINE_SKIPPED',
+  MUTATION_UNWITNESSED:       'MUTATION_UNWITNESSED',
   // audit P2 — the discipline enforcement path threw and fell open. Recording the
   // failure keeps a silent fail-open from hiding a persistent enforcement bug.
   // data: { reason, tool, sessionId }
@@ -626,10 +633,13 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // `sync init` is never lost (only a genuine >timeoutMs stall, surfaced by the
   // outer resolve, still refuses). The retry cap is a livelock backstop only.
   const STALL_MSG = 'spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry';
+  // One credit per LOGICAL event: every success return funnels through here,
+  // so the pending/ENOENT retries below can never double-count.
+  const credit = (out) => { witnessSpineAppend(); return out; };
   let enoentRetries = 0;
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);
-    if (w.id) return appendPartitioned(repoRoot, w.id, ev);
+    if (w.id) return credit(await appendPartitioned(repoRoot, w.id, ev));
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
 
     // Test seam (no-op in production): fired exactly ONCE, after the outer resolve
@@ -650,7 +660,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     // migration renaming a segment out from under us — never in pure default mode).
     try {
       const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
-      if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev);
+      if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev));
       if (outcome.pending) {                             // migration began in the resolve→lock window → retry
         // Test seam (no-op in production): acknowledge that the inner re-resolve
         // observed {pending}, so a deterministic test can act AFTER the retry.
@@ -658,7 +668,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
         if (attempt >= 10000) throw new Error(STALL_MSG); // livelock backstop (never hit in practice)
         continue;
       }
-      return outcome.ev;
+      return credit(outcome).ev;
     } catch (err) {
       // ENOENT backstop: a `sync init` renamed the flat segment between
       // currentSegment and appendFile. The legitimate rename race resolves on the

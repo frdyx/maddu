@@ -26,7 +26,7 @@ import { listSkills } from './lib/skills.mjs';
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes } from './lib/runtimes.mjs';
 import { listMcp, mcpHealth } from './lib/mcp.mjs';
-import { readTrustConfig, auditRepo, renderReportMarkdown } from './lib/trust.mjs';
+import { readTrustConfig, auditRepo, renderReportMarkdown, depsFingerprint as trustDepsFingerprint } from './lib/trust.mjs';
 import { readWorkerEnvConfig } from './lib/worker-env.mjs';
 import { registerBridge, unregisterBridge } from './lib/bridges-registry.mjs';
 import { TOKEN_HEADER, mintToken, tokenEquals, writeCapability, clearCapability, pruneStaleCapabilities } from './lib/bridge-auth.mjs';
@@ -58,6 +58,12 @@ import { routeApprovals } from './lib/bridge-routes-approvals.mjs';
 import { routeImports, routeAuth, routeCheckpoints, routeSchedules } from './lib/bridge-routes-capabilities.mjs';
 import { routeWorkers, routeSkills, routeTasks, routeMailbox, routeMemory } from './lib/bridge-routes-work.mjs';
 import { routeProposals, routeBoss } from './lib/bridge-routes-collab.mjs';
+// Mutation-witness (buzz-steals S1, v1.116.0): per-request coverage guard —
+// a mutating request that completes 2xx with zero spine appends and no
+// declared no-op appends MUTATION_UNWITNESSED inline; if THAT append fails,
+// the breach is spooled synchronously (the CLI drain picks it up). The
+// response is never rewritten — the spine event IS the red.
+import { withMutationWitness, witnessNoop, evaluateWitness, recordBreachSync } from './lib/mutation-witness.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const runtimeRoot = __dirname;
@@ -143,6 +149,27 @@ export async function enforceLoopbackOrigin(req, res, ctx, boundHost) {
 // the mutation off the read path entirely is deferred to P3 (actor-is-witness).
 export const MUTATING_GET_PATHS = new Set(['/bridge/operations', '/bridge/projection']);
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// ── Mutation-witness classification (S1) ────────────────────────────────────
+// The token guard above is deliberately method-primary; the WITNESS classifier
+// additionally exempts the read-only POST routes — successful POSTs that
+// compute without mutating (parse/scan/check shapes). Pinned COMPLETE across
+// server.js AND every bridge-routes-*.mjs; the command-tier-discipline census
+// sweeps all of them, so a new read-only POST must be added here or its route
+// breaches loudly. Plugin non-GET routes are NOT exempt (they declare a
+// witness in their handler result or breach).
+export const READONLY_POST_PATHS = new Set([
+  '/bridge/_global/schedules/parse',  // parseNatural echo (server.js)
+  '/bridge/schedules/parse',          // parseNatural echo (bridge-routes-capabilities)
+  '/bridge/imports/scan',             // secret-scan preview (bridge-routes-capabilities)
+  '/bridge/enforcer/check',           // rule evaluation (server.js)
+]);
+
+// True when this request's SUCCESS must be witnessed (append or declared noop).
+export function bridgeRequestIsMutating(method, pathname) {
+  if (WRITE_METHODS.has(method)) return !READONLY_POST_PATHS.has(pathname);
+  return method === 'GET' && MUTATING_GET_PATHS.has(pathname);
+}
 
 // The <meta> the cockpit fetch shim reads to attach the token. The token is
 // hex (mintToken) so it needs no attribute escaping; assert that to be safe.
@@ -233,7 +260,22 @@ export async function handleRequest(req, res, ctx, opts) {
     if (url.pathname.startsWith('/bridge/')) {
       // P0b: require the capability token on mutating + cross-workspace routes.
       if (await enforceBridgeAuth(req, res, url, ctx, bridgeToken)) return;
-      return await handleBridge(req, res, url, ctx);
+      // S1: per-request witness context (ALS — no CLI fallback here: a lost
+      // bridge context stays uncredited, red-biased). Breach ONLY after a
+      // SUCCESSFUL (2xx) response: a 4xx refusal or 5xx error is already
+      // loud and mutated nothing.
+      const method = req.method || 'GET';
+      const mutating = bridgeRequestIsMutating(method, url.pathname);
+      const { result, ctx: wctx } = await withMutationWitness(`bridge ${method} ${url.pathname}`, () => handleBridge(req, res, url, ctx), {
+        mode: mutating ? 'mutating' : 'read',
+        surface: 'bridge', method, path: url.pathname,
+      });
+      const status = res.statusCode;
+      if (mutating && res.writableEnded && status >= 200 && status < 300) {
+        const { breach } = evaluateWitness(wctx, { exitCode: 0 });
+        if (breach) await recordBridgeBreach(req, url, ctx, wctx);
+      }
+      return result;
     }
     // Serve the cockpit, injecting the capability token into index.html so the
     // fetch shim can attach it (same-origin delivery — see cockpit.js).
@@ -242,6 +284,31 @@ export async function handleRequest(req, res, ctx, opts) {
     console.error('bridge error:', err);
     return sendJson(res, 500, { error: 'internal', detail: err?.message || String(err) });
   }
+}
+
+// S1: record a bridge breach. Inline append against the request's workspace
+// root; on append failure fall back to the sync CLI drain spool + one stderr
+// line (Codex plan-review r2 F4) — the completed response is never rewritten.
+async function recordBridgeBreach(req, url, ctx, wctx) {
+  const resolved = resolveRequestWorkspace(req, url, ctx);
+  const repoRoot = resolved?.repoRoot || ctx.workspaces.get(ctx.active) || null;
+  if (!repoRoot) return;
+  const data = {
+    breachId: newBridgeBreachId(), breachTs: new Date().toISOString(),
+    surface: 'bridge', label: wctx.label,
+    verb: null, sub: null, method: wctx.method, path: wctx.path,
+    exitCode: null, sessionId: null, via: 'inline',
+  };
+  try {
+    await append(repoRoot, { type: EVENT_TYPES.MUTATION_UNWITNESSED, actor: null, lane: null, data });
+  } catch (err) {
+    const spooled = recordBreachSync({ stateRoot: repoRoot, ctx: wctx, exitCode: null, via: 'inline-append-failed' });
+    process.stderr.write(`maddu bridge: MUTATION_UNWITNESSED inline append failed (${err?.message || err}) — breach ${spooled ? `spooled as ${spooled}` : 'LOST (spool also failed)'}\n`);
+  }
+}
+let _bridgeBreachSeq = 0;
+function newBridgeBreachId() {
+  return `br_${Date.now()}-${process.pid}-b${++_bridgeBreachSeq}`;
 }
 
 // Resolve the workspace for an incoming request.
@@ -314,6 +381,9 @@ async function handleBridge(req, res, url, ctx) {
     if (!ctx.workspaces.has(body.id)) return sendJson(res, 404, { error: 'unknown workspace', id: body.id });
     ctx.active = body.id;
     try { await activateWorkspace(body.id); } catch {}
+    // S1 declared no-op: mutates the DEVICE-GLOBAL workspace registry — there
+    // is no single workspace spine this belongs to (census-audited exception).
+    witnessNoop('machine-scope:workspace-registry');
     return sendJson(res, 200, { ok: true, active: ctx.active });
   }
 
@@ -321,6 +391,12 @@ async function handleBridge(req, res, url, ctx) {
   // These live under ~/.config/maddu/global/ and are not bound to any one
   // workspace, so they bypass resolveRequestWorkspace just like the
   // /bridge/_workspaces routes above.
+  // S1 declared no-op (Codex diff r2 F3): every mutating /_global/* route
+  // edits that MACHINE-SCOPE config — no workspace spine owns it. (The parse
+  // POST is exempt read; the declaration is harmless there.)
+  if (path.startsWith('/bridge/_global/') && req.method !== 'GET') {
+    witnessNoop('machine-scope:global-config');
+  }
   if (path === '/bridge/_global/schedules' && req.method === 'GET') {
     const schedules = await listGlobalSchedules();
     return sendJson(res, 200, { schedules });
@@ -712,6 +788,10 @@ async function handleBridge(req, res, url, ctx) {
 
   // ── receipt log feed (v1.1.0 Phase 4) ─────────────────────────────────
   if (path === '/bridge/operations' && req.method === 'GET') {
+    // S1 declared no-op: writes a regenerable STATE artifact on read (the
+    // P0b-known projection-write-on-read; moving it off the read path is the
+    // deferred P3 actor-is-witness work) — never a spine append.
+    witnessNoop('projection-write-on-read (P3 actor-is-witness pending)');
     try {
       const lib = await import('./lib/receipts.mjs');
       const u = new URL(req.url, 'http://x');
@@ -804,6 +884,32 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/trust/audit' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     const audit = await auditRepo(repoRoot, { fresh: !!body.fresh, includeCves: !!body.cve });
+    // S1 witnessing parity (plan-review r4 F6; corrected per diff r5 F2): a
+    // REAL audit (audit.ok === true — refusal is ok:false, not `refused`)
+    // appends TRUST_AUDIT_RAN with the same depsFingerprint the CLI records;
+    // a refusal served as HTTP 200 is an append-free outcome and declares
+    // itself instead of minting a fake zero-violation audit event.
+    if (audit && audit.ok === true) {
+      try {
+        const depsHash = await trustDepsFingerprint(repoRoot).catch(() => null);
+        await append(repoRoot, {
+          type: EVENT_TYPES.TRUST_AUDIT_RAN, actor: null, lane: null,
+          data: {
+            audited: audit.rows?.length ?? 0,
+            freshDays: audit.audit?.freshness_warn_days ?? null,
+            blockDays: audit.audit?.freshness_block_days ?? null,
+            warns: audit.warns?.length ?? 0,
+            violations: audit.violations?.length ?? 0,
+            cacheHits: audit.cacheHits ?? null,
+            cacheMisses: audit.cacheMisses ?? null,
+            cveTotal: audit.cveSummary?.total ?? null,
+            depsHash,
+          },
+        });
+      } catch {}
+    } else {
+      witnessNoop('trust-audit-refused (no audit ran, nothing to witness)');
+    }
     return sendJson(res, 200, audit);
   }
 
@@ -876,6 +982,9 @@ async function handleBridge(req, res, url, ctx) {
     return sendJson(res, 200, { page, body });
   }
   if (path === '/bridge/wiki/rebuild' && req.method === 'POST') {
+    // S1 declared no-op: wiki pages are DERIVED state (renderings of spine
+    // slice-stops) — same rationale as the CLI's wiki sync/rebuild.
+    witnessNoop('derived-state-write:wiki-pages');
     const n = await rebuildWiki(repoRoot);
     return sendJson(res, 200, { ok: true, pagesWritten: n });
   }
@@ -883,8 +992,21 @@ async function handleBridge(req, res, url, ctx) {
   // ── plugins: enabled plugins claim their own /bridge/* routes ─────────────
   // (e.g. the `comms` plugin owns /bridge/{telegram,discord,email}/*). A
   // disabled plugin contributes zero routes — the path simply 404s below.
+  // S1 plugin witness contract (plan-review r1 F4 / r3 F5): a plugin's spine
+  // appends are observed by ALS like any core route — no auto-excuse. The
+  // handler result is extended backward-compatibly: `true` = handled;
+  // `{handled:true, witness:{kind:'noop', reason}}` declares a legitimate
+  // zero-append success. A mutating-method plugin route that neither appends
+  // nor declares breaches inline (handleRequest's verdict).
   for (const ps of await pluginServerHandlers(repoRoot)) {
-    if (await ps.handle({ path, method: req.method, req, res, url, repoRoot, sendJson, readBody })) return;
+    const out = await ps.handle({ path, method: req.method, req, res, url, repoRoot, sendJson, readBody });
+    if (out === true) return;
+    if (out && typeof out === 'object' && out.handled === true) {
+      if (out.witness && out.witness.kind === 'noop') {
+        witnessNoop(`plugin:${ps.name}:${out.witness.reason || 'declared-noop'}`);
+      }
+      return;
+    }
   }
 
   // ── events: tail N most recent (no cursor) for charts/sparklines ──────
@@ -935,6 +1057,11 @@ async function handleBridge(req, res, url, ctx) {
 
   // ── projection ────────────────────────────────────────────────────────
   if (path === '/bridge/projection' && req.method === 'GET') {
+    // S1 declared no-op: the inline janitor below appends ONLY when staleness
+    // thresholds cross — a quiet read legitimately appends nothing. When the
+    // janitor does append, the witness counter ALSO credits (witnessed
+    // either way).
+    witnessNoop('janitor-read-path (conditional append)');
     // Team-sync surfacing (#12c phase 6): in sync mode, decorate the payload
     // with this checkout's replicaId + the partition ids on disk so the
     // cockpit can render foreign replicas alongside proj.contentions.

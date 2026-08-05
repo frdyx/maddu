@@ -17,6 +17,7 @@ import { listMcp, readMcp, saveMcp, setEnabled as mcpSetEnabled, removeMcp,
 import { listRuntimes, readRuntime, saveRuntime, removeRuntime, detectRuntime,
   detectAll, runtimesHealth, spawnWorker } from './runtimes.mjs';
 import { sendJson, readBody } from './http-util.mjs';
+import { witnessNoop } from './mutation-witness.mjs';
 import { readBodySessionId } from './bridge-body-id.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
@@ -37,6 +38,10 @@ export async function routeMcp({ req, res, path, repoRoot }) {
     } catch (err) { return reply(res, 400, { error: err.message }); }
   }
   if (path === '/bridge/mcp/test-all' && req.method === 'POST') {
+    // S1 declared no-op (Codex diff r2 F3): a batch over zero/disabled
+    // servers legitimately appends nothing; per-server test events credit
+    // when they fire (conditional-append posture).
+    witnessNoop('empty-or-conditional-batch:mcp-test-all');
     const body = (await readBody(req)) || {};
     const results = await mcpTestAll(repoRoot, body.by || null);
     return reply(res, 200, { results });
@@ -94,6 +99,9 @@ export async function routeRuntimes({ req, res, path, repoRoot }) {
     return reply(res, 200, { ok: true, runtime: saved });
   }
   if (path === '/bridge/runtimes/detect-all' && req.method === 'POST') {
+    // S1 declared no-op (r2 F3): same conditional-batch posture as
+    // mcp/test-all — zero detected runtimes appends nothing.
+    witnessNoop('empty-or-conditional-batch:runtimes-detect-all');
     const body = (await readBody(req)) || {};
     const results = await detectAll(repoRoot, body.by || null);
     return reply(res, 200, { results });

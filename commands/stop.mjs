@@ -48,6 +48,13 @@ function printHelp() {
 
 export default async function stopCmd(args = []) {
   if (args.includes('--help') || args.includes('-h')) { printHelp(); return; }
+  // Mutation-witness declared no-op (Codex diff-review r1 F3): this verb's
+  // mutation is a HOST-PROCESS signal + pid-file cleanup (state artifact) —
+  // no spine event exists for it; the no-bridge path is a graceful success.
+  try {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('host-process:bridge-stop');
+  } catch {}
   const cwd = process.cwd();
   const pidPath = join(cwd, '.maddu', 'state', 'bridge.pid');
 

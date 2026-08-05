@@ -78,7 +78,10 @@ export default async function evolve(argv) {
     return;
   }
 
-  // adopt
+  // adopt — NOTE (Codex diff-review r1 F2): no blanket no-op here. The
+  // memory/agent-file/skill arms APPEND (LEARN_CORRECTION_WRITTEN /
+  // SKILL_CREATED) and must stay witnessed by their appends; only the
+  // draft-only arm below declares an excuse.
   const recId = positional[0];
   if (!recId) { console.error('Usage: maddu evolve adopt <rec-id> [--json]'); process.exit(2); }
   const rec = plan.recommendations.find((r) => r.recId === recId);
@@ -164,6 +167,10 @@ export default async function evolve(argv) {
     result.event = 'SKILL_CREATED/UPDATED';
   } else {
     // gate / workflow / tool-pattern: draft only — no existing writer.
+    // Mutation-witness declared no-op: this arm prints a draft and writes
+    // nothing (the genuinely append-free adoption branch).
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('draft-only-adoption');
     if (flags.json) {
       process.stdout.write(JSON.stringify({ ...result, draftOnly: true, draft: rec.draft, instructions: rec.category === 'gate' ? 'place as .maddu/gates/<id>.mjs (operator-owned dir)' : 'apply manually — no programmatic write path exists for this category' }, null, 2) + '\n');
       return;

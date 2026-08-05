@@ -78,6 +78,12 @@ export default async function checkpoint(argv) {
     if (!id) { console.error('usage: maddu checkpoint worktree <id>'); process.exit(2); }
     try {
       const out = await checkpoints.createWorktree(repoRoot, id);
+      if (out.alreadyExisted) {
+        // Mutation-witness declared no-op (Codex diff r4 F9): idempotent
+        // re-create of an existing worktree.
+        const { loadLibOptional } = await import('./_libroot.mjs');
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-worktree-exists');
+      }
       console.log(`${ANSI.pass}worktree${ANSI.reset}  ${out.path}${out.alreadyExisted ? ` ${ANSI.dim}(already existed)${ANSI.reset}` : ''}`);
     } catch (err) { console.error(`${ANSI.fail}worktree failed:${ANSI.reset} ${err.message}`); process.exit(5); }
     return;
@@ -110,7 +116,14 @@ export default async function checkpoint(argv) {
   if (sub === 'remove') {
     const id = rest[0];
     if (!id) { console.error('usage: maddu checkpoint remove <id>'); process.exit(2); }
-    await checkpoints.removeCheckpoint(repoRoot, id);
+    const r = await checkpoints.removeCheckpoint(repoRoot, id);
+    if (!r || r.removed === false) {
+      // Mutation-witness declared no-op (r4 F9): removing a nonexistent
+      // checkpoint is an idempotent success (an actual removal appends
+      // CHECKPOINT_REMOVED and is credited). Falsy r = pre-S1 lib skew.
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-checkpoint-not-found');
+    }
     console.log(`${ANSI.warn}removed${ANSI.reset}  ${id}`);
     return;
   }

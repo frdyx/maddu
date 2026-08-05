@@ -222,7 +222,13 @@ export default async function bridges(argv) {
   }
   const sub = argv[0];
   if (sub === 'list') return cmdList();
-  if (sub === 'kill-all') return cmdKillAll();
+  if (sub === 'kill-all') {
+    // Mutation-witness declared no-op: host-process signals + registry
+    // cleanup across devices' bridges — no workspace spine owns it.
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('host-process:bridge-kill-all');
+    return cmdKillAll();
+  }
   console.error(`maddu bridges: unknown subcommand "${sub}"`);
   printHelp();
   process.exit(2);

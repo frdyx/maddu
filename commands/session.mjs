@@ -283,7 +283,13 @@ export default async function session(argv) {
         eventType: spine.EVENT_TYPES.SESSION_CLOSED,
         data: { handoff: flags.handoff && flags.handoff !== true ? flags.handoff : null },
       });
-      if (res.status === 'already-closed') { console.log(`(already closed)  ${sessionId}`); return; }
+      if (res.status === 'already-closed') {
+        // Mutation-witness declared no-op: closing a closed session is a
+        // graceful idempotent success.
+        const { loadLibOptional } = await import('./_libroot.mjs');
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-closed');
+        console.log(`(already closed)  ${sessionId}`); return;
+      }
       if (res.status === 'missing') {
         console.error(`no such session on the spine: ${sessionId}`);
         process.exit(2);

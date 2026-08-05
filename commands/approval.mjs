@@ -203,6 +203,10 @@ export default async function approval(argv) {
     console.log(`Scanning spine: ${events.length} events`);
     console.log(`Found ${candidates.length} APPROVAL_REQUESTED events without paired decision (legacy auto-decisions)`);
     if (candidates.length === 0) {
+      // Mutation-witness declared no-op (Codex diff r4 F7): zero legacy
+      // candidates is a graceful append-free success.
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-nothing-to-migrate');
       console.log('(nothing to migrate)');
       return;
     }

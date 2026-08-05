@@ -81,6 +81,10 @@ export default async function plugin(argv) {
   const set = new Set(state.enabled);
 
   if (sub === 'enable') {
+    // Mutation-witness declared no-op: writes .maddu/config/plugins.json
+    // (config write, no spine event).
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('control-plane-config-write:plugins');
     if (!p.trusted && !flags.trust) {
       const sha = await plugins.hashPlugin(p.dir);
       console.error(`maddu plugin enable: "${name}" is a user-added (untrusted) plugin.`);
@@ -96,6 +100,10 @@ export default async function plugin(argv) {
   }
 
   if (sub === 'disable') {
+    // Declared no-op: same config write (and the already-disabled early
+    // return is an idempotent success).
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('control-plane-config-write:plugins');
     if (!set.has(name)) { console.log(`${name} is already disabled`); return; }
     set.delete(name);
     await plugins.writeEnableState(repoRoot, { enabled: [...set] });

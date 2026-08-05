@@ -16,6 +16,7 @@
 // shim that preserves the original `return sendJson(...)` flow verbatim.
 
 import { append, EVENT_TYPES, genWorkerId, genTaskId, readAll } from './spine.mjs';
+import { witnessNoop } from './mutation-witness.mjs';
 import { project } from './projections.mjs';
 import { redactSpawn } from './secret-scan.mjs';
 import { listSkills, readSkill, saveSkill, deleteSkill, applySkill, draftFromSliceStop } from './skills.mjs';
@@ -285,6 +286,10 @@ export async function routeMemory({ req, res, path, url, repoRoot }) {
     return reply(res, 200, { query: q, kind, facts, count: facts.length });
   }
   if (path === '/bridge/memory/extract' && req.method === 'POST') {
+    // S1 declared no-op (Codex diff r2 F3): extraction writes .maddu/memory/
+    // (hindsight state DERIVED from spine slice-stops) — same rationale as
+    // the CLI's `memory extract`.
+    witnessNoop('derived-state-write:memory-facts');
     const body = (await readBody(req)) || {};
     if (body.rebuild) {
       const n = await rebuildMemory(repoRoot);

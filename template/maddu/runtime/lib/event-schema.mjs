@@ -103,7 +103,18 @@
 // to the approved CONTENT, so a hand-edited memory.ndjson row with a
 // preserved id can never ride an old approval into agent context. Additive →
 // minor bump; baseline refresh at the next release.
-export const EVENT_CONTRACT_VERSION = '1.13.0';
+// 1.14.0 (buzz-steals S1, mutation-witness) — added MUTATION_UNWITNESSED: a
+// mutating seam (CLI verb or bridge write endpoint) exited claiming success
+// with zero spine appends and no declared no-op — silence made loud, the
+// runtime complement to the static tier census (DISCIPLINE_SKIPPED's sibling:
+// that one witnesses a bypassed check, this one witnesses an unrecorded
+// mutation). CLI breaches are recorded synchronously at process exit into a
+// spool (.maddu/state/mutation-breaches/) because spine.append cannot run in
+// an exit handler, then drained onto the spine by the next dispatcher run
+// (via:'breach-drain'); bridge breaches append inline (via:'inline').
+// `breachId` dedupes the at-least-once drain across a crash window. Additive
+// → minor bump; baseline refresh at the next release.
+export const EVENT_CONTRACT_VERSION = '1.14.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -294,6 +305,7 @@ export const EVENT_SCHEMA = {
   BRIDGE_CROSS_WORKSPACE: { summary: "A bridge request selected a workspace other than the active one.", data: { active: 'string', method: 'string', path: 'string', workspace: 'string' } },
   SPINE_CUTOVER: { summary: "A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).", data: { version: 'string' } },
   DISCIPLINE_SKIPPED: { summary: "A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent.", data: { blocked: 'boolean?', enforcement: 'string|null', reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
+  MUTATION_UNWITNESSED: { summary: "A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain.", data: { breachId: 'string', breachTs: 'string', exitCode: 'number|null', label: 'string', method: 'string|null', path: 'string|null', sessionId: 'string|null', sub: 'string|null', surface: 'string', verb: 'string|null', via: 'string' } },
   ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   VERIFICATION_STARTED: { summary: "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.", data: { kind: 'string', profile: 'string|null' } },
   VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.", data: { allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?' } },

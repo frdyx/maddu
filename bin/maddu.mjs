@@ -104,6 +104,171 @@ Docs:
 `);
 }
 
+// ── Mutation witness (buzz-steals S1, v1.116.0) ─────────────────────────────
+// Runtime proof that every mutating verb RECORDED something: the guard's
+// verdict runs in a process 'exit' handler (commands call process.exit()
+// directly — same seam as invocation receipts), where a breach (exit 0, zero
+// spine appends, zero declared no-ops) is spooled synchronously to
+// .maddu/state/mutation-breaches/ and forces exit 1; the NEXT dispatcher run
+// drains the spool onto the spine BEFORE arming the command's own witness
+// context (a drain append must never credit the upcoming command). FAIL-OPEN
+// on older installs: lib or _tiers unloadable → guard never arms, dispatch
+// unchanged. Ordering law (plan-review r1 F1): (1) register the inert exit
+// handler → (2) arm receipts → (3) drain with NO witness ctx active →
+// (4) create/arm the command ctx → (5) dispatch inside runWithWitness.
+// Resolve the ONE runtime-lib directory this invocation's commands will use —
+// MUST mirror commands/_libroot.mjs#resolveLibDir: cwd-installed repo first,
+// then the layout relative to this bin. Two rules matter:
+//   1. SAME DIR, not same name: the witness lib holds process-wide state, so
+//      bin and the command handlers must import the same module instance (a
+//      divergent order imported two instances and every credit landed in the
+//      wrong one — found by the S1 calibration pass).
+//   2. NO cross-dir fallback for the witness itself: if the chosen dir's
+//      runtime predates S1 (no mutation-witness.mjs), its spine never
+//      credits — arming a guard from a NEWER tree would false-breach every
+//      appending verb on that old install. Missing in the chosen dir ⇒ inert.
+import { statSync } from 'node:fs';
+function pickLibDir() {
+  for (const d of [
+    join(process.cwd(), 'maddu', 'runtime', 'lib'),         // installed repo at cwd (what commands resolve)
+    join(repoRoot, 'runtime', 'lib'),                       // consumer install (bin = <repo>/maddu/bin)
+    join(repoRoot, 'template', 'maddu', 'runtime', 'lib'),  // source checkout
+  ]) {
+    try { if (statSync(d).isDirectory()) return d; } catch {}
+  }
+  return null;
+}
+async function loadOptionalLib(name) {
+  const dir = pickLibDir();
+  if (!dir) return null;
+  try { return await import(pathToFileURL(join(dir, name)).href); } catch { return null; }
+}
+
+async function prepareMutationWitness(ws) {
+  try {
+    ws.lib = await loadOptionalLib('mutation-witness.mjs');
+    ws.receipts = await loadOptionalLib('invocation-receipts.mjs');
+    if (!ws.lib || typeof ws.lib.evaluateWitness !== 'function') { ws.lib = null; return; }
+    // Inert holder: registered FIRST (before the receipts handler) so a
+    // breach-forced exitCode=1 is what receipts record; inert while ctx null.
+    process.on('exit', (code) => {
+      try {
+        const ctx = ws.ctx;
+        if (!ctx) return;
+        const exitCode = typeof process.exitCode === 'number' ? process.exitCode
+          : (typeof code === 'number' ? code : 0);
+        const { breach } = ws.lib.evaluateWitness(ctx, { exitCode });
+        if (!breach) return;
+        const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env) ?? null;
+        const breachId = ws.lib.recordBreachSync({ stateRoot, ctx, exitCode });
+        process.stderr.write(`maddu: MUTATION_UNWITNESSED — ${ctx.verb ?? ctx.label} exited 0 with zero spine appends and no declared no-op${breachId ? ` (${breachId})` : ''}\n`);
+        process.exitCode = 1;
+      } catch {}
+    });
+  } catch { ws.lib = null; }
+}
+
+// Read-shape matching (plan-review r4 F1): a _tiers.mjs `readShapes` entry is
+// a string (single leading token; '(bare)' = no token-shaped first arg) or
+// { tokens: [...], requiredFlags: [...] } — leading tokens must equal
+// `tokens` exactly AND every required flag must be present. Anything
+// unmatched on a mutating verb is mutating (mutation wins).
+function matchesReadShape(shape, rest) {
+  const first = typeof rest[0] === 'string' && !rest[0].startsWith('-') ? rest[0] : null;
+  if (typeof shape === 'string') {
+    return shape === '(bare)' ? first === null : first === shape;
+  }
+  if (!shape || !Array.isArray(shape.tokens)) return false;
+  for (let i = 0; i < shape.tokens.length; i++) {
+    if (rest[i] !== shape.tokens[i]) return false;
+  }
+  for (const f of shape.requiredFlags ?? []) {
+    if (!rest.includes(f)) return false;
+  }
+  return true;
+}
+
+// THE one invocation-shape classifier — shared by arming AND drain-failure
+// handling (Codex diff-review r1 F7: a divergent drain classifier treated
+// every mixed-tier verb as mutating and blocked `plan list` on a broken
+// drain). Returns 'read' | 'mutating' | null (unknown verb → guard inert).
+async function resolveInvocationMode(raw, rest) {
+  let tiers = null;
+  try { tiers = (await import(pathToFileURL(join(repoRoot, 'commands', '_tiers.mjs')).href)).default; } catch {}
+  const entry = tiers?.[raw];
+  if (!entry) return null;
+  const isRead = entry.tier === 'read-only'
+    || (Array.isArray(entry.readShapes) && entry.readShapes.some((s) => matchesReadShape(s, rest)));
+  return isRead ? 'read' : 'mutating';
+}
+
+async function armCommandWitness(ws, raw, rest) {
+  try {
+    if (!ws.lib) return;
+    const mode = await resolveInvocationMode(raw, rest);
+    if (mode === null) return; // unknown tier → guard stays inert (census owns parity)
+    const subRaw = Array.isArray(rest) && typeof rest[0] === 'string' && /^[a-z][a-z0-9-]{0,31}$/i.test(rest[0]) ? rest[0].toLowerCase() : null;
+    const isRead = mode === 'read';
+    // Grammar-gated session attribution (sid-surface-census: raw session-env
+    // reads must be inline-gated; a malformed inherited id is dropped to null).
+    const isRefId = (v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v);
+    const ctx = ws.lib.createWitnessContext(`cli:${raw}${subRaw ? ' ' + subRaw : ''}`, {
+      mode: isRead ? 'read' : 'mutating',
+      surface: 'cli', verb: raw, sub: subRaw,
+      sessionId: isRefId(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null,
+    });
+    ws.lib.armCliWitness(ctx);
+    ws.ctx = ctx;
+  } catch {}
+}
+
+// Drain spooled breaches onto the spine (step 3 — runs with NO witness ctx
+// armed). A drain failure blocks a MUTATING dispatch (exit 1, spool
+// retained); read-shaped dispatches warn and proceed so `maddu doctor` can
+// always diagnose a broken drain. Pinned recovery exception (plan-review r5
+// F1): a drain refused by the S2 identity-conflict gate does not block the
+// exact ceremony invocation `spine identity resolve`.
+async function drainMutationBreaches(ws, raw, rest) {
+  if (!ws.lib || typeof ws.lib.drainBreachesToSpine !== 'function') return;
+  let res = null;
+  try {
+    const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env);
+    if (!stateRoot) return;
+    // The drain runs when bare rows OR claim files exist (Codex diff r3 F1:
+    // a crashed drainer leaves ONLY `<id>.json.draining.…` — the fast path
+    // must still enter so reclaim can rename it back and this run drains
+    // it). Quarantined .corrupt rows alone never trigger a drain — they are
+    // the census gate's evidence, not drainable work.
+    const spoolNames = ws.lib.listBreachesSync(stateRoot);
+    if (!spoolNames.some((n) => n.endsWith('.json') || /\.json\.draining\./.test(n))) return;
+    const spine = await loadOptionalLib('spine.mjs');
+    if (!spine) { res = { failed: 1, errors: [{ error: 'spine lib unloadable' }] }; }
+    else {
+      // breachId idempotency (r1 F5): a crashed prior drain may have appended
+      // without unlinking — scan the spine before re-appending. Drains with
+      // rows are rare; a full read here is acceptable.
+      const hasBreachId = async (id) => {
+        try {
+          const all = await spine.readAll(stateRoot);
+          return all.some((e) => e.type === 'MUTATION_UNWITNESSED' && e.data?.breachId === id);
+        } catch { return false; }
+      };
+      res = await ws.lib.drainBreachesToSpine(stateRoot, stateRoot, (spec) => spine.append(stateRoot, spec), { hasBreachId });
+    }
+  } catch (err) { res = { failed: 1, errors: [{ error: err?.message || String(err) }] }; }
+  if (!res || !res.failed) return;
+  const isCeremony = raw === 'spine' && rest[0] === 'identity' && rest[1] === 'resolve';
+  const conflictOnly = Array.isArray(res.errors) && res.errors.length > 0 && res.errors.every((e) => e.code === 'WS_IDENTITY_CONFLICT');
+  if (isCeremony && conflictOnly) return;
+  const detail = res.errors?.[0]?.error ?? 'unknown';
+  const mode = await resolveInvocationMode(raw, rest); // shared classifier (r1 F7)
+  if (mode !== 'read') {
+    console.error(`maddu: mutation-breach drain failed (${res.failed} row(s): ${detail}) — spool retained; resolve before mutating`);
+    process.exit(1);
+  }
+  console.error(`maddu: warning — mutation-breach drain failed (${res.failed} row(s): ${detail}); read-only dispatch proceeding`);
+}
+
 // ── Invocation receipts (usage-audit Tier 2, v1.101.0) ──────────────────────
 // Every CLI entry records one execution receipt to
 // `.maddu/state/invocation-receipts.ndjson` — the audit's verb stats were
@@ -142,7 +307,11 @@ async function armInvocationReceipt(raw, rest) {
         if (!stateRoot) return;
         lib.recordInvocationSync({
           stateRoot, verb, sub,
-          exitCode: typeof code === 'number' ? code : (process.exitCode ?? 0),
+          // Prefer the LIVE process.exitCode: the mutation-witness handler
+          // (registered first) may have amended it to 1 on a breach, and the
+          // frozen `code` arg predates that amendment.
+          exitCode: typeof process.exitCode === 'number' ? process.exitCode
+            : (typeof code === 'number' ? code : 0),
           durationMs: Date.now() - t0,
         });
       } catch {}
@@ -152,6 +321,10 @@ async function armInvocationReceipt(raw, rest) {
 
 async function main() {
   const [, , raw, ...rest] = process.argv;
+  // Witness ordering law: inert exit handler FIRST, receipts second — so a
+  // breach-forced exit 1 is what telemetry records.
+  const witnessState = { ctx: null, lib: null, receipts: null };
+  await prepareMutationWitness(witnessState);
   await armInvocationReceipt(raw, rest);
 
   if (!raw || raw === '--help' || raw === '-h') {
@@ -176,15 +349,20 @@ async function main() {
   // plan, lane, install) detect --help at the top of their handler — route
   // through them so the operator sees the more specific text. Everything
   // else falls back to the global discovery surface (`maddu help`).
+  //
+  // Mutation-witness census pin: the two --help arms below are the ONLY
+  // unguarded invocation sites, and both are read-only by construction
+  // (they render usage text). The canonical dispatch below is the single
+  // guarded site — command-tier-discipline asserts this arity.
   if (rest.includes('--help') || rest.includes('-h')) {
     const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install', 'task', 'review', 'self-test', 'agents']);
     if (VERBS_WITH_OWN_HELP.has(raw)) {
-      const mod = await import(pathToFileURL(join(repoRoot, 'commands', `${raw}.mjs`)).href);
+      const mod = await import(pathToFileURL(join(repoRoot, 'commands', `${raw}.mjs`)).href); // census-pinned --help site 1
       await mod.default(rest);
       return;
     }
     try {
-      const helpMod = await import(pathToFileURL(join(repoRoot, 'commands', 'help.mjs')).href);
+      const helpMod = await import(pathToFileURL(join(repoRoot, 'commands', 'help.mjs')).href); // census-pinned --help site 2
       await helpMod.default([]);
       return;
     } catch {
@@ -193,9 +371,18 @@ async function main() {
     }
   }
 
+  // Ordering law (see prepareMutationWitness): drain BEFORE the command's
+  // witness ctx exists, arm, then dispatch inside the ALS context.
+  await drainMutationBreaches(witnessState, raw, rest);
+  await armCommandWitness(witnessState, raw, rest);
+
   const commandPath = join(repoRoot, 'commands', `${raw}.mjs`);
   const mod = await import(pathToFileURL(commandPath).href);
-  await mod.default(rest);
+  if (witnessState.ctx && witnessState.lib) {
+    await witnessState.lib.runWithWitness(witnessState.ctx, () => mod.default(rest)); // the ONE guarded dispatch site
+  } else {
+    await mod.default(rest); // guard inert (older install / lib unloadable)
+  }
 }
 
 main().catch((err) => {

@@ -47,7 +47,12 @@ export default async function command(argv) {
 
   if (sub === 'clear') {
     const proj = await projections.project(repoRoot);
-    if (!proj.phase) { console.log('no active phase — nothing to clear.'); return; }
+    if (!proj.phase) {
+      // Mutation-witness declared no-op: double-clear is a graceful success.
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-active-phase');
+      console.log('no active phase — nothing to clear.'); return;
+    }
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PHASE_CLEARED,
       actor: await envActingSid(),
