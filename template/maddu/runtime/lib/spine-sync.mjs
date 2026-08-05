@@ -19,7 +19,7 @@
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache, publishWsAnchorOnce, computeAuthorityFingerprint } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache, publishWsAnchorOnce, computeAuthorityFingerprint, findIncompatibleWsStamp, buildWsGrandfather } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -437,6 +437,14 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
     if (law2.conflict) {
       await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true, mode: 'sync' }).catch(() => {});
     } else if (law2.authority) {
+      // Adoption-side history compatibility (diff-funnel r4-F2): activating
+      // with an authority that instantly FAILs migrated stamped history is
+      // never correct — grandfathered losing stamps pass, anything else is
+      // the named failure.
+      const badAdopt = await findIncompatibleWsStamp(repoRoot, law2.authority, buildWsGrandfather(scan2.anchors, scan2.resolutions));
+      if (badAdopt) {
+        return wsFail(`existing event ${badAdopt.id} is stamped ${badAdopt.ws}, incompatible with the workspace authority ${law2.authority}`);
+      }
       await writeIdentityCache(repoRoot, { spineIdentity: law2.authority, mode: 'sync', fp: fpPre2 }).catch(() => {});
     } else {
       return wsFail('no identity authority exists after the anchor bootstrap');

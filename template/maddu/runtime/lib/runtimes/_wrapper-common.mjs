@@ -71,7 +71,7 @@ export async function appendTokenUsage(repoRoot, payload) {
   //   unknown  → absent/mode-less/unprovable cache — emit ws-less, tolerated
   //              forward-only like prev_hash
   try {
-    const idf = await readFreshCachedIdentity(repoRoot);
+    const idf = await readFreshCachedIdentity(repoRoot, { refresh: true });
     if (idf.state === 'conflict') return null; // frozen — drop, never block
     if (idf.state === 'fresh') ev.ws = idf.ws;
   } catch { /* best-effort */ }

@@ -183,28 +183,40 @@ export async function writeIdentityCache(repoRoot, { spineIdentity, conflict = f
 // across consecutive deltas, hiding a completed anchor forever). Sizes,
 // never mtimes (S1 lesson: rename preserves mtime). An entry of -1 means
 // "could not determine" and always forces a rescan.
-async function committedSizeOf(path) {
-  let st;
-  try { st = await stat(path); } catch { return -1; }
-  if (st.size === 0) return 0;
-  const window = Math.min(st.size, 65536);
+async function committedSizeOf(path, rawSize) {
+  if (rawSize === 0) return 0;
+  const window = Math.min(rawSize, 65536);
   let fh;
   try { fh = await open(path, 'r'); } catch { return -1; }
   try {
     const buf = Buffer.alloc(window);
-    const { bytesRead } = await fh.read(buf, 0, window, st.size - window);
+    const { bytesRead } = await fh.read(buf, 0, window, rawSize - window);
     if (bytesRead !== window) return -1;
     const idx = buf.lastIndexOf(0x0a);
-    if (idx === -1) return st.size > window ? -1 : 0; // no newline: whole file is one unterminated line
-    return st.size - (window - idx - 1);
+    if (idx === -1) return rawSize > window ? -1 : 0; // no newline: whole file is one unterminated line
+    return rawSize - (window - idx - 1);
   } catch { return -1; } finally { await fh.close().catch(() => {}); }
 }
-export async function computeAuthorityFingerprint(repoRoot) {
+// Entries are { raw, committed }. When a previous fingerprint is supplied and
+// a segment's RAW stat size is unchanged, its committed size is reused
+// without any read (diff-funnel r4-F3: the hot path is stats-only when
+// nothing changed; only grown/new segments pay the bounded tail read).
+export async function computeAuthorityFingerprint(repoRoot, prevFp = null) {
   const segs = {};
   const eventsDir = join(repoRoot, '.maddu', 'events');
+  const prev = prevFp?.segs || {};
   const addDir = async (dir, prefix) => {
     for (const s of await listSegmentsInDir(dir)) {
-      segs[`${prefix}${s}`] = await committedSizeOf(join(dir, s));
+      const key = `${prefix}${s}`;
+      const p = join(dir, s);
+      let raw = -1;
+      try { raw = (await stat(p)).size; } catch { /* raw stays -1 */ }
+      const old = prev[key];
+      if (raw >= 0 && old && typeof old === 'object' && old.raw === raw && Number.isInteger(old.committed) && old.committed >= 0) {
+        segs[key] = { raw, committed: old.committed };
+      } else {
+        segs[key] = { raw, committed: raw < 0 ? -1 : await committedSizeOf(p, raw) };
+      }
     }
   };
   await addDir(eventsDir, 'flat:');
@@ -215,12 +227,15 @@ export async function computeAuthorityFingerprint(repoRoot) {
   return { segs };
 }
 
+const fpCommitted = (entry) => (entry && typeof entry === 'object' && Number.isInteger(entry.committed) ? entry.committed : -1);
+
 function fpEqual(a, b) {
   const ka = Object.keys(a?.segs || {}), kb = Object.keys(b?.segs || {});
   if (ka.length !== kb.length) return false;
   for (const k of ka) {
-    if (a.segs[k] < 0 || b.segs[k] < 0) return false; // undeterminable never matches
-    if (a.segs[k] !== b.segs[k]) return false;
+    const ca = fpCommitted(a.segs[k]), cb = fpCommitted(b.segs[k]);
+    if (ca < 0 || cb < 0) return false; // undeterminable (or legacy shape) never matches
+    if (ca !== cb) return false;
   }
   return true;
 }
@@ -242,8 +257,9 @@ async function authorityDeltaState(repoRoot, cachedFp, currentFp) {
   for (const key of Object.keys(old)) {
     if (!(key in (currentFp.segs || {}))) return 'rescan'; // segment vanished
   }
-  for (const [key, size] of Object.entries(currentFp.segs || {})) {
-    const prev = old[key] ?? 0;
+  for (const [key, entry] of Object.entries(currentFp.segs || {})) {
+    const size = fpCommitted(entry);
+    const prev = key in old ? fpCommitted(old[key]) : 0;
     if (size === prev) continue;
     if (size < prev || prev < 0 || size < 0) return 'rescan';
     const rel = key.startsWith('flat:')
@@ -271,7 +287,7 @@ async function authorityDeltaState(repoRoot, cachedFp, currentFp) {
 //   {state:'conflict'}  — cached freeze, caller drops
 //   {state:'unknown'}   — absent/unresolvable/mode-less/unprovable cache —
 //                         treat as absent, emit ws-less
-export async function readFreshCachedIdentity(repoRoot) {
+export async function readFreshCachedIdentity(repoRoot, { refresh = false } = {}) {
   let c;
   try { c = await readIdentityCache(repoRoot); } catch { return { state: 'unknown' }; }
   if (c.state !== 'present') return { state: 'unknown' };
@@ -281,9 +297,18 @@ export async function readFreshCachedIdentity(repoRoot) {
   }
   if (c.mode === 'sync' && c.fp) {
     if (!(await wsModeIsPartitioned(repoRoot))) return { state: 'unknown' };
-    const cur = await computeAuthorityFingerprint(repoRoot);
+    const cur = await computeAuthorityFingerprint(repoRoot, c.fp);
     const d = await authorityDeltaState(repoRoot, c.fp, cur);
-    if (d === 'fresh' || d === 'clean') return { state: 'fresh', ws: c.spineIdentity };
+    if (d === 'fresh') return { state: 'fresh', ws: c.spineIdentity };
+    if (d === 'clean') {
+      // Advance the fingerprint past the clean growth (r4-F3: a wrapper-only
+      // workload would otherwise re-read an ever-growing delta) —
+      // last-writer-wins best-effort, never blocking.
+      if (refresh) {
+        await writeIdentityCache(repoRoot, { spineIdentity: c.spineIdentity, mode: 'sync', fp: cur }).catch(() => {});
+      }
+      return { state: 'fresh', ws: c.spineIdentity };
+    }
   }
   return { state: 'unknown' };
 }
@@ -454,18 +479,68 @@ export async function scanWsAuthorityEvents(repoRoot) {
 //   conflicting anchors + a resolution binding ALL of them selecting an
 //   EXISTING identity → { authority: selected }
 //   else → { conflict: true, identities }
-export function resolveWsAuthority({ anchors = [], resolutions = [], flatWs = null } = {}) {
+export function validWsResolutions(anchors, resolutions) {
   const ids = [...new Set(anchors.map((a) => a?.data?.spineIdentity).filter((x) => WS_ID_RE.test(String(x || ''))))];
-  if (ids.length === 0) return { authority: flatWs };
-  if (ids.length === 1) return { authority: ids[0] };
-  const valid = resolutions.filter((r) => {
+  return resolutions.filter((r) => {
     const sel = r?.data?.selected;
     return WS_ID_RE.test(String(sel || '')) && ids.includes(sel)
       && validateResolutionBinding(anchors, r?.data).ok;
   });
+}
+
+export function resolveWsAuthority({ anchors = [], resolutions = [], flatWs = null } = {}) {
+  const ids = [...new Set(anchors.map((a) => a?.data?.spineIdentity).filter((x) => WS_ID_RE.test(String(x || ''))))];
+  if (ids.length === 0) return { authority: flatWs };
+  if (ids.length === 1) return { authority: ids[0] };
+  const valid = validWsResolutions(anchors, resolutions);
   const selections = [...new Set(valid.map((r) => r.data.selected))];
   if (selections.length === 1) return { authority: selections[0], resolved: true };
   return { conflict: true, identities: ids };
+}
+
+// ── The resolution GRANDFATHER law (diff-funnel r4-F1) ──────────────────────
+// A realistic conflict has WORK stamped with both identities before anyone
+// notices (each offline first-writer stamped its triggering append). The
+// ceremony is forward-only in an append-only spine — the losing stamps can
+// never be rewritten — so WS_IDENTITY_RESOLVED binds a forward CUTOVER: the
+// exact per-partition chain heads at ceremony time
+// (`data.cutover: [{replicaId, segment, line, hash}]`, recorded atomically
+// under the funnel lock by appendWsResolutionOnce). Verify and the
+// history-compatibility law then tolerate a LOSING identity (bound by the
+// resolution, ≠ selected) only at-or-before its partition's bound head;
+// everything after the cutover must carry `selected` (or be ws-less legacy).
+// A partition with no cutover entry had no events at ceremony time — losing
+// stamps there are post-ceremony and stay red.
+export function buildWsGrandfather(anchors, resolutions) {
+  const valid = validWsResolutions(anchors, resolutions);
+  const losing = new Set();
+  const cutovers = []; // one map per valid resolution — ANY tolerating map grandfathers
+  for (const r of valid) {
+    const sel = r.data.selected;
+    for (const c of Array.isArray(r.data.conflicts) ? r.data.conflicts : []) {
+      if (WS_ID_RE.test(String(c?.spineIdentity || '')) && c.spineIdentity !== sel) losing.add(c.spineIdentity);
+    }
+    const map = new Map();
+    for (const h of Array.isArray(r.data.cutover) ? r.data.cutover : []) {
+      if (h && typeof h.replicaId === 'string' && typeof h.segment === 'string' && Number.isInteger(h.line)) {
+        map.set(h.replicaId, { segment: h.segment, line: h.line });
+      }
+    }
+    cutovers.push(map);
+  }
+  return { losing, cutovers };
+}
+
+// Is a `ws` stamp at (replicaId, segment, lineNo) tolerated by the
+// grandfather law? (Pure position check — head-hash validation is verify's
+// job.)
+export function wsStampGrandfathered(grandfather, ws, replicaId, segment, lineNo) {
+  if (!grandfather || !grandfather.losing.has(ws)) return false;
+  for (const map of grandfather.cutovers) {
+    const head = map.get(replicaId);
+    if (head && (segment < head.segment || (segment === head.segment && lineNo <= head.line))) return true;
+  }
+  return false;
 }
 
 // The canonical binding a resolution must carry: EVERY conflicting anchor as
@@ -558,7 +633,7 @@ export async function resolveIdentityForAppend(repoRoot) {
 
   // Sync mode: anchors are the authority. Fingerprint BEFORE the scan so any
   // byte that lands during it stays inside the next append's delta window.
-  const fpBefore = await computeAuthorityFingerprint(repoRoot);
+  const fpBefore = await computeAuthorityFingerprint(repoRoot, cache.state === 'present' ? cache.fp : null);
   let scan;
   try { scan = await scanWsAuthorityEvents(repoRoot); }
   catch (e) { return { refuse: e?.message || String(e) }; }
@@ -568,6 +643,14 @@ export async function resolveIdentityForAppend(repoRoot) {
     return { conflict: law.identities };
   }
   if (law.authority) {
+    // History-compatibility on ADOPTION (diff-funnel r4-F2): a scan that
+    // transitions to an authority must not start stamping an identity that
+    // instantly FAILs already-stamped history — losing pre-cutover stamps
+    // bound by a valid resolution are grandfathered, anything else refuses.
+    const bad = await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions));
+    if (bad) {
+      return { refuse: `existing event ${bad.id} is stamped ${bad.ws}, incompatible with the workspace authority ${law.authority} — resolve the histories before S2 writes` };
+    }
     await writeIdentityCache(repoRoot, { spineIdentity: law.authority, mode: 'sync', fp: fpBefore }).catch(() => {});
     return { ws: law.authority };
   }
@@ -587,14 +670,17 @@ export async function resolveIdentityForAppend(repoRoot) {
   };
 }
 
-// Sweep every stored line for a ws stamp that differs from `proposed` —
-// bootstrap-only (never on the hot path). Returns {id, ws} of the first
-// offender or null. Torn tails are skipped exactly like the authority scan
-// (not yet part of the record); malformed complete lines are the chain
-// verifier's domain, not the identity law's.
-async function findForeignWsStamp(repoRoot, proposed) {
+// Sweep every stored line for a ws stamp INCOMPATIBLE with `authority` —
+// adoption/publication-time only (never on the hot path). A differing stamp
+// is tolerated only when the grandfather law covers it (a LOSING identity
+// bound by a valid resolution, at-or-before its partition's cutover head —
+// diff-funnel r4-F1/F2). Returns {id, ws} of the first offender or null.
+// Torn tails are skipped exactly like the authority scan (not yet part of
+// the record); malformed complete lines are the chain verifier's domain,
+// not the identity law's.
+export async function findIncompatibleWsStamp(repoRoot, authority, grandfather = null) {
   const eventsDir = join(repoRoot, '.maddu', 'events');
-  const sweepDir = async (dir) => {
+  const sweepDir = async (dir, replicaId) => {
     let names = [];
     try { names = (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); }
     catch { return null; }
@@ -607,20 +693,20 @@ async function findForeignWsStamp(repoRoot, proposed) {
         if (!lines[i].includes('"ws"')) continue;
         let ev;
         try { ev = JSON.parse(lines[i]); } catch { continue; }
-        if (ev && typeof ev.ws === 'string' && WS_ID_RE.test(ev.ws) && ev.ws !== proposed) {
-          return { id: ev.id ?? null, ws: ev.ws };
-        }
+        if (!ev || typeof ev.ws !== 'string' || !WS_ID_RE.test(ev.ws) || ev.ws === authority) continue;
+        if (wsStampGrandfathered(grandfather, ev.ws, replicaId, seg, i + 1)) continue;
+        return { id: ev.id ?? null, ws: ev.ws };
       }
     }
     return null;
   };
-  const flatHit = await sweepDir(eventsDir);
+  const flatHit = await sweepDir(eventsDir, ''); // flat has no cutover entries — losing stamps there stay incompatible
   if (flatHit) return flatHit;
   const byReplica = join(eventsDir, 'by-replica');
   let ids = [];
   try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
   for (const id of ids.sort()) {
-    const hit = await sweepDir(join(byReplica, id));
+    const hit = await sweepDir(join(byReplica, id), id);
     if (hit) return hit;
   }
   return null;
@@ -647,7 +733,17 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     catch (e) { return { unresolvable: e?.message || String(e) }; }
     const law = resolveWsAuthority(scan);
     if (law.conflict) return { conflict: law.identities };
-    if (law.authority) return { adopted: law.authority };
+    if (law.authority) {
+      // Adoption applies the SAME history-compatibility law as publication
+      // (diff-funnel r4-F2: adopting a peer anchor over an anchorless
+      // workspace's already-stamped history is exactly as corrupting as
+      // publishing one).
+      const badAdopt = await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions));
+      if (badAdopt) {
+        return { unresolvable: `existing event ${badAdopt.id} is stamped ${badAdopt.ws}, incompatible with the anchored authority ${law.authority} — resolve the histories before S2 writes` };
+      }
+      return { adopted: law.authority };
+    }
     const mf = await findMergeFirstGenesis(repoRoot);
     if (mf.state === 'absent') return { bootstrap: true }; // empty partition — the caller's event IS the genesis
     if (mf.state === 'unresolvable') return { unresolvable: mf.error };
@@ -657,8 +753,10 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     // events already ws-stamped in this workspace (e.g. S2-stamped flat
     // history migrated into an anchorless older sync workspace whose peer
     // genesis sorts merge-first) would make verify FAIL ws_mismatch on the
-    // entire migrated history the moment it lands. Refuse instead.
-    const foreign = await findForeignWsStamp(repoRoot, proposed);
+    // entire migrated history the moment it lands. Refuse instead. (No
+    // anchors exist here, so no resolutions can be valid — the grandfather
+    // is empty by construction.)
+    const foreign = await findIncompatibleWsStamp(repoRoot, proposed, null);
     if (foreign) {
       return { unresolvable: `existing event ${foreign.id} is stamped ${foreign.ws} but the merge-first nomination derives ${proposed} — resolve the histories before anchoring (an anchor is irreversible)` };
     }
@@ -709,6 +807,32 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
     }
     const binding = validateResolutionBinding(scan.anchors, ev.data);
     if (!binding.ok) return { invalid: binding.reason };
+    // Bind the forward CUTOVER (diff-funnel r4-F1): the exact per-partition
+    // chain heads at ceremony time, recorded atomically under this lock. The
+    // grandfather law tolerates LOSING-identity stamps at-or-before these
+    // heads — the only way a both-sides-stamped conflict can ever resolve in
+    // an append-only spine.
+    const cutover = [];
+    const byReplica = join(eventsDir, 'by-replica');
+    let rids = [];
+    try { rids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
+    for (const rid of rids.sort()) {
+      const pdir = partitionDir(repoRoot, rid);
+      let segsIn = [];
+      try { segsIn = (await readdir(pdir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { continue; }
+      let head = null;
+      for (let si = segsIn.length - 1; si >= 0 && !head; si--) {
+        let txt = '';
+        try { txt = await readFile(join(pdir, segsIn[si]), 'utf8'); } catch { continue; }
+        const lines = txt.split('\n');
+        const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+        for (let li = committed - 1; li >= 0; li--) {
+          if (lines[li].trim()) { head = { replicaId: rid, segment: segsIn[si], line: li + 1, hash: hashLine(lines[li]) }; break; }
+        }
+      }
+      if (head) cutover.push(head);
+    }
+    ev.data = { ...ev.data, cutover };
     const prevLine = await lastEventLineInDir(dir);
     ev.prev_hash = prevLine === null ? null : hashLine(prevLine);
     const line = JSON.stringify(ev);

@@ -69,7 +69,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
-import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE } from './spine-append-core.mjs';
+import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE, validWsResolutions, buildWsGrandfather, wsStampGrandfathered, readPartitionLineAt } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -1187,15 +1187,36 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
   }
   const authority = law.conflict ? null : law.authority;
 
+  // The resolution GRANDFATHER law (diff-funnel r4-F1): a valid resolution
+  // binds a forward cutover (per-partition chain heads at ceremony time) —
+  // LOSING-identity stamps at-or-before their bound head are tolerated;
+  // everything after must carry the selected authority. The bound heads
+  // themselves must survive a position+hash re-read (a moved/rewritten head
+  // would silently widen or shrink the grandfathered range).
+  const grandfather = buildWsGrandfather(anchors, resolutions);
+  for (const r of validWsResolutions(anchors, resolutions)) {
+    for (const h of Array.isArray(r?.data?.cutover) ? r.data.cutover : []) {
+      const rr = await readPartitionLineAt(repoRoot, h.replicaId, h.segment, h.line);
+      if (rr.state !== 'ok' || hashLine(rr.line) !== h.hash) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `resolution ${r.id}: cutover head ${h.replicaId}/${h.segment}:${h.line} ${rr.state !== 'ok' ? rr.state : 'hash mismatch'}`, { eventId: r.id }));
+      }
+    }
+  }
+
   // Sweep every stored line for a ws stamp (cheap substring prefilter; lines
-  // that fail to parse already FAILed in the chain scan above).
-  const sweep = async (dir) => {
+  // that fail to parse already FAILed in the chain scan above). Positions are
+  // tracked so the grandfather law can compare against the bound heads —
+  // `replicaId` is '' for the flat dir (never grandfathered: cutovers bind
+  // by-replica partitions only).
+  const sweep = async (dir, replicaId) => {
     let segs = [];
     try { segs = (await readdir(dir)).filter((f) => SEGMENT_RE.test(f)).sort(); } catch { return; }
     for (const seg of segs) {
       let txt;
       try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
-      for (const line of txt.split('\n')) {
+      const lines = txt.split('\n');
+      for (let li = 0; li < lines.length; li++) {
+        const line = lines[li];
         // Prefilter on the quoted key alone — `"ws":` would let valid JSON
         // with whitespace before the colon (`"ws" : ...`) slip past the sweep
         // entirely (diff-funnel r1-F3); the parse below is the real filter.
@@ -1214,6 +1235,7 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
           continue;
         }
         if (authority && ev.ws !== authority) {
+          if (wsStampGrandfathered(grandfather, ev.ws, replicaId, seg, li + 1)) continue; // pre-cutover losing stamp — tolerated by the resolution
           push(issue('FAIL', 'ws_mismatch', `event ${ev.id}: ws ${ev.ws} ≠ workspace authority ${authority} (cross-workspace splice signal)`, { eventId: ev.id }));
         } else if (!authority && !law.conflict) {
           const why = flatWs && flatWs.unresolvable ? `genesis unresolvable: ${flatWs.unresolvable}` : 'no derivable authority';
@@ -1222,8 +1244,8 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
       }
     }
   };
-  await sweep(eventsDir);
-  for (const rid of await listPartitionIds(repoRoot)) await sweep(partitionDir(repoRoot, rid));
+  await sweep(eventsDir, '');
+  for (const rid of await listPartitionIds(repoRoot)) await sweep(partitionDir(repoRoot, rid), rid);
 
   // Cache honesty (never authority).
   if (authority) {

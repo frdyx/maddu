@@ -313,6 +313,34 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r4-F2: ADOPTION applies the history-compatibility law too ───────────
+  {
+    const fix = await freshFix();
+    const mkPart = async (rep, lines) => {
+      const d = join(fix, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    // Local anchorless history stamped with identity A…
+    const gA = JSON.stringify({ v: 1, id: 'evt_ga', ts: '2026-05-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const wsA = wsFromLine(gA);
+    const workA = JSON.stringify({ v: 1, id: 'evt_wa', ts: '2026-05-01T00:00:01.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 }, ws: wsA, prev_hash: hashLine(gA) });
+    await mkPart('repA', [gA, workA]);
+    // …then a single valid PEER anchor for identity B arrives (no conflict —
+    // one anchor — so the law ADOPTS B).
+    const gB = JSON.stringify({ v: 1, id: 'evt_gb', ts: '2026-05-02T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+    const anchorB = JSON.stringify({ v: 1, id: 'evt_ab', ts: '2026-05-02T00:00:01.000Z', type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(gB), genesis: { replicaId: 'repB', segment: '000000000001.ndjson', line: 1, hash: hashLine(gB) } }, prev_hash: hashLine(gB) });
+    await mkPart('repB', [gB, anchorB]);
+    const r = await resolveIdentityForAppend(fix);
+    ok('adopting an authority that contradicts stamped history REFUSES (r4-F2)',
+      typeof r.refuse === 'string' && r.refuse.includes(wsA), JSON.stringify(r).slice(0, 160));
+    const { publishWsAnchorOnce } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    const pub = await publishWsAnchorOnce(fix, 'repA', () => { throw new Error('must not build'); });
+    ok('publishWsAnchorOnce adopt path refuses the same incompatibility',
+      typeof pub.unresolvable === 'string' && pub.unresolvable.includes(wsA), JSON.stringify(pub).slice(0, 160));
+    await rm(fix, { recursive: true, force: true });
+  }
+
   // ── r2-F4: the ceremony append is atomic + idempotent at the core ───────
   {
     const fix = await freshFix();

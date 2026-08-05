@@ -117,6 +117,59 @@ try {
       run(fix, ['spine', 'identity', 'resolve', '--keep', peerWs]).status !== 0);
   }
 
+  // ── (E) r4-F1: both-sides-stamped conflict recovers via the cutover ─────
+  // The REALISTIC conflict: two offline first-writers each published an
+  // anchor AND stamped work before merging. The ceremony must leave verify
+  // at 0 FAILs (losing pre-cutover stamps grandfathered), while a
+  // POST-cutover losing stamp stays red.
+  {
+    const fix2 = await mkdtemp(join(tmpdir(), 'ws-cutover-'));
+    await mkdir(join(fix2, '.maddu', 'config'), { recursive: true });
+    const mkPart = async (rep, lines) => {
+      const d = join(fix2, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    const mkSide = (rep, ts) => {
+      const g = JSON.stringify({ v: 1, id: `evt_g_${rep}`, ts, type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+      const ws = core.wsFromLine(g);
+      const anchor = JSON.stringify({ v: 1, id: `evt_a_${rep}`, ts, type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: ws, genesis: { replicaId: rep, segment: '000000000001.ndjson', line: 1, hash: core.hashLine(g) } }, prev_hash: core.hashLine(g) });
+      const work = JSON.stringify({ v: 1, id: `evt_w_${rep}`, ts, type: 'GOAL_DECLARED', actor: null, lane: null, data: { side: rep }, ws, prev_hash: core.hashLine(anchor) });
+      return { g, ws, anchor, work };
+    };
+    const A = mkSide('repA', '2026-01-01T00:00:00.000Z');
+    const B = mkSide('repB', '2026-01-02T00:00:00.000Z');
+    await mkPart('repA', [A.g, A.anchor, A.work]);
+    await mkPart('repB', [B.g, B.anchor, B.work]);
+    await writeFile(join(fix2, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }) + '\n');
+
+    const vE0 = await verifySpine(fix2, {});
+    ok('both-sides-stamped merge → conflicted', hasFail(vE0, 'ws_anchor_conflict'));
+    const cer = run(fix2, ['spine', 'identity', 'resolve', '--keep', A.ws]);
+    ok('ceremony over both-sides-stamped conflict exits 0', cer.status === 0, (cer.stdout + cer.stderr).trim().split('\n').pop());
+    const { resolutions: resE } = await core.scanWsAuthorityEvents(fix2);
+    ok('resolution binds the forward cutover (per-partition heads)',
+      resE.length === 1 && Array.isArray(resE[0].data.cutover) && resE[0].data.cutover.length === 2,
+      JSON.stringify(resE[0]?.data?.cutover ?? null).slice(0, 160));
+    const vE1 = await verifySpine(fix2, {});
+    ok('verify is FULLY green after resolution (losing pre-cutover stamps grandfathered)',
+      vE1.counts.FAIL === 0, vE1.issues.filter((i) => i.level === 'FAIL').map((i) => i.kind).join(','));
+    // Stamping resumes with the selected identity despite the losing history.
+    const resumedE = await spine.append(fix2, { type: 'GOAL_DECLARED', actor: null, lane: null, data: { post: 1 } });
+    ok('stamping resumes with the selected identity over grandfathered history', resumedE.ws === A.ws);
+    // A POST-cutover losing stamp is NOT grandfathered.
+    const d2 = join(fix2, '.maddu', 'events', 'by-replica', 'repB');
+    const txtB = await import('node:fs/promises').then((fs) => fs.readFile(join(d2, '000000000001.ndjson'), 'utf8'));
+    const lastB = txtB.split('\n').filter(Boolean).pop();
+    const post = JSON.stringify({ v: 1, id: 'evt_post_b', ts: '2026-03-01T00:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { post: 'b' }, ws: B.ws, prev_hash: core.hashLine(lastB) });
+    await writeFile(join(d2, '000000000001.ndjson'), txtB + post + '\n');
+    const vE2 = await verifySpine(fix2, {});
+    ok('a POST-cutover losing stamp stays red (grandfather is position-bound)',
+      vE2.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_mismatch' && String(i.detail).includes('evt_post_b')),
+      vE2.issues.filter((i) => i.level === 'FAIL').map((i) => `${i.kind}`).join(','));
+    await rm(fix2, { recursive: true, force: true });
+  }
+
   // ── (D) residual-flat continuation: incompatible → NAMED fatal ──────────
   {
     const stray = JSON.stringify({ v: 1, id: 'evt_stray', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'stray' }, prev_hash: 'f'.repeat(64) });
