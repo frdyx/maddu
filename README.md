@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that puts their work **on a record**: one agent per lane, sensitive changes waiting on your approval, recorded steps replayable and checkable, instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.105.2](https://img.shields.io/badge/version-1.105.2-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.115.0](https://img.shields.io/badge/version-1.115.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -100,7 +100,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ### The record is a contract, not just a log
 
-Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 182 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
+Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 190 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
 docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.8.0)
@@ -265,6 +265,10 @@ The spine is the foundation. This is what you actually get standing on top of it
 | 🧭 **Architecture-drift detection** | Declare your module boundaries; Máddu diffs the contract against the *real* import graph and fails CI on new forbidden edges or cycles — with a diagram + ratchet. | `/maddu-architecture` |
 | 📦 **Blueprint a whole build** | Distil *how a project was built* into one portable, variable-driven handoff — intake → procedure → problems & fixes — optionally polished to prose. | `/maddu-blueprint` |
 | 🧠 **Agents that learn from mistakes** | Mines past transcripts for failed→succeeded tool calls and writes typed corrections into the project's `CLAUDE.md` + memory, so the next agent stops repeating them — `learn sync` federates the portable ones across your repos, and `learn sync --from-claude-memory` imports Claude Code's own auto-memory as provenance-carrying facts (import-only, deduped). | `/maddu-learn` |
+| 🔐 **Trust-gated memory recall** | Facts start *asserted* — searchable everywhere, injectable nowhere. `memory approve` binds an approval to a content hash of the whole fact (any edit voids it); briefs then feed **only approved facts** through a bounded packet (8 items / 16 KB) where every feed is witnessed on the spine and re-verified by a critical gate. Withheld facts are listed with reasons, never silently dropped. | `maddu memory recall` |
+| 🔎 **Relevance-ranked search** | Cross-corpus search is BM25-ranked (pure Node, zero deps) with duplicate views of one event collapsed to the best hit and trust labels on every memory row — so the fact that matters outranks the noise that's merely newer. `--sort time` keeps the old ordering. | `/maddu-search` |
+| 📓 **A lane wiki that can't drift** | Every slice-stop lands in the per-lane wiki from *both* transports through one idempotent path; `wiki drift` counts exactly which events a page is missing and `wiki sync` backfills them without touching your hand-edits. | `maddu wiki drift` |
+| 🔌 **Máddu as an MCP server** | One command exposes memory search, the recall packet, the wiki, and status as read-only MCP tools over stdio — size-shaped responses, strict protocol handling, and a conformance test that hash-proves a full dialogue writes nothing. | `maddu mcp serve` |
 | 🧷 **Session discipline by default** | One `maddu hooks install` wires Claude Code hooks so every session auto-registers to the spine, auto-closes, and writes a **governance checkpoint before every context compaction** — the durable record marks exactly what survived, and `orient` announces it on resume. | `maddu hooks install` |
 | 🧾 **Completion claims, verified** | A deterministic check (no LLM) joins hedged "done" claims ("should work now") against *observed* proof — real gate passes, verified deliverables — and a warn-tier gate surfaces any live pattern at every slice-stop. A model checking a model is a second opinion; this is evidence. | `maddu learn scan` |
 | 🧊 **Sterile release phases** | Declare a phase with a governance tier and discipline escalates for exactly that window — stricter approvals, tighter loops — then lifts on `phase clear`. Escalation-only: a phase can never silently weaken your baseline. | `maddu phase set --tier strict` |
@@ -352,7 +356,7 @@ Switch context across five repos without booting five bridges. `maddu workspace 
 <td width="50%" valign="top">
 
 ### 🧠 Memory through structured events only
-Nothing enters long-term memory without a structured event saying so. `SLICE_STOP` feeds hindsight; `maddu learn` distils corrections from past failed→succeeded tool calls. Both replay on rebuild — memory stays auditable, replayable, and deletable.
+Nothing enters long-term memory without a structured event saying so. `SLICE_STOP` feeds hindsight; `maddu learn` distils corrections from past failed→succeeded tool calls. Both replay on rebuild — memory stays auditable, replayable, and deletable. And nothing flows *back* without one either: a fact reaches an agent's brief only after an operator approves it (content-hash-bound), and every feed is witnessed on the spine and re-checked by a critical gate.
 
 </td>
 <td width="50%" valign="top">
