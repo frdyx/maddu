@@ -104,7 +104,14 @@ export async function appendTokenUsage(repoRoot, payload) {
   const w = await resolveWriteReplica(repoRoot, { timeoutMs: waitMs });
   if (w.pending) return null; // migration in flight — drop this token event
   if (w.unattached) return null; // r7-F1: unattached clone — never write a flat event that can't be Git-carried
-  if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
+  if (w.id) {
+    // r16-F1: an attached sync workspace shares its events via git — an
+    // UNPROVABLE identity (absent/stale/unreadable cache, failed mode probe)
+    // drops the best-effort event rather than emitting an S2-unprotected
+    // ws-less line into the partition.
+    if (typeof ev.ws !== 'string') return null;
+    return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
+  }
 
   // Default flat path — through the SHARED locked+chained primitive (audit P1) so
   // token events carry prev_hash like every other flat write (no keyless flat

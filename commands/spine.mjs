@@ -77,7 +77,9 @@ export default async function spine(argv) {
       let anchors = [], resolutions = [];
       try { ({ anchors, resolutions } = await core.scanWsAuthorityEvents(repoRoot)); }
       catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
-      const partitioned = await core.wsModeIsPartitioned(repoRoot);
+      let partitioned;
+      try { partitioned = await core.wsModeIsPartitioned(repoRoot); }
+      catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
       let flatWs = null;
       if (!partitioned) {
         const g = await core.readFlatGenesisLine(repoRoot);
@@ -118,7 +120,7 @@ export default async function spine(argv) {
         // same-selection resolution with fresh heads).
         if (law.authority && law.authority === keep) {
           const uncovered = law.resolved
-            ? await core.findIncompatibleWsStamp(repoRoot, keep, core.buildWsGrandfather(anchors, resolutions))
+            ? await core.findUncoveredLosingStamp(repoRoot, keep, anchors, resolutions)
             : null;
           if (!uncovered) {
             console.log(`nothing to resolve — authority is ${keep}`);
@@ -165,8 +167,10 @@ export default async function spine(argv) {
         console.error(`refused: ${e?.message || e}`);
         process.exit(1);
       }
-      const partitioned2 = await core.wsModeIsPartitioned(repoRoot);
-      await core.writeIdentityCache(repoRoot, { spineIdentity: keep, mode: partitioned2 ? 'sync' : 'flat' }).catch(() => {});
+      const partitioned2 = await core.wsModeIsPartitioned(repoRoot).catch(() => null);
+      if (partitioned2 !== null) {
+        await core.writeIdentityCache(repoRoot, { spineIdentity: keep, mode: partitioned2 ? 'sync' : 'flat' }).catch(() => {});
+      }
       console.log(`${levelTag('PASS')}  resolved — authority: ${keep}  (${conflicts.length} anchor(s) bound; event ${ev.id})`);
       return;
     }

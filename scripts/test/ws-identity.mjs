@@ -14,7 +14,7 @@ import {
   writeIdentityCache, wsModeIsPartitioned, readFlatGenesisLine,
   readPartitionLineAt, findMergeFirstGenesis, verifyAnchorNomination,
   resolveWsAuthority, resolveIdentityForAppend,
-  canonicalAnchorConflicts, validateResolutionBinding, scanWsAuthorityEvents,
+  canonicalAnchorConflicts, validateResolutionBinding, scanWsAuthorityEvents, buildWsGrandfather,
 } from '../../template/maddu/runtime/lib/spine-append-core.mjs';
 
 let passed = 0, failed = 0;
@@ -533,6 +533,60 @@ try {
     const spineMod = await import(pathToFileURL(join(process.cwd(), 'template/maddu/runtime/lib/spine.mjs')).href);
     const healed = await spineMod.append(fix, { type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 2 } });
     ok('a fresh append stamps the SETTLED authority (B) after the ceremony', healed.ws === wsB, `ws=${healed.ws}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r16-F1: the mode probe fails CLOSED ─────────────────────────────────
+  {
+    const fix = await freshFix();
+    // A by-replica that errors on readdir with something OTHER than ENOENT
+    // (here: it is a FILE, so readdir ENOTDIRs) must never read as "flat".
+    await writeFile(join(fix, '.maddu', 'events', 'by-replica'), 'not a directory');
+    let code = null;
+    try { await wsModeIsPartitioned(fix); } catch (e) { code = e.code; }
+    ok('non-ENOENT probe error throws WS_SCAN_UNRESOLVABLE (never silently flat)', code === 'WS_SCAN_UNRESOLVABLE');
+    await writeFile(seg1(fix), genesisLine + '\n');
+    const r = await resolveIdentityForAppend(fix);
+    ok('the writer REFUSES on an unprovable mode (no ws-less flat bootstrap)', typeof r.refuse === 'string', JSON.stringify(r).slice(0, 120));
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── r16-F2: only BOUND LOSING stamps are extension-eligible ─────────────
+  {
+    const fix = await freshFix();
+    const mkPart = async (rep, lines) => {
+      const d = join(fix, '.maddu', 'events', 'by-replica', rep);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), lines.join('\n') + '\n');
+    };
+    const mkSide = (rep, ts) => {
+      const g = JSON.stringify({ v: 1, id: `evt_g_${rep}`, ts, type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null });
+      return { g, ws: wsFromLine(g), anchor: { v: 1, id: `evt_a_${rep}`, ts, type: 'WS_IDENTITY_ANCHORED', actor: null, lane: null, data: { v: 1, spineIdentity: wsFromLine(g), genesis: { replicaId: rep, segment: '000000000001.ndjson', line: 1, hash: hashLine(g) } }, prev_hash: hashLine(g) } };
+    };
+    const A = mkSide('repA', '2026-01-01T00:00:00.000Z');
+    const B = mkSide('repB', '2026-01-02T00:00:00.000Z');
+    const binding = canonicalAnchorConflicts([A.anchor, B.anchor]);
+    const res = { v: 1, id: 'evt_res', ts: '2026-01-03T00:00:00.000Z', type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null, data: { selected: A.ws, conflicts: binding, cutover: [
+      { replicaId: 'repA', segment: '000000000001.ndjson', line: 2, hash: hashLine(JSON.stringify(A.anchor)) },
+      { replicaId: 'repB', segment: '000000000001.ndjson', line: 2, hash: hashLine(JSON.stringify(B.anchor)) },
+    ] }, prev_hash: hashLine(JSON.stringify(A.anchor)) };
+    // A FOREIGN identity's stamp (C — never bound by the resolution) beyond
+    // the heads: a splice, not extendable offline work.
+    const foreignStamp = { v: 1, id: 'evt_foreign_c', ts: '2026-02-01T00:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 }, ws: 'ws_' + 'c'.repeat(16), prev_hash: hashLine(JSON.stringify(B.anchor)) };
+    await mkPart('repA', [A.g, JSON.stringify(A.anchor), JSON.stringify(res)]);
+    await mkPart('repB', [B.g, JSON.stringify(B.anchor), JSON.stringify(foreignStamp)]);
+    const { findUncoveredLosingStamp, findIncompatibleWsStamp: fiws } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    const scan = await scanWsAuthorityEvents(fix);
+    ok('a foreign stamp is NOT extension-eligible (no spurious/endless extensions)',
+      (await findUncoveredLosingStamp(fix, A.ws, scan.anchors, scan.resolutions)) === null);
+    ok('…but the ADOPTION law still flags it (findIncompatibleWsStamp)',
+      (await fiws(fix, A.ws, buildWsGrandfather(scan.anchors, scan.resolutions)))?.ws === 'ws_' + 'c'.repeat(16));
+    // A bound LOSING stamp beyond the heads IS eligible.
+    const losing = { v: 1, id: 'evt_losing_b', ts: '2026-02-02T00:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 2 }, ws: B.ws, prev_hash: hashLine(JSON.stringify(foreignStamp)) };
+    const d2 = join(fix, '.maddu', 'events', 'by-replica', 'repB', '000000000001.ndjson');
+    await writeFile(d2, [B.g, JSON.stringify(B.anchor), JSON.stringify(foreignStamp), JSON.stringify(losing)].join('\n') + '\n');
+    ok('a bound losing stamp beyond the heads IS extension-eligible',
+      (await findUncoveredLosingStamp(fix, A.ws, scan.anchors, scan.resolutions))?.id === 'evt_losing_b');
     await rm(fix, { recursive: true, force: true });
   }
 

@@ -300,11 +300,14 @@ export async function readFreshCachedIdentity(repoRoot, { refresh = false } = {}
   try { c = await readIdentityCache(repoRoot); } catch { return { state: 'unknown' }; }
   if (c.state !== 'present') return { state: 'unknown' };
   if (c.conflict) return { state: 'conflict' };
+  let partitionedNow;
+  try { partitionedNow = await wsModeIsPartitioned(repoRoot); }
+  catch { return { state: 'unknown' }; } // unprovable — the caller's mode decides emit-vs-drop
   if (c.mode === 'flat') {
-    return (await wsModeIsPartitioned(repoRoot)) ? { state: 'unknown' } : { state: 'fresh', ws: c.spineIdentity };
+    return partitionedNow ? { state: 'unknown' } : { state: 'fresh', ws: c.spineIdentity };
   }
   if (c.mode === 'sync' && c.fp) {
-    if (!(await wsModeIsPartitioned(repoRoot))) return { state: 'unknown' };
+    if (!partitionedNow) return { state: 'unknown' };
     const cur = await computeAuthorityFingerprint(repoRoot, c.fp);
     const d = await authorityDeltaState(repoRoot, c.fp, cur);
     if (d === 'fresh') return { state: 'fresh', ws: c.spineIdentity };
@@ -328,10 +331,25 @@ export async function readFreshCachedIdentity(repoRoot, { refresh = false } = {}
 export async function wsModeIsPartitioned(repoRoot) {
   const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
   let ids = [];
-  try { ids = await readdir(byReplica); } catch { return false; }
+  // FAIL-CLOSED enumeration (diff-funnel r16-F1): only ENOENT means "flat" —
+  // any other error (EACCES/EIO/ENOTDIR) must never silently downgrade an
+  // attached sync workspace to flat bootstrap, or an ordinary append would
+  // land ws-less in the partition (an S2-unprotected event verify then
+  // tolerates as legacy).
+  try { ids = await readdir(byReplica); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return false;
+    throw Object.assign(new Error(`ws mode probe: by-replica: ${e?.message || e}`), { code: 'WS_SCAN_UNRESOLVABLE' });
+  }
   for (const id of ids) {
     if (!isValidReplicaId(id)) continue;
-    if ((await listSegmentsInDir(join(byReplica, id))).length > 0) return true;
+    let names = [];
+    try { names = await readdir(join(byReplica, id)); }
+    catch (e) {
+      if (e && e.code === 'ENOENT') continue; // partition removed mid-probe — no segments there
+      throw Object.assign(new Error(`ws mode probe: ${id}: ${e?.message || e}`), { code: 'WS_SCAN_UNRESOLVABLE' });
+    }
+    if (names.some((f) => /^\d{12}\.ndjson$/.test(f))) return true;
   }
   return false;
 }
@@ -626,7 +644,9 @@ export function validateResolutionBinding(anchors, data) {
 //   { conflict: identities }     — only WS_IDENTITY_RESOLVED may append
 export async function resolveIdentityForAppend(repoRoot) {
   const cache = await readIdentityCache(repoRoot);
-  const partitioned = await wsModeIsPartitioned(repoRoot);
+  let partitioned;
+  try { partitioned = await wsModeIsPartitioned(repoRoot); }
+  catch (e) { return { refuse: e?.message || String(e) }; } // fail-closed (r16-F1)
   // Cache discipline (diff-funnel r1-F1): the cache is NEVER authority.
   //   unresolvable → DISCARD and re-resolve (a corrupt cache must not block
   //     writes — that would promote it to authority);
@@ -744,6 +764,46 @@ export async function findIncompatibleWsStamp(repoRoot, authority, grandfather =
   for (const id of ids.sort()) {
     const hit = await sweepDir(join(byReplica, id), id);
     if (hit) return hit;
+  }
+  return null;
+}
+
+// The EXTENSION-eligibility sweep (diff-funnel r16-F2): an extension can only
+// legalize stamps whose identity is BOUND AS A LOSER by the resolutions —
+// and only in by-replica positions (cutovers never bind flat storage). A
+// foreign identity, a ws-bearing authority event, or a losing stamp in
+// residual flat can never be grandfathered: triggering an extension for them
+// would append spurious resolutions forever while verify stays red. Distinct
+// from findIncompatibleWsStamp, which is the ADOPTION law (any mismatch
+// refuses adoption).
+export async function findUncoveredLosingStamp(repoRoot, authority, anchors, resolutions) {
+  const gf = buildWsGrandfather(anchors, resolutions);
+  if (!gf.losing.size) return null;
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const byReplica = join(eventsDir, 'by-replica');
+  let ids = [];
+  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch { return null; }
+  for (const rid of ids.sort()) {
+    const pdir = join(byReplica, rid);
+    let names = [];
+    try { names = (await readdir(pdir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { continue; }
+    for (const seg of names) {
+      let txt;
+      try { txt = await readFile(join(pdir, seg), 'utf8'); } catch { continue; }
+      const lines = txt.split('\n');
+      const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
+      for (let i = 0; i < committed; i++) {
+        if (!lines[i].trim()) continue;
+        let ev;
+        try { ev = JSON.parse(lines[i]); } catch { continue; }
+        if (!ev || typeof ev.ws !== 'string' || !WS_ID_RE.test(ev.ws)) continue;
+        if (ev.type === 'WS_IDENTITY_ANCHORED' || ev.type === 'WS_IDENTITY_RESOLVED') continue; // protocol violation — verify's FAIL, never extendable
+        if (ev.ws === authority) continue;
+        if (!gf.losing.has(ev.ws)) continue; // foreign identity — not extendable
+        if (wsStampGrandfathered(gf, ev.ws, rid, seg, i + 1)) continue;
+        return { id: ev.id ?? null, ws: ev.ws };
+      }
+    }
   }
   return null;
 }
@@ -885,7 +945,7 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
       // the pre-adoption work. Anything else (different selection, no
       // uncovered stamps, single-anchor authority) stays {already}.
       const uncovered = law.resolved && law.authority && law.authority === ev?.data?.selected
-        ? await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions))
+        ? await findUncoveredLosingStamp(repoRoot, law.authority, scan.anchors, scan.resolutions)
         : null;
       if (!uncovered) return { already: law.authority ?? null };
       const binding = validateResolutionBinding(scan.anchors, ev.data);
@@ -921,8 +981,7 @@ export async function maybeExtendWsCutoverLocked(repoRoot, dir, buildEv) {
   catch (e) { return { unresolvable: e?.message || String(e) }; }
   const law = resolveWsAuthority(scan);
   if (law.conflict || !law.resolved || !law.authority) return { extended: false };
-  const gf = buildWsGrandfather(scan.anchors, scan.resolutions);
-  const uncovered = await findIncompatibleWsStamp(repoRoot, law.authority, gf);
+  const uncovered = await findUncoveredLosingStamp(repoRoot, law.authority, scan.anchors, scan.resolutions);
   if (!uncovered) return { extended: false };
   const ev = buildEv(law.authority, canonicalAnchorConflicts(scan.anchors));
   ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };

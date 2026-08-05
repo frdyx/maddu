@@ -139,6 +139,34 @@ async function scenarioWsStamp() {
   }
 
   {
+    // r16-F1: in an ATTACHED SYNC workspace an unprovable identity DROPS the
+    // best-effort event — a ws-less line in a git-shared partition would be
+    // S2-unprotected forever.
+    const tmp = await mkdtemp(join(tmpdir(), 'maddu-wrap-syncdrop-'));
+    const d = join(tmp, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    await mkdir(join(tmp, '.maddu', 'config'), { recursive: true });
+    const { hashLine } = await import(
+      new URL('../../template/maddu/runtime/lib/spine-append-core.mjs', import.meta.url).href
+    );
+    void hashLine;
+    await writeFile(join(d, '000000000001.ndjson'), JSON.stringify({ v: 1, id: 'evt_g', ts: '2026-01-01T00:00:00.000Z', type: 'SPINE_CUTOVER', actor: null, lane: null, data: { version: '1.98.0' }, prev_hash: null }) + '\n');
+    await writeFile(join(tmp, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }) + '\n');
+    // NO identity cache → the wrapper cannot prove an identity.
+    const res = await runWrapper({
+      wrapper: join(WRAPPER_DIR, 'codex-wrapper.mjs'),
+      fakeProvider: await mkFake(tmp),
+      env: { MADDU_REPO_ROOT: tmp, MADDU_WORKER_ID: 'wrk_test_syncdrop', MADDU_SESSION_ID: 'ses_test_syncdrop' },
+    });
+    ok('sync-drop wrapper exits 0', res.code === 0, `exit=${res.code} stderr=${res.stderr.slice(0, 200)}`);
+    await new Promise((r) => setTimeout(r, 80));
+    const txt = await readFile(join(d, '000000000001.ndjson'), 'utf8');
+    ok('attached sync + unprovable identity → token event DROPPED (nothing appended)',
+      !txt.includes('TOKEN_USAGE_REPORTED'));
+    await rm(tmp, { recursive: true, force: true });
+  }
+
+  {
     // r2-F5: a mode-less (legacy / version-skew) cache is UNPROVABLE — the
     // wrapper treats it as absent and emits ws-less rather than trusting a
     // possibly-obsolete identity.
