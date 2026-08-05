@@ -46,7 +46,14 @@ async function main() {
 
     const partSeg = join(repo, '.maddu', 'events', 'by-replica', 'rep_testinit01', '000000000001.ndjson');
     ok(await exists(partSeg), 'segment now lives in the partition');
-    ok((await readFile(partSeg, 'utf8')) === bytesBefore, 'migration is byte-identical (prev_hash chain survives)');
+    // S2: init publishes WS_IDENTITY_ANCHORED into the partition after the
+    // migration, so the migrated bytes are a strict PREFIX (never rewritten)
+    // and the anchor continues the chain from the migrated tail.
+    const partAfter = await readFile(partSeg, 'utf8');
+    ok(partAfter.startsWith(bytesBefore), 'migrated bytes are a strict prefix (never rewritten)');
+    const appendedLines = partAfter.slice(bytesBefore.length).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    ok(appendedLines.length === 1 && appendedLines[0].type === 'WS_IDENTITY_ANCHORED',
+      `init appended exactly the identity anchor (got ${JSON.stringify(appendedLines.map((e) => e.type))})`);
     ok((await segs(join(repo, '.maddu', 'events'))).length === 0, 'no flat segment left behind');
     ok((await readReplicaId(repo)) === 'rep_testinit01', 'readReplicaId now reports sync mode');
 
@@ -57,7 +64,7 @@ async function main() {
     await append(repo, { type: TYPE, data: { n: 3 } });
     ok((await segs(join(repo, '.maddu', 'events', 'by-replica', 'rep_testinit01'))).length >= 1, 'post-init append targets the partition');
     const v2 = await verifySpine(repo);
-    ok(v2.events === 3 && chainMismatches(v2).length === 0, 'chain still valid after post-init append');
+    ok(v2.events === 4 && chainMismatches(v2).length === 0, 'chain still valid after post-init append (3 + anchor)');
     await rm(repo, { recursive: true, force: true });
   }
 
@@ -73,8 +80,11 @@ async function main() {
     ok(res.ok, 'empty-repo sync init ok');
     const pseg = join(repo, '.maddu', 'events', 'by-replica', 'rep_empty01', '000000000001.ndjson');
     const evs = (await readFile(pseg, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    ok(evs.length === 1 && evs[0].type === 'SPINE_CUTOVER' && evs[0].prev_hash === null,
-      `empty partition seeded with a SPINE_CUTOVER genesis (got ${JSON.stringify(evs.map((e) => e.type))})`);
+    // S2: the empty-partition seed is cutover genesis + the identity anchor
+    // nominating it (both ws-less by protocol — they precede stamping).
+    ok(evs.length === 2 && evs[0].type === 'SPINE_CUTOVER' && evs[0].prev_hash === null
+      && evs[1].type === 'WS_IDENTITY_ANCHORED' && !('ws' in evs[0]) && !('ws' in evs[1]),
+      `empty partition seeded with cutover genesis + ws-less anchor (got ${JSON.stringify(evs.map((e) => e.type))})`);
     await append(repo, { type: TYPE, data: { n: 1 } }); // lands in the partition, strict
     // Hand-append a forked line (wrong prev_hash) → strict chain_broken FAIL.
     await writeFile(pseg, (await readFile(pseg, 'utf8')) + JSON.stringify({ v: 1, id: 'evt_20260101000009_ffffff', ts: '2026-01-01T00:00:09Z', type: TYPE, actor: null, lane: null, data: { n: 2 }, prev_hash: null }) + '\n');
@@ -136,7 +146,7 @@ async function main() {
     ok(await exists(join(repo, '.maddu', 'config', 'replica.json')), 'replica.json written after migration completed');
     ok(!(await exists(join(repo, '.maddu', 'config', 'replica.pending.json'))), 'pending marker cleared');
     const v = await verifySpine(repo);
-    ok(v.events === 3 && chainMismatches(v).length === 0, 'reassembled partition chain is intact (3 events, no fork)');
+    ok(v.events === 4 && chainMismatches(v).length === 0, 'reassembled partition chain is intact (3 events + anchor, no fork)');
     await rm(repo, { recursive: true, force: true });
   }
 
@@ -168,9 +178,13 @@ async function main() {
       const [res] = await Promise.all(jobs);
       ok(res.ok, `iter ${iter}: concurrent sync init ok`);
 
-      // (1) no event lost — the hard guarantee, unconditional.
+      // (1) no event lost — the hard guarantee, unconditional. S2: a successful
+      // init also publishes exactly one WS_IDENTITY_ANCHORED — count it apart so
+      // an anchor can never mask a lost work event.
       const all = await readAll(repo);
-      ok(all.length === 2 + APPENDS, `iter ${iter}: no event lost (${all.length}/${2 + APPENDS} in merged read)`);
+      const anchors0 = all.filter((e) => e.type === 'WS_IDENTITY_ANCHORED').length;
+      ok(anchors0 === 1, `iter ${iter}: init published exactly one identity anchor (${anchors0})`);
+      ok(all.length - anchors0 === 2 + APPENDS, `iter ${iter}: no event lost (${all.length - anchors0}/${2 + APPENDS} in merged read)`);
 
       // Snapshot legacy-window forks migration carried in (tolerated, surfaced —
       // counted for visibility), then prove the FUNNEL adds none: two post-commit
@@ -184,9 +198,10 @@ async function main() {
       const forksFinal = chainMismatches(vFinal).length;
       // (2) funnel adds no forks above the committed tail.
       ok(forksFinal === forksAfterInit, `iter ${iter}: funnel adds no forks (before=${forksAfterInit}, after=${forksFinal})`);
-      // (3) post-commit appends land in the merged read.
+      // (3) post-commit appends land in the merged read (anchor counted apart).
       const allFinal = await readAll(repo);
-      ok(allFinal.length === 2 + APPENDS + 2, `iter ${iter}: post-commit appends land (${allFinal.length}/${2 + APPENDS + 2})`);
+      const anchorsF = allFinal.filter((e) => e.type === 'WS_IDENTITY_ANCHORED').length;
+      ok(allFinal.length - anchorsF === 2 + APPENDS + 2, `iter ${iter}: post-commit appends land (${allFinal.length - anchorsF}/${2 + APPENDS + 2})`);
       await rm(repo, { recursive: true, force: true });
     }
     if (legacyWindowForks > 0) {
@@ -263,7 +278,8 @@ async function main() {
     ok(res.ok && res.replicaId === 'rep_rr01', 'resume-race: init resumes into the marker replicaId');
     const v = await verifySpine(repo);
     ok(chainMismatches(v).length === 0, 'resume-race: concurrent append did NOT fork the committed chain');
-    ok((await readAll(repo)).length === 3, 'resume-race: all 3 events present');
+    const allRR = await readAll(repo);
+    ok(allRR.filter((e) => e.type !== 'WS_IDENTITY_ANCHORED').length === 3, 'resume-race: all 3 events present (anchor apart)');
     await rm(repo, { recursive: true, force: true });
   }
 
