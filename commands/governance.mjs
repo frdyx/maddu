@@ -10,7 +10,7 @@
 // immutable regardless of mode.
 
 import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
-import { loadLib } from './_libroot.mjs';
+import { loadLib, loadLibOptional } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', warn: '\x1b[33m', pass: '\x1b[32m', fail: '\x1b[31m', red: '\x1b[31m', blue: '\x1b[34m', yellow: '\x1b[33m' };
 
@@ -92,6 +92,9 @@ export default async function governanceCmd(argv) {
     if (ri >= 0) reason = rest[ri + 1] || null;
     const before = await lib.readGovernance(repoRoot);
     if (before.mode === mode) {
+      // Mutation-witness declared no-op: success with zero appends by design.
+      const mw = await loadLibOptional('mutation-witness.mjs');
+      mw?.witnessNoop?.('idempotent-already-at-mode');
       console.log(`${ANSI.dim}no change${ANSI.reset}  already at mode ${modeBadge(mode)}`);
       return;
     }

@@ -177,6 +177,18 @@ export default async function init(argv) {
   const { hashLine } = await import(
     'file://' + join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'spine-append-core.mjs').replace(/\\/g, '/')
   );
+  // Mutation-witness (S1): the fresh-install genesis writes below bypass
+  // spine.append by design (single-writer inline chaining), so each raw write
+  // declares itself a REAL witnessed append via witnessRawWrite — a
+  // census-pinned exception in command-tier-discipline. Fail-open: the lib
+  // ships in the same template being installed.
+  let witnessRaw = () => {};
+  try {
+    const mw = await import(
+      'file://' + join(TEMPLATE_ROOT, 'maddu', 'runtime', 'lib', 'mutation-witness.mjs').replace(/\\/g, '/')
+    );
+    if (typeof mw.witnessRawWrite === 'function') witnessRaw = mw.witnessRawWrite;
+  } catch {}
   const eventsDir = join(cwd, '.maddu', 'events');
   const eventsSegment = join(eventsDir, '000000000001.ndjson');
   // An EXISTING spine is project state — `init --force` re-installs framework
@@ -214,6 +226,7 @@ export default async function init(argv) {
     ev.prev_hash = null; // genesis
     lastStoredLine = JSON.stringify(ev);
     await writeFile(eventsSegment, lastStoredLine + '\n');
+    witnessRaw('init-genesis'); // census-pinned raw spine write 1/3
     console.log(`  spine seeded with FRAMEWORK_INSTALLED event`);
   }
 
@@ -280,6 +293,7 @@ export default async function init(argv) {
       ev2.prev_hash = hashLine(lastStoredLine);
       lastStoredLine = JSON.stringify(ev2);
       await appendFile(eventsSegment, lastStoredLine + '\n');
+      witnessRaw('init-genesis'); // census-pinned raw spine write 2/3
     }
     const perFileSummary = Object.entries(result.perFile)
       .map(([f, a]) => `${f}:${a}`).join(', ');
@@ -308,6 +322,7 @@ export default async function init(argv) {
       ev3.prev_hash = hashLine(lastStoredLine);
       lastStoredLine = JSON.stringify(ev3);
       await appendFile(eventsSegment, lastStoredLine + '\n');
+      witnessRaw('init-genesis'); // census-pinned raw spine write 3/3
     }
     const slashSummary = slashResult.files.length
       ? `${slashResult.files.length} command(s)`

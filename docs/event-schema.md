@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.13.0` · **Event types:** 190
+**Contract version:** `1.14.0` · **Event types:** 191
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -33,7 +33,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (190)
+## Events (191)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -200,6 +200,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `BRIDGE_CROSS_WORKSPACE` | A bridge request selected a workspace other than the active one. | `active: string`, `method: string`, `path: string`, `workspace: string` |
 | `SPINE_CUTOVER` | A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules). | `version: string` |
 | `DISCIPLINE_SKIPPED` | A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent. | `blocked: boolean?`, `enforcement: string\|null`, `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
+| `MUTATION_UNWITNESSED` | A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain. | `breachId: string`, `breachTs: string`, `exitCode: number\|null`, `label: string`, `method: string\|null`, `path: string\|null`, `sessionId: string\|null`, `sub: string\|null`, `surface: string`, `verb: string\|null`, `via: string` |
 | `ENFORCEMENT_ERROR` | The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open. | `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
 | `VERIFICATION_STARTED` | A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative. | `kind: string`, `profile: string\|null` |
 | `VERIFICATION_RAN` | A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection. | `allMet: boolean?`, `complete: boolean`, `conditions: array?`, `counts: object\|null`, `kind: string`, `metCount: number?`, `objective: string\|null?`, `pendingCount: number?`, `profile: string\|null`, `result: string`, `setAt: string\|null?`, `startedId: string`, `verifiable: number?` |

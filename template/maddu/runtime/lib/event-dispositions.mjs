@@ -184,6 +184,7 @@ export const EVENT_DISPOSITIONS = {
   BRIDGE_CROSS_WORKSPACE: { disp: 'dormant', reason: "fires only when a request targets a non-active workspace (multi-workspace bridge)" },
   SPINE_CUTOVER: { disp: 'dormant', reason: "fires only when a fresh sync partition is minted (spine sync init)" },
   DISCIPLINE_SKIPPED: { disp: 'dormant', reason: "fires only when a discipline bypass is witnessed (enforcement off / self-disable / hook uninstalled) — absent in a healthy disciplined run" },
+  MUTATION_UNWITNESSED: { disp: 'dormant', reason: "fires only when a mutating seam exits successfully with zero spine appends and no declared no-op (the mutation-witness guard's breach witness) — absent in a healthy witnessed run" },
   ENFORCEMENT_ERROR: { disp: 'dormant', reason: "fires only when the enforcement path throws and falls open — absent unless there's an enforcement bug" },
   GOVERNANCE_OVERRIDE_CHANGED: { disp: 'dormant', reason: "fires only when a governance behavior-override key is changed/cleared (e.g. the discipline off-switch)" },
   VERIFICATION_STARTED: { disp: 'active' },

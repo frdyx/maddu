@@ -60,6 +60,11 @@ export default async function focus(argv) {
       ? [...new Set([...allowed, ...FOCUS_TRIGGERS])]
       : allowed.filter((t) => !FOCUS_TRIGGERS.includes(t));
     await writeTriggers(repoRoot, raw, next);
+    // Mutation-witness declared no-op: edits the rule-#9 trigger allowlist
+    // (.maddu/config/triggers.json) — a config write with no spine event
+    // pre-S1; declared rather than silent.
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('control-plane-config-write:triggers');
     console.log(`Focus Director ${sub === 'enable' ? `${ANSI.pass}enabled${ANSI.reset}` : `${ANSI.warn}disabled${ANSI.reset}`}  ${ANSI.dim}(${FOCUS_TRIGGERS.join(', ')})${ANSI.reset}`);
     return;
   }

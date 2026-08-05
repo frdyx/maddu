@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.13.0",
+  "x-contractVersion": "1.14.0",
   "type": "object",
   "required": [
     "v",
@@ -191,6 +191,7 @@
         "BRIDGE_CROSS_WORKSPACE",
         "SPINE_CUTOVER",
         "DISCIPLINE_SKIPPED",
+        "MUTATION_UNWITNESSED",
         "ENFORCEMENT_ERROR",
         "VERIFICATION_STARTED",
         "VERIFICATION_RAN",
@@ -5657,6 +5658,77 @@
                   "string",
                   "null"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "MUTATION_UNWITNESSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "breachId": {
+                "type": "string"
+              },
+              "breachTs": {
+                "type": "string"
+              },
+              "exitCode": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "method": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sessionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sub": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "surface": {
+                "type": "string"
+              },
+              "verb": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "via": {
+                "type": "string"
               }
             }
           }

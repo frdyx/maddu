@@ -76,6 +76,11 @@ export default async function wikiCmd(argv) {
 
   if (sub === 'sync') {
     if (!wiki.syncWiki) { console.error('maddu wiki sync: this install predates syncWiki — upgrade first'); process.exit(1); }
+    // Mutation-witness declared no-op: wiki pages are DERIVED state
+    // (rebuildable renderings of spine slice-stops) — sync/rebuild write
+    // pages, never spine events, so success is legitimately append-free.
+    const mw = await loadLibOptional('mutation-witness.mjs');
+    mw?.witnessNoop?.('derived-state-write:wiki-pages');
     const r = await wiki.syncWiki(repoRoot);
     if (flags.json) return json(r);
     console.log(`wiki sync: ${r.appended} block(s) appended, ${r.skipped} already present`);
@@ -88,6 +93,9 @@ export default async function wikiCmd(argv) {
       console.error('maddu wiki rebuild: destructive truncate-and-replay — drops operator hand-edits. Pass --force to proceed (or use `maddu wiki sync` for the non-destructive backfill).');
       process.exit(1);
     }
+    // Derived-state write — same declared no-op rationale as sync above.
+    const mwr = await loadLibOptional('mutation-witness.mjs');
+    mwr?.witnessNoop?.('derived-state-write:wiki-pages');
     const n = await wiki.rebuildWiki(repoRoot);
     if (flags.json) return json({ pagesWritten: n });
     console.log(`wiki rebuild: ${n} page(s) rewritten from the spine`);

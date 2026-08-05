@@ -52,6 +52,12 @@ export default async function upgrade(argv) {
   const fromVersion = madduJson.framework_version;
   const toVersion = await frameworkVersion();
   if (fromVersion === toVersion && !force) {
+    // Mutation-witness declared no-op: already-current is a success that
+    // deliberately touches nothing.
+    try {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-current');
+    } catch {}
     console.log(`Already on framework v${toVersion}. Nothing to do.`);
     console.log(`  (pass --force to re-overwrite all framework files anyway)`);
     return;

@@ -218,6 +218,11 @@ export default async function memory(argv) {
 
   if (sub === 'extract') {
     const { flags } = parseFlags(rest);
+    // Mutation-witness declared no-op: extraction writes .maddu/memory/
+    // (hindsight state DERIVED from spine slice-stops, rebuildable) — success
+    // is legitimately append-free.
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('derived-state-write:memory-facts');
     if (flags.rebuild) {
       const n = await hindsight.rebuildMemory(repoRoot);
       console.log(`rebuilt memory.ndjson: ${n} fact(s) from the entire spine`);

@@ -22,7 +22,7 @@ import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFlags } from './_args.mjs';
-import { loadLib } from './_libroot.mjs';
+import { loadLib, loadLibOptional } from './_libroot.mjs';
 import { frameworkOwnedFiles, sha256OfFile, frameworkVersion } from './_manifest.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -277,6 +277,17 @@ function renderPlan(rows, summary, srcVersion, report, flags) {
 }
 
 // Run a child Máddu verb against a target repo, capturing exit + tail output.
+// Mutation-witness (S1, census-pinned): the mutation lands on the TARGET
+// repo's spine under the child dispatcher's own guard — the parent's counter
+// stays 0 by design, so each delegated run declares itself.
+let _witnessDelegated = null;
+async function witnessDelegatedRun(repoPath) {
+  if (_witnessDelegated === null) {
+    const mw = await loadLibOptional('mutation-witness.mjs');
+    _witnessDelegated = mw?.witnessDelegated ?? (() => {});
+  }
+  _witnessDelegated('fleet-upgrade', repoPath);
+}
 function runIn(repoPath, args, timeout) {
   const r = spawnSync('node', [SOURCE_BIN, ...args], { cwd: repoPath, encoding: 'utf8', timeout });
   const tail = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(-4).join('\n');
@@ -324,6 +335,7 @@ async function applyDelivery(rows, up, srcVersion, flags) {
     }
 
     // 3. Deliver via the proven single-repo engine (no --force: respect local edits).
+    await witnessDelegatedRun(r.path); // declared: mutation lands on the target repo's spine
     const delivery = runIn(r.path, ['upgrade'], 180000);
     if (!delivery.ok) {
       console.log(`${C.red}delivery failed${C.reset} ${C.dim}(exit ${delivery.status})${C.reset}`);

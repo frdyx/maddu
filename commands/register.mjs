@@ -36,7 +36,7 @@ function fmtTime(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z
 
 export default async function register(argv) {
   const { flags, positional } = parseFlags(argv);
-  const { paths, spine, projections, sessionActive, sessionLifecycle } = await loadSpineLib();
+  const { paths, spine, projections, sessionActive, sessionLifecycle, mutationWitness } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   // 1. Idempotency: reuse an env-named session ONLY when it conforms to the
@@ -77,6 +77,10 @@ export default async function register(argv) {
     const proj = await projections.project(repoRoot);
     const s = proj.sessions.find((x) => x.id === envId);
     if (s && s.status === 'active') {
+      // Mutation-witness declared no-op: this success path appends nothing by
+      // design (the session already exists and no renewal primitive is
+      // available) — silence would read as an unwitnessed mutation.
+      mutationWitness?.witnessNoop?.('idempotent-session-exists');
       console.log(envId);
       if (process.stdout.isTTY) console.log(`  (already registered — MADDU_SESSION_ID=${envId})`);
       return { sessionId: envId, created: false };
