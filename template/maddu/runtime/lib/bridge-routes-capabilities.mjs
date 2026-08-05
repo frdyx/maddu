@@ -22,6 +22,7 @@ import { listCheckpoints, readCheckpoint, createCheckpoint, createWorktree,
 import { listSchedules, readSchedule, saveSchedule, removeSchedule,
   setEnabled as scheduleSetEnabled, parseNatural } from './schedule.mjs';
 import { sendJson, readBody } from './http-util.mjs';
+import { witnessNoop } from './mutation-witness.mjs';
 
 const reply = (res, code, body) => { sendJson(res, code, body); return true; };
 
@@ -117,7 +118,13 @@ export async function routeCheckpoints({ req, res, path, url, repoRoot }) {
     if (rest.endsWith('/worktree') && req.method === 'POST') {
       const id = rest.slice(0, -'/worktree'.length);
       const body = (await readBody(req)) || {};
-      try { return reply(res, 200, await createWorktree(repoRoot, id, body.by || null)); }
+      try {
+        const out = await createWorktree(repoRoot, id, body.by || null);
+        // S1 (Codex diff r5 F1): the idempotent re-create appends nothing —
+        // declare it; an actual create appends and is credited.
+        if (out && out.alreadyExisted) witnessNoop('idempotent-worktree-exists');
+        return reply(res, 200, out);
+      }
       catch (err) { return reply(res, 400, { error: err.message }); }
     }
     if (rest.endsWith('/rollback') && req.method === 'POST') {
@@ -133,7 +140,11 @@ export async function routeCheckpoints({ req, res, path, url, repoRoot }) {
     }
     if (req.method === 'DELETE' && !rest.includes('/')) {
       const body = (await readBody(req)) || {};
-      await removeCheckpoint(repoRoot, rest, body.by || null);
+      const r = await removeCheckpoint(repoRoot, rest, body.by || null);
+      // S1 (r5 F1): removing a nonexistent checkpoint (or pre-S1 lib skew
+      // returning undefined) is an idempotent append-free success; a real
+      // removal appends CHECKPOINT_REMOVED and is credited.
+      if (!r || r.removed === false) witnessNoop('idempotent-checkpoint-not-found');
       return reply(res, 200, { ok: true });
     }
   }

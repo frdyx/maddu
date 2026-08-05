@@ -26,7 +26,7 @@ import { listSkills } from './lib/skills.mjs';
 import { search as crossSearch, KINDS as SEARCH_KINDS } from './lib/search.mjs';
 import { listRuntimes } from './lib/runtimes.mjs';
 import { listMcp, mcpHealth } from './lib/mcp.mjs';
-import { readTrustConfig, auditRepo, renderReportMarkdown } from './lib/trust.mjs';
+import { readTrustConfig, auditRepo, renderReportMarkdown, depsFingerprint as trustDepsFingerprint } from './lib/trust.mjs';
 import { readWorkerEnvConfig } from './lib/worker-env.mjs';
 import { registerBridge, unregisterBridge } from './lib/bridges-registry.mjs';
 import { TOKEN_HEADER, mintToken, tokenEquals, writeCapability, clearCapability, pruneStaleCapabilities } from './lib/bridge-auth.mjs';
@@ -884,11 +884,14 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/trust/audit' && req.method === 'POST') {
     const body = (await readBody(req)) || {};
     const audit = await auditRepo(repoRoot, { fresh: !!body.fresh, includeCves: !!body.cve });
-    // S1 witnessing parity (plan-review r4 F6): the CLI's `trust audit`
-    // appends TRUST_AUDIT_RAN; this route wrote its cache without one — the
-    // same mutation gets the same witness, not an excuse.
-    if (audit && !audit.refused) {
+    // S1 witnessing parity (plan-review r4 F6; corrected per diff r5 F2): a
+    // REAL audit (audit.ok === true — refusal is ok:false, not `refused`)
+    // appends TRUST_AUDIT_RAN with the same depsFingerprint the CLI records;
+    // a refusal served as HTTP 200 is an append-free outcome and declares
+    // itself instead of minting a fake zero-violation audit event.
+    if (audit && audit.ok === true) {
       try {
+        const depsHash = await trustDepsFingerprint(repoRoot).catch(() => null);
         await append(repoRoot, {
           type: EVENT_TYPES.TRUST_AUDIT_RAN, actor: null, lane: null,
           data: {
@@ -900,10 +903,12 @@ async function handleBridge(req, res, url, ctx) {
             cacheHits: audit.cacheHits ?? null,
             cacheMisses: audit.cacheMisses ?? null,
             cveTotal: audit.cveSummary?.total ?? null,
-            depsHash: null,
+            depsHash,
           },
         });
       } catch {}
+    } else {
+      witnessNoop('trust-audit-refused (no audit ran, nothing to witness)');
     }
     return sendJson(res, 200, audit);
   }
