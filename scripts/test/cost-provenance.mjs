@@ -92,6 +92,10 @@ try {
   // rt-garbage: mistyped costUsd must be DROPPED at the reducer, not coerced.
   await tok(fix, { runtime: 'rt-garbage', sessionId: 'ses_g', model: 'claude-sonnet-4-5',
     inputTokens: 5, outputTokens: 5, costUsd: '12.5', costProvenance: 'wire-reported' });
+  // rt-tiny: a one-token estimate ($0.000003) must never RENDER as zero.
+  await tok(fix, { runtime: 'rt-tiny', sessionId: 'ses_t', model: 'claude-sonnet-4-5',
+    inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0,
+    pricingIdentity: PID_SONNET });
 
   // ── (A)+(B) --usd --json buckets ────────────────────────────────────────
   const j = runCost(fix, ['--usd', '--json', '--by', 'runtime']);
@@ -132,6 +136,11 @@ try {
   ok('text mode names the unpriced-reason breakdown',
     t.stdout.includes('Unpriced:') && t.stdout.includes('no-manifest-match'));
   ok('text mode surfaces partial estimates', t.stdout.includes('Partial estimates: 1'));
+  const tinyLine = t.stdout.split('\n').find((l) => l.includes('rt-tiny')) || '';
+  ok("proven-nonzero tiny estimate renders '<0.0001', never a fabricated zero (r2-F1)",
+    tinyLine.includes('<0.0001') && !/\b0\.0000\b/.test(tinyLine));
+  ok('tiny estimate is still an exact number in --json (display floor is text-only)',
+    near(by['rt-tiny']?.usd?.estimated, 3e-6));
 
   // ── (E) no --usd → pre-S4 shape untouched ───────────────────────────────
   const plain = runCost(fix, ['--json', '--by', 'runtime']);
@@ -158,7 +167,23 @@ try {
   const bad = runCost(fix, ['--usd', '--json']);
   ok('garbage override → exit 2 naming the override file (never silent fallback)',
     bad.status === 2 && bad.stderr.includes('pricing override'));
+  const badCount = runCost(fix, ['--usd', '--unreported-count']);
+  ok('--usd --unreported-count still fails loudly on a malformed override (r2-F3)',
+    badCount.status === 2 && badCount.stderr.includes('pricing override'));
   await rm(join(fix, '.maddu', 'config', 'pricing.json'));
+  const goodCount = runCost(fix, ['--usd', '--unreported-count']);
+  ok('--usd --unreported-count with valid pricing still prints the bare count',
+    goodCount.status === 0 && /^\d+\s*$/.test(goodCount.stdout));
+  // r2-F3: empty ledger + --usd still surfaces the promised manifest version.
+  const efix = await mkdtemp(join(tmpdir(), 'cost-empty-'));
+  await mkdir(join(efix, '.maddu', 'events'), { recursive: true });
+  const empty = runCost(efix, ['--usd']);
+  ok('empty ledger + --usd surfaces the manifest-version trailer',
+    empty.status === 0 && empty.stdout.includes(`Pricing: manifest ${PRICING_MANIFEST_VERSION}`));
+  const emptyPlain = runCost(efix, []);
+  ok('empty ledger WITHOUT --usd stays byte-compatible (no pricing line)',
+    emptyPlain.status === 0 && !emptyPlain.stdout.includes('Pricing: manifest'));
+  await rm(efix, { recursive: true, force: true });
   const noUsdStill = runCost(fix, ['--json']);
   ok('plain cost (no --usd) never loads pricing (worked even while override was present)',
     noUsdStill.status === 0);

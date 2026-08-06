@@ -74,6 +74,8 @@ try {
     validatePricingDoc(docWith([goodEntry({ inputUsdPerMTok: 0, outputUsdPerMTok: 0, cacheReadUsdPerMTok: 0, cacheCreationUsdPerMTok: 0 })])).length === 0);
   ok('isValidAuthority accepts a plain hostname and rejects schemes/paths',
     isValidAuthority('api.anthropic.com') && !isValidAuthority('https://api.anthropic.com') && !isValidAuthority('api.anthropic.com/v1') && !isValidAuthority(''));
+  ok('isValidAuthority follows the pinned grammar EXACTLY — no hidden length ceiling (r2-F2)',
+    isValidAuthority('a'.repeat(254)) && isValidAuthority('a'));
 
   // ── (C) exact-match lookup ──────────────────────────────────────────────
   const fix0 = await mkdtemp(join(tmpdir(), 'pricing-'));

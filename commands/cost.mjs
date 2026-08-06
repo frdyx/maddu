@@ -70,12 +70,17 @@ function rollup(ledger, axis, pricing = null) {
 function fmt(n) { return n.toLocaleString(); }
 
 // USD cell: blank for an empty bucket (null), '0.00' for a proven zero,
-// 4 decimals when 2 would falsely display a nonzero value as 0.00.
+// 4 decimals when 2 would falsely display a nonzero value as 0.00, and an
+// explicit '<0.0001' floor beyond that (funnel r2-F1) — a proven-nonzero
+// amount must NEVER render as zero, however tiny.
 function fmtUsd(v) {
   if (v == null) return '';
   if (v === 0) return '0.00';
   const two = v.toFixed(2);
-  return (two === '0.00' || two === '-0.00') ? v.toFixed(4) : two;
+  if (two !== '0.00' && two !== '-0.00') return two;
+  const four = v.toFixed(4);
+  if (four !== '0.0000' && four !== '-0.0000') return four;
+  return v > 0 ? '<0.0001' : '>-0.0001';
 }
 
 export default async function cost(argv) {
@@ -91,14 +96,10 @@ export default async function cost(argv) {
   const proj = await projections.project(repoRoot);
   const ledger = Array.isArray(proj.tokenLedger) ? proj.tokenLedger : [];
 
-  if (flags['unreported-count']) {
-    const unreported = ledger.filter((r) => r.inputTokens == null).length;
-    process.stdout.write(String(unreported) + '\n');
-    return;
-  }
-
-  // S4: --usd loads the pricing library + effective table up front. An
-  // unparseable or schema-invalid override file is a LOUD exit 2 (the
+  // S4: --usd loads the pricing library + effective table up front — BEFORE
+  // every early return (funnel r2-F3: `--usd --unreported-count` must still
+  // fail loudly on a malformed override, never exit 0 past the validation).
+  // An unparseable or schema-invalid override file is a LOUD exit 2 (the
   // operator explicitly re-priced; a silent fallback would misprice), and a
   // pre-S4 install without pricing.mjs is an honest "upgrade first".
   let pricing = null;
@@ -115,6 +116,12 @@ export default async function cost(argv) {
       process.exit(2);
     }
     pricing = { lib, effective };
+  }
+
+  if (flags['unreported-count']) {
+    const unreported = ledger.filter((r) => r.inputTokens == null).length;
+    process.stdout.write(String(unreported) + '\n');
+    return;
   }
 
   const r = rollup(ledger, axis, pricing);
@@ -143,6 +150,12 @@ export default async function cost(argv) {
     console.log('      maddu usage import --from claude-code [--session <id>] [--dry-run]');
     console.log('    Each transcript line becomes a TOKEN_USAGE_REPORTED event with');
     console.log('    source: "claude-code-transcript".');
+    if (pricing) {
+      // r2-F3: --usd promised pricing metadata — surface it on the empty
+      // ledger too, so the operator knows which manifest WOULD price rows.
+      console.log('');
+      console.log(`Pricing: manifest ${pricing.effective.version}  (estimates are read-time presentation, never written to the spine)`);
+    }
     return;
   }
 
