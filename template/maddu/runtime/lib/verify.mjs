@@ -1280,7 +1280,27 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
     }
   };
   await sweep(eventsDir, '');
-  for (const rid of await listPartitionIds(repoRoot)) await sweep(partitionDir(repoRoot, rid), rid);
+  // STRICT parent enumeration (diff-funnel r18-F1): listPartitionIds
+  // collapses every readdir error to [] — a transient EACCES here would
+  // skip the partition sweep entirely and let a foreign-ws splice verify
+  // green. Only ENOENT means "no partitions".
+  {
+    const byReplicaDir = join(eventsDir, 'by-replica');
+    let repNames = [];
+    let enumFailed = false;
+    try { repNames = await readdir(byReplicaDir); }
+    catch (e) {
+      if (!(e && e.code === 'ENOENT')) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: by-replica enumeration failed: ${e?.message || e}`));
+        enumFailed = true;
+      }
+    }
+    if (!enumFailed) {
+      for (const rid of repNames.filter((d) => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(d)).sort()) {
+        await sweep(partitionDir(repoRoot, rid), rid);
+      }
+    }
+  }
 
   // Cache honesty (never authority).
   if (authority) {

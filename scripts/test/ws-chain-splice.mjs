@@ -183,6 +183,21 @@ try {
     await writeLines(fix, baseLines);
   }
 
+  // ── (B8) r18-F1: an unreadable by-replica NEVER verifies green ──────────
+  {
+    // Make by-replica a FILE: every enumeration of it errors with ENOTDIR.
+    // Whether the strict authority scan or the sweep's strict parent
+    // enumeration catches it first, verify must FAIL ws_identity_unverifiable
+    // — never skip the partition sweep and return green.
+    const brPath = join(fix, '.maddu', 'events', 'by-replica');
+    await writeFile(brPath, 'not a directory');
+    const v = await verifySpine(fix, {});
+    ok('unreadable by-replica → FAIL ws_identity_unverifiable (never a silent green)',
+      v.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_identity_unverifiable'),
+      kinds(v).filter((k) => k.startsWith('FAIL')).join(','));
+    await rm(brPath, { force: true });
+  }
+
   // ── (C) empty-string ws is malformed ────────────────────────────────────
   {
     const ls = [...baseLines];
