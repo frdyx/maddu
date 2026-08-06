@@ -179,6 +179,13 @@ try {
     ok('a torn tail in a NON-final segment still FAILs torn_trailing_line (r8-F1)',
       v.issues.some((i) => i.level === 'FAIL' && i.kind === 'torn_trailing_line' && String(i.detail).includes('000000000001')),
       kinds(v).filter((k) => k.startsWith('FAIL')).join(','));
+    // r19-F1: the torn element is OUTSIDE the chain — its committed successor
+    // must NOT verify as chained-through-it (it chains against the last
+    // committed line and breaks).
+    ok('the successor chaining THROUGH the torn element breaks the chain (r19-F1)',
+      v.issues.some((i) => (i.kind === 'chain_broken' || i.kind === 'chain_fork') && String(i.detail ?? '').length >= 0
+        && (i.segment === '000000000002.ndjson' || String(i.detail).includes('000000000002'))),
+      kinds(v).join(','));
     await rm(seg2, { force: true });
     await writeLines(fix, baseLines);
   }

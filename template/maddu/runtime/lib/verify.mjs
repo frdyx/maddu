@@ -268,28 +268,29 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       if (!line.trim()) continue;
       const lineNo = i + 1;
 
-      // Chain-integrity bookkeeping (v1.14.0): hash this stored line and capture
-      // the previous line's hash, then advance — so every early `continue` below
-      // still carries the chain forward correctly.
-      const thisPrev = prevLineHash;
-      prevLineHash = hashLine(line);
-
-      // ─── Committed-record boundary (diff-funnel r7-F2, widened r8-F1) ───
+      // ─── Committed-record boundary (diff-funnel r7-F2, widened r8-F1,
+      // fenced r19-F1) ───
       // A nonempty UNTERMINATED trailer is torn whether or not it parses: a
       // complete-looking JSON object whose newline never landed is not part
       // of the committed record (the S2 identity law, the authority scan,
-      // and the writers all exclude it), and processing it here would make
-      // verify bless what every writer ignores. Classified BEFORE parsing —
-      // and in EVERY segment, not only the globally last one (r8-F1: a torn
-      // tail buried by a segment rollover must not become "committed" by
-      // position).
+      // and the writers all exclude it). Classified BEFORE parsing AND
+      // BEFORE the chain bookkeeping (r19-F1: hashing a torn element would
+      // let its committed successor chain THROUGH an element the record
+      // excludes — the successor must instead chain-FAIL against the last
+      // committed line). Every segment, not only the globally last one.
       const isUnterminatedTrailer = !fileEndsWithNewline && i === lines.length - 1;
       if (isUnterminatedTrailer) {
         push(issue('FAIL', 'torn_trailing_line',
           `${segName}:${lineNo}: trailing line is unterminated (missing final newline) — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event is not part of the committed record. Remediation: if the JSON is complete, append the missing newline; otherwise trim the partial line. Then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
           { segment: segName, line: lineNo }));
-        continue;
+        continue; // prevLineHash NOT advanced — the torn element is outside the chain
       }
+
+      // Chain-integrity bookkeeping (v1.14.0): hash this stored line and capture
+      // the previous line's hash, then advance — so every early `continue` below
+      // still carries the chain forward correctly.
+      const thisPrev = prevLineHash;
+      prevLineHash = hashLine(line);
 
       // ─── Parseability ───
       let ev;

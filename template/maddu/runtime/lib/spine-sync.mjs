@@ -529,7 +529,20 @@ export async function importPartitions(repoRoot) {
   // Quarantine = line-level parse/envelope damage: set aside (readAll skips it),
   // reported but NOT fatal — the rest of the partition still imports.
   const quarantineKinds = new Set(['unparseable', 'torn_trailing_line', 'non_object', 'envelope_missing']);
-  const quarantined = v.issues.filter((i) => quarantineKinds.has(i.kind));
+  // r19-F1: a torn trailer in a NON-final segment is a BURIED torn element —
+  // its committed successor chains through bytes the record excludes.
+  // Structural corruption, never quarantinable. (A torn ACTIVE tail — the
+  // final segment — stays quarantined: it is the local crash the operator
+  // repairs; the sync commit path refuses to share it anyway.)
+  const lastSegByRid = new Map();
+  for (const s of v.segments) {
+    const key = s.replicaId ?? null;
+    const cur = lastSegByRid.get(key);
+    if (!cur || s.name > cur) lastSegByRid.set(key, s.name);
+  }
+  const buriedTorn = v.issues.filter((i) => i.kind === 'torn_trailing_line' && i.segment !== lastSegByRid.get(i.replicaId ?? null));
+  const buriedTornSet = new Set(buriedTorn);
+  const quarantined = v.issues.filter((i) => quarantineKinds.has(i.kind) && !buriedTornSet.has(i));
 
   // Duplicate ids: WITHIN a partition = a real single-writer bug (fatal); ACROSS
   // partitions = a tolerated probabilistic id collision (identity is partition-
@@ -545,7 +558,7 @@ export async function importPartitions(repoRoot) {
   // as both a fork and a structural fail.
   const structuralFails = v.issues.filter(
     (i) => i.level === 'FAIL' && !quarantineKinds.has(i.kind) && i.kind !== 'duplicate_id' && i.kind !== 'chain_broken'
-  );
+  ).concat(buriedTorn); // r19-F1: buried torn elements are structural, fatal
 
   const byRid = new Map();
   for (const s of v.segments) {

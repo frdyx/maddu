@@ -351,6 +351,30 @@ try {
     await rm(fixG, { recursive: true, force: true });
   }
 
+  // ── (I) r19-F1: a BURIED torn element makes sync import FATAL ───────────
+  {
+    const fixI = await mkdtemp(join(tmpdir(), 'ws-buried-torn-'));
+    run(fixI, ['init']);
+    run(fixI, ['goal', 'set', '--objective', 'buried-torn-fixture']);
+    const attI = await sync.syncInit(fixI);
+    ok('buried-torn fixture attaches', attI.ok === true);
+    const pdirI = join(fixI, '.maddu', 'events', 'by-replica', attI.replicaId);
+    const segsI = (await import('node:fs/promises').then((fs) => fs.readdir(pdirI))).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+    const lastSeg = segsI[segsI.length - 1];
+    const txtI = await readFile(join(pdirI, lastSeg), 'utf8');
+    const tailI = txtI.split('\n').filter(Boolean).pop();
+    // Bury: torn valid-JSON tail in segment N, successor chained THROUGH it in N+1.
+    const tornI = JSON.stringify({ v: 1, id: 'evt_torn_i', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 }, prev_hash: core.hashLine(tailI) });
+    await writeFile(join(pdirI, lastSeg), txtI + tornI); // no newline
+    const nextSegI = String(Number(lastSeg.slice(0, 12)) + 1).padStart(12, '0') + '.ndjson';
+    await writeFile(join(pdirI, nextSegI), JSON.stringify({ v: 1, id: 'evt_after_i', ts: new Date().toISOString(), type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 2 }, prev_hash: core.hashLine(tornI) }) + '\n');
+    const imp = await sync.importPartitions(fixI);
+    ok('a buried torn element is a FATAL structural import failure (never "safe to merge")',
+      imp.ok === false && imp.structuralFails.some((i) => i.kind === 'torn_trailing_line'),
+      JSON.stringify({ ok: imp.ok, sf: imp.structuralFails.map((i) => i.kind) }).slice(0, 140));
+    await rm(fixI, { recursive: true, force: true });
+  }
+
   // ── (F) r8-F2: REPLICA_UNATTACHED never deadlocks its own recovery ──────
   // An unattached checkout (replica.json removed) with a pending S1 breach
   // row: the drain fails with REPLICA_UNATTACHED on every invocation — the
