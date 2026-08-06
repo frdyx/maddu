@@ -131,7 +131,22 @@
 // ONLY appendable type; it binds every conflicting anchor and selects one
 // EXISTING identity). Additive → minor bump; baseline refresh at the next
 // release.
-export const EVENT_CONTRACT_VERSION = '1.15.0';
+// 1.16.0 (buzz-steals S4, cost provenance) — TOKEN_USAGE_REPORTED gains three
+// honest-optional fields: `pricingIdentity` ({authority, model} — recorded
+// only when the emitter can PROVE the endpoint, via the descriptor-declared
+// MADDU_PRICING_AUTHORITY env at the spawn seam, and the model string is real,
+// not a `-unknown` fallback), plus contract-ready `costUsd` +
+// `costProvenance:'wire-reported'` for a provider that ever reports wire cost
+// (no emitter does today). USD estimation is READ-time only (`cost --usd`
+// over the embedded pricing manifest in lib/pricing.mjs) — an estimate is
+// presentation over the factual record and is NEVER written to the spine,
+// because writing one would bake a stale price into append-only history.
+// Estimated vs reported dollars are never merged; null ≠ zero ≠ omitted
+// survives end-to-end (Object.hasOwn threading through the tokenLedger
+// reducer). Transcript import always omits pricingIdentity — a transcript
+// cannot distinguish api.anthropic.com from Bedrock/Vertex. Additive → minor
+// bump; baseline refresh at the next release.
+export const EVENT_CONTRACT_VERSION = '1.16.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -268,7 +283,7 @@ export const EVENT_SCHEMA = {
   PIPELINE_HALTED: { summary: "A pipeline run halted before completion.", data: { pipelineRunId: 'string', reason: 'string' } },
   ADVISOR_INVOKED: { summary: "An advisor (external CLI) was invoked in a subprocess.", data: { advisorId: 'string', authProvider: 'string', binary: 'string', kind: 'string', parentSessionId: 'string|null', prompt: 'string', runtime: 'string', timeoutSec: 'number' } },
   ADVISOR_ARTIFACT_WRITTEN: { summary: "An advisor wrote its result artifact.", data: { advisorId: 'string', artifactPath: 'string', exitCode: 'number|null', status: 'string' } },
-  TOKEN_USAGE_REPORTED: { summary: "Token usage for a session/model was reported to the ledger.", data: { cacheCreation: 'number|null', cacheRead: 'number|null', importHash: 'string', inputTokens: 'number|null', model: 'string|null', outputTokens: 'number|null', runtime: 'string|null', sessionId: 'string|null', source: 'string', ts: 'string', unreportedTokens: 'boolean' } },
+  TOKEN_USAGE_REPORTED: { summary: "Token usage for a session/model was reported to the ledger.", data: { cacheCreation: 'number|null', cacheRead: 'number|null', costProvenance: 'string?', costUsd: 'number|null?', importHash: 'string', inputTokens: 'number|null', model: 'string|null', outputTokens: 'number|null', pricingIdentity: 'object?', runtime: 'string|null', sessionId: 'string|null', source: 'string', ts: 'string', unreportedTokens: 'boolean' } },
   SKILL_INJECTED: { summary: "Skill bodies were auto-injected into an orientation digest.", data: { sessionId: 'string|null', skillIds: 'array', tags: 'array', totalBytes: 'number', triggers: 'array' } },
   SKILL_INJECTION_REFUSED: { summary: "A matching skill was withheld from injection for untrusted provenance.", data: { reason: 'string', refused: 'array', sessionId: 'string|null' } },
   TOOL_INVOKED: { summary: "A default framework tool invocation started.", data: { argv: 'array', mode: 'string', sessionId: 'string|null', tool: 'string', lane: 'string|null' } },

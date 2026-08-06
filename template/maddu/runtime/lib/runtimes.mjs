@@ -18,6 +18,7 @@ import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, genWorkerId, normalizeParentId, isRefId } from './spine.mjs';
 import { readWorkerEnvConfig, filterEnvForWorker } from './worker-env.mjs';
 import { redactSpawn, redactLeaves } from './secret-scan.mjs';
+import { isValidAuthority } from './pricing.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -161,6 +162,15 @@ function defaultDescriptor(name) {
     // also be a richer { default, plan, exec, verify, review } object;
     // the caller resolves a single string before spawning.
     modelPreference: null,
+    // v1.118.0 (S4 cost provenance) — optional pricing authority: the
+    // lowercase hostname the runtime's workers actually call (e.g.
+    // 'api.anthropic.com'). Forwarded as MADDU_PRICING_AUTHORITY so wrappers
+    // can stamp a provable pricingIdentity on TOKEN_USAGE_REPORTED. Null =
+    // unknown endpoint → rows stay honestly unpriced. Descriptors are
+    // load/saved unvalidated, so the grammar is enforced at the spawn seam:
+    // an invalid hand-edited value is NOT injected (omission + one-line
+    // diagnostic — pricing must never block work).
+    authority: null,
     notes: ''
   };
 }
@@ -395,6 +405,15 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
         stage: opts.stage || null,
       });
   if (resolvedHint) env.MADDU_MODEL_HINT = resolvedHint;
+  // v1.118.0 (S4 cost provenance) — descriptor-declared pricing authority,
+  // grammar-checked HERE because descriptors load unvalidated. Invalid value
+  // → omit + one-line diagnostic, never refuse the spawn (pricing must never
+  // block work). Wrappers stamp pricingIdentity only when this env is present
+  // AND the model string is real — so a row's identity is always provable.
+  if (r.authority != null) {
+    if (isValidAuthority(r.authority)) env.MADDU_PRICING_AUTHORITY = r.authority;
+    else process.stderr.write(`maddu: runtime "${name}" has invalid pricing authority ${JSON.stringify(r.authority)} — MADDU_PRICING_AUTHORITY not injected\n`);
+  }
 
   // v0.17 Phase 3 — runtime descriptors carrying autoRegister:true mint
   // a fresh child session per spawn (linked to opts.session as parent

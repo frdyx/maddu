@@ -118,7 +118,7 @@ export async function project(repoRoot) {
   //   teams       : Map teamId -> { id, openedAt, parentSessionId, lanes[], members[], status, closedAt }
   //   pipelines   : Map pipelineRunId -> { id, name, goal, startedAt, stages[], status, completedAt }
   //   advisors    : Array of { id, ts, runtime, prompt, parentSessionId, artifactPath }
-  //   tokenLedger : Array of { ts, runtime, sessionId, model, inputTokens, outputTokens, cacheRead, cacheCreation }
+  //   tokenLedger : Array of { ts, runtime, sessionId, model, inputTokens, outputTokens, cacheRead, cacheCreation, costUsd?, costProvenance?, pricingIdentity? }
   //                 Entries without input/output token counts are kept as
   //                 "minimum-schema" rows; `maddu cost --unreported-count`
   //                 surfaces the gap honestly instead of zeroing it.
@@ -833,7 +833,7 @@ export async function project(repoRoot) {
         // Minimum schema: { runtime, sessionId, model, ts }. Optional:
         // inputTokens, outputTokens, cacheRead, cacheCreation. We keep
         // rows verbatim; `maddu cost` does the rollup + unreported count.
-        tokenLedger.push({
+        const row = {
           ts: ev.ts,
           runtime: ev.data.runtime || null,
           sessionId: ev.data.sessionId || ev.actor || null,
@@ -842,7 +842,29 @@ export async function project(repoRoot) {
           outputTokens: typeof ev.data.outputTokens === 'number' ? ev.data.outputTokens : null,
           cacheRead: typeof ev.data.cacheRead === 'number' ? ev.data.cacheRead : null,
           cacheCreation: typeof ev.data.cacheCreation === 'number' ? ev.data.cacheCreation : null,
-        });
+        };
+        // S4 cost provenance — omitted ≠ null ≠ zero: the three provenance
+        // fields are threaded ONLY when present on the event (Object.hasOwn),
+        // so `maddu cost --usd` can distinguish "provider reported null cost"
+        // from "field never emitted". A present-but-mistyped value is dropped
+        // (absent), never coerced — fail toward the unpriced bucket.
+        if (Object.hasOwn(ev.data, 'costUsd') &&
+            (typeof ev.data.costUsd === 'number' || ev.data.costUsd === null)) {
+          row.costUsd = ev.data.costUsd;
+        }
+        if (Object.hasOwn(ev.data, 'costProvenance') && typeof ev.data.costProvenance === 'string') {
+          row.costProvenance = ev.data.costProvenance;
+        }
+        if (Object.hasOwn(ev.data, 'pricingIdentity') &&
+            ev.data.pricingIdentity && typeof ev.data.pricingIdentity === 'object' &&
+            typeof ev.data.pricingIdentity.authority === 'string' &&
+            typeof ev.data.pricingIdentity.model === 'string') {
+          row.pricingIdentity = {
+            authority: ev.data.pricingIdentity.authority,
+            model: ev.data.pricingIdentity.model,
+          };
+        }
+        tokenLedger.push(row);
         break;
       }
     }

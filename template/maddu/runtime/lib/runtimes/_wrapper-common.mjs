@@ -61,6 +61,19 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (typeof payload.cacheCreation === 'number') ev.data.cacheCreation = payload.cacheCreation;
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
 
+  // S4 cost provenance: stamp pricingIdentity ONLY when it is provable —
+  // the authority arrives via MADDU_PRICING_AUTHORITY (declared on the
+  // runtime descriptor, grammar-checked at the spawn seam) AND the model is
+  // a real parsed string, not a '<runtime>-unknown' fallback. Anything less
+  // → omit the field entirely; the row stays honestly unpriced. No estimate
+  // is ever computed or written here — pricing is read-time presentation.
+  const authority = process.env.MADDU_PRICING_AUTHORITY;
+  if (typeof authority === 'string' && authority.length > 0 &&
+      typeof ev.data.model === 'string' && ev.data.model.length > 0 &&
+      !ev.data.model.endsWith('-unknown')) {
+    ev.data.pricingIdentity = { authority, model: ev.data.model };
+  }
+
   // Workspace identity (S2): CACHE-ONLY, freshness-proven read (r2-F5) — the
   // wrapper never scans/derives (its standalone contract forbids the heavier
   // machinery, and a drop is acceptable by design). readFreshCachedIdentity
