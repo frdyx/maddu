@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that puts their work **on a record**: one agent per lane, sensitive changes waiting on your approval, recorded steps replayable and checkable, instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.115.0](https://img.shields.io/badge/version-1.115.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version 1.118.0](https://img.shields.io/badge/version-1.118.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -100,7 +100,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 
 ### The record is a contract, not just a log
 
-Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 190 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
+Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs — and since v1.117.0 every event is also stamped with a **workspace identity** derived from the spine's own genesis line, riding inside the hash preimage, so a chain-valid line lifted from *another* workspace's spine can't re-chain here either (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 193 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
 docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.8.0)
@@ -113,7 +113,7 @@ What the contract attests is precise — and worth stating precisely: a third pa
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.105.2 installed.
+Máddu v1.118.0 installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
@@ -149,9 +149,9 @@ Inside Claude Code or Codex CLI, you drive everything from one line:
 
 And for the person who **can't read the code** — the one on the hook for what the agent did — there's a read-only **Operator Plane** on top of the same record: `maddu status --line` (a one-line on-goal/drift segment, wireable into the status line), `maddu orient --digest` ("while you were away"), an **oversight** readout of what a skill was *fed vs withheld* and the plain-language why (`maddu spine oversight`), a per-project cockpit, a **decision ledger** whose every row ties to the tamper chain, and a cross-workspace **portfolio wall** that surfaces which repos *need a human*. All read-only projections — nothing new is written to make them. See [Oversight](docs/52-oversight.md) and [the Operator Plane](docs/53-operator-plane.md).
 
-## Seven ways people run it
+## Eight ways people run it
 
-Same substrate, seven shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
+Same substrate, eight shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
 
 ### 🔍 1. Verify the agent instead of trusting it
 
@@ -255,6 +255,20 @@ maddu model gates install                            # 12 ML-lifecycle gates in 
 
 Every promotion above candidate waits for an explicit per-request decision — standing approval policies are deliberately inert near production. Rollback is strictly downward and re-promotion goes back through the full ride; the spine verifier holds the whole ladder tamper-detecting on replay. And the honesty line is structural: Máddu records what your tools *declared* and pins the bytes of record — it never trains, serves, evaluates, or decides that a model is good. Full guide: [51-slm-governance.md](docs/51-slm-governance.md).
 
+### 🕰️ 8. Proof for someone who doesn't trust you
+
+**For the reviewer, the auditor, the client — or future-you — who won't take your machine's word for it.** Everything above verifies the agent *on your machine, under your authority*. This shape escalates the evidence past that boundary: each rung of the assurance ladder names exactly what backs it, and no rung is granted by local state.
+
+```bash
+maddu spine verify --replay <sha>   # clean checkout of that exact commit re-runs the DECLARED verification
+maddu spine anchor                  # stamp a receipt of the record into Bitcoin (OpenTimestamps)
+maddu spine anchor --assess         # operator consume ceremony — records the assurance level, honestly labeled
+```
+
+<picture><img alt="Proof for someone who doesn't trust you — the assurance ladder from actor-reported receipt to clean-checkout replay to a Bitcoin-anchored timestamp, with the skeptic's checks listed" src="docs/images/use-case-witness.svg" width="920"></picture>
+
+**actor-reported** is the agent's own receipt, preserved. **replayed** re-runs the repo's declared checks in a clean clone of the exact commit and appends its own strict receipt. **anchored** commits a receipt (and chain head) to Bitcoin via the stock OpenTimestamps client — evidence that exists *outside the actor's authority*, which no after-the-fact rewrite can back-date. The consume ceremony can only refuse, never vouch: the positive evidence is the operator's own `ots verify`, and `ASSURANCE_ASSESSED` is labeled a non-authoritative ledger note by every consumer. Combined with the workspace-stamped, hash-chained record and the published event contract, a skeptic can check what happened without trusting you, your agent, or Máddu itself.
+
 ## What it does for you
 
 The spine is the foundation. This is what you actually get standing on top of it — every item is a real command, and every step it takes lands as an event on the spine.
@@ -281,7 +295,7 @@ The spine is the foundation. This is what you actually get standing on top of it
 | ✅ **A real testing harness** | Runs your project's tests with adaptive profiles; `self-test` runs the framework's own suite, backed by a dogfooded multi-layer gate. | `/maddu-test` |
 | 🗂️ **One bridge, every repo** | Mount N repos on one bridge; `/_all/*` fans out reads across all of them, each row tagged by workspace. Each repo's spine stays its own truth. | `/maddu-status` |
 | 🛰️ **Fleet view + staged upgrade** | See every Máddu install on your machine at a glance — version, liveness, how far behind — computed offline without running any of them. Then `fleet upgrade --plan` previews exactly what a delivery would change and which repos are safe to touch, and `--apply` delivers it: snapshot → upgrade → per-repo doctor, **halt-on-red**. | `maddu fleet` |
-| 💰 **Cost accounting** | Token and call rollup per session, day, runtime, and model — so you can see what your agents actually spent, with an opt-in `cost-budget` gate that WARNs when a session runs hot. | `/maddu-cost` |
+| 💰 **Cost accounting** | Token and call rollup per session, day, runtime, and model — so you can see what your agents actually spent, with an opt-in `cost-budget` gate that WARNs when a session runs hot. `cost --usd` prices rows **only when provable** (v1.118.0): wire-reported and manifest-estimated dollars never merge, and unpriced rows say why. | `/maddu-cost` |
 | 🚦 **Default pipelines** | One canonical flow — orient → plan → coordinate → slice → test → review → land → account — as `ship-a-feature`, `fix-a-bug`, `plan-and-delegate`. | `/maddu-autopilot` |
 | 🔬 **Insights + debt ledger** | See what's actually used vs merely defined, and keep a ledger of deliberate shortcuts — flagged when they have no upgrade trigger. | `/maddu-insights`, `/maddu-debt` |
 

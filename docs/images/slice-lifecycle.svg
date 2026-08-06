@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 600" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Máddu slice lifecycle">
-  <title>The slice loop — register → claim → work → slice-stop → hindsight → memory / skills · review / follow-up · janitor / re-register</title>
+  <title>The slice loop — register → claim → work → slice-stop → hindsight → memory / skills / wiki · review / follow-up · janitor / re-register</title>
   <desc>The Máddu work loop: a session registers (idempotent on MADDU_SESSION_ID), claims a lane, does the work, heartbeats, runs slice-stop. The slice-stop event feeds hindsight extraction into memory and skills, optionally fires a post-stop review, and either closes the session or — via the janitor — auto-closes a stale session and surfaces a follow-up.</desc>
   <defs>
     <style>
@@ -29,7 +29,7 @@
   <g transform="translate(40,30)">
     <text x="0" y="0" class="cond-b" fill="#D0FF00" font-size="11" letter-spacing="0.14em" filter="url(#glow-lime)">◈ LIFECYCLE</text>
     <text x="0" y="22" class="cond-b" fill="#E8E6E3" font-size="20">The slice loop</text>
-    <text x="0" y="42" class="mono" fill="#6a7079" font-size="11">register → claim → work → slice-stop → hindsight → memory / skills · review / follow-up · janitor / re-register</text>
+    <text x="0" y="42" class="mono" fill="#6a7079" font-size="11">register → claim → work → slice-stop → hindsight → memory / skills / wiki · review / follow-up · janitor / re-register</text>
   </g>
 
   <!-- Bezier edges — main loop (left to right, then down through hindsight) -->
@@ -91,9 +91,9 @@
     </g>
 
     <!-- memory + skills — terminal value surface, glow lime -->
-    <g transform="translate(1260,358)">
-      <rect class="node-rect" width="160" height="44" rx="6" filter="url(#glow-lime)"/>
-      <text x="80" y="28" fill="#D0FF00">MEMORY · SKILLS</text>
+    <g transform="translate(1246,358)">
+      <rect class="node-rect" width="188" height="44" rx="6" filter="url(#glow-lime)"/>
+      <text x="94" y="28" fill="#D0FF00">MEMORY · SKILLS · WIKI</text>
     </g>
 
     <!-- review (v0.16) — second-opinion lane, glow cyan -->

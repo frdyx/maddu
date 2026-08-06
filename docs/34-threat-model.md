@@ -17,7 +17,7 @@ One compromised npm package on one developer's machine got access to
 ("local-first, files-only, no hosted backend, no provider SDKs in
 framework code, device-bound tokens") into enforced gates.
 
-## The 13 attack scenarios
+## The 15 attack scenarios
 
 Each scenario lists the attack, what Máddu enforces, what it does NOT
 enforce, and the concrete gate / spine event family that catches it
@@ -414,8 +414,8 @@ Likewise **truncating a contiguous tail** (removing the final event or
 segment) leaves no dangling link, **editing only the last event** (no
 successor to notice), **appending a forged well-linked event** (the
 correct `prev_hash` is publicly computable), **stripping every key from a
-legacy-rooted chain**, and **whole-partition add/delete/replace in sync
-mode** (verify enumerates only present partitions) all pass silently.
+legacy-rooted chain**, and **whole-partition deletion in sync mode**
+(verify enumerates only present partitions) all pass silently.
 These are the classic limits of an unkeyed, file-enumerating record: it
 catches naive/accidental edits and partial interior tampering, not an
 adversary who rewrites a contiguous whole. Keyed integrity and
@@ -423,6 +423,22 @@ process-level isolation remain the OS's job (see *Integration with
 OS-level defenses*). The point Máddu does guarantee: **the actor is not
 the sole witness** — a naive after-the-fact rewrite leaves a detectable
 break, on the record, that an independent `spine verify` surfaces.
+
+**Workspace identity closes the cross-workspace splice (v1.117.0):**
+every post-cutover event is stamped with a `ws` identity derived from
+the spine's own committed genesis line (flat mode) or frozen by an
+in-band `WS_IDENTITY_ANCHORED` event (sync mode). The stamp rides
+*inside* the stored line — and therefore inside the next event's
+`prev_hash` — so a chain-valid line lifted from ANOTHER workspace's
+spine, or an entire internally-consistent foreign partition, now FAILs
+(`ws_mismatch`) instead of passing: re-homing it requires re-stamping
+every line AND recomputing the whole forward chain. That wholesale
+recompute remains the unkeyed limit above — but in flat mode an
+OpenTimestamps anchor (scenario 13) pins the genesis line in time, so
+even a full recompute cannot back-date the identity it fabricates.
+Conflicting sync-mode anchors freeze writes until the operator resolves
+them (`maddu spine identity resolve`); ws-less legacy events are
+tolerated forward-only, exactly like `prev_hash`.
 
 ### 12. An agent weakens its own verification (the verdict machinery)
 
@@ -596,6 +612,54 @@ The `ASSURANCE_ASSESSED` event itself is writable by anyone with repo
 access (like every spine event); that is why every consumer prints it as
 a non-authoritative ledger note and the real consume gate is the
 operator re-running the ceremony themselves.
+
+### 14. A mutating seam succeeds while recording nothing
+
+**Attack:** the inverse of scenario 11 — instead of rewriting the
+record, the actor simply never writes one. A CLI verb or bridge write
+route mutates state and exits 0 without appending any event: work
+happened, the spine is silent, and silence is indistinguishable from
+idleness.
+
+**Máddu enforcement (v1.116.0, the mutation-witness guard):** every
+mutating CLI dispatch and bridge write route runs under a witness. A
+seam that claims success with zero spine appends and no *declared*
+no-op reason breaches: `MUTATION_UNWITNESSED` lands on the spine (CLI
+breaches spool crash-safely and are drained by the next dispatcher run;
+bridge breaches append inline after the 2xx), the exit code is forced
+to 1, and the `command-tier-discipline` census stays red while breach
+evidence is undrained. ~40 legitimately append-free paths (idempotent
+early returns, delegated mutations, read-shaped subverbs) carry
+declared, census-verified reasons instead of silent exemptions.
+
+**Máddu does NOT enforce:** a command that crashes (non-zero exit)
+after partially mutating is a transactionality problem, not a witness
+problem — MUTATION_UNWITNESSED means "reported success while recording
+nothing". Worker-child token accounting is best-effort by design and
+is not witnessed.
+
+### 15. Mispriced or fabricated cost figures
+
+**Attack:** the accounting layer lies pleasantly — an estimated dollar
+figure is presented as a provider-reported fact, a stale price is baked
+into the permanent record, garbage is coerced into the totals, or an
+unpriceable row is silently zeroed so the spend looks known.
+
+**Máddu enforcement (v1.118.0, cost provenance):** `cost --usd` prices
+a row only when PROVABLE — a `pricingIdentity` stamped from a
+descriptor-declared endpoint authority (inherited env scrubbed at the
+spawn seam) plus a model the wrapper parsed from the provider's own
+stream, an exact pricing-manifest match, and reported token counts.
+Wire-reported and manifest-estimated dollars never merge; estimates are
+read-time presentation and are never written to the append-only spine;
+null ≠ zero ≠ omitted end-to-end; IEEE overflow/underflow fail loudly
+rather than serialize a fabricated zero or empty bucket; an invalid
+pricing override is a loud exit 2, never a silent fallback.
+
+**Máddu does NOT enforce:** the embedded manifest's rates being
+CURRENT (the manifest is versioned and surfaced with every estimate —
+stale rates produce honestly-labeled stale estimates), and rows
+emitted before v1.118.0 stay unpriced with a named reason.
 
 ## Operator responsibilities
 

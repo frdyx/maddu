@@ -400,7 +400,12 @@ Verify integrity of the append-only event spine, look up a single event by id, o
 
 ```bash
 $ maddu spine verify [--json]
+$ maddu spine verify --replay <commit>  # clean-checkout replay of the repo's declared verification (v1.109.0)
 $ maddu spine show <eventId>
+$ maddu spine anchor [--status]     # stamp a spine receipt into Bitcoin via OpenTimestamps (v1.108.0 — see 54-spine-anchor.md)
+$ maddu spine anchor --assess       # operator consume ceremony: record an assurance level (v1.110.0)
+$ maddu spine identity show         # workspace identity (v1.117.0): derived from the genesis line, stamped into every event's hash preimage
+$ maddu spine identity resolve --keep <ws_...>   # operator ceremony for sync-mode identity conflicts
 $ maddu spine oversight [--json]    # non-technical readout: skills fed/withheld + why, on-goal, record-intact (v1.97.0 — see 52-oversight.md)
 $ maddu spine sync init [--json]    # opt into git-native team sync (one-time per checkout)
 $ maddu spine sync [--json]         # audited round-trip: commit own segments → pull → validate → push
@@ -660,7 +665,18 @@ $ maddu cost --by day                   # per day
 $ maddu cost --by model                 # per model
 $ maddu cost --unreported-count         # just the gap count
 $ maddu cost --json                     # machine-readable
+$ maddu cost --usd                      # provenance-honest dollars (v1.118.0)
+$ maddu cost --usd --json               # group-shaped usd buckets + pricing metadata
 ```
+
+`--usd` prices a row **only when provable**: it needs a `pricingIdentity`
+(stamped by wrappers only from a descriptor-declared authority plus a
+parser-proven model), an exact match in the embedded pricing manifest, and
+reported token counts. Wire-reported and manifest-estimated dollars are
+never merged; unpriced rows carry a named reason. Rates can be overridden
+via `.maddu/config/pricing.json` — an invalid override fails loudly
+(exit 2), never falls back silently. Estimates are read-time presentation,
+never written to the spine.
 
 ## `maddu usage import` *(v0.19.1)*
 
@@ -675,6 +691,10 @@ $ maddu usage import --from claude-code              # commit the import
 $ maddu usage import --from claude-code --session 21f43c48   # filter by session UUID
 $ maddu usage import --from claude-code --since 2026-04-01   # skip older lines
 ```
+
+Imported rows are **never priced** by `cost --usd` — a transcript cannot
+prove which endpoint served it (api.anthropic.com vs Bedrock/Vertex), so
+they land in the unpriced bucket with reason `no-pricing-identity`.
 
 Full reference: [27-transcript-import.md](27-transcript-import.md).
 
