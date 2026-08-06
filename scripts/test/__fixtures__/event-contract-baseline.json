@@ -1,6 +1,6 @@
 {
-  "version": "1.14.0",
-  "fingerprint": "4a520601",
+  "version": "1.15.0",
+  "fingerprint": "43bdc673",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -11,7 +11,8 @@
       "triggered_by": "object|null",
       "ts": "string",
       "type": "string",
-      "v": "number"
+      "v": "number",
+      "ws": "string?"
     },
     "envelopeRequired": [
       "actor",
@@ -1789,6 +1790,22 @@
           "reason": "string|null",
           "schemaVersion": "number",
           "worktreeInstanceId": "string"
+        }
+      },
+      "WS_IDENTITY_ANCHORED": {
+        "frozen": false,
+        "data": {
+          "genesis": "object",
+          "spineIdentity": "string",
+          "v": "number"
+        }
+      },
+      "WS_IDENTITY_RESOLVED": {
+        "frozen": false,
+        "data": {
+          "conflicts": "array",
+          "cutover": "array?",
+          "selected": "string"
         }
       }
     }
