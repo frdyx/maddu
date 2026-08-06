@@ -1297,8 +1297,25 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
       }
     }
     if (!enumFailed) {
-      for (const rid of repNames.filter((d) => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(d)).sort()) {
-        await sweep(partitionDir(repoRoot, rid), rid);
+      // r20-F1: an INVALIDLY-named dir is chain-scanned like any partition,
+      // so the identity sweep must not silently skip it — a segment-bearing
+      // one FAILs (and is swept anyway, so its foreign stamps also surface).
+      const validName = (d) => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(d);
+      for (const rid of [...repNames].sort()) {
+        let segBearing = false;
+        if (!validName(rid)) {
+          try {
+            const sub = await readdir(join(byReplicaDir, rid));
+            segBearing = sub.some((f) => SEGMENT_RE.test(f));
+          } catch (e) {
+            if (e && (e.code === 'ENOTDIR' || e.code === 'ENOENT')) continue; // plain junk file — not a partition
+            push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: by-replica/${rid}: ${e?.message || e}`));
+            continue;
+          }
+          if (!segBearing) continue;
+          push(issue('FAIL', 'ws_identity_unverifiable', `by-replica/${rid}: invalidly-named segment-bearing partition dir — the identity law cannot account for it; remove or rename it`));
+        }
+        await sweep(join(byReplicaDir, rid), rid);
       }
     }
   }

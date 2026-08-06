@@ -590,6 +590,26 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
+  // ── r20-F2: the in-lock gate late-stamps a stale bootstrap decision ─────
+  {
+    const fix = await freshFix();
+    const { appendFlatChained } = await import('../../template/maddu/runtime/lib/spine-append-core.mjs');
+    // Simulate the race: a writer resolved BOOTSTRAP (empty spine, ws-less
+    // event built) — but the genesis lands before its locked append runs.
+    await writeFile(seg1(fix), genesisLine + '\n');
+    const ev = { v: 1, id: 'evt_second', ts: '2026-01-01T00:00:01.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 2 } };
+    const out = await appendFlatChained(fix, join(fix, '.maddu', 'events'), ev);
+    ok('a ws-less ordinary write after the genesis is LATE-STAMPED in-lock (never S2-unprotected)',
+      !!out.ev && out.ev.ws === wsFromLine(genesisLine), JSON.stringify({ ws: out.ev?.ws }).slice(0, 80));
+    // A TRUE bootstrap (empty spine) legitimately stays ws-less.
+    const fix2 = await freshFix();
+    const ev2 = { v: 1, id: 'evt_first', ts: '2026-01-01T00:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { n: 1 } };
+    const out2 = await appendFlatChained(fix2, join(fix2, '.maddu', 'events'), ev2);
+    ok('a true bootstrap write stays ws-less (it IS the genesis)', !!out2.ev && !('ws' in out2.ev));
+    await rm(fix, { recursive: true, force: true });
+    await rm(fix2, { recursive: true, force: true });
+  }
+
   // ── r5-F2: the fingerprint stat-reuse fast path provably skips reads ────
   {
     const fix = await freshFix();

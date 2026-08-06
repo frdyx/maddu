@@ -205,6 +205,23 @@ try {
     await rm(brPath, { force: true });
   }
 
+  // ── (B9) r20-F1: an invalidly-NAMED partition cannot hide from the law ──
+  {
+    const badDir = join(fix, '.maddu', 'events', 'by-replica', 'rep.bad');
+    await mkdir(badDir, { recursive: true });
+    const fg = JSON.stringify({ v: 1, id: 'evt_badname_g', ts: '2026-01-01T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null });
+    const fe = { v: 1, id: 'evt_badname_e', ts: '2026-01-01T00:00:01.000Z', type: 'GOAL_SET', actor: null, lane: null, data: { objective: 'foreign' }, ws: 'ws_' + 'd'.repeat(16), prev_hash: core.hashLine(fg) };
+    await writeFile(join(badDir, '000000000001.ndjson'), fg + '\n' + JSON.stringify(fe) + '\n');
+    const v = await verifySpine(fix, {});
+    ok('a segment-bearing INVALIDLY-named partition dir FAILs (never invisible to the law)',
+      v.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_identity_unverifiable' && /rep\.bad/.test(String(i.detail))),
+      kinds(v).filter((k) => k.startsWith('FAIL')).join(','));
+    let wsProbeCode = null;
+    try { await core.wsModeIsPartitioned(fix); } catch (e) { wsProbeCode = e.code; }
+    ok('the writer-side law refuses too (WS_SCAN_UNRESOLVABLE from the shared enumerator)', wsProbeCode === 'WS_SCAN_UNRESOLVABLE');
+    await rm(join(fix, '.maddu', 'events', 'by-replica'), { recursive: true, force: true });
+  }
+
   // ── (C) empty-string ws is malformed ────────────────────────────────────
   {
     const ls = [...baseLines];

@@ -121,6 +121,35 @@ async function strictReadText(path, where) {
   try { return await readFile(path, 'utf8'); }
   catch (e) { throw wsScanUnresolvable(where, e); }
 }
+// The ONE by-replica enumeration for the ws law (diff-funnel r20-F1): the
+// chain scanner walks EVERY partition directory, so a foreign workspace
+// partition parked under an invalidly-named dir (e.g. `rep.bad/`) would be
+// chain-green yet invisible to every identity sweep that filters on
+// isValidReplicaId. An invalidly-named SEGMENT-BEARING directory therefore
+// throws — the law refuses until the operator removes or renames it. Plain
+// files and empty junk dirs are ignored.
+async function strictPartitionIds(repoRoot, where = 'by-replica') {
+  const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
+  const names = await strictLs(byReplica, where);
+  if (names === null) return [];
+  const good = [], bad = [];
+  for (const n of names) {
+    if (isValidReplicaId(n)) { good.push(n); continue; }
+    let st = null;
+    try { st = await stat(join(byReplica, n)); }
+    catch (e) {
+      if (e && e.code === 'ENOENT') continue;
+      throw wsScanUnresolvable(`${where}/${n}`, e);
+    }
+    if (!st.isDirectory()) continue;
+    const sub = await strictLs(join(byReplica, n), `${where}/${n}`);
+    if (sub && sub.some((f) => /^\d{12}\.ndjson$/.test(f))) bad.push(n);
+  }
+  if (bad.length) {
+    throw wsScanUnresolvable(where, `invalidly-named segment-bearing partition dir(s): ${bad.join(', ')} — remove or rename them (the identity law cannot account for them)`);
+  }
+  return good.sort();
+}
 
 export function wsFromLine(line) {
   return 'ws_' + hashLine(line).slice(0, 16);
@@ -249,8 +278,7 @@ export async function computeAuthorityFingerprint(repoRoot, prevFp = null) {
   };
   await addDir(eventsDir, 'flat:', 'flat');
   const byReplica = join(eventsDir, 'by-replica');
-  const repNames = await strictLs(byReplica, 'by-replica');
-  for (const id of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
+  for (const id of await strictPartitionIds(repoRoot, 'fingerprint')) {
     await addDir(join(byReplica, id), `${id}/`, id);
   }
   return { segs };
@@ -362,19 +390,10 @@ export async function readFreshCachedIdentity(repoRoot, { refresh = false } = {}
 // flat data.
 export async function wsModeIsPartitioned(repoRoot) {
   const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
-  let ids = [];
-  // FAIL-CLOSED enumeration (diff-funnel r16-F1): only ENOENT means "flat" —
-  // any other error (EACCES/EIO/ENOTDIR) must never silently downgrade an
-  // attached sync workspace to flat bootstrap, or an ordinary append would
-  // land ws-less in the partition (an S2-unprotected event verify then
-  // tolerates as legacy).
-  try { ids = await readdir(byReplica); }
-  catch (e) {
-    if (e && e.code === 'ENOENT') return false;
-    throw Object.assign(new Error(`ws mode probe: by-replica: ${e?.message || e}`), { code: 'WS_SCAN_UNRESOLVABLE' });
-  }
-  for (const id of ids) {
-    if (!isValidReplicaId(id)) continue;
+  // FAIL-CLOSED enumeration (diff-funnel r16-F1, unified r20-F1): only
+  // ENOENT means "flat"; other errors and invalidly-named segment-bearing
+  // dirs throw WS_SCAN_UNRESOLVABLE via the one shared enumerator.
+  for (const id of await strictPartitionIds(repoRoot, 'ws mode probe')) {
     let names = [];
     try { names = await readdir(join(byReplica, id)); }
     catch (e) {
@@ -448,11 +467,10 @@ export async function findMergeFirstGenesis(repoRoot) {
   // STRICT (r17-F2): a transient error here must never demote an existing
   // sync spine to "absent" (which would send the writer down the ws-less
   // bootstrap path). Only genuine absence is absent.
-  let names;
-  try { names = await strictLs(byReplica, 'by-replica'); }
+  let ids;
+  try { ids = await strictPartitionIds(repoRoot, 'merge-first nomination'); }
   catch (e) { return { state: 'unresolvable', error: e.message }; }
-  if (names === null) return { state: 'absent' };
-  const ids = names.filter((d) => isValidReplicaId(d));
+  if (!ids.length) return { state: 'absent' };
   let best = null;
   for (const id of ids.sort()) {
     let segNames;
@@ -555,12 +573,7 @@ export async function scanWsAuthorityEvents(repoRoot) {
   };
   await scanDir(join(repoRoot, '.maddu', 'events'), 'flat');
   const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
-  let ids = [];
-  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); }
-  catch (e) {
-    if (!(e && e.code === 'ENOENT')) throw scanUnresolvable('by-replica', e?.message || String(e));
-  }
-  for (const id of ids.sort()) await scanDir(join(byReplica, id), id);
+  for (const id of await strictPartitionIds(repoRoot, 'authority scan')) await scanDir(join(byReplica, id), id);
   return { anchors, resolutions };
 }
 
@@ -809,8 +822,7 @@ export async function findIncompatibleWsStamp(repoRoot, authority, grandfather =
   const flatHit = await sweepDir(eventsDir, ''); // flat has no cutover entries — losing stamps there stay incompatible
   if (flatHit) return flatHit;
   const byReplica = join(eventsDir, 'by-replica');
-  const repNames = await strictLs(byReplica, 'by-replica');
-  for (const id of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
+  for (const id of await strictPartitionIds(repoRoot, 'history compatibility')) {
     const hit = await sweepDir(join(byReplica, id), id);
     if (hit) return hit;
   }
@@ -833,8 +845,7 @@ export async function findUncoveredLosingStamp(repoRoot, authority, anchors, res
   // WS_SCAN_UNRESOLVABLE.
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const byReplica = join(eventsDir, 'by-replica');
-  const repNames = await strictLs(byReplica, 'by-replica');
-  for (const rid of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
+  for (const rid of await strictPartitionIds(repoRoot, 'extension eligibility')) {
     const pdir = join(byReplica, rid);
     const rawNames = await strictLs(pdir, `partition ${rid}`);
     if (rawNames === null) continue;
@@ -947,8 +958,8 @@ async function collectPartitionHeadsLocked(repoRoot) {
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const cutover = [];
   const byReplica = join(eventsDir, 'by-replica');
-  const repNames = await strictLs(byReplica, 'by-replica');
-  for (const rid of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
+  void byReplica;
+  for (const rid of await strictPartitionIds(repoRoot, 'cutover heads')) {
     const pdir = partitionDir(repoRoot, rid);
     const rawSegs = await strictLs(pdir, `partition ${rid}`);
     if (rawSegs === null) continue;
@@ -1447,12 +1458,38 @@ async function preflightWsStamp(repoRoot, ev, site) {
 // exactly when authority bytes moved. The pre-lock cache preflight above
 // stays as the cheap early refusal — it is never the final word.
 async function assertWsStampCurrent(repoRoot, ev, site) {
-  if (typeof ev?.ws !== 'string') return;
+  // Protocol-authorized ws-less writes: the sync-init cutover seed (the
+  // partition's own genesis) and the two authority types (appended inline by
+  // their serialized paths, never through the primitives) are the ONLY
+  // events allowed past this gate without a stamp decision.
+  if (ev?.type === 'SPINE_CUTOVER' || ev?.type === 'WS_IDENTITY_ANCHORED' || ev?.type === 'WS_IDENTITY_RESOLVED') return;
   const idr = await resolveIdentityForAppend(repoRoot);
   if (idr.conflict) {
     const err = new Error(`${site}: workspace identity became conflict-frozen — run \`maddu spine identity resolve --keep <ws_...>\``);
     err.code = 'WS_IDENTITY_CONFLICT';
     throw err;
+  }
+  if (typeof ev?.ws !== 'string') {
+    // MISSING ws is a state, not an exemption (diff-funnel r20-F2): a stale
+    // bootstrap/unprovable decision is revalidated HERE, under the lock. If
+    // an authority exists now (a concurrent writer just landed the genesis;
+    // a sync-init activated under us), stamp it LATE — self-healing — so no
+    // ordinary post-bootstrap event is ever appended S2-unprotected. A
+    // still-empty spine (true bootstrap) legitimately stays ws-less.
+    if (idr.ws) { ev.ws = idr.ws; return; }
+    if (idr.refuse) {
+      const err = new Error(`${site}: workspace identity unresolvable — ${idr.refuse}`);
+      err.code = 'WS_IDENTITY_UNRESOLVABLE';
+      throw err;
+    }
+    if (idr.needAnchor) {
+      // Publishing an anchor needs this very lock — punt to the caller's
+      // bounded restamp path, which re-runs the full gate outside the lock.
+      const err = new Error(`${site}: workspace identity requires an anchor bootstrap before this write`);
+      err.code = 'WS_IDENTITY_MISMATCH';
+      throw err;
+    }
+    return; // bootstrap — this write IS the genesis
   }
   if (!idr.ws || idr.ws !== ev.ws) {
     const err = new Error(`${site}: ws stamp ${ev.ws} is stale — the workspace authority is now ${idr.ws ?? (idr.refuse ? `unresolvable (${idr.refuse})` : 'unresolved')}`);
