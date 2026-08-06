@@ -58,6 +58,10 @@ child.on('close', async (code) => {
       runtime: RUNTIME,
       sessionId,
       model: modelHint || 'gemini-unknown',
+      // S4 (funnel r1-F2): NO pricingModel — the model hint is display
+      // metadata, not proof (the CLI may ignore it or route elsewhere).
+      // This wrapper doesn't parse Gemini output, so nothing is proven and
+      // pricingIdentity is never stamped on its rows.
       unreportedTokens: true,
     });
   } catch (err) {

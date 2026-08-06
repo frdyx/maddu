@@ -1,6 +1,6 @@
 {
-  "version": "1.15.0",
-  "fingerprint": "43bdc673",
+  "version": "1.16.0",
+  "fingerprint": "23e0e71f",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1542,10 +1542,13 @@
         "data": {
           "cacheCreation": "number|null",
           "cacheRead": "number|null",
+          "costProvenance": "string?",
+          "costUsd": "number|null?",
           "importHash": "string",
           "inputTokens": "number|null",
           "model": "string|null",
           "outputTokens": "number|null",
+          "pricingIdentity": "object?",
           "runtime": "string|null",
           "sessionId": "string|null",
           "source": "string",

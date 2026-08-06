@@ -38,7 +38,13 @@ function genId() {
 //
 // repoRoot: the .maddu/ parent dir.
 // payload : { runtime, sessionId, model, inputTokens?, outputTokens?,
-//             cacheRead?, cacheCreation?, unreportedTokens? }
+//             cacheRead?, cacheCreation?, unreportedTokens?, pricingModel? }
+//
+// `model` is DISPLAY metadata (may be a '<runtime>-unknown' fallback or an
+// unproven MADDU_MODEL_HINT). `pricingModel` is the model string the wrapper
+// PARSED out of the provider's own stream — the only value eligible for
+// pricingIdentity. Wrappers that don't parse the stream (gemini) never pass
+// it, so a hinted-but-unproven model can never become pricing provenance.
 export async function appendTokenUsage(repoRoot, payload) {
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const ts = new Date().toISOString();
@@ -60,6 +66,22 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (typeof payload.cacheRead === 'number') ev.data.cacheRead = payload.cacheRead;
   if (typeof payload.cacheCreation === 'number') ev.data.cacheCreation = payload.cacheCreation;
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
+
+  // S4 cost provenance: stamp pricingIdentity ONLY when BOTH halves are
+  // proven — the authority arrives via MADDU_PRICING_AUTHORITY (declared on
+  // the runtime descriptor, grammar-checked and inheritance-scrubbed at the
+  // spawn seam), and the model is `payload.pricingModel`: parsed from the
+  // provider's own stream, passed SEPARATELY from the display `model`
+  // (funnel r1-F2 — a '-unknown' fallback or an unproven model hint must
+  // never become factual provenance on the append-only spine). Anything
+  // less → omit the field entirely; the row stays honestly unpriced. No
+  // estimate is ever computed or written here — pricing is read-time
+  // presentation.
+  const authority = process.env.MADDU_PRICING_AUTHORITY;
+  if (typeof authority === 'string' && authority.length > 0 &&
+      typeof payload.pricingModel === 'string' && payload.pricingModel.length > 0) {
+    ev.data.pricingIdentity = { authority, model: payload.pricingModel };
+  }
 
   // Workspace identity (S2): CACHE-ONLY, freshness-proven read (r2-F5) — the
   // wrapper never scans/derives (its standalone contract forbids the heavier

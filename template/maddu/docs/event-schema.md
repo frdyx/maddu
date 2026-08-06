@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.15.0` · **Event types:** 193
+**Contract version:** `1.16.0` · **Event types:** 193
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -146,7 +146,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `PIPELINE_HALTED` | A pipeline run halted before completion. | `pipelineRunId: string`, `reason: string` |
 | `ADVISOR_INVOKED` | An advisor (external CLI) was invoked in a subprocess. | `advisorId: string`, `authProvider: string`, `binary: string`, `kind: string`, `parentSessionId: string\|null`, `prompt: string`, `runtime: string`, `timeoutSec: number` |
 | `ADVISOR_ARTIFACT_WRITTEN` | An advisor wrote its result artifact. | `advisorId: string`, `artifactPath: string`, `exitCode: number\|null`, `status: string` |
-| `TOKEN_USAGE_REPORTED` | Token usage for a session/model was reported to the ledger. | `cacheCreation: number\|null`, `cacheRead: number\|null`, `importHash: string`, `inputTokens: number\|null`, `model: string\|null`, `outputTokens: number\|null`, `runtime: string\|null`, `sessionId: string\|null`, `source: string`, `ts: string`, `unreportedTokens: boolean` |
+| `TOKEN_USAGE_REPORTED` | Token usage for a session/model was reported to the ledger. | `cacheCreation: number\|null`, `cacheRead: number\|null`, `costProvenance: string?`, `costUsd: number\|null?`, `importHash: string`, `inputTokens: number\|null`, `model: string\|null`, `outputTokens: number\|null`, `pricingIdentity: object?`, `runtime: string\|null`, `sessionId: string\|null`, `source: string`, `ts: string`, `unreportedTokens: boolean` |
 | `SKILL_INJECTED` | Skill bodies were auto-injected into an orientation digest. | `sessionId: string\|null`, `skillIds: array`, `tags: array`, `totalBytes: number`, `triggers: array` |
 | `SKILL_INJECTION_REFUSED` | A matching skill was withheld from injection for untrusted provenance. | `reason: string`, `refused: array`, `sessionId: string\|null` |
 | `TOOL_INVOKED` | A default framework tool invocation started. | `argv: array`, `mode: string`, `sessionId: string\|null`, `tool: string`, `lane: string\|null` |

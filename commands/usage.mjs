@@ -165,6 +165,10 @@ async function importFromClaudeCode(repoRoot, spine, flags) {
       const importHash = hashLine(entry.sessionUuid, lineNumber, parsed.message?.usage || {});
       if (existing.has(importHash)) { skipped++; fileSkipped++; continue; }
       if (!dryRun) {
+        // S4 cost provenance: transcript imports ALWAYS omit pricingIdentity —
+        // a transcript records usage numbers, not the endpoint; it cannot
+        // distinguish api.anthropic.com from Bedrock/Vertex. Imported rows
+        // land in the unpriced bucket (reason: no-pricing-identity) by design.
         await spine.append(repoRoot, {
           type: spine.EVENT_TYPES.TOKEN_USAGE_REPORTED,
           actor: entry.sessionUuid,

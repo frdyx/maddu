@@ -1,0 +1,285 @@
+#!/usr/bin/env node
+// cost-provenance — S4 end-to-end suite: TOKEN_USAGE_REPORTED provenance
+// fields → tokenLedger projection (Object.hasOwn threading) → `maddu cost
+// --usd` buckets, through the REAL spawned CLI against a fixture spine.
+//
+//   (A) one mixed group carrying BOTH provenances, all three unpriced
+//       reasons, a partial estimate — reported and estimated never merge.
+//   (B) null ≠ zero end-to-end: a proven-zero reported bucket (0) vs an
+//       empty reported bucket (null) in --json; '0.00' vs blank in text.
+//   (C) mistyped costUsd (string) is dropped at the reducer — never
+//       coerced into the reported bucket.
+//   (D) transcript-import-shaped rows are never priced (no-pricing-identity).
+//   (E) plain `cost --json` (no --usd) is shape-identical to pre-S4: no
+//       usd key on groups, no top-level pricing key.
+//   (F) override file changes estimates + surfaces '+override'; garbage
+//       override → exit 2 naming the override.
+//   (G) wrapper emission: appendTokenUsage stamps pricingIdentity ONLY when
+//       MADDU_PRICING_AUTHORITY is present AND the wrapper passed a
+//       parser-PROVEN pricingModel — a display-model fallback or an
+//       unproven model hint (the gemini case) never becomes provenance.
+//   (H) spawn seam (funnel r1-F1): a poisoned parent MADDU_PRICING_AUTHORITY
+//       is scrubbed — a worker sees an authority ONLY when its own
+//       descriptor declares a grammar-valid one.
+//
+// Exit codes: 0 = OK, 1 = a check failed, 2 = harness error.
+
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { append } from '../../template/maddu/runtime/lib/spine.mjs';
+import { appendTokenUsage } from '../../template/maddu/runtime/lib/runtimes/_wrapper-common.mjs';
+import { PRICING_MANIFEST_VERSION } from '../../template/maddu/runtime/lib/pricing.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, '..', '..');
+const SOURCE_BIN = join(repoRoot, 'bin', 'maddu.mjs');
+
+let passed = 0, failed = 0;
+function ok(name, cond, extra = '') {
+  console.log(`  ${cond ? '[PASS]' : '[FAIL]'} ${name}${extra ? ` - ${extra}` : ''}`);
+  if (cond) passed++; else failed++;
+}
+
+function runCost(fix, args) {
+  const r = spawnSync('node', [SOURCE_BIN, 'cost', ...args], {
+    cwd: fix, encoding: 'utf8', timeout: 60000, env: { ...process.env },
+  });
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+}
+
+const PID_SONNET = { authority: 'api.anthropic.com', model: 'claude-sonnet-4-5' };
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+async function tok(fix, data) {
+  await append(fix, { type: 'TOKEN_USAGE_REPORTED', actor: data.sessionId || null, data });
+}
+
+try {
+  const fix = await mkdtemp(join(tmpdir(), 'cost-prov-'));
+
+  // ── fixture spine ───────────────────────────────────────────────────────
+  // rt-mixed: both provenances + every unpriced reason in ONE group.
+  await tok(fix, { runtime: 'rt-mixed', sessionId: 'ses_a', model: 'claude-sonnet-4-5',
+    inputTokens: 100, outputTokens: 100, cacheRead: 0, cacheCreation: 0,
+    costUsd: 12.5, costProvenance: 'wire-reported' });                       // reported 12.5
+  await tok(fix, { runtime: 'rt-mixed', sessionId: 'ses_a', model: 'claude-sonnet-4-5',
+    inputTokens: 1e6, outputTokens: 1e6, cacheRead: 1e6, cacheCreation: 1e6,
+    pricingIdentity: PID_SONNET });                                          // estimated 22.05, full
+  await tok(fix, { runtime: 'rt-mixed', sessionId: 'ses_a', model: 'claude-sonnet-4-5',
+    inputTokens: 1e6, outputTokens: 1e6, cacheRead: 1e6, cacheCreation: null,
+    pricingIdentity: PID_SONNET });                                          // estimated 18.30, partial
+  await tok(fix, { runtime: 'rt-mixed', sessionId: 'ses_i', model: 'claude-sonnet-4-5',
+    ts: '2026-08-06T00:00:00.000Z', inputTokens: 5, outputTokens: 5,
+    cacheRead: null, cacheCreation: null,
+    source: 'claude-code-transcript', importHash: 'abcd1234abcd1234' });     // import-shaped → no-pricing-identity
+  await tok(fix, { runtime: 'rt-mixed', sessionId: 'ses_a', model: 'mystery-model',
+    inputTokens: 5, outputTokens: 5,
+    pricingIdentity: { authority: 'api.anthropic.com', model: 'mystery-model' } }); // no-manifest-match
+  await tok(fix, { runtime: 'rt-mixed', sessionId: 'ses_a', model: 'claude-sonnet-4-5',
+    inputTokens: null, outputTokens: null, unreportedTokens: true,
+    pricingIdentity: PID_SONNET });                                          // unreported-tokens
+  // rt-zero: proven-zero reported bucket.
+  await tok(fix, { runtime: 'rt-zero', sessionId: 'ses_z', model: 'claude-sonnet-4-5',
+    inputTokens: 1, outputTokens: 1, cacheRead: 0, cacheCreation: 0,
+    costUsd: 0, costProvenance: 'wire-reported' });
+  // rt-est-only: estimated members, EMPTY reported bucket.
+  await tok(fix, { runtime: 'rt-est-only', sessionId: 'ses_e', model: 'claude-sonnet-4-5',
+    inputTokens: 1e6, outputTokens: 0, cacheRead: 0, cacheCreation: 0,
+    pricingIdentity: PID_SONNET });                                          // estimated 3.00
+  // rt-garbage: mistyped costUsd must be DROPPED at the reducer, not coerced.
+  await tok(fix, { runtime: 'rt-garbage', sessionId: 'ses_g', model: 'claude-sonnet-4-5',
+    inputTokens: 5, outputTokens: 5, costUsd: '12.5', costProvenance: 'wire-reported' });
+  // rt-tiny: a one-token estimate ($0.000003) must never RENDER as zero.
+  await tok(fix, { runtime: 'rt-tiny', sessionId: 'ses_t', model: 'claude-sonnet-4-5',
+    inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0,
+    pricingIdentity: PID_SONNET });
+
+  // ── (A)+(B) --usd --json buckets ────────────────────────────────────────
+  const j = runCost(fix, ['--usd', '--json', '--by', 'runtime']);
+  ok('cost --usd --json exits 0', j.status === 0, j.stderr.slice(0, 200));
+  const out = JSON.parse(j.stdout);
+  ok('top-level pricing names the embedded manifest, override inactive',
+    out.pricing?.manifestVersion === PRICING_MANIFEST_VERSION && out.pricing?.overrideActive === false);
+  const by = Object.fromEntries(out.groups.map((g) => [g.key, g]));
+  const m = by['rt-mixed']?.usd;
+  ok('mixed group: reported holds ONLY the wire-reported dollars', near(m?.reported, 12.5));
+  ok('mixed group: estimated holds ONLY manifest arithmetic (22.05 + 18.30)', near(m?.estimated, 40.35));
+  ok('mixed group: three unpriced rows', m?.unpricedCount === 3);
+  ok('mixed group: unpriced reasons broken down one each',
+    m?.unpricedReasons?.['no-pricing-identity'] === 1 &&
+    m?.unpricedReasons?.['no-manifest-match'] === 1 &&
+    m?.unpricedReasons?.['unreported-tokens'] === 1);
+  ok('mixed group: exactly one partial-components estimate', m?.partialComponentsCount === 1);
+  ok('proven-zero reported bucket is 0, not null (null ≠ zero)',
+    by['rt-zero']?.usd?.reported === 0 && by['rt-zero']?.usd?.estimated === null);
+  ok('empty reported bucket is null, not 0',
+    by['rt-est-only']?.usd?.reported === null && near(by['rt-est-only']?.usd?.estimated, 3));
+  // ── (C) mistyped costUsd dropped at the reducer ─────────────────────────
+  ok('string costUsd never reaches the reported bucket (reducer drops, row falls to unpriced)',
+    by['rt-garbage']?.usd?.reported === null &&
+    by['rt-garbage']?.usd?.unpricedReasons?.['no-pricing-identity'] === 1);
+  // ── (D) import rows never priced ────────────────────────────────────────
+  ok('transcript-import-shaped row lands unpriced with no-pricing-identity',
+    m?.unpricedReasons?.['no-pricing-identity'] === 1);
+
+  // ── (B) text mode: '0.00' proven zero vs blank empty bucket ─────────────
+  const t = runCost(fix, ['--usd', '--by', 'runtime']);
+  ok('text mode exits 0 with usd columns + manifest line',
+    t.status === 0 && t.stdout.includes('usdRep') && t.stdout.includes(`Pricing: manifest ${PRICING_MANIFEST_VERSION}`));
+  const zeroLine = t.stdout.split('\n').find((l) => l.includes('rt-zero')) || '';
+  ok("proven-zero reported bucket renders '0.00' in text", /\b0\.00\b/.test(zeroLine));
+  const estOnlyLine = t.stdout.split('\n').find((l) => l.includes('rt-est-only')) || '';
+  ok('empty reported bucket renders BLANK in text (no 0 fabricated)', !/\$|0\.00.*0\.00/.test(estOnlyLine) && /3\.00/.test(estOnlyLine));
+  ok('text mode names the unpriced-reason breakdown',
+    t.stdout.includes('Unpriced:') && t.stdout.includes('no-manifest-match'));
+  ok('text mode surfaces partial estimates', t.stdout.includes('Partial estimates: 1'));
+  const tinyLine = t.stdout.split('\n').find((l) => l.includes('rt-tiny')) || '';
+  ok("proven-nonzero tiny estimate renders '<0.0001', never a fabricated zero (r2-F1)",
+    tinyLine.includes('<0.0001') && !/\b0\.0000\b/.test(tinyLine));
+  ok('tiny estimate is still an exact number in --json (display floor is text-only)',
+    near(by['rt-tiny']?.usd?.estimated, 3e-6));
+
+  // ── (E) no --usd → pre-S4 shape untouched ───────────────────────────────
+  const plain = runCost(fix, ['--json', '--by', 'runtime']);
+  const plainOut = JSON.parse(plain.stdout);
+  ok('plain --json groups carry NO usd key and no top-level pricing key',
+    plain.status === 0 && !('pricing' in plainOut) && plainOut.groups.every((g) => !('usd' in g)));
+
+  // ── (F) override behavior through the CLI ───────────────────────────────
+  await mkdir(join(fix, '.maddu', 'config'), { recursive: true });
+  await writeFile(join(fix, '.maddu', 'config', 'pricing.json'), JSON.stringify({
+    version: '2026-01-01.1',
+    entries: [{ authority: 'api.anthropic.com', model: 'claude-sonnet-4-5',
+      inputUsdPerMTok: 6, outputUsdPerMTok: 30, cacheReadUsdPerMTok: 0.6, cacheCreationUsdPerMTok: 7.5 }],
+  }) + '\n');
+  const jo = runCost(fix, ['--usd', '--json', '--by', 'runtime']);
+  const ovr = JSON.parse(jo.stdout);
+  ok('override doubles the estimates and surfaces +override',
+    ovr.pricing?.manifestVersion === `${PRICING_MANIFEST_VERSION}+override` &&
+    ovr.pricing?.overrideActive === true &&
+    near(Object.fromEntries(ovr.groups.map((g) => [g.key, g]))['rt-mixed']?.usd?.estimated, 80.7));
+  ok('override never touches the reported bucket',
+    near(Object.fromEntries(ovr.groups.map((g) => [g.key, g]))['rt-mixed']?.usd?.reported, 12.5));
+  await writeFile(join(fix, '.maddu', 'config', 'pricing.json'), '{ not json');
+  const bad = runCost(fix, ['--usd', '--json']);
+  ok('garbage override → exit 2 naming the override file (never silent fallback)',
+    bad.status === 2 && bad.stderr.includes('pricing override'));
+  const badCount = runCost(fix, ['--usd', '--unreported-count']);
+  ok('--usd --unreported-count still fails loudly on a malformed override (r2-F3)',
+    badCount.status === 2 && badCount.stderr.includes('pricing override'));
+  await rm(join(fix, '.maddu', 'config', 'pricing.json'));
+  const goodCount = runCost(fix, ['--usd', '--unreported-count']);
+  ok('--usd --unreported-count with valid pricing still prints the bare count',
+    goodCount.status === 0 && /^\d+\s*$/.test(goodCount.stdout));
+  // r2-F3: empty ledger + --usd still surfaces the promised manifest version.
+  const efix = await mkdtemp(join(tmpdir(), 'cost-empty-'));
+  await mkdir(join(efix, '.maddu', 'events'), { recursive: true });
+  const empty = runCost(efix, ['--usd']);
+  ok('empty ledger + --usd surfaces the manifest-version trailer',
+    empty.status === 0 && empty.stdout.includes(`Pricing: manifest ${PRICING_MANIFEST_VERSION}`));
+  const emptyPlain = runCost(efix, []);
+  ok('empty ledger WITHOUT --usd stays byte-compatible (no pricing line)',
+    emptyPlain.status === 0 && !emptyPlain.stdout.includes('Pricing: manifest'));
+  await rm(efix, { recursive: true, force: true });
+  const noUsdStill = runCost(fix, ['--json']);
+  ok('plain cost (no --usd) never loads pricing (worked even while override was present)',
+    noUsdStill.status === 0);
+
+  // ── (F2) aggregate overflow fails loudly (r3-F1) ────────────────────────
+  const ofix = await mkdtemp(join(tmpdir(), 'cost-ovf-'));
+  await tok(ofix, { runtime: 'rt-ovf', sessionId: 'ses_o', model: 'm',
+    inputTokens: 1, outputTokens: 1, costUsd: 1e308, costProvenance: 'wire-reported' });
+  await tok(ofix, { runtime: 'rt-ovf', sessionId: 'ses_o', model: 'm',
+    inputTokens: 1, outputTokens: 1, costUsd: 1e308, costProvenance: 'wire-reported' });
+  const ovf = runCost(ofix, ['--usd', '--json']);
+  ok('two finite reported costs whose SUM overflows → exit 2, never a serialized null bucket',
+    ovf.status === 2 && ovf.stderr.includes('overflows IEEE double'));
+  ok('the same ledger WITHOUT --usd still rolls up (overflow guard is usd-scoped)',
+    runCost(ofix, ['--json']).status === 0);
+  await rm(ofix, { recursive: true, force: true });
+
+  // r4-F1: underflow-to-zero through the spawned CLI — exit 2, never '0.00'.
+  const ufix = await mkdtemp(join(tmpdir(), 'cost-unf-'));
+  await mkdir(join(ufix, '.maddu', 'config'), { recursive: true });
+  await writeFile(join(ufix, '.maddu', 'config', 'pricing.json'), JSON.stringify({
+    version: '2026-01-01.1',
+    entries: [{ authority: 'tiny.example', model: 'tiny',
+      inputUsdPerMTok: 5e-324, outputUsdPerMTok: 0, cacheReadUsdPerMTok: 0, cacheCreationUsdPerMTok: 0 }],
+  }) + '\n');
+  await tok(ufix, { runtime: 'rt-unf', sessionId: 'ses_u', model: 'tiny',
+    inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0,
+    pricingIdentity: { authority: 'tiny.example', model: 'tiny' } });
+  const unf = runCost(ufix, ['--usd', '--json']);
+  ok("positive estimate underflowing to zero → exit 2, never a fabricated '0.00'",
+    unf.status === 2 && unf.stderr.includes('underflows to zero'));
+  await rm(ufix, { recursive: true, force: true });
+
+  // ── (G) wrapper emission gate ───────────────────────────────────────────
+  const wfix = await mkdtemp(join(tmpdir(), 'cost-wrap-'));
+  const prevAuth = process.env.MADDU_PRICING_AUTHORITY;
+  process.env.MADDU_PRICING_AUTHORITY = 'api.anthropic.com';
+  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-sonnet-4-5', pricingModel: 'claude-sonnet-4-5', inputTokens: 1, outputTokens: 1 });
+  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-unknown', inputTokens: 1, outputTokens: 1 });
+  await appendTokenUsage(wfix, { runtime: 'gemini', sessionId: 'ses_w', model: 'gemini-2.5-pro', unreportedTokens: true });
+  delete process.env.MADDU_PRICING_AUTHORITY;
+  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-sonnet-4-5', pricingModel: 'claude-sonnet-4-5', inputTokens: 1, outputTokens: 1 });
+  if (prevAuth !== undefined) process.env.MADDU_PRICING_AUTHORITY = prevAuth;
+  const segs = (await readdir(join(wfix, '.maddu', 'events'))).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
+  const evs = (await readFile(join(wfix, '.maddu', 'events', segs[0]), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  ok('wrapper stamps pricingIdentity when authority env + parser-proven pricingModel',
+    evs[0]?.data?.pricingIdentity?.authority === 'api.anthropic.com' &&
+    evs[0]?.data?.pricingIdentity?.model === 'claude-sonnet-4-5');
+  ok('wrapper OMITS pricingIdentity when only a display-model fallback exists (no pricingModel)',
+    !('pricingIdentity' in (evs[1]?.data || {})));
+  ok('gemini-shaped row (hinted model, never parsed → no pricingModel) is NEVER stamped',
+    !('pricingIdentity' in (evs[2]?.data || {})) && evs[2]?.data?.model === 'gemini-2.5-pro');
+  ok('wrapper OMITS pricingIdentity when MADDU_PRICING_AUTHORITY is absent',
+    !('pricingIdentity' in (evs[3]?.data || {})));
+  ok('wrapper never invents costUsd/costProvenance (estimation is read-time only)',
+    evs.every((e) => !('costUsd' in e.data) && !('costProvenance' in e.data)));
+
+  // ── (H) spawn seam: inherited authority is scrubbed ─────────────────────
+  const { saveRuntime, spawnWorker } = await import('../../template/maddu/runtime/lib/runtimes.mjs');
+  const sfix = await mkdtemp(join(tmpdir(), 'cost-seam-'));
+  const outFile = join(sfix, 'seen-authority.txt');
+  // The probe lives in a FILE: the win32 direct-binary spawn path uses
+  // shell:true, where an inline `-e` script's `||` is split as a cmd pipe.
+  const probePath = join(sfix, 'probe.cjs');
+  await writeFile(probePath,
+    "const v = process.env.MADDU_PRICING_AUTHORITY;\n" +
+    "require('node:fs').writeFileSync(process.env.MADDU_TEST_OUT, typeof v === 'string' ? v : '');\n");
+  async function seamProbe(name, authority) {
+    await saveRuntime(sfix, { name, binary: 'node', args: [probePath], authority });
+    const prevOut = process.env.MADDU_TEST_OUT;
+    process.env.MADDU_TEST_OUT = outFile;
+    process.env.MADDU_PRICING_AUTHORITY = 'api.anthropic.com'; // poisoned parent
+    try {
+      await writeFile(outFile, '(not-written)');
+      await spawnWorker(sfix, name, { wait: true });
+      return await readFile(outFile, 'utf8');
+    } finally {
+      delete process.env.MADDU_PRICING_AUTHORITY;
+      if (prevOut !== undefined) process.env.MADDU_TEST_OUT = prevOut; else delete process.env.MADDU_TEST_OUT;
+      if (prevAuth !== undefined) process.env.MADDU_PRICING_AUTHORITY = prevAuth;
+    }
+  }
+  ok('poisoned parent authority + null descriptor authority → worker sees NONE',
+    (await seamProbe('probe-null', null)) === '');
+  ok('poisoned parent authority + INVALID descriptor authority → worker sees NONE',
+    (await seamProbe('probe-invalid', 'Bad_Host!')) === '');
+  ok('valid descriptor authority wins over the poisoned parent',
+    (await seamProbe('probe-valid', 'proxy.internal')) === 'proxy.internal');
+
+  await rm(fix, { recursive: true, force: true });
+  await rm(wfix, { recursive: true, force: true });
+  await rm(sfix, { recursive: true, force: true });
+} catch (err) {
+  console.error(`harness error: ${err.stack || err}`);
+  process.exit(2);
+}
+
+console.log(`cost-provenance: ${passed} passed, ${failed} failed`);
+process.exit(failed > 0 ? 1 : 0);
