@@ -409,7 +409,13 @@ export async function spawnWorker(repoRoot, name, opts = {}) {
   // grammar-checked HERE because descriptors load unvalidated. Invalid value
   // → omit + one-line diagnostic, never refuse the spawn (pricing must never
   // block work). Wrappers stamp pricingIdentity only when this env is present
-  // AND the model string is real — so a row's identity is always provable.
+  // AND the model is parser-proven — so a row's identity is always provable.
+  // Funnel r1-F1: the parent's own MADDU_PRICING_AUTHORITY survives the
+  // MADDU_* env allowlist above, so a nested worker routed through a
+  // DIFFERENT endpoint would inherit the parent's authority and be silently
+  // mispriced against the wrong manifest entry. Scrub unconditionally; only
+  // what THIS descriptor proves is ever injected.
+  delete env.MADDU_PRICING_AUTHORITY;
   if (r.authority != null) {
     if (isValidAuthority(r.authority)) env.MADDU_PRICING_AUTHORITY = r.authority;
     else process.stderr.write(`maddu: runtime "${name}" has invalid pricing authority ${JSON.stringify(r.authority)} — MADDU_PRICING_AUTHORITY not injected\n`);

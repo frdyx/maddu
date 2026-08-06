@@ -15,8 +15,12 @@
 //   (F) override file changes estimates + surfaces '+override'; garbage
 //       override → exit 2 naming the override.
 //   (G) wrapper emission: appendTokenUsage stamps pricingIdentity ONLY when
-//       MADDU_PRICING_AUTHORITY is present AND the model is real (not a
-//       '<runtime>-unknown' fallback).
+//       MADDU_PRICING_AUTHORITY is present AND the wrapper passed a
+//       parser-PROVEN pricingModel — a display-model fallback or an
+//       unproven model hint (the gemini case) never becomes provenance.
+//   (H) spawn seam (funnel r1-F1): a poisoned parent MADDU_PRICING_AUTHORITY
+//       is scrubbed — a worker sees an authority ONLY when its own
+//       descriptor declares a grammar-valid one.
 //
 // Exit codes: 0 = OK, 1 = a check failed, 2 = harness error.
 
@@ -163,25 +167,61 @@ try {
   const wfix = await mkdtemp(join(tmpdir(), 'cost-wrap-'));
   const prevAuth = process.env.MADDU_PRICING_AUTHORITY;
   process.env.MADDU_PRICING_AUTHORITY = 'api.anthropic.com';
-  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-sonnet-4-5', inputTokens: 1, outputTokens: 1 });
+  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-sonnet-4-5', pricingModel: 'claude-sonnet-4-5', inputTokens: 1, outputTokens: 1 });
   await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-unknown', inputTokens: 1, outputTokens: 1 });
+  await appendTokenUsage(wfix, { runtime: 'gemini', sessionId: 'ses_w', model: 'gemini-2.5-pro', unreportedTokens: true });
   delete process.env.MADDU_PRICING_AUTHORITY;
-  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-sonnet-4-5', inputTokens: 1, outputTokens: 1 });
+  await appendTokenUsage(wfix, { runtime: 'claude-code', sessionId: 'ses_w', model: 'claude-sonnet-4-5', pricingModel: 'claude-sonnet-4-5', inputTokens: 1, outputTokens: 1 });
   if (prevAuth !== undefined) process.env.MADDU_PRICING_AUTHORITY = prevAuth;
   const segs = (await readdir(join(wfix, '.maddu', 'events'))).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
   const evs = (await readFile(join(wfix, '.maddu', 'events', segs[0]), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  ok('wrapper stamps pricingIdentity when authority env + real model',
+  ok('wrapper stamps pricingIdentity when authority env + parser-proven pricingModel',
     evs[0]?.data?.pricingIdentity?.authority === 'api.anthropic.com' &&
     evs[0]?.data?.pricingIdentity?.model === 'claude-sonnet-4-5');
-  ok("wrapper OMITS pricingIdentity for a '-unknown' model fallback",
+  ok('wrapper OMITS pricingIdentity when only a display-model fallback exists (no pricingModel)',
     !('pricingIdentity' in (evs[1]?.data || {})));
+  ok('gemini-shaped row (hinted model, never parsed → no pricingModel) is NEVER stamped',
+    !('pricingIdentity' in (evs[2]?.data || {})) && evs[2]?.data?.model === 'gemini-2.5-pro');
   ok('wrapper OMITS pricingIdentity when MADDU_PRICING_AUTHORITY is absent',
-    !('pricingIdentity' in (evs[2]?.data || {})));
+    !('pricingIdentity' in (evs[3]?.data || {})));
   ok('wrapper never invents costUsd/costProvenance (estimation is read-time only)',
     evs.every((e) => !('costUsd' in e.data) && !('costProvenance' in e.data)));
 
+  // ── (H) spawn seam: inherited authority is scrubbed ─────────────────────
+  const { saveRuntime, spawnWorker } = await import('../../template/maddu/runtime/lib/runtimes.mjs');
+  const sfix = await mkdtemp(join(tmpdir(), 'cost-seam-'));
+  const outFile = join(sfix, 'seen-authority.txt');
+  // The probe lives in a FILE: the win32 direct-binary spawn path uses
+  // shell:true, where an inline `-e` script's `||` is split as a cmd pipe.
+  const probePath = join(sfix, 'probe.cjs');
+  await writeFile(probePath,
+    "const v = process.env.MADDU_PRICING_AUTHORITY;\n" +
+    "require('node:fs').writeFileSync(process.env.MADDU_TEST_OUT, typeof v === 'string' ? v : '');\n");
+  async function seamProbe(name, authority) {
+    await saveRuntime(sfix, { name, binary: 'node', args: [probePath], authority });
+    const prevOut = process.env.MADDU_TEST_OUT;
+    process.env.MADDU_TEST_OUT = outFile;
+    process.env.MADDU_PRICING_AUTHORITY = 'api.anthropic.com'; // poisoned parent
+    try {
+      await writeFile(outFile, '(not-written)');
+      await spawnWorker(sfix, name, { wait: true });
+      return await readFile(outFile, 'utf8');
+    } finally {
+      delete process.env.MADDU_PRICING_AUTHORITY;
+      if (prevOut !== undefined) process.env.MADDU_TEST_OUT = prevOut; else delete process.env.MADDU_TEST_OUT;
+      if (prevAuth !== undefined) process.env.MADDU_PRICING_AUTHORITY = prevAuth;
+    }
+  }
+  ok('poisoned parent authority + null descriptor authority → worker sees NONE',
+    (await seamProbe('probe-null', null)) === '');
+  ok('poisoned parent authority + INVALID descriptor authority → worker sees NONE',
+    (await seamProbe('probe-invalid', 'Bad_Host!')) === '');
+  ok('valid descriptor authority wins over the poisoned parent',
+    (await seamProbe('probe-valid', 'proxy.internal')) === 'proxy.internal');
+
   await rm(fix, { recursive: true, force: true });
   await rm(wfix, { recursive: true, force: true });
+  await rm(sfix, { recursive: true, force: true });
 } catch (err) {
   console.error(`harness error: ${err.stack || err}`);
   process.exit(2);

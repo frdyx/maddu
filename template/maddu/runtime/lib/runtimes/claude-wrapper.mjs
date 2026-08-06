@@ -74,6 +74,9 @@ async function handleLine(line) {
       runtime: RUNTIME,
       sessionId,
       model: currentModel || msg.model || 'claude-unknown',
+      // S4: pricingModel is the parser-PROVEN model only — never the
+      // '-unknown' display fallback (funnel r1-F2).
+      pricingModel: currentModel || undefined,
       inputTokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined,
       outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
       cacheRead: typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : undefined,

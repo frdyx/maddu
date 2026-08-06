@@ -61,6 +61,9 @@ async function handleLine(line) {
       runtime: RUNTIME,
       sessionId,
       model: currentModel || obj.model || 'codex-unknown',
+      // S4: pricingModel is the parser-PROVEN model only — never the
+      // '-unknown' display fallback (funnel r1-F2).
+      pricingModel: currentModel || undefined,
       inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
       outputTokens: typeof outputTokens === 'number' ? outputTokens : undefined,
     });

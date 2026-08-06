@@ -69,6 +69,9 @@ async function handleLine(line) {
       runtime: RUNTIME,
       sessionId,
       model: currentModel || msg.model || 'hermes-unknown',
+      // S4: pricingModel is the parser-PROVEN model only — never the
+      // '-unknown' display fallback (funnel r1-F2).
+      pricingModel: currentModel || undefined,
       // Hermes uses prompt_tokens / completion_tokens (OpenAI-style names).
       // We normalize into the spine's input/output token columns.
       inputTokens: typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens
