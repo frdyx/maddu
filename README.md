@@ -149,9 +149,9 @@ Inside Claude Code or Codex CLI, you drive everything from one line:
 
 And for the person who **can't read the code** — the one on the hook for what the agent did — there's a read-only **Operator Plane** on top of the same record: `maddu status --line` (a one-line on-goal/drift segment, wireable into the status line), `maddu orient --digest` ("while you were away"), an **oversight** readout of what a skill was *fed vs withheld* and the plain-language why (`maddu spine oversight`), a per-project cockpit, a **decision ledger** whose every row ties to the tamper chain, and a cross-workspace **portfolio wall** that surfaces which repos *need a human*. All read-only projections — nothing new is written to make them. See [Oversight](docs/52-oversight.md) and [the Operator Plane](docs/53-operator-plane.md).
 
-## Seven ways people run it
+## Eight ways people run it
 
-Same substrate, seven shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
+Same substrate, eight shapes of work. Every workflow below is real commands against the same append-only record — pick the one that looks like your week.
 
 ### 🔍 1. Verify the agent instead of trusting it
 
@@ -254,6 +254,20 @@ maddu model gates install                            # 12 ML-lifecycle gates in 
 <picture><img alt="The SLM factory — external tools do the curation, training, and benchmarks; their results become hash-pinned manifests that maddu model records as spine events; the 12-gate pack and the approvals ride govern the promotion ladder, whose stages are derived from the record, and rollback only ever moves down" src="docs/images/use-case-slm.svg" width="920"></picture>
 
 Every promotion above candidate waits for an explicit per-request decision — standing approval policies are deliberately inert near production. Rollback is strictly downward and re-promotion goes back through the full ride; the spine verifier holds the whole ladder tamper-detecting on replay. And the honesty line is structural: Máddu records what your tools *declared* and pins the bytes of record — it never trains, serves, evaluates, or decides that a model is good. Full guide: [51-slm-governance.md](docs/51-slm-governance.md).
+
+### 🕰️ 8. Proof for someone who doesn't trust you
+
+**For the reviewer, the auditor, the client — or future-you — who won't take your machine's word for it.** Everything above verifies the agent *on your machine, under your authority*. This shape escalates the evidence past that boundary: each rung of the assurance ladder names exactly what backs it, and no rung is granted by local state.
+
+```bash
+maddu spine verify --replay <sha>   # clean checkout of that exact commit re-runs the DECLARED verification
+maddu spine anchor                  # stamp a receipt of the record into Bitcoin (OpenTimestamps)
+maddu spine anchor --assess         # operator consume ceremony — records the assurance level, honestly labeled
+```
+
+<picture><img alt="Proof for someone who doesn't trust you — the assurance ladder from actor-reported receipt to clean-checkout replay to a Bitcoin-anchored timestamp, with the skeptic's checks listed" src="docs/images/use-case-witness.svg" width="920"></picture>
+
+**actor-reported** is the agent's own receipt, preserved. **replayed** re-runs the repo's declared checks in a clean clone of the exact commit and appends its own strict receipt. **anchored** commits a receipt (and chain head) to Bitcoin via the stock OpenTimestamps client — evidence that exists *outside the actor's authority*, which no after-the-fact rewrite can back-date. The consume ceremony can only refuse, never vouch: the positive evidence is the operator's own `ots verify`, and `ASSURANCE_ASSESSED` is labeled a non-authoritative ledger note by every consumer. Combined with the workspace-stamped, hash-chained record and the published event contract, a skeptic can check what happened without trusting you, your agent, or Máddu itself.
 
 ## What it does for you
 

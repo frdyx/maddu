@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 340" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Proof for someone who doesn't trust you — the assurance ladder">
+  <title>Proof for someone who doesn't trust you</title>
+  <desc>The assurance ladder: an actor-reported receipt is replayed in a clean checkout, then anchored into Bitcoin via OpenTimestamps; a skeptic checks the published contract, the workspace-stamped chain, and the external timestamp without trusting the actor's machine.</desc>
+  <defs>
+    <style>
+      .canvas    { fill: #FFFFFF; }
+      .panel     { fill: #F3F7FB; stroke: rgba(80,113,149,0.30); stroke-width: 1; }
+      .node      { fill: #F8FAFD; stroke: #8298B0; stroke-width: 1.2; }
+      .node.blue { fill: #EAF5FF; stroke: #2489DB; }
+      .node.lime { fill: #F4FFC8; stroke: #A9CC00; }
+      .edge      { fill: none; stroke: #7D93AC; stroke-width: 1.5; }
+      .edge.live { stroke: #8FB800; stroke-width: 2; }
+      .cond-b    { font-family: 'IBM Plex Sans Condensed','Inter','Helvetica Neue',sans-serif; font-weight: 600; letter-spacing: 0.06em; }
+      .mono      { font-family: 'IBM Plex Mono','JetBrains Mono','Consolas',monospace; }
+    </style>
+    <marker id="warr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7D93AC"/>
+    </marker>
+    <marker id="warr-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8FB800"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" width="1480" height="340"/>
+
+  <g transform="translate(40,34)">
+    <text x="0" y="0" class="cond-b" fill="#6C8A00" font-size="11" letter-spacing="0.14em">◈ USE CASE 08 · EXTERNAL WITNESS</text>
+    <text x="0" y="22" class="cond-b" fill="#06121F" font-size="20">Each rung names its evidence — no rung is granted by local state</text>
+    <text x="0" y="42" class="mono" fill="#5C6B7E" font-size="11">the assurance ladder: from the actor's own receipt to a witness outside the actor's authority</text>
+  </g>
+
+  <!-- ladder: actor-reported → replayed → anchored -->
+  <rect class="node" x="40" y="130" width="300" height="72" rx="6"/>
+  <text x="56" y="154" class="cond-b" fill="#06121F" font-size="14">actor-reported</text>
+  <text x="56" y="174" class="mono" fill="#5C6B7E" font-size="11">VERIFICATION_RAN receipt —</text>
+  <text x="56" y="190" class="mono" fill="#5C6B7E" font-size="11">the actor ran its own verifier</text>
+
+  <path d="M 340 166 C 380 166, 390 166, 428 166" class="edge" marker-end="url(#warr)"/>
+
+  <rect class="node blue" x="436" y="130" width="330" height="72" rx="6"/>
+  <text x="452" y="154" class="cond-b" fill="#06121F" font-size="14">replayed</text>
+  <text x="452" y="174" class="mono" fill="#5C6B7E" font-size="11">spine verify --replay &lt;sha&gt; — clean</text>
+  <text x="452" y="190" class="mono" fill="#5C6B7E" font-size="11">checkout re-runs the DECLARED checks</text>
+
+  <path d="M 766 166 C 806 166, 816 166, 854 166" class="edge live" marker-end="url(#warr-lime)"/>
+
+  <rect class="node lime" x="862" y="130" width="330" height="72" rx="6"/>
+  <text x="878" y="154" class="cond-b" fill="#5F7A00" font-size="14">anchored ₿</text>
+  <text x="878" y="174" class="mono" fill="#5C6B7E" font-size="11">spine anchor → OpenTimestamps →</text>
+  <text x="878" y="190" class="mono" fill="#5C6B7E" font-size="11">Bitcoin · --assess consume ceremony</text>
+
+  <!-- the skeptic's panel -->
+  <rect class="panel" x="40" y="238" width="1152" height="72" rx="8"/>
+  <text x="60" y="262" class="cond-b" fill="#5C6B7E" font-size="10" letter-spacing="0.14em">◈ WHAT A SKEPTIC CHECKS — WITHOUT TRUSTING YOUR MACHINE</text>
+  <text x="60" y="284" class="mono" fill="#06121F" font-size="12">published event contract (JSON Schema) · hash-chained + workspace-stamped record · a Bitcoin timestamp nobody can back-date</text>
+  <text x="60" y="301" class="mono" fill="#5C6B7E" font-size="11">the operator's own ots verify is the positive evidence — Máddu's ceremony can only refuse, never vouch</text>
+
+  <!-- side note -->
+  <rect class="node" x="1232" y="130" width="208" height="180" rx="6"/>
+  <text x="1248" y="154" class="cond-b" fill="#06121F" font-size="13">honestly labeled</text>
+  <text x="1248" y="176" class="mono" fill="#5C6B7E" font-size="11">ASSURANCE_ASSESSED is</text>
+  <text x="1248" y="192" class="mono" fill="#5C6B7E" font-size="11">a non-authoritative</text>
+  <text x="1248" y="208" class="mono" fill="#5C6B7E" font-size="11">ledger note — every</text>
+  <text x="1248" y="224" class="mono" fill="#5C6B7E" font-size="11">consumer says so, and</text>
+  <text x="1248" y="240" class="mono" fill="#5C6B7E" font-size="11">nothing gates on it.</text>
+  <text x="1248" y="264" class="mono" fill="#5C6B7E" font-size="11">the real consume gate:</text>
+  <text x="1248" y="280" class="mono" fill="#5C6B7E" font-size="11">the operator re-runs</text>
+  <text x="1248" y="296" class="mono" fill="#5C6B7E" font-size="11">the ceremony themselves</text>
+</svg>
