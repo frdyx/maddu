@@ -114,7 +114,24 @@
 // (via:'breach-drain'); bridge breaches append inline (via:'inline').
 // `breachId` dedupes the at-least-once drain across a crash window. Additive
 // → minor bump; baseline refresh at the next release.
-export const EVENT_CONTRACT_VERSION = '1.14.0';
+// 1.15.0 (buzz-steals S2, workspace identity) — the envelope gains an
+// OPTIONAL `ws` (workspace identity, `ws_` + 16 hex of the genesis line's
+// sha256 via hashLine semantics): it rides inside the stored NDJSON line, so
+// it lands inside prev_hash with zero new hashing code — a line lifted from
+// another workspace's spine can no longer re-chain without wholesale
+// recompute, which the OTS anchor then pins in time (flat mode). Forward-only
+// exactly like prev_hash: ws-less legacy events are tolerated; ws NEVER
+// enters ENVELOPE_REQUIRED (that would be a major bump and would contradict
+// the tolerance). Genesis/bootstrap lines are deliberately ws-less (an
+// identity cannot be the hash of a line containing it). Two new types:
+// WS_IDENTITY_ANCHORED (sync mode's in-band authority — nominates the
+// merge-first genesis by immutable partition position + hash; published once
+// by the first S2 writer, before any stamping) and WS_IDENTITY_RESOLVED (the
+// forward-only conflict ceremony: while conflicting anchors exist it is the
+// ONLY appendable type; it binds every conflicting anchor and selects one
+// EXISTING identity). Additive → minor bump; baseline refresh at the next
+// release.
+export const EVENT_CONTRACT_VERSION = '1.15.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -132,6 +149,7 @@ export const EVENT_ENVELOPE = {
   lane: 'string|null',
   prev_hash: 'string|null',
   triggered_by: 'object|null',
+  ws: 'string?',
   data: 'object',
 };
 
@@ -304,6 +322,8 @@ export const EVENT_SCHEMA = {
   BRIDGE_ORIGIN_REJECTED: { summary: "The bridge rejected a request with a non-loopback Host/Origin.", data: { host: 'string|null', method: 'string', origin: 'string|null', path: 'string', reason: 'string' } },
   BRIDGE_CROSS_WORKSPACE: { summary: "A bridge request selected a workspace other than the active one.", data: { active: 'string', method: 'string', path: 'string', workspace: 'string' } },
   SPINE_CUTOVER: { summary: "A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules).", data: { version: 'string' } },
+  WS_IDENTITY_ANCHORED: { summary: "Sync mode's in-band workspace-identity authority: nominates the merge-first genesis line by immutable partition position + hash and derives spineIdentity from it. Published once by the first S2-aware writer BEFORE any ws stamping (the event itself is ws-less by protocol); once present, verify resolves authority from the anchor, never from the evolving partition set. Conflicting anchors fail verify and freeze writers until WS_IDENTITY_RESOLVED.", data: { genesis: 'object', spineIdentity: 'string', v: 'number' } },
+  WS_IDENTITY_RESOLVED: { summary: "The forward-only anchor-conflict ceremony (maddu spine identity resolve --keep): while conflicting anchors exist it is the ONLY appendable type; it binds EVERY known conflicting anchor by eventId+genesisHash (canonically sorted) and selects one EXISTING identity as authority. `cutover` records the exact per-partition chain heads at ceremony time — losing-identity events stamped at-or-before their bound head are grandfathered by verify (forward-only recovery for conflicts where both sides already stamped work); everything after must carry the selected identity. Appended ws-less; stamping resumes after it. Conflicting resolutions, or a later anchor conflicting with a resolution, fail verify.", data: { conflicts: 'array', cutover: 'array?', selected: 'string' } },
   DISCIPLINE_SKIPPED: { summary: "A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent.", data: { blocked: 'boolean?', enforcement: 'string|null', reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   MUTATION_UNWITNESSED: { summary: "A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain.", data: { breachId: 'string', breachTs: 'string', exitCode: 'number|null', label: 'string', method: 'string|null', path: 'string|null', sessionId: 'string|null', sub: 'string|null', surface: 'string', verb: 'string|null', via: 'string' } },
   ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },

@@ -113,11 +113,14 @@ function validateEvent(ev) {
   }
   return bad;
 }
-// Validate the top-level envelope keys against EVENT_ENVELOPE.
+// Validate the top-level envelope keys against EVENT_ENVELOPE. Presence rule:
+// a `?`-suffixed type is optional (the grammar's own marker — `ws` as of
+// 1.15.0), plus the two historical conditional fields (prev_hash /
+// triggered_by, declared before the `?` convention reached the envelope).
 function validateEnvelope(ev) {
   const bad = [];
   for (const [f, ty] of Object.entries(EVENT_ENVELOPE)) {
-    if (!(f in ev)) { if (f !== 'prev_hash' && f !== 'triggered_by') bad.push(`${f} absent`); continue; }
+    if (!(f in ev)) { if (f !== 'prev_hash' && f !== 'triggered_by' && !ty.endsWith('?')) bad.push(`${f} absent`); continue; }
     if (f === 'v') { if (ev.v !== 1) bad.push(`v=${ev.v}`); continue; }
     if (f === 'data') continue;
     if (!fieldAccepts(ty, ev[f])) bad.push(`${f}=${jt(ev[f])} vs ${ty}`);

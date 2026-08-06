@@ -124,7 +124,7 @@ export default {
   // (commands/spine.mjs → lib.spineSync.syncGit/syncInit). Declaring it read-only
   // let those mutations escape the Rule-9 trigger gauntlet. Any-write-subverb ⇒
   // the top-level verb is mutating; it is operator-invoked, never auto-fired.
-  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['verify', 'show', 'oversight', { tokens: ['anchor'], requiredFlags: ['--status'] }, { tokens: ['anchor'], requiredFlags: ['--verify'] }] },
+  spine:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['verify', 'show', 'oversight', { tokens: ['anchor'], requiredFlags: ['--status'] }, { tokens: ['anchor'], requiredFlags: ['--verify'] }, { tokens: ['identity', 'show'] }] },
   start:        { tier: 'read-only', autoTrigger: 'allowed',   surface: 'operator',  layer: 'core' },
   stop:         { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   status:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },

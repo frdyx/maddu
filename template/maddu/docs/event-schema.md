@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.14.0` · **Event types:** 191
+**Contract version:** `1.15.0` · **Event types:** 193
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -23,6 +23,7 @@ fields are guaranteed stable.
 | `lane` | `string\|null` | Lane id, or null. |
 | `prev_hash` | `string\|null` | Chain link to the prior line (absent pre-chain, null on genesis). |
 | `triggered_by` | `object\|null` | Object provenance ({ kind, id, … }) or null. |
+| `ws` | `string?` | Workspace identity (`ws_` + 16 hex of the genesis line's sha256). Optional, forward-only like `prev_hash`: absent on legacy and genesis/bootstrap lines. Rides inside the stored line, so it is inside `prev_hash` — anti-splice across workspaces. |
 | `data` | `object` | Per-type payload — see below. |
 
 ## Semantic versioning
@@ -33,7 +34,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (191)
+## Events (193)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -199,6 +200,8 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `BRIDGE_ORIGIN_REJECTED` | The bridge rejected a request with a non-loopback Host/Origin. | `host: string\|null`, `method: string`, `origin: string\|null`, `path: string`, `reason: string` |
 | `BRIDGE_CROSS_WORKSPACE` | A bridge request selected a workspace other than the active one. | `active: string`, `method: string`, `path: string`, `workspace: string` |
 | `SPINE_CUTOVER` | A chain-local tamper-detection cutover anchor (seeded into a freshly-minted sync partition so verify holds it to the post-cutover strict rules). | `version: string` |
+| `WS_IDENTITY_ANCHORED` | Sync mode's in-band workspace-identity authority: nominates the merge-first genesis line by immutable partition position + hash and derives spineIdentity from it. Published once by the first S2-aware writer BEFORE any ws stamping (the event itself is ws-less by protocol); once present, verify resolves authority from the anchor, never from the evolving partition set. Conflicting anchors fail verify and freeze writers until WS_IDENTITY_RESOLVED. | `genesis: object`, `spineIdentity: string`, `v: number` |
+| `WS_IDENTITY_RESOLVED` | The forward-only anchor-conflict ceremony (maddu spine identity resolve --keep): while conflicting anchors exist it is the ONLY appendable type; it binds EVERY known conflicting anchor by eventId+genesisHash (canonically sorted) and selects one EXISTING identity as authority. `cutover` records the exact per-partition chain heads at ceremony time — losing-identity events stamped at-or-before their bound head are grandfathered by verify (forward-only recovery for conflicts where both sides already stamped work); everything after must carry the selected identity. Appended ws-less; stamping resumes after it. Conflicting resolutions, or a later anchor conflicting with a resolution, fail verify. | `conflicts: array`, `cutover: array?`, `selected: string` |
 | `DISCIPLINE_SKIPPED` | A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent. | `blocked: boolean?`, `enforcement: string\|null`, `reason: string`, `sessionId: string\|null`, `tool: string\|null` |
 | `MUTATION_UNWITNESSED` | A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain. | `breachId: string`, `breachTs: string`, `exitCode: number\|null`, `label: string`, `method: string\|null`, `path: string\|null`, `sessionId: string\|null`, `sub: string\|null`, `surface: string`, `verb: string\|null`, `via: string` |
 | `ENFORCEMENT_ERROR` | The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open. | `reason: string`, `sessionId: string\|null`, `tool: string\|null` |

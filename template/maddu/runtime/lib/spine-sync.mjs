@@ -19,7 +19,7 @@
 import { readdir, readFile, writeFile, mkdir, rename, access, unlink, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { makeId } from './spine.mjs';
-import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION } from './spine-append-core.mjs';
+import { isValidReplicaId, readReplicaId, partitionDir, pendingReplicaPath, appendPartitioned, FLAT_LOCK_VERSION, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, wsFromLine, hashLine, writeIdentityCache, publishWsAnchorOnce, computeAuthorityFingerprint, findIncompatibleWsStamp, buildWsGrandfather, maybeExtendWsCutoverLocked } from './spine-append-core.mjs';
 import { withAppendLock } from './append-lock.mjs';
 import { redactText } from './secret-scan.mjs';
 import { verifySpine } from './verify.mjs';
@@ -117,6 +117,81 @@ async function ensureMarkerBlock(file, begin, end, body) {
 // preserved verbatim). Refuses to overwrite an existing partition segment (an
 // inconsistent state) rather than clobber history. Idempotent: with no flat
 // segments left it is a no-op, which is what makes a re-run resume cleanly.
+// S2 (r4-F4/r5-F3): safe continuation of a stranded residual-flat migration
+// in an ALREADY-activated workspace. Locking order is FIXED: flat append
+// lock → active partition append lock (nested) — live partition appends use
+// the partition lock, so the compatibility re-read inside both locks cannot
+// race a concurrent append into a fork. Returns
+//   { status:'migrated', segments } |
+//   { status:'fatal', reason, remedy }.
+// Safe means: no partition segment-name collision AND the residual chain's
+// first prev_hash links the partition's CURRENT last stored line (it chains
+// cleanly onto the tail). Residual segments written against the OLD
+// pre-migration flat tail can never satisfy that — they get the named fatal.
+async function continueResidualMigration(repoRoot, replicaId, residualSegs) {
+  const eventsDir = join(repoRoot, '.maddu', 'events');
+  const pdir = partitionDir(repoRoot, replicaId);
+  const flatLock = join(eventsDir, '.append.lock');
+  const partLock = join(pdir, '.append.lock');
+  const FATAL_REMEDY = 'inspect the residual segment(s) under .maddu/events/ — if their events are already represented in the partition, archive them out of .maddu/events/; otherwise re-append their events through `maddu` verbs and archive the files';
+  try {
+    return await withAppendLock(flatLock, async () =>
+      withAppendLock(partLock, async () => {
+        // Re-read INSIDE both locks (the pre-lock listing may be stale).
+        const flats = await listSegs(eventsDir);
+        if (!flats.length) return { status: 'migrated', segments: [] };
+        const partSegs = await listSegs(pdir);
+        for (const f of flats) {
+          if (partSegs.includes(f)) {
+            return { status: 'fatal', reason: `segment name ${f} collides with an existing partition segment`, remedy: FATAL_REMEDY };
+          }
+        }
+        // Committed-element law (diff-funnel r10-F1): NEVER rename a torn
+        // residual segment into the partition — a valid-JSON tail whose
+        // newline was lost in a crashed append would become the partition's
+        // poisoned active tail (verify: torn_trailing_line; every later
+        // append: TORN_TAIL). Every residual segment must end with '\n'.
+        for (const f of flats) {
+          let txt;
+          try { txt = await readFile(join(eventsDir, f), 'utf8'); }
+          catch (e) { return { status: 'fatal', reason: `residual segment ${f} unreadable: ${e?.message || e}`, remedy: FATAL_REMEDY }; }
+          if (txt.length && !txt.endsWith('\n')) {
+            return { status: 'fatal', reason: `residual segment ${f} ends with an unterminated line (a crashed write) — append the missing newline if the JSON is complete, otherwise trim the partial line`, remedy: FATAL_REMEDY };
+          }
+        }
+        // Tail compatibility: first residual line must chain onto the
+        // partition's current last COMMITTED line (a torn partition tail is
+        // equally fatal — the residual would chain past an uncommitted line).
+        const firstFlatTxt = await readFile(join(eventsDir, flats[0]), 'utf8');
+        const firstLine = firstFlatTxt.split('\n').find((l) => l.trim());
+        if (!firstLine) return { status: 'fatal', reason: `residual segment ${flats[0]} is empty/unreadable`, remedy: FATAL_REMEDY };
+        let firstPrev = null;
+        try { firstPrev = JSON.parse(firstLine)?.prev_hash ?? null; }
+        catch { return { status: 'fatal', reason: `residual segment ${flats[0]} first line is malformed`, remedy: FATAL_REMEDY }; }
+        let tailLine = null;
+        for (let i = partSegs.length - 1; i >= 0 && tailLine === null; i--) {
+          const txt = await readFile(join(pdir, partSegs[i]), 'utf8');
+          if (txt.length && !txt.endsWith('\n')) {
+            return { status: 'fatal', reason: `partition segment ${partSegs[i]} ends with an unterminated line (a crashed write) — repair it before continuing the migration`, remedy: FATAL_REMEDY };
+          }
+          const lines = txt.split('\n').filter((l) => l.trim());
+          if (lines.length) tailLine = lines[lines.length - 1];
+        }
+        if (!tailLine || firstPrev !== hashLine(tailLine)) {
+          return { status: 'fatal', reason: 'residual chain does not link the partition tail (written against the pre-migration flat tail)', remedy: FATAL_REMEDY };
+        }
+        const moved = [];
+        for (const f of flats) {
+          await rename(join(eventsDir, f), join(pdir, f));
+          moved.push(f);
+        }
+        return { status: 'migrated', segments: moved };
+      }, { maxWaitMs: 10000 }), { maxWaitMs: 10000 });
+  } catch (e) {
+    return { status: 'fatal', reason: `continuation locking failed: ${e?.message || e}`, remedy: FATAL_REMEDY };
+  }
+}
+
 async function migrateFlatInto(repoRoot, replicaId) {
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const partDir = partitionDir(repoRoot, replicaId);
@@ -213,6 +288,27 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   if (existing) {
     await ensureSyncTemplates(repoRoot);
     await bootstrapLineageUpgrade(repoRoot, existing);
+    // ── S2 residual-flat continuation (plan-review r4-F4 / r5-F3) ──
+    // Pre-existing residual flat segments in an ALREADY-activated workspace
+    // (the funnel race the init-time barrier can't reach retroactively) used
+    // to be permanently stranded behind this early return. Attempt a SAFE
+    // continuation: flat lock AND active partition lock acquired in that
+    // fixed order (live partition appends serialize on the latter), tail
+    // compatibility re-read INSIDE both locks, rename only when every
+    // residual segment (a) has no name collision in the partition and
+    // (b) chains onto the partition's CURRENT tail. Anything else is a NAMED
+    // fatal with the manual remedy — never a silent strand.
+    const residual = await listSegs(join(repoRoot, '.maddu', 'events'));
+    if (residual.length) {
+      const cont = await continueResidualMigration(repoRoot, existing, residual);
+      if (cont.status === 'fatal') {
+        // A fatal continuation is a FAILURE, never "already in sync mode"
+        // (diff-funnel r1-F5: reporting it ok:true stranded the residual
+        // history silently behind an exit-0 no-op).
+        return { ok: false, reason: 'residual-migration-fatal', message: cont.reason, remedy: cont.remedy, replicaId: existing, continuation: cont };
+      }
+      return { ok: true, already: true, replicaId: existing, continuation: cont };
+    }
     return { ok: true, already: true, replicaId: existing };
   }
 
@@ -227,12 +323,23 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
     if (!replicaId) return { ok: false, reason: 'mint-collision' };
   }
 
-  // Write the pending marker FIRST. From here a concurrent append() sees it and —
-  // crucially — does NOT write into the partition; it WAITS for replica.json (the
-  // completion signal) before touching the partition. So migration needs no lock:
-  // no writer can interleave with the renames. readAll still sees the in-progress
-  // partition + residual flat (readActiveReplicaId), so reads stay consistent.
+  // Write the pending marker FIRST — and UNDER the flat funnel lock, held
+  // from here through migration and activation (diff-funnel r3-F3): a flat
+  // writer's in-lock marker recheck and its appendFile are one critical
+  // section, so publishing the marker inside the same funnel closes the
+  // TOCTOU where the marker landed between a writer's recheck and its write
+  // (which stranded that write — worst case a ceremony's WS_IDENTITY_RESOLVED
+  // — in a residual flat segment migration had already snapshotted past).
+  // Lock order stays flat → partition (publishWsAnchorOnce / the cutover
+  // seed take the partition lock NESTED under this), matching
+  // continueResidualMigration. From the marker on, a concurrent append()
+  // WAITS for replica.json (the completion signal) before touching the
+  // partition; readAll still sees the in-progress partition + residual flat
+  // (readActiveReplicaId), so reads stay consistent.
   await mkdir(join(repoRoot, '.maddu', 'config'), { recursive: true });
+  const flatFunnelDir = join(repoRoot, '.maddu', 'events');
+  await mkdir(flatFunnelDir, { recursive: true });
+  return withAppendLock(join(flatFunnelDir, '.append.lock'), async () => {
   await writeFile(pendingReplicaPath(repoRoot), JSON.stringify({ replicaId }) + '\n');
 
   // Anchors recheck AFTER the marker: once the marker exists, any in-flight
@@ -281,6 +388,89 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
       data: { version: FLAT_LOCK_VERSION },
     });
   }
+  // ── Workspace-identity anchor bootstrap (S2, plan-review r4-F2; hardened
+  // diff-funnel r1-F4) ──
+  // Runs for EVERY first-time or resumed init, OUTSIDE the empty-partition
+  // branch, BEFORE replica.json publishes — and is a HARD precondition:
+  // activation without a verified identity authority (or a cached conflict
+  // awaiting the ceremony) would let this checkout stamp events into a
+  // permanently unverifiable workspace. Failure returns a NAMED reason and
+  // leaves the pending marker in place, so a re-run resumes exactly here.
+  // Nomination target is this partition's first line: a NON-empty migration
+  // nominates the migrated old flat genesis (its derivation equals the
+  // workspace's prior flat identity, so already-ws-stamped migrated events
+  // stay consistent); an empty migration nominates the cutover just seeded.
+  // A workspace-wide anchor already present (peer partitions in a clone; a
+  // crash-resumed init that got this far last time) is nomination-VERIFIED
+  // and adopted, never duplicated — idempotent resumes by construction.
+  {
+    const WS_REMEDY = 'fix the reported partition/anchor state (or restore the missing bytes), then re-run `maddu spine sync init` — the pending marker keeps this resumable';
+    const wsFail = (message) => ({ ok: false, reason: 'ws-identity-bootstrap-failed', message, remedy: WS_REMEDY });
+    // (1) Verify what already exists — an unverifiable pre-existing anchor is
+    // a named failure BEFORE we add anything.
+    let scan;
+    try { scan = await scanWsAuthorityEvents(repoRoot); }
+    catch (e) { return wsFail(`authority scan failed: ${e?.message || e}`); }
+    for (const a of scan.anchors) {
+      const v = await verifyAnchorNomination(repoRoot, a.data);
+      if (!v.ok) return wsFail(`existing anchor ${a.id} does not verify: ${v.reason}`);
+    }
+    // (2) Publish only when anchorless — through the ONE serialized law
+    // (diff-funnel r2-F2: a direct appendPartitioned from a pre-lock scan
+    // could double-publish against a racing writer, and nominating this
+    // partition's first line instead of the canonical merge-first candidate
+    // mis-anchors a clone joining an existing anchorless workspace).
+    const law = resolveWsAuthority(scan);
+    if (!law.conflict && !law.authority) {
+      const anchorTs = now || new Date().toISOString();
+      let pub;
+      try {
+        pub = await publishWsAnchorOnce(repoRoot, replicaId, ({ spineIdentity, genesis }) => ({
+          v: 1,
+          id: makeId('evt', anchorTs),
+          ts: anchorTs,
+          type: 'WS_IDENTITY_ANCHORED',
+          actor: null,
+          lane: null,
+          data: { v: 1, spineIdentity, genesis },
+        }));
+      } catch (e) { return wsFail(`anchor publication failed: ${e?.message || e}`); }
+      if (pub.unresolvable) return wsFail(`anchor publication failed: ${pub.unresolvable}`);
+      if (pub.bootstrap) return wsFail(`partition ${replicaId} has no genesis line to nominate`);
+      // adopted / published / conflict — all resolved by the post-verify below.
+    }
+    // (3) FRESH post-verify before activation: whatever the workspace holds
+    // NOW (our anchor, an adopted one, or a raced conflict) must verify and
+    // resolve — activation without a defined identity state is forbidden
+    // (r1-F4). A verified conflict IS a defined state: freeze + ceremony.
+    const fpPre2 = await computeAuthorityFingerprint(repoRoot).catch(() => null); // pre-scan: makes the final cache provably fresh
+    let scan2;
+    try { scan2 = await scanWsAuthorityEvents(repoRoot); }
+    catch (e) { return wsFail(`post-publication authority scan failed: ${e?.message || e}`); }
+    for (const a of scan2.anchors) {
+      const v = await verifyAnchorNomination(repoRoot, a.data);
+      if (!v.ok) return wsFail(`anchor ${a.id} does not verify after bootstrap: ${v.reason}`);
+    }
+    const law2 = resolveWsAuthority(scan2);
+    if (law2.conflict) {
+      await writeIdentityCache(repoRoot, { spineIdentity: null, conflict: true, mode: 'sync' }).catch(() => {});
+    } else if (law2.authority) {
+      // Adoption-side history compatibility (diff-funnel r4-F2): activating
+      // with an authority that instantly FAILs migrated stamped history is
+      // never correct — grandfathered losing stamps pass, anything else is
+      // the named failure.
+      let badAdopt;
+      try { badAdopt = await findIncompatibleWsStamp(repoRoot, law2.authority, buildWsGrandfather(scan2.anchors, scan2.resolutions)); }
+      catch (e) { return wsFail(`history-compatibility sweep failed: ${e?.message || e}`); }
+      if (badAdopt) {
+        return wsFail(`existing event ${badAdopt.id} is stamped ${badAdopt.ws}, incompatible with the workspace authority ${law2.authority}`);
+      }
+      await writeIdentityCache(repoRoot, { spineIdentity: law2.authority, mode: 'sync', fp: fpPre2 }).catch(() => {});
+    } else {
+      return wsFail('no identity authority exists after the anchor bootstrap');
+    }
+  }
+
   // Device-local replica lineage (PR-D §3.1), written AFTER migration + BEFORE
   // replica.json activation: a fresh init is the authoritative origin, so
   // {current:replicaId, predecessors:[], complete:true} — completeness is KNOWN
@@ -313,6 +503,7 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
   const result = { ok: true, replicaId, migrated };
   if (strandedFlat.length) result.strandedFlat = strandedFlat;
   return result;
+  }); // end of the flat-funnel critical section opened at the pending-marker write (r3-F3)
 }
 
 // Validate the partitions that git placed on disk (git is a dumb transport). This
@@ -338,7 +529,20 @@ export async function importPartitions(repoRoot) {
   // Quarantine = line-level parse/envelope damage: set aside (readAll skips it),
   // reported but NOT fatal — the rest of the partition still imports.
   const quarantineKinds = new Set(['unparseable', 'torn_trailing_line', 'non_object', 'envelope_missing']);
-  const quarantined = v.issues.filter((i) => quarantineKinds.has(i.kind));
+  // r19-F1: a torn trailer in a NON-final segment is a BURIED torn element —
+  // its committed successor chains through bytes the record excludes.
+  // Structural corruption, never quarantinable. (A torn ACTIVE tail — the
+  // final segment — stays quarantined: it is the local crash the operator
+  // repairs; the sync commit path refuses to share it anyway.)
+  const lastSegByRid = new Map();
+  for (const s of v.segments) {
+    const key = s.replicaId ?? null;
+    const cur = lastSegByRid.get(key);
+    if (!cur || s.name > cur) lastSegByRid.set(key, s.name);
+  }
+  const buriedTorn = v.issues.filter((i) => i.kind === 'torn_trailing_line' && i.segment !== lastSegByRid.get(i.replicaId ?? null));
+  const buriedTornSet = new Set(buriedTorn);
+  const quarantined = v.issues.filter((i) => quarantineKinds.has(i.kind) && !buriedTornSet.has(i));
 
   // Duplicate ids: WITHIN a partition = a real single-writer bug (fatal); ACROSS
   // partitions = a tolerated probabilistic id collision (identity is partition-
@@ -354,7 +558,7 @@ export async function importPartitions(repoRoot) {
   // as both a fork and a structural fail.
   const structuralFails = v.issues.filter(
     (i) => i.level === 'FAIL' && !quarantineKinds.has(i.kind) && i.kind !== 'duplicate_id' && i.kind !== 'chain_broken'
-  );
+  ).concat(buriedTorn); // r19-F1: buried torn elements are structural, fatal
 
   const byRid = new Map();
   for (const s of v.segments) {
@@ -549,62 +753,123 @@ export async function syncGit(repoRoot, opts = {}) {
   // 1. Stage ONLY this replica's numeric segment files. Peers' partitions arrive
   //    already-committed via pull; a stray non-segment *.ndjson (which the secret
   //    scan does NOT cover) and unrelated user work are never swept in.
+  // The whole snapshot-and-merge phase — segment enumeration, torn-tail
+  // check, staging, the pathspec commit, the upstream probe, AND the pull —
+  // runs UNDER ONE uninterrupted hold of the active partition's append lock
+  // (diff-funnel r13-F1 + r14-F1): `git add` racing a writer mid-append
+  // could commit a segment blob cut before the trailing newline (the
+  // pre-push audit's prefix-extension rule would publish that torn blob),
+  // and any gap before the pull would let a local append land just before
+  // peer AUTHORITY bytes whose cutover binds the pre-append head. Under the
+  // lock the files are whole-line by construction; a segment torn by a
+  // CRASH (no writer active) is refused with the repair remedy rather than
+  // shared.
   const myDirRel = `.maddu/events/by-replica/${replicaId}`;
-  const mySegs = await listSegs(join(repoRoot, myDirRel));
-  const stagePaths = mySegs.map((s) => `${myDirRel}/${s}`);
-  // The sync-managed ignore/attr files must land ONCE so peers track partitions —
-  // but only when UNTRACKED, so a user's own edits to a pre-existing (tracked)
-  // .gitignore/.gitattributes are never folded into a spine-sync commit.
-  const uncommittedMeta = [];
-  for (const f of ['.gitignore', '.gitattributes']) {
-    if (!(await dirExists(join(repoRoot, f)))) continue;
-    const tracked = await gitRun(['ls-files', '--error-unmatch', '--', f], repoRoot, 5000);
-    if (tracked.code === 0) continue; // already tracked → not ours to commit
-    // Untracked → first share, but ONLY if the file is the maddu-managed block
-    // and nothing else. A user's pre-existing untracked .gitignore rules must
-    // NOT be published by sync — flag it for the operator to commit themselves.
-    const content = await readFile(join(repoRoot, f), 'utf8').catch(() => '');
-    if (isSyncManagedOnlyDotfile(f, content)) stagePaths.push(f);
-    else uncommittedMeta.push(f);
-  }
+  const commitLockPath = join(partitionDir(repoRoot, replicaId), '.append.lock');
+  await mkdir(partitionDir(repoRoot, replicaId), { recursive: true });
+  let commitOutcome;
+  try {
+    commitOutcome = await withAppendLock(commitLockPath, async () => {
+      const mySegs = await listSegs(join(repoRoot, myDirRel));
+      for (const s of mySegs) {
+        const txt = await readFile(join(repoRoot, myDirRel, s), 'utf8').catch(() => null);
+        if (txt === null) return { fail: { ok: false, reason: 'git-add-failed', detail: `segment ${s} unreadable`, steps } };
+        if (txt.length && !txt.endsWith('\n')) {
+          return { fail: { ok: false, reason: 'torn-segment', detail: `segment ${s} ends with an unterminated line (a crashed write) — append the missing newline if the JSON is complete, otherwise trim the partial line, then re-run \`maddu spine sync\``, steps } };
+        }
+      }
+      const stagePaths = mySegs.map((s) => `${myDirRel}/${s}`);
+      // The sync-managed ignore/attr files must land ONCE so peers track partitions —
+      // but only when UNTRACKED, so a user's own edits to a pre-existing (tracked)
+      // .gitignore/.gitattributes are never folded into a spine-sync commit.
+      const uncommittedMeta = [];
+      for (const f of ['.gitignore', '.gitattributes']) {
+        if (!(await dirExists(join(repoRoot, f)))) continue;
+        const tracked = await gitRun(['ls-files', '--error-unmatch', '--', f], repoRoot, 5000);
+        if (tracked.code === 0) continue; // already tracked → not ours to commit
+        // Untracked → first share, but ONLY if the file is the maddu-managed block
+        // and nothing else. A user's pre-existing untracked .gitignore rules must
+        // NOT be published by sync — flag it for the operator to commit themselves.
+        const content = await readFile(join(repoRoot, f), 'utf8').catch(() => '');
+        if (isSyncManagedOnlyDotfile(f, content)) stagePaths.push(f);
+        else uncommittedMeta.push(f);
+      }
 
-  let committed = false;
-  if (stagePaths.length) {
-    const add = await gitRun(['add', '--', ...stagePaths], repoRoot, 20000);
-    if (add.code !== 0) return { ok: false, reason: 'git-add-failed', detail: (add.stderr || add.error || '').trim(), steps };
-    // 0 = our paths have no staged changes; 1 = they do; anything else is a real
-    // git error we surface (never silently skip a commit of pending spine data).
-    const diff = await gitRun(['diff', '--cached', '--quiet', '--', ...stagePaths], repoRoot, 10000);
-    if (diff.code === 1) {
-      // Commit ONLY our pathspec, under the canonical subject the pre-push audit
-      // recognizes as sync-owned — never fold in unrelated staged work. Hooks are
-      // NOT bypassed: repo policy applies and a hook failure surfaces cleanly.
-      const commit = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...stagePaths], repoRoot, 20000);
-      if (commit.code !== 0) return { ok: false, reason: 'git-commit-failed', detail: (commit.stderr || commit.error || '').trim(), steps };
-      committed = true;
-    } else if (diff.code !== 0) {
-      return { ok: false, reason: 'git-status-failed', detail: (diff.stderr || diff.error || '').trim(), steps };
-    }
+      let committedIn = false;
+      if (stagePaths.length) {
+        const add = await gitRun(['add', '--', ...stagePaths], repoRoot, 20000);
+        if (add.code !== 0) return { fail: { ok: false, reason: 'git-add-failed', detail: (add.stderr || add.error || '').trim(), steps } };
+        // 0 = our paths have no staged changes; 1 = they do; anything else is a real
+        // git error we surface (never silently skip a commit of pending spine data).
+        const diff = await gitRun(['diff', '--cached', '--quiet', '--', ...stagePaths], repoRoot, 10000);
+        if (diff.code === 1) {
+          // Commit ONLY our pathspec, under the canonical subject the pre-push audit
+          // recognizes as sync-owned — never fold in unrelated staged work. Hooks are
+          // NOT bypassed: repo policy applies and a hook failure surfaces cleanly.
+          const commit = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...stagePaths], repoRoot, 20000);
+          if (commit.code !== 0) return { fail: { ok: false, reason: 'git-commit-failed', detail: (commit.stderr || commit.error || '').trim(), steps } };
+          committedIn = true;
+        } else if (diff.code !== 0) {
+          return { fail: { ok: false, reason: 'git-status-failed', detail: (diff.stderr || diff.error || '').trim(), steps } };
+        }
+      }
+      // ── 2. Upstream probe + pull, INSIDE the SAME critical section ──
+      // (diff-funnel r14-F1: releasing the lock between the snapshot commit
+      // and the pull left a gap where a concurrent writer could append an
+      // A-stamped event at H+1 just before the pull delivered a resolution
+      // whose cutover binds head H — an unhealable post-cutover losing
+      // stamp. One uninterrupted lock covers snapshot → probe → pull; peer
+      // AUTHORITY bytes can never interleave with a local append. r12-F1's
+      // rationale for fencing the pull itself also lives here. Appends wait
+      // (or best-effort callers drop) for the phase's duration — a
+      // workspace receiving new authority SHOULD quiesce.)
+      const upstream = await gitRun(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, 5000);
+      const hasUpstreamIn = upstream.code === 0 && upstream.stdout.trim().length > 0;
+      let pulledIn = false;
+      if (doPull && hasUpstreamIn) {
+        const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
+        if (pull.code !== 0) {
+          await gitRun(['merge', '--abort'], repoRoot, 10000);
+          return { fail: { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed: committedIn, steps } };
+        }
+        pulledIn = true;
+        // Cutover EXTENSION (diff-funnel r15-F1), still under the SAME lock:
+        // if the pulled resolution's heads predate this checkout's own
+        // pre-adoption offline work (losing stamps beyond the bound heads —
+        // legitimately appended before this checkout learned of the
+        // ceremony), append a same-selection extension with fresh heads and
+        // commit it NOW, so the grandfathered coverage travels with this
+        // sync instead of leaving unhealable post-cutover mismatches.
+        const extTs = new Date().toISOString();
+        const ext = await maybeExtendWsCutoverLocked(repoRoot, partitionDir(repoRoot, replicaId), (selected, conflicts) => ({
+          v: 1, id: makeId('evt', extTs), ts: extTs,
+          type: 'WS_IDENTITY_RESOLVED', actor: null, lane: null,
+          data: { selected, conflicts },
+        }));
+        if (ext.unresolvable) {
+          return { fail: { ok: false, reason: 'import-failed', detail: `cutover-extension scan failed: ${ext.unresolvable}`, committed: committedIn, steps } };
+        }
+        if (ext.extended) {
+          const segsNow = await listSegs(join(repoRoot, myDirRel));
+          const extPaths = segsNow.map((s) => `${myDirRel}/${s}`);
+          const add2 = await gitRun(['add', '--', ...extPaths], repoRoot, 20000);
+          if (add2.code !== 0) return { fail: { ok: false, reason: 'git-add-failed', detail: (add2.stderr || add2.error || '').trim(), committed: committedIn, steps } };
+          const commit2 = await gitRun(['commit', '-m', syncCommitSubject(replicaId), '--', ...extPaths], repoRoot, 20000);
+          if (commit2.code !== 0) return { fail: { ok: false, reason: 'git-commit-failed', detail: (commit2.stderr || commit2.error || '').trim(), committed: committedIn, steps } };
+          committedIn = true;
+        }
+      }
+      return { committed: committedIn, uncommittedMeta, hasUpstream: hasUpstreamIn, pulled: pulledIn };
+    }, { maxWaitMs: 60000 });
+  } catch (e) {
+    return { ok: false, reason: 'git-busy', detail: `append funnel contended: ${e?.message || e}`, steps };
   }
+  if (commitOutcome.fail) return commitOutcome.fail;
+  const committed = commitOutcome.committed;
+  const uncommittedMeta = commitOutcome.uncommittedMeta;
+  const hasUpstream = commitOutcome.hasUpstream;
+  const pulled = commitOutcome.pulled;
   steps.push({ step: 'commit', committed });
-
-  // Upstream presence gates the network hops — a local-only repo (no tracking
-  // branch) still commits, and reports pull/push as skipped rather than erroring.
-  const upstream = await gitRun(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, 5000);
-  const hasUpstream = upstream.code === 0 && upstream.stdout.trim().length > 0;
-
-  // 2. Pull peers' partitions. Disjoint author dirs + merge=binary → never a
-  //    conflict; if one somehow arises, abort OUR merge (we guaranteed above the
-  //    tree was clean of a user operation) and report it — never push over it.
-  let pulled = false;
-  if (doPull && hasUpstream) {
-    const pull = await gitRun(['pull', '--no-rebase', '--no-edit'], repoRoot, 60000);
-    if (pull.code !== 0) {
-      await gitRun(['merge', '--abort'], repoRoot, 10000);
-      return { ok: false, reason: 'pull-conflict', detail: (pull.stderr || pull.error || '').trim(), committed, steps };
-    }
-    pulled = true;
-  }
   steps.push({ step: 'pull', pulled });
 
   // 3. Validate the merged set before sharing further. A fork / structural fail /

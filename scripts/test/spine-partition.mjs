@@ -86,16 +86,22 @@ async function main() {
     ok(partSegs.length === 1, `SYNC: one partition segment (got ${partSegs.length})`);
     const partFile = join(partDir, partSegs[0]);
     const lines = await linesOf(partFile);
-    ok(lines.length === 4, `SYNC: all 4 events (incl. token) in partition (got ${lines.length})`);
+    // S2: the first append is the ws-less partition genesis, the resolver then
+    // publishes WS_IDENTITY_ANCHORED nominating it, and stamping begins — so
+    // the 4 fixture events plus one anchor.
+    ok(lines.length === 5, `SYNC: all 4 events (incl. token) + identity anchor in partition (got ${lines.length})`);
 
     const fork = await chainForkAt(partFile);
     ok(fork === -1, `SYNC: partition prev_hash chain unbroken (first fork at ${fork})`);
 
     const first = JSON.parse(lines[0]);
-    ok((first.prev_hash ?? null) === null, 'SYNC: partition genesis has prev_hash null');
-    const tok = JSON.parse(lines[2]);
-    ok(tok.type === 'TOKEN_USAGE_REPORTED' && typeof tok.prev_hash === 'string',
-      'SYNC: token event routed into partition WITH a prev_hash (in the chain)');
+    ok((first.prev_hash ?? null) === null && !('ws' in first), 'SYNC: partition genesis has prev_hash null and is ws-less');
+    const anchor = JSON.parse(lines[1]);
+    ok(anchor.type === 'WS_IDENTITY_ANCHORED' && !('ws' in anchor),
+      `SYNC: ws-less identity anchor published after the genesis (got ${anchor.type})`);
+    const tok = JSON.parse(lines[3]);
+    ok(tok.type === 'TOKEN_USAGE_REPORTED' && typeof tok.prev_hash === 'string' && typeof tok.ws === 'string',
+      'SYNC: token event routed into partition WITH a prev_hash and the ws stamp (in the chain)');
     // The lock file must never pollute the segment listing.
     ok(!(await numericSegs(partDir)).includes('.append.lock'), 'SYNC: .append.lock excluded from segments');
     await rm(repo, { recursive: true, force: true });

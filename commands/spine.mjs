@@ -16,6 +16,8 @@
 //                                          #   record-intact + independently checkable
 
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { parseFlags } from './_args.mjs';
 import { loadSecretScan } from './_tools.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveSessionId } from './_spine.mjs';
@@ -57,7 +59,124 @@ export default async function spine(argv) {
   const repoRoot = await resolveRepoRoot(lib.paths);
 
   if (!sub) {
-    console.error('Usage: maddu spine <verify|show|oversight|anchor|sync|import> [args]');
+    console.error('Usage: maddu spine <verify|show|oversight|anchor|identity|sync|import> [args]');
+    process.exit(2);
+  }
+
+  // ── workspace identity (S2, v1.117.0) ──
+  // `identity show` — read-only resolution readout (authority, mode, cache).
+  // `identity resolve --keep <ws_...>` — the forward-only anchor-conflict
+  // ceremony: appends WS_IDENTITY_RESOLVED binding EVERY known conflicting
+  // anchor and selecting one EXISTING identity. spine.append's pre-stamp gate
+  // exempts the ceremony type, so it is appendable WHILE conflicted.
+  if (sub === 'identity') {
+    const verb = rest[0];
+    const { flags } = parseFlags(rest.slice(1));
+    const core = await import(pathToFileURL(join(await (await import('./_libroot.mjs')).resolveLibDir(), 'spine-append-core.mjs')).href);
+    if (verb === 'show') {
+      let anchors = [], resolutions = [];
+      try { ({ anchors, resolutions } = await core.scanWsAuthorityEvents(repoRoot)); }
+      catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+      let partitioned;
+      try { partitioned = await core.wsModeIsPartitioned(repoRoot); }
+      catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+      let flatWs = null;
+      if (!partitioned) {
+        const g = await core.readFlatGenesisLine(repoRoot);
+        if (g.state === 'ok') flatWs = core.wsFromLine(g.line);
+      }
+      const law = core.resolveWsAuthority({ anchors, resolutions, flatWs });
+      const cache = await core.readIdentityCache(repoRoot);
+      if (flags.json) {
+        console.log(JSON.stringify({ mode: partitioned ? 'sync' : 'flat', authority: law.conflict ? null : law.authority, conflict: !!law.conflict, identities: law.identities || null, anchors: anchors.length, resolutions: resolutions.length, cache }, null, 2));
+        process.exit(law.conflict ? 1 : 0);
+      }
+      console.log(`mode:      ${partitioned ? 'sync (anchor authority)' : 'flat (genesis derivation)'}`);
+      if (law.conflict) {
+        console.log(`${levelTag('FAIL')}  CONFLICTING anchors: ${law.identities.join(', ')}`);
+        console.log(`  resolve with: maddu spine identity resolve --keep <ws_...>`);
+        process.exit(1);
+      }
+      console.log(`authority: ${law.authority || '(none yet — first S2 append establishes it)'}`);
+      console.log(`anchors:   ${anchors.length}  ·  resolutions: ${resolutions.length}  ·  cache: ${cache.state}${cache.state === 'present' ? ` (${cache.spineIdentity}${cache.conflict ? ', conflict-frozen' : ''})` : ''}`);
+      return;
+    }
+    if (verb === 'resolve') {
+      const keep = typeof flags.keep === 'string' ? flags.keep : null;
+      if (!keep || !core.WS_ID_RE.test(keep)) {
+        console.error('Usage: maddu spine identity resolve --keep <ws_...> (a currently-anchored identity — never a new one)');
+        process.exit(2);
+      }
+      let anchors = [], resolutions = [];
+      try { ({ anchors, resolutions } = await core.scanWsAuthorityEvents(repoRoot)); }
+      catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+      const law = core.resolveWsAuthority({ anchors, resolutions });
+      if (!law.conflict) {
+        // Idempotent success ONLY when the selection matches the resolved
+        // authority (diff-funnel r3-F5) AND the grandfather already covers
+        // every losing stamp (r15-F1: pre-adoption offline work beyond the
+        // bound heads makes a matching --keep a cutover EXTENSION, not a
+        // no-op — fall through to the ceremony, which appends a
+        // same-selection resolution with fresh heads).
+        if (law.authority && law.authority === keep) {
+          let uncovered = null;
+          if (law.resolved) {
+            try { uncovered = await core.findUncoveredLosingStamp(repoRoot, keep, anchors, resolutions); }
+            catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+          }
+          if (!uncovered) {
+            console.log(`nothing to resolve — authority is ${keep}`);
+            const { loadLibOptional } = await import('./_libroot.mjs');
+            (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
+            return;
+          }
+          // fall through: extension ceremony
+        } else {
+          console.error(law.authority
+            ? `refused: nothing to resolve, and the authority is ${law.authority} — not ${keep}`
+            : `refused: nothing to resolve — no anchors exist yet`);
+          process.exit(2);
+        }
+      }
+      // (The extension fall-through arrives here RESOLVED — law.identities
+      // only exists in conflict state; the selection already matched above.)
+      if (law.conflict && !law.identities.includes(keep)) {
+        console.error(`refused: --keep ${keep} is not among the conflicting identities (${law.identities.join(', ')}) — the ceremony selects an EXISTING identity, never a new one`);
+        process.exit(2);
+      }
+      // Canonical binding: exact {eventId, genesisHash, spineIdentity} tuples
+      // in canonical order — spine.append re-validates this against a fresh
+      // anchor scan (the shared validateResolutionBinding law).
+      const conflicts = core.canonicalAnchorConflicts(anchors);
+      let ev;
+      try {
+        ev = await lib.spine.append(repoRoot, {
+          type: lib.spine.EVENT_TYPES.WS_IDENTITY_RESOLVED,
+          actor: await resolveSessionId(repoRoot, flags, lib.sessionActive).catch(() => null),
+          lane: null,
+          data: { selected: keep, conflicts },
+        });
+      } catch (e) {
+        // A raced ceremony that lost to an identical resolution is
+        // idempotent success, not a refusal (r2-F4: the atomic path reports
+        // the resolved authority on the `already` outcome).
+        if (e?.code === 'WS_RESOLUTION_INVALID' && e.resolvedAuthority === keep) {
+          console.log(`nothing to resolve — authority is ${keep}`);
+          const { loadLibOptional } = await import('./_libroot.mjs');
+          (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-no-identity-conflict');
+          return;
+        }
+        console.error(`refused: ${e?.message || e}`);
+        process.exit(1);
+      }
+      const partitioned2 = await core.wsModeIsPartitioned(repoRoot).catch(() => null);
+      if (partitioned2 !== null) {
+        await core.writeIdentityCache(repoRoot, { spineIdentity: keep, mode: partitioned2 ? 'sync' : 'flat' }).catch(() => {});
+      }
+      console.log(`${levelTag('PASS')}  resolved — authority: ${keep}  (${conflicts.length} anchor(s) bound; event ${ev.id})`);
+      return;
+    }
+    console.error('Usage: maddu spine identity <show | resolve --keep <ws_...>> [--json]');
     process.exit(2);
   }
 
@@ -311,6 +430,25 @@ export default async function spine(argv) {
     }
     const { flags } = parseFlags(rest.slice(1));
     const res = await lib.spineSync.syncInit(repoRoot);
+    // S1 witness classification runs BEFORE the output-format branch
+    // (diff-funnel r3-F6: the --json early exit skipped it, so a successful
+    // residual continuation false-breached in JSON mode). Failures exit
+    // non-zero and never breach.
+    if (res.ok && res.already) {
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      const movedSegs = res.continuation?.status === 'migrated' ? (res.continuation.segments || []) : [];
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.(
+        movedSegs.length ? 'host-file:residual-migration' : 'idempotent-already-synced');
+    } else if (res.ok) {
+      // Fresh activation writes REAL spine events (cutover/anchor) through
+      // the core primitives, which never credit the witness — declare the
+      // raw write honestly (r8 follow-up: the fresh path was an
+      // uncalibrated S1 false breach; census-pinned like init's genesis).
+      const { loadLibOptional } = await import('./_libroot.mjs');
+      const mwl = await loadLibOptional('mutation-witness.mjs');
+      const witnessRaw = typeof mwl?.witnessRawWrite === 'function' ? mwl.witnessRawWrite : () => {};
+      witnessRaw('sync-init-activation'); // census-pinned raw spine write
+    }
     if (flags.json) {
       process.stdout.write(JSON.stringify(res, null, 2) + '\n');
       process.exit(res.ok ? 0 : 1);
@@ -325,16 +463,21 @@ export default async function spine(argv) {
         console.error(`  Archive or remove the anchors first if you want team-sync on this repo.`);
       } else if (res.reason === 'config-invalid') {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
+      } else if (res.reason === 'ws-identity-bootstrap-failed' || res.reason === 'residual-migration-fatal') {
+        console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.message}`);
+        if (res.remedy) console.error(`  remedy: ${res.remedy}`);
       } else {
         console.error(`${ANSI.fail}Refused:${ANSI.reset} ${res.reason}`);
       }
       process.exit(1);
     }
     if (res.already) {
-      // Declared no-op: sync init on an already-synced checkout.
-      const { loadLibOptional } = await import('./_libroot.mjs');
-      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-synced');
+      // (Witness classification already ran above, before the format branch.)
+      const moved = res.continuation?.status === 'migrated' ? (res.continuation.segments || []) : [];
       console.log(`${ANSI.dim}Already in sync mode${ANSI.reset} — replicaId ${ANSI.accent}${res.replicaId}${ANSI.reset}`);
+      if (moved.length) {
+        console.log(`  ${levelTag('PASS')}  residual flat segment(s) migrated into the partition: ${moved.join(', ')}`);
+      }
     } else {
       console.log(`${levelTag('PASS')}  team-sync initialised`);
       console.log(`  replicaId: ${ANSI.accent}${res.replicaId}${ANSI.reset}  ${ANSI.dim}(this checkout's identity — never committed)${ANSI.reset}`);

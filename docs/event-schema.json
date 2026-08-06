@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.14.0",
+  "x-contractVersion": "1.15.0",
   "type": "object",
   "required": [
     "v",
@@ -190,6 +190,8 @@
         "BRIDGE_ORIGIN_REJECTED",
         "BRIDGE_CROSS_WORKSPACE",
         "SPINE_CUTOVER",
+        "WS_IDENTITY_ANCHORED",
+        "WS_IDENTITY_RESOLVED",
         "DISCIPLINE_SKIPPED",
         "MUTATION_UNWITNESSED",
         "ENFORCEMENT_ERROR",
@@ -244,6 +246,9 @@
         "object",
         "null"
       ]
+    },
+    "ws": {
+      "type": "string"
     },
     "data": {
       "type": "object"
@@ -5613,6 +5618,64 @@
             "additionalProperties": true,
             "properties": {
               "version": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WS_IDENTITY_ANCHORED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "Sync mode's in-band workspace-identity authority: nominates the merge-first genesis line by immutable partition position + hash and derives spineIdentity from it. Published once by the first S2-aware writer BEFORE any ws stamping (the event itself is ws-less by protocol); once present, verify resolves authority from the anchor, never from the evolving partition set. Conflicting anchors fail verify and freeze writers until WS_IDENTITY_RESOLVED.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "genesis": {
+                "type": "object"
+              },
+              "spineIdentity": {
+                "type": "string"
+              },
+              "v": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "WS_IDENTITY_RESOLVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The forward-only anchor-conflict ceremony (maddu spine identity resolve --keep): while conflicting anchors exist it is the ONLY appendable type; it binds EVERY known conflicting anchor by eventId+genesisHash (canonically sorted) and selects one EXISTING identity as authority. `cutover` records the exact per-partition chain heads at ceremony time — losing-identity events stamped at-or-before their bound head are grandfathered by verify (forward-only recovery for conflicts where both sides already stamped work); everything after must carry the selected identity. Appended ws-less; stamping resumes after it. Conflicting resolutions, or a later anchor conflicting with a resolution, fail verify.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "conflicts": {
+                "type": "array"
+              },
+              "cutover": {
+                "type": "array"
+              },
+              "selected": {
                 "type": "string"
               }
             }

@@ -24,7 +24,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { resolveWriteReplica, appendPartitioned, appendFlatChained } from '../spine-append-core.mjs';
+import { resolveWriteReplica, appendPartitioned, appendFlatChained, readFreshCachedIdentity } from '../spine-append-core.mjs';
 import { redactDataPayload, redactText } from '../secret-scan.mjs';
 import { envActingSid } from '../id-grammar.mjs';
 
@@ -61,6 +61,21 @@ export async function appendTokenUsage(repoRoot, payload) {
   if (typeof payload.cacheCreation === 'number') ev.data.cacheCreation = payload.cacheCreation;
   if (payload.unreportedTokens === true) ev.data.unreportedTokens = true;
 
+  // Workspace identity (S2): CACHE-ONLY, freshness-proven read (r2-F5) — the
+  // wrapper never scans/derives (its standalone contract forbids the heavier
+  // machinery, and a drop is acceptable by design). readFreshCachedIdentity
+  // applies the mode/fingerprint/delta law without any authority scan:
+  //   fresh    → stamp the proven-current identity
+  //   conflict → drop the event entirely (a frozen workspace refuses
+  //              best-effort writes rather than spreading either identity)
+  //   unknown  → absent/mode-less/unprovable cache — emit ws-less, tolerated
+  //              forward-only like prev_hash
+  try {
+    const idf = await readFreshCachedIdentity(repoRoot, { refresh: true });
+    if (idf.state === 'conflict') return null; // frozen — drop, never block
+    if (idf.state === 'fresh') ev.ws = idf.ws;
+  } catch { /* best-effort */ }
+
   // This append bypasses spine.append(), so it applies the same write-boundary
   // sweep itself. The fields are numbers by construction EXCEPT `model`, which
   // is parsed from the provider stream — a malformed frame must not carry a
@@ -88,7 +103,15 @@ export async function appendTokenUsage(repoRoot, payload) {
   const waitMs = Number.isFinite(rawWait) && rawWait > defaultWaitMs ? rawWait : defaultWaitMs;
   const w = await resolveWriteReplica(repoRoot, { timeoutMs: waitMs });
   if (w.pending) return null; // migration in flight — drop this token event
-  if (w.id) return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
+  if (w.unattached) return null; // r7-F1: unattached clone — never write a flat event that can't be Git-carried
+  if (w.id) {
+    // r16-F1: an attached sync workspace shares its events via git — an
+    // UNPROVABLE identity (absent/stale/unreadable cache, failed mode probe)
+    // drops the best-effort event rather than emitting an S2-unprotected
+    // ws-less line into the partition.
+    if (typeof ev.ws !== 'string') return null;
+    return appendPartitioned(repoRoot, w.id, ev, { maxWaitMs: waitMs });
+  }
 
   // Default flat path — through the SHARED locked+chained primitive (audit P1) so
   // token events carry prev_hash like every other flat write (no keyless flat
@@ -101,6 +124,7 @@ export async function appendTokenUsage(repoRoot, payload) {
     const outcome = await appendFlatChained(repoRoot, eventsDir, ev, { maxWaitMs: waitMs });
     if (outcome.reroute) return appendPartitioned(repoRoot, outcome.reroute, ev, { maxWaitMs: waitMs });
     if (outcome.pending) return null;
+    if (outcome.unattached) return null;
     return outcome.ev;
   } catch {
     return null; // contention past budget / transient — drop, never block the worker

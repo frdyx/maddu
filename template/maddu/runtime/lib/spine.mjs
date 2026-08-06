@@ -18,7 +18,7 @@ import { DEFAULT_LANE_CATALOG } from './defaults.mjs';
 // stdlib-only core so the worker token-wrapper can share them. hashLine is
 // re-exported below so verify.mjs / usage.mjs (which import it from here) are
 // unaffected.
-import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned } from './spine-append-core.mjs';
+import { hashLine, readActiveReplicaId, resolveWriteReplica, appendPartitioned, appendFlatChained, readAllPartitioned, resolveIdentityForAppend, writeIdentityCache, publishWsAnchorOnce, appendWsResolutionOnce } from './spine-append-core.mjs';
 import { redactDataPayload } from './secret-scan.mjs';
 // Mutation-witness credit (buzz-steals S1): every SUCCESSFUL logical append
 // credits the active witness context exactly once — counted here (not in the
@@ -316,6 +316,8 @@ export const EVENT_TYPES = {
   // partition to the post-cutover strict rules even without a migrated FRAMEWORK
   // marker. data: { version }
   SPINE_CUTOVER:              'SPINE_CUTOVER',
+  WS_IDENTITY_ANCHORED:       'WS_IDENTITY_ANCHORED',
+  WS_IDENTITY_RESOLVED:       'WS_IDENTITY_RESOLVED',
   // audit P2 — self-discipline honesty. A mutating tool was let through WITHOUT a
   // discipline check (enforcement off, a self-disable attempt, or the enforcement
   // hook uninstalled), so a bypass always leaves a witness. Emitted best-effort at
@@ -611,9 +613,150 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // actor/lane/triggered_by carry ids by construction.
   data = redactDataPayload(data);
   const paths = await ensureSpine(repoRoot);
+
+  // ── Workspace identity (S2): pre-stamp gate + stamping ──
+  // The two ws-authority event types are ws-less BY PROTOCOL (the anchor
+  // precedes stamping; the resolution must be appendable WHILE conflicted) —
+  // but neither is a free pass (diff-funnel r1-F2):
+  //   WS_IDENTITY_ANCHORED — internal bootstrap capability ONLY. The public
+  //     API refuses it outright: anchors are published exclusively by the
+  //     needAnchor recursion below and by sync-init's core-primitive path.
+  //   WS_IDENTITY_RESOLVED — validated HERE against a fresh re-read of the
+  //     current anchor set: there must BE an unresolved conflict, `selected`
+  //     must be an existing conflicting identity, and the binding must
+  //     deep-equal the canonical anchor tuple list (validateResolutionBinding
+  //     — exact {eventId, genesisHash, spineIdentity} tuples, canonical
+  //     order, no extras).
+  // Everything else resolves the identity:
+  //   conflict → refuse with a stable code (Codex plan r6 advisory 1) so the
+  //     dispatcher's ceremony exception can key on it;
+  //   needAnchor → publish WS_IDENTITY_ANCHORED first (once), then stamp;
+  //   bootstrap → this IS the genesis line; it stays ws-less (self-reference).
+  let wsStamp = null;
+  const WS_AUTHORITY_TYPE = type === EVENT_TYPES.WS_IDENTITY_ANCHORED || type === EVENT_TYPES.WS_IDENTITY_RESOLVED;
+  if (WS_AUTHORITY_TYPE) {
+    if (type === EVENT_TYPES.WS_IDENTITY_ANCHORED) {
+      // Anchors are published ONLY by the serialized bootstrap
+      // (publishWsAnchorOnce below / sync-init's core-primitive path) —
+      // never through the public API, and never at all while conflicted.
+      const err = new Error('spine append: WS_IDENTITY_ANCHORED is published only by the identity bootstrap, never by callers');
+      err.code = 'WS_ANCHOR_RESTRICTED';
+      throw err;
+    }
+    // WS_IDENTITY_RESOLVED is validated + appended ATOMICALLY under the
+    // write funnel's lock (appendWsResolutionOnce below, after the envelope
+    // is built) — validating here, outside the lock, would let concurrent
+    // ceremonies race the same conflict (diff-funnel r2-F4).
+    // Both types append ws-less with NO recursive identity resolution.
+  } else {
+    // Wait out any in-flight `spine sync init` BEFORE resolving identity
+    // (duplicate-anchor race: an append resolving mid-migration sees an
+    // anchorless partial partition, takes `needAnchor`, and would publish a
+    // second anchor after the init publishes its own — resolveWriteReplica
+    // already embodies the wait-for-activation law, so reuse it; a genuine
+    // stall surfaces as the same refusal the write path below would give).
+    // The gate is a small RETRY LOOP: a sync-init can complete BETWEEN the
+    // funnel resolution and the identity resolution (neither holds a lock),
+    // leaving `wGate` stale — mid-transition outcomes (needAnchor/refuse)
+    // whose funnel has since changed re-run the gate against the settled
+    // world instead of failing on a snapshot that no longer exists.
+    let wGate, idr;
+    for (let gateTry = 0; ; gateTry++) {
+      wGate = await resolveWriteReplica(repoRoot);
+      if (wGate.pending) {
+        throw new Error('spine append: a `spine sync init` migration is pending/stalled — re-run `maddu spine sync init`, then retry');
+      }
+      if (wGate.unattached) {
+        // r7-F1: sync partitions without a replica identity (a fresh clone).
+        // Refuse EVERY write — a flat append here is never Git-carried.
+        const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+        err.code = 'REPLICA_UNATTACHED';
+        throw err;
+      }
+      idr = await resolveIdentityForAppend(repoRoot);
+      if ((idr.needAnchor || idr.refuse) && gateTry < 3) {
+        const wNow = await resolveWriteReplica(repoRoot);
+        if ((wNow.id || null) !== (wGate.id || null) || wNow.pending) continue; // the world moved — re-run
+      }
+      break;
+    }
+    if (idr.conflict) {
+      const err = new Error(`spine append: conflicting workspace-identity anchors (${idr.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+      err.code = 'WS_IDENTITY_CONFLICT';
+      throw err;
+    }
+    if (idr.refuse) {
+      const err = new Error(`spine append: workspace identity unresolvable — ${idr.refuse}`);
+      err.code = 'WS_IDENTITY_UNRESOLVABLE';
+      throw err;
+    }
+    if (idr.needAnchor) {
+      // Serialized + idempotent under the partition lock: an anchor that
+      // landed while we raced is adopted, a conflict freezes, and only a
+      // still-anchorless workspace publishes (exactly once).
+      if (!wGate.id) {
+        // Partitioned identity with a flat write funnel = a checkout that
+        // has partitions but no replica identity (a fresh clone of a synced
+        // repo). It must not publish anchors or write at all.
+        const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+        err.code = 'WS_IDENTITY_UNRESOLVABLE';
+        throw err;
+      }
+      const anchorTs = new Date().toISOString();
+      const pub = await publishWsAnchorOnce(repoRoot, wGate.id, ({ spineIdentity, genesis }) => ({
+        v: 1, id: genId(anchorTs), ts: anchorTs,
+        type: EVENT_TYPES.WS_IDENTITY_ANCHORED,
+        actor, lane: null,
+        data: { v: 1, spineIdentity, genesis },
+      }));
+      if (pub.conflict) {
+        const err = new Error(`spine append: conflicting workspace-identity anchors (${pub.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+        err.code = 'WS_IDENTITY_CONFLICT';
+        throw err;
+      }
+      if (pub.unresolvable) {
+        const err = new Error(`spine append: workspace identity unresolvable — ${pub.unresolvable}`);
+        err.code = 'WS_IDENTITY_UNRESOLVABLE';
+        throw err;
+      }
+      wsStamp = pub.adopted || pub.ws || null; // bootstrap → null (this event IS the genesis)
+      if (wsStamp) {
+        // Converge the cache to a PROVABLY-fresh state (with fingerprint):
+        // the re-resolution rescans (the anchor now exists → authority) and
+        // caches with a pre-scan fingerprint, so cache-only readers (the
+        // token wrapper's no-scan freshness law) can stamp immediately
+        // post-bootstrap. Every non-{ws} outcome PROPAGATES (diff-funnel
+        // r3-F2: a peer anchor arriving right after publication is a real
+        // conflict — overwriting that freeze with a fallback clean cache and
+        // stamping the pre-conflict identity would append what verify then
+        // FAILs as ws_anchor_conflict/ws_mismatch).
+        const idr2 = await resolveIdentityForAppend(repoRoot);
+        if (idr2.conflict) {
+          const err = new Error(`spine append: conflicting workspace-identity anchors (${idr2.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+          err.code = 'WS_IDENTITY_CONFLICT';
+          throw err;
+        }
+        if (!idr2.ws) {
+          const err = new Error(`spine append: workspace identity unresolvable — ${idr2.refuse || 'anchor bootstrap did not converge'}`);
+          err.code = 'WS_IDENTITY_UNRESOLVABLE';
+          throw err;
+        }
+        wsStamp = idr2.ws;
+      }
+    } else if (idr.ws) {
+      wsStamp = idr.ws;
+    }
+    // idr.bootstrap → wsStamp stays null: the genesis line is ws-less.
+  }
+
   const ts = new Date().toISOString();
   const ev = { v: 1, id: genId(ts), ts, type, actor, lane, data };
   if (triggered_by) ev.triggered_by = triggered_by;
+  // Stamped INSIDE the stored line (after triggered_by, before prev_hash) —
+  // it rides into prev_hash with zero new hashing code. Caller-supplied `ws`
+  // is impossible by construction: the destructured signature above never
+  // accepts one.
+  if (wsStamp) ev.ws = wsStamp;
 
   // ── Sync mode (#12c): partitioned append ──
   // Write to this replica's partition under the funnel (prev_hash computed inside
@@ -636,11 +779,61 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // One credit per LOGICAL event: every success return funnels through here,
   // so the pending/ENOENT retries below can never double-count.
   const credit = (out) => { witnessSpineAppend(); return out; };
+
+  // The ceremony type takes the ATOMIC path: scan + law + binding +
+  // idempotency + inline append in one critical section (r2-F4).
+  if (type === EVENT_TYPES.WS_IDENTITY_RESOLVED) {
+    for (let i = 0; i < 3; i++) {
+      const out = await appendWsResolutionOnce(repoRoot, ev);
+      if (out.retry) continue;
+      if (out.invalid) {
+        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — ${out.invalid}`);
+        err.code = 'WS_RESOLUTION_INVALID';
+        throw err;
+      }
+      if ('already' in out) {
+        const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — no unresolved anchor conflict exists${out.already ? ` (authority already ${out.already})` : ''}`);
+        err.code = 'WS_RESOLUTION_INVALID';
+        err.resolvedAuthority = out.already;
+        throw err;
+      }
+      return credit(out.ev);
+    }
+    throw new Error(STALL_MSG);
+  }
+
+  // One bounded restamp (diff-funnel r11-F1): the primitives re-validate the
+  // ws stamp INSIDE the append lock, so a ceremony/anchor that raced us
+  // surfaces as WS_IDENTITY_MISMATCH here — re-resolve once and restamp with
+  // the settled authority instead of hard-failing a healable verb. A
+  // conflict or unresolvable outcome still propagates.
+  let wsRestamped = false;
+  const restampOrRethrow = async (err) => {
+    if (err?.code !== 'WS_IDENTITY_MISMATCH' || wsRestamped) throw err;
+    wsRestamped = true;
+    const idrR = await resolveIdentityForAppend(repoRoot);
+    if (idrR.conflict) {
+      const e = new Error(`spine append: conflicting workspace-identity anchors (${idrR.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
+      e.code = 'WS_IDENTITY_CONFLICT';
+      throw e;
+    }
+    if (idrR.ws) { ev.ws = idrR.ws; return; }
+    if (idrR.bootstrap) { delete ev.ws; return; }
+    throw err;
+  };
   let enoentRetries = 0;
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);
-    if (w.id) return credit(await appendPartitioned(repoRoot, w.id, ev));
+    if (w.id) {
+      try { return credit(await appendPartitioned(repoRoot, w.id, ev)); }
+      catch (err) { await restampOrRethrow(err); continue; }
+    }
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
+    if (w.unattached) {
+      const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+      err.code = 'REPLICA_UNATTACHED';
+      throw err;
+    }
 
     // Test seam (no-op in production): fired exactly ONCE, after the outer resolve
     // returned flat and BEFORE appendFlatChained's non-waiting re-resolve — the
@@ -661,6 +854,11 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     try {
       const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
       if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev));
+      if (outcome.unattached) {
+        const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
+        err.code = 'REPLICA_UNATTACHED';
+        throw err;
+      }
       if (outcome.pending) {                             // migration began in the resolve→lock window → retry
         // Test seam (no-op in production): acknowledge that the inner re-resolve
         // observed {pending}, so a deterministic test can act AFTER the retry.
@@ -676,6 +874,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
       // enough — a PERSISTENT ENOENT (a genuinely broken FS, not a migration) then
       // surfaces the real error instead of hot-spinning.
       if (err && err.code === 'ENOENT' && ++enoentRetries <= 3) continue;
+      if (err && err.code === 'WS_IDENTITY_MISMATCH') { await restampOrRethrow(err); continue; }
       throw err;
     }
   }
@@ -710,7 +909,13 @@ export async function readAll(repoRoot) {
       if (err && err.code === 'ENOENT') return readAllPartitioned(repoRoot);
       throw err;
     }
-    for (const line of text.split('\n')) {
+    const lines = text.split('\n');
+    // Committed elements only (diff-funnel r8-F1): a nonempty unterminated
+    // final element is not part of the record even when it parses — reads
+    // must agree with the writers and the verifier about what exists.
+    const committed = text.endsWith('\n') ? lines.length : lines.length - 1;
+    for (let i = 0; i < committed; i++) {
+      const line = lines[i];
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }
       catch (err) { console.error(`spine: bad line in ${seg}:`, err.message); }
@@ -739,7 +944,16 @@ export async function readAllStrict(repoRoot) {
       if (err && err.code === 'ENOENT') return { events: await readAllPartitioned(repoRoot), parseErrors: null };
       throw err;
     }
-    for (const line of text.split('\n')) {
+    const lines = text.split('\n');
+    // Committed elements only (diff-funnel r9-F1): a nonempty unterminated
+    // final element is NOT part of the record even when it parses — and a
+    // STRICT reader must also COUNT it, so integrity-sensitive callers see
+    // the accounting gap instead of treating a torn stream as fully
+    // accounted.
+    const committed = text.endsWith('\n') ? lines.length : lines.length - 1;
+    if (committed < lines.length && lines[committed].trim()) parseErrors++;
+    for (let i = 0; i < committed; i++) {
+      const line = lines[i];
       if (!line.trim()) continue;
       try { out.push(JSON.parse(line)); }
       catch { parseErrors++; }

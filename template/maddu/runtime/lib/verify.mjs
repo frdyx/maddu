@@ -69,7 +69,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
-import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION } from './spine-append-core.mjs';
+import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE, validWsResolutions, buildWsGrandfather, wsStampGrandfathered, readPartitionLineAt } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -257,7 +257,6 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     // interior line (which means real data loss in the middle of history): the
     // torn trailer is the only event never durably committed, and the operator
     // can safely trim it. We flag it distinctly so the remediation differs.
-    const isLastSegment = segName === segs[segs.length - 1];
     const fileEndsWithNewline = text.endsWith('\n');
     let evCount = 0;
     let firstTs = null;
@@ -269,6 +268,24 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       if (!line.trim()) continue;
       const lineNo = i + 1;
 
+      // ─── Committed-record boundary (diff-funnel r7-F2, widened r8-F1,
+      // fenced r19-F1) ───
+      // A nonempty UNTERMINATED trailer is torn whether or not it parses: a
+      // complete-looking JSON object whose newline never landed is not part
+      // of the committed record (the S2 identity law, the authority scan,
+      // and the writers all exclude it). Classified BEFORE parsing AND
+      // BEFORE the chain bookkeeping (r19-F1: hashing a torn element would
+      // let its committed successor chain THROUGH an element the record
+      // excludes — the successor must instead chain-FAIL against the last
+      // committed line). Every segment, not only the globally last one.
+      const isUnterminatedTrailer = !fileEndsWithNewline && i === lines.length - 1;
+      if (isUnterminatedTrailer) {
+        push(issue('FAIL', 'torn_trailing_line',
+          `${segName}:${lineNo}: trailing line is unterminated (missing final newline) — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event is not part of the committed record. Remediation: if the JSON is complete, append the missing newline; otherwise trim the partial line. Then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
+          { segment: segName, line: lineNo }));
+        continue; // prevLineHash NOT advanced — the torn element is outside the chain
+      }
+
       // Chain-integrity bookkeeping (v1.14.0): hash this stored line and capture
       // the previous line's hash, then advance — so every early `continue` below
       // still carries the chain forward correctly.
@@ -279,16 +296,9 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       let ev;
       try { ev = JSON.parse(line); }
       catch (err) {
-        const isTornTrailer = isLastSegment && !fileEndsWithNewline && i === lines.length - 1;
-        if (isTornTrailer) {
-          push(issue('FAIL', 'torn_trailing_line',
-            `${segName}:${lineNo}: trailing line is truncated/unterminated JSON — a write was interrupted mid-append (crash, or a concurrent writer above the atomic-append size). This event was never durably committed. Remediation: manually trim the final partial line, then re-run \`maddu spine verify\` and record a slice-stop. Never auto-repaired.`,
-            { segment: segName, line: lineNo }));
-        } else {
-          push(issue('FAIL', 'unparseable',
-            `${segName}:${lineNo}: ${err.message}`,
-            { segment: segName, line: lineNo }));
-        }
+        push(issue('FAIL', 'unparseable',
+          `${segName}:${lineNo}: ${err.message}`,
+          { segment: segName, line: lineNo }));
         continue;
       }
       if (!ev || typeof ev !== 'object') {
@@ -1132,7 +1142,202 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     await scanChain(eventsDir, { referential: true });
   }
 
+  // ── Workspace-identity post-pass (S2, v1.117.0) ──
+  // ONE authority for the whole workspace, resolved OUTSIDE the per-partition
+  // chain scans (plan-review r1-F3: an internally-consistent foreign partition
+  // must not pass) — anchors when present, flat derivation otherwise — then
+  // every ws-bearing line in every chain is compared against it. Runs as a
+  // separate pass over the SHARED strict enumerators in spine-append-core
+  // (r2-F2), after the chain scans so chain issues stay primary. Forward-only:
+  // ws-less legacy events are untouched.
+  await wsIdentityPass(repoRoot, push, { partitioned: nonEmptyParts.length > 0, eventsDir });
+
   return result;
+}
+
+// The S2 identity checks. FAIL kinds:
+//   ws_identity_unverifiable — an anchor's nominated position is missing or
+//     mismatched, the authority scan itself failed, or ws-bearing events
+//     exist with no derivable authority (never a silent skip; r2-F2).
+//   ws_anchor_conflict — conflicting anchors without a binding resolution
+//     (or conflicting resolutions).
+//   ws_mismatch — an event's ws differs from the workspace authority (the
+//     splice signal), or is an empty string (presence-byte lesson: absent
+//     and empty must be distinguishable — empty is malformed).
+// WARN kinds:
+//   ws_cache_stale — identity.json disagrees with the resolved authority
+//     (cache, never authority).
+async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
+  let anchors = [], resolutions = [];
+  let authorityScanFailed = false;
+  try { ({ anchors, resolutions } = await scanWsAuthorityEvents(repoRoot)); }
+  catch (e) {
+    // Fail closed but DON'T stop (diff-funnel r21-F1): the committed-line
+    // sweep below still runs with NO authority, so every ws-bearing line —
+    // including a foreign stamp inside the very directory that broke the
+    // scan — surfaces individually instead of hiding behind one generic
+    // failure.
+    push(issue('FAIL', 'ws_identity_unverifiable', `authority scan failed: ${e?.message || e}`));
+    authorityScanFailed = true;
+    anchors = []; resolutions = [];
+  }
+
+  // Anchor nominations must survive a re-read (position + hash + derivation).
+  for (const a of anchors) {
+    const v = await verifyAnchorNomination(repoRoot, a.data);
+    if (!v.ok) push(issue('FAIL', 'ws_identity_unverifiable', `anchor ${a.id}: ${v.reason}`, { eventId: a.id }));
+  }
+
+  let flatWs = null;
+  if (!partitioned && !authorityScanFailed) {
+    // Skipped when the authority scan failed (r22-F1): degraded mode means
+    // NO authority at all — deriving flat identity here would let stamped
+    // events pass silently behind the one generic scan FAIL instead of
+    // surfacing individually.
+    const g = await readFlatGenesisLine(repoRoot);
+    if (g.state === 'ok') flatWs = wsFromLine(g.line);
+    else if (g.state === 'unresolvable') {
+      // Only fatal if identity is actually at stake (ws-bearing events exist).
+      flatWs = { unresolvable: g.error };
+    }
+  }
+
+  const law = resolveWsAuthority({ anchors, resolutions, flatWs: typeof flatWs === 'string' ? flatWs : null });
+  if (law.conflict) {
+    push(issue('FAIL', 'ws_anchor_conflict', `conflicting workspace-identity anchors: ${law.identities.join(', ')} — resolve with \`maddu spine identity resolve --keep <ws_...>\``));
+  }
+  const authority = law.conflict ? null : law.authority;
+
+  // The resolution GRANDFATHER law (diff-funnel r4-F1): a valid resolution
+  // binds a forward cutover (per-partition chain heads at ceremony time) —
+  // LOSING-identity stamps at-or-before their bound head are tolerated;
+  // everything after must carry the selected authority. The bound heads
+  // themselves must survive a position+hash re-read (a moved/rewritten head
+  // would silently widen or shrink the grandfathered range).
+  const grandfather = buildWsGrandfather(anchors, resolutions);
+  for (const r of validWsResolutions(anchors, resolutions)) {
+    for (const h of Array.isArray(r?.data?.cutover) ? r.data.cutover : []) {
+      // Malformed rows FAIL, never throw (diff-funnel r5-F1: a tampered
+      // imported resolution must degrade to ws_identity_unverifiable —
+      // buildWsGrandfather already excludes such rows from the grandfather).
+      const wellFormed = h && typeof h === 'object' && typeof h.replicaId === 'string'
+        && typeof h.segment === 'string' && Number.isInteger(h.line) && typeof h.hash === 'string';
+      if (!wellFormed) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `resolution ${r.id}: malformed cutover row ${JSON.stringify(h).slice(0, 80)}`, { eventId: r.id }));
+        continue;
+      }
+      const rr = await readPartitionLineAt(repoRoot, h.replicaId, h.segment, h.line);
+      if (rr.state !== 'ok' || hashLine(rr.line) !== h.hash) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `resolution ${r.id}: cutover head ${h.replicaId}/${h.segment}:${h.line} ${rr.state !== 'ok' ? rr.state : 'hash mismatch'}`, { eventId: r.id }));
+      }
+    }
+  }
+
+  // Sweep every stored line for a ws stamp (cheap substring prefilter; lines
+  // that fail to parse already FAILed in the chain scan above). Positions are
+  // tracked so the grandfather law can compare against the bound heads —
+  // `replicaId` is '' for the flat dir (never grandfathered: cutovers bind
+  // by-replica partitions only).
+  const sweep = async (dir, replicaId) => {
+    // FAIL-CLOSED (diff-funnel r17-F1): an unreadable dir/segment in the ws
+    // sweep must surface as ws_identity_unverifiable — a transiently
+    // unreadable spliced segment would otherwise let verify return green.
+    let segs = [];
+    try { segs = (await readdir(dir)).filter((f) => SEGMENT_RE.test(f)).sort(); }
+    catch (e) {
+      if (!(e && e.code === 'ENOENT')) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: ${replicaId || 'flat'}: ${e?.message || e}`));
+      }
+      return;
+    }
+    for (const seg of segs) {
+      let txt;
+      try { txt = await readFile(join(dir, seg), 'utf8'); }
+      catch (e) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: ${replicaId || 'flat'}/${seg}: ${e?.message || e}`, { segment: seg }));
+        continue;
+      }
+      const lines = txt.split('\n');
+      // Committed elements only (r7-F2): an unterminated trailer is not part
+      // of the record — the chain scan already FAILs it as torn.
+      const committedN = txt.endsWith('\n') ? lines.length : lines.length - 1;
+      for (let li = 0; li < committedN; li++) {
+        const line = lines[li];
+        if (!line.trim()) continue;
+        // PARSE is authoritative (diff-funnel r6-F1: any substring prefilter
+        // — even on the bare quoted key — is evadable with JSON escapes like
+        // an escaped key (backslash-u0077 then s), which parses to a top-level `ws` the raw bytes never
+        // show). Lines that fail to parse already FAILed the chain scan.
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (!ev || !('ws' in ev)) continue;
+        if (ev.type === 'WS_IDENTITY_ANCHORED' || ev.type === 'WS_IDENTITY_RESOLVED') {
+          // Authority events are ws-less BY PROTOCOL (they precede/suspend
+          // stamping) — any ws on one is a violation, whatever its value.
+          push(issue('FAIL', 'ws_mismatch', `authority event ${ev.id} (${ev.type}) carries a ws stamp — anchors/resolutions are ws-less by protocol`, { eventId: ev.id }));
+          continue;
+        }
+        if (ev.ws === '' || !WS_ID_RE.test(String(ev.ws))) {
+          push(issue('FAIL', 'ws_mismatch', `event ${ev.id}: malformed ws ${JSON.stringify(ev.ws)} (absent ≠ empty)`, { eventId: ev.id }));
+          continue;
+        }
+        if (authority && ev.ws !== authority) {
+          if (wsStampGrandfathered(grandfather, ev.ws, replicaId, seg, li + 1)) continue; // pre-cutover losing stamp — tolerated by the resolution
+          push(issue('FAIL', 'ws_mismatch', `event ${ev.id}: ws ${ev.ws} ≠ workspace authority ${authority} (cross-workspace splice signal)`, { eventId: ev.id }));
+        } else if (!authority && !law.conflict) {
+          const why = flatWs && flatWs.unresolvable ? `genesis unresolvable: ${flatWs.unresolvable}` : 'no derivable authority';
+          push(issue('FAIL', 'ws_identity_unverifiable', `event ${ev.id} carries ws ${ev.ws} but the workspace has ${why}`, { eventId: ev.id }));
+        }
+      }
+    }
+  };
+  await sweep(eventsDir, '');
+  // STRICT parent enumeration (diff-funnel r18-F1): listPartitionIds
+  // collapses every readdir error to [] — a transient EACCES here would
+  // skip the partition sweep entirely and let a foreign-ws splice verify
+  // green. Only ENOENT means "no partitions".
+  {
+    const byReplicaDir = join(eventsDir, 'by-replica');
+    let repNames = [];
+    let enumFailed = false;
+    try { repNames = await readdir(byReplicaDir); }
+    catch (e) {
+      if (!(e && e.code === 'ENOENT')) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: by-replica enumeration failed: ${e?.message || e}`));
+        enumFailed = true;
+      }
+    }
+    if (!enumFailed) {
+      // r20-F1: an INVALIDLY-named dir is chain-scanned like any partition,
+      // so the identity sweep must not silently skip it — a segment-bearing
+      // one FAILs (and is swept anyway, so its foreign stamps also surface).
+      const validName = (d) => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(d);
+      for (const rid of [...repNames].sort()) {
+        let segBearing = false;
+        if (!validName(rid)) {
+          try {
+            const sub = await readdir(join(byReplicaDir, rid));
+            segBearing = sub.some((f) => SEGMENT_RE.test(f));
+          } catch (e) {
+            if (e && (e.code === 'ENOTDIR' || e.code === 'ENOENT')) continue; // plain junk file — not a partition
+            push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: by-replica/${rid}: ${e?.message || e}`));
+            continue;
+          }
+          if (!segBearing) continue;
+          push(issue('FAIL', 'ws_identity_unverifiable', `by-replica/${rid}: invalidly-named segment-bearing partition dir — the identity law cannot account for it; remove or rename it`));
+        }
+        await sweep(join(byReplicaDir, rid), rid);
+      }
+    }
+  }
+
+  // Cache honesty (never authority).
+  if (authority) {
+    const c = await readIdentityCache(repoRoot);
+    if (c.state === 'present' && !c.conflict && c.spineIdentity !== authority) {
+      push(issue('WARN', 'ws_cache_stale', `identity.json caches ${c.spineIdentity} but the resolved authority is ${authority} — the next append re-resolves`));
+    }
+  }
 }
 
 // audit P3 — the verified-read the recency/success GATES use as their authority.
