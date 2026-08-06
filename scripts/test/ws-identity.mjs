@@ -139,6 +139,22 @@ try {
       && validateResolutionBinding([a1, a2], { conflicts: bindAll(a1, a2) }).ok === true);
   }
 
+  // ── r23-F1: leading committed blanks never shift the nomination ─────────
+  {
+    const fix = await freshFix();
+    const d = join(fix, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(d, { recursive: true });
+    // Legacy partition starting with a committed blank line: the genesis is
+    // physically line 2.
+    await writeFile(join(d, '000000000001.ndjson'), '\n' + genesisLine + '\n');
+    const mfB = await findMergeFirstGenesis(fix);
+    ok('nomination records the ACTUAL index past leading blanks (line 2)',
+      mfB.state === 'ok' && mfB.line === 2 && mfB.text === genesisLine, JSON.stringify(mfB).slice(0, 120));
+    const nomB = { spineIdentity: wsFromLine(genesisLine), genesis: { replicaId: mfB.replicaId, segment: mfB.segment, line: mfB.line, hash: hashLine(mfB.text) } };
+    ok('that nomination verifies (position + hash + derivation)', (await verifyAnchorNomination(fix, nomB)).ok === true);
+    await rm(fix, { recursive: true, force: true });
+  }
+
   // ── anchor nomination verification ──────────────────────────────────────
   {
     const fix = await freshFix();

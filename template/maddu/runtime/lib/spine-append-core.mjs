@@ -483,15 +483,19 @@ export async function findMergeFirstGenesis(repoRoot) {
     catch (e) { return { state: 'unresolvable', error: `partition ${id}: ${e?.message || e}` }; }
     // COMMITTED elements only (r6-F2): never nominate an in-flight
     // unterminated first line — its bytes are not yet part of the record.
+    // The nomination records the line's ACTUAL 1-based index (r23-F1:
+    // hardcoding line 1 while skipping leading committed blanks published an
+    // anchor whose position named a blank line — hash-mismatching forever).
     const allLines = txt.split('\n');
     const committedN = txt.endsWith('\n') ? allLines.length : allLines.length - 1;
-    const line = allLines.slice(0, committedN).find((l) => l.trim());
-    if (!line) continue;
+    const lineIdx = allLines.slice(0, committedN).findIndex((l) => l.trim());
+    if (lineIdx === -1) continue;
+    const line = allLines[lineIdx];
     let ts = null;
     try { ts = JSON.parse(line)?.ts ?? null; } catch { return { state: 'unresolvable', error: `partition ${id}: malformed first line` }; }
     if (typeof ts !== 'string') return { state: 'unresolvable', error: `partition ${id}: first line has no ts` };
     if (!best || ts < best.ts || (ts === best.ts && id < best.replicaId)) {
-      best = { replicaId: id, segment: segs[0], line: 1, text: line, ts };
+      best = { replicaId: id, segment: segs[0], line: lineIdx + 1, text: line, ts };
     }
   }
   return best ? { state: 'ok', ...best } : { state: 'absent' };
