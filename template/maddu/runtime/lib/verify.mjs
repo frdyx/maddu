@@ -1169,10 +1169,17 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
 //     (cache, never authority).
 async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
   let anchors = [], resolutions = [];
+  let authorityScanFailed = false;
   try { ({ anchors, resolutions } = await scanWsAuthorityEvents(repoRoot)); }
   catch (e) {
+    // Fail closed but DON'T stop (diff-funnel r21-F1): the committed-line
+    // sweep below still runs with NO authority, so every ws-bearing line —
+    // including a foreign stamp inside the very directory that broke the
+    // scan — surfaces individually instead of hiding behind one generic
+    // failure.
     push(issue('FAIL', 'ws_identity_unverifiable', `authority scan failed: ${e?.message || e}`));
-    return;
+    authorityScanFailed = true;
+    anchors = []; resolutions = [];
   }
 
   // Anchor nominations must survive a re-read (position + hash + derivation).

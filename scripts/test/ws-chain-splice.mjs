@@ -216,6 +216,11 @@ try {
     ok('a segment-bearing INVALIDLY-named partition dir FAILs (never invisible to the law)',
       v.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_identity_unverifiable' && /rep\.bad/.test(String(i.detail))),
       kinds(v).filter((k) => k.startsWith('FAIL')).join(','));
+    // r21-F1: the sweep continues DEGRADED past the failed authority scan —
+    // the foreign stamp inside the bad dir surfaces individually too.
+    ok('the foreign stamp inside the bad dir surfaces individually (degraded sweep)',
+      v.issues.some((i) => i.level === 'FAIL' && /evt_badname_e/.test(String(i.detail))),
+      v.issues.filter((i) => i.level === 'FAIL').map((i) => i.kind).join(','));
     let wsProbeCode = null;
     try { await core.wsModeIsPartitioned(fix); } catch (e) { wsProbeCode = e.code; }
     ok('the writer-side law refuses too (WS_SCAN_UNRESOLVABLE from the shared enumerator)', wsProbeCode === 'WS_SCAN_UNRESOLVABLE');
