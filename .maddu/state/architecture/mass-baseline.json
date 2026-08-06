@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
-  "ts": "2026-07-09T21:59:08.217Z",
+  "ts": "2026-08-06T02:24:39.102Z",
   "maxLines": 1500,
   "files": {
-    "template/maddu/cockpit/cockpit.js": 1730
+    "template/maddu/cockpit/cockpit.js": 1730,
+    "template/maddu/runtime/lib/spine-append-core.mjs": 1577
   }
 }
