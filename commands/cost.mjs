@@ -54,9 +54,9 @@ function rollup(ledger, axis, pricing = null) {
     if (pricing) {
       const c = pricing.lib.classifyRow(row, pricing.effective);
       if (c.bucket === 'reported') {
-        g.usd.reported = (g.usd.reported ?? 0) + c.usd;
+        g.usd.reported = addFiniteUsd(g.usd.reported, c.usd, 'reported');
       } else if (c.bucket === 'estimated') {
-        g.usd.estimated = (g.usd.estimated ?? 0) + c.usd;
+        g.usd.estimated = addFiniteUsd(g.usd.estimated, c.usd, 'estimated');
         if (c.partialComponents) g.usd.partialComponentsCount++;
       } else {
         g.usd.unpricedCount++;
@@ -68,6 +68,18 @@ function rollup(ledger, axis, pricing = null) {
 }
 
 function fmt(n) { return n.toLocaleString(); }
+
+// r3-F1: a bucket sum that leaves IEEE-double range must FAIL LOUDLY —
+// JSON.stringify(Infinity) emits null, which falsely reads as an empty
+// bucket. Individual row values are finite by construction (JSON.parse
+// never yields Infinity/NaN), but their SUM can still overflow.
+function addFiniteUsd(current, add, label) {
+  const next = (current ?? 0) + add;
+  if (!Number.isFinite(next)) {
+    throw new Error(`${label} USD total overflows IEEE double — the ledger carries absurd dollar values; inspect the spine rows`);
+  }
+  return next;
+}
 
 // USD cell: blank for an empty bucket (null), '0.00' for a proven zero,
 // 4 decimals when 2 would falsely display a nonzero value as 0.00, and an
@@ -124,7 +136,14 @@ export default async function cost(argv) {
     return;
   }
 
-  const r = rollup(ledger, axis, pricing);
+  // r3-F1: classification/aggregation overflow throws — surface it as the
+  // same loud exit 2 as an invalid override, never serialize a lie.
+  let r;
+  try { r = rollup(ledger, axis, pricing); }
+  catch (err) {
+    console.error(`maddu cost${flags.usd ? ' --usd' : ''}: ${err.message}`);
+    process.exit(2);
+  }
 
   if (flags.json) {
     const out = { axis, ...r };

@@ -148,6 +148,23 @@ try {
   try { await loadEffectivePricing(fix2); } catch (err) { threwSchema = /invalid/.test(err.message) && /inputUsdPerMTok/.test(err.message); }
   ok('schema-invalid override THROWS with the failing field named', threwSchema);
 
+  // ── (F) finite-overflow law (r3-F1) ─────────────────────────────────────
+  const fix3 = await mkdtemp(join(tmpdir(), 'pricing-big-'));
+  await mkdir(join(fix3, '.maddu', 'config'), { recursive: true });
+  await writeFile(join(fix3, '.maddu', 'config', 'pricing.json'), JSON.stringify(docWith([
+    goodEntry({ authority: 'big.example', model: 'big', inputUsdPerMTok: 1e308, outputUsdPerMTok: 0, cacheReadUsdPerMTok: 0, cacheCreationUsdPerMTok: 0 }),
+  ])) + '\n');
+  const effBig = await loadEffectivePricing(fix3);
+  const pidBig = { authority: 'big.example', model: 'big' };
+  const bigOk = classifyRow({ pricingIdentity: pidBig, inputTokens: 1e6, outputTokens: 0, cacheRead: 0, cacheCreation: 0 }, effBig);
+  ok('divide-before-multiply: 1e6 tokens at a 1e308 rate = the representable 1e308, not Infinity',
+    bigOk.bucket === 'estimated' && bigOk.usd === 1e308);
+  let threwOverflow = false;
+  try { classifyRow({ pricingIdentity: pidBig, inputTokens: 1e7, outputTokens: 0, cacheRead: 0, cacheCreation: 0 }, effBig); }
+  catch (err) { threwOverflow = /non-finite USD estimate/.test(err.message); }
+  ok('truly non-representable estimate THROWS loudly, never returns Infinity', threwOverflow);
+  await rm(fix3, { recursive: true, force: true });
+
   await rm(fix0, { recursive: true, force: true });
   await rm(fix1, { recursive: true, force: true });
   await rm(fix2, { recursive: true, force: true });

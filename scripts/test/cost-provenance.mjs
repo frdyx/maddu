@@ -188,6 +188,19 @@ try {
   ok('plain cost (no --usd) never loads pricing (worked even while override was present)',
     noUsdStill.status === 0);
 
+  // ── (F2) aggregate overflow fails loudly (r3-F1) ────────────────────────
+  const ofix = await mkdtemp(join(tmpdir(), 'cost-ovf-'));
+  await tok(ofix, { runtime: 'rt-ovf', sessionId: 'ses_o', model: 'm',
+    inputTokens: 1, outputTokens: 1, costUsd: 1e308, costProvenance: 'wire-reported' });
+  await tok(ofix, { runtime: 'rt-ovf', sessionId: 'ses_o', model: 'm',
+    inputTokens: 1, outputTokens: 1, costUsd: 1e308, costProvenance: 'wire-reported' });
+  const ovf = runCost(ofix, ['--usd', '--json']);
+  ok('two finite reported costs whose SUM overflows → exit 2, never a serialized null bucket',
+    ovf.status === 2 && ovf.stderr.includes('overflows IEEE double'));
+  ok('the same ledger WITHOUT --usd still rolls up (overflow guard is usd-scoped)',
+    runCost(ofix, ['--json']).status === 0);
+  await rm(ofix, { recursive: true, force: true });
+
   // ── (G) wrapper emission gate ───────────────────────────────────────────
   const wfix = await mkdtemp(join(tmpdir(), 'cost-wrap-'));
   const prevAuth = process.env.MADDU_PRICING_AUTHORITY;
