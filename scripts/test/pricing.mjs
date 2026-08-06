@@ -165,6 +165,23 @@ try {
   ok('truly non-representable estimate THROWS loudly, never returns Infinity', threwOverflow);
   await rm(fix3, { recursive: true, force: true });
 
+  // r4-F1: the mirror direction — a positive component underflowing to 0.
+  const fix4 = await mkdtemp(join(tmpdir(), 'pricing-tiny-'));
+  await mkdir(join(fix4, '.maddu', 'config'), { recursive: true });
+  await writeFile(join(fix4, '.maddu', 'config', 'pricing.json'), JSON.stringify(docWith([
+    goodEntry({ authority: 'tiny.example', model: 'tiny', inputUsdPerMTok: 5e-324, outputUsdPerMTok: 0, cacheReadUsdPerMTok: 0, cacheCreationUsdPerMTok: 0 }),
+  ])) + '\n');
+  const effTiny = await loadEffectivePricing(fix4);
+  const pidTiny = { authority: 'tiny.example', model: 'tiny' };
+  let threwUnderflow = false;
+  try { classifyRow({ pricingIdentity: pidTiny, inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0 }, effTiny); }
+  catch (err) { threwUnderflow = /underflows to zero/.test(err.message); }
+  ok('positive component underflowing to 0 THROWS — never a fabricated proven zero', threwUnderflow);
+  const tinyRep = classifyRow({ pricingIdentity: pidTiny, inputTokens: 1e6, outputTokens: 0, cacheRead: 0, cacheCreation: 0 }, effTiny);
+  ok('denormal-but-representable estimate still computes (guard fires only on true underflow)',
+    tinyRep.bucket === 'estimated' && tinyRep.usd === 5e-324);
+  await rm(fix4, { recursive: true, force: true });
+
   await rm(fix0, { recursive: true, force: true });
   await rm(fix1, { recursive: true, force: true });
   await rm(fix2, { recursive: true, force: true });

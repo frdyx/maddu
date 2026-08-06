@@ -201,6 +201,22 @@ try {
     runCost(ofix, ['--json']).status === 0);
   await rm(ofix, { recursive: true, force: true });
 
+  // r4-F1: underflow-to-zero through the spawned CLI — exit 2, never '0.00'.
+  const ufix = await mkdtemp(join(tmpdir(), 'cost-unf-'));
+  await mkdir(join(ufix, '.maddu', 'config'), { recursive: true });
+  await writeFile(join(ufix, '.maddu', 'config', 'pricing.json'), JSON.stringify({
+    version: '2026-01-01.1',
+    entries: [{ authority: 'tiny.example', model: 'tiny',
+      inputUsdPerMTok: 5e-324, outputUsdPerMTok: 0, cacheReadUsdPerMTok: 0, cacheCreationUsdPerMTok: 0 }],
+  }) + '\n');
+  await tok(ufix, { runtime: 'rt-unf', sessionId: 'ses_u', model: 'tiny',
+    inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0,
+    pricingIdentity: { authority: 'tiny.example', model: 'tiny' } });
+  const unf = runCost(ufix, ['--usd', '--json']);
+  ok("positive estimate underflowing to zero → exit 2, never a fabricated '0.00'",
+    unf.status === 2 && unf.stderr.includes('underflows to zero'));
+  await rm(ufix, { recursive: true, force: true });
+
   // ── (G) wrapper emission gate ───────────────────────────────────────────
   const wfix = await mkdtemp(join(tmpdir(), 'cost-wrap-'));
   const prevAuth = process.env.MADDU_PRICING_AUTHORITY;
