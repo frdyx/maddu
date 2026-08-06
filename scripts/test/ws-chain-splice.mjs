@@ -205,6 +205,23 @@ try {
     await rm(brPath, { force: true });
   }
 
+  // ── (B10) r22-F1: a failed authority scan degrades FLAT mode too ────────
+  {
+    // A committed malformed authority-marker line breaks the strict scan in
+    // a FLAT workspace: no authority may be derived — every stamped event
+    // must surface individually, never pass behind the one generic FAIL.
+    const ls = [...baseLines];
+    const junk = '{"type":"WS_IDENTITY_ANCHORED",broken}';
+    ls.push(junk);
+    await writeFile(segPath(fix), ls.join('\n') + '\n');
+    const v = await verifySpine(fix, {});
+    ok('flat authority-scan failure → generic FAIL present', hasFail(v, 'ws_identity_unverifiable'));
+    ok('…AND stamped events surface individually (no silent flat derivation in degraded mode)',
+      v.issues.some((i) => i.level === 'FAIL' && i.kind === 'ws_identity_unverifiable' && /event evt_/.test(String(i.detail))),
+      v.issues.filter((i) => i.level === 'FAIL').map((i) => i.kind).join(','));
+    await writeLines(fix, baseLines);
+  }
+
   // ── (B9) r20-F1: an invalidly-NAMED partition cannot hide from the law ──
   {
     const badDir = join(fix, '.maddu', 'events', 'by-replica', 'rep.bad');

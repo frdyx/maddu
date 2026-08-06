@@ -1189,7 +1189,11 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
   }
 
   let flatWs = null;
-  if (!partitioned) {
+  if (!partitioned && !authorityScanFailed) {
+    // Skipped when the authority scan failed (r22-F1): degraded mode means
+    // NO authority at all — deriving flat identity here would let stamped
+    // events pass silently behind the one generic scan FAIL instead of
+    // surfacing individually.
     const g = await readFlatGenesisLine(repoRoot);
     if (g.state === 'ok') flatWs = wsFromLine(g.line);
     else if (g.state === 'unresolvable') {
