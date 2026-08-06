@@ -119,9 +119,11 @@ export default async function spine(argv) {
         // no-op — fall through to the ceremony, which appends a
         // same-selection resolution with fresh heads).
         if (law.authority && law.authority === keep) {
-          const uncovered = law.resolved
-            ? await core.findUncoveredLosingStamp(repoRoot, keep, anchors, resolutions)
-            : null;
+          let uncovered = null;
+          if (law.resolved) {
+            try { uncovered = await core.findUncoveredLosingStamp(repoRoot, keep, anchors, resolutions); }
+            catch (e) { console.error(`identity scan failed: ${e.message}`); process.exit(1); }
+          }
           if (!uncovered) {
             console.log(`nothing to resolve — authority is ${keep}`);
             const { loadLibOptional } = await import('./_libroot.mjs');

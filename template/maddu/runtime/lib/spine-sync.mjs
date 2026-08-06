@@ -459,7 +459,9 @@ async function syncInitBody(repoRoot, { mintId = () => makeId('rep'), now = null
       // with an authority that instantly FAILs migrated stamped history is
       // never correct — grandfathered losing stamps pass, anything else is
       // the named failure.
-      const badAdopt = await findIncompatibleWsStamp(repoRoot, law2.authority, buildWsGrandfather(scan2.anchors, scan2.resolutions));
+      let badAdopt;
+      try { badAdopt = await findIncompatibleWsStamp(repoRoot, law2.authority, buildWsGrandfather(scan2.anchors, scan2.resolutions)); }
+      catch (e) { return wsFail(`history-compatibility sweep failed: ${e?.message || e}`); }
       if (badAdopt) {
         return wsFail(`existing event ${badAdopt.id} is stamped ${badAdopt.ws}, incompatible with the workspace authority ${law2.authority}`);
       }

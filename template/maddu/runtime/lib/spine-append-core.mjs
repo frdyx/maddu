@@ -101,6 +101,27 @@ export function partitionDir(repoRoot, replicaId) {
 
 export const WS_ID_RE = /^ws_[a-f0-9]{16}$/;
 
+// ── Strict, fail-closed enumeration for the ws-identity law (diff-funnel
+// r17): only genuine absence (ENOENT) reads as empty — EACCES/EIO/ENOTDIR
+// must never make an anchor, a stamp, or a whole partition silently
+// disappear from any sweep the law depends on.
+function wsScanUnresolvable(where, e) {
+  return Object.assign(new Error(`ws scan: ${where}: ${e?.message || e}`), { code: 'WS_SCAN_UNRESOLVABLE' });
+}
+// Returns the raw name list, or null for a genuinely-absent dir; throws on
+// any other error.
+async function strictLs(dir, where) {
+  try { return await readdir(dir); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return null;
+    throw wsScanUnresolvable(where, e);
+  }
+}
+async function strictReadText(path, where) {
+  try { return await readFile(path, 'utf8'); }
+  catch (e) { throw wsScanUnresolvable(where, e); }
+}
+
 export function wsFromLine(line) {
   return 'ws_' + hashLine(line).slice(0, 16);
 }
@@ -205,8 +226,15 @@ export async function computeAuthorityFingerprint(repoRoot, prevFp = null) {
   const segs = {};
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const prev = prevFp?.segs || {};
-  const addDir = async (dir, prefix) => {
-    for (const s of await listSegmentsInDir(dir)) {
+  // STRICT enumeration (r17-F4): an unreadable partition/dir must never be
+  // fingerprint-invisible — a newly pulled authority partition that EACCESes
+  // would otherwise leave the fingerprint byte-identical and the stale cache
+  // trusted. Throws WS_SCAN_UNRESOLVABLE; a per-segment stat failure stays a
+  // -1 entry (never matches → forced rescan, which is itself strict).
+  const addDir = async (dir, prefix, where) => {
+    const names = await strictLs(dir, where);
+    if (names === null) return;
+    for (const s of names.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort()) {
       const key = `${prefix}${s}`;
       const p = join(dir, s);
       let raw = -1;
@@ -219,11 +247,12 @@ export async function computeAuthorityFingerprint(repoRoot, prevFp = null) {
       }
     }
   };
-  await addDir(eventsDir, 'flat:');
+  await addDir(eventsDir, 'flat:', 'flat');
   const byReplica = join(eventsDir, 'by-replica');
-  let ids = [];
-  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
-  for (const id of ids.sort()) await addDir(join(byReplica, id), `${id}/`);
+  const repNames = await strictLs(byReplica, 'by-replica');
+  for (const id of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
+    await addDir(join(byReplica, id), `${id}/`, id);
+  }
   return { segs };
 }
 
@@ -308,8 +337,11 @@ export async function readFreshCachedIdentity(repoRoot, { refresh = false } = {}
   }
   if (c.mode === 'sync' && c.fp) {
     if (!partitionedNow) return { state: 'unknown' };
-    const cur = await computeAuthorityFingerprint(repoRoot, c.fp);
-    const d = await authorityDeltaState(repoRoot, c.fp, cur);
+    let cur, d;
+    try {
+      cur = await computeAuthorityFingerprint(repoRoot, c.fp);
+      d = await authorityDeltaState(repoRoot, c.fp, cur);
+    } catch { return { state: 'unknown' }; } // strict enumeration failed — unprovable (r17-F4)
     if (d === 'fresh') return { state: 'fresh', ws: c.spineIdentity };
     if (d === 'clean') {
       // Advance the fingerprint past the clean growth (r4-F3: a wrapper-only
@@ -413,11 +445,20 @@ export async function readPartitionLineAt(repoRoot, replicaId, segment, lineNo) 
 // smallest (ts, replicaId) head among partition first-lines.
 export async function findMergeFirstGenesis(repoRoot) {
   const byReplica = join(repoRoot, '.maddu', 'events', 'by-replica');
-  let ids = [];
-  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch { return { state: 'absent' }; }
+  // STRICT (r17-F2): a transient error here must never demote an existing
+  // sync spine to "absent" (which would send the writer down the ws-less
+  // bootstrap path). Only genuine absence is absent.
+  let names;
+  try { names = await strictLs(byReplica, 'by-replica'); }
+  catch (e) { return { state: 'unresolvable', error: e.message }; }
+  if (names === null) return { state: 'absent' };
+  const ids = names.filter((d) => isValidReplicaId(d));
   let best = null;
   for (const id of ids.sort()) {
-    const segs = await listSegmentsInDir(join(byReplica, id));
+    let segNames;
+    try { segNames = await strictLs(join(byReplica, id), `partition ${id}`); }
+    catch (e) { return { state: 'unresolvable', error: e.message }; }
+    const segs = (segNames || []).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
     if (!segs.length) continue;
     let txt;
     try { txt = await readFile(join(byReplica, id, segs[0]), 'utf8'); }
@@ -664,8 +705,11 @@ export async function resolveIdentityForAppend(repoRoot) {
   } else if (cache.state === 'present' && !cache.conflict) {
     if (cache.mode === 'flat' && !partitioned) return { ws: cache.spineIdentity };
     if (cache.mode === 'sync' && partitioned && cache.fp) {
-      const currentFp = await computeAuthorityFingerprint(repoRoot, cache.fp); // stat-reuse fast path (r5-F2)
-      const delta = await authorityDeltaState(repoRoot, cache.fp, currentFp);
+      let currentFp = null, delta = 'rescan';
+      try {
+        currentFp = await computeAuthorityFingerprint(repoRoot, cache.fp); // stat-reuse fast path (r5-F2)
+        delta = await authorityDeltaState(repoRoot, cache.fp, currentFp);
+      } catch { delta = 'rescan'; } // strict enumeration failed — the full (strict) resolution decides (r17-F4)
       if (delta === 'fresh') return { ws: cache.spineIdentity };
       if (delta === 'clean') {
         await writeIdentityCache(repoRoot, { spineIdentity: cache.spineIdentity, mode: 'sync', fp: currentFp }).catch(() => {});
@@ -686,7 +730,9 @@ export async function resolveIdentityForAppend(repoRoot) {
 
   // Sync mode: anchors are the authority. Fingerprint BEFORE the scan so any
   // byte that lands during it stays inside the next append's delta window.
-  const fpBefore = await computeAuthorityFingerprint(repoRoot, cache.state === 'present' ? cache.fp : null);
+  let fpBefore;
+  try { fpBefore = await computeAuthorityFingerprint(repoRoot, cache.state === 'present' ? cache.fp : null); }
+  catch (e) { return { refuse: e?.message || String(e) }; }
   let scan;
   try { scan = await scanWsAuthorityEvents(repoRoot); }
   catch (e) { return { refuse: e?.message || String(e) }; }
@@ -700,7 +746,9 @@ export async function resolveIdentityForAppend(repoRoot) {
     // transitions to an authority must not start stamping an identity that
     // instantly FAILs already-stamped history — losing pre-cutover stamps
     // bound by a valid resolution are grandfathered, anything else refuses.
-    const bad = await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions));
+    let bad;
+    try { bad = await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions)); }
+    catch (e) { return { refuse: e?.message || String(e) }; }
     if (bad) {
       return { refuse: `existing event ${bad.id} is stamped ${bad.ws}, incompatible with the workspace authority ${law.authority} — resolve the histories before S2 writes` };
     }
@@ -732,14 +780,16 @@ export async function resolveIdentityForAppend(repoRoot) {
 // the record); malformed complete lines are the chain verifier's domain,
 // not the identity law's.
 export async function findIncompatibleWsStamp(repoRoot, authority, grandfather = null) {
+  // STRICT (r17-F3): unreadable history must never read as COMPATIBLE — an
+  // anchor published over unscanned stamped events is irreversible. Throws
+  // WS_SCAN_UNRESOLVABLE; callers refuse/name the failure.
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const sweepDir = async (dir, replicaId) => {
-    let names = [];
-    try { names = (await readdir(dir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); }
-    catch { return null; }
+    const raw = await strictLs(dir, replicaId === '' ? 'flat' : `partition ${replicaId}`);
+    if (raw === null) return null;
+    const names = raw.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
     for (const seg of names) {
-      let txt;
-      try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
+      const txt = await strictReadText(join(dir, seg), `${replicaId === '' ? 'flat' : replicaId}/${seg}`);
       const lines = txt.split('\n');
       const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
       for (let i = 0; i < committed; i++) {
@@ -759,9 +809,8 @@ export async function findIncompatibleWsStamp(repoRoot, authority, grandfather =
   const flatHit = await sweepDir(eventsDir, ''); // flat has no cutover entries — losing stamps there stay incompatible
   if (flatHit) return flatHit;
   const byReplica = join(eventsDir, 'by-replica');
-  let ids = [];
-  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
-  for (const id of ids.sort()) {
+  const repNames = await strictLs(byReplica, 'by-replica');
+  for (const id of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
     const hit = await sweepDir(join(byReplica, id), id);
     if (hit) return hit;
   }
@@ -779,17 +828,19 @@ export async function findIncompatibleWsStamp(repoRoot, authority, grandfather =
 export async function findUncoveredLosingStamp(repoRoot, authority, anchors, resolutions) {
   const gf = buildWsGrandfather(anchors, resolutions);
   if (!gf.losing.size) return null;
+  // STRICT (r17-F5): an unreadable partition must never read as "covered" —
+  // a false idempotent no-op would leave losing stamps red forever. Throws
+  // WS_SCAN_UNRESOLVABLE.
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const byReplica = join(eventsDir, 'by-replica');
-  let ids = [];
-  try { ids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch { return null; }
-  for (const rid of ids.sort()) {
+  const repNames = await strictLs(byReplica, 'by-replica');
+  for (const rid of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
     const pdir = join(byReplica, rid);
-    let names = [];
-    try { names = (await readdir(pdir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { continue; }
+    const rawNames = await strictLs(pdir, `partition ${rid}`);
+    if (rawNames === null) continue;
+    const names = rawNames.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
     for (const seg of names) {
-      let txt;
-      try { txt = await readFile(join(pdir, seg), 'utf8'); } catch { continue; }
+      const txt = await strictReadText(join(pdir, seg), `${rid}/${seg}`);
       const lines = txt.split('\n');
       const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
       for (let i = 0; i < committed; i++) {
@@ -834,7 +885,9 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
       // (diff-funnel r4-F2: adopting a peer anchor over an anchorless
       // workspace's already-stamped history is exactly as corrupting as
       // publishing one).
-      const badAdopt = await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions));
+      let badAdopt;
+      try { badAdopt = await findIncompatibleWsStamp(repoRoot, law.authority, buildWsGrandfather(scan.anchors, scan.resolutions)); }
+      catch (e) { return { unresolvable: e?.message || String(e) }; }
       if (badAdopt) {
         return { unresolvable: `existing event ${badAdopt.id} is stamped ${badAdopt.ws}, incompatible with the anchored authority ${law.authority} — resolve the histories before S2 writes` };
       }
@@ -852,7 +905,9 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     // entire migrated history the moment it lands. Refuse instead. (No
     // anchors exist here, so no resolutions can be valid — the grandfather
     // is empty by construction.)
-    const foreign = await findIncompatibleWsStamp(repoRoot, proposed, null);
+    let foreign;
+    try { foreign = await findIncompatibleWsStamp(repoRoot, proposed, null); }
+    catch (e) { return { unresolvable: e?.message || String(e) }; }
     if (foreign) {
       return { unresolvable: `existing event ${foreign.id} is stamped ${foreign.ws} but the merge-first nomination derives ${proposed} — resolve the histories before anchoring (an anchor is irreversible)` };
     }
@@ -885,19 +940,22 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
 // The exact per-partition chain heads RIGHT NOW — the cutover a resolution
 // (or extension) binds. Caller must hold the funnel lock that fences writes.
 async function collectPartitionHeadsLocked(repoRoot) {
+  // STRICT (r17-F5): a head OMITTED because its partition was transiently
+  // unreadable would silently narrow the cutover — losing stamps in that
+  // partition stay red while the ceremony reports success. Throws
+  // WS_SCAN_UNRESOLVABLE.
   const eventsDir = join(repoRoot, '.maddu', 'events');
   const cutover = [];
   const byReplica = join(eventsDir, 'by-replica');
-  let rids = [];
-  try { rids = (await readdir(byReplica)).filter((d) => isValidReplicaId(d)); } catch {}
-  for (const rid of rids.sort()) {
+  const repNames = await strictLs(byReplica, 'by-replica');
+  for (const rid of (repNames || []).filter((d) => isValidReplicaId(d)).sort()) {
     const pdir = partitionDir(repoRoot, rid);
-    let segsIn = [];
-    try { segsIn = (await readdir(pdir)).filter((f) => /^\d{12}\.ndjson$/.test(f)).sort(); } catch { continue; }
+    const rawSegs = await strictLs(pdir, `partition ${rid}`);
+    if (rawSegs === null) continue;
+    const segsIn = rawSegs.filter((f) => /^\d{12}\.ndjson$/.test(f)).sort();
     let head = null;
     for (let si = segsIn.length - 1; si >= 0 && !head; si--) {
-      let txt = '';
-      try { txt = await readFile(join(pdir, segsIn[si]), 'utf8'); } catch { continue; }
+      const txt = await strictReadText(join(pdir, segsIn[si]), `${rid}/${segsIn[si]}`);
       const lines = txt.split('\n');
       const committed = txt.endsWith('\n') ? lines.length : lines.length - 1;
       for (let li = committed - 1; li >= 0; li--) {
@@ -981,10 +1039,13 @@ export async function maybeExtendWsCutoverLocked(repoRoot, dir, buildEv) {
   catch (e) { return { unresolvable: e?.message || String(e) }; }
   const law = resolveWsAuthority(scan);
   if (law.conflict || !law.resolved || !law.authority) return { extended: false };
-  const uncovered = await findUncoveredLosingStamp(repoRoot, law.authority, scan.anchors, scan.resolutions);
+  let uncovered;
+  try { uncovered = await findUncoveredLosingStamp(repoRoot, law.authority, scan.anchors, scan.resolutions); }
+  catch (e) { return { unresolvable: e?.message || String(e) }; }
   if (!uncovered) return { extended: false };
   const ev = buildEv(law.authority, canonicalAnchorConflicts(scan.anchors));
-  ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };
+  try { ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) }; }
+  catch (e) { return { unresolvable: e?.message || String(e) }; }
   await appendLineLocked(dir, ev, 'maybeExtendWsCutoverLocked');
   await writeIdentityCache(repoRoot, { spineIdentity: law.authority, mode: 'sync' }).catch(() => {});
   return { extended: true, ev };

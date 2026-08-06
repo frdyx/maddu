@@ -1227,11 +1227,24 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
   // `replicaId` is '' for the flat dir (never grandfathered: cutovers bind
   // by-replica partitions only).
   const sweep = async (dir, replicaId) => {
+    // FAIL-CLOSED (diff-funnel r17-F1): an unreadable dir/segment in the ws
+    // sweep must surface as ws_identity_unverifiable — a transiently
+    // unreadable spliced segment would otherwise let verify return green.
     let segs = [];
-    try { segs = (await readdir(dir)).filter((f) => SEGMENT_RE.test(f)).sort(); } catch { return; }
+    try { segs = (await readdir(dir)).filter((f) => SEGMENT_RE.test(f)).sort(); }
+    catch (e) {
+      if (!(e && e.code === 'ENOENT')) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: ${replicaId || 'flat'}: ${e?.message || e}`));
+      }
+      return;
+    }
     for (const seg of segs) {
       let txt;
-      try { txt = await readFile(join(dir, seg), 'utf8'); } catch { continue; }
+      try { txt = await readFile(join(dir, seg), 'utf8'); }
+      catch (e) {
+        push(issue('FAIL', 'ws_identity_unverifiable', `ws sweep: ${replicaId || 'flat'}/${seg}: ${e?.message || e}`, { segment: seg }));
+        continue;
+      }
       const lines = txt.split('\n');
       // Committed elements only (r7-F2): an unterminated trailer is not part
       // of the record — the chain scan already FAILs it as torn.
