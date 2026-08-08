@@ -172,9 +172,15 @@
 //     is deliberately NOT declared: a plugin could plausibly carry its own
 //     `tasks` on its own kind, and typing it would have broken that payload.
 //     The five fields above are framework-minted names on a framework-owned
-//     event type that NO plugin emits (project-test, self-test, success-eval,
-//     replay are the only kinds in-tree). A payload they could break would have
-//     been squatting on undefined framework namespace.
+//     event type. The load-bearing property is OWNERSHIP, not a fixed kind
+//     list: every in-tree emitter is the framework itself — runtime libs, the
+//     recency gates, and the test harness — and NO plugin emits it. (Kinds
+//     observed across ALL trees at 2026-08-09: project-test, self-test,
+//     success-eval, replay, stress, upgrade-matrix. An earlier revision of this
+//     comment named only the first four, because the census that produced it
+//     excluded scripts/ — do not re-derive this list from a partial tree.)
+//     A payload the five fields could break would have been squatting on
+//     undefined framework namespace.
 //
 // If that reasoning is ever rejected, the fix is to change `classifyChange` so
 // narrowing-by-declaration reports major CONTRACT-WIDE — not to price one
