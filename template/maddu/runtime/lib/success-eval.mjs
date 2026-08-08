@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
+import { conditionPlanFingerprint } from './acceptance-digest.mjs';
 
 export const VERIFY_TIMEOUT_MS = 120000;
 const SCHEMA_VERSION = 1;
@@ -302,6 +303,23 @@ export async function recordSuccessEvalStart(repoRoot, spineLib, { actor = null,
   } catch { return null; }
 }
 
+// Identity of the goal's DECLARED condition plan, for the receipt's direct
+// fields. Source is `goal.success` in declaration order — NOT `result.evaluated`
+// — so the digest describes what the operator declared, independent of what any
+// particular evaluation observed.
+//
+// Degrades to {} when the digest lib is unavailable (older install) rather than
+// emitting a partial identity: an absent field is honest, a wrong digest is not.
+function conditionPlanFields(goal) {
+  const success = Array.isArray(goal?.success) ? goal.success : [];
+  try {
+    return {
+      conditionPlanDigest: conditionPlanFingerprint(success),
+      conditionCount: success.length,
+    };
+  } catch { return {}; }
+}
+
 // Close the eval: append the VERIFICATION_RAN receipt referencing `startedId`.
 export async function recordSuccessEvalFinish(repoRoot, spineLib, { startedId, goal, result, actor = null, lane = null }) {
   const spine = spineLib && spineLib.spine ? spineLib.spine : spineLib;
@@ -316,7 +334,15 @@ export async function recordSuccessEvalFinish(repoRoot, spineLib, { startedId, g
         allMet: result.allMet, metCount: result.metCount,
         verifiable: result.verifiable, pendingCount: result.pendingCount,
         objective: (goal && goal.objective) ?? null, setAt: (goal && goal.setAt) ?? null,
+        // `conditions` keeps its EXACT existing shape. resolveSuccessView returns
+        // these rows verbatim and buildProjectCockpit/buildHandoff serialize them
+        // onto /bridge/project-cockpit and /bridge/handoff, so adding row fields
+        // would widen two public responses — and rewriting rows would strip
+        // legitimate existing extensions. Identity rides the DIRECT fields below
+        // instead, where the contract can actually hold it (contractShape only
+        // records direct data fields; array items are unconstrained).
         conditions: (result.evaluated || []).map((c) => ({ text: c.text || null, state: c.state })),
+        ...conditionPlanFields(goal),
       },
     });
   } catch { /* a dangling STARTED remains → the readout stales the prior receipt */ }

@@ -583,6 +583,17 @@ export async function runProjectTest(options = {}) {
     discoveryWarnings: plan.discoveryWarnings,
     reportPaths: report.reportPaths || null,
     changedFiles: plan.changedFiles,
+    // The SELECTED plan, independent of what executed. `results` is not a
+    // substitute: a --bail run stops at the first failure (above), so two plans
+    // sharing a first failing task but differing later would be
+    // indistinguishable if identity were derived from results. Frozen because
+    // it is receipt identity — a caller must not be able to reshape it after
+    // the fact.
+    selectedTasks: Object.freeze(plan.tasks.map((t) => Object.freeze({
+      id: t.id,
+      command: t.command,
+      cwd: t.cwd,
+    }))),
   };
 }
 

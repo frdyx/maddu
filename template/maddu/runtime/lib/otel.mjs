@@ -78,6 +78,17 @@ export function nanoFromIso(iso) {
 // runs), so the export redacts again as defense-in-depth — no raw secret-shaped
 // value reaches an external collector. redactText is a no-op on non-secret text,
 // so ids/lanes/summaries are untouched and the mapping stays deterministic.
+// Data keys deliberately NOT exported as OTLP attributes.
+//
+// Every data property becomes one attribute and arrays are JSON-stringified, so
+// a bounded-but-large diagnostics array becomes one very large attribute value.
+// `tasks` on a VERIFICATION_RAN receipt is capped at 32 KiB — fine on the spine,
+// but a collector with per-attribute size limits could reject or truncate log
+// records that previously passed. The IDENTITY fields (planDigest,
+// conditionPlanDigest, planTaskCount, …) are small and DO export; only the
+// per-row diagnostics are withheld, and nothing derivable is lost.
+const EXPORT_EXCLUDED_DATA_KEYS = new Set(['tasks']);
+
 function anyValue(v) {
   if (v === null || v === undefined) return null;
   if (typeof v === 'string') return { stringValue: redactText(v).text };
@@ -116,6 +127,7 @@ export function toLogRecord(ev, observedNano) {
   if (session != null) push('maddu.session', session);
   for (const [k, val] of Object.entries(data)) {
     if (k === 'schemaVersion') continue;
+    if (EXPORT_EXCLUDED_DATA_KEYS.has(k)) continue;
     push('maddu.data.' + k, val);
   }
   // eventName and body are the only non-attribute strings. For a KNOWN type they

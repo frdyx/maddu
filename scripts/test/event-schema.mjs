@@ -167,6 +167,25 @@ if (baseline) {
   ok('contract matches baseline OR version bumped by the required magnitude', vd.ok,
     vd.ok ? '' : `${vd.required} change since baseline ${vd.baselineVersion} but bump was ${vd.bump} — set EVENT_CONTRACT_VERSION accordingly, then \`node scripts/refresh-event-contract-baseline.mjs\` (${vd.change.reasons?.slice(0, 3).map((r) => r.why).join('; ')})`);
   ok('fingerprint is deterministic', contractFingerprint() === contractFingerprint());
+
+  // `--expect-change <level>` — assert the CLASSIFICATION, not merely that the
+  // bump was sufficient. The `vd.ok` check above passes for any bump >= what is
+  // required, so a correct additive change and an over-sized one look identical
+  // and `required` is never surfaced on success. A release running
+  // `--expect-change minor` proves the shape moved additively and no further,
+  // BEFORE the baseline is refreshed (refreshing first would overwrite the very
+  // change this polices).
+  const expectIdx = process.argv.indexOf('--expect-change');
+  if (expectIdx !== -1) {
+    const want = process.argv[expectIdx + 1];
+    const valid = ['none', 'patch', 'minor', 'major'];
+    if (!valid.includes(want)) {
+      console.error(`[FAIL] --expect-change needs one of ${valid.join('|')}, got ${want === undefined ? '(missing)' : want}`);
+      process.exit(2);
+    }
+    ok(`contract change classifies as ${want}`, vd.required === want,
+      `classified ${vd.required} (baseline ${vd.baselineVersion} → ${EVENT_CONTRACT_VERSION})`);
+  }
 }
 
 // ── SEMVER MAGNITUDE: classification + discipline catch under-sized bumps (the
