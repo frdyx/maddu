@@ -68,29 +68,41 @@ function canonPath(p) {
   return NATIVE_SEP_IS_BACKSLASH ? p.split(BACKSLASH).join('/') : p;
 }
 
-// Lossless encoding of a JSON-compatible value, for identity terms.
+// Lossless, RECURSIVE encoding of a value, for identity terms.
 //
-// THROWS on anything it cannot encode losslessly. That is deliberate and the
-// callers rely on it: conditionPlanFields wraps the call in try/catch and omits
-// identity entirely on error (success-eval.mjs), so an unencodable value yields
-// NO identity rather than a shared one. An earlier revision collapsed such
-// values to a type tag and justified it by claiming a throw would leave a
-// dangling STARTED — which was simply false about that call site.
+// Recursive on purpose. An earlier revision special-cased a top-level -0 and
+// then handed everything else to JSON.stringify, which merges values one level
+// down: {x:-0} and {x:0} both render `{"x":0}`, and NaN/Infinity both render
+// `null`. Special-casing the outermost value while delegating the interior is
+// not "lossless" — it just moves the collision.
 //
-// -0 is distinguished from 0: JSON.stringify maps both to "0", so without this
-// two distinct declared values would share a term.
-// `undefined` is an ABSENCE, not an encoding failure, and it is the common case:
-// a condition declared with only a verifier has no `text`. Throwing on it would
-// omit identity for ordinary goals. It gets its own term so it stays
-// distinguishable from `null` (which encodes as the string "null").
-function valueTerm(v) {
+// THROWS on anything it cannot encode. Callers rely on that: conditionPlanFields
+// wraps the call in try/catch and omits identity entirely (success-eval.mjs), so
+// an unencodable value yields NO identity rather than a shared one.
+//
+// Object keys are sorted so key ORDER does not change identity, while the key
+// SET and every value do. Cycles are detected per path and rejected.
+function encodeValue(v, seen) {
   if (v === undefined) return ['u'];
-  if (Object.is(v, -0)) return ['n', '-0'];
-  if (typeof v === 'bigint') throw new TypeError('bigint is not JSON-encodable');
-  const json = JSON.stringify(v);              // throws on circular
-  // Functions and symbols also stringify to undefined — genuinely unencodable.
-  if (typeof json !== 'string') throw new TypeError('value is not JSON-encodable');
-  return ['j', json];
+  if (v === null) return ['z'];
+  const t = typeof v;
+  if (t === 'boolean') return ['b', v ? '1' : '0'];
+  // String() keeps -0, NaN and Infinity distinct; JSON.stringify does not.
+  if (t === 'number') return ['n', Object.is(v, -0) ? '-0' : String(v)];
+  if (t === 'string') return ['s', v];
+  if (t !== 'object') throw new TypeError(`unencodable value of type ${t}`);
+  if (seen.has(v)) throw new TypeError('circular value is not encodable');
+  seen.add(v);
+  try {
+    if (Array.isArray(v)) return ['a', v.map((x) => encodeValue(x, seen))];
+    return ['o', Object.keys(v).sort().map((k) => [k, encodeValue(v[k], seen)])];
+  } finally {
+    seen.delete(v);
+  }
+}
+
+function valueTerm(v) {
+  return encodeValue(v, new Set());
 }
 
 // Fingerprint of a SELECTED task plan.
@@ -140,9 +152,15 @@ export function conditionPlanFingerprint(success) {
   // both are contract-valid, since GOAL_DECLARED.success constrains only the
   // outer array. Fixing `verify` and leaving `text` collapsed would have been
   // the same defect one field over.
-  const rows = (Array.isArray(success) ? success : []).map((c) => [
-    typeof c?.text === 'string' ? ['s', c.text] : ['x', valueTerm(c?.text)],
-    verifierTerm(c),
-  ]);
+  // The ROW itself is validated, not only its fields. `GOAL_DECLARED.success`
+  // constrains only the outer array, so a plan of bare primitives like [1] and
+  // [2] is contract-valid — and both would read `text` and `verify` as
+  // undefined and collide. Fixing `text` and `verify` while leaving the row
+  // unchecked was the same defect one level up. A non-object row THROWS, so
+  // identity is omitted rather than shared.
+  const rows = (Array.isArray(success) ? success : []).map((c) => {
+    if (c === null || typeof c !== 'object') throw new TypeError('condition row is not an object');
+    return [valueTerm(c.text), verifierTerm(c)];
+  });
   return sha256Json([CONDITION_PLAN_TAG, rows]);
 }

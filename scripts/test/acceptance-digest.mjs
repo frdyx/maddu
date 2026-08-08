@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { sep } from 'node:path';
 import {
   commandDigest,
   conditionPlanFingerprint,
@@ -117,12 +118,21 @@ ok('duplicate ids are preserved, not rejected',
   planFingerprint([{ id: 'x', command: 'a', cwd: '.' }, { id: 'x', command: 'b', cwd: '.' }])
   !== planFingerprint([{ id: 'x', command: 'a', cwd: '.' }]));
 ok('planFingerprint tolerates a non-array', typeof planFingerprint(null) === 'string');
-// A cwd is fingerprinted in platform-native form otherwise, so the SAME declared
-// task would hash differently on Windows and POSIX — a false DIFFERENCE that
-// also makes a published golden digest unreproducible across platforms.
-ok('a Windows cwd and its POSIX form fingerprint identically',
-  planFingerprint([{ id: 'a', command: 'x', cwd: 'test' + String.fromCharCode(92) + 'sub' }])
-  === planFingerprint([{ id: 'a', command: 'x', cwd: 'test/sub' }]));
+// canonPath substitutes only the HOST separator, so the correct property is
+// platform-dependent and the assertion must branch. An earlier revision asserted
+// the Windows property unconditionally; CI runs ubuntu-latest, where a backslash
+// is a legal filename character and the two paths are genuinely DIFFERENT
+// directories — so it would have gone red there while passing locally. Asserting
+// a platform-specific property without branching is how a green local run
+// becomes a red CI run.
+const BS = String.fromCharCode(92);
+const winCwd = planFingerprint([{ id: 'a', command: 'x', cwd: 'test' + BS + 'sub' }]);
+const posixCwd = planFingerprint([{ id: 'a', command: 'x', cwd: 'test/sub' }]);
+if (sep === BS) {
+  ok('WINDOWS: a native-separator cwd matches its POSIX spelling', winCwd === posixCwd);
+} else {
+  ok('POSIX: a literal backslash in a cwd is NOT a separator', winCwd !== posixCwd);
+}
 
 // ── condition plan ────────────────────────────────────────────────────────
 const cA = { text: 'tests pass', verify: 'npm test' };
@@ -137,7 +147,7 @@ ok('text is bound to its own verifier',
 const weird = [{ verify: 42 }, { verify: null }, { verify: {} }, {}, { verify: 'x' }];
 let threw = null;
 try { weird.forEach((c) => conditionPlanFingerprint([c])); } catch (e) { threw = e; }
-ok('conditionPlanFingerprint is total over non-string verifiers', threw === null, threw?.message);
+ok('conditionPlanFingerprint accepts representative JSON-compatible verifiers', threw === null, threw?.message);
 ok('a number verifier and a null verifier stay distinguishable',
   conditionPlanFingerprint([{ verify: 42 }]) !== conditionPlanFingerprint([{ verify: null }]));
 ok('a missing verifier and an object verifier stay distinguishable',
@@ -166,6 +176,28 @@ const throwsOn = (v) => { try { conditionPlanFingerprint([{ verify: v }]); retur
 ok('a circular verifier THROWS (identity omitted, never shared)',
   throwsOn((() => { const o = {}; o.self = o; return o; })()));
 ok('a bigint verifier THROWS', throwsOn(10n));
+
+// The encoder must be recursive. An earlier revision special-cased a top-level
+// -0 and delegated the interior to JSON.stringify, which merges one level down.
+ok('NESTED -0 and 0 are distinguishable',
+  conditionPlanFingerprint([{ verify: { x: -0 } }]) !== conditionPlanFingerprint([{ verify: { x: 0 } }]));
+ok('NaN and Infinity are distinguishable (JSON maps both to null)',
+  conditionPlanFingerprint([{ verify: NaN }]) !== conditionPlanFingerprint([{ verify: Infinity }]));
+ok('NaN and null are distinguishable',
+  conditionPlanFingerprint([{ verify: NaN }]) !== conditionPlanFingerprint([{ verify: null }]));
+ok('object key ORDER does not change identity',
+  conditionPlanFingerprint([{ verify: { a: 1, b: 2 } }]) === conditionPlanFingerprint([{ verify: { b: 2, a: 1 } }]));
+ok('object key SET does change identity',
+  conditionPlanFingerprint([{ verify: { a: 1 } }]) !== conditionPlanFingerprint([{ verify: { a: 1, b: undefined } }]));
+ok('a DEEPLY circular value THROWS',
+  throwsOn((() => { const o = { a: {} }; o.a.up = o; return o; })()));
+
+// The ROW is validated too: GOAL_DECLARED.success constrains only the outer
+// array, so a plan of bare primitives is contract-valid and [1] vs [2] would
+// otherwise both read text/verify as undefined and collide.
+const rowThrows = (rows) => { try { conditionPlanFingerprint(rows); return false; } catch { return true; } };
+ok('a primitive condition ROW throws rather than collapsing', rowThrows([1]) && rowThrows([2]));
+ok('a null condition ROW throws', rowThrows([null]));
 
 // The common case must NOT throw: a condition declared with only a verifier has
 // no `text`, and treating that absence as an encoding failure would omit
