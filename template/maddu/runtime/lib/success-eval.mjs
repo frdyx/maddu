@@ -17,7 +17,6 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
-import { conditionPlanFingerprint } from './acceptance-digest.mjs';
 
 export const VERIFY_TIMEOUT_MS = 120000;
 const SCHEMA_VERSION = 1;
@@ -310,11 +309,28 @@ export async function recordSuccessEvalStart(repoRoot, spineLib, { actor = null,
 //
 // Degrades to {} when the digest lib is unavailable (older install) rather than
 // emitting a partial identity: an absent field is honest, a wrong digest is not.
-function conditionPlanFields(goal) {
+// Loaded LAZILY, not as a static import. `maddu upgrade` applies updates to
+// EXISTING files before adding NEW ones (commands/upgrade.mjs), so there is a
+// window where this file is the new version and acceptance-digest.mjs does not
+// exist yet. A static import would make orient, status and the bridge fail to
+// load their module graph during that window; a lazy load degrades to omitting
+// identity, which is what the fallback below actually promises.
+let _digestMod;
+async function loadDigest() {
+  if (_digestMod === undefined) {
+    try { _digestMod = await import('./acceptance-digest.mjs'); }
+    catch { _digestMod = null; }
+  }
+  return _digestMod;
+}
+
+async function conditionPlanFields(goal) {
+  const mod = await loadDigest();
+  if (!mod?.conditionPlanFingerprint) return {};
   const success = Array.isArray(goal?.success) ? goal.success : [];
   try {
     return {
-      conditionPlanDigest: conditionPlanFingerprint(success),
+      conditionPlanDigest: mod.conditionPlanFingerprint(success),
       conditionCount: success.length,
     };
   } catch { return {}; }
@@ -342,7 +358,7 @@ export async function recordSuccessEvalFinish(repoRoot, spineLib, { startedId, g
         // instead, where the contract can actually hold it (contractShape only
         // records direct data fields; array items are unconstrained).
         conditions: (result.evaluated || []).map((c) => ({ text: c.text || null, state: c.state })),
-        ...conditionPlanFields(goal),
+        ...(await conditionPlanFields(goal)),
       },
     });
   } catch { /* a dangling STARTED remains → the readout stales the prior receipt */ }

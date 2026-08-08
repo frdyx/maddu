@@ -42,13 +42,22 @@ function deriveTaskPlan(captured, digest) {
       exitCode: r && typeof r.exitCode === 'number' ? r.exitCode : null,
     };
   });
-  // Stable prefix by id, not execution order, so the retained sample does not
-  // change when a bail moves.
-  const ordered = rows.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // Stable prefix by the FULL (id, commandSha256, cwd) tuple. Sorting by id
+  // alone is not a total order — the config path can produce duplicate
+  // normalized ids from distinct raw keys ("x" and " x "), and a stable sort
+  // then falls back to input order, so reordering config would silently change
+  // which diagnostics survive truncation.
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const ordered = rows.slice().sort((a, b) =>
+    cmp(a.id, b.id) || cmp(a.commandSha256 ?? '', b.commandSha256 ?? '') || cmp(a.cwd ?? '', b.cwd ?? ''));
   const kept = [];
   let bytes = 2; // "[]"
   for (const row of ordered.slice(0, TASK_ROW_CAP)) {
-    const size = JSON.stringify(row).length + 1;
+    // UTF-8 BYTES, not UTF-16 code units. `.length` under-counts every non-ASCII
+    // character (a CJK id counts 1 but serializes to 3), so a row set measured
+    // under the cap could serialize well past it — and past the spine's 64 KiB
+    // whole-line-read threshold, which is the reason the cap exists.
+    const size = Buffer.byteLength(JSON.stringify(row), 'utf8') + 1;
     if (bytes + size > TASK_BYTE_CAP) break;
     kept.push(row);
     bytes += size;

@@ -178,13 +178,24 @@ if (baseline) {
   const expectIdx = process.argv.indexOf('--expect-change');
   if (expectIdx !== -1) {
     const want = process.argv[expectIdx + 1];
-    const valid = ['none', 'patch', 'minor', 'major'];
+    // classifyChange returns only none | minor | major. A 'patch' is a
+    // summary-only edit, invisible to contractShape, so accepting it here would
+    // let a caller assert an outcome that can never occur.
+    const valid = ['none', 'minor', 'major'];
     if (!valid.includes(want)) {
       console.error(`[FAIL] --expect-change needs one of ${valid.join('|')}, got ${want === undefined ? '(missing)' : want}`);
       process.exit(2);
     }
     ok(`contract change classifies as ${want}`, vd.required === want,
       `classified ${vd.required} (baseline ${vd.baselineVersion} → ${EVENT_CONTRACT_VERSION})`);
+    // TWO axes, not one. `vd.required` is what the SHAPE demands; `vd.bump` is
+    // what the version actually moved. Asserting only `required` still lets an
+    // OVERSIZED bump through — a minor shape change shipped as a major — which
+    // is exactly the case this flag exists to distinguish.
+    if (want !== 'none') {
+      ok(`version bump magnitude is exactly ${want}`, vd.bump === want,
+        `bumped ${vd.bump} for a ${vd.required} shape change`);
+    }
   }
 }
 

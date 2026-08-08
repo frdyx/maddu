@@ -51,17 +51,12 @@ export function commandDigest(str) {
   return sha256Json([COMMAND_TAG, str]);
 }
 
-// Locale-INDEPENDENT UTF-16 code-unit comparator. Never `localeCompare`, whose
-// ordering differs across runtimes and locales for non-ASCII and case — a
-// golden digest computed under one collation would not reproduce under another.
-function compareCodeUnits(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-function compareTuple(a, b) {
-  return compareCodeUnits(a[0], b[0])
-    || compareCodeUnits(a[1] ?? '', b[1] ?? '')
-    || compareCodeUnits(a[2] ?? '', b[2] ?? '');
+// Repo-relative POSIX form. A cwd is fingerprinted in platform-native form
+// otherwise, so the SAME declared task hashes differently on Windows
+// (`test\sub`) and POSIX (`test/sub`) — a false DIFFERENCE across platforms,
+// and it would make a published golden digest unreproducible.
+function posixPath(p) {
+  return typeof p === 'string' ? p.split('\\').join('/') : '';
 }
 
 // Fingerprint of a SELECTED task plan.
@@ -71,18 +66,23 @@ function compareTuple(a, b) {
 // executed results would make two plans sharing a first failing task
 // fingerprint identically, which is exactly the guarantee this defeats).
 //
-// MULTIPLICITY IS PRESERVED and duplicates are NOT rejected: ids are trimmed in
-// one place and keyed untrimmed in another, so "x" and " x " can both legitimately
-// execute today. Sorting a COPY by the full (id, commandDigest, cwd) tuple gives
-// a total order without requiring ids to be unique, and never touches execution
-// order — which is deliberately not part of the fingerprint.
+// ORDER IS PART OF THE FINGERPRINT, and that is a correction, not a preference.
+// An earlier revision sorted a copy and declared execution order irrelevant
+// "because only the selected set matters". It does matter: runProjectTest walks
+// plan.tasks IN ORDER and breaks at the first failure under --bail
+// (_project-test-runner.mjs:549-555), so [pass, fail] runs two tasks while
+// [fail, pass] runs one. Sorting made those two genuinely different plans share
+// a digest — a FALSE MATCH, the exact direction this module exists to prevent.
+//
+// Multiplicity is preserved and duplicate ids are NOT rejected: ids are trimmed
+// in one place and keyed untrimmed in another, so "x" and " x " can both
+// legitimately execute today, and refusing them would be a behaviour change.
 export function planFingerprint(descriptors) {
   const rows = (Array.isArray(descriptors) ? descriptors : []).map((d) => [
     typeof d?.id === 'string' ? d.id : '',
     commandDigest(d?.command) ?? '',
-    typeof d?.cwd === 'string' ? d.cwd : '',
+    posixPath(d?.cwd),
   ]);
-  rows.sort(compareTuple);
   return sha256Json([TASK_PLAN_TAG, rows]);
 }
 
@@ -93,15 +93,24 @@ export function planFingerprint(descriptors) {
 // `recordSuccessEvalFinish`'s outer catch, leave a dangling STARTED and change
 // the rendered verdict — a behaviour change in a recording-only path.
 //
-// Non-strings are encoded BY TYPE rather than collapsed to one value, so
-// `{verify:42}` and `{verify:null}` stay distinguishable. Two different numbers
-// do NOT: the term records `[object Number]`, not the number. That equivalence
-// class is deliberate and documented, not an oversight.
+// Non-strings encode their actual VALUE, not merely their type. An earlier
+// revision recorded `[object Number]`, which made {verify:1} and {verify:2}
+// share a digest — two distinct declared plans with one identity. Documenting a
+// false match does not make it acceptable; this module's whole claim is that
+// they cannot happen.
+//
+// Unserializable values (circular, BigInt) fall back to a type tag: that is a
+// last resort for input the contract does not really admit, and it is recorded
+// as a DIFFERENT shape (`t`) so it can never be mistaken for a serialized value.
 export function verifierTerm(cond) {
   const v = cond?.verify;
-  return typeof v === 'string'
-    ? ['s', commandDigest(v)]
-    : ['x', Object.prototype.toString.call(v)];
+  if (typeof v === 'string') return ['s', commandDigest(v)];
+  try {
+    const json = JSON.stringify(v);
+    // JSON.stringify(undefined) and (function) return undefined — not a value.
+    if (typeof json === 'string') return ['v', json];
+  } catch { /* circular / BigInt → type tag below */ }
+  return ['t', Object.prototype.toString.call(v)];
 }
 
 // Fingerprint of a goal's DECLARED condition plan.
