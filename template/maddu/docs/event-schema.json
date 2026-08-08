@@ -5901,9 +5901,6 @@
               "planTaskCount": {
                 "type": "number"
               },
-              "tasks": {
-                "type": "array"
-              },
               "tasksTruncated": {
                 "type": "boolean"
               },

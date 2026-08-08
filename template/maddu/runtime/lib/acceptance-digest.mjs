@@ -84,35 +84,63 @@ function canonPath(p) {
 // SET and every value do. Cycles are detected per path and rejected.
 const OBJECT_PROTO = Object.prototype;
 const ARRAY_PROTO = Array.prototype;
+const HAS_OWN = Object.prototype.hasOwnProperty;
+
+// Traversal budget. Without one, `new Array(0xffffffff)` passes validation and
+// then attempts 4.29 billion iterations — the process dies before the caller's
+// try/catch can omit identity, turning a bad declaration into a crash. Bounded
+// by construction instead: exceeding any limit throws like any other
+// unencodable input, so identity is simply absent.
+const MAX_NODES = 10000;
+const MAX_DEPTH = 32;
+const MAX_ARRAY = 1000;
+
+// A canonical array index is an integer 0..2^32-2 whose decimal spelling round
+// -trips. `String(Number(k)) === k` alone accepts "4294967295" (2^32-1), which
+// is NOT a valid index — such a property is a named property the index loop
+// never visits, so two arrays differing only there would collide.
+const MAX_INDEX = 4294967294;
+function isCanonicalIndex(k) {
+  const n = Number(k);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_INDEX && String(n) === k;
+}
 
 // Reject anything outside PLAIN DATA. An earlier revision walked Object.keys()
 // on any object, which silently merged everything whose state does not live in
 // own enumerable string keys: new Date(1) and new Date(2) both encoded as an
 // empty object, as did a Map and a Set. Those are false MATCHES on
-// contract-valid input, so the domain is now closed rather than best-effort.
+// contract-valid input, so the domain is closed rather than best-effort.
+//
+// HONEST LIMIT: a Proxy can impersonate a plain object and lie to every check
+// here. Nothing in pure JS reliably detects one. The guard is against ordinary
+// values that merge, not against a hostile object graph.
 function assertPlainData(v) {
   const proto = Object.getPrototypeOf(v);
   if (proto !== OBJECT_PROTO && proto !== ARRAY_PROTO && proto !== null) {
     throw new TypeError('only plain objects and arrays are encodable');
   }
+  if (Array.isArray(v) ? proto === OBJECT_PROTO : proto === ARRAY_PROTO) {
+    throw new TypeError('container type and prototype disagree');
+  }
   if (Object.getOwnPropertySymbols(v).length) {
     throw new TypeError('symbol-keyed properties are not encodable');
   }
-  const names = Object.getOwnPropertyNames(v);
-  if (Array.isArray(v)) {
-    // Indices and `length` only: a named property on an array would be dropped.
-    for (const k of names) {
-      if (k !== 'length' && String(Number(k)) !== k) {
-        throw new TypeError('named properties on an array are not encodable');
-      }
+  for (const k of Object.getOwnPropertyNames(v)) {
+    if (Array.isArray(v) && k === 'length') continue;
+    if (Array.isArray(v) && !isCanonicalIndex(k)) {
+      throw new TypeError('named properties on an array are not encodable');
     }
-  } else if (names.length !== Object.keys(v).length) {
-    // A non-enumerable own property would vanish from the encoding.
-    throw new TypeError('non-enumerable properties are not encodable');
+    const d = Object.getOwnPropertyDescriptor(v, k);
+    // An accessor is not data: a getter can return a different value each read,
+    // so the digest would not bind what the caller later evaluates.
+    if (!('value' in d)) throw new TypeError('accessor properties are not encodable');
+    if (!d.enumerable) throw new TypeError('non-enumerable properties are not encodable');
   }
 }
 
-function encodeValue(v, seen) {
+function encodeValue(v, seen, budget, depth) {
+  if (++budget.n > MAX_NODES) throw new TypeError('value exceeds the node budget');
+  if (depth > MAX_DEPTH) throw new TypeError('value exceeds the depth budget');
   if (v === undefined) return ['u'];
   if (v === null) return ['z'];
   const t = typeof v;
@@ -126,22 +154,23 @@ function encodeValue(v, seen) {
   seen.add(v);
   try {
     if (Array.isArray(v)) {
+      if (v.length > MAX_ARRAY) throw new TypeError('array exceeds the length budget');
       // Explicit index walk, not map(): map SKIPS holes, so a sparse array and
       // one with an explicit undefined would encode alike.
       const out = [];
       for (let i = 0; i < v.length; i++) {
-        out.push(Object.prototype.hasOwnProperty.call(v, i) ? encodeValue(v[i], seen) : ['h']);
+        out.push(HAS_OWN.call(v, i) ? encodeValue(v[i], seen, budget, depth + 1) : ['h']);
       }
       return ['a', out];
     }
-    return ['o', Object.keys(v).sort().map((k) => [k, encodeValue(v[k], seen)])];
+    return ['o', Object.keys(v).sort().map((k) => [k, encodeValue(v[k], seen, budget, depth + 1)])];
   } finally {
     seen.delete(v);
   }
 }
 
 function valueTerm(v) {
-  return encodeValue(v, new Set());
+  return encodeValue(v, new Set(), { n: 0 }, 0);
 }
 
 // Fingerprint of a SELECTED task plan.
@@ -204,6 +233,11 @@ export function conditionPlanFingerprint(success) {
     if (c === null || typeof c !== 'object' || Array.isArray(c)) {
       throw new TypeError('condition row is not a plain record');
     }
+    // The SAME hardened validation the values get. An earlier revision used
+    // only the weak shape check above, so [new Date(1)] and [new Date(2)] both
+    // passed, read text/verify as undefined, and collided — the value path was
+    // hardened while the row path kept the old check.
+    assertPlainData(c);
     return [valueTerm(c.text), verifierTerm(c)];
   });
   return sha256Json([CONDITION_PLAN_TAG, rows]);

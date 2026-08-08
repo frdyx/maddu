@@ -224,6 +224,32 @@ ok('a sparse array and an explicit-undefined array are distinguishable',
 ok('a plain nested object/array is still encodable',
   typeof conditionPlanFingerprint([{ verify: { a: [1, { b: 2 }] } }]) === 'string');
 
+// The ROW gets the SAME hardened validation as the values. An earlier revision
+// hardened the value path and left the row on a weak shape check, so
+// [new Date(1)] and [new Date(2)] both passed, read text/verify as undefined,
+// and collided.
+ok('a Date ROW throws', rowThrows([new Date(1)]) && rowThrows([new Date(2)]));
+ok('a Map ROW throws', rowThrows([new Map()]));
+
+// `String(Number(k)) === k` alone accepts "4294967295" (2^32-1), which is NOT a
+// valid array index — the index loop never visits it, so two arrays differing
+// only there would collide.
+ok('an out-of-range numeric array property throws',
+  throwsOn((() => { const a = [1]; a['4294967295'] = 'A'; return a; })()));
+// A getter is not data: it can return something different on each read, so the
+// digest would not bind what the caller later evaluates.
+ok('an accessor property throws',
+  throwsOn(Object.defineProperty({}, 'g', { get() { return 1; }, enumerable: true })));
+
+// BUDGETS. Without them `new Array(0xffffffff)` passes validation and then tries
+// 4.29 billion iterations, killing the process before the caller can catch and
+// omit identity. Bounded by construction: over-budget throws like any other
+// unencodable input.
+ok('a huge array throws instead of exhausting memory', throwsOn(new Array(0xffffffff)));
+ok('excessive depth throws',
+  throwsOn((() => { let o = {}; for (let i = 0; i < 50; i++) o = { n: o }; return o; })()));
+ok('excessive node count throws', throwsOn(Array.from({ length: 2000 }, (_, i) => i)));
+
 // The common case must NOT throw: a condition declared with only a verifier has
 // no `text`, and treating that absence as an encoding failure would omit
 // identity for every ordinary goal.

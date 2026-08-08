@@ -1,6 +1,6 @@
 {
   "version": "1.17.0",
-  "fingerprint": "f64f09c6",
+  "fingerprint": "0cf0ae16",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1679,7 +1679,6 @@
           "result": "string",
           "setAt": "string|null?",
           "startedId": "string",
-          "tasks": "array?",
           "tasksTruncated": "boolean?",
           "verifiable": "number?"
         }
