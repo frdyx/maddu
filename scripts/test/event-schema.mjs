@@ -189,11 +189,20 @@ if (baseline) {
     ok(`contract change classifies as ${want}`, vd.required === want,
       `classified ${vd.required} (baseline ${vd.baselineVersion} → ${EVENT_CONTRACT_VERSION})`);
     // TWO axes, not one. `vd.required` is what the SHAPE demands; `vd.bump` is
-    // what the version actually moved. Asserting only `required` still lets an
-    // OVERSIZED bump through — a minor shape change shipped as a major — which
-    // is exactly the case this flag exists to distinguish.
+    // what the version actually moved. Asserting only `required` lets an
+    // OVERSIZED bump through unnoticed — but an oversized bump is sometimes
+    // DELIBERATE (a narrowing the classifier cannot see), so it must be
+    // DECLARED rather than either ignored or forbidden. `--expect-bump`
+    // defaults to the shape classification; passing a larger value states the
+    // over-bump explicitly.
+    const bumpIdx = process.argv.indexOf('--expect-bump');
+    const wantBump = bumpIdx === -1 ? want : process.argv[bumpIdx + 1];
+    if (!valid.includes(wantBump)) {
+      console.error(`[FAIL] --expect-bump needs one of ${valid.join('|')}, got ${wantBump === undefined ? '(missing)' : wantBump}`);
+      process.exit(2);
+    }
     if (want !== 'none') {
-      ok(`version bump magnitude is exactly ${want}`, vd.bump === want,
+      ok(`version bump magnitude is exactly ${wantBump}`, vd.bump === wantBump,
         `bumped ${vd.bump} for a ${vd.required} shape change`);
     }
   }

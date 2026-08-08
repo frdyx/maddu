@@ -248,7 +248,39 @@ ok('an accessor property throws',
 ok('a huge array throws instead of exhausting memory', throwsOn(new Array(0xffffffff)));
 ok('excessive depth throws',
   throwsOn((() => { let o = {}; for (let i = 0; i < 50; i++) o = { n: o }; return o; })()));
-ok('excessive node count throws', throwsOn(Array.from({ length: 2000 }, (_, i) => i)));
+// The earlier version of this case used a 2000-element array, which trips
+// MAX_ARRAY (1000) first — so deleting MAX_NODES entirely left it GREEN. It
+// asserted a throw without exercising the limit it names. This structure keeps
+// every array and key count under their caps and only exceeds the NODE budget:
+// 20 keys x 600 elements = 12000 nodes.
+const nodeHeavy = Object.fromEntries(
+  Array.from({ length: 20 }, (_, i) => ['k' + i, Array.from({ length: 600 }, (_, j) => j)]),
+);
+const nodeBudgetMsg = (() => {
+  try { conditionPlanFingerprint([{ verify: nodeHeavy }]); return 'no throw'; } catch (e) { return e.message; }
+})();
+ok('excessive node count throws FOR THE NODE BUDGET REASON',
+  nodeBudgetMsg.includes('node budget'), nodeBudgetMsg);
+
+// The outer row array was unbounded: every row was walked before any budget
+// applied.
+ok('an over-long condition PLAN throws', (() => {
+  try { conditionPlanFingerprint(new Array(100000)); return false; } catch { return true; }
+})());
+
+// ONE budget spans the whole plan. A per-value budget resets for every field, so
+// many modest rows could spend MAX_NODES repeatedly and never trip it.
+ok('the node budget is PLAN-WIDE, not per-value', (() => {
+  const many = Array.from({ length: 30 }, () => ({ verify: Array.from({ length: 600 }, (_, i) => i) }));
+  try { conditionPlanFingerprint(many); return false; } catch (e) { return e.message.includes('node budget'); }
+})());
+
+// And the realistic shapes must still encode — a budget that rejects ordinary
+// input would be worse than the collisions it prevents.
+ok('a realistic 5-condition goal still encodes',
+  typeof conditionPlanFingerprint(
+    Array.from({ length: 5 }, (_, i) => ({ text: 'condition ' + i, verify: 'npm test -- --grep x' + i })),
+  ) === 'string');
 
 // The common case must NOT throw: a condition declared with only a verifier has
 // no `text`, and treating that absence as an encoding failure would omit

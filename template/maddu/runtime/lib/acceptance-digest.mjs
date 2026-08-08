@@ -94,6 +94,8 @@ const HAS_OWN = Object.prototype.hasOwnProperty;
 const MAX_NODES = 10000;
 const MAX_DEPTH = 32;
 const MAX_ARRAY = 1000;
+const MAX_KEYS = 1000;
+const MAX_ROWS = 1000;   // condition rows in one declared plan
 
 // A canonical array index is an integer 0..2^32-2 whose decimal spelling round
 // -trips. `String(Number(k)) === k` alone accepts "4294967295" (2^32-1), which
@@ -122,10 +124,18 @@ function assertPlainData(v) {
   if (Array.isArray(v) ? proto === OBJECT_PROTO : proto === ARRAY_PROTO) {
     throw new TypeError('container type and prototype disagree');
   }
+  // Length/key caps BEFORE enumerating descriptors: getOwnPropertyNames on a
+  // dense 4-billion-element array materializes the whole name list, so checking
+  // the cap afterwards exhausts memory before it can reject anything.
+  if (Array.isArray(v)) {
+    if (v.length > MAX_ARRAY) throw new TypeError('array exceeds the length budget');
+  }
   if (Object.getOwnPropertySymbols(v).length) {
     throw new TypeError('symbol-keyed properties are not encodable');
   }
-  for (const k of Object.getOwnPropertyNames(v)) {
+  const ownNames = Object.getOwnPropertyNames(v);
+  if (ownNames.length > MAX_KEYS + 1) throw new TypeError('object exceeds the key budget');
+  for (const k of ownNames) {
     if (Array.isArray(v) && k === 'length') continue;
     if (Array.isArray(v) && !isCanonicalIndex(k)) {
       throw new TypeError('named properties on an array are not encodable');
@@ -154,7 +164,7 @@ function encodeValue(v, seen, budget, depth) {
   seen.add(v);
   try {
     if (Array.isArray(v)) {
-      if (v.length > MAX_ARRAY) throw new TypeError('array exceeds the length budget');
+      // (length already checked in assertPlainData, before enumeration)
       // Explicit index walk, not map(): map SKIPS holes, so a sparse array and
       // one with an explicit undefined would encode alike.
       const out = [];
@@ -169,8 +179,11 @@ function encodeValue(v, seen, budget, depth) {
   }
 }
 
-function valueTerm(v) {
-  return encodeValue(v, new Set(), { n: 0 }, 0);
+// A per-call budget would reset for every field, so a plan with many rows could
+// spend MAX_NODES over and over. Callers that encode a whole plan pass ONE
+// budget through, making the bound plan-wide rather than per-value.
+function valueTerm(v, budget = { n: 0 }) {
+  return encodeValue(v, new Set(), budget, 0);
 }
 
 // Fingerprint of a SELECTED task plan.
@@ -203,9 +216,9 @@ export function planFingerprint(descriptors) {
 // One condition's verifier term. Strings hash through commandDigest; every
 // other JSON-encodable value is encoded losslessly; anything else THROWS, which
 // makes the whole condition-plan identity absent rather than shared.
-export function verifierTerm(cond) {
+export function verifierTerm(cond, budget = { n: 0 }) {
   const v = cond?.verify;
-  return typeof v === 'string' ? ['s', commandDigest(v)] : ['x', valueTerm(v)];
+  return typeof v === 'string' ? ['s', commandDigest(v)] : ['x', valueTerm(v, budget)];
 }
 
 // Fingerprint of a goal's DECLARED condition plan.
@@ -226,7 +239,15 @@ export function conditionPlanFingerprint(success) {
   // undefined and collide. Fixing `text` and `verify` while leaving the row
   // unchecked was the same defect one level up. A non-object row THROWS, so
   // identity is omitted rather than shared.
-  const rows = (Array.isArray(success) ? success : []).map((c) => {
+  const list = Array.isArray(success) ? success : [];
+  // The OUTER array was unbounded: conditionPlanFingerprint(new Array(100000))
+  // walked every row before any budget applied. The cap is checked before the
+  // walk, and ONE budget is threaded through the whole plan — a per-value budget
+  // resets for every field, so a plan with many rows could spend MAX_NODES over
+  // and over and never trip it.
+  if (list.length > MAX_ROWS) throw new TypeError('condition plan exceeds the row budget');
+  const budget = { n: 0 };
+  const rows = list.map((c) => {
     // `typeof [] === 'object'`, so an array row slipped through an earlier
     // revision and [[1]] vs [[2]] both read text/verify as undefined and
     // collided. A row must be a non-array record.
@@ -238,7 +259,7 @@ export function conditionPlanFingerprint(success) {
     // passed, read text/verify as undefined, and collided — the value path was
     // hardened while the row path kept the old check.
     assertPlainData(c);
-    return [valueTerm(c.text), verifierTerm(c)];
+    return [valueTerm(c.text, budget), verifierTerm(c, budget)];
   });
   return sha256Json([CONDITION_PLAN_TAG, rows]);
 }

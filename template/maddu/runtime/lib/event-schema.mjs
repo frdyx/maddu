@@ -146,16 +146,39 @@
 // reducer). Transcript import always omits pricingIdentity — a transcript
 // cannot distinguish api.anthropic.com from Bedrock/Vertex. Additive → minor
 // bump; baseline refresh at the next release.
-// 1.17.0 (2026-08-08, PR-1 receipt task-plan fingerprint) — VERIFICATION_RAN
+// 1.17.0 (2026-08-09, PR-1 receipt task-plan fingerprint) — VERIFICATION_RAN
 // gains DIRECT identity fields so two receipts for different test sets stop
 // being indistinguishable: planDigest / planTaskCount / tasksTruncated for
-// kind:'project-test', and
-// conditionPlanDigest / conditionCount for kind:'success-eval'. Identity is
-// DIRECT, never nested: contractShape records only direct data fields and
-// generated schemas leave array items unconstrained, so a nested `plan.digest`
-// could be dropped later without a MAJOR bump. The existing `conditions` array
-// is deliberately UNCHANGED — resolveSuccessView returns those rows verbatim to
-// two public bridge responses. Additive → minor.
+// kind:'project-test', and conditionPlanDigest / conditionCount for
+// kind:'success-eval'. Identity is DIRECT, never nested: contractShape records
+// only direct data fields and generated schemas leave array items
+// unconstrained, so a nested `plan.digest` could be dropped later without a
+// MAJOR bump. The existing `conditions` array is deliberately UNCHANGED —
+// resolveSuccessView returns those rows verbatim to two public bridge
+// responses.
+//
+// WHY MINOR, since `data` is an OPEN object and declaring a field does narrow
+// what validates. This was reviewed, argued as MAJOR, and settled as MINOR:
+//
+//   - The argument for MAJOR proves too much. `data` is open on EVERY type, so
+//     if declaring a field is breaking then NO field can ever be added below
+//     major, and the scheme becomes major-only. Five prior bumps (1.9.0 and
+//     others) shipped exactly this shape as minor.
+//   - MAJOR should mean "something you depend on changed". Spending it on an
+//     addition destroys that signal: a consumer diffing the versions hunts for
+//     removals and finds none.
+//   - The distinction that matters is GENERIC vs DISTINCTIVE names. A generic
+//     name IS a real risk — which is why the bounded `tasks` diagnostics array
+//     is deliberately NOT declared: a plugin could plausibly carry its own
+//     `tasks` on its own kind, and typing it would have broken that payload.
+//     The five fields above are framework-minted names on a framework-owned
+//     event type that NO plugin emits (project-test, self-test, success-eval,
+//     replay are the only kinds in-tree). A payload they could break would have
+//     been squatting on undefined framework namespace.
+//
+// If that reasoning is ever rejected, the fix is to change `classifyChange` so
+// narrowing-by-declaration reports major CONTRACT-WIDE — not to price one
+// release differently from its five predecessors. Additive → minor.
 export const EVENT_CONTRACT_VERSION = '1.17.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
