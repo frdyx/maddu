@@ -19,6 +19,8 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUITE = join(HERE, 'event-schema.mjs');
@@ -31,6 +33,16 @@ const ok = (name, cond, extra = '') => {
 
 function run(...args) {
   const r = spawnSync(process.execPath, [SUITE, ...args], { encoding: 'utf8' });
+  if (r.error) { console.error(`[harness] ${r.error.message}`); process.exit(2); }
+  return r.status;
+}
+
+// Same, against a SYNTHETIC baseline via the MADDU_CONTRACT_BASELINE seam.
+function runWithBaseline(baselineFile, ...args) {
+  const r = spawnSync(process.execPath, [SUITE, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, MADDU_CONTRACT_BASELINE: baselineFile },
+  });
   if (r.error) { console.error(`[harness] ${r.error.message}`); process.exit(2); }
   return r.status;
 }
@@ -70,6 +82,51 @@ ok('--expect-bump garbage → harness error',
   run('--expect-change', 'none', '--expect-bump', 'garbage') === 2);
 ok('orphaned --expect-bump (no --expect-change) → harness error',
   run('--expect-bump', 'major') === 2);
+
+// -- THE DISCRIMINATING CASES ---------------------------------------------
+// Everything above runs against required === bump === 'none', so changing the
+// guard from `vd.bump === wantBump` to `vd.required === wantBump` would leave
+// every one of them unchanged. A suite written to pin a distinction, which
+// never exercises the distinction, pins nothing.
+//
+// This builds a baseline where the two axes genuinely DIFFER: the pre-PR shape
+// (so the SHAPE change is minor -- fields were added) stamped with version
+// 0.17.0 (so the VERSION move to 1.17.0 is major).
+const dir = mkdtempSync(join(tmpdir(), 'maddu-expect-flags-'));
+const live = JSON.parse(readFileSync(join(HERE, '__fixtures__', 'event-contract-baseline.json'), 'utf8'));
+const NEW_FIELDS = ['planDigest', 'planTaskCount', 'tasksTruncated', 'conditionPlanDigest', 'conditionCount'];
+const ran = live.shape?.types?.VERIFICATION_RAN;
+if (!ran || !ran.data) { console.error('[harness] baseline shape missing VERIFICATION_RAN.data'); process.exit(2); }
+for (const f of NEW_FIELDS) delete ran.data[f];
+live.version = '0.17.0';
+const skewed = join(dir, 'baseline-skewed.json');
+writeFileSync(skewed, JSON.stringify(live, null, 2));
+
+// CONTROL: the fixture must really produce differing axes, or the three
+// assertions below are as vacuous as the ones they exist to replace.
+ok('CONTROL: synthetic baseline yields required=minor, bump=major',
+  runWithBaseline(skewed, '--expect-change', 'minor', '--expect-bump', 'major') === 0,
+  'if this fails the fixture is wrong, not the guard');
+ok('an UNDECLARED over-bump FAILS (bump defaults to the shape)',
+  runWithBaseline(skewed, '--expect-change', 'minor') === 1);
+ok('declaring the WRONG bump FAILS',
+  runWithBaseline(skewed, '--expect-change', 'minor', '--expect-bump', 'minor') === 1);
+ok('a wrong SHAPE expectation FAILS even with the right bump',
+  runWithBaseline(skewed, '--expect-change', 'major', '--expect-bump', 'major') === 1);
+
+// -- argv hygiene: assertion-LOOKING input must never pass silently --------
+ok('a TYPO in a flag name -> harness error',
+  run('--expect-change', 'none', '--expect-bunp', 'major') === 2);
+ok('a DUPLICATE --expect-change -> harness error',
+  run('--expect-change', 'none', '--expect-change', 'major') === 2);
+ok('a DUPLICATE --expect-bump -> harness error',
+  run('--expect-change', 'none', '--expect-bump', 'none', '--expect-bump', 'major') === 2);
+ok('the --flag=value form -> harness error',
+  run('--expect-change', 'none', '--expect-bump=major') === 2);
+ok('an unknown flag -> harness error', run('--totally-unknown', 'x') === 2);
+ok('a bare positional argument -> harness error', run('nonsense') === 2);
+ok('a flag whose value is another flag -> harness error',
+  run('--expect-change', '--expect-bump') === 2);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

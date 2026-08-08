@@ -263,7 +263,12 @@ export function conditionPlanFingerprint(success) {
     // passed, read text/verify as undefined, and collided — the value path was
     // hardened while the row path kept the old check.
     assertPlainData(c);
-    return [valueTerm(c.text, budget), verifierTerm(c, budget)];
+    // Bind the ENTIRE row, not a chosen pair of fields. Validating the whole
+    // row while fingerprinting only text+verify silently ignored every other
+    // enumerable key, so {text,verify,note:'A'} and {text,verify,note:'B'} —
+    // both contract-valid, both preserved verbatim by projections — shared a
+    // digest. Validating a thing is not the same as binding it.
+    return valueTerm(c, budget);
   });
   return sha256Json([CONDITION_PLAN_TAG, rows]);
 }
