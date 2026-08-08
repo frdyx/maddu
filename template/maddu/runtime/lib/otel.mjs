@@ -78,21 +78,27 @@ export function nanoFromIso(iso) {
 // runs), so the export redacts again as defense-in-depth — no raw secret-shaped
 // value reaches an external collector. redactText is a no-op on non-secret text,
 // so ids/lanes/summaries are untouched and the mapping stays deterministic.
-// Data keys deliberately NOT exported as OTLP attributes, PER EVENT TYPE.
+// Data keys deliberately NOT exported as OTLP attributes, scoped to the EXACT
+// producer that introduced them (event type AND data.kind).
 //
-// Scoped, never global: a global `tasks` exclusion would silently strip
-// `maddu.data.tasks` from any OTHER event — including plugin events and
-// contract-valid open payloads — that already exported it before the upgrade.
-// An exclusion must only cover the field it was written for.
+// Narrow on purpose. `tasks` was added to VERIFICATION_RAN by the project-test
+// path only, but event `data` is an OPEN object: a plugin or custom receipt such
+// as {kind:'plugin-check', tasks:[...]} is contract-valid and may already export
+// maddu.data.tasks today. An exclusion keyed on the event type alone would strip
+// that after an upgrade. An exclusion must cover the field it was written for
+// and nothing else.
 //
-// Every data property becomes one attribute and arrays are JSON-stringified, so
-// a bounded-but-large diagnostics array becomes one very large attribute value.
-// `tasks` on a VERIFICATION_RAN receipt is capped at 32 KiB — fine on the spine,
-// but a collector with per-attribute size limits could reject or truncate log
-// records that previously passed. The IDENTITY fields (planDigest,
-// conditionPlanDigest, planTaskCount, …) are small and DO export; only the
-// per-row diagnostics are withheld, and nothing derivable is lost.
-const EXPORT_EXCLUDED_BY_TYPE = { VERIFICATION_RAN: new Set(['tasks']) };
+// What is withheld is NOT reconstructible from what is kept: per-task status and
+// exit code do not follow from the digest. This is a deliberate export-size
+// trade (a 32 KiB array becomes one 32 KiB attribute and collectors enforce
+// per-attribute limits), not a lossless projection — the spine keeps the rows.
+const EXPORT_EXCLUDED = [
+  { type: 'VERIFICATION_RAN', kind: 'project-test', keys: new Set(['tasks']) },
+];
+
+function isExcluded(ev, data, key) {
+  return EXPORT_EXCLUDED.some((r) => r.type === ev.type && r.kind === data.kind && r.keys.has(key));
+}
 
 function anyValue(v) {
   if (v === null || v === undefined) return null;
@@ -132,7 +138,7 @@ export function toLogRecord(ev, observedNano) {
   if (session != null) push('maddu.session', session);
   for (const [k, val] of Object.entries(data)) {
     if (k === 'schemaVersion') continue;
-    if (EXPORT_EXCLUDED_BY_TYPE[ev.type]?.has(k)) continue;
+    if (isExcluded(ev, data, k)) continue;
     push('maddu.data.' + k, val);
   }
   // eventName and body are the only non-attribute strings. For a KNOWN type they

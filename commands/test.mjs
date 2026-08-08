@@ -57,7 +57,10 @@ function deriveTaskPlan(captured, digest) {
     // character (a CJK id counts 1 but serializes to 3), so a row set measured
     // under the cap could serialize well past it — and past the spine's 64 KiB
     // whole-line-read threshold, which is the reason the cap exists.
-    const size = Buffer.byteLength(JSON.stringify(row), 'utf8') + 1;
+    // +1 for the separating comma, charged only BETWEEN rows — charging it for
+    // the first row too would reject a final row on an array that lands exactly
+    // on the cap without ever exceeding it.
+    const size = Buffer.byteLength(JSON.stringify(row), 'utf8') + (kept.length ? 1 : 0);
     if (bytes + size > TASK_BYTE_CAP) break;
     kept.push(row);
     bytes += size;
