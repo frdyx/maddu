@@ -155,7 +155,11 @@ function encodeValue(v, seen, budget, depth) {
   if (v === null) return ['z'];
   const t = typeof v;
   if (t === 'boolean') return ['b', v ? '1' : '0'];
-  // String() keeps -0, NaN and Infinity distinct; JSON.stringify does not.
+  // TWO different mechanisms, and the comment matters because a maintainer
+  // trusting a wrong one could delete the load-bearing line:
+  //   - Object.is(v, -0) is what preserves -0. String(-0) is "0", NOT "-0".
+  //   - String() is what preserves NaN and Infinity, which JSON.stringify maps
+  //     to null.
   if (t === 'number') return ['n', Object.is(v, -0) ? '-0' : String(v)];
   if (t === 'string') return ['s', v];
   if (t !== 'object') throw new TypeError(`unencodable value of type ${t}`);

@@ -173,8 +173,11 @@
 //     `tasks` on its own kind, and typing it would have broken that payload.
 //     The five fields above are framework-minted names on a framework-owned
 //     event type. The load-bearing property is OWNERSHIP, not a fixed kind
-//     list: every in-tree emitter is the framework itself — runtime libs, the
-//     recency gates, and the test harness — and NO plugin emits it. (Kinds
+//     list: every in-tree emitter is the framework itself — recordVerification's
+//     callers (the test/self-test commands), success-eval, replay, and the
+//     heavy test harnesses — and NO plugin emits it. (The recency GATES are not
+//     emitters: project-test-recent and self-test-recent only READ receipts via
+//     readVerifiedEvents + recencyGateVerdict. Kinds
 //     observed across ALL trees at 2026-08-09: project-test, self-test,
 //     success-eval, replay, stress, upgrade-matrix. An earlier revision of this
 //     comment named only the first four, because the census that produced it

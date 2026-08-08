@@ -175,36 +175,45 @@ if (baseline) {
   // `--expect-change minor` proves the shape moved additively and no further,
   // BEFORE the baseline is refreshed (refreshing first would overwrite the very
   // change this polices).
+  // An orphaned --expect-bump is a caller error, not a silent no-op: it looks
+  // like an assertion and would assert nothing without --expect-change.
+  const bumpIdx = process.argv.indexOf('--expect-bump');
   const expectIdx = process.argv.indexOf('--expect-change');
+  if (bumpIdx !== -1 && expectIdx === -1) {
+    console.error('[FAIL] --expect-bump requires --expect-change');
+    process.exit(2);
+  }
   if (expectIdx !== -1) {
+    // TWO DIFFERENT DOMAINS, and conflating them was the defect here.
+    // classifyChange (the SHAPE) returns none|minor|major — a patch is a
+    // summary-only edit invisible to contractShape, so it can never be a shape
+    // classification. bumpMagnitude (the VERSION) can legitimately return
+    // patch, so a patch-only contract release must be able to declare it.
+    const validShape = ['none', 'minor', 'major'];
+    const validBump = ['none', 'patch', 'minor', 'major'];
     const want = process.argv[expectIdx + 1];
-    // classifyChange returns only none | minor | major. A 'patch' is a
-    // summary-only edit, invisible to contractShape, so accepting it here would
-    // let a caller assert an outcome that can never occur.
-    const valid = ['none', 'minor', 'major'];
-    if (!valid.includes(want)) {
-      console.error(`[FAIL] --expect-change needs one of ${valid.join('|')}, got ${want === undefined ? '(missing)' : want}`);
+    if (!validShape.includes(want)) {
+      console.error(`[FAIL] --expect-change needs one of ${validShape.join('|')}, got ${want === undefined ? '(missing)' : want}`);
       process.exit(2);
     }
     ok(`contract change classifies as ${want}`, vd.required === want,
       `classified ${vd.required} (baseline ${vd.baselineVersion} → ${EVENT_CONTRACT_VERSION})`);
-    // TWO axes, not one. `vd.required` is what the SHAPE demands; `vd.bump` is
-    // what the version actually moved. Asserting only `required` lets an
-    // OVERSIZED bump through unnoticed — but an oversized bump is sometimes
-    // DELIBERATE (a narrowing the classifier cannot see), so it must be
-    // DECLARED rather than either ignored or forbidden. `--expect-bump`
-    // defaults to the shape classification; passing a larger value states the
-    // over-bump explicitly.
-    const bumpIdx = process.argv.indexOf('--expect-bump');
+
+    // `vd.required` is what the SHAPE demands; `vd.bump` is what the version
+    // actually moved. Asserting only `required` lets an OVERSIZED bump through
+    // unnoticed — and an oversized bump is sometimes DELIBERATE (a narrowing the
+    // classifier cannot see), so it must be DECLARED rather than ignored or
+    // forbidden. The bump is ALWAYS asserted once --expect-change is given:
+    // gating it on `want !== 'none'` left `--expect-change none --expect-bump
+    // major` passing while the real bump was none — the guard switched off in
+    // exactly the mode a post-refresh release runs in.
     const wantBump = bumpIdx === -1 ? want : process.argv[bumpIdx + 1];
-    if (!valid.includes(wantBump)) {
-      console.error(`[FAIL] --expect-bump needs one of ${valid.join('|')}, got ${wantBump === undefined ? '(missing)' : wantBump}`);
+    if (!validBump.includes(wantBump)) {
+      console.error(`[FAIL] --expect-bump needs one of ${validBump.join('|')}, got ${wantBump === undefined ? '(missing)' : wantBump}`);
       process.exit(2);
     }
-    if (want !== 'none') {
-      ok(`version bump magnitude is exactly ${wantBump}`, vd.bump === wantBump,
-        `bumped ${vd.bump} for a ${vd.required} shape change`);
-    }
+    ok(`version bump magnitude is exactly ${wantBump}`, vd.bump === wantBump,
+      `bumped ${vd.bump} for a ${vd.required} shape change`);
   }
 }
 
