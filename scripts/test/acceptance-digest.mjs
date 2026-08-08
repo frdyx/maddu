@@ -198,6 +198,31 @@ ok('a DEEPLY circular value THROWS',
 const rowThrows = (rows) => { try { conditionPlanFingerprint(rows); return false; } catch { return true; } };
 ok('a primitive condition ROW throws rather than collapsing', rowThrows([1]) && rowThrows([2]));
 ok('a null condition ROW throws', rowThrows([null]));
+// `typeof [] === 'object'`, so an array row slipped past an earlier revision
+// and [[1]] vs [[2]] both read text/verify as undefined and collided.
+ok('an ARRAY condition row throws', rowThrows([[1]]) && rowThrows([[2]]));
+
+// The encodable domain is CLOSED, not best-effort. Everything below shares one
+// failure mode: its state does not live in own enumerable string keys, so an
+// Object.keys() walk silently merged distinct values. Each case is a real
+// collision that existed one commit ago.
+ok('a Date THROWS (Date(1) and Date(2) both encoded empty before)', throwsOn(new Date(1)));
+ok('a Map THROWS', throwsOn(new Map([[1, 2]])));
+ok('a Set THROWS', throwsOn(new Set([1])));
+ok('a RegExp THROWS', throwsOn(/x/));
+ok('a boxed primitive THROWS', throwsOn(new Number(1)));
+ok('a custom-prototype object THROWS', throwsOn(Object.create({ inherited: 1 })));
+ok('a symbol-keyed object THROWS', throwsOn({ [Symbol('s')]: 1 }));
+ok('a non-enumerable own property THROWS',
+  throwsOn(Object.defineProperty({}, 'hidden', { value: 1, enumerable: false })));
+ok('a named property on an array THROWS',
+  throwsOn((() => { const a = [1]; a.x = 2; return a; })()));
+// A hole and an explicit undefined are different declarations.
+ok('a sparse array and an explicit-undefined array are distinguishable',
+  conditionPlanFingerprint([{ verify: [, 1] }]) !== conditionPlanFingerprint([{ verify: [undefined, 1] }]));
+// And the ordinary shapes must still work.
+ok('a plain nested object/array is still encodable',
+  typeof conditionPlanFingerprint([{ verify: { a: [1, { b: 2 }] } }]) === 'string');
 
 // The common case must NOT throw: a condition declared with only a verifier has
 // no `text`, and treating that absence as an encoding failure would omit

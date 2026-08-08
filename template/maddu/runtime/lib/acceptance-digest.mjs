@@ -82,6 +82,36 @@ function canonPath(p) {
 //
 // Object keys are sorted so key ORDER does not change identity, while the key
 // SET and every value do. Cycles are detected per path and rejected.
+const OBJECT_PROTO = Object.prototype;
+const ARRAY_PROTO = Array.prototype;
+
+// Reject anything outside PLAIN DATA. An earlier revision walked Object.keys()
+// on any object, which silently merged everything whose state does not live in
+// own enumerable string keys: new Date(1) and new Date(2) both encoded as an
+// empty object, as did a Map and a Set. Those are false MATCHES on
+// contract-valid input, so the domain is now closed rather than best-effort.
+function assertPlainData(v) {
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== OBJECT_PROTO && proto !== ARRAY_PROTO && proto !== null) {
+    throw new TypeError('only plain objects and arrays are encodable');
+  }
+  if (Object.getOwnPropertySymbols(v).length) {
+    throw new TypeError('symbol-keyed properties are not encodable');
+  }
+  const names = Object.getOwnPropertyNames(v);
+  if (Array.isArray(v)) {
+    // Indices and `length` only: a named property on an array would be dropped.
+    for (const k of names) {
+      if (k !== 'length' && String(Number(k)) !== k) {
+        throw new TypeError('named properties on an array are not encodable');
+      }
+    }
+  } else if (names.length !== Object.keys(v).length) {
+    // A non-enumerable own property would vanish from the encoding.
+    throw new TypeError('non-enumerable properties are not encodable');
+  }
+}
+
 function encodeValue(v, seen) {
   if (v === undefined) return ['u'];
   if (v === null) return ['z'];
@@ -92,9 +122,18 @@ function encodeValue(v, seen) {
   if (t === 'string') return ['s', v];
   if (t !== 'object') throw new TypeError(`unencodable value of type ${t}`);
   if (seen.has(v)) throw new TypeError('circular value is not encodable');
+  assertPlainData(v);
   seen.add(v);
   try {
-    if (Array.isArray(v)) return ['a', v.map((x) => encodeValue(x, seen))];
+    if (Array.isArray(v)) {
+      // Explicit index walk, not map(): map SKIPS holes, so a sparse array and
+      // one with an explicit undefined would encode alike.
+      const out = [];
+      for (let i = 0; i < v.length; i++) {
+        out.push(Object.prototype.hasOwnProperty.call(v, i) ? encodeValue(v[i], seen) : ['h']);
+      }
+      return ['a', out];
+    }
     return ['o', Object.keys(v).sort().map((k) => [k, encodeValue(v[k], seen)])];
   } finally {
     seen.delete(v);
@@ -159,7 +198,12 @@ export function conditionPlanFingerprint(success) {
   // unchecked was the same defect one level up. A non-object row THROWS, so
   // identity is omitted rather than shared.
   const rows = (Array.isArray(success) ? success : []).map((c) => {
-    if (c === null || typeof c !== 'object') throw new TypeError('condition row is not an object');
+    // `typeof [] === 'object'`, so an array row slipped through an earlier
+    // revision and [[1]] vs [[2]] both read text/verify as undefined and
+    // collided. A row must be a non-array record.
+    if (c === null || typeof c !== 'object' || Array.isArray(c)) {
+      throw new TypeError('condition row is not a plain record');
+    }
     return [valueTerm(c.text), verifierTerm(c)];
   });
   return sha256Json([CONDITION_PLAN_TAG, rows]);
