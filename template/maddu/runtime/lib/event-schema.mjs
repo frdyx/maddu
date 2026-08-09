@@ -146,7 +146,49 @@
 // reducer). Transcript import always omits pricingIdentity — a transcript
 // cannot distinguish api.anthropic.com from Bedrock/Vertex. Additive → minor
 // bump; baseline refresh at the next release.
-export const EVENT_CONTRACT_VERSION = '1.16.0';
+// 1.17.0 (2026-08-09, PR-1 receipt task-plan fingerprint) — VERIFICATION_RAN
+// gains DIRECT identity fields so two receipts for different test sets stop
+// being indistinguishable: planDigest / planTaskCount / tasksTruncated for
+// kind:'project-test', and conditionPlanDigest / conditionCount for
+// kind:'success-eval'. Identity is DIRECT, never nested: contractShape records
+// only direct data fields and generated schemas leave array items
+// unconstrained, so a nested `plan.digest` could be dropped later without a
+// MAJOR bump. The existing `conditions` array is deliberately UNCHANGED —
+// resolveSuccessView returns those rows verbatim to two public bridge
+// responses.
+//
+// WHY MINOR, since `data` is an OPEN object and declaring a field does narrow
+// what validates. This was reviewed, argued as MAJOR, and settled as MINOR:
+//
+//   - The argument for MAJOR proves too much. `data` is open on EVERY type, so
+//     if declaring a field is breaking then NO field can ever be added below
+//     major, and the scheme becomes major-only. Five prior bumps (1.9.0 and
+//     others) shipped exactly this shape as minor.
+//   - MAJOR should mean "something you depend on changed". Spending it on an
+//     addition destroys that signal: a consumer diffing the versions hunts for
+//     removals and finds none.
+//   - The distinction that matters is GENERIC vs DISTINCTIVE names. A generic
+//     name IS a real risk — which is why the bounded `tasks` diagnostics array
+//     is deliberately NOT declared: a plugin could plausibly carry its own
+//     `tasks` on its own kind, and typing it would have broken that payload.
+//     The five fields above are framework-minted names on a framework-owned
+//     event type. The load-bearing property is OWNERSHIP, not a fixed kind
+//     list: every in-tree emitter is the framework itself — recordVerification's
+//     callers (the test/self-test commands), success-eval, replay, and the
+//     heavy test harnesses — and NO plugin emits it. (The recency GATES are not
+//     emitters: project-test-recent and self-test-recent only READ receipts via
+//     readVerifiedEvents + recencyGateVerdict. Kinds
+//     observed across ALL trees at 2026-08-09: project-test, self-test,
+//     success-eval, replay, stress, upgrade-matrix. An earlier revision of this
+//     comment named only the first four, because the census that produced it
+//     excluded scripts/ — do not re-derive this list from a partial tree.)
+//     A payload the five fields could break would have been squatting on
+//     undefined framework namespace.
+//
+// If that reasoning is ever rejected, the fix is to change `classifyChange` so
+// narrowing-by-declaration reports major CONTRACT-WIDE — not to price one
+// release differently from its five predecessors. Additive → minor.
+export const EVENT_CONTRACT_VERSION = '1.17.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -343,7 +385,7 @@ export const EVENT_SCHEMA = {
   MUTATION_UNWITNESSED: { summary: "A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain.", data: { breachId: 'string', breachTs: 'string', exitCode: 'number|null', label: 'string', method: 'string|null', path: 'string|null', sessionId: 'string|null', sub: 'string|null', surface: 'string', verb: 'string|null', via: 'string' } },
   ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   VERIFICATION_STARTED: { summary: "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.", data: { kind: 'string', profile: 'string|null' } },
-  VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.", data: { allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?' } },
+  VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.", data: { conditionCount: 'number?', conditionPlanDigest: 'string?', planDigest: 'string?', planTaskCount: 'number?', tasksTruncated: 'boolean?', allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?' } },
   ANCHOR_STAMPED: { summary: "A spine receipt was stamped into the OpenTimestamps calendars as a new anchor.", data: { seq: 'number', payload_digest: 'string', calendars: 'array', proof_files: 'array' } },
   ANCHOR_UPGRADED: { summary: "An anchor's OpenTimestamps proof file changed (partial merge or completed Bitcoin attestation).", data: { seq: 'number', payload_digest: 'string', complete: 'boolean', proof_files: 'array' } },
   ASSURANCE_ASSESSED: { summary: "An operator-run consume ceremony recorded an assurance assessment — ledger convenience only, labeled non-authoritative by every consumer.", data: { subject_sha: 'string', receipt_digest: 'string', level: 'string', evidence: 'object', assessed_by: 'string', note: 'string?' } },

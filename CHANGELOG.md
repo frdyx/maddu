@@ -11,6 +11,42 @@ narrative summary.
 
 ---
 
+## [v1.119.0] · 2026-08-09 · verification receipts gain a task-plan fingerprint
+
+**Contract 1.17.0** (additive minor). No new verbs, no new gates, no new event
+types, no behaviour change.
+
+A `VERIFICATION_RAN` receipt recorded *that* something was verified but not
+*what was run*: `commands/test.mjs` discarded the runner's per-task array and
+`success-eval` mapped conditions to `{text,state}` only. Two `profile:'quick'`
+receipts were indistinguishable on the spine even when they selected entirely
+different test sets.
+
+- **`project-test` receipts** gain `planDigest`, `planTaskCount`,
+  `tasksTruncated` and a bounded `tasks` diagnostics array (100 rows / 32 KiB,
+  UTF-8 measured, rows carrying a command digest and never the command text).
+  The fingerprint covers the **selected** plan — including tasks a `--bail` run
+  never reached — because deriving identity from results would make two plans
+  sharing a first failing task identical.
+- **`success-eval` receipts** gain `conditionPlanDigest` and `conditionCount`.
+  The existing `conditions` array is untouched: `resolveSuccessView` returns
+  those rows verbatim to `/bridge/project-cockpit` and `/bridge/handoff`.
+- **`maddu test --json` is byte-identical** — the selected plan rides as a
+  non-enumerable property, so it never widened an existing public output.
+- **`scripts/test/event-schema.mjs --expect-change`/`--expect-bump`** assert the
+  contract classification *and* the version magnitude separately, before the
+  baseline refresh that would otherwise erase what they police.
+
+**What a fingerprint does not bind:** the resolved executable, `PATH`,
+environment, repository revision, `package.json` script bodies, runner
+configuration, or which tests a command discovers at runtime. Two `npm test`
+receipts can share a fingerprint while running different tests after a config
+change. It is a *task-plan fingerprint*, never "identity of what ran".
+
+Reviewed through 10 Codex diff rounds to CLEAN.
+
+---
+
 ## [v1.118.0] · 2026-08-06 · buzz-steals S4: cost provenance — priced only when provable
 
 **Cost provenance for `maddu cost`** (plan `pln_20260805152106_44d2` phase `s4-cost-provenance`, the block/buzz audit's NIP-AM accounting steal — the track's final phase; plan **Codex-SOUND after 6 review rounds**; diff **Codex-CLEAN after 5 review rounds**, findings **2 → 3 → 1 → 1 → CLEAN** — 7 fixed: 1 major, 6 minor, +1 advisory). Self-test **202/203** (the one red is the pre-existing local atlas architecture-drift — environmental, CI clean); 81 assertions across 2 new suites; contract **1.15.0 → 1.16.0**.

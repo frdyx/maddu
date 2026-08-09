@@ -1,6 +1,6 @@
 {
-  "version": "1.16.0",
-  "fingerprint": "23e0e71f",
+  "version": "1.17.0",
+  "fingerprint": "0cf0ae16",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1665,16 +1665,21 @@
         "data": {
           "allMet": "boolean?",
           "complete": "boolean",
+          "conditionCount": "number?",
+          "conditionPlanDigest": "string?",
           "conditions": "array?",
           "counts": "object|null",
           "kind": "string",
           "metCount": "number?",
           "objective": "string|null?",
           "pendingCount": "number?",
+          "planDigest": "string?",
+          "planTaskCount": "number?",
           "profile": "string|null",
           "result": "string",
           "setAt": "string|null?",
           "startedId": "string",
+          "tasksTruncated": "boolean?",
           "verifiable": "number?"
         }
       },

@@ -10,6 +10,68 @@ import { runWrapper } from './_tools.mjs';
 import { loadSecretScan, loadTools } from './_tools.mjs';
 import { loadSpineLib, envActingSid } from './_spine.mjs';
 import { isAdaptiveProjectTestArgs, runProjectTestCli, parseProjectTestArgs } from './_project-test-runner.mjs';
+import { loadLibOptional } from './_libroot.mjs';
+
+// Bounded diagnostics: 100 rows AND 32 KiB serialized, whichever binds first.
+// Config permits an unbounded task array with unbounded argument strings, and
+// the spine falls back to reading a whole line once it exceeds 64 KiB — an
+// unbounded receipt would burden verification, search and the cockpit forever.
+const TASK_ROW_CAP = 100;
+const TASK_BYTE_CAP = 32 * 1024;
+
+// Derive the task-plan fingerprint + bounded diagnostics from a completed run.
+// Identity is taken over the SELECTED plan; the rows are diagnostics only, so
+// truncating them never weakens the digest. Rows carry a command DIGEST, never
+// the command text — a command can carry a pasted credential, so the plaintext
+// simply never enters the append-only receipt.
+function deriveTaskPlan(captured, digest) {
+  const selected = Array.isArray(captured.selectedTasks) ? captured.selectedTasks : null;
+  // No selected plan (upgrade skew) or no digest lib (older install) → emit NOTHING.
+  // A partial or guessed identity is worse than an absent one.
+  if (!selected || !digest) return {};
+  const results = Array.isArray(captured.results) ? captured.results : [];
+  const rows = selected.map((t, i) => {
+    const r = results[i];
+    return {
+      id: t.id,
+      commandSha256: digest.commandDigest(t.command),
+      cwd: t.cwd,
+      // A selected task the bail cut short is present-but-unexecuted. That is a
+      // distinct fact from "row dropped by the byte budget" — never conflate them.
+      status: r ? r.status : 'not-run',
+      exitCode: r && typeof r.exitCode === 'number' ? r.exitCode : null,
+    };
+  });
+  // Stable prefix by the FULL (id, commandSha256, cwd) tuple. Sorting by id
+  // alone is not a total order — the config path can produce duplicate
+  // normalized ids from distinct raw keys ("x" and " x "), and a stable sort
+  // then falls back to input order, so reordering config would silently change
+  // which diagnostics survive truncation.
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const ordered = rows.slice().sort((a, b) =>
+    cmp(a.id, b.id) || cmp(a.commandSha256 ?? '', b.commandSha256 ?? '') || cmp(a.cwd ?? '', b.cwd ?? ''));
+  const kept = [];
+  let bytes = 2; // "[]"
+  for (const row of ordered.slice(0, TASK_ROW_CAP)) {
+    // UTF-8 BYTES, not UTF-16 code units. `.length` under-counts every non-ASCII
+    // character (a CJK id counts 1 but serializes to 3), so a row set measured
+    // under the cap could serialize well past it — and past the spine's 64 KiB
+    // whole-line-read threshold, which is the reason the cap exists.
+    // +1 for the separating comma, charged only BETWEEN rows — charging it for
+    // the first row too would reject a final row on an array that lands exactly
+    // on the cap without ever exceeding it.
+    const size = Buffer.byteLength(JSON.stringify(row), 'utf8') + (kept.length ? 1 : 0);
+    if (bytes + size > TASK_BYTE_CAP) break;
+    kept.push(row);
+    bytes += size;
+  }
+  return {
+    planDigest: digest.planFingerprint(selected),
+    planTaskCount: selected.length,
+    tasks: kept,
+    tasksTruncated: selected.length > kept.length,
+  };
+}
 
 async function resolveAdaptiveContext() {
   try {
@@ -117,6 +179,8 @@ export default async function testCmd(argv) {
     let code;
     if (recordVerification && spine && !isList && argsValid) {
       let captured = null;
+      // Resolved before the run so the sync derive() closure can use it.
+      const digestLib = await loadLibOptional('acceptance-digest.mjs');
       const out = await recordVerification(repoRoot, { spine, actor: sessionId, lane }, {
         kind: 'project-test', profile,
         run: async () => runProjectTestCli(argv, { repoRoot, onResult: (r) => { captured = r; } }),
@@ -125,6 +189,7 @@ export default async function testCmd(argv) {
           complete: captured.complete !== false,
           result: (captured.counts && captured.counts.fail === 0) ? 'pass' : 'fail',
           counts: captured.counts ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total } : null,
+          ...deriveTaskPlan(captured, digestLib),
         } : null,
       });
       code = out.result;

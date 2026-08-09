@@ -571,7 +571,7 @@ export async function runProjectTest(options = {}) {
   };
   if (plan.changedFiles.length) report.changedFiles = plan.changedFiles;
   if (options.report !== false) report.reportPaths = await writeReports(plan.repoRoot, report);
-  return {
+  const out = {
     ok: counts.fail === 0,
     exitCode: counts.fail === 0 ? 0 : 1,
     profile: plan.profile,
@@ -584,6 +584,23 @@ export async function runProjectTest(options = {}) {
     reportPaths: report.reportPaths || null,
     changedFiles: plan.changedFiles,
   };
+  // The SELECTED plan, independent of what executed. `results` is not a
+  // substitute: a --bail run stops at the first failure (above), so two plans
+  // sharing a first failing task but differing later would be indistinguishable
+  // if identity were derived from results.
+  //
+  // NON-ENUMERABLE on purpose. resultJson() is a bare JSON.stringify(result), so
+  // a plain property would widen `maddu test --json` — an existing public output
+  // — and would print raw commands for tasks that never ran. This is receipt
+  // identity for in-process callers, not part of the CLI contract. Frozen so a
+  // caller cannot reshape it after the fact.
+  Object.defineProperty(out, 'selectedTasks', {
+    value: Object.freeze(plan.tasks.map((t) => Object.freeze({
+      id: t.id, command: t.command, cwd: t.cwd,
+    }))),
+    enumerable: false, writable: false, configurable: false,
+  });
+  return out;
 }
 
 export function listText(plan) {

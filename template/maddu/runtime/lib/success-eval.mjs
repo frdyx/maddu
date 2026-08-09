@@ -302,6 +302,40 @@ export async function recordSuccessEvalStart(repoRoot, spineLib, { actor = null,
   } catch { return null; }
 }
 
+// Identity of the goal's DECLARED condition plan, for the receipt's direct
+// fields. Source is `goal.success` in declaration order — NOT `result.evaluated`
+// — so the digest describes what the operator declared, independent of what any
+// particular evaluation observed.
+//
+// Degrades to {} when the digest lib is unavailable (older install) rather than
+// emitting a partial identity: an absent field is honest, a wrong digest is not.
+// Loaded LAZILY, not as a static import. `maddu upgrade` applies updates to
+// EXISTING files before adding NEW ones (commands/upgrade.mjs), so there is a
+// window where this file is the new version and acceptance-digest.mjs does not
+// exist yet. A static import would make orient, status and the bridge fail to
+// load their module graph during that window; a lazy load degrades to omitting
+// identity, which is what the fallback below actually promises.
+let _digestMod;
+async function loadDigest() {
+  if (_digestMod === undefined) {
+    try { _digestMod = await import('./acceptance-digest.mjs'); }
+    catch { _digestMod = null; }
+  }
+  return _digestMod;
+}
+
+async function conditionPlanFields(goal) {
+  const mod = await loadDigest();
+  if (!mod?.conditionPlanFingerprint) return {};
+  const success = Array.isArray(goal?.success) ? goal.success : [];
+  try {
+    return {
+      conditionPlanDigest: mod.conditionPlanFingerprint(success),
+      conditionCount: success.length,
+    };
+  } catch { return {}; }
+}
+
 // Close the eval: append the VERIFICATION_RAN receipt referencing `startedId`.
 export async function recordSuccessEvalFinish(repoRoot, spineLib, { startedId, goal, result, actor = null, lane = null }) {
   const spine = spineLib && spineLib.spine ? spineLib.spine : spineLib;
@@ -316,7 +350,15 @@ export async function recordSuccessEvalFinish(repoRoot, spineLib, { startedId, g
         allMet: result.allMet, metCount: result.metCount,
         verifiable: result.verifiable, pendingCount: result.pendingCount,
         objective: (goal && goal.objective) ?? null, setAt: (goal && goal.setAt) ?? null,
+        // `conditions` keeps its EXACT existing shape. resolveSuccessView returns
+        // these rows verbatim and buildProjectCockpit/buildHandoff serialize them
+        // onto /bridge/project-cockpit and /bridge/handoff, so adding row fields
+        // would widen two public responses — and rewriting rows would strip
+        // legitimate existing extensions. Identity rides the DIRECT fields below
+        // instead, where the contract can actually hold it (contractShape only
+        // records direct data fields; array items are unconstrained).
         conditions: (result.evaluated || []).map((c) => ({ text: c.text || null, state: c.state })),
+        ...(await conditionPlanFields(goal)),
       },
     });
   } catch { /* a dangling STARTED remains → the readout stales the prior receipt */ }

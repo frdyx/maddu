@@ -12,6 +12,7 @@
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { EVENT_TYPES } from '../../template/maddu/runtime/lib/spine.mjs';
 import {
   EVENT_SCHEMA, EVENT_ENVELOPE, EVENT_CONTRACT_VERSION, validateSchema,
@@ -160,13 +161,93 @@ ok('envelope rejects a wrong-typed prev_hash', validateEnvelope({ v: 1, id: 'e',
 // committed baseline is the last published contract; a silent shape change
 // (fingerprint moved, version didn't) fails here. ──
 let baseline = null;
-try { baseline = JSON.parse(await readFile(new URL('./__fixtures__/event-contract-baseline.json', import.meta.url), 'utf8')); } catch { /* baseline stays null */ }
+// MADDU_CONTRACT_BASELINE is a TEST SEAM (mirrors MADDU_CI_PROFILE): it lets the
+// flag suite drive states this repo is not currently in — notably one where the
+// SHAPE change and the VERSION bump differ, which is the only way to prove the
+// bump assertion reads vd.bump and not vd.required. Unset in every normal run.
+const baselinePath = process.env.MADDU_CONTRACT_BASELINE
+  ? pathToFileURL(process.env.MADDU_CONTRACT_BASELINE)
+  : new URL('./__fixtures__/event-contract-baseline.json', import.meta.url);
+try { baseline = JSON.parse(await readFile(baselinePath, 'utf8')); } catch { /* baseline stays null */ }
 ok('contract baseline present with a shape', baseline !== null && !!baseline.shape);
 if (baseline) {
   const vd = versionDiscipline(baseline);
   ok('contract matches baseline OR version bumped by the required magnitude', vd.ok,
     vd.ok ? '' : `${vd.required} change since baseline ${vd.baselineVersion} but bump was ${vd.bump} — set EVENT_CONTRACT_VERSION accordingly, then \`node scripts/refresh-event-contract-baseline.mjs\` (${vd.change.reasons?.slice(0, 3).map((r) => r.why).join('; ')})`);
   ok('fingerprint is deterministic', contractFingerprint() === contractFingerprint());
+
+  // `--expect-change <level>` — assert the CLASSIFICATION, not merely that the
+  // bump was sufficient. The `vd.ok` check above passes for any bump >= what is
+  // required, so a correct additive change and an over-sized one look identical
+  // and `required` is never surfaced on success. A release running
+  // `--expect-change minor` proves the shape moved additively and no further,
+  // BEFORE the baseline is refreshed (refreshing first would overwrite the very
+  // change this polices).
+  // STRICT argv parsing. indexOf-based scanning let assertion-LOOKING input
+  // pass silently: a typo (--expect-bunp), a duplicate (--expect-change twice),
+  // an --expect-bump=major equals-form, and an orphaned --expect-bump all
+  // exited 0 while asserting nothing. A flag that looks like an assertion and
+  // silently asserts nothing is worse than no flag.
+  const EXPECT_FLAGS = new Set(['--expect-change', '--expect-bump']);
+  const seen = new Map();
+  const argvTail = process.argv.slice(2);
+  for (let i = 0; i < argvTail.length; i++) {
+    const tok = argvTail[i];
+    if (!tok.startsWith('--')) {
+      console.error(`[FAIL] unexpected argument: ${tok}`);
+      process.exit(2);
+    }
+    if (tok.includes('=')) {
+      console.error(`[FAIL] ${tok.split('=')[0]} must be given as two tokens, not --flag=value`);
+      process.exit(2);
+    }
+    if (!EXPECT_FLAGS.has(tok)) {
+      console.error(`[FAIL] unknown flag: ${tok}`);
+      process.exit(2);
+    }
+    if (seen.has(tok)) {
+      console.error(`[FAIL] ${tok} given more than once`);
+      process.exit(2);
+    }
+    const val = argvTail[i + 1];
+    if (val === undefined || val.startsWith('--')) {
+      console.error(`[FAIL] ${tok} needs a value`);
+      process.exit(2);
+    }
+    seen.set(tok, val);
+    i++;
+  }
+  if (seen.has('--expect-bump') && !seen.has('--expect-change')) {
+    console.error('[FAIL] --expect-bump requires --expect-change');
+    process.exit(2);
+  }
+  if (seen.has('--expect-change')) {
+    // TWO DIFFERENT DOMAINS. classifyChange (the SHAPE) returns
+    // none|minor|major — a patch is a summary-only edit invisible to
+    // contractShape. bumpMagnitude (the VERSION) can legitimately return patch,
+    // so a patch-only contract release must be able to declare it.
+    const validShape = ['none', 'minor', 'major'];
+    const validBump = ['none', 'patch', 'minor', 'major'];
+    const want = seen.get('--expect-change');
+    if (!validShape.includes(want)) {
+      console.error(`[FAIL] --expect-change needs one of ${validShape.join('|')}, got ${want}`);
+      process.exit(2);
+    }
+    ok(`contract change classifies as ${want}`, vd.required === want,
+      `classified ${vd.required} (baseline ${vd.baselineVersion} → ${EVENT_CONTRACT_VERSION})`);
+
+    // `vd.required` is what the SHAPE demands; `vd.bump` is what the version
+    // actually moved. ALWAYS asserted once --expect-change is given: gating it
+    // on `want !== 'none'` left the guard inert in exactly the post-refresh mode
+    // every release runs in.
+    const wantBump = seen.has('--expect-bump') ? seen.get('--expect-bump') : want;
+    if (!validBump.includes(wantBump)) {
+      console.error(`[FAIL] --expect-bump needs one of ${validBump.join('|')}, got ${wantBump}`);
+      process.exit(2);
+    }
+    ok(`version bump magnitude is exactly ${wantBump}`, vd.bump === wantBump,
+      `bumped ${vd.bump} for a ${vd.required} shape change`);
+  }
 }
 
 // ── SEMVER MAGNITUDE: classification + discipline catch under-sized bumps (the
