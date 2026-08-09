@@ -82,13 +82,13 @@ The detailed form of those three steps:
 Long work should heartbeat every meaningful step:
 
 ```bash
-maddu session heartbeat --session-id <id> --focus "<what changed / what's next>"
+maddu session heartbeat --session <id> --focus "<what changed / what's next>"
 ```
 
 Before stopping your CLI session:
 
 ```bash
-maddu session close --session-id <id> --focus "<handoff summary>"
+maddu session close --session <id> --focus "<handoff summary>"
 ```
 
 ## The slice-stop ritual

@@ -27,8 +27,25 @@ async function resolveSession(flags, repoRoot, sessionActive) {
   const g = await loadIdGrammar();
   // Explicit --session: OWNED-but-malformed is a hard error (PR-B), never a
   // silent fall-through. `Object.hasOwn` catches bare `--session` / `--session=`.
-  if (Object.hasOwn(flags, 'session')) {
-    const v = flags.session;
+  // `--session-id` is accepted as an ALIAS for `--session`. It is the spelling
+  // the shipped worker brief (template/maddu/CLAUDE.md) and /maddu-cancel have
+  // documented all along, and until now NOTHING read it: the parser accepts any
+  // `--key` (_args.mjs) and no command validates the key set, so an agent
+  // closing its own session with the documented flag fell silently through to
+  // the env var and then the ambient active-session cache — and closed SOMEONE
+  // ELSE'S SESSION, exit 0, no diagnostic. Accepting the alias repairs every
+  // already-deployed agent; the docs now say `--session`.
+  const explicitKeys = ['session', 'session-id'].filter((k) => Object.hasOwn(flags, k));
+  if (explicitKeys.length) {
+    const vals = [...new Set(explicitKeys.map((k) => flags[k]))];
+    if (vals.length > 1) {
+      // Two spellings that disagree is an ambiguous instruction, and guessing
+      // which one the caller meant is how the original defect closed the wrong
+      // session in the first place.
+      console.error(`--session and --session-id disagree (${vals.join(' vs ')}) — pass exactly one.`);
+      process.exit(2);
+    }
+    const v = vals[0];
     if (g) {
       if (g.isRefId(v)) return v;
       throw new g.InvalidExplicitId('session');

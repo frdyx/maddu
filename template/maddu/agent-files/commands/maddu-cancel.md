@@ -21,7 +21,7 @@ Procedure:
    operator-cancel."`
 4. Release the lane (if claimed): `./maddu/run lane release --lane
    <lane>`.
-5. Close the session: `./maddu/run session close --session-id <id>
+5. Close the session: `./maddu/run session close --session <id>
    --focus "cancelled: $ARGUMENTS"`.
 
 Discipline:

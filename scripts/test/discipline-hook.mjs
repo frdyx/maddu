@@ -55,9 +55,18 @@ try {
     const hso = json && json.hookSpecificOutput;
     ok('Edit + no session → permissionDecision:deny', !!hso && hso.permissionDecision === 'deny', out.trim().slice(0, 80));
     const reason = String((hso && hso.permissionDecisionReason) || '');
-    // The honest recovery for an unbound running session is a RESTART (the CLI
-    // cannot bind it); `maddu register` is only the fallback for "no session at all".
-    ok('deny reason leads with the restart recovery', /restart this session/i.test(reason), reason.slice(0, 90));
+    // CORRECTED 2026-08-09. This assertion previously pinned "restart this
+    // session" and called it "the honest recovery ... the CLI cannot bind it".
+    // That was FALSE, and pinning it made the falsehood self-defending: the
+    // Claude session_id is persisted in .maddu/state/discipline/sessions.json
+    // and `hooks fire session-start` takes it on STDIN, so an unbound running
+    // session is recoverable without a restart (verified in the act). The old
+    // wording cost several sessions a needless restart. What must be pinned is
+    // that the message names a recovery the operator can actually perform, and
+    // that it does NOT resurrect the restart-is-required claim.
+    ok('deny reason names the stdin hook recovery', /hooks fire session-start/.test(reason), reason.slice(0, 120));
+    ok('deny reason points at the sessions.json lookup', /sessions\.json/.test(reason), reason.slice(0, 120));
+    ok('deny reason does NOT claim a restart is required', !/restart this session/i.test(reason), reason.slice(0, 120));
     ok('deny reason still names maddu register as the fallback', /maddu register/.test(reason));
     ok('deny reason event name is PreToolUse', !!hso && hso.hookEventName === 'PreToolUse');
   }

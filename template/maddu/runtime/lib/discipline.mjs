@@ -246,7 +246,7 @@ export function decide({ thresholds, state, counter, toolCtx }) {
   // Ordered preconditions: session → lane → goal/plan → slice-stop → commit.
   if (!state.session?.registered) {
     return mk(cap('block'), 'session', 'no active Máddu session governs this work',
-      'restart this session so the SessionStart hook binds it (an unbound running session — e.g. after a mid-session hooks install/upgrade — cannot be healed from the CLI: the hook never inherits an exported MADDU_SESSION_ID). If no Máddu session exists at all, run `maddu register` first.');
+      'recover WITHOUT restarting: find your Claude session_id in .maddu/state/discipline/sessions.json (the key whose madduId is yours), then re-fire the hook with it — `echo \'{"session_id":"<uuid>","cwd":"<repo>"}\' | maddu hooks fire session-start` — which mints a fresh session AND binds it. A plain `maddu register` cannot heal this: it never sees the Claude session_id, which arrives only on hook stdin. If no Máddu session exists at all, `maddu register` is enough.');
   }
   if (!state.lane?.claimed) {
     return mk(cap('block'), 'lane', 'editing without a claimed lane (hard rule #8)',
