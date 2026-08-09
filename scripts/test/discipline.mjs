@@ -102,6 +102,35 @@ ok('no session → block (strict)', d(strict, { ...good, session: { registered: 
 ok('no lane → block (strict)', d(strict, { ...good, lane: { claimed: false } }).blocker === 'lane');
 ok('session beats lane in ordering', d(strict, { ...good, session: { registered: false }, lane: { claimed: false } }).blocker === 'session');
 
+// ── unobservable projection must SOFTEN, never harden (v1.120.0) ────────────
+//
+// gatherRitualState used to swallow a project() failure into `proj = {}`, which
+// makes sessions/claims/stops read as EMPTY. An unreadable projection therefore
+// presented as "no session, no lane, no slice-stop" and BLOCKED every write,
+// telling the operator they had skipped rituals they may well have performed.
+// The module's own contract says an input that cannot be resolved is UNKNOWN,
+// never silently measured — the commit gate has always worked that way. These
+// pin the ritual half to the same rule.
+const unobserved = {
+  ritualObserved: false,
+  session: { registered: false }, lane: { claimed: false }, goalOrPlan: { active: false },
+  slice: { ageMin: 999 },
+  commit: { newDirtyFiles: 0, dirtyAgeMin: 0, slicedButDirty: false },
+};
+ok('unobservable projection does NOT block on session', d(strict, unobserved, { editsSinceSlice: 99 }).blocker !== 'session');
+ok('unobservable projection does NOT block on lane', d(strict, unobserved, { editsSinceSlice: 99 }).blocker !== 'lane');
+ok('unobservable projection does NOT block on goal/plan', d(strict, unobserved, { editsSinceSlice: 99 }).blocker !== 'goal/plan');
+ok('unobservable projection does NOT block on slice-stop', d(strict, unobserved, { editsSinceSlice: 99 }).blocker !== 'slice-stop');
+ok('unobservable projection with a clean tree → ok', d(strict, unobserved, { editsSinceSlice: 99 }).verdict === 'ok');
+// The commit gate keeps running: it observes the WORKING TREE directly, which
+// is a different source from the projection, so suppressing it too would be
+// over-correction rather than honesty.
+ok('unobservable projection STILL enforces the commit gate',
+  d(strict, { ...unobserved, commit: { newDirtyFiles: 99, dirtyAgeMin: 999, slicedButDirty: false } }, { editsSinceSlice: 99 }).blocker === 'commit');
+// And the normal path is untouched — without the flag, absence still blocks.
+ok('an OBSERVED empty projection still blocks on session (no regression)',
+  d(strict, { ...unobserved, ritualObserved: true }, { editsSinceSlice: 99 }).blocker === 'session');
+
 // goal/plan
 ok('strict no goal/plan → block now', d(strict, { ...good, goalOrPlan: { active: false } }).verdict === 'block');
 ok('standard no goal/plan within grace → warn', d(standard, { ...good, goalOrPlan: { active: false } }, { editsSinceSlice: 0, goalplanAgeEdits: 0, goalplanAgeMin: 0 }).verdict === 'warn');
