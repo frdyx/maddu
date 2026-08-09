@@ -19,7 +19,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -127,6 +127,19 @@ ok('an unknown flag -> harness error', run('--totally-unknown', 'x') === 2);
 ok('a bare positional argument -> harness error', run('nonsense') === 2);
 ok('a flag whose value is another flag -> harness error',
   run('--expect-change', '--expect-bump') === 2);
+
+// The suite runs on every self-test, so a leaked mkdtemp accumulates one
+// directory per run forever. Cleaned unconditionally, after the assertions.
+// NOT a bare catch. An earlier revision swallowed a ReferenceError here — rmSync
+// was never imported — so the cleanup looked applied while never running, and
+// the suite leaked one directory per self-test run. A catch that cannot tell
+// "cleanup failed" from "cleanup was impossible" hides its own absence.
+try {
+  rmSync(dir, { recursive: true, force: true });
+} catch (e) {
+  console.error(`[FAIL] temp cleanup did not run: ${e.message}`);
+  failed++;
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
