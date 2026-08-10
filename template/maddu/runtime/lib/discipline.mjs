@@ -439,26 +439,28 @@ async function readSessionsMapStrict(p) {
   return parsed;
 }
 async function writeJson(p, obj) {
+  // Tracked outside the try so the reclaim below can see it: EVERY failure
+  // after the name is chosen can leave the file behind — writeFile can die
+  // mid-write (ENOSPC, quota) and rename can fail on a target we cannot
+  // replace (read-only file, cross-device). The name is unique per attempt,
+  // so an orphan per call accumulates for as long as the condition lasts.
+  let tmp = null;
   try {
     await mkdir(disciplineDirOf(p), { recursive: true });
     // Atomic replace (UNIQUE temp + rename — a shared temp name lets two
     // concurrent writers consume each other's file) so a lock-free reader
     // never observes a torn half-written file while a writer is mid-update.
-    const tmp = `${p}.tmp.${process.pid}-${randomBytes(4).toString('hex')}`;
+    tmp = `${p}.tmp.${process.pid}-${randomBytes(4).toString('hex')}`;
     await writeFile(tmp, JSON.stringify(obj, null, 2));
-    try {
-      await rename(tmp, p);
-    } catch (e) {
-      // The rename is what can fail on a target we cannot replace (read-only
-      // file, cross-device, disk full). The temp name is UNIQUE per attempt,
-      // so leaving it behind accumulates one orphan per call for as long as
-      // the condition lasts. Reclaim it, then fail exactly as before — the
-      // caller's false is unchanged and the target is still untouched.
-      try { await rm(tmp, { force: true }); } catch { /* orphan beats a throw */ }
-      throw e;
-    }
+    await rename(tmp, p);
+    tmp = null;   // renamed away — there is nothing left to reclaim
     return true;
-  } catch { return false; }
+  } catch {
+    // force:true so a temp that was never created is a no-op. The caller's
+    // false and the untouched target are exactly as before.
+    if (tmp) { try { await rm(tmp, { force: true }); } catch { /* orphan beats a throw */ } }
+    return false;
+  }
 }
 function disciplineDirOf(filePath) { return filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))); }
 
@@ -652,6 +654,25 @@ export async function withBindingTransaction(repoRoot, fn) {
 export async function bindingMapHealthy(repoRoot) {
   try { await readSessionsMapStrict(sessionsMapPath(repoRoot)); return true; }
   catch { return false; }
+}
+
+// Writability PROOF for callers that must not spend an IRREVERSIBLE side
+// effect — an append to the append-only spine — before knowing the binding
+// they will publish afterwards can actually be written. Readability is not
+// writability: a valid but read-only file, a read-only directory, and a full
+// disk all satisfy bindingMapHealthy and then fail the bind.
+// The only way to prove a filesystem write is to perform one, so this rewrites
+// the map's OWN current content: on success nothing new is published (a
+// missing map is materialized as an empty one, which still binds no one), and
+// the round trip exercises the exact mkdir + temp + rename path a real bind
+// takes. Never throws; false covers unreadable and unwritable alike.
+// 'In' convention: the caller MUST hold the binding lock. Under that lock the
+// no-op rewrite cannot clobber a concurrent bind; without it, it could.
+export async function bindingMapWritableIn(repoRoot) {
+  try {
+    const p = sessionsMapPath(repoRoot);
+    return await writeJson(p, await readSessionsMapStrict(p));
+  } catch { return false; }
 }
 
 // Unlocked inner bind — caller MUST hold the binding lock. `boundAt` is real

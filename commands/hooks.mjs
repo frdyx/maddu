@@ -345,9 +345,10 @@ async function mintFreshBoundSession(repoRoot, {
       return null;
     }
 
-    // Register + bind as ONE transaction, the same shape as fireSessionStart:
-    // the bind commits while the close lock still protects the liveness proof,
-    // so no interleaved close can kill the sid in the gap.
+    // Prove-writable + register + bind as ONE transaction, holding the same
+    // two locks fireSessionStart does: the bind commits while the close lock
+    // still protects the liveness proof, so no interleaved close can kill the
+    // sid in the gap.
     const bt = await disc.withBindingTransaction(repoRoot, async () =>
       sessionLifecycle.withCloseLock(repoRoot, async () => {
         // Revalidate the no-live decision UNDER the lock (r1 F1). The caller
@@ -360,67 +361,77 @@ async function mintFreshBoundSession(repoRoot, {
         // (unreadable bindings map or projection) propagates to the outer
         // catch → null, matching the rule that an unobservable state never
         // mints.
-        // Read the live set ONCE, under the lock: it answers both questions
-        // below — is our own binding already healed, and is a candidate id
-        // free. Both locks are held and every registration path takes the
-        // close lock, so no session can become active between this read and
-        // the bind; the answer cannot go stale inside the transaction.
+        // The live set is read ONCE and answers two questions: is our own
+        // binding already healed, and is a candidate id free. Both locks are
+        // held and every registration path takes the close lock, so no session
+        // can become active between this read and the register below.
         const now = await projections.project(repoRoot);
         const live = Array.isArray(now.activeSessions) ? now.activeSessions : [];
         const prior = await disc.resolveMadduSession(repoRoot, claudeId);
         if (refOk(prior) && live.some((s) => s && s.id === prior)) {
           return { sid: prior, created: false };
         }
-        // BIND BEFORE REGISTER (r6 F1). The bind is the only failure-prone
-        // FILE mutation in a mint; the register is an append to an append-only
-        // spine, which cannot be taken back. Doing the risky write FIRST makes
-        // every unwritable-map mode — corrupt content, read-only file,
-        // read-only directory, disk full — fail with ZERO appends by
-        // CONSTRUCTION. A probe cannot deliver that: bindingMapHealthy proves
-        // the map is readable, never that it is writable.
-        // boundAt is stamped here, still inside both locks, so the SessionEnd
-        // <10s freshness guard covers the whole mint exactly as before.
-        // Crash window: dying between the bind and the register leaves a
-        // binding to a session that was never recorded, which resolution reads
-        // as dead — the next call re-mints and overwrites it. Self-healing,
-        // and still append-free.
-        // Pick an id that collides with no ACTIVE session BEFORE binding to it
-        // (r7 F2). The binding becomes visible to lock-free resolvers the
-        // instant it is written, so binding first and discovering the clash at
-        // registration would briefly point this claude id at someone else's
-        // LIVE session — and a failed unbind would leave it pointing there.
-        // The uniqueness check moves ahead of the write for that reason.
-        // Bounded: three draws, then give up rather than spin.
-        let sid = null;
-        for (let attempt = 0; attempt < 3 && !sid; attempt++) {
-          const cand = spine.genSessionId();
-          if (!live.some((s) => s && s.id === cand)) sid = cand;
-        }
-        if (!sid) return null;
-        const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, sid);
-        if (bound === false) return null;
-        const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { id: sid, makeEvent });
-        if (reg.status !== 'registered') {
-          // Leave no binding pointing at a session the spine never recorded.
-          // Best-effort: a failed unbind lands in the same self-healing state
-          // as the crash window above.
-          try {
-            if (typeof disc.unbindClaudeSessionIn === 'function') {
-              await disc.unbindClaudeSessionIn(repoRoot, claudeId, sid);
-            }
-          } catch { /* self-healing — never throw out of the transaction */ }
+        // ORDER: prove writable → register → bind (r8). Three invariants, in
+        // priority order:
+        //   1. NEVER publish a binding to a session that does not exist. The
+        //      binding is visible to lock-free resolvers the instant it lands,
+        //      and pre-compact resolves bindings WITHOUT a liveness check — a
+        //      binding to a never-registered session makes it append a
+        //      checkpoint attributed to a session that never existed, false
+        //      forever on an append-only spine. So the bind goes LAST.
+        //   2. NEVER append before the map has proven writable. The append
+        //      cannot be taken back; the bind that follows it can still fail.
+        //      Readability says nothing about this, so the proof performs a
+        //      real write of the map's own content, publishing nothing.
+        //   3. The single bind IS the completion stamp. boundAt therefore
+        //      dates from when the mint finished, which is what the SessionEnd
+        //      <10s freshness guard needs — no re-stamp, nothing to fail
+        //      silently.
+        // Crash windows are now benign in one direction only: dying before the
+        // bind leaves a registered-but-unbound session, which is truthful on
+        // the spine and sweepable by the janitor.
+        // Skew: an older installed lib without the proof falls through and
+        // keeps the r6/r7 behavior (a bounded rollback pair at worst) rather
+        // than losing the mint entirely.
+        if (typeof disc.bindingMapWritableIn === 'function'
+            && !(await disc.bindingMapWritableIn(repoRoot))) {
           return null;
         }
-        // Re-stamp boundAt now that the mint has actually COMPLETED (r7 F1).
-        // The first stamp dates from before the register, whose append can
-        // stall on lock contention; if the whole mint outran 10s, a SessionEnd
-        // arriving right after this transaction would read the binding as old
-        // enough to close — killing the session the mint just created. The
-        // <10s freshness guard has to measure from completion, not from start.
-        // Best-effort: the map just proved writable, and a failed re-stamp only
-        // returns the pre-r7 window.
-        try { await disc.bindClaudeSessionIn(repoRoot, claudeId, sid); }
-        catch { /* the earlier stamp stands */ }
+        // Draw until an id is free. The cheap pre-check skips ids that clash
+        // with a LIVE session; the registrar checks against ALL history, so a
+        // same-second collision with a CLOSED session comes back as 'exists'
+        // and must be redrawn rather than abandoned (r8 F3). Nothing has been
+        // published at this point, so a retry costs nothing. Bounded at three
+        // draws — a persistent clash means something is wrong, not busy.
+        let sid = null, reg = null;
+        for (let attempt = 0; attempt < 3 && !sid; attempt++) {
+          const cand = spine.genSessionId();
+          if (live.some((s) => s && s.id === cand)) continue;
+          const r = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { id: cand, makeEvent });
+          if (r.status === 'registered') { sid = cand; reg = r; break; }
+          if (r.status === 'exists') continue;   // historical collision → redraw
+          return null;                           // invalid-id / spine-corrupt / unknown
+        }
+        if (!sid) return null;
+        // The completion stamp. A false here means the map turned unwritable
+        // between the proof and now — rare, and bounded to ONE rollback pair
+        // because the NEXT call fails at the proof above and appends nothing.
+        // Roll the registration back so the spine does not carry a session no
+        // caller can reach (In-variant: both locks are still held).
+        const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, sid);
+        if (bound === false) {
+          try {
+            if (typeof sessionLifecycle.closeSessionIfActiveIn === 'function'
+                && spine.EVENT_TYPES.SESSION_CLOSED) {
+              await sessionLifecycle.closeSessionIfActiveIn(repoRoot, {
+                sessionId: sid,
+                eventType: spine.EVENT_TYPES.SESSION_CLOSED,
+                data: { handoff: { summary: 'recovery mint rolled back: binding became unwritable after the write proof', auto: true } },
+              });
+            }
+          } catch { /* rollback is best-effort — the janitor sweeps the leak */ }
+          return null;
+        }
         if (sessionActive && sessionActive.writeActiveSession) {
           await sessionActive.writeActiveSession(repoRoot, {
             sessionId: sid,
