@@ -301,6 +301,17 @@ async function mintFreshBoundSession(repoRoot, {
       }
     } catch { baseObs = null; }
 
+    // Test seam (session-mint.mjs concurrency case): hold between the no-live
+    // decision and the transaction so a racing second caller provably reaches
+    // the same decision before either takes the lock — the under-lock
+    // revalidation is then the ONLY thing standing between this race and a
+    // double-mint. Inert without the env var; capped so an ambient value can
+    // never wedge the hook.
+    const holdMs = Number(process.env.MADDU_TEST_MINT_HOLD_MS || 0);
+    if (Number.isFinite(holdMs) && holdMs > 0) {
+      await new Promise((r) => setTimeout(r, Math.min(holdMs, 5000)));
+    }
+
     // Register + bind as ONE transaction, the same shape as fireSessionStart:
     // the bind commits while the close lock still protects the liveness proof,
     // so no interleaved close can kill the sid in the gap.

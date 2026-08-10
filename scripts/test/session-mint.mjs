@@ -312,17 +312,23 @@ async function main() {
     }
   }
 
-  // ── 10. concurrent mint race (Codex r1 F1): two simultaneous PreToolUse
-  // calls for the SAME bound-but-dead identity must converge on exactly ONE
-  // fresh session — the loser revalidates under the binding lock and reuses
-  // the winner's mint instead of double-minting and orphaning it. ──────────
+  // ── 10. concurrent mint race (Codex r1 F1, rendezvous per r2): two
+  // simultaneous PreToolUse calls for the SAME bound-but-dead identity must
+  // converge on exactly ONE fresh session — the loser revalidates under the
+  // binding lock and reuses the winner's mint instead of double-minting and
+  // orphaning it. The MADDU_TEST_MINT_HOLD_MS seam holds each caller between
+  // its no-live decision and the transaction, so BOTH provably decide to
+  // mint before either takes the lock — without it the first child can
+  // finish before the second decides, and the case would pass against a
+  // TOCTOU-broken build (Codex r2). ─────────────────────────────────────────
   {
     const repo = await freshRepo('maddu-mint-race-'); repos.push(repo);
     const sidG = await startSession(repo, 'claude-G');
     await closeSession(repo, sidG);
+    const HOLD = { MADDU_TEST_MINT_HOLD_MS: '2500' };
     const [r1, r2] = await Promise.all([
-      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G')),
-      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G')),
+      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G'), HOLD),
+      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G'), HOLD),
     ]);
     for (const [i, r] of [[1, r1], [2, r2]].map(([i, r]) => [i, parseHook(r.out)])) {
       ok(`concurrent mint: call ${i} not blocked on session`, !(r.deny && SESSION_DENY_RE.test(r.reason)), r.reason.slice(0, 100));
