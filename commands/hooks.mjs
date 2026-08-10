@@ -230,6 +230,110 @@ async function hookFireNoop(reason) {
   } catch {}
 }
 
+// PreToolUse recovery mint (B1/B2). The caller carries a validated Claude
+// session id but has NO live Máddu session: its SessionStart binding points at
+// a session someone else's SessionEnd already closed, or the sid it inherited
+// through the environment is dead. The only sound recovery is to MINT a fresh
+// session bound to this claude id — ADOPTING an existing one (the active-session
+// cache, the newest live session) was rejected as unsound (audit P2 F11),
+// because it lets an unbound caller record its work under another agent's
+// identity.
+//
+// FAIL-SOFT in every direction: a helper missing from an older installed
+// runtime, a busy lock, or any throw returns null and the caller degrades to
+// the pre-fix resolution. A mint must never be why a tool call is blocked.
+async function mintFreshBoundSession(repoRoot, {
+  claudeId, workRoot, disc, spine, projections, sessionLifecycle, sessionActive,
+}) {
+  try {
+    // Version skew: without the FULL register+bind transaction, a mint would
+    // be unbound or unrecorded — both worse than no mint — so refuse outright
+    // rather than half-perform it.
+    if (!claudeId || !disc || !spine || !sessionLifecycle) return null;
+    if (typeof disc.withBindingTransaction !== 'function') return null;
+    if (typeof disc.bindClaudeSessionIn !== 'function') return null;
+    if (typeof sessionLifecycle.registerSessionUniqueIn !== 'function') return null;
+    if (typeof sessionLifecycle.withCloseLock !== 'function') return null;
+    if (typeof sessionLifecycle.isLockFailed !== 'function') return null;
+    if (!spine.EVENT_TYPES || !spine.EVENT_TYPES.SESSION_AUTO_REGISTERED) return null;
+
+    const label = basename(repoRoot) || 'agent';
+    // CP5 (PR-B) applies here as at SessionStart: an ambient parent is
+    // grammar-gated + existence-checked, and an unusable one drops the LINK,
+    // never the mint.
+    let parentEnv = null;
+    try { parentEnv = await resolveParentId(repoRoot, null, { projections }); }
+    catch { parentEnv = null; }
+    const makeEvent = (sessionId) => ({
+      type: spine.EVENT_TYPES.SESSION_AUTO_REGISTERED,
+      actor: sessionId,
+      lane: null,
+      data: {
+        sessionId,
+        parentSessionId: parentEnv,
+        // Provenance marker (SessionStart writes 'cli'): a recovery mint stays
+        // distinguishable on the spine, so a RUN of them reads as the
+        // lifecycle defect it compensates for and not as normal traffic.
+        source: 'pretooluse-mint',
+        label,
+        role: 'implementer',
+      },
+    });
+
+    // Register + bind as ONE transaction, the same shape as fireSessionStart:
+    // the bind commits while the close lock still protects the liveness proof,
+    // so no interleaved close can kill the sid in the gap.
+    const bt = await disc.withBindingTransaction(repoRoot, async () =>
+      sessionLifecycle.withCloseLock(repoRoot, async () => {
+        const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { makeEvent });
+        if (reg.status !== 'registered') return null;
+        await disc.bindClaudeSessionIn(repoRoot, claudeId, reg.sessionId);
+        if (sessionActive && sessionActive.writeActiveSession) {
+          await sessionActive.writeActiveSession(repoRoot, {
+            sessionId: reg.sessionId,
+            registeredAt: reg.event ? reg.event.ts : null,
+            role: 'implementer',
+            label,
+            lane: null,
+          });
+        }
+        return reg.sessionId;
+      }));
+    // Either lock busy → null. Deliberately NOT fireSessionStart's
+    // register-WITHOUT-binding fallback: an unbound mint leaves the caller
+    // still unbound, so the next tool call mints again — a session storm, one
+    // per call, for as long as the lock stays hot. Letting legacy behavior
+    // stand for this single call is the far cheaper failure.
+    if (sessionLifecycle.isLockFailed(bt)) return null;
+    if (disc.isBindingLockFailed && disc.isBindingLockFailed(bt)) return null;
+    if (typeof bt !== 'string' || !bt) return null;
+    const sid = bt;
+
+    // Seed the discipline baseline exactly as fireSessionStart's created path
+    // does. Without it the fresh sid inherits the whole pre-existing dirty
+    // tree as its OWN new dirt, and the commit gate could block the very call
+    // this mint just unblocked. Best-effort: a skipped observation leaves
+    // baselineInit unset, which the first gate call seeds fail-open.
+    try {
+      if (disc.mutateCounter && disc.dirtyFilesDetailed && workRoot) {
+        const obs = await disc.dirtyFilesDetailed(workRoot);
+        if (obs.ok) {
+          await disc.mutateCounter(repoRoot, sid, (c) => {
+            c.dirtyBaseline = obs.paths.slice();
+            c.dirtyFirstSeen = [];
+            c.firstDirtyTs = null;
+            c.baselineInit = true;
+            c.workRoot = workRoot;
+            c.dirtyV = 2;
+            return c;
+          });
+        }
+      }
+    } catch { /* baseline capture is best-effort */ }
+    return sid;
+  } catch { return null; /* never throw into the gate */ }
+}
+
 async function fireSessionStart() {
   let note = 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.';
   // Hoisted so the post-containment verdict below can see whether a session
@@ -523,7 +627,7 @@ export default async function hooks(argv) {
         // Load the discipline lib BEFORE reading/parsing stdin so a malformed-input
         // throw still lands in the catch with `disc` available to witness (F6).
         disc = await loadLib('discipline.mjs');
-        const { paths, projections, spine } = await loadSpineLib();
+        const { paths, projections, spine, sessionLifecycle, sessionActive } = await loadSpineLib();
         repoRoot = await resolveRepoRoot(paths);
         seamThrow('handler');
         let raw = '';
@@ -549,21 +653,50 @@ export default async function hooks(argv) {
           : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
         if (kind === 'read' || kind === 'remedy') process.exit(0);
 
-        // CENTRALIZED acting-sid resolution (v1.111.0): validated ONCE, then
-        // every consumer — auto-claim, enforcement, the witness path — uses
-        // the SAME result, so an invalid env value or legacy nonconforming
-        // binding can never produce a lane claim or witness event upstream of
-        // the check. Precedence: env → SessionStart binding. NO active-
-        // session-cache fallback (audit P2 F11): an unbound Claude caller
-        // must stay unbound rather than inherit the cached active session.
+        // CENTRALIZED acting-sid resolution (v1.111.0), LIVENESS-AWARE since
+        // B1/B2: validated ONCE, then every consumer — auto-claim, enforcement,
+        // the witness path — uses the SAME result, so an invalid env value or
+        // legacy nonconforming binding can never produce a lane claim or
+        // witness event upstream of the check. Precedence is by LIVENESS
+        // first, source second: a grammar-valid but DEAD env sid (inherited
+        // from a parent process, or closed underneath us) must lose to the
+        // caller's own live SessionStart binding, and a binding pointing at a
+        // session that another agent's SessionEnd already closed must lose to
+        // a freshly minted one. Still NO active-session-cache fallback and no
+        // adoption of any existing session (audit P2 F11) — an unbound Claude
+        // caller mints ITS OWN session rather than inheriting someone else's.
         const refOk = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
         const envSid = process.env.MADDU_SESSION_ID;
-        sid = refOk(envSid) ? envSid : null;
-        if (!sid && disc && claudeSessionId) {
+        const envCand = refOk(envSid) ? envSid : null;
+        let boundSid = null;
+        if (disc && claudeSessionId) {
           try {
             const bound = await disc.resolveMadduSession(repoRoot, claudeSessionId);
-            if (refOk(bound)) sid = bound;
-          } catch { /* fall through */ }
+            if (refOk(bound)) boundSid = bound;
+          } catch { /* unresolvable binding reads as absent */ }
+        }
+        // ONE projection read decides liveness. An UNREADABLE projection is
+        // unobservable, NOT evidence of death (E1): it softens the resolution
+        // back to the legacy env→binding precedence and never hardens it into
+        // a mint — minting against a projection we cannot read would spawn a
+        // session per tool call for as long as the read keeps failing.
+        let liveProj = null;
+        try { liveProj = await projections.project(repoRoot); } catch { liveProj = null; }
+        const isLive = (id) => !!id && !!liveProj && Array.isArray(liveProj.activeSessions)
+          && liveProj.activeSessions.some((s) => s && s.id === id);
+        if (liveProj) {
+          sid = isLive(envCand) ? envCand : (isLive(boundSid) ? boundSid : null);
+          if (!sid && claudeSessionId) {
+            sid = await mintFreshBoundSession(repoRoot, {
+              claudeId: claudeSessionId, workRoot, disc, spine, projections,
+              sessionLifecycle, sessionActive,
+            });
+          }
+          // A refused or failed mint degrades to EXACTLY the pre-fix result,
+          // not to no session at all.
+          if (!sid) sid = envCand || boundSid;
+        } else {
+          sid = envCand || boundSid;
         }
         // claudeSessionId is already validated-or-null (gated at the source
         // above), so the fallback key is filename-safe by construction.

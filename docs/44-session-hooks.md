@@ -212,6 +212,20 @@ governance tier, **allows, nudges, or denies** the edit.
   slice-stop message that merely *mentions* `>` is not mistaken for a redirect.
 - **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
   uncommitted pileup. The deny names the first stale ritual and its exact remedy.
+- **Liveness-aware identity + the recovery mint (v1.120.0).** The gate resolves
+  *which* session a caller acts as by **liveness**, not grammar alone: a live
+  `$MADDU_SESSION_ID` wins, else the caller's own **live** SessionStart binding —
+  a dead inherited env id can no longer shadow a live binding and block a
+  healthy worker. When *neither* is live and the payload carries a Claude
+  `session_id`, the gate **mints a fresh bound session** on the spot (recorded
+  as `SESSION_AUTO_REGISTERED` with `source: "pretooluse-mint"`, baseline
+  seeded so pre-existing dirt isn't charged to the new session) instead of
+  denying. It never *adopts* an existing session — an unbound caller must not
+  inherit someone else's attribution — and it never mints when the projection
+  is unreadable (unknown is not "nothing exists") or for an anonymous caller
+  with no Claude id to bind. The practical effect: a session whose id was
+  wrongly closed out from under it (e.g. a worker's `SessionEnd` closing the
+  id it inherited) self-heals on its next edit, without a restart.
 - **Tier-scaled** by the `discipline-enforcement` governance value: `strict` = block at
   the first threshold; `standard` = *graduated* (block a missing session/lane now, warn
   then block on stale slice-stop/commit); `relaxed` = nudge only. See
@@ -264,7 +278,7 @@ maddu governance set relaxed                            # drop enforcement to nu
 maddu governance set-override discipline-enforcement off   # disable just this gate
 ```
 
-### Mid-session install/upgrade — the running session heals on restart
+### Mid-session install/upgrade — the running session self-heals
 
 The `PreToolUse` gate resolves *which* Máddu session a Claude caller owns from a
 **claude→maddu binding** written at `SessionStart` (`.maddu/state/<prj>/discipline/
@@ -274,14 +288,15 @@ on the hook's stdin payload — never as a CLI argument.
 So if you run `maddu hooks install` (or `maddu upgrade` onto a version that adds
 the gate) **while a session is already running**, that session's `SessionStart`
 already fired — under old code, or before the hook existed — so it has **no
-binding**. Its next edit hits *"no active session governs"* even though the work
-is legitimate. This is a one-time transitional state, not a recurring bug:
+binding**. As of v1.120.0 this heals itself: the gate's **recovery mint** (above)
+sees a Claude id with no live session and mints + binds a fresh one on the next
+edit — no restart, no manual step. (`maddu register` alone never healed this,
+because the hook subprocess doesn't inherit an exported `MADDU_SESSION_ID` from
+your shell; the binding is written only by paths that see the Claude
+`session_id` on hook stdin — SessionStart, or the mint itself.)
 
-- **Fix:** **restart the session** — the fresh `SessionStart` binds it. `maddu
-  register` alone does *not* heal the running session, because the hook subprocess
-  never inherits an exported `MADDU_SESSION_ID` from your shell; only the
-  SessionStart hook (which sees the Claude `session_id` on stdin) can write the
-  binding.
+- On pre-mint versions the fix was to **restart the session** so a fresh
+  `SessionStart` binds it.
 - The binding write is **atomic** (serialized under a per-repo advisory lock with
   an atomic file replace), so two concurrent starts — e.g. the long-lived bridge
   plus a CLI invocation — can never clobber each other's entries in
