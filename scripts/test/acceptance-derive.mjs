@@ -231,10 +231,15 @@ ok('"live" is one of the declared states',
 // introduced in this phase and removed; this pins it.
 // ---------------------------------------------------------------------------
 const { readFileSync } = await import('node:fs');
-const raw = readFileSync(new URL('../../template/maddu/runtime/lib/acceptance.mjs', import.meta.url));
-let nulCount = 0;
-for (let i = 0; i < raw.length; i++) if (raw[i] === 0) nulCount++;
-ok('acceptance.mjs contains no literal NUL byte', nulCount === 0, `found ${nulCount}`);
+// The lib was split along its phase seams (facade + core/derive/observe) —
+// the tripwire must cover every file the code now lives in, or it silently
+// narrows to the facade.
+for (const f of ['acceptance.mjs', 'acceptance-core.mjs', 'acceptance-derive.mjs', 'acceptance-observe.mjs']) {
+  const raw = readFileSync(new URL(`../../template/maddu/runtime/lib/${f}`, import.meta.url));
+  let nulCount = 0;
+  for (let i = 0; i < raw.length; i++) if (raw[i] === 0) nulCount++;
+  ok(`${f} contains no literal NUL byte`, nulCount === 0, `found ${nulCount}`);
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
