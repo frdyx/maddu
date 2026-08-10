@@ -18,6 +18,12 @@
 //   • a mint's bind refreshes boundAt, so an immediately-following SessionEnd
 //     for the same claude id cannot close the just-minted session (<10s guard)
 //
+// Funnel-CLEAN residuals on record (Codex r10, no action required): the
+// prospective-size half of the writability proof has no portable regression
+// test (a quota boundary between map sizes cannot be simulated hermetically);
+// a counter-I/O stall aging boundAt past the SessionEnd guard is a compound
+// pathological-I/O case inside the guard's documented fail-open posture.
+//
 // DELIBERATELY NOT COVERED here (no silent caps — say what was dropped):
 //   • the projection-unreadable branch (no mint on unobservable liveness):
 //     faulting project() hermetically also breaks the spine append the mint
