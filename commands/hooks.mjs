@@ -305,11 +305,17 @@ async function mintFreshBoundSession(repoRoot, {
     // decision and the transaction so a racing second caller provably reaches
     // the same decision before either takes the lock — the under-lock
     // revalidation is then the ONLY thing standing between this race and a
-    // double-mint. Inert without the env var; capped so an ambient value can
-    // never wedge the hook.
-    const holdMs = Number(process.env.MADDU_TEST_MINT_HOLD_MS || 0);
-    if (Number.isFinite(holdMs) && holdMs > 0) {
-      await new Promise((r) => setTimeout(r, Math.min(holdMs, 5000)));
+    // double-mint. PRODUCTION-GATED on MADDU_SELF_TEST === '1', exactly like
+    // seamThrow: a test-injection switch must be DOUBLY opted in so an ambient
+    // value can never alter production behavior — an inherited
+    // MADDU_TEST_MINT_HOLD_MS would otherwise delay every real recovery mint
+    // by up to the cap, on top of whatever the locks already cost. The cap is
+    // the second bound, not the first.
+    if (process.env.MADDU_SELF_TEST === '1') {
+      const holdMs = Number(process.env.MADDU_TEST_MINT_HOLD_MS || 0);
+      if (Number.isFinite(holdMs) && holdMs > 0) {
+        await new Promise((r) => setTimeout(r, Math.min(holdMs, 5000)));
+      }
     }
 
     // Register + bind as ONE transaction, the same shape as fireSessionStart:

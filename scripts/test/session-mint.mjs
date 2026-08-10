@@ -65,12 +65,13 @@ function fire(repo, event, payload, envOverrides = {}) {
     // when set — an inherited value would pollute the DEVELOPER'S live env
     // file from inside a fixture. Scrubbed here until _hermetic-env carries it.
     delete env.CLAUDE_ENV_FILE;
+    const startedAt = Date.now();
     const child = spawn(process.execPath, [BIN, 'hooks', 'fire', event], { cwd: repo, env });
     let out = '', err = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code, out, err }));
+    child.on('close', (code) => resolve({ code, out, err, ms: Date.now() - startedAt }));
     child.stdin.write(JSON.stringify(payload));
     child.stdin.end();
   });
@@ -322,21 +323,41 @@ async function main() {
   // finish before the second decides, and the case would pass against a
   // TOCTOU-broken build (Codex r2). ─────────────────────────────────────────
   {
-    const repo = await freshRepo('maddu-mint-race-'); repos.push(repo);
-    const sidG = await startSession(repo, 'claude-G');
-    await closeSession(repo, sidG);
-    const HOLD = { MADDU_TEST_MINT_HOLD_MS: '2500' };
-    const [r1, r2] = await Promise.all([
-      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G'), HOLD),
-      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G'), HOLD),
-    ]);
-    for (const [i, r] of [[1, r1], [2, r2]].map(([i, r]) => [i, parseHook(r.out)])) {
-      ok(`concurrent mint: call ${i} not blocked on session`, !(r.deny && SESSION_DENY_RE.test(r.reason)), r.reason.slice(0, 100));
+    // A fixed sleep alone is not a rendezvous (Codex r3): on a loaded runner
+    // the second child could start after the first already minted, see the
+    // live binding, skip the seam, and pass vacuously. So each attempt PROVES
+    // the rendezvous held — a child that entered the hold cannot finish in
+    // less than HOLD_MS, so a sub-HOLD_MS runtime ⇒ that child never raced ⇒
+    // retry with a fresh identity; never a silent pass. Bounded attempts,
+    // loud failure if the runner never yields a true race.
+    const HOLD_MS = 2500;
+    const ATTEMPTS = 3;
+    let raced = null;
+    for (let attempt = 1; attempt <= ATTEMPTS && !raced; attempt++) {
+      const repo = await freshRepo('maddu-mint-race-'); repos.push(repo);
+      const cid = `claude-G${attempt}`;
+      const sidG = await startSession(repo, cid);
+      await closeSession(repo, sidG);
+      const HOLD = { MADDU_TEST_MINT_HOLD_MS: String(HOLD_MS), MADDU_SELF_TEST: '1' };
+      const [r1, r2] = await Promise.all([
+        fire(repo, 'pre-tool-use', EDIT(repo, cid), HOLD),
+        fire(repo, 'pre-tool-use', EDIT(repo, cid), HOLD),
+      ]);
+      if (r1.ms >= HOLD_MS && r2.ms >= HOLD_MS) raced = { repo, cid, sidG, r1, r2 };
+      else console.log(`  [....] race attempt ${attempt}: rendezvous not achieved (${r1.ms}ms / ${r2.ms}ms) — retrying`);
     }
-    const live = await activeIds(repo);
-    const b = await bindings(repo);
-    ok('concurrent mint: exactly ONE fresh session (no double-mint, no orphan)', live.length === 1 && live[0] !== sidG, JSON.stringify(live));
-    ok('concurrent mint: binding points at the single survivor', !!b['claude-G'] && b['claude-G'].madduId === live[0], JSON.stringify(b['claude-G']));
+    ok('concurrent mint: a PROVEN rendezvous was achieved (both racers held)', !!raced, `${ATTEMPTS} attempts max`);
+    if (raced) {
+      for (const [i, r] of [[1, raced.r1], [2, raced.r2]].map(([i, r]) => [i, parseHook(r.out)])) {
+        ok(`concurrent mint: call ${i} not blocked on session`, !(r.deny && SESSION_DENY_RE.test(r.reason)), r.reason.slice(0, 100));
+      }
+      const live = await activeIds(raced.repo);
+      const b = await bindings(raced.repo);
+      ok('concurrent mint: exactly ONE fresh session (no double-mint, no orphan)', live.length === 1 && live[0] !== raced.sidG, JSON.stringify(live));
+      ok('concurrent mint: binding points at the single survivor', !!b[raced.cid] && b[raced.cid].madduId === live[0], JSON.stringify(b[raced.cid]));
+    } else {
+      failed += 4; // the four race assertions could not run — red, not silently skipped
+    }
   }
 
   // ── 9. the B1 story end-to-end: worker inherits env → SessionEnd closes the
