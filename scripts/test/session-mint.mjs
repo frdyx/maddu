@@ -420,6 +420,13 @@ async function main() {
         after.length === before, `before=${before} after=${after.length} types=${JSON.stringify(after.map((e) => e.type))}`);
       const d1 = parseHook(res1.out), d2 = parseHook(res2.out);
       ok('unwritable map: the session deny stands', d1.deny && SESSION_DENY_RE.test(d1.reason) && d2.deny && SESSION_DENY_RE.test(d2.reason), d1.reason.slice(0, 80));
+      // Codex r7: a failed bind must not LEAK its temp file — otherwise the
+      // spine-append storm is merely traded for an unbounded tmp-file leak,
+      // one per edit, in the same discipline dir.
+      // 'v2' is the counters dir — legitimate. Anything else beside the map
+      // itself (in particular writeJson's unique temp names) is a leak.
+      const leftovers = (await readdir(dir)).filter((f) => f !== 'sessions.json' && f !== 'v2');
+      ok('unwritable map: no temp-file leak in the discipline dir', leftovers.length === 0, JSON.stringify(leftovers));
     } finally {
       // Restore permissions or the temp-dir cleanup below fails.
       try { if (win) await chmod(bindingsPath(repo), 0o644); else await chmod(dir, 0o755); } catch { /* best-effort */ }

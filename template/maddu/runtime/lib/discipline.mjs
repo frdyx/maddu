@@ -18,7 +18,7 @@
 
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, stat, rm } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
 import { gitRun } from './git-exec.mjs';
 import { withAppendLock } from './append-lock.mjs';
@@ -446,7 +446,17 @@ async function writeJson(p, obj) {
     // never observes a torn half-written file while a writer is mid-update.
     const tmp = `${p}.tmp.${process.pid}-${randomBytes(4).toString('hex')}`;
     await writeFile(tmp, JSON.stringify(obj, null, 2));
-    await rename(tmp, p);
+    try {
+      await rename(tmp, p);
+    } catch (e) {
+      // The rename is what can fail on a target we cannot replace (read-only
+      // file, cross-device, disk full). The temp name is UNIQUE per attempt,
+      // so leaving it behind accumulates one orphan per call for as long as
+      // the condition lasts. Reclaim it, then fail exactly as before — the
+      // caller's false is unchanged and the target is still untouched.
+      try { await rm(tmp, { force: true }); } catch { /* orphan beats a throw */ }
+      throw e;
+    }
     return true;
   } catch { return false; }
 }

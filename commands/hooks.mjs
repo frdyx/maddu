@@ -360,12 +360,16 @@ async function mintFreshBoundSession(repoRoot, {
         // (unreadable bindings map or projection) propagates to the outer
         // catch → null, matching the rule that an unobservable state never
         // mints.
+        // Read the live set ONCE, under the lock: it answers both questions
+        // below — is our own binding already healed, and is a candidate id
+        // free. Both locks are held and every registration path takes the
+        // close lock, so no session can become active between this read and
+        // the bind; the answer cannot go stale inside the transaction.
+        const now = await projections.project(repoRoot);
+        const live = Array.isArray(now.activeSessions) ? now.activeSessions : [];
         const prior = await disc.resolveMadduSession(repoRoot, claudeId);
-        if (refOk(prior)) {
-          const now = await projections.project(repoRoot);
-          if (Array.isArray(now.activeSessions) && now.activeSessions.some((s) => s && s.id === prior)) {
-            return { sid: prior, created: false };
-          }
+        if (refOk(prior) && live.some((s) => s && s.id === prior)) {
+          return { sid: prior, created: false };
         }
         // BIND BEFORE REGISTER (r6 F1). The bind is the only failure-prone
         // FILE mutation in a mint; the register is an append to an append-only
@@ -380,7 +384,19 @@ async function mintFreshBoundSession(repoRoot, {
         // binding to a session that was never recorded, which resolution reads
         // as dead — the next call re-mints and overwrites it. Self-healing,
         // and still append-free.
-        const sid = spine.genSessionId();
+        // Pick an id that collides with no ACTIVE session BEFORE binding to it
+        // (r7 F2). The binding becomes visible to lock-free resolvers the
+        // instant it is written, so binding first and discovering the clash at
+        // registration would briefly point this claude id at someone else's
+        // LIVE session — and a failed unbind would leave it pointing there.
+        // The uniqueness check moves ahead of the write for that reason.
+        // Bounded: three draws, then give up rather than spin.
+        let sid = null;
+        for (let attempt = 0; attempt < 3 && !sid; attempt++) {
+          const cand = spine.genSessionId();
+          if (!live.some((s) => s && s.id === cand)) sid = cand;
+        }
+        if (!sid) return null;
         const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, sid);
         if (bound === false) return null;
         const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { id: sid, makeEvent });
@@ -395,6 +411,16 @@ async function mintFreshBoundSession(repoRoot, {
           } catch { /* self-healing — never throw out of the transaction */ }
           return null;
         }
+        // Re-stamp boundAt now that the mint has actually COMPLETED (r7 F1).
+        // The first stamp dates from before the register, whose append can
+        // stall on lock contention; if the whole mint outran 10s, a SessionEnd
+        // arriving right after this transaction would read the binding as old
+        // enough to close — killing the session the mint just created. The
+        // <10s freshness guard has to measure from completion, not from start.
+        // Best-effort: the map just proved writable, and a failed re-stamp only
+        // returns the pre-r7 window.
+        try { await disc.bindClaudeSessionIn(repoRoot, claudeId, sid); }
+        catch { /* the earlier stamp stands */ }
         if (sessionActive && sessionActive.writeActiveSession) {
           await sessionActive.writeActiveSession(repoRoot, {
             sessionId: sid,
