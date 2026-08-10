@@ -311,9 +311,22 @@ async function mintFreshBoundSession(repoRoot, {
     // MADDU_TEST_MINT_HOLD_MS would otherwise delay every real recovery mint
     // by up to the cap, on top of whatever the locks already cost. The cap is
     // the second bound, not the first.
+    //
+    // The marker line is the seam's EVIDENCE. Child wall-clock cannot prove a
+    // rendezvous happened — a CPU-starved child that never raced still reports
+    // a long runtime — so each racer records that it entered the hold from
+    // INSIDE the hold, which is reachable only after deciding to mint on
+    // observed-dead state. Counting markers is how the suite knows both
+    // callers made that decision before either took the lock; a missing marker
+    // means rendezvous-not-achieved, not a passing test.
     if (process.env.MADDU_SELF_TEST === '1') {
       const holdMs = Number(process.env.MADDU_TEST_MINT_HOLD_MS || 0);
       if (Number.isFinite(holdMs) && holdMs > 0) {
+        try {
+          await appendFile(
+            join(repoRoot, '.maddu', 'state', 'test-mint-hold.ndjson'),
+            JSON.stringify({ pid: process.pid, ts: Date.now() }) + '\n');
+        } catch { /* evidence must never break the mint it observes */ }
         await new Promise((r) => setTimeout(r, Math.min(holdMs, 5000)));
       }
     }

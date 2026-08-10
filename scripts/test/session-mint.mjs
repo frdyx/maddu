@@ -323,13 +323,16 @@ async function main() {
   // finish before the second decides, and the case would pass against a
   // TOCTOU-broken build (Codex r2). ─────────────────────────────────────────
   {
-    // A fixed sleep alone is not a rendezvous (Codex r3): on a loaded runner
-    // the second child could start after the first already minted, see the
-    // live binding, skip the seam, and pass vacuously. So each attempt PROVES
-    // the rendezvous held — a child that entered the hold cannot finish in
-    // less than HOLD_MS, so a sub-HOLD_MS runtime ⇒ that child never raced ⇒
-    // retry with a fresh identity; never a silent pass. Bounded attempts,
-    // loud failure if the runner never yields a true race.
+    // A fixed sleep alone is not a rendezvous (Codex r3), and wall-clock from
+    // spawn cannot prove one either — it includes scheduling delay, so a
+    // CPU-starved child that never raced still reports a long runtime (Codex
+    // r4). The proof comes from INSIDE the seam: each child that decides to
+    // mint on observed-dead state appends a line to
+    // .maddu/state/test-mint-hold.ndjson BEFORE holding. TWO lines ⇒ both
+    // children provably reached the mint decision ⇒ the under-lock
+    // revalidation is the only thing preventing a double-mint, regardless of
+    // scheduling. Fewer ⇒ no true race ⇒ retry with a fresh identity; a
+    // never-achieved rendezvous is a loud red, not a silent pass.
     const HOLD_MS = 2500;
     const ATTEMPTS = 3;
     let raced = null;
@@ -343,8 +346,13 @@ async function main() {
         fire(repo, 'pre-tool-use', EDIT(repo, cid), HOLD),
         fire(repo, 'pre-tool-use', EDIT(repo, cid), HOLD),
       ]);
-      if (r1.ms >= HOLD_MS && r2.ms >= HOLD_MS) raced = { repo, cid, sidG, r1, r2 };
-      else console.log(`  [....] race attempt ${attempt}: rendezvous not achieved (${r1.ms}ms / ${r2.ms}ms) — retrying`);
+      let holders = 0;
+      try {
+        const raw = await readFile(join(repo, '.maddu', 'state', 'test-mint-hold.ndjson'), 'utf8');
+        holders = raw.split('\n').filter((l) => l.trim()).length;
+      } catch { holders = 0; }
+      if (holders >= 2) raced = { repo, cid, sidG, r1, r2 };
+      else console.log(`  [....] race attempt ${attempt}: rendezvous not achieved (${holders} holder(s), ${r1.ms}ms / ${r2.ms}ms) — retrying`);
     }
     ok('concurrent mint: a PROVEN rendezvous was achieved (both racers held)', !!raced, `${ATTEMPTS} attempts max`);
     if (raced) {
