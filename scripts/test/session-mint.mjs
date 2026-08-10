@@ -208,6 +208,16 @@ async function main() {
     // (the mint's bind refreshed boundAt; the <10s guard skips the close).
     await fire(repo, 'session-end', { session_id: 'claude-A', cwd: repo });
     ok('mint survives an immediately-following SessionEnd (<10s bind guard)', (await activeIds(repo)).includes(sidM));
+    // Codex r1 F5: prove it was the GUARD that preserved the mint, not a
+    // broken-into-no-op SessionEnd — age the binding past the guard and the
+    // same fire must close.
+    const b8 = await bindings(repo);
+    if (b8['claude-A']) {
+      b8['claude-A'].at = Date.now() - 60_000;
+      await writeFile(bindingsPath(repo), JSON.stringify(b8, null, 2) + '\n');
+    }
+    await fire(repo, 'session-end', { session_id: 'claude-A', cwd: repo });
+    ok('aged binding: the SAME SessionEnd closes (guard proven live, not a no-op)', !(await activeIds(repo)).includes(sidM));
   }
 
   // ── 2. dead env + dead binding → mint (env dead does not poison the heal) ──
@@ -231,6 +241,11 @@ async function main() {
     const res = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-C'), { MADDU_SESSION_ID: DEAD_SID });
     const { deny, reason } = parseHook(res.out);
     ok('dead env + live binding: not blocked on session (binding wins)', !(deny && SESSION_DENY_RE.test(reason)), reason.slice(0, 100));
+    // Codex r1 F5: absence-of-session-deny alone can't tell "binding won" from
+    // "the gate crashed into fail-open before deciding". The lane deny proves
+    // the pipeline COMPLETED under a governing session (lane is the very next
+    // ordered blocker in this bare fixture).
+    ok('dead env + live binding: gate pipeline completed (lane deny)', deny && /lane/.test(reason), reason.slice(0, 100));
     const live = await activeIds(repo);
     ok('dead env + live binding: NO mint (live set unchanged)', live.length === 1 && live[0] === sidC, JSON.stringify(live));
     const b = await bindings(repo);
@@ -244,6 +259,7 @@ async function main() {
     const res = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-D'), { MADDU_SESSION_ID: sidD });
     const { deny, reason } = parseHook(res.out);
     ok('live env: not blocked on session', !(deny && SESSION_DENY_RE.test(reason)), reason.slice(0, 100));
+    ok('live env: gate pipeline completed (lane deny)', deny && /lane/.test(reason), reason.slice(0, 100));
     ok('live env: NO mint', (await activeIds(repo)).length === 1);
   }
 
@@ -294,6 +310,27 @@ async function main() {
       ok('mint seeds baselineInit', !!counter && counter.baselineInit === true, JSON.stringify(counter && { baselineInit: counter.baselineInit }));
       ok('mint baseline contains the pre-existing dirt', !!counter && Array.isArray(counter.dirtyBaseline) && counter.dirtyBaseline.some((p) => /dirt\.txt$/.test(p)), JSON.stringify(counter && counter.dirtyBaseline));
     }
+  }
+
+  // ── 10. concurrent mint race (Codex r1 F1): two simultaneous PreToolUse
+  // calls for the SAME bound-but-dead identity must converge on exactly ONE
+  // fresh session — the loser revalidates under the binding lock and reuses
+  // the winner's mint instead of double-minting and orphaning it. ──────────
+  {
+    const repo = await freshRepo('maddu-mint-race-'); repos.push(repo);
+    const sidG = await startSession(repo, 'claude-G');
+    await closeSession(repo, sidG);
+    const [r1, r2] = await Promise.all([
+      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G')),
+      fire(repo, 'pre-tool-use', EDIT(repo, 'claude-G')),
+    ]);
+    for (const [i, r] of [[1, r1], [2, r2]].map(([i, r]) => [i, parseHook(r.out)])) {
+      ok(`concurrent mint: call ${i} not blocked on session`, !(r.deny && SESSION_DENY_RE.test(r.reason)), r.reason.slice(0, 100));
+    }
+    const live = await activeIds(repo);
+    const b = await bindings(repo);
+    ok('concurrent mint: exactly ONE fresh session (no double-mint, no orphan)', live.length === 1 && live[0] !== sidG, JSON.stringify(live));
+    ok('concurrent mint: binding points at the single survivor', !!b['claude-G'] && b['claude-G'].madduId === live[0], JSON.stringify(b['claude-G']));
   }
 
   // ── 9. the B1 story end-to-end: worker inherits env → SessionEnd closes the

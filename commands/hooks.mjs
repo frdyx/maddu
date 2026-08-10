@@ -256,7 +256,13 @@ async function mintFreshBoundSession(repoRoot, {
     if (typeof sessionLifecycle.withCloseLock !== 'function') return null;
     if (typeof sessionLifecycle.isLockFailed !== 'function') return null;
     if (!spine.EVENT_TYPES || !spine.EVENT_TYPES.SESSION_AUTO_REGISTERED) return null;
+    // The under-lock revalidation below needs BOTH of these; without them the
+    // no-live decision could never be rechecked and concurrent callers would
+    // double-mint (r1 F1).
+    if (typeof disc.resolveMadduSession !== 'function') return null;
+    if (!projections || typeof projections.project !== 'function') return null;
 
+    const refOk = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
     const label = basename(repoRoot) || 'agent';
     // CP5 (PR-B) applies here as at SessionStart: an ambient parent is
     // grammar-gated + existence-checked, and an unusable one drops the LINK,
@@ -280,14 +286,66 @@ async function mintFreshBoundSession(repoRoot, {
       },
     });
 
+    // Observe the dirty tree BEFORE the transaction (r1 F4). Captured after
+    // the mint, the baseline would swallow an edit made by a parallel caller
+    // that resolved the new binding in the meantime — silently erasing that
+    // edit's commit pressure. A pre-transaction snapshot fails the other way:
+    // a racing edit lands OUTSIDE the baseline and counts as new dirt, which
+    // is the safe direction. Best-effort; a failed observation leaves the
+    // counter unwritten and the first gate call seeds baselineInit fail-open.
+    let baseObs = null;
+    try {
+      if (disc.mutateCounter && disc.dirtyFilesDetailed && workRoot) {
+        const obs = await disc.dirtyFilesDetailed(workRoot);
+        if (obs && obs.ok) baseObs = obs;
+      }
+    } catch { baseObs = null; }
+
     // Register + bind as ONE transaction, the same shape as fireSessionStart:
     // the bind commits while the close lock still protects the liveness proof,
     // so no interleaved close can kill the sid in the gap.
     const bt = await disc.withBindingTransaction(repoRoot, async () =>
       sessionLifecycle.withCloseLock(repoRoot, async () => {
+        // Revalidate the no-live decision UNDER the lock (r1 F1). The caller
+        // decided to mint before taking either lock, so two concurrent
+        // PreToolUse calls for the same claude id would both register and the
+        // second bind would overwrite the first — orphaning a live session.
+        // Re-reading OUR OWN binding is not adoption (F11 still holds): if a
+        // concurrent mint or a SessionStart already healed this claude id, the
+        // sid we find is the one this caller is entitled to. A throw here
+        // (unreadable bindings map or projection) propagates to the outer
+        // catch → null, matching the rule that an unobservable state never
+        // mints.
+        const prior = await disc.resolveMadduSession(repoRoot, claudeId);
+        if (refOk(prior)) {
+          const now = await projections.project(repoRoot);
+          if (Array.isArray(now.activeSessions) && now.activeSessions.some((s) => s && s.id === prior)) {
+            return { sid: prior, created: false };
+          }
+        }
         const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { makeEvent });
         if (reg.status !== 'registered') return null;
-        await disc.bindClaudeSessionIn(repoRoot, claudeId, reg.sessionId);
+        // A bind can FAIL (corrupt / unwritable bindings map) and says so by
+        // returning false (r1 F2). Reporting the mint as bound anyway would
+        // leave the caller unbound, so the next tool call mints again — the
+        // exact storm this helper exists to avoid. Roll the just-registered
+        // session back instead: an unbindable session is dead weight on the
+        // spine, and closing it here (In-variant: we already hold the close
+        // lock) keeps the active-session list honest.
+        const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, reg.sessionId);
+        if (bound === false) {
+          try {
+            if (typeof sessionLifecycle.closeSessionIfActiveIn === 'function'
+                && spine.EVENT_TYPES.SESSION_CLOSED) {
+              await sessionLifecycle.closeSessionIfActiveIn(repoRoot, {
+                sessionId: reg.sessionId,
+                eventType: spine.EVENT_TYPES.SESSION_CLOSED,
+                data: { handoff: { summary: 'recovery mint rolled back: binding write failed', auto: true } },
+              });
+            }
+          } catch { /* rollback is best-effort — the janitor sweeps the leak */ }
+          return null;
+        }
         if (sessionActive && sessionActive.writeActiveSession) {
           await sessionActive.writeActiveSession(repoRoot, {
             sessionId: reg.sessionId,
@@ -297,7 +355,7 @@ async function mintFreshBoundSession(repoRoot, {
             lane: null,
           });
         }
-        return reg.sessionId;
+        return { sid: reg.sessionId, created: true };
       }));
     // Either lock busy → null. Deliberately NOT fireSessionStart's
     // register-WITHOUT-binding fallback: an unbound mint leaves the caller
@@ -306,31 +364,28 @@ async function mintFreshBoundSession(repoRoot, {
     // stand for this single call is the far cheaper failure.
     if (sessionLifecycle.isLockFailed(bt)) return null;
     if (disc.isBindingLockFailed && disc.isBindingLockFailed(bt)) return null;
-    if (typeof bt !== 'string' || !bt) return null;
-    const sid = bt;
+    if (!bt || typeof bt.sid !== 'string' || !bt.sid) return null;
 
-    // Seed the discipline baseline exactly as fireSessionStart's created path
-    // does. Without it the fresh sid inherits the whole pre-existing dirty
-    // tree as its OWN new dirt, and the commit gate could block the very call
-    // this mint just unblocked. Best-effort: a skipped observation leaves
-    // baselineInit unset, which the first gate call seeds fail-open.
+    // Seed the discipline baseline exactly as fireSessionStart's CREATED path
+    // does — and only on a created mint: a reused sid already carries its own
+    // accumulated history, and re-baselining would erase its commit pressure.
+    // Without this a fresh sid inherits the whole pre-existing dirty tree as
+    // its OWN new dirt, and the commit gate could block the very call this
+    // mint just unblocked.
     try {
-      if (disc.mutateCounter && disc.dirtyFilesDetailed && workRoot) {
-        const obs = await disc.dirtyFilesDetailed(workRoot);
-        if (obs.ok) {
-          await disc.mutateCounter(repoRoot, sid, (c) => {
-            c.dirtyBaseline = obs.paths.slice();
-            c.dirtyFirstSeen = [];
-            c.firstDirtyTs = null;
-            c.baselineInit = true;
-            c.workRoot = workRoot;
-            c.dirtyV = 2;
-            return c;
-          });
-        }
+      if (bt.created && baseObs && disc.mutateCounter) {
+        await disc.mutateCounter(repoRoot, bt.sid, (c) => {
+          c.dirtyBaseline = baseObs.paths.slice();
+          c.dirtyFirstSeen = [];
+          c.firstDirtyTs = null;
+          c.baselineInit = true;
+          c.workRoot = workRoot;
+          c.dirtyV = 2;
+          return c;
+        });
       }
     } catch { /* baseline capture is best-effort */ }
-    return sid;
+    return bt.sid;
   } catch { return null; /* never throw into the gate */ }
 }
 
@@ -694,6 +749,17 @@ export default async function hooks(argv) {
           }
           // A refused or failed mint degrades to EXACTLY the pre-fix result,
           // not to no session at all.
+          //
+          // ADJUDICATED (r1 F3), against the objection that falling back to a
+          // sid we just observed to be DEAD — and thereby denying the edit —
+          // breaks fail-open. It is held deliberately. The deny is the
+          // discipline VERDICT on an observed dead identity, not an internal
+          // error; genuine internal errors still fail open inside
+          // enforcePreTool. Allowing the edit whenever the mint loses a lock
+          // would make enforcement bypassable by hammering the binding lock,
+          // which is a far worse property than one blocked call. And the state
+          // is self-healing rather than terminal: the next tool call re-reads
+          // the projection and re-attempts the mint.
           if (!sid) sid = envCand || boundSid;
         } else {
           sid = envCand || boundSid;
