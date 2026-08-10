@@ -93,8 +93,11 @@ const derived = await deriveFlagAllowlists(join(REPO_ROOT, 'commands'));
 let artifactText = null;
 try { artifactText = await readFile(join(REPO_ROOT, 'commands', '_flag-allowlists.json'), 'utf8'); } catch {}
 ok('committed artifact exists', artifactText !== null);
+// CRLF-normalized on read (same discipline as the cockpit golden gate): the
+// artifact is .gitattributes-pinned to LF, but an unpinned historical checkout
+// under autocrlf must not red the staleness check for line endings alone.
 ok('committed artifact is CURRENT (re-derived byte-equal) — else run scripts/generate-flag-allowlists.mjs',
-  artifactText === renderAllowlistArtifact(derived));
+  artifactText !== null && artifactText.replace(/\r\n/g, '\n') === renderAllowlistArtifact(derived));
 
 const allowlists = artifactText ? JSON.parse(artifactText) : { open: [], verbs: {} };
 

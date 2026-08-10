@@ -23,7 +23,7 @@ const check = process.argv.includes('--check');
 const derived = await deriveFlagAllowlists(join(REPO_ROOT, 'commands'));
 const expected = renderAllowlistArtifact(derived);
 let current = null;
-try { current = await readFile(TARGET, 'utf8'); } catch {}
+try { current = (await readFile(TARGET, 'utf8')).replace(/\r\n/g, '\n'); } catch {}
 
 if (current === expected) {
   console.log('flag-allowlists: current');
