@@ -30,7 +30,7 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -394,6 +394,36 @@ async function main() {
       d1.deny && SESSION_DENY_RE.test(d1.reason) && d2.deny && SESSION_DENY_RE.test(d2.reason), d1.reason.slice(0, 80));
     ok('corrupt map: the corrupt file is left untouched (never clobbered)',
       (await readFile(bindingsPath(repo), 'utf8')) === '{not json');
+  }
+
+  // ── 12. UNWRITABLE-but-readable bindings map → still zero spine appends
+  // (Codex r6): a valid map that cannot be REwritten passed the health probe,
+  // and the old register-then-bind order appended a register+close pair per
+  // edit. The bind-before-register order spends the risky file mutation
+  // first, so every unwritable mode is append-free by construction.
+  // Platform-aware: a read-only FILE blocks Windows' rename-over; a
+  // read-only DIRECTORY blocks POSIX temp-file creation.
+  {
+    const repo = await freshRepo('maddu-mint-rofile-'); repos.push(repo);
+    const dir = dirname(bindingsPath(repo));
+    await mkdir(dir, { recursive: true });
+    await writeFile(bindingsPath(repo), '{}\n');
+    const win = process.platform === 'win32';
+    if (win) await chmod(bindingsPath(repo), 0o444);
+    else await chmod(dir, 0o555);
+    try {
+      const before = (await spineEvents(repo)).length;
+      const res1 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-J'));
+      const res2 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-J'));
+      const after = await spineEvents(repo);
+      ok(`unwritable map (${win ? 'read-only file' : 'read-only dir'}): ZERO spine appends across two edits`,
+        after.length === before, `before=${before} after=${after.length} types=${JSON.stringify(after.map((e) => e.type))}`);
+      const d1 = parseHook(res1.out), d2 = parseHook(res2.out);
+      ok('unwritable map: the session deny stands', d1.deny && SESSION_DENY_RE.test(d1.reason) && d2.deny && SESSION_DENY_RE.test(d2.reason), d1.reason.slice(0, 80));
+    } finally {
+      // Restore permissions or the temp-dir cleanup below fails.
+      try { if (win) await chmod(bindingsPath(repo), 0o644); else await chmod(dir, 0o755); } catch { /* best-effort */ }
+    }
   }
 
   // ── 9. the B1 story end-to-end: worker inherits env → SessionEnd closes the

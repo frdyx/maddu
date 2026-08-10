@@ -261,6 +261,9 @@ async function mintFreshBoundSession(repoRoot, {
     // double-mint (r1 F1).
     if (typeof disc.resolveMadduSession !== 'function') return null;
     if (!projections || typeof projections.project !== 'function') return null;
+    // Bind-before-register (r6 F1) mints the id HERE rather than letting the
+    // registrar generate one, so the same generator must be reachable.
+    if (typeof spine.genSessionId !== 'function') return null;
 
     const refOk = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
     const label = basename(repoRoot) || 'agent';
@@ -331,17 +334,13 @@ async function mintFreshBoundSession(repoRoot, {
       }
     }
 
-    // Refuse a DOOMED mint before spending any side effect (r5 F1). The
-    // bindings map is read leniently during resolution (corrupt → empty → "no
-    // binding"), so a corrupt map makes every edit decide to mint; without this
-    // probe each one would REGISTER (append), fail the bind on the strict read,
-    // and append a rollback close — a permanent register+close pair per edit on
-    // an append-only spine until the operator repairs the file. Probing here,
-    // BEFORE the transaction, also spends no locks on a mint that cannot
-    // succeed; the map corrupting in the window between probe and bind still
-    // costs at most ONE bounded rollback pair, which the F2 path handles.
-    // Skew: an older installed lib without the probe keeps that bounded
-    // worst case rather than losing the mint entirely.
+    // OPTIMIZATION only (r5 F1, demoted by r6 F1): skip the lock churn when
+    // the map is already visibly corrupt. The append-free GUARANTEE comes from
+    // the bind-before-register order inside the transaction, not from here —
+    // this probe proves the map is READABLE and can say nothing about whether
+    // it is writable, so a valid-but-read-only map sails through it. Nothing
+    // downstream may rely on it having run: an older installed lib without the
+    // probe takes the same path, just after paying for the locks.
     if (typeof disc.bindingMapHealthy === 'function' && !(await disc.bindingMapHealthy(repoRoot))) {
       return null;
     }
@@ -368,39 +367,44 @@ async function mintFreshBoundSession(repoRoot, {
             return { sid: prior, created: false };
           }
         }
-        const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { makeEvent });
-        if (reg.status !== 'registered') return null;
-        // A bind can FAIL (corrupt / unwritable bindings map) and says so by
-        // returning false (r1 F2). Reporting the mint as bound anyway would
-        // leave the caller unbound, so the next tool call mints again — the
-        // exact storm this helper exists to avoid. Roll the just-registered
-        // session back instead: an unbindable session is dead weight on the
-        // spine, and closing it here (In-variant: we already hold the close
-        // lock) keeps the active-session list honest.
-        const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, reg.sessionId);
-        if (bound === false) {
+        // BIND BEFORE REGISTER (r6 F1). The bind is the only failure-prone
+        // FILE mutation in a mint; the register is an append to an append-only
+        // spine, which cannot be taken back. Doing the risky write FIRST makes
+        // every unwritable-map mode — corrupt content, read-only file,
+        // read-only directory, disk full — fail with ZERO appends by
+        // CONSTRUCTION. A probe cannot deliver that: bindingMapHealthy proves
+        // the map is readable, never that it is writable.
+        // boundAt is stamped here, still inside both locks, so the SessionEnd
+        // <10s freshness guard covers the whole mint exactly as before.
+        // Crash window: dying between the bind and the register leaves a
+        // binding to a session that was never recorded, which resolution reads
+        // as dead — the next call re-mints and overwrites it. Self-healing,
+        // and still append-free.
+        const sid = spine.genSessionId();
+        const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, sid);
+        if (bound === false) return null;
+        const reg = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { id: sid, makeEvent });
+        if (reg.status !== 'registered') {
+          // Leave no binding pointing at a session the spine never recorded.
+          // Best-effort: a failed unbind lands in the same self-healing state
+          // as the crash window above.
           try {
-            if (typeof sessionLifecycle.closeSessionIfActiveIn === 'function'
-                && spine.EVENT_TYPES.SESSION_CLOSED) {
-              await sessionLifecycle.closeSessionIfActiveIn(repoRoot, {
-                sessionId: reg.sessionId,
-                eventType: spine.EVENT_TYPES.SESSION_CLOSED,
-                data: { handoff: { summary: 'recovery mint rolled back: binding write failed', auto: true } },
-              });
+            if (typeof disc.unbindClaudeSessionIn === 'function') {
+              await disc.unbindClaudeSessionIn(repoRoot, claudeId, sid);
             }
-          } catch { /* rollback is best-effort — the janitor sweeps the leak */ }
+          } catch { /* self-healing — never throw out of the transaction */ }
           return null;
         }
         if (sessionActive && sessionActive.writeActiveSession) {
           await sessionActive.writeActiveSession(repoRoot, {
-            sessionId: reg.sessionId,
+            sessionId: sid,
             registeredAt: reg.event ? reg.event.ts : null,
             role: 'implementer',
             label,
             lane: null,
           });
         }
-        return { sid: reg.sessionId, created: true };
+        return { sid, created: true };
       }));
     // Either lock busy → null. Deliberately NOT fireSessionStart's
     // register-WITHOUT-binding fallback: an unbound mint leaves the caller
