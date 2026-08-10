@@ -247,7 +247,7 @@ is a real verb you can call directly. Run `maddu help` for flags.
 4. Append a question to the inbox:
 
    ```bash
-   maddu mailbox send --lane harness --text "QUESTION: <what's blocking>"
+   maddu mailbox send harness --type question --subject "QUESTION: <what's blocking>"
    ```
 
    The cockpit operator sees it.

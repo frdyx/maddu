@@ -84,7 +84,7 @@ every run. Full rationale in `maddu/docs/hard-rules.md`; the stable charter is
 - **Slice-stop on every meaningful unit of work.** This is what feeds
   hindsight, pattern projection, and the operator's audit trail.
 - **Scope-lock available** for high-stakes slices —
-  `./maddu/run slice scope-declare --slice <id> --scope path1,path2,...`
+  `./maddu/run slice scope-declare --slice-id <id> --paths path1,path2,...`
   refuses edits outside the declared set until you expand the scope
   explicitly.
 - **Auto-trigger discipline.** Mutating commands fired by triggers must
@@ -243,7 +243,7 @@ Press `?` inside the cockpit for the full docs index.
 4. Append a question to the operator inbox:
 
    ```bash
-   ./maddu/run mailbox send --lane harness --text "QUESTION: <what's blocking>"
+   ./maddu/run mailbox send harness --type question --subject "QUESTION: <what's blocking>"
    ```
 
    The cockpit operator sees it.

@@ -134,7 +134,7 @@ $ maddu status --line     # one-line on-goal/drift + goal progress (v1.97.0) —
 Zero-keystroke session bootstrap. The agent's mandatory first command of every turn.
 
 ```bash
-$ maddu register [<label>] [--parent <sessionId>] [--role <role>] [--runtime <name>]
+$ maddu register [<label>] [--parent <sessionId>] [--role <role>]
 ```
 
 - Defaults: label from cwd-basename, role=`implementer`, focus=label.
@@ -369,13 +369,13 @@ $ maddu runtime list
 $ maddu runtime show <name>
 $ maddu runtime register --name <n> --binary <b> [--args a,b] [--detect "<cmd>"] \
                          [--display "<d>"] [--mcp] [--streaming] [--approval per-tool] \
-                         [--lanes a,b] [--notes "<n>"] [--auto-register]
+                         [--lanes a,b] [--notes "<n>"]
 $ maddu runtime detect [<name>]                     # no arg → detect-all
 $ maddu runtime spawn <name> [--session <sid>] [--lane <id>] [--args a,b]
 $ maddu runtime remove <name>
 ```
 
-**`--auto-register`** *(v0.17)* sets `kind: 'reviewer'`-style behavior: every `spawnWorker` call against this runtime first registers a fresh child session (linked to the caller via `parentSessionId`), then injects the new id into the child's `MADDU_SESSION_ID` env. Fan-out orchestration produces N distinct sessions in the tree instead of one shared session. Editable post-register by hand-editing `.maddu/runtimes/<name>.json` and setting `autoRegister: true`.
+**`autoRegister`** *(v0.17, descriptor field — there is no CLI flag)* sets `kind: 'reviewer'`-style behavior: every `spawnWorker` call against a runtime whose descriptor carries `autoRegister: true` first registers a fresh child session (linked to the caller via `parentSessionId`), then injects the new id into the child's `MADDU_SESSION_ID` env. Fan-out orchestration produces N distinct sessions in the tree instead of one shared session. Enable it by hand-editing `.maddu/runtimes/<name>.json` and setting `autoRegister: true`.
 
 ## `maddu schedule`
 

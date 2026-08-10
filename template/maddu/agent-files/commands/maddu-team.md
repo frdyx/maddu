@@ -40,8 +40,8 @@ Procedure:
      track sub-workers.
    - **Manual fan-out:** each member opens `/maddu-autopilot <their focus>` in
      its own terminal session (same `--parent` registration applies for tracking).
-   Cross-lane handoffs go through `./maddu/run mailbox send --lane <lane>
-   --text "..."`. Never claim each other's lanes.
+   Cross-lane handoffs go through `./maddu/run mailbox send <lane>
+   --type handoff --subject "..."`. Never claim each other's lanes.
 5. Close the team when work converges: `./maddu/run team close
    --team-id <id>` from the parent.
 

@@ -14,7 +14,7 @@ Procedure:
    `$MADDU_SESSION_ID` against `./maddu/run lane list`), use that. If
    no claim, use lane `harness` (the project's general-purpose
    coordination lane).
-3. Run `./maddu/run mailbox send --lane <lane> --text "$ARGUMENTS"`.
+3. Run `./maddu/run mailbox send <lane> --type note --subject "$ARGUMENTS"`.
 4. Confirm to the operator: *"Noted in lane `<lane>`."* — one line.
 
 Discipline:
