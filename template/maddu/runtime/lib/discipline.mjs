@@ -661,18 +661,48 @@ export async function bindingMapHealthy(repoRoot) {
 // they will publish afterwards can actually be written. Readability is not
 // writability: a valid but read-only file, a read-only directory, and a full
 // disk all satisfy bindingMapHealthy and then fail the bind.
-// The only way to prove a filesystem write is to perform one, so this rewrites
-// the map's OWN current content: on success nothing new is published (a
-// missing map is materialized as an empty one, which still binds no one), and
-// the round trip exercises the exact mkdir + temp + rename path a real bind
-// takes. Never throws; false covers unreadable and unwritable alike.
+//
+// Proving a filesystem write means performing one, and it must be the write
+// that is actually coming. Two halves, both required:
+//   SIZE — a quota or ENOSPC boundary can sit BETWEEN the current map and the
+//     map with one more binding in it, so rewriting the current content would
+//     pass forever while every real bind fails. The prospective content (the
+//     current map plus this claudeId, with a placeholder entry the same shape
+//     and size as a real one) is written to a unique scratch file in the SAME
+//     directory — same filesystem, same quota — and immediately removed. It is
+//     never renamed over the map, so nothing is published.
+//   TARGET — the map itself must be replaceable, which the scratch write says
+//     nothing about (a read-only sessions.json accepts neighbours happily). A
+//     no-op rewrite of the map's own content exercises the real temp+rename
+//     path; a missing map is materialized as an empty one, which binds no one.
+// Without a usable claudeId only the TARGET half runs — the caller's bind will
+// refuse that id anyway.
+// Never throws; false covers unreadable, unwritable, and out-of-space alike.
 // 'In' convention: the caller MUST hold the binding lock. Under that lock the
 // no-op rewrite cannot clobber a concurrent bind; without it, it could.
-export async function bindingMapWritableIn(repoRoot) {
+const PROBE_SID_PLACEHOLDER = `ses_${'0'.repeat(14)}_${'0'.repeat(6)}`; // makeId('ses') shape
+export async function bindingMapWritableIn(repoRoot, claudeId) {
+  let scratch = null;
   try {
     const p = sessionsMapPath(repoRoot);
-    return await writeJson(p, await readSessionsMapStrict(p));
-  } catch { return false; }
+    const cur = await readSessionsMapStrict(p);
+    if (claudeIdOk(claudeId)) {
+      // Null-prototype copy for the same reason bindClaudeSessionIn uses one:
+      // a grammar-valid `__proto__` key must stay a plain own entry.
+      const prospective = Object.create(null);
+      for (const k of Object.keys(cur)) prospective[k] = cur[k];
+      prospective[claudeId] = { madduId: PROBE_SID_PLACEHOLDER, at: Date.now() };
+      await mkdir(disciplineDirOf(p), { recursive: true });
+      scratch = `${p}.probe.${process.pid}-${randomBytes(4).toString('hex')}`;
+      await writeFile(scratch, JSON.stringify(prospective, null, 2));
+      await rm(scratch, { force: true });
+      scratch = null;
+    }
+    return await writeJson(p, cur);
+  } catch {
+    if (scratch) { try { await rm(scratch, { force: true }); } catch { /* orphan beats a throw */ } }
+    return false;
+  }
 }
 
 // Unlocked inner bind — caller MUST hold the binding lock. `boundAt` is real

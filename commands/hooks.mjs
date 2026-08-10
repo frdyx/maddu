@@ -383,20 +383,23 @@ async function mintFreshBoundSession(repoRoot, {
         //      cannot be taken back; the bind that follows it can still fail.
         //      Readability says nothing about this, so the proof performs a
         //      real write of the map's own content, publishing nothing.
-        //   3. The single bind IS the completion stamp. boundAt therefore
-        //      dates from when the mint finished, which is what the SessionEnd
-        //      <10s freshness guard needs — no re-stamp, nothing to fail
+        //   3. The single bind IS the completion stamp, and it is the LAST
+        //      mutating act in the transaction, so boundAt dates as close to
+        //      release as this design can get — which is what the SessionEnd
+        //      <10s freshness guard needs. No re-stamp, nothing to fail
         //      silently.
         // Crash windows are now benign in one direction only: dying before the
         // bind leaves a registered-but-unbound session, which is truthful on
         // the spine and sweepable by the janitor.
-        // Skew: an older installed lib without the proof falls through and
-        // keeps the r6/r7 behavior (a bounded rollback pair at worst) rather
-        // than losing the mint entirely.
-        if (typeof disc.bindingMapWritableIn === 'function'
-            && !(await disc.bindingMapWritableIn(repoRoot))) {
-          return null;
-        }
+        // Skew: the self-heal REFUSES to run on a runtime that does not ship
+        // the proof. Falling through would resurrect the storm this whole
+        // ordering exists to prevent — on an unwritable-but-valid map every
+        // call would register and roll back, permanently, one pair at a time.
+        // An older install therefore keeps exactly today's behavior (session
+        // deny plus its recovery remedy — no regression, no storm), and
+        // `maddu upgrade` restores the mint.
+        if (typeof disc.bindingMapWritableIn !== 'function') return null;
+        if (!(await disc.bindingMapWritableIn(repoRoot, claudeId))) return null;
         // Draw until an id is free. The cheap pre-check skips ids that clash
         // with a LIVE session; the registrar checks against ALL history, so a
         // same-second collision with a CLOSED session comes back as 'exists'
@@ -413,11 +416,30 @@ async function mintFreshBoundSession(repoRoot, {
           return null;                           // invalid-id / spine-corrupt / unknown
         }
         if (!sid) return null;
+        // Cache the active session BEFORE the bind (r9 F3) so the bind is the
+        // transaction's last mutating act and boundAt is not aged by whatever
+        // follows it. A cache entry for a registered-but-not-yet-bound session
+        // is harmless: nothing resolves IDENTITY from this file — the
+        // no-cache-fallback rule (audit P2 F11) is exactly what makes ordering
+        // it first safe.
+        if (sessionActive && sessionActive.writeActiveSession) {
+          await sessionActive.writeActiveSession(repoRoot, {
+            sessionId: sid,
+            registeredAt: reg.event ? reg.event.ts : null,
+            role: 'implementer',
+            label,
+            lane: null,
+          });
+        }
         // The completion stamp. A false here means the map turned unwritable
         // between the proof and now — rare, and bounded to ONE rollback pair
         // because the NEXT call fails at the proof above and appends nothing.
         // Roll the registration back so the spine does not carry a session no
         // caller can reach (In-variant: both locks are still held).
+        // Accepted residual: a stall INSIDE this single-file write still ages
+        // boundAt. That is within the SessionEnd guard's documented
+        // deliberately-fail-open heuristic — I/O pathological enough to stall
+        // this write would stall the guard's own read of the same file.
         const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, sid);
         if (bound === false) {
           try {
@@ -431,15 +453,6 @@ async function mintFreshBoundSession(repoRoot, {
             }
           } catch { /* rollback is best-effort — the janitor sweeps the leak */ }
           return null;
-        }
-        if (sessionActive && sessionActive.writeActiveSession) {
-          await sessionActive.writeActiveSession(repoRoot, {
-            sessionId: sid,
-            registeredAt: reg.event ? reg.event.ts : null,
-            role: 'implementer',
-            label,
-            lane: null,
-          });
         }
         return { sid, created: true };
       }));
