@@ -331,6 +331,21 @@ async function mintFreshBoundSession(repoRoot, {
       }
     }
 
+    // Refuse a DOOMED mint before spending any side effect (r5 F1). The
+    // bindings map is read leniently during resolution (corrupt → empty → "no
+    // binding"), so a corrupt map makes every edit decide to mint; without this
+    // probe each one would REGISTER (append), fail the bind on the strict read,
+    // and append a rollback close — a permanent register+close pair per edit on
+    // an append-only spine until the operator repairs the file. Probing here,
+    // BEFORE the transaction, also spends no locks on a mint that cannot
+    // succeed; the map corrupting in the window between probe and bind still
+    // costs at most ONE bounded rollback pair, which the F2 path handles.
+    // Skew: an older installed lib without the probe keeps that bounded
+    // worst case rather than losing the mint entirely.
+    if (typeof disc.bindingMapHealthy === 'function' && !(await disc.bindingMapHealthy(repoRoot))) {
+      return null;
+    }
+
     // Register + bind as ONE transaction, the same shape as fireSessionStart:
     // the bind commits while the close lock still protects the liveness proof,
     // so no interleaved close can kill the sid in the gap.

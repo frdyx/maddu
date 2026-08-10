@@ -629,6 +629,21 @@ export async function withBindingTransaction(repoRoot, fn) {
   return result;
 }
 
+// Preflight PROBE for writers that must not spend SIDE EFFECTS on a bind that
+// is already doomed — the PreToolUse recovery mint, which otherwise registers a
+// session (a spine append), discovers the bind fails, and appends again to roll
+// it back, on every single edit until the map is repaired.
+// Healthy = the strict read succeeds. A MISSING file is healthy: the first bind
+// creates it. A present-but-corrupt or wrong-shaped one is not, because
+// bindClaudeSessionIn's strict read throws and returns false only AFTER the
+// caller has already appended. Deliberately stricter than resolveMadduSession,
+// whose lenient read (corrupt → empty map → null) is right for read-only
+// resolution but hides exactly this condition from writers.
+export async function bindingMapHealthy(repoRoot) {
+  try { await readSessionsMapStrict(sessionsMapPath(repoRoot)); return true; }
+  catch { return false; }
+}
+
 // Unlocked inner bind — caller MUST hold the binding lock. `boundAt` is real
 // (epoch ms): the session-end rebind-freshness guard keys on it.
 export async function bindClaudeSessionIn(repoRoot, claudeId, madduId, boundAt = Date.now()) {

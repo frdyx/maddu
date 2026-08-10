@@ -356,8 +356,14 @@ async function main() {
     }
     ok('concurrent mint: a PROVEN rendezvous was achieved (both racers held)', !!raced, `${ATTEMPTS} attempts max`);
     if (raced) {
-      for (const [i, r] of [[1, raced.r1], [2, raced.r2]].map(([i, r]) => [i, parseHook(r.out)])) {
-        ok(`concurrent mint: call ${i} not blocked on session`, !(r.deny && SESSION_DENY_RE.test(r.reason)), r.reason.slice(0, 100));
+      // Codex r5: exit code + lane deny REQUIRED per child — a child killed or
+      // crashed after writing its marker must not read as "not blocked"; only
+      // a child that completed the whole gate pipeline counts as a racer.
+      for (const [i, rr] of [[1, raced.r1], [2, raced.r2]]) {
+        const r = parseHook(rr.out);
+        ok(`concurrent mint: call ${i} completed the gate (exit 0 + lane deny, not session)`,
+          rr.code === 0 && r.deny && /lane/.test(r.reason) && !SESSION_DENY_RE.test(r.reason),
+          `code=${rr.code} ${r.reason.slice(0, 80)}`);
       }
       const live = await activeIds(raced.repo);
       const b = await bindings(raced.repo);
@@ -366,6 +372,28 @@ async function main() {
     } else {
       failed += 4; // the four race assertions could not run — red, not silently skipped
     }
+  }
+
+  // ── 11. corrupt bindings map → the mint must refuse BEFORE any side effect
+  // (Codex r5): a lenient read sees a corrupt map as empty, so without the
+  // health probe every edit would register a session, fail the strict-read
+  // bind, roll back — and permanently append a register+close pair to the
+  // append-only spine, per call, until the map is repaired. ─────────────────
+  {
+    const repo = await freshRepo('maddu-mint-corrupt-'); repos.push(repo);
+    await mkdir(dirname(bindingsPath(repo)), { recursive: true });
+    await writeFile(bindingsPath(repo), '{not json');
+    const before = (await spineEvents(repo)).length;
+    const res1 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-H'));
+    const res2 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-H'));
+    const after = await spineEvents(repo);
+    ok('corrupt map: ZERO spine appends across two edits (no register/close storm)',
+      after.length === before, `before=${before} after=${after.length} types=${JSON.stringify(after.map((e) => e.type))}`);
+    const d1 = parseHook(res1.out), d2 = parseHook(res2.out);
+    ok('corrupt map: the session deny stands (legacy remedy leads to the repair)',
+      d1.deny && SESSION_DENY_RE.test(d1.reason) && d2.deny && SESSION_DENY_RE.test(d2.reason), d1.reason.slice(0, 80));
+    ok('corrupt map: the corrupt file is left untouched (never clobbered)',
+      (await readFile(bindingsPath(repo), 'utf8')) === '{not json');
   }
 
   // ── 9. the B1 story end-to-end: worker inherits env → SessionEnd closes the
