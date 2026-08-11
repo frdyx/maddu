@@ -64,6 +64,74 @@ maddu loop ralph --goal "fix tests until green" \
 That keeps Ralph's loop bounded to the project's discovered test contract,
 prints stable failing test ids, and leaves test creation suggest-only.
 
+#### Ralph is acceptance-declared *(v1.120.0)*
+
+Ralph's verification is now a declared **acceptance** — a command plus the
+oracle that must stay frozen and the implementation that must move
+([56-acceptance-proof.md](56-acceptance-proof.md)). Two grammars, and nothing is
+inferred:
+
+```bash
+maddu loop ralph --from-goal --iterate "<agent turn>"          # adopt the active goal
+maddu loop ralph --goal "..." --verify "<cmd>" \
+                 --oracle "test/**" --impl "src/**"            # one ad-hoc acceptance
+```
+
+| invocation | outcome |
+|---|---|
+| `--from-goal` **and** `--verify` | exit 2 — two answers to one question |
+| neither flag | exit 2 — nothing to verify |
+| `--verify` without both `--oracle` and `--impl` | exit 2 |
+| `--from-goal` with no goal / a closed goal / no verifiable condition / no declared sets | exit 3 |
+
+A loop that cannot succeed refuses at the door instead of at the cap: an
+acceptance with no declared sets can never satisfy the frozen-oracle clause, and
+before v1.120.0 a bare `--verify` burned every iteration to `max-iter` on
+`no-verify-supplied`. That change is **breaking** for existing
+`ralph --verify`-only invocations — loudly, with a typed exit code.
+
+`--from-goal` adopts the goal's own conditions, so the RED an earlier
+`maddu orient` recorded pairs with the GREEN this loop produces; an ad-hoc
+`--verify` acceptance is scoped to the loop id and pairs only within it. When
+both an ad-hoc `--verify` and an acceptance-active goal exist, the loop warns
+naming both and records `verifyOverride: true`.
+
+#### Baseline observation
+
+Ralph records an explicit **iteration-0 baseline** observation of every
+acceptance after `LOOP_STARTED` and before the first iterate — the RED that must
+exist before any later GREEN can pair with it. If the baseline comes back green
+the loop still runs (the operator asked for it), and that GREEN can close a
+qualifying earlier RED. A baseline that throws is caught and summarized, never
+fatal: proof plumbing must not break the primitive it observes.
+
+`LOOP_STARTED.data` carries the intent fields for acceptance-bearing ralph runs
+only — `baselineRequested`, `verifySource: 'flag' | 'goal'`, `verifyOverride`.
+`loop plan` and ralph-without-acceptance keep their exact legacy five-field
+shape.
+
+#### The stuck signature comes from an output fingerprint
+
+For an acceptance-bearing ralph, an iteration's stuck-detection signature is
+built per acceptance as `${acceptanceId}:${exit}:${fingerprint}`, joined in a
+stable order — where `fingerprint` is a bounded digest of the run's output with
+timing noise canonicalized away.
+
+**A null fingerprint disables stuck detection for that iteration.** If any
+acceptance's fingerprint is null — the output was truncated, or the observation
+did not run at all (lock contention, a refusal) — the whole signature is `null`
+and the loop cannot halt on it. That is the deliberately safe direction: two
+genuinely different failures that happen to share a truncation prefix must never
+read as "stuck", and a missed halt is bounded by `--max-iter` while a false halt
+stops real work.
+
+Timing is collapsed only in positions where it is unambiguously a *duration*:
+an end-of-line suffix (parenthesized, `in`/`took`, or bare) and whole-line
+fields (TAP `duration_ms`, jest `Time:`, vitest `Duration`). A test name that
+itself ends its line with a duration collides with its own variants — a known,
+accepted residue; every form that is *missed* merely false-differs, which costs
+iterations, not correctness.
+
 ### Plan-loop
 
 ```bash

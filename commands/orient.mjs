@@ -23,33 +23,12 @@ import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, envActingSid } from './_spine.mjs';
 import { loadLib, loadLibOptional } from './_libroot.mjs';
 
-// maddu.json → acceptance.maxProofAge, read exactly the way `readMaxAnchorAge`
-// (spine-anchor.mjs) reads the witness policy beside it: an ABSENT maddu.json is
-// the only thing that means "no policy declared", and every other failure —
-// unreadable file, invalid JSON, a value that is not "<n>d" — returns the
-// INVALID shape, which `normalizeMaxProofAge` fail-closes on (`policy-invalid`,
-// so nothing derives live). A consume gate must never guess its own policy.
-//
-// The offending value is never echoed: it is caller-typed config text, and a
-// secret pasted into the wrong field must not land on stderr or in a log. The
-// shape returned here is the one `deriveProofs` already accepts, so nothing
-// downstream has to re-interpret it.
-async function readMaxProofAge(repoRoot) {
-  let raw = null;
-  try { raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8'); } catch (e) {
-    if (e && e.code === 'ENOENT') return { set: false };
-    return { set: true, invalid: true };
-  }
-  let cfg = null;
-  try { cfg = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw); } catch { return { set: true, invalid: true }; }
-  const v = cfg?.acceptance?.maxProofAge;
-  if (v === undefined || v === null) return { set: false };
-  // Bounded by construction (≤5 digits ≈ 273 years): an unbounded digit run
-  // parses to Infinity and makes every age comparison false — a policy that can
-  // never fire is worse than none.
-  if (typeof v !== 'string' || !/^\d{1,5}d$/.test(v) || parseInt(v, 10) < 1) return { set: true, invalid: true };
-  return { set: true, invalid: false, days: parseInt(v, 10) };
-}
+// The acceptance DECLARATION MAPPING, the goal FOLD, the proof DERIVATION and
+// the `maddu.json → acceptance.maxProofAge` reader all live in the runtime's
+// `acceptance-view.mjs`, not here: the `acceptance-proven` gate renders the same
+// proof state, and two hand-maintained copies of the decl mapping is how the two
+// surfaces drift into different acceptanceIds for one condition. Orient owns the
+// OBSERVATION (it runs the commands) and the RENDER; it owns none of the view.
 
 // Read this install's own version + release date for the staleness FLOOR
 // (roadmap #6) — the consumer's bundled maddu/version.json, or the framework
@@ -164,14 +143,13 @@ const TIMELINE_TYPES = {
 // voids instead of runs. Each command executes exactly once per orient; nothing
 // here re-runs anything the observer already ran.
 //
-// Returns `{ rows, ids }` aligned by index with `success`, or null on an
-// install whose runtime predates the acceptance library — the caller then falls
-// back to the legacy spawn path, which is a degraded READOUT, never a degraded
-// claim (no receipts, no proofs).
-async function observeGoalAcceptances({ goal, success, workRoot, stateRoot, spine, verifyLib, actor, lane, timeoutMs, mapResult }) {
-  const acceptance = await loadLibOptional('acceptance.mjs');
+// Returns `{ rows }` aligned by index with `success`, or null on an install
+// whose runtime predates the acceptance library — the caller then falls back to
+// the legacy spawn path, which is a degraded READOUT, never a degraded claim
+// (no receipts, no proofs).
+async function observeGoalAcceptances({ goal, success, workRoot, stateRoot, spine, verifyLib, view, actor, lane, timeoutMs, mapResult }) {
   const recorder = await loadLibOptional('acceptance-record.mjs');
-  if (!acceptance?.acceptanceIdFor || !recorder?.observeAcceptance) return null;
+  if (typeof view?.goalAcceptanceDecls !== 'function' || !recorder?.observeAcceptance) return null;
 
   // The mode the RECEIPTS are stamped with, resolved BEFORE the runs from the
   // shared predicate — cheap (no chain verify) and the same word the verified
@@ -183,112 +161,86 @@ async function observeGoalAcceptances({ goal, success, workRoot, stateRoot, spin
 
   const roots = { workRoot, stateRoot };
   const rctx = { declSource: 'goal', phase: 'orient', spineLib: spine, actor, lane };
+  // The SHARED decl mapping — aligned by index with `success`, `null` where the
+  // condition declares no command, and an `{error}` arm where the declaration
+  // cannot be encoded into an identity at all.
+  const decls = view.goalAcceptanceDecls(goal, workRoot);
   const rows = [];
-  const ids = [];
-  for (const cond of success) {
-    if (!cond.verify) { rows.push({ ...cond, state: 'unverifiable' }); ids.push(null); continue; }
-    const decl = {
-      command: cond.verify,
-      cwd: workRoot,
-      declEventId: goal.declEventId ?? null,
-      scopeNonce: null,
-      oraclePatterns: goal.oracle,
-      implPatterns: goal.implementation,
-      tierPolicy: 'worktree',
-      schemaVersion: '1',
-    };
+  for (let i = 0; i < success.length; i++) {
+    const cond = success[i];
+    const d = decls[i];
+    if (!d) { rows.push({ ...cond, state: 'unverifiable' }); continue; }
     let res;
-    let id = null;
-    try {
-      id = acceptance.acceptanceIdFor(decl);
-      res = await recorder.observeAcceptance(roots, decl, rctx, { mode, timeoutMs });
-    } catch (err) {
-      // A THROW here is a declaration this surface should never have built (an
+    if (d.error) {
+      // A declaration this surface should never have been able to build (an
       // unencodable identity term, a set that outgrew its budget). It is not a
       // verdict about the condition, so it reads as pending-with-a-note exactly
-      // like any other run that did not happen.
-      res = { ok: false, reason: (err && err.message) || 'observation error' };
+      // like any other run that did not happen — and nothing is executed,
+      // because there is no identity to file the receipt under.
+      res = { ok: false, reason: d.error };
+    } else {
+      try {
+        res = await recorder.observeAcceptance(roots, d.decl, rctx, { mode, timeoutMs });
+      } catch (err) {
+        res = { ok: false, reason: (err && err.message) || 'observation error' };
+      }
     }
     rows.push(mapResult(cond, res));
-    ids.push(id);
   }
-  return { rows, ids, mode, acceptance };
+  // Only the evaluated ROWS leave here. The acceptanceIds and the digests they
+  // key are the view lib's business now — orient re-deriving them would be the
+  // second copy this extraction exists to delete.
+  return { rows };
 }
 
-// Derive the proof verdict for the conditions just observed.
+// Derive the proof verdict for the conditions just observed, through the SHARED
+// view — orient contributes the post-observation verified read (so the GREEN it
+// just appended is inside the evidence) and the render vocabulary; the view owns
+// the fold, the expansion and the derivation, so this surface and the
+// `acceptance-proven` gate cannot reach different verdicts about one condition.
 //
-// ONE expansion per SET, not one per condition: every condition of a goal
-// shares the goal's declared oracle and implementation, so the current digests
-// are computed once and mapped onto each condition's acceptanceId. The lookups
-// are keyed by acceptanceId because that is how `deriveProofs` asks "is this id
-// still declared, and what does it hash to now" — a MISS means undeclared, a
-// present `null` means declared-but-unavailable, and those must not collapse.
-// A refused expansion therefore maps to `null` for every id (fail-closed:
-// `oracle-unavailable` / `impl-unavailable`), never to the refusal record.
-async function deriveGoalProofs({ goal, evaluated, observed, workRoot, stateRoot, verifyLib }) {
-  const acceptance = observed.acceptance;
-  if (typeof verifyLib?.readVerifiedEvents !== 'function' || typeof acceptance?.deriveProofs !== 'function') return null;
-
-  const rowFor = (i, extra) => ({
-    text: evaluated[i]?.text ?? null,
-    verify: evaluated[i]?.verify ?? null,
-    acceptanceId: observed.ids[i],
-    state: null, staleReason: null, reason: null, red: null, green: null,
-    ...extra,
-  });
-  const declared = observed.ids.map((id, i) => (id ? i : -1)).filter((i) => i >= 0);
+// Returns null when nothing could be derived at all (an install whose runtime
+// predates the view, an unreadable chain, a contract violation) — the caller
+// then renders no proof section, which is a degraded READOUT, never a degraded
+// claim. The three whole-run refusals are NOT that case: each keeps its own
+// single-key payload so they never render alike.
+async function deriveGoalProofs({ goal, workRoot, stateRoot, verifyLib, view }) {
+  if (typeof verifyLib?.readVerifiedEvents !== 'function' || typeof view?.deriveGoalProofView !== 'function') return null;
 
   let read;
   try { read = await verifyLib.readVerifiedEvents(stateRoot); }
   catch { return null; }
 
-  const roots = { workRoot, stateRoot };
-  const oracle = await acceptance.oracleDigest(roots, goal.oracle);
-  const impl = await acceptance.implDigest(roots, goal.implementation);
-  const currentOracleDigest = new Map();
-  const currentImplDigest = new Map();
-  for (const i of declared) {
-    currentOracleDigest.set(observed.ids[i], oracle.ok === true ? oracle.digest : null);
-    currentImplDigest.set(observed.ids[i], impl.ok === true ? impl.digest : null);
-  }
-
   let derived;
   try {
-    derived = acceptance.deriveProofs(read, {
-      goal,
+    derived = await view.deriveGoalProofView({ workRoot, stateRoot }, {
+      read,
+      declEventId: goal.declEventId ?? null,
       nowMs: Date.now(),
-      currentOracleDigest,
-      currentImplDigest,
-      maxProofAge: await readMaxProofAge(workRoot),
+      maxProofAge: await view.readMaxProofAge(workRoot),
     });
   } catch { return null; }
 
-  const oracleFileCount = oracle.ok === true ? oracle.fileCount : null;
   const byIndex = new Map();
-  // The two whole-derivation refusals render as ONE statement about the run,
-  // never as per-condition noise: neither is a fact about any single condition.
-  if (derived.ok !== true) return { payload: { unsupported: derived.unsupported || 'team-sync' }, oracleFileCount, byIndex };
-  if (derived.suppressed) return { payload: { suppressed: derived.suppressed }, oracleFileCount, byIndex };
+  if (derived.ok !== true) {
+    // Each whole-derivation refusal renders as ONE statement about the run,
+    // never as per-condition noise: none of them is a fact about any single
+    // condition, and collapsing them would make "this mode cannot support
+    // proofs", "the chain is broken" and "you are looking at a different goal"
+    // indistinguishable.
+    const payload = derived.why === 'goal-changed'
+      ? { stale: 'goal-changed' }
+      : derived.why === 'integrity'
+        ? { suppressed: 'integrity' }
+        : { unsupported: derived.why || 'team-sync' };
+    return { payload, oracleFileCount: null, byIndex };
+  }
 
-  // One row per CURRENT condition, aligned by index with `success` (funnel r1
-  // #2): a positional consumer zipping the two arrays must never attribute a
-  // verifiable condition's proof to a text-only neighbour. Conditions that
-  // declare no command carry a null acceptanceId and an all-null proof row.
-  const payload = evaluated.map((_, i) => {
-    const p = observed.ids[i] ? derived.proofs.get(observed.ids[i]) : null;
-    // red/green are EVENT-ID STRINGS on the wire (funnel r5 #2) — the
-    // derivation's reference objects are an internal shape; a machine
-    // consumer gets the receipt id it can look up, or null.
-    const row = p
-      ? rowFor(i, { state: p.state, staleReason: p.staleReason, reason: p.reason, red: p.red?.eventId ?? null, green: p.green?.eventId ?? null })
-      : rowFor(i, {});
-    // Keyed by CONDITION INDEX, not by command text: two conditions may declare
-    // the same verify command (and then share an acceptanceId), and a text key
-    // would render one of them under the other's row.
-    byIndex.set(i, row);
-    return row;
-  });
-  return { payload, oracleFileCount, byIndex };
+  // Keyed by CONDITION INDEX, not by command text: two conditions may declare
+  // the same verify command (and then share an acceptanceId), and a text key
+  // would render one of them under the other's row.
+  derived.rows.forEach((row, i) => byIndex.set(i, row));
+  return { payload: derived.rows, oracleFileCount: derived.oracleFileCount, byIndex };
 }
 
 // One proof clause per condition, in the derivation's OWN vocabulary. `unproven`
@@ -358,9 +310,10 @@ export default async function orient(argv) {
   // derive. Rows stay aligned with `success` by index.
   let observed = null;
   let result;
+  const acceptanceView = acceptanceActive ? await loadLibOptional('acceptance-view.mjs') : null;
   if (runVerify && acceptanceActive) {
     observed = await observeGoalAcceptances({
-      goal, success, workRoot, stateRoot, spine, verifyLib,
+      goal, success, workRoot, stateRoot, spine, verifyLib, view: acceptanceView,
       actor: seActor, lane: seLane, timeoutMs: successEval.VERIFY_TIMEOUT_MS,
       mapResult: successEval.evalConditionFromResult,
     });
@@ -408,7 +361,7 @@ export default async function orient(argv) {
   let oracleFileCount = null;
   let proofByIndex = new Map();
   if (observed) {
-    const derived = await deriveGoalProofs({ goal, evaluated, observed, workRoot, stateRoot, verifyLib });
+    const derived = await deriveGoalProofs({ goal, workRoot, stateRoot, verifyLib, view: acceptanceView });
     if (derived) {
       proofs = derived.payload;
       oracleFileCount = derived.oracleFileCount;
@@ -491,7 +444,8 @@ export default async function orient(argv) {
       // conditions — never the derivation's Map, which serializes to `{}` and
       // would read as "no proofs" to every consumer. `null` when this
       // invocation derived nothing (legacy goal, --no-verify, older install);
-      // the two whole-run refusals keep their own single-key shapes.
+      // the three whole-run refusals keep their own single-key shapes
+      // (`{unsupported}` / `{suppressed}` / `{stale}`).
       proofs,
       counters, timeline,
       handoff: handoff ? { body: handoff.body, setAt: handoff.setAt } : null,
@@ -567,13 +521,22 @@ export default async function orient(argv) {
       if (clause) console.log(`      ${C.dim}${clause}${C.reset}`);
     });
     if (proofs && !Array.isArray(proofs)) {
+      // Three DISTINCT sentences, deliberately: "this mode cannot support
+      // proofs", "the chain is broken" and "you are looking at a goal the
+      // record has moved past" have three different remedies.
       const line = proofs.unsupported
         ? `acceptance proofs: unsupported in ${proofs.unsupported} mode — a partitioned spine has no single order for a RED to precede a GREEN in`
-        : `acceptance proofs: suppressed (${proofs.suppressed}) — proof state derived from a chain that failed verification would already be untrusted`;
+        : proofs.stale
+          ? `acceptance proofs: stale (${proofs.stale}) — the goal was re-declared or closed while this briefing ran; re-run \`maddu orient\``
+          : `acceptance proofs: suppressed (${proofs.suppressed}) — proof state derived from a chain that failed verification would already be untrusted`;
       console.log(`    ${C.dim}${line}${C.reset}`);
     }
     if (proofs) {
-      console.log(`    ${C.dim}a proof says the command EXITED NONZERO then ZERO with the oracle frozen — process-level, never "a test failed". Limits: ACCEPTANCE_HONEST_LIMITS in the acceptance library.${C.reset}`);
+      // The pointer text is the shared one the gate also renders — a second
+      // hand-written copy is how one surface quietly narrows the limits.
+      // Reachable here by construction: `proofs` is only non-null when the view
+      // lib loaded.
+      console.log(`    ${C.dim}${acceptanceView.ACCEPTANCE_LIMITS_POINTER}${C.reset}`);
     }
     if (goal.constraints?.length) {
       console.log(`\n  ${C.bold}Constraints${C.reset} (${goal.constraints.length}):`);

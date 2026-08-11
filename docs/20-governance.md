@@ -39,7 +39,7 @@ The bridge surfaces the same view at `GET /bridge/orientation`. The cockpit's **
 `maddu doctor` is a fan-out runner over a discoverable gate set:
 
 ```
-template/maddu/runtime/gates/builtin/*.mjs    # framework-shipped (74 today)
+template/maddu/runtime/gates/builtin/*.mjs    # framework-shipped (76 today)
 <repoRoot>/.maddu/gates/*.mjs                 # operator-supplied
 ```
 
@@ -91,7 +91,7 @@ maddu doctor --severity critical           # filter by severity
 
 ### Built-in gates
 
-The framework ships **74 built-in gates today** (`template/maddu/runtime/gates/builtin/*.mjs`
+The framework ships **76 built-in gates today** (`template/maddu/runtime/gates/builtin/*.mjs`
 is the exhaustive, discoverable set — `maddu doctor`/`maddu audit` run them all). The
 table below is a **representative selection**, not the full list; it shows the original
 v0.16.0 core plus a few later additions to convey the range.
@@ -129,6 +129,7 @@ v0.16.0 core plus a few later additions to convey the range.
 | project-test-recent | warn | consumer repo adaptive `maddu test --profile quick\|full` ran recently and green (records last-run at `.maddu/state/project-test-last-run.json`) | v1.16.0 |
 | defaults-single-sourced | safety | `init.mjs` + `upgrade.mjs` seed config defaults via `commands/_config-seed.mjs`; neither re-inlines `DEFAULT_TRIGGERS`/pipelines/config constants (prevents the init↔upgrade drift that silently dropped v1.10.0 triggers on upgrade) | v1.11.0 |
 | brief-coherence | warn | every agent-facing `COMMANDS` verb is named in the worker brief `template/maddu/CLAUDE.md` (closes the gap that shipped `learn` without a brief mention) | v1.11.0 |
+| acceptance-proven | warn | every verifiable success condition of the ACTIVE goal holds a **live** RED→GREEN acceptance proof — the declared command observed to exit nonzero then zero with the declared oracle frozen ([56-acceptance-proof.md](56-acceptance-proof.md)). Read-only: it executes no declared command (observation belongs to `orient` / `loop ralph`) and renders from the same shared view those surfaces render from. Nothing-declared stays visibly distinct from proven-clean — no goal, no verify command, and no `--oracle`/`--impl` set are three separate refusals. **Permanently advisory**: `maddu ci pin` structurally refuses warn-severity gates, and that ceiling is honest — the actor who can green a proof can re-declare the goal underneath it | v1.120.0 |
 
 **Config defaults are single-sourced.** All `.maddu/config/*.json` defaults (the rule-#9 trigger allowlist, janitor/trust/worker-env/governance, the pipeline catalog) live in `commands/_config-seed.mjs` and are seeded by BOTH `maddu init` and `maddu upgrade` via one `seedConfigDefaults()` call — so the two commands can't drift. Every write is write-if-missing; `triggers.json` merges new entries without removing operator additions; an operator-edited config is never overwritten. `maddu upgrade` now backfills every config default (so a repo installed before a config existed gets it on upgrade — including `worker-env.json`'s default-deny-secrets). The `defaults-single-sourced` gate fails if anyone re-inlines a default.
 
