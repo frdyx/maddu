@@ -276,8 +276,11 @@ async function deriveGoalProofs({ goal, evaluated, observed, workRoot, stateRoot
   // declare no command carry a null acceptanceId and an all-null proof row.
   const payload = evaluated.map((_, i) => {
     const p = observed.ids[i] ? derived.proofs.get(observed.ids[i]) : null;
+    // red/green are EVENT-ID STRINGS on the wire (funnel r5 #2) — the
+    // derivation's reference objects are an internal shape; a machine
+    // consumer gets the receipt id it can look up, or null.
     const row = p
-      ? rowFor(i, { state: p.state, staleReason: p.staleReason, reason: p.reason, red: p.red, green: p.green })
+      ? rowFor(i, { state: p.state, staleReason: p.staleReason, reason: p.reason, red: p.red?.eventId ?? null, green: p.green?.eventId ?? null })
       : rowFor(i, {});
     // Keyed by CONDITION INDEX, not by command text: two conditions may declare
     // the same verify command (and then share an acceptanceId), and a text key

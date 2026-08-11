@@ -348,7 +348,17 @@ const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]{0,4096}(?:\
 // false DIFFERENCE, bounded by max-iter: safe. This boundary is adjudicated
 // (plan r5); moving it requires showing a class OUTSIDE it, not another point
 // on the same trade-off.
-const TIMING_RE = /(?:\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)|(?<=\s)\d+(?:[.,]\d+)?\s?(?:ms|s))\s*$|^\s*duration_ms[:=\s]+\d+(?:[.,]\d+)?\s*$|^\s*Time:\s+\d+(?:[.,]\d+)?\s?(?:ms|s)(?:\s*,\s*estimated\s+\d+(?:[.,]\d+)?\s?(?:ms|s))?\s*$|^\s*Duration\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b.*$/g;
+const TIMING_RE = /(?:\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)|(?<=\s)\d+(?:[.,]\d+)?\s?(?:ms|s))\s*$|^\s*duration_ms[:=\s]+\d+(?:[.,]\d+)?\s*$|^\s*Time:\s+\d+(?:[.,]\d+)?\s?(?:ms|s)(?:\s*,\s*estimated\s+\d+(?:[.,]\d+)?\s?(?:ms|s))?\s*$/g;
+
+// The vitest `Duration` summary is a whole-line FIELD whose parenthetical
+// carries labelled inner timings (`Duration 1.26s (transform 35ms, setup
+// 1ms)`) — every value changes per run. The line SHAPE is the gate and only
+// the timing tokens inside it collapse (funnel r5 #1: a `.*$` arm here
+// swallowed arbitrary trailing text, collapsing NON-timing differences —
+// outside the adjudicated boundary). A `Duration …` line with anything after
+// the time other than one parenthetical is a name and is left alone.
+const DURATION_LINE_RE = /^\s*Duration\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\s*(?:\([^()]*\))?\s*$/;
+const BARE_TIMING_G = /\b\d+(?:[.,]\d+)?\s?(?:ms|s)\b/g;
 
 function escapeRegExpLiteral(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -377,6 +387,7 @@ function cwdPrefixRegExp(cwd) {
 function canonicalizeOutputLine(line, cwdRe) {
   let s = line.replace(ANSI_RE, '');
   if (cwdRe) s = s.replace(cwdRe, '');
+  if (DURATION_LINE_RE.test(s)) return s.replace(BARE_TIMING_G, '<t>');
   return s.replace(TIMING_RE, '<t>');
 }
 

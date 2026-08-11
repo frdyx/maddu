@@ -143,6 +143,12 @@ async function main() {
       && ['text', 'verify', 'acceptanceId', 'state', 'staleReason', 'reason', 'red', 'green']
         .every((k) => k in row),
       JSON.stringify(row));
+    // red/green are EVENT-ID STRINGS on the wire (funnel r5 #2), never the
+    // derivation's internal reference objects.
+    ok('live row red/green are event-id strings',
+      !!row && typeof row.red === 'string' && /^evt_/.test(row.red)
+      && typeof row.green === 'string' && /^evt_/.test(row.green),
+      JSON.stringify(row && { red: row.red, green: row.green }));
     ok('exactly-once: three verifying orients ran the command exactly three times', countOf(root) === 3,
       `count=${countOf(root)}`);
     const controlOk = g.status === 0 && !!red && red.state === 'pending' && !!met && met.state === 'met' && live;

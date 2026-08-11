@@ -315,6 +315,13 @@ const fpOf = async (body) => {
     ['vitest per-file bare EOL suffix', ' ❯ test/example.test.ts (5 tests | 1 failed) 306ms', ' ❯ test/example.test.ts (5 tests | 1 failed) 412ms'],
     ['vitest Duration summary', '   Duration  1.26s (transform 35ms, setup 1ms)', '   Duration  2.84s (transform 41ms, setup 2ms)'],
   ];
+  // Funnel W1-r5 #1: the Duration arm is a line-SHAPE gate, never a prefix
+  // swallow — same time, different trailing prose must stay distinct.
+  {
+    const e = await fpOf(`process.stderr.write(${JSON.stringify('Duration 1s — failure A\n')}); process.exit(1);`);
+    const f = await fpOf(`process.stderr.write(${JSON.stringify('Duration 1s — failure B\n')}); process.exit(1);`);
+    ok('Duration-prefixed line with differing non-timing text stays distinct', e.fingerprint !== f.fingerprint, `${e.fingerprint} vs ${f.fingerprint}`);
+  }
   for (const [label, l1, l2] of collapsePairs) {
     const g = await fpOf(`process.stderr.write(${JSON.stringify(l1 + '\n')}); process.exit(1);`);
     const h = await fpOf(`process.stderr.write(${JSON.stringify(l2 + '\n')}); process.exit(1);`);
