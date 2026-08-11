@@ -433,7 +433,7 @@ export default async function orient(argv) {
   // holds, with legible failures (event id + repro) instead of a stack trace.
   let gates = null;
   const gateLedgerLib = await loadLibOptional('gate-ledger.mjs');
-  if (gateLedgerLib?.summarizeGates) gates = gateLedgerLib.summarizeGates(events);
+  if (gateLedgerLib?.summarizeGates) gates = gateLedgerLib.summarizeGates(events, { workRoot });
 
   if (flags.json) {
     process.stdout.write(JSON.stringify({

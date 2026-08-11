@@ -226,7 +226,15 @@
 // whose every in-tree emitter is the framework itself, so the generic-looking
 // ones (`command`, `exit`, `subject`) squat on no plugin's namespace.
 // Additive → minor bump; baseline refreshed with this change.
-export const EVENT_CONTRACT_VERSION = '1.18.0';
+//
+// 1.19.0 (2026-08-11, PR-2 gate campaign, funnel r7): GATE_RAN.data gains
+// `workRoot?` — the CHECKOUT a verdict describes. Gate receipts moved to the
+// SHARED state-root spine (funnel r6), so two checkouts' receipts collapse in
+// latest-per-gate readouts unless scoped; readers filter by it, and a legacy
+// receipt without it stays visible in every scope. Optional because every
+// pre-1.19.0 receipt lacks it. Framework-minted name on a framework-owned
+// event (the 1.17.0 ownership argument); additive → minor.
+export const EVENT_CONTRACT_VERSION = '1.19.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -331,7 +339,7 @@ export const EVENT_SCHEMA = {
   EMAIL_SENT: { summary: "An email was sent.", data: { length: 'number', to: 'string' } },
   EMAIL_OUTBOUND_FAILED: { summary: "An outbound email failed to send.", data: { error: 'string', reason: 'string', to: 'string' } },
   FOLLOWUP_OPENED: { summary: "A follow-up was opened from a slice review finding.", data: { draftScope: 'array', fromReviewEventId: 'string', severity: 'string' } },
-  GATE_RAN: { summary: "A verification gate ran and recorded its verdict.", data: { durationMs: 'number', evidence: 'object|null', gateId: 'string', ok: 'boolean', severity: 'string', sliceId: 'string', status: 'string' } },
+  GATE_RAN: { summary: "A verification gate ran and recorded its verdict.", data: { durationMs: 'number', evidence: 'object|null', gateId: 'string', ok: 'boolean', severity: 'string', sliceId: 'string', status: 'string', workRoot: 'string?' } },
   GOAL_DECLARED: { summary: "A goal with success conditions and constraints was declared, plus the acceptance sets (oracle / implementation) its success conditions are proven against.", data: { constraints: 'array', implementation: 'array', objective: 'string', oracle: 'array', success: 'array' } },
   GOAL_COMPLETED: { summary: "A declared goal was marked done or abandoned, closing the goal lifecycle.", data: { note: 'string|null', objective: 'string|null', outcome: 'string' } },
   PENDING_ACTION_DRAINED: { summary: "A queued pending action was drained (executed or resolved).", data: { actionId: 'string', detail: 'string', kind: 'string', outcome: 'string', payload: 'object' } },

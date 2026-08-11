@@ -144,6 +144,12 @@ export async function runGates(repoRoot, opts = {}) {
           // as a hard fail.
           data: {
             gateId: g.id, ok, status, severity: g.severity, durationMs, evidence,
+            // The CHECKOUT this verdict describes (funnel r7 #1): receipts on
+            // a SHARED spine from two checkouts would otherwise collapse in
+            // latest-per-gate readouts, letting a worktree's green mask the
+            // primary's red. Readers filter by scope; legacy receipts without
+            // it stay visible everywhere.
+            workRoot: ctx.roots?.workRoot || repoRoot,
             ...(attribution?.sliceId ? { sliceId: attribution.sliceId } : {}),
           },
         });

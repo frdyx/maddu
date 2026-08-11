@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.18.0` · **Event types:** 193
+**Contract version:** `1.19.0` · **Event types:** 193
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -114,7 +114,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `EMAIL_SENT` | An email was sent. | `length: number`, `to: string` |
 | `EMAIL_OUTBOUND_FAILED` | An outbound email failed to send. | `error: string`, `reason: string`, `to: string` |
 | `FOLLOWUP_OPENED` | A follow-up was opened from a slice review finding. | `draftScope: array`, `fromReviewEventId: string`, `severity: string` |
-| `GATE_RAN` | A verification gate ran and recorded its verdict. | `durationMs: number`, `evidence: object\|null`, `gateId: string`, `ok: boolean`, `severity: string`, `sliceId: string`, `status: string` |
+| `GATE_RAN` | A verification gate ran and recorded its verdict. | `durationMs: number`, `evidence: object\|null`, `gateId: string`, `ok: boolean`, `severity: string`, `sliceId: string`, `status: string`, `workRoot: string?` |
 | `GOAL_DECLARED` | A goal with success conditions and constraints was declared, plus the acceptance sets (oracle / implementation) its success conditions are proven against. | `constraints: array`, `implementation: array`, `objective: string`, `oracle: array`, `success: array` |
 | `GOAL_COMPLETED` | A declared goal was marked done or abandoned, closing the goal lifecycle. | `note: string\|null`, `objective: string\|null`, `outcome: string` |
 | `PENDING_ACTION_DRAINED` | A queued pending action was drained (executed or resolved). | `actionId: string`, `detail: string`, `kind: string`, `outcome: string`, `payload: object` |

@@ -417,6 +417,21 @@ async function main() {
       ok('split pair: GATE_RAN appended to the STATE root, not the worktree',
         er.status === 0 && (await gateRans(primary)) === beforePrimary + 1 && (await gateRans(work)) === beforeLocal,
         `exit=${er.status} primary ${beforePrimary}->${await gateRans(primary)} local ${beforeLocal}->${await gateRans(work)}`);
+
+      // …and the shared-spine receipt cannot MASK the other checkout (funnel
+      // r7 #1): it carries the worktree's workRoot, so a primary-scoped
+      // ledger excludes it while an unscoped read (legacy) still sees it.
+      const GL = await import(LIB('gate-ledger.mjs'));
+      const evs = await spine.readAll(primary);
+      const ranHere = evs.filter((e) => e.type === 'GATE_RAN' && e.data?.gateId === 'acceptance-proven');
+      const stamped = ranHere[ranHere.length - 1];
+      ok('shared-spine receipt carries the emitting checkout\'s workRoot',
+        !!stamped && typeof stamped.data.workRoot === 'string' && stamped.data.workRoot.toLowerCase().replace(/[\\/]+$/, '') === work.toLowerCase().replace(/[\\/]+$/, ''),
+        JSON.stringify(stamped && stamped.data.workRoot));
+      const scoped = GL.latestGateRuns(evs, { workRoot: primary }).find((r) => r.gateId === 'acceptance-proven');
+      const unscoped = GL.latestGateRuns(evs).find((r) => r.gateId === 'acceptance-proven');
+      ok('a primary-scoped ledger excludes the worktree\'s receipt (no cross-checkout masking)',
+        !scoped && !!unscoped, JSON.stringify({ scoped, unscoped: !!unscoped }));
     }
   }
 

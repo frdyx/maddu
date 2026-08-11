@@ -1,6 +1,6 @@
 {
-  "version": "1.18.0",
-  "fingerprint": "ece8dc36",
+  "version": "1.19.0",
+  "fingerprint": "3556e729",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -517,7 +517,8 @@
           "ok": "boolean",
           "severity": "string",
           "sliceId": "string",
-          "status": "string"
+          "status": "string",
+          "workRoot": "string?"
         }
       },
       "GOAL_COMPLETED": {
