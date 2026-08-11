@@ -353,16 +353,25 @@ async function main() {
   // the return; the funnel-CLEAN receipt shape must not grow these keys.)
   {
     const root = await makeRepo('fingerprint');
-    // Two failing runs whose ONLY difference is their output must fingerprint
-    // differently — the whole point of the field (same exit, different bug).
-    const say = (word) => `"${NODE}" -e "console.log('${word}');process.exit(1)"`;
-    const f1 = await R.observeAcceptance(roots(root), decl(root, { command: say('failure-alpha') }), rctx(), ctx());
-    const f2 = await R.observeAcceptance(roots(root), decl(root, { command: say('failure-beta') }), rctx(), ctx());
+    // ONE command string throughout (funnel r1 #5): an implementation that
+    // fingerprinted the COMMAND would pass a two-command comparison while
+    // handing ralph identical fingerprints for two different failures. Output
+    // varies through an external fixture file the command reads, so only the
+    // OUTPUT distinguishes the runs.
+    const catCmd = `"${NODE}" -e "console.log(require('fs').readFileSync('fp-src.txt','utf8'));process.exit(1)"`;
+    await writeFile(join(root, 'fp-src.txt'), 'failure-alpha\n');
+    const f1 = await R.observeAcceptance(roots(root), decl(root, { command: catCmd }), rctx(), ctx());
+    const f1b = await R.observeAcceptance(roots(root), decl(root, { command: catCmd }), rctx(), ctx());
+    await writeFile(join(root, 'fp-src.txt'), 'failure-beta\n');
+    const f2 = await R.observeAcceptance(roots(root), decl(root, { command: catCmd }), rctx(), ctx());
     ok('return carries settled:true and a string fingerprint on a normal run',
       f1.ran.settled === true && typeof f1.ran.fingerprint === 'string' && f1.ran.fingerprintTruncated === false,
       JSON.stringify({ settled: f1.ran.settled, fp: typeof f1.ran.fingerprint, tr: f1.ran.fingerprintTruncated }));
-    ok('two failures differing only by output fingerprint differently',
-      typeof f2.ran.fingerprint === 'string' && f1.ran.fingerprint !== f2.ran.fingerprint);
+    ok('same command, same output → the same fingerprint (deterministic)',
+      f1.ran.fingerprint === f1b.ran.fingerprint, `${f1.ran.fingerprint} vs ${f1b.ran.fingerprint}`);
+    ok('same command, different output → different fingerprints',
+      typeof f2.ran.fingerprint === 'string' && f1.ran.fingerprint !== f2.ran.fingerprint,
+      `${f1.ran.fingerprint} vs ${f2.ran.fingerprint}`);
     // Truncation: cap the output below what the command writes → the
     // fingerprint must be NULL (a shared long prefix must not read as "same
     // failure"), flagged truncated.

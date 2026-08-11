@@ -98,14 +98,12 @@ const orientJson = (root, extra = []) => {
   return { r, j };
 };
 
-// Proof rows in --json are a JSON-safe per-condition array (plan r3 #5) — but
-// the exact envelope key layout is the implementation's; resolve rows
-// defensively so an assert failure names the real gap instead of a path typo.
+// Proof rows in --json are a DIRECT JSON-safe per-condition array (plan r3
+// #5). Only that exact shape is accepted — tolerating a nested envelope here
+// would keep CI green while the pinned contract regressed (funnel r1 #3).
 const proofRows = (j) => {
   const p = j && j.proofs;
-  if (Array.isArray(p)) return p;
-  if (p && Array.isArray(p.conditions)) return p.conditions;
-  return null;
+  return Array.isArray(p) ? p : null;
 };
 const proofStates = (j) => (proofRows(j) || []).map((row) => row && row.state);
 
@@ -139,6 +137,12 @@ async function main() {
     ok('GREEN orient: condition met', !!met && met.state === 'met', JSON.stringify(met));
     ok('GREEN orient: proof state live in --json', live,
       JSON.stringify({ proofs: o2.j && o2.j.proofs, states }));
+    const row = (proofRows(o2.j) || [])[0];
+    ok('proof rows carry the pinned keys, aligned with success',
+      !!row && (proofRows(o2.j) || []).length === o2.j.success.length
+      && ['text', 'verify', 'acceptanceId', 'state', 'staleReason', 'reason', 'red', 'green']
+        .every((k) => k in row),
+      JSON.stringify(row));
     ok('exactly-once: three verifying orients ran the command exactly three times', countOf(root) === 3,
       `count=${countOf(root)}`);
     const controlOk = g.status === 0 && !!red && red.state === 'pending' && !!met && met.state === 'met' && live;
@@ -270,12 +274,33 @@ async function main() {
     ok('LOOP_STARTED carries intent fields for acceptance ralph',
       loopStarted.data.baselineRequested === true && loopStarted.data.verifySource === 'flag',
       JSON.stringify(loopStarted.data));
-    // The ad-hoc pair must anchor a live proof: derive through a follow-up
-    // orient-free read is W2's gate's job; here the RED→GREEN pair existing
-    // eligible on both ends is the wiring claim.
     ok('both loop observations are eligible',
       s.accRan.every((e) => e.data.observation_status === 'eligible'),
       JSON.stringify(s.accRan.map((e) => [e.data.phase, e.data.observation_status, e.data.refusal_reason])));
+    // THE LOOP'S OWN receipts must anchor the live proof (funnel r1 #4): a
+    // derivation right here — no orient has run in this repo — can only be
+    // fed by receipts carrying this loopId, so a loop that recorded under two
+    // different acceptanceIds (or recorded no GREEN at all) cannot pass.
+    ok('loop receipts share ONE acceptanceId across baseline and iteration',
+      new Set(s.accRan.map((e) => e.data.acceptanceId)).size === 1,
+      JSON.stringify(s.accRan.map((e) => e.data.acceptanceId)));
+    {
+      const id = s.accRan[0].data.acceptanceId;
+      const oraDig = await A.oracleDigest({ workRoot: root, stateRoot: root }, ['oracle/**']);
+      const implDig = await A.implDigest({ workRoot: root, stateRoot: root }, ['src/**']);
+      const out = A.deriveProofs({ events: s.all, integrity: 'ok', mode: 'flat' }, {
+        goal: null, nowMs: Date.now(),
+        currentOracleDigest: { [id]: oraDig.ok === true ? oraDig.digest : null },
+        currentImplDigest: { [id]: implDig.ok === true ? implDig.digest : null },
+      });
+      const proof = out.ok === true ? out.proofs.get(id) : null;
+      // No orient ever ran in this repo, so the ONLY receipts the derivation
+      // can anchor on are the loop's own — live here proves the loop recorded
+      // a qualifying pair, not that some other surface did.
+      ok('the loop-recorded pair derives LIVE from the spine alone',
+        !!proof && proof.state === 'live',
+        JSON.stringify(proof && { state: proof.state, stale: proof.staleReason }));
+    }
   }
 
   // ── --from-goal positive (r3 #6): two conditions, orient REDs, loop greens ─
@@ -296,7 +321,28 @@ async function main() {
     ok('--from-goal decls are goal-declared (declEventId set, null nonce)',
       s.accRan.filter((e) => e.data.phase !== undefined).every((e) => e.data.scopeNonce === null && typeof e.data.declEventId === 'string'),
       JSON.stringify(s.accRan.map((e) => [e.data.scopeNonce, e.data.declEventId])));
-    // The orient RED must pair with the loop GREEN: both proofs live via orient.
+    // BEFORE any follow-up orient (funnel r1 #4 — a later orient would append
+    // its own GREENs and mask a loop that recorded none): the loop must have
+    // recorded an iteration GREEN for BOTH conditions, and each orient-RED +
+    // loop-GREEN pair must derive live from the spine as it stands right now.
+    const loopGreens = s.accRan.filter((e) =>
+      e.data.phase === 'iteration' && e.data.loopId === started.data.loopId && e.data.outcome_class === 'process-pass');
+    const loopIdsGreen = new Set(loopGreens.map((e) => e.data.acceptanceId));
+    ok('the loop recorded an iteration GREEN for both conditions', loopIdsGreen.size === 2,
+      JSON.stringify(s.accRan.map((e) => [e.data.phase, e.data.loopId, e.data.outcome_class])));
+    {
+      const oraDig = await A.oracleDigest({ workRoot: root, stateRoot: root }, ['oracle/**']);
+      const implDig = await A.implDigest({ workRoot: root, stateRoot: root }, ['src/**']);
+      const cur = (dig) => Object.fromEntries([...loopIdsGreen].map((id) => [id, dig.ok === true ? dig.digest : null]));
+      const out = A.deriveProofs({ events: s.all, integrity: 'ok', mode: 'flat' }, {
+        goal: null, nowMs: Date.now(),
+        currentOracleDigest: cur(oraDig), currentImplDigest: cur(implDig),
+      });
+      const states = out.ok === true ? [...loopIdsGreen].map((id) => out.proofs.get(id)?.state) : [];
+      ok('both orient-RED + loop-GREEN pairs derive live pre-orient',
+        states.length === 2 && states.every((x) => x === 'live'), JSON.stringify(states));
+    }
+    // And the rendering surface agrees.
     const o2 = orientJson(root);
     const states = proofStates(o2.j);
     ok('both conditions live after the loop', states.filter((x) => x === 'live').length === 2,
@@ -384,10 +430,29 @@ async function main() {
     declareGoal(legacyGoal, { sets: false });
     const r2 = run(['loop', 'ralph', '--from-goal'], legacyGoal);
     ok('refusal: --from-goal on a goal without declared sets → exit 3', r2.status === 3, `exit=${r2.status}`);
-    // Declaration-shape validation at the door (r2 #7 / r3 #9).
-    const r3 = run(['goal', 'set', '--objective', 'x', '--success', 'true::t',
-      '--oracle', 'p'.repeat(1025), '--impl', 'src/**'], root);
-    ok('goal set refuses an over-length oracle pattern', r3.status !== 0, `exit=${r3.status}`);
+    // Declaration-shape validation at the door (r2 #7 / r3 #9) — a TYPED exit
+    // 2 refusal, never an uncaught crash's exit 1 (funnel r1 #6).
+    const shapeCases = [
+      [['--oracle', 'p'.repeat(1025), '--impl', 'src/**'], 'over-length oracle pattern'],
+      [['--oracle', '   ', '--impl', 'src/**'], 'blank oracle pattern'],
+      [[...Array.from({ length: 257 }, (_, i) => ['--oracle', `p${i}/**`]).flat(), '--impl', 'src/**'], 'over-count oracle set'],
+    ];
+    for (const [setArgs, label] of shapeCases) {
+      const r = run(['goal', 'set', '--objective', 'x', '--success', 'true::t', ...setArgs], root);
+      ok(`goal set refuses ${label} with exit 2`, r.status === 2, `exit=${r.status} ${r.stderr.slice(0, 150)}`);
+    }
+  }
+
+  // ── proofs array stays aligned when a text-only condition precedes (r1 #2) ─
+  {
+    const root = await makeRepo('align');
+    declareGoal(root, { conditions: ['a text-only condition with no command', `${oracleCmd(root)}::verifiable`] });
+    const o = orientJson(root);
+    const rows = proofRows(o.j);
+    ok('mixed goal: one proof row per condition, aligned by index',
+      !!rows && rows.length === 2 && rows[0].acceptanceId === null && rows[0].state === null
+      && typeof rows[1].acceptanceId === 'string',
+      JSON.stringify(rows));
   }
 
   // ── mode: partitioned fixtures (r2 #10 split) ────────────────────────────

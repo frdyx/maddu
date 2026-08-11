@@ -270,8 +270,12 @@ async function deriveGoalProofs({ goal, evaluated, observed, workRoot, stateRoot
   if (derived.ok !== true) return { payload: { unsupported: derived.unsupported || 'team-sync' }, oracleFileCount, byIndex };
   if (derived.suppressed) return { payload: { suppressed: derived.suppressed }, oracleFileCount, byIndex };
 
-  const payload = declared.map((i) => {
-    const p = derived.proofs.get(observed.ids[i]);
+  // One row per CURRENT condition, aligned by index with `success` (funnel r1
+  // #2): a positional consumer zipping the two arrays must never attribute a
+  // verifiable condition's proof to a text-only neighbour. Conditions that
+  // declare no command carry a null acceptanceId and an all-null proof row.
+  const payload = evaluated.map((_, i) => {
+    const p = observed.ids[i] ? derived.proofs.get(observed.ids[i]) : null;
     const row = p
       ? rowFor(i, { state: p.state, staleReason: p.staleReason, reason: p.reason, red: p.red, green: p.green })
       : rowFor(i, {});

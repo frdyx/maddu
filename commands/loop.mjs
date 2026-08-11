@@ -135,12 +135,17 @@ export default async function loopCmd(argv) {
   if (sub === 'ralph') {
     const { flags } = parseFlags(rest);
     const fromGoal = Object.hasOwn(flags, 'from-goal');
-    const verifyCmd = typeof flags.verify === 'string' ? flags.verify : null;
+    // PRESENCE and VALUE are separate questions (funnel r1 #1): a bare
+    // `--verify` or `--verify=` still names the ad-hoc intent, so it must
+    // still CONFLICT with --from-goal rather than silently vanishing into a
+    // goal adoption that reports green on flags the operator never reconciled.
+    const verifySupplied = Object.hasOwn(flags, 'verify');
+    const verifyCmd = typeof flags.verify === 'string' && flags.verify.trim() ? flags.verify : null;
     const iterateCmd = typeof flags.iterate === 'string' ? flags.iterate : null;
     const maxIter = typeof flags['max-iter'] === 'string' ? Number(flags['max-iter']) : null;
     const lane = typeof flags.lane === 'string' ? flags.lane : null;
 
-    if (fromGoal && verifyCmd) {
+    if (fromGoal && verifySupplied) {
       console.error('--from-goal and --verify are two answers to one question: --from-goal adopts the active goal\'s conditions, --verify declares an ad-hoc one. Pick one.');
       process.exit(2);
     }
