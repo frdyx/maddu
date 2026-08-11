@@ -324,16 +324,23 @@ const FINGERPRINT_PREFIX = 'maddu.acceptance-output.sha256.v1\n';
 // an escape form this misses produces a false DIFFERENCE, which is the safe
 // direction — a false MATCH would halt a loop that is still making progress.
 const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]{0,4096}(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
-// Elapsed times, in the CONTEXTS runners actually print them: parenthesized
-// (`(45 ms)`, jest/mocha), after "in"/"took" (`failed in 123ms`), and the TAP
-// `duration_ms 0.123` field. This is the ONE class of output that changes on
-// every run of an unchanged failure, so collapsing it is what makes the
-// fingerprint comparable at all — but ONLY in those contexts (funnel W1-r2
-// #2): a bare `\d+ms` also matches duration-bearing TEST NAMES, and collapsing
-// `handles 100ms timeout` into `handles 200ms timeout` hands stuck detection a
-// false MATCH — the unsafe direction. A timing form this misses produces a
-// false difference, bounded by max-iter: safe.
-const TIMING_RE = /\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b|\bduration_ms[:=\s]+\d+(?:[.,]\d+)?\b/g;
+// Elapsed times, in the POSITIONS runners actually print them (funnel W1-r2
+// #2, narrowed again in W1-r3 #1): a trailing parenthesized or in/took suffix
+// (`ok 1 - name (45 ms)`, `failed in 123ms` — runners append elapsed time at
+// END of line), a line-leading TAP `duration_ms` field (it gets its own line),
+// or a jest summary `Time:` line. This is the ONE class of output that changes
+// on every run of an unchanged failure, so collapsing it is what makes the
+// fingerprint comparable at all — but a bare or mid-line match also hits
+// duration-shaped TEST NAMES (`handles (100ms) timeout`), and collapsing two
+// different names hands stuck detection a false MATCH — the unsafe direction.
+// Position is the discriminator: runner timings are suffixes or whole fields;
+// name text is mid-line.
+//
+// KNOWN LIMIT, irreducible for a heuristic: a test name that itself ENDS the
+// line with a duration (`FAIL waits (100ms)` with no runner suffix after it)
+// still collapses against its variant. Every form this misses instead produces
+// a false DIFFERENCE, bounded by max-iter: safe.
+const TIMING_RE = /(?:\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b)\s*$|^\s*duration_ms[:=\s]+\d+(?:[.,]\d+)?\b|^\s*Time:\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b/g;
 
 function escapeRegExpLiteral(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

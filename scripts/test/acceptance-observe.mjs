@@ -277,13 +277,29 @@ const fpOf = async (body) => {
   const c = await fpOf('process.stderr.write("ok 1 (12 ms)\\n"); process.exit(1);');
   const d = await fpOf('process.stderr.write("ok 1 (99 ms)\\n"); process.exit(1);');
   ok('parenthesized run timings do not change the fingerprint', c.fingerprint === d.fingerprint, `${c.fingerprint} vs ${d.fingerprint}`);
-  // Funnel W1-r2 #2: a duration-shaped token inside a TEST NAME is identity,
-  // not elapsed time — collapsing it merges two different failures and hands
-  // stuck detection a false halt. The planted offender for the context-anchored
-  // TIMING_RE: under the old bare `\d+ms` rule these two hashed alike.
-  const e = await fpOf('process.stderr.write("FAIL handles 100ms timeout\\n"); process.exit(1);');
-  const f = await fpOf('process.stderr.write("FAIL handles 200ms timeout\\n"); process.exit(1);');
-  ok('duration-bearing TEST NAMES stay distinct (no false stuck-match)', e.fingerprint !== f.fingerprint, `${e.fingerprint} vs ${f.fingerprint}`);
+  // Funnel W1-r2 #2 + W1-r3 #1: a duration-shaped token inside a TEST NAME is
+  // identity, not elapsed time — collapsing it merges two different failures
+  // and hands stuck detection a false halt. One planted offender PER REGEX
+  // ARM: bare, mid-line parenthesized, mid-line in-form, and mid-line
+  // duration_ms all hashed alike under the earlier substring rules.
+  const namePairs = [
+    ['bare', 'FAIL handles 100ms timeout', 'FAIL handles 200ms timeout'],
+    ['parenthesized mid-line', 'FAIL handles (100ms) timeout', 'FAIL handles (200ms) timeout'],
+    ['in-form mid-line', 'FAIL completes in 100ms budget', 'FAIL completes in 200ms budget'],
+    ['duration_ms mid-line', '# Subtest: reports duration_ms 100', '# Subtest: reports duration_ms 200'],
+  ];
+  for (const [label, l1, l2] of namePairs) {
+    const e = await fpOf(`process.stderr.write(${JSON.stringify(l1 + '\n')}); process.exit(1);`);
+    const f = await fpOf(`process.stderr.write(${JSON.stringify(l2 + '\n')}); process.exit(1);`);
+    ok(`duration-bearing TEST NAME (${label}) stays distinct`, e.fingerprint !== f.fingerprint, `${e.fingerprint} vs ${f.fingerprint}`);
+  }
+  // …while genuine runner timing FIELDS still collapse in their positions.
+  const g = await fpOf('process.stderr.write("  duration_ms: 0.123\\n"); process.exit(1);');
+  const h = await fpOf('process.stderr.write("  duration_ms: 9.876\\n"); process.exit(1);');
+  ok('line-leading TAP duration_ms still collapses', g.fingerprint === h.fingerprint, `${g.fingerprint} vs ${h.fingerprint}`);
+  const i = await fpOf('process.stderr.write("Time:        2.153 s\\n"); process.exit(1);');
+  const j = await fpOf('process.stderr.write("Time:        4.907 s\\n"); process.exit(1);');
+  ok('jest summary Time: line still collapses', i.fingerprint === j.fingerprint, `${i.fingerprint} vs ${j.fingerprint}`);
 }
 
 {
