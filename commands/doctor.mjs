@@ -492,7 +492,16 @@ export default async function doctor(argv) {
     // root for everything would scan the primary checkout's files from a
     // worktree and falsely pass its edits.
     const workRepo = await findRepoRoot(process.cwd());
-    const stateRepo = await findStateRoot(process.cwd());
+    let stateRepo = null;
+    try {
+      stateRepo = await findStateRoot(process.cwd());
+    } catch (err) {
+      // A misconfigured MADDU_STATE_ROOT / pointer is a hard finding, not a
+      // silent fallback (funnel r5 #1) — every other command refuses this
+      // state, so doctor must not report health against a substitute.
+      console.log(`${tag('FAIL')}  ${err.message}`);
+      process.exit(1);
+    }
     const cwdRepo = workRepo || stateRepo;
     if (!cwdRepo) {
       if (regResult.workspaces.length > 0) {

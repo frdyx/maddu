@@ -25,35 +25,50 @@ export async function findRepoRoot(startDir = process.cwd()) {
 // `.maddu/` directory is ignored (misconfiguration must not silently retarget
 // state), falling back to the plain walk-up.
 export async function findStateRoot(startDir = process.cwd(), env = process.env) {
-  // Canonical precedence (paths.mjs resolveRoots): env override → pointer →
-  // local marker (funnel r3 #3). An env target that does not hold `.maddu/`
-  // is ignored rather than honored — a misconfiguration must not silently
-  // retarget state.
-  const envRoot = typeof env.MADDU_STATE_ROOT === 'string' ? env.MADDU_STATE_ROOT.trim() : '';
-  if (envRoot) {
-    try {
-      const st = await stat(join(resolve(envRoot), '.maddu'));
-      if (st.isDirectory()) return resolve(envRoot);
-    } catch {}
-  }
+  // FULL canonical parity with paths.mjs resolveRoots (funnel r3 #3, r5 #1):
+  // the WORK-ROOT MARKER is found first (nearest dir holding `.maddu/` or the
+  // pointer file — no marker anywhere ⇒ null, and the env override is never
+  // consulted for a tree that is not a Máddu checkout); then stateRoot
+  // precedence is env → pointer-at-workRoot → workRoot itself. A NON-BLANK
+  // env or pointer target that does not hold `.maddu/` THROWS — canonical
+  // calls that a misconfiguration, and a consumer that silently fell back
+  // would report health against a state every other command refuses to use.
+  // The thrown message never echoes the configured value.
+  const hasStateDir = async (p) => {
+    try { return (await stat(join(p, '.maddu'))).isDirectory(); } catch { return false; }
+  };
   let dir = resolve(startDir);
+  let workRoot = null;
   while (true) {
-    // Pointer FIRST — matching paths.mjs resolveRoots precedence (pointer file
-    // at workRoot beats workRoot itself): an attached worktree may hold BOTH a
-    // local `.maddu/` and the pointer, and the shared state is the pointer's.
+    if (await hasStateDir(dir)) { workRoot = dir; break; }
     try {
-      const target = (await readFile(join(dir, '.maddu-state-root'), 'utf8')).trim();
-      if (target) {
-        const st = await stat(join(resolve(dir, target), '.maddu'));
-        if (st.isDirectory()) return resolve(dir, target);
-      }
-    } catch {}
-    try {
-      const st = await stat(join(dir, '.maddu'));
-      if (st.isDirectory()) return dir;
+      await stat(join(dir, '.maddu-state-root'));
+      workRoot = dir;
+      break;
     } catch {}
     const parent = dirname(dir);
-    if (parent === dir) return null;
+    if (parent === dir) break;
     dir = parent;
   }
+  if (!workRoot) return null;
+  const envRoot = typeof env.MADDU_STATE_ROOT === 'string' ? env.MADDU_STATE_ROOT.trim() : '';
+  if (envRoot) {
+    const target = resolve(envRoot);
+    if (!(await hasStateDir(target))) {
+      throw new Error('MADDU_STATE_ROOT is set but its target holds no .maddu/ directory — fix or unset it (value not echoed)');
+    }
+    return target;
+  }
+  let pointerTarget = null;
+  try {
+    const raw = (await readFile(join(workRoot, '.maddu-state-root'), 'utf8')).trim();
+    if (raw) pointerTarget = resolve(workRoot, raw);
+  } catch {}
+  if (pointerTarget !== null) {
+    if (!(await hasStateDir(pointerTarget))) {
+      throw new Error('.maddu-state-root points at a directory with no .maddu/ — fix or remove the pointer (target not echoed)');
+    }
+    return pointerTarget;
+  }
+  return (await hasStateDir(workRoot)) ? workRoot : null;
 }

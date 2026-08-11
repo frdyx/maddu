@@ -357,19 +357,37 @@ async function main() {
       !!ovRow && ovRow.ok === false, JSON.stringify(ovRow));
 
     // The standalone STATE-root walk consumers like doctor use (gate funnel
-    // r2 #1): the pointer must beat a LOCAL `.maddu/` (paths.mjs precedence),
-    // and a pointer to a non-repo must be ignored, never followed.
+    // r2 #1, canonical-parity semantics per r5 #1): env → pointer → local,
+    // marker-gated, and a non-blank INVALID env/pointer target THROWS — the
+    // canonical misconfiguration law, never a silent substitute state.
     const RES = await import(pathToFileURL(join(process.cwd(), 'commands', '_resolve.mjs')).href);
     ok('findStateRoot follows the pointer from a plain worktree',
       await RES.findStateRoot(work) === primary, String(await RES.findStateRoot(work)));
     await mkdir(join(work, '.maddu'), { recursive: true });
     ok('findStateRoot: pointer beats a local .maddu (canonical precedence)',
       await RES.findStateRoot(work) === primary, String(await RES.findStateRoot(work)));
-    const orphan = await mkdtemp(join(scratch, 'orphan-'));
-    await writeFile(join(orphan, '.maddu-state-root'), join(orphan, 'nowhere') + '\n');
-    await mkdir(join(orphan, '.maddu'), { recursive: true });
-    ok('findStateRoot: a dangling pointer is ignored, local .maddu wins',
-      await RES.findStateRoot(orphan) === orphan, String(await RES.findStateRoot(orphan)));
+    ok('findStateRoot: a VALID env override beats the pointer',
+      await RES.findStateRoot(work, { MADDU_STATE_ROOT: work }) === work,
+      String(await RES.findStateRoot(work, { MADDU_STATE_ROOT: work })));
+    {
+      let threw = false;
+      try { await RES.findStateRoot(work, { MADDU_STATE_ROOT: join(work, 'nowhere') }); } catch { threw = true; }
+      ok('findStateRoot: an INVALID env override throws (never a silent substitute)', threw);
+    }
+    {
+      const orphan = await mkdtemp(join(scratch, 'orphan-'));
+      await writeFile(join(orphan, '.maddu-state-root'), join(orphan, 'nowhere') + '\n');
+      await mkdir(join(orphan, '.maddu'), { recursive: true });
+      let threw = false;
+      try { await RES.findStateRoot(orphan, {}); } catch { threw = true; }
+      ok('findStateRoot: a dangling pointer throws (canonical misconfiguration law)', threw);
+    }
+    {
+      const bare = await mkdtemp(join(scratch, 'bare-'));
+      ok('findStateRoot: no marker anywhere → null even with a valid env set',
+        await RES.findStateRoot(bare, { MADDU_STATE_ROOT: primary }) === null,
+        String(await RES.findStateRoot(bare, { MADDU_STATE_ROOT: primary })));
+    }
   }
 
   return failed === 0 ? 0 : 1;

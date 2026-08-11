@@ -619,8 +619,14 @@ export default async function audit(argv) {
   // standing in; every other audit check here is checkout-scoped and keeps
   // `repoRoot` alone.
   if (!sub || sub === 'acceptance') {
-    checks.push(...await runGateChecks(repoRoot, GATE_IDS.acceptance,
-      { workRoot: repoRoot, stateRoot: (await findStateRoot(process.cwd())) || repoRoot }));
+    try {
+      checks.push(...await runGateChecks(repoRoot, GATE_IDS.acceptance,
+        { workRoot: repoRoot, stateRoot: (await findStateRoot(process.cwd())) || repoRoot }));
+    } catch (err) {
+      // Misconfigured state override/pointer (funnel r5 #1): a hard finding,
+      // never a silent fallback to a state other commands refuse.
+      checks.push({ level: 'FAIL', label: 'acceptance proven', detail: err.message });
+    }
   }
 
   // Audit-only checks.
