@@ -24,7 +24,18 @@ export async function findRepoRoot(startDir = process.cwd()) {
 // no runtime-library dependency. A pointer whose target does not hold a
 // `.maddu/` directory is ignored (misconfiguration must not silently retarget
 // state), falling back to the plain walk-up.
-export async function findStateRoot(startDir = process.cwd()) {
+export async function findStateRoot(startDir = process.cwd(), env = process.env) {
+  // Canonical precedence (paths.mjs resolveRoots): env override → pointer →
+  // local marker (funnel r3 #3). An env target that does not hold `.maddu/`
+  // is ignored rather than honored — a misconfiguration must not silently
+  // retarget state.
+  const envRoot = typeof env.MADDU_STATE_ROOT === 'string' ? env.MADDU_STATE_ROOT.trim() : '';
+  if (envRoot) {
+    try {
+      const st = await stat(join(resolve(envRoot), '.maddu'));
+      if (st.isDirectory()) return resolve(envRoot);
+    } catch {}
+  }
   let dir = resolve(startDir);
   while (true) {
     // Pointer FIRST — matching paths.mjs resolveRoots precedence (pointer file

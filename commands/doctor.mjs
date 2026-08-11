@@ -294,9 +294,12 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   }
 
   // ── Gate runner — built-in gates + operator gates ──
+  // Gates run against the STATE root (funnel r3 #1): the spine and the proof
+  // record live there, while resolveGateRoots re-derives the working tree
+  // from the invocation cwd. Checkout checks above keep `repoRoot`.
   const gatesLib = await loadGatesLib();
   if (gatesLib?.runGates) {
-    const result = await gatesLib.runGates(repoRoot, {
+    const result = await gatesLib.runGates(gateOpts.stateRoot || repoRoot, {
       onlyId: gateOpts.onlyId,
       severity: gateOpts.severity,
       emitEvents: true,
@@ -479,10 +482,15 @@ export default async function doctor(argv) {
     }
     repoTargets = regResult.workspaces.map((w) => ({ repoRoot: w.path, label: workspaceDoctorLabel(w) }));
   } else {
-    // STATE root, not the nearest `.maddu` holder (gate funnel r2 #1): from an
-    // attached worktree the gates must read the SHARED spine the pointer names,
-    // while resolveGateRoots re-derives the work root from the invocation cwd.
-    const cwdRepo = await findStateRoot(process.cwd());
+    // TWO roots, two scopes (gate funnel r2 #1, narrowed r3 #1): checkout
+    // checks (install integrity, package rules) keep the nearest `.maddu`
+    // holder — the tree the operator is standing in — while the GATES read
+    // the SHARED spine the `.maddu-state-root` pointer names; using the state
+    // root for everything would scan the primary checkout's files from a
+    // worktree and falsely pass its edits.
+    const workRepo = await findRepoRoot(process.cwd());
+    const stateRepo = await findStateRoot(process.cwd());
+    const cwdRepo = workRepo || stateRepo;
     if (!cwdRepo) {
       if (regResult.workspaces.length > 0) {
         console.log(`${tag('WARN')}  not inside a .maddu/ repo; pass --all to check every registered workspace.`);
@@ -491,7 +499,7 @@ export default async function doctor(argv) {
         process.exit(1);
       }
     } else {
-      repoTargets = [{ repoRoot: cwdRepo, label: null }];
+      repoTargets = [{ repoRoot: cwdRepo, stateRoot: stateRepo || cwdRepo, label: null }];
     }
   }
 
@@ -510,8 +518,8 @@ export default async function doctor(argv) {
     onlyId: typeof flags.gate === 'string' ? flags.gate : undefined,
     severity: typeof flags.severity === 'string' ? flags.severity : undefined,
   };
-  for (const { repoRoot, label } of repoTargets) {
-    checks.push(...await runRepoChecks(repoRoot, label, gateOpts));
+  for (const { repoRoot, stateRoot, label } of repoTargets) {
+    checks.push(...await runRepoChecks(repoRoot, label, { ...gateOpts, stateRoot: stateRoot || repoRoot }));
   }
 
   // ── Port availability (machine-wide, not per-workspace) ──

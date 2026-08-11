@@ -36,7 +36,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
-import { findRepoRoot } from './_resolve.mjs';
+import { findRepoRoot, findStateRoot } from './_resolve.mjs';
 import { exists } from './_libroot.mjs';
 
 const ANSI = {
@@ -613,7 +613,10 @@ export default async function audit(argv) {
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
   if (!sub || sub === 'mass') checks.push(...await runGateChecks(repoRoot, GATE_IDS.mass));
   if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
-  if (!sub || sub === 'acceptance') checks.push(...await runGateChecks(repoRoot, GATE_IDS.acceptance));
+  // The acceptance gate reads the SHARED spine (funnel r3 #2): from an
+  // attached worktree the proof record lives at the pointer's target, while
+  // every other audit check here is checkout-scoped and keeps `repoRoot`.
+  if (!sub || sub === 'acceptance') checks.push(...await runGateChecks((await findStateRoot(process.cwd())) || repoRoot, GATE_IDS.acceptance));
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());

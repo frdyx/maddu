@@ -74,9 +74,14 @@ const shipped = JSON.parse(await readFile(join(repoRoot, 'docs', 'audit', 'gover
 const builtinGates = (await discoverGates(repoRoot)).filter((g) => g.__source === 'builtin').length;
 const binSrc = await readFile(join(repoRoot, 'bin', 'maddu.mjs'), 'utf8');
 const verbCount = (() => { const m = binSrc.match(/const\s+COMMANDS\s*=\s*(\[[^\]]+\])/); return m ? new Function(`return ${m[1]}`)().length : 0; })();
-// audit-checks: 9 reusable gates surfaced + the 7 audit-only labels (kept in sync
-// with commands/audit.mjs by the audit-checks budget itself catching drift).
-const auditChecks = 9 + 7;
+// audit-checks: the reusable-gate registry COUNTED FROM SOURCE (funnel r3 #4 —
+// a hard-coded literal went stale the day a tenth gate registered and this
+// suite stayed green over the wrong count) + the 7 audit-only labels.
+const auditSrc = await readFile(join(repoRoot, 'commands', 'audit.mjs'), 'utf8');
+const gateIdsMatch = auditSrc.match(/const\s+GATE_IDS\s*=\s*\{([\s\S]*?)\n\};/);
+const reusableGateCount = gateIdsMatch ? (gateIdsMatch[1].match(/^\s*[\w-]+:\s*'/gm) || []).length : 0;
+if (reusableGateCount < 9) { console.log(`[FAIL] could not parse GATE_IDS from commands/audit.mjs (got ${reusableGateCount})`); process.exit(1); }
+const auditChecks = reusableGateCount + 7;
 const shippedVerdict = budgetVerdict({ counts: { gates: builtinGates, verbs: verbCount, 'audit-checks': auditChecks }, manifest: shipped });
 ok('shipped manifest is PASS against real counts', shippedVerdict.level === 'PASS',
   `${shippedVerdict.level} | ${summarizeBudget(shippedVerdict)}`);
