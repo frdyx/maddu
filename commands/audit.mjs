@@ -126,6 +126,11 @@ const GATE_IDS = {
   // the import graph can't see). Baselined monoliths may only shrink; a new or
   // grown one fails. Skips when no contract / mass config.
   mass: 'architecture-mass',
+  // PR-2 gate campaign (funnel r2 #2) — acceptance-proven: the declared-
+  // verification readout. Doctor and CI already run every builtin gate; audit
+  // running a curated subset that silently omitted it made "renders wherever
+  // gates run" false on exactly one surface.
+  acceptance: 'acceptance-proven',
   // v1.19.0 — generated-artifacts-current: every single-sourced artifact is
   // byte-equal to a fresh render of its authored source, and no payload file is
   // an orphan (no source). The enforcement arm of the generated-artifact
@@ -580,7 +585,7 @@ async function checkGovernanceBudget() {
   return { level: 'PASS', label: 'governance budget', detail: `${summary}${latency.level === 'OK' ? ` · ${latency.message}` : ''}` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget', 'positioning']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget', 'positioning', 'acceptance']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -608,6 +613,7 @@ export default async function audit(argv) {
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
   if (!sub || sub === 'mass') checks.push(...await runGateChecks(repoRoot, GATE_IDS.mass));
   if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
+  if (!sub || sub === 'acceptance') checks.push(...await runGateChecks(repoRoot, GATE_IDS.acceptance));
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());

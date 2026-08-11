@@ -173,9 +173,18 @@ export default async function ciCmd(argv) {
       return;
     }
     console.log(`maddu ci pin  ${C.dim}pinned ${green.length} gate(s) as required → ${target}${C.reset}`);
-    if (excluded.length) {
-      console.log(`  ${C.yellow}excluded ${excluded.length} currently-failing gate(s):${C.reset} ${excluded.join(', ')}`);
+    // Two different exclusions, two different truths (gate funnel r2 #3): a
+    // FAILING fail-capable gate is fixable and re-pinnable; a warn-severity
+    // gate is structurally unpinnable however green it runs, and calling it
+    // "currently-failing" tells the operator to fix something that isn't broken.
+    const failing = runs.filter((r) => r.status === 'fail').map((r) => r.gateId).sort();
+    const advisory = excluded.filter((id) => !failing.includes(id));
+    if (failing.length) {
+      console.log(`  ${C.yellow}excluded ${failing.length} currently-failing gate(s):${C.reset} ${failing.join(', ')}`);
       console.log(`  ${C.dim}fix them and re-run \`maddu ci pin\` to include them.${C.reset}`);
+    }
+    if (advisory.length) {
+      console.log(`  ${C.dim}excluded ${advisory.length} advisory (warn-severity) gate(s) — never pinnable: ${advisory.join(', ')}${C.reset}`);
     }
     console.log(`  ${C.dim}from now on \`maddu ci\` exits nonzero only when a pinned gate fails — framework`);
     console.log(`  upgrades can add gates without changing this repo's CI verdict until you re-pin.${C.reset}`);

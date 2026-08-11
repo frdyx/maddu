@@ -337,6 +337,21 @@ async function main() {
     const w2 = gateFromWorktree();
     ok('real runner from the worktree: red after the WORKTREE impl moved',
       !!w2 && w2.ok === false && /impl/i.test(w2.message || ''), JSON.stringify(w2));
+
+    // The standalone STATE-root walk consumers like doctor use (gate funnel
+    // r2 #1): the pointer must beat a LOCAL `.maddu/` (paths.mjs precedence),
+    // and a pointer to a non-repo must be ignored, never followed.
+    const RES = await import(pathToFileURL(join(process.cwd(), 'commands', '_resolve.mjs')).href);
+    ok('findStateRoot follows the pointer from a plain worktree',
+      await RES.findStateRoot(work) === primary, String(await RES.findStateRoot(work)));
+    await mkdir(join(work, '.maddu'), { recursive: true });
+    ok('findStateRoot: pointer beats a local .maddu (canonical precedence)',
+      await RES.findStateRoot(work) === primary, String(await RES.findStateRoot(work)));
+    const orphan = await mkdtemp(join(scratch, 'orphan-'));
+    await writeFile(join(orphan, '.maddu-state-root'), join(orphan, 'nowhere') + '\n');
+    await mkdir(join(orphan, '.maddu'), { recursive: true });
+    ok('findStateRoot: a dangling pointer is ignored, local .maddu wins',
+      await RES.findStateRoot(orphan) === orphan, String(await RES.findStateRoot(orphan)));
   }
 
   return failed === 0 ? 0 : 1;

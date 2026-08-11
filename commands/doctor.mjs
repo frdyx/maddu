@@ -23,7 +23,7 @@ import { join, dirname } from 'node:path';
 import { createServer, request as httpRequest } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
-import { findRepoRoot } from './_resolve.mjs';
+import { findRepoRoot, findStateRoot } from './_resolve.mjs';
 import { exists, readMadduJson, frameworkVersion } from './_manifest.mjs';
 
 const ANSI = {
@@ -479,7 +479,10 @@ export default async function doctor(argv) {
     }
     repoTargets = regResult.workspaces.map((w) => ({ repoRoot: w.path, label: workspaceDoctorLabel(w) }));
   } else {
-    const cwdRepo = await findRepoRoot(process.cwd());
+    // STATE root, not the nearest `.maddu` holder (gate funnel r2 #1): from an
+    // attached worktree the gates must read the SHARED spine the pointer names,
+    // while resolveGateRoots re-derives the work root from the invocation cwd.
+    const cwdRepo = await findStateRoot(process.cwd());
     if (!cwdRepo) {
       if (regResult.workspaces.length > 0) {
         console.log(`${tag('WARN')}  not inside a .maddu/ repo; pass --all to check every registered workspace.`);
