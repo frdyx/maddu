@@ -325,22 +325,30 @@ const FINGERPRINT_PREFIX = 'maddu.acceptance-output.sha256.v1\n';
 // direction — a false MATCH would halt a loop that is still making progress.
 const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]{0,4096}(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
 // Elapsed times, in the POSITIONS runners actually print them (funnel W1-r2
-// #2, narrowed again in W1-r3 #1): a trailing parenthesized or in/took suffix
-// (`ok 1 - name (45 ms)`, `failed in 123ms` — runners append elapsed time at
-// END of line), a line-leading TAP `duration_ms` field (it gets its own line),
-// or a jest summary `Time:` line. This is the ONE class of output that changes
-// on every run of an unchanged failure, so collapsing it is what makes the
-// fingerprint comparable at all — but a bare or mid-line match also hits
-// duration-shaped TEST NAMES (`handles (100ms) timeout`), and collapsing two
+// #2, r3 #1, r4 #1-#2 — THE ADJUDICATED BOUNDARY of this heuristic):
+//   - an END-OF-LINE suffix — parenthesized (`ok 1 - name (45 ms)`), in/took
+//     (`failed in 123ms`), or bare (vitest/mocha `… 306ms`); runners append
+//     elapsed time at line end,
+//   - a WHOLE-LINE field — TAP's own-line `duration_ms: 0.123`, jest's
+//     `Time: 2.1 s[, estimated 3 s]`, vitest's `Duration 1.26s (…)` summary.
+// This is the ONE class of output that changes on every run of an unchanged
+// failure, so collapsing it is what makes the fingerprint comparable at all —
+// but a mid-line or trailing-text match also hits duration-shaped TEST NAMES
+// (`handles (100ms) timeout`, `Time: 100ms budget`), and collapsing two
 // different names hands stuck detection a false MATCH — the unsafe direction.
-// Position is the discriminator: runner timings are suffixes or whole fields;
-// name text is mid-line.
+// Position is the discriminator: runner timings are line suffixes or whole
+// fields; name text is mid-line or carries trailing words.
 //
 // KNOWN LIMIT, irreducible for a heuristic: a test name that itself ENDS the
-// line with a duration (`FAIL waits (100ms)` with no runner suffix after it)
-// still collapses against its variant. Every form this misses instead produces
-// a false DIFFERENCE, bounded by max-iter: safe.
-const TIMING_RE = /(?:\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b)\s*$|^\s*duration_ms[:=\s]+\d+(?:[.,]\d+)?\b|^\s*Time:\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b/g;
+// line with a duration (`FAIL waits 100ms` / `FAIL waits (100ms)` with no
+// runner suffix after it) collapses against its variant — deliberately, since
+// that position is where three major runners put genuine elapsed time, and
+// refusing it would false-differ EVERY vitest/mocha failure and structurally
+// disable stuck detection there. Every form this misses instead produces a
+// false DIFFERENCE, bounded by max-iter: safe. This boundary is adjudicated
+// (plan r5); moving it requires showing a class OUTSIDE it, not another point
+// on the same trade-off.
+const TIMING_RE = /(?:\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)|(?<=\s)\d+(?:[.,]\d+)?\s?(?:ms|s))\s*$|^\s*duration_ms[:=\s]+\d+(?:[.,]\d+)?\s*$|^\s*Time:\s+\d+(?:[.,]\d+)?\s?(?:ms|s)(?:\s*,\s*estimated\s+\d+(?:[.,]\d+)?\s?(?:ms|s))?\s*$|^\s*Duration\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b.*$/g;
 
 function escapeRegExpLiteral(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

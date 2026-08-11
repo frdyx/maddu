@@ -293,13 +293,33 @@ const fpOf = async (body) => {
     const f = await fpOf(`process.stderr.write(${JSON.stringify(l2 + '\n')}); process.exit(1);`);
     ok(`duration-bearing TEST NAME (${label}) stays distinct`, e.fingerprint !== f.fingerprint, `${e.fingerprint} vs ${f.fingerprint}`);
   }
-  // …while genuine runner timing FIELDS still collapse in their positions.
-  const g = await fpOf('process.stderr.write("  duration_ms: 0.123\\n"); process.exit(1);');
-  const h = await fpOf('process.stderr.write("  duration_ms: 9.876\\n"); process.exit(1);');
-  ok('line-leading TAP duration_ms still collapses', g.fingerprint === h.fingerprint, `${g.fingerprint} vs ${h.fingerprint}`);
-  const i = await fpOf('process.stderr.write("Time:        2.153 s\\n"); process.exit(1);');
-  const j = await fpOf('process.stderr.write("Time:        4.907 s\\n"); process.exit(1);');
-  ok('jest summary Time: line still collapses', i.fingerprint === j.fingerprint, `${i.fingerprint} vs ${j.fingerprint}`);
+  // Funnel W1-r4 #1: the whole-line FIELD arms must not swallow trailing
+  // words — `Time:`/`duration_ms` followed by more text is a NAME, not a field.
+  const fieldNamePairs = [
+    ['Time: with trailing text', 'Time: 100ms budget exceeded', 'Time: 200ms budget exceeded'],
+    ['duration_ms with trailing text', 'duration_ms 100 budget', 'duration_ms 200 budget'],
+  ];
+  for (const [label, l1, l2] of fieldNamePairs) {
+    const e = await fpOf(`process.stderr.write(${JSON.stringify(l1 + '\n')}); process.exit(1);`);
+    const f = await fpOf(`process.stderr.write(${JSON.stringify(l2 + '\n')}); process.exit(1);`);
+    ok(`field-shaped TEST NAME (${label}) stays distinct`, e.fingerprint !== f.fingerprint, `${e.fingerprint} vs ${f.fingerprint}`);
+  }
+  // …while genuine runner timing FIELDS still collapse in their positions —
+  // including vitest's bare end-of-line suffix and Duration summary (r4 #2:
+  // refusing those would false-differ EVERY vitest run and structurally
+  // disable stuck detection for it).
+  const collapsePairs = [
+    ['line-leading TAP duration_ms', '  duration_ms: 0.123', '  duration_ms: 9.876'],
+    ['jest summary Time:', 'Time:        2.153 s', 'Time:        4.907 s'],
+    ['jest Time: with estimated suffix', 'Time:        2.1 s, estimated 3 s', 'Time:        2.9 s, estimated 4 s'],
+    ['vitest per-file bare EOL suffix', ' ❯ test/example.test.ts (5 tests | 1 failed) 306ms', ' ❯ test/example.test.ts (5 tests | 1 failed) 412ms'],
+    ['vitest Duration summary', '   Duration  1.26s (transform 35ms, setup 1ms)', '   Duration  2.84s (transform 41ms, setup 2ms)'],
+  ];
+  for (const [label, l1, l2] of collapsePairs) {
+    const g = await fpOf(`process.stderr.write(${JSON.stringify(l1 + '\n')}); process.exit(1);`);
+    const h = await fpOf(`process.stderr.write(${JSON.stringify(l2 + '\n')}); process.exit(1);`);
+    ok(`${label} still collapses`, g.fingerprint === h.fingerprint, `${g.fingerprint} vs ${h.fingerprint}`);
+  }
 }
 
 {
