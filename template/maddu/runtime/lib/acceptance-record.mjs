@@ -39,6 +39,15 @@
 // on the receipt is the DECLARED policy, labelled as such (see below), and
 // `captureSubject` (a later phase) replaces it with observed evidence.
 //
+// KNOWN LIMIT (adjudicated, funnel r1): the receipt appends inside the
+// observation lock inherit `spine.append`'s unbounded wait on the spine append
+// lock — the same discipline every recordVerification caller has had since P3.
+// A LIVE-but-stalled append-lock holder therefore stalls this observation (and
+// every other spine writer on the machine) while the acceptance lock is held;
+// a DEAD holder is stolen by the append lock's own recovery. Bounding only
+// these appends would produce an observation the pair rule says must not
+// exist, for a condition in which no spine writer can record anything anyway.
+//
 // Node stdlib plus four local imports: the acceptance entry, the standalone
 // command digest, the shared recorder and the canonical redactor.
 
@@ -304,17 +313,28 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
     loopId,
   };
 
+  // SNAPSHOT the declaration terms the identity was computed FROM, before the
+  // first asynchronous yield. Everything after the lock is acquired reads ONLY
+  // these locals: a caller that mutates `decl` (or its pattern arrays) while
+  // the observation is in flight must not be able to execute a different
+  // command — or hash different sets — under the already-recorded identity,
+  // which would let deriveProofs report LIVE for a command that never ran.
+  const rawCommand = decl.command;
+  const oraclePatterns = Object.freeze([...decl.oraclePatterns]);
+  const implPatterns = Object.freeze([...decl.implPatterns]);
+  const tierPolicy = decl.tierPolicy;
+
   // O7 requires a non-null EQUAL tier on both observations of a pair, so a
   // receipt without one makes every proof impossible. In this phase the tier is
   // the DECLARED policy rather than captured evidence, and the receipt says so:
   // `source:'declared-policy'` is what stops a later reader mistaking it for an
   // observed subject. Written ONLY for the supported policy — labelling an
   // unsupported tier would let two receipts agree on a tier neither honoured.
-  const subject = decl.tierPolicy === SUPPORTED_TIER_POLICY
-    ? { tier: decl.tierPolicy, source: 'declared-policy' }
+  const subject = tierPolicy === SUPPORTED_TIER_POLICY
+    ? { tier: tierPolicy, source: 'declared-policy' }
     : null;
 
-  const command = persistedCommand(decl.command);
+  const command = persistedCommand(rawCommand);
 
   // Build the RAN payload. It is merged OVER the recorder's shared defaults
   // ({kind, startedId, profile, complete, result, counts}), so `complete` and
@@ -372,8 +392,8 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
       derive: () => ranPayload({
         voidReason,
         ran: null,
-        oracle: setRecord(decl.oraclePatterns, null, null),
-        impl: setRecord(decl.implPatterns, null, null),
+        oracle: setRecord(oraclePatterns, null, null),
+        impl: setRecord(implPatterns, null, null),
       }),
     });
     return receiptOf(rec, voidReason);
@@ -395,7 +415,7 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
     // would carry evidence-shaped values nothing may compare.
     const hashable = mode === 'flat';
     if (!hashable) note('unsupported-team-sync');
-    if (decl.tierPolicy !== SUPPORTED_TIER_POLICY) note('unsupported-tier-policy');
+    if (tierPolicy !== SUPPORTED_TIER_POLICY) note('unsupported-tier-policy');
 
     // PRE-HASH BEFORE THE STARTED APPEND. A refusal here precedes the receipt
     // pair entirely, so an expansion that could not be computed never leaves a
@@ -405,8 +425,8 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
     let preOracle = null;
     let preImpl = null;
     if (hashable) {
-      preOracle = await oracleDigest(roots, decl.oraclePatterns);
-      preImpl = await implDigest(roots, decl.implPatterns);
+      preOracle = await oracleDigest(roots, oraclePatterns);
+      preImpl = await implDigest(roots, implPatterns);
       if (preOracle.ok !== true) note(preOracle.reason);
       if (preImpl.ok !== true) note(preImpl.reason);
       if (preOracle.ok === true && preImpl.ok === true && firstOverlap(preOracle.paths, preImpl.paths) !== null) {
@@ -425,7 +445,7 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
       run: async () => {
         // Runs on EVERY path that got here — a void reason above changes what
         // is claimed, never whether the command executed.
-        ran = await runAcceptanceCommand({ command: decl.command, cwd: workRoot, timeoutMs, maxOutputBytes });
+        ran = await runAcceptanceCommand({ command: rawCommand, cwd: workRoot, timeoutMs, maxOutputBytes });
 
         // POST-HASH only where a pre-hash succeeded: an endpoint pair needs
         // both ends, and a `digestAfter` with no `digest` compares against
@@ -434,11 +454,11 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
         // the receipt, never abandoning the RAN and leaving a dangling STARTED.
         let postFailed = false;
         if (preOracle !== null && preOracle.ok === true) {
-          try { postOracle = await oracleDigest(roots, decl.oraclePatterns); } catch { postOracle = null; }
+          try { postOracle = await oracleDigest(roots, oraclePatterns); } catch { postOracle = null; }
           if (postOracle === null || postOracle.ok !== true) { postOracle = null; postFailed = true; }
         }
         if (preImpl !== null && preImpl.ok === true) {
-          try { postImpl = await implDigest(roots, decl.implPatterns); } catch { postImpl = null; }
+          try { postImpl = await implDigest(roots, implPatterns); } catch { postImpl = null; }
           if (postImpl === null || postImpl.ok !== true) { postImpl = null; postFailed = true; }
         }
         if (postFailed) note('posthash-failed');
@@ -449,8 +469,8 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
       derive: () => ranPayload({
         voidReason,
         ran,
-        oracle: setRecord(decl.oraclePatterns, preOracle, postOracle),
-        impl: setRecord(decl.implPatterns, preImpl, postImpl),
+        oracle: setRecord(oraclePatterns, preOracle, postOracle),
+        impl: setRecord(implPatterns, preImpl, postImpl),
       }),
     });
 

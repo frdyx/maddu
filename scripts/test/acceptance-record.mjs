@@ -37,9 +37,10 @@ const NODE = process.execPath;
 const cmd = (root, marker, code) =>
   `"${NODE}" -e "require('fs').writeFileSync(${JSON.stringify(JSON.stringify(join(root, marker)))}, 'ran'); process.exit(${code})"`;
 
-const scratch = join(tmpdir(), 'acc-record-suite');
-await rm(scratch, { recursive: true, force: true });
-await mkdir(scratch, { recursive: true });
+// ONE mkdtemp root owned by THIS invocation, and cleanup deletes only that
+// resolved path — a fixed shared name would erase an unrelated directory and
+// let two concurrent runs destroy each other's live repos (funnel r1 #3).
+const scratch = await mkdtemp(join(tmpdir(), 'acc-record-'));
 
 async function makeRepo(tag) {
   const root = await mkdtemp(join(scratch, tag + '-'));
@@ -185,26 +186,44 @@ async function main() {
       && !existsSync(join(root, 'm')) && starteds(events).length === 0);
   }
 
-  // ── lock-busy: void pair recorded, command NOT run, proof not live ──────
+  // ── lock-busy: void pair recorded, command NOT run, LIVE proof superseded ──
+  // A LIVE baseline is established FIRST so the supersession assertion can
+  // actually fail (funnel r1 #4: without it, "not live" was true vacuously).
   {
     const root = await makeRepo('lockbusy');
-    let contender;
+    const oracleCmd = `"${NODE}" -e "const s=require('fs').readFileSync(${JSON.stringify(JSON.stringify(join(root, 'src', 'a.txt')))},'utf8'); process.exit(s.includes('fixed')?0:1)"`;
+    await R.observeAcceptance(roots(root), decl(root, { command: oracleCmd }), rctx(), ctx());
+    await writeFile(join(root, 'src', 'a.txt'), 'impl-v2 fixed\n');
+    const gg = await R.observeAcceptance(roots(root), decl(root, { command: oracleCmd }), rctx(), ctx());
+    const baseId = gg.receipt.acceptanceId;
+    const implDig = await A.implDigest(roots(root), ['src/**']);
+    const oraDig = await A.oracleDigest(roots(root), ['oracle/**']);
+    const lookups = { currentOracleDigest: { [baseId]: oraDig.digest }, currentImplDigest: { [baseId]: implDig.digest } };
+    const { out: outLive } = await derived(root, lookups);
+    const baseline = outLive.proofs.get(baseId);
+    ok('lock-busy baseline: a LIVE proof exists before the contention', !!baseline && baseline.state === 'live',
+      JSON.stringify(baseline && baseline.state));
+    let sameId, marker;
     await A.withAcceptanceLock(roots(root), async () => {
-      contender = await R.observeAcceptance(roots(root),
+      // contender A: the SAME acceptance — its void must supersede the baseline
+      sameId = await R.observeAcceptance(roots(root),
+        decl(root, { command: oracleCmd }), rctx(), ctx({ maxWaitMs: 250 }));
+      // contender B: marker command — proves lock-busy does NOT run the command
+      marker = await R.observeAcceptance(roots(root),
         decl(root, { command: cmd(root, 'm-busy', 0) }), rctx(), ctx({ maxWaitMs: 250 }));
     }, { maxWaitMs: 2000 });
-    const { events, out } = await derived(root);
-    ok('lock-busy: ok:false, void pair recorded, command NOT run',
-      contender && contender.ok === false && contender.reason === 'lock-busy'
-      && !existsSync(join(root, 'm-busy')) && rans(events).length === 1
-      && rans(events)[0].data.observation_status === 'void'
-      && rans(events)[0].data.refusal_reason === 'lock-busy'
-      && rans(events)[0].data.outcome_class === null,
-      JSON.stringify(contender));
-    const id = rans(events)[0].data.acceptanceId;
-    const proof = out.proofs.get(id);
-    ok('lock-busy void supersedes: latest observation yields no live proof',
-      !proof || proof.state !== 'live', JSON.stringify(proof && proof.state));
+    const { events, out } = await derived(root, lookups);
+    const voids = rans(events).filter((e) => e.data.observation_status === 'void');
+    ok('lock-busy: ok:false, void pairs recorded, command NOT run',
+      sameId && sameId.ok === false && sameId.reason === 'lock-busy'
+      && marker && marker.ok === false && !existsSync(join(root, 'm-busy'))
+      && voids.length === 2
+      && voids.every((e) => e.data.refusal_reason === 'lock-busy' && e.data.outcome_class === null),
+      JSON.stringify({ sameId, voids: voids.length }));
+    const after = out.proofs.get(baseId);
+    ok('lock-busy void SUPERSEDES the previously-LIVE proof',
+      !after || after.state !== 'live',
+      JSON.stringify({ before: 'live', after: after && after.state }));
   }
 
   // ── planted offender: RAN append fails → recorded:false + dangling ──────
@@ -238,37 +257,64 @@ async function main() {
       JSON.stringify({ impl: d.impl.stable, oracle: d.oracle.stable }));
   }
 
-  // ── planted offender: hand-appended mismatched RAN derives identity-mismatch ──
+  // Establish a LIVE baseline for one acceptance, returning what the offender
+  // cases need to prove a live→not-live transition (funnel r1 #4: without a
+  // prior LIVE, "not live" asserts were vacuously true).
+  async function liveBaseline(root) {
+    const oracleCmd = `"${NODE}" -e "const s=require('fs').readFileSync(${JSON.stringify(JSON.stringify(join(root, 'src', 'a.txt')))},'utf8'); process.exit(s.includes('fixed')?0:1)"`;
+    await R.observeAcceptance(roots(root), decl(root, { command: oracleCmd }), rctx(), ctx());
+    await writeFile(join(root, 'src', 'a.txt'), 'impl-v2 fixed\n');
+    const g = await R.observeAcceptance(roots(root), decl(root, { command: oracleCmd }), rctx(), ctx());
+    const id = g.receipt.acceptanceId;
+    const lookups = {
+      currentOracleDigest: { [id]: (await A.oracleDigest(roots(root), ['oracle/**'])).digest },
+      currentImplDigest: { [id]: (await A.implDigest(roots(root), ['src/**'])).digest },
+    };
+    const { out } = await derived(root, lookups);
+    const p = out.proofs.get(id);
+    return { id, lookups, live: !!p && p.state === 'live', sha: g.ran ? null : null, greenSha: id };
+  }
+
+  // ── planted offender: a VALID mismatched pair poisons a LIVE proof ──────
+  // The forged RAN references its OWN fresh STARTED (a used STARTED would trip
+  // duplicate-reference rejection before identity agreement ever ran — r1 #4).
   {
     const root = await makeRepo('mismatch');
-    await R.observeAcceptance(roots(root), decl(root, { command: cmd(root, 'm', 1) }), rctx(), ctx());
+    const base = await liveBaseline(root);
+    ok('mismatch baseline is LIVE', base.live);
     const { events: ev0 } = await derived(root);
-    const s = starteds(ev0)[0];
+    const realSha = rans(ev0)[0].data.commandSha256;
+    const forgedStarted = await spine.append(root, {
+      type: 'VERIFICATION_STARTED', actor: null, lane: null,
+      data: { kind: 'acceptance', profile: null, acceptanceId: base.id, scopeNonce: null, commandSha256: realSha },
+    });
     await spine.append(root, {
       type: 'VERIFICATION_RAN', actor: null, lane: null,
       data: {
-        kind: 'acceptance', startedId: s.id, profile: null, complete: true, result: 'pass', counts: null,
-        acceptanceId: s.data.acceptanceId, scopeNonce: 'FORGED-NONCE', commandSha256: s.data.commandSha256,
+        kind: 'acceptance', startedId: forgedStarted.id, profile: null, complete: true, result: 'pass', counts: null,
+        acceptanceId: base.id, scopeNonce: 'FORGED-NONCE', commandSha256: realSha,
         observation_status: 'eligible', outcome_class: 'process-pass',
       },
     });
-    const { out } = await derived(root);
-    const proof = out.proofs.get(starteds(ev0)[0].data.acceptanceId);
-    ok('mismatched triple poisons as void (never a live/green anchor)',
+    const { out } = await derived(root, base.lookups);
+    const proof = out.proofs.get(base.id);
+    ok('mismatched identity triple POISONS the previously-LIVE proof',
       !proof || proof.state !== 'live', JSON.stringify(proof && proof.state));
   }
 
-  // ── dangling honesty ────────────────────────────────────────────────────
+  // ── dangling honesty: a LIVE proof drops when a dangling STARTED is latest ──
   {
     const root = await makeRepo('dangling');
-    await R.observeAcceptance(roots(root), decl(root, { command: cmd(root, 'm', 0) }), rctx(), ctx());
+    const base = await liveBaseline(root);
+    ok('dangling baseline is LIVE', base.live);
+    const { events: ev0 } = await derived(root);
     await spine.append(root, {
       type: 'VERIFICATION_STARTED', actor: null, lane: null,
-      data: { kind: 'acceptance', profile: null, acceptanceId: rans((await derived(root)).events)[0].data.acceptanceId, scopeNonce: null, commandSha256: rans((await derived(root)).events)[0].data.commandSha256 },
+      data: { kind: 'acceptance', profile: null, acceptanceId: base.id, scopeNonce: null, commandSha256: rans(ev0)[0].data.commandSha256 },
     });
-    const { out } = await derived(root);
-    const [proof] = [...out.proofs.values()];
-    ok('latest dangling STARTED yields no live proof', !proof || proof.state !== 'live',
+    const { out } = await derived(root, base.lookups);
+    const proof = out.proofs.get(base.id);
+    ok('latest dangling STARTED drops the LIVE proof', !proof || proof.state !== 'live',
       JSON.stringify(proof && proof.state));
   }
 
