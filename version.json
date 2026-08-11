@@ -1,5 +1,5 @@
 {
-  "version": "1.119.0",
-  "phase": "receipt-task-plan-fingerprint",
-  "released": "2026-08-09"
+  "version": "1.120.0",
+  "phase": "session-lifecycle-recovery-mint",
+  "released": "2026-08-11"
 }

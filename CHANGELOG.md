@@ -11,6 +11,44 @@ narrative summary.
 
 ---
 
+## [v1.120.0] · 2026-08-11 · session-lifecycle recovery mint + CLI honesty fixes
+
+Two PRs (#302, #303). No new verbs, no new gates; one new event provenance
+(`SESSION_AUTO_REGISTERED` with `source: 'pretooluse-mint'`).
+
+**Session lifecycle (#303).** A SessionEnd fired for a still-live Claude
+session used to close and unbind the Máddu session it *inherited* — every
+spawned worker triggered it, and the victim hard-blocked until restart. The
+PreToolUse gate now resolves identity by **liveness** (live env id → the
+caller's own live binding → a fresh **recovery mint**, never adoption): a
+session closed out from under a live caller self-heals on its next edit, no
+restart, no manual re-fire. The mint transaction publishes nothing before it
+exists — writability is proven with a scratch write, registration redraws on
+collision, and the binding is written last. Suite:
+`scripts/test/session-mint.mjs`, 40 asserts, every negative proven by a
+planted offender. Spawn rule for orchestrators: `claude -p --session-id X`
+fires SessionStart *and* SessionEnd with `session_id = X` even in print mode
+— never spawn a worker with a live session's uuid.
+
+**CLI and gate honesty (#302).**
+
+- `session close --session-id <id>` (the spelling the shipped worker brief
+  itself documented) was silently ignored and fell through to the ambient
+  active session — closing someone else's session with exit 0.
+  `--session-id` is now an accepted alias everywhere `--session` is read.
+- Unknown `--flags` are rejected across all 73 verbs (warn + did-you-mean;
+  `MADDU_STRICT_FLAGS=1` exits 2). Allowlists are derived mechanically from
+  each command's own flag reads; a doc-flag census keeps every documented
+  invocation honest (it caught 8 shipped doc defects on its first run).
+- The architecture scanner honours `.gitignore`, ending a permanently-red
+  audit signal produced by files that are not in the repository.
+- Fixture suites no longer inherit the developer's live session env
+  (`scripts/test/_hermetic-env.mjs` + a census ratchet) — the cause of two
+  "permanently red" suites, both green since.
+- An unreadable projection now softens the discipline verdict to UNKNOWN
+  instead of hardening it; the deny message no longer claims the state
+  "cannot be healed from the CLI" (it can).
+
 ## [v1.119.0] · 2026-08-09 · verification receipts gain a task-plan fingerprint
 
 **Contract 1.17.0** (additive minor). No new verbs, no new gates, no new event
