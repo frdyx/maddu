@@ -72,11 +72,16 @@ export async function runGates(repoRoot, opts = {}) {
   // enrichment — { actor?, lane?, sliceId? }. Callers that know which session
   // is running the gates (slice-stop does) stamp it so the autonomy scorer can
   // bind gate runs exactly instead of by time window. Absent → legacy shape.
-  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null, attribution = null } = opts;
+  // opts.roots (gate funnel r4 #2/#3) — an EXPLICIT {workRoot, stateRoot}
+  // pair from a caller that already resolved both (doctor). It beats the
+  // cwd-derived resolution below, because a caller iterating explicit targets
+  // (`doctor --all`) must not have the invoker's standing worktree paired
+  // onto a workspace it merely shares a state root with.
+  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null, attribution = null, roots: rootsOverride = null } = opts;
 
   // Build the gate execution context. Lazy-load spine/projections/verify
   // (matches commands/_spine.mjs:loadSpineLib resolution).
-  const ctx = ctxOverride || (await buildCtx(repoRoot));
+  const ctx = ctxOverride || (await buildCtx(repoRoot, rootsOverride));
 
   const all = await discoverGates(repoRoot);
   const gates = all.filter((g) => {
@@ -162,14 +167,25 @@ async function resolveGateRoots(paths, repoRoot) {
   try {
     if (typeof paths.resolveRoots !== 'function') return { workRoot: repoRoot, stateRoot: repoRoot };
     const pair = await paths.resolveRoots(process.cwd());
-    if (pair && typeof pair.workRoot === 'string' && pair.workRoot && pair.stateRoot === repoRoot) {
+    // EITHER leg may be the root this run was handed (funnel r4): ci hands
+    // the state root, doctor hands the work root — both name the same
+    // workspace the invoker is standing in. A root matching neither leg is a
+    // foreign target (fleet runner, test harness) and gets the equal pair.
+    if (pair && typeof pair.workRoot === 'string' && pair.workRoot
+      && (pair.stateRoot === repoRoot || pair.workRoot === repoRoot)) {
       return { workRoot: pair.workRoot, stateRoot: pair.stateRoot };
     }
   } catch {}
   return { workRoot: repoRoot, stateRoot: repoRoot };
 }
 
-async function buildCtx(repoRoot) {
+function validRootsPair(p) {
+  return !!(p && typeof p === 'object'
+    && typeof p.workRoot === 'string' && p.workRoot
+    && typeof p.stateRoot === 'string' && p.stateRoot);
+}
+
+async function buildCtx(repoRoot, rootsOverride = null) {
   const paths = await import(pathToFileURL(join(__dirname, 'paths.mjs')).href);
   const spine = await import(pathToFileURL(join(__dirname, 'spine.mjs')).href);
   const projections = await import(pathToFileURL(join(__dirname, 'projections.mjs')).href);
@@ -177,7 +193,7 @@ async function buildCtx(repoRoot) {
   try { verify = await import(pathToFileURL(join(__dirname, 'verify.mjs')).href); } catch {}
   return {
     repoRoot,
-    roots: await resolveGateRoots(paths, repoRoot),
+    roots: validRootsPair(rootsOverride) ? { workRoot: rootsOverride.workRoot, stateRoot: rootsOverride.stateRoot } : await resolveGateRoots(paths, repoRoot),
     paths,
     spine,
     projections,

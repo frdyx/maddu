@@ -338,6 +338,24 @@ async function main() {
     ok('real runner from the worktree: red after the WORKTREE impl moved',
       !!w2 && w2.ok === false && /impl/i.test(w2.message || ''), JSON.stringify(w2));
 
+    // An EXPLICIT roots pair beats the invoker's standing worktree (funnel
+    // r4 #3): `doctor --all` iterating registered workspaces must judge each
+    // workspace's own tree, not pair the primary target with this cwd's
+    // worktree. The equal-pair override from the worktree cwd must judge the
+    // PRIMARY (whose cwd-bound decls have no worktree proof ⇒ red), while
+    // the cwd-derived run above judged the worktree (green then red).
+    const overrideScript = join(scratch, 'run-gates-override.mjs');
+    await writeFile(overrideScript, [
+      `import { runGates } from ${JSON.stringify(LIB('gates.mjs'))};`,
+      `const res = await runGates(${JSON.stringify(primary)}, { emitEvents: false, roots: { workRoot: ${JSON.stringify(primary)}, stateRoot: ${JSON.stringify(primary)} } });`,
+      `console.log(JSON.stringify(res.runs.find((r) => r.gateId === 'acceptance-proven') || null));`,
+    ].join('\n'));
+    const ov = spawnSync(NODE, [overrideScript], { cwd: work, encoding: 'utf8', timeout: 180000, env: hermeticEnv() });
+    let ovRow = null;
+    try { ovRow = JSON.parse((ov.stdout || '').trim().split('\n').pop()); } catch {}
+    ok('explicit roots pair overrides the standing worktree (judges the target, not the cwd)',
+      !!ovRow && ovRow.ok === false, JSON.stringify(ovRow));
+
     // The standalone STATE-root walk consumers like doctor use (gate funnel
     // r2 #1): the pointer must beat a LOCAL `.maddu/` (paths.mjs precedence),
     // and a pointer to a non-repo must be ignored, never followed.

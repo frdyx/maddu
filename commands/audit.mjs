@@ -150,7 +150,7 @@ function gateRunToCheck(run) {
 // Run one or all of the reusable gates via the gate runner. repoRoot is the
 // cwd repo (used by the runner for ctx); the coherence gates resolve the
 // framework source from their own __dirname regardless.
-async function runGateChecks(repoRoot, onlyGateId) {
+async function runGateChecks(repoRoot, onlyGateId, roots = null) {
   const gatesLib = await loadGatesLib();
   if (!gatesLib?.runGates) {
     return [{ level: 'WARN', label: 'gate runner', detail: 'gates.mjs not available' }];
@@ -158,7 +158,7 @@ async function runGateChecks(repoRoot, onlyGateId) {
   const checks = [];
   const ids = onlyGateId ? [onlyGateId] : Object.values(GATE_IDS);
   for (const id of ids) {
-    const result = await gatesLib.runGates(repoRoot, { onlyId: id, emitEvents: false });
+    const result = await gatesLib.runGates(repoRoot, { onlyId: id, emitEvents: false, ...(roots ? { roots } : {}) });
     if (result.runs.length === 0) {
       checks.push({ level: 'WARN', label: id, detail: 'gate not found' });
     } else {
@@ -613,10 +613,15 @@ export default async function audit(argv) {
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
   if (!sub || sub === 'mass') checks.push(...await runGateChecks(repoRoot, GATE_IDS.mass));
   if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
-  // The acceptance gate reads the SHARED spine (funnel r3 #2): from an
-  // attached worktree the proof record lives at the pointer's target, while
-  // every other audit check here is checkout-scoped and keeps `repoRoot`.
-  if (!sub || sub === 'acceptance') checks.push(...await runGateChecks((await findStateRoot(process.cwd())) || repoRoot, GATE_IDS.acceptance));
+  // The acceptance gate reads the SHARED spine (funnel r3 #2, explicit pair
+  // per r4): from an attached worktree the proof record lives at the
+  // pointer's target while the digests describe the tree the operator is
+  // standing in; every other audit check here is checkout-scoped and keeps
+  // `repoRoot` alone.
+  if (!sub || sub === 'acceptance') {
+    checks.push(...await runGateChecks(repoRoot, GATE_IDS.acceptance,
+      { workRoot: repoRoot, stateRoot: (await findStateRoot(process.cwd())) || repoRoot }));
+  }
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());

@@ -294,15 +294,18 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   }
 
   // ── Gate runner — built-in gates + operator gates ──
-  // Gates run against the STATE root (funnel r3 #1): the spine and the proof
-  // record live there, while resolveGateRoots re-derives the working tree
-  // from the invocation cwd. Checkout checks above keep `repoRoot`.
+  // `repoRoot` stays the CHECKOUT root every gate has always read (funnel r4
+  // #2 — re-rooting it regressed install/pin gates from worktrees); the
+  // resolved pair rides the explicit `roots` override so pair-aware gates
+  // (acceptance-proven) read the shared spine, and an explicit target is
+  // never mispaired with the invoker's standing worktree (r4 #3).
   const gatesLib = await loadGatesLib();
   if (gatesLib?.runGates) {
-    const result = await gatesLib.runGates(gateOpts.stateRoot || repoRoot, {
+    const result = await gatesLib.runGates(repoRoot, {
       onlyId: gateOpts.onlyId,
       severity: gateOpts.severity,
       emitEvents: true,
+      roots: { workRoot: repoRoot, stateRoot: gateOpts.stateRoot || repoRoot },
     });
     for (const run of result.runs) checks.push(gateRunToCheck(run, tagLabel));
     // State containment isn't a gate (no security-relevant invariant; it's

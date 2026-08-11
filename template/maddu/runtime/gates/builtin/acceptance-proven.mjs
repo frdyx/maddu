@@ -96,7 +96,11 @@ export default {
     // false statement.
     let proj;
     try {
-      proj = await ctx.projections.project(ctx.repoRoot);
+      // STATE root, not ctx.repoRoot (funnel r4 #2): the goal lives on the
+      // shared spine; a work-rooted projection from an attached worktree with
+      // a local `.maddu/` would read an empty record beside a verified read
+      // of the real one.
+      proj = await ctx.projections.project(roots.stateRoot);
     } catch (err) {
       return {
         ok: false,
