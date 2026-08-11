@@ -274,6 +274,16 @@ const fpOf = async (body) => {
   const a = await fpOf('process.stderr.write("suite failed in 123ms\\n"); process.exit(1);');
   const b = await fpOf('process.stderr.write("suite failed in 987ms\\n"); process.exit(1);');
   ok('run timings do not change the fingerprint', a.fingerprint === b.fingerprint, `${a.fingerprint} vs ${b.fingerprint}`);
+  const c = await fpOf('process.stderr.write("ok 1 (12 ms)\\n"); process.exit(1);');
+  const d = await fpOf('process.stderr.write("ok 1 (99 ms)\\n"); process.exit(1);');
+  ok('parenthesized run timings do not change the fingerprint', c.fingerprint === d.fingerprint, `${c.fingerprint} vs ${d.fingerprint}`);
+  // Funnel W1-r2 #2: a duration-shaped token inside a TEST NAME is identity,
+  // not elapsed time — collapsing it merges two different failures and hands
+  // stuck detection a false halt. The planted offender for the context-anchored
+  // TIMING_RE: under the old bare `\d+ms` rule these two hashed alike.
+  const e = await fpOf('process.stderr.write("FAIL handles 100ms timeout\\n"); process.exit(1);');
+  const f = await fpOf('process.stderr.write("FAIL handles 200ms timeout\\n"); process.exit(1);');
+  ok('duration-bearing TEST NAMES stay distinct (no false stuck-match)', e.fingerprint !== f.fingerprint, `${e.fingerprint} vs ${f.fingerprint}`);
 }
 
 {

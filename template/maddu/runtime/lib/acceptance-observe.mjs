@@ -324,11 +324,16 @@ const FINGERPRINT_PREFIX = 'maddu.acceptance-output.sha256.v1\n';
 // an escape form this misses produces a false DIFFERENCE, which is the safe
 // direction — a false MATCH would halt a loop that is still making progress.
 const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]{0,4096}(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
-// Elapsed times: `123ms`, `1.23s`, `(45 ms)`. The word boundaries keep this off
-// identifiers — `v8s` and `3seconds` are untouched. This is the ONE class of
-// output that changes on every run of an unchanged failure, so collapsing it is
-// what makes the fingerprint comparable at all.
-const TIMING_RE = /\b\d+(?:[.,]\d+)?\s?(?:ms|s)\b/g;
+// Elapsed times, in the CONTEXTS runners actually print them: parenthesized
+// (`(45 ms)`, jest/mocha), after "in"/"took" (`failed in 123ms`), and the TAP
+// `duration_ms 0.123` field. This is the ONE class of output that changes on
+// every run of an unchanged failure, so collapsing it is what makes the
+// fingerprint comparable at all — but ONLY in those contexts (funnel W1-r2
+// #2): a bare `\d+ms` also matches duration-bearing TEST NAMES, and collapsing
+// `handles 100ms timeout` into `handles 200ms timeout` hands stuck detection a
+// false MATCH — the unsafe direction. A timing form this misses produces a
+// false difference, bounded by max-iter: safe.
+const TIMING_RE = /\(\s*\d+(?:[.,]\d+)?\s?(?:ms|s)\s*\)|\b(?:in|took)\s+\d+(?:[.,]\d+)?\s?(?:ms|s)\b|\bduration_ms[:=\s]+\d+(?:[.,]\d+)?\b/g;
 
 function escapeRegExpLiteral(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
