@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hermeticEnv } from './_hermetic-env.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -39,7 +40,11 @@ try {
   const bin = join(REPO, 'bin', 'maddu.mjs');
   const run = (args, env = {}) => spawnSync(process.execPath, [bin, ...args], {
     cwd: fixture, encoding: 'utf8', timeout: 120000,
-    env: { ...process.env, ...env },
+    // hermeticEnv, not a raw `...process.env` spread: the developer's live
+    // MADDU_SESSION_ID would otherwise reach the fixture, where `lane claim`
+    // resolves it, finds no such session in this throwaway repo, and fails —
+    // which is why this suite was written off as a permanent red.
+    env: hermeticEnv(env),
   });
   const git = (args) => spawnSync('git', args, { cwd: fixture, encoding: 'utf8', timeout: 60000 });
 

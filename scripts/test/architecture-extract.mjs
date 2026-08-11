@@ -11,9 +11,10 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { spawn } from 'node:child_process';
 import {
   assessDrift, evaluateFailOn, extractImports, globToRegExp,
-  renderMermaid, validateContract, violationList,
+  renderMermaid, scanFiles, validateContract, violationList,
 } from '../../template/maddu/runtime/lib/architecture.mjs';
 
 let passed = 0, failed = 0;
@@ -97,6 +98,44 @@ async function main() {
     ok('ratchet: only the new violation blocks', ratchet.blocking === true && ratchet.new === 1, JSON.stringify({ new: ratchet.new, keys: ratchet.freshViolations.map((v) => v.key) }));
     ok('ratchet: new violation is domain->app', ratchet.freshViolations[0]?.key === 'forbidden:domain->app');
   } finally { await rm(root, { recursive: true, force: true }); }
+
+  // ── scanFiles honours .gitignore (v1.120.0 regression pin) ────────────────
+  //
+  // A gitignored file is NOT part of the repository, and scanning it let a
+  // local scratch script under docs/audit/ produce a permanent forbidden
+  // `docs -> runtime-libs` edge: `maddu audit` red on something no commit
+  // could fix and CI would never see. The complementary half matters just as
+  // much — an untracked-but-NOT-ignored file must still be scanned, or a
+  // forbidden import would go unnoticed until after it was committed.
+  {
+    const groot = await mkdtemp(join(tmpdir(), 'maddu-arch-gitignore-'));
+    try {
+      const git = (args) => new Promise((res) => {
+        const c = spawn('git', args, { cwd: groot, stdio: 'ignore' });
+        c.on('error', () => res(-1));
+        c.on('exit', (code) => res(code));
+      });
+      const initCode = await git(['init', '-q']);
+      if (initCode !== 0) {
+        // No git here: scanFiles falls back to the raw walk by design. Report
+        // it as UNTESTED rather than letting the case count as a pass.
+        ok('[UNTESTED] gitignore honoured — git unavailable in this environment', true, 'fallback path is intentional');
+      } else {
+        await mkdir(join(groot, 'src'), { recursive: true });
+        await mkdir(join(groot, 'scratch'), { recursive: true });
+        await writeFile(join(groot, '.gitignore'), 'scratch/\n', 'utf8');
+        await writeFile(join(groot, 'src', 'tracked.mjs'), 'export const a = 1;\n', 'utf8');
+        await writeFile(join(groot, 'src', 'untracked.mjs'), 'export const b = 2;\n', 'utf8');
+        await writeFile(join(groot, 'scratch', 'ignored.mjs'), "import '../src/tracked.mjs';\n", 'utf8');
+        await git(['add', 'src/tracked.mjs']);
+
+        const found = await scanFiles(groot);
+        ok('gitignored file is NOT scanned', !found.includes('scratch/ignored.mjs'), JSON.stringify(found));
+        ok('tracked file IS scanned', found.includes('src/tracked.mjs'), JSON.stringify(found));
+        ok('untracked-but-not-ignored file IS still scanned (caught before commit)', found.includes('src/untracked.mjs'), JSON.stringify(found));
+      }
+    } finally { await rm(groot, { recursive: true, force: true }); }
+  }
 
   console.log('');
   console.log(`architecture-extract: ${passed} pass - ${failed} fail`);

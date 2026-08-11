@@ -244,9 +244,18 @@ export function decide({ thresholds, state, counter, toolCtx }) {
   const edits = counter?.editsSinceSlice || 0;
 
   // Ordered preconditions: session → lane → goal/plan → slice-stop → commit.
+  //
+  // The first four all read ONE projection. If it could not be read we have
+  // observed nothing, not "nothing exists", so they are skipped entirely —
+  // blocking on unreadable state would deny writes for a ritual the operator
+  // may well have performed, which is the wrong direction for a fail-open
+  // module. The commit gate keeps running: it observes the working tree
+  // directly and carries its own `observed` flag.
+  if (state.ritualObserved === false) return commitOnly(state, thresholds, cap);
+
   if (!state.session?.registered) {
     return mk(cap('block'), 'session', 'no active Máddu session governs this work',
-      'restart this session so the SessionStart hook binds it (an unbound running session — e.g. after a mid-session hooks install/upgrade — cannot be healed from the CLI: the hook never inherits an exported MADDU_SESSION_ID). If no Máddu session exists at all, run `maddu register` first.');
+      'recover WITHOUT restarting: find your Claude session_id in .maddu/state/discipline/sessions.json (the key whose madduId is yours), then re-fire the hook with it — `echo \'{"session_id":"<uuid>","cwd":"<repo>"}\' | maddu hooks fire session-start` — which mints a fresh session AND binds it. A plain `maddu register` cannot heal this: it never sees the Claude session_id, which arrives only on hook stdin. If no Máddu session exists at all, `maddu register` is enough.');
   }
   if (!state.lane?.claimed) {
     return mk(cap('block'), 'lane', 'editing without a claimed lane (hard rule #8)',
@@ -271,7 +280,14 @@ export function decide({ thresholds, state, counter, toolCtx }) {
     if (warnSlice) return mk(cap('warn'), 'slice-stop',
       `slice-stop getting stale (${edits} edits)`, 'maddu slice-stop "SLICE STOP: ..."');
   }
-  // Uncommitted accumulation — count only NEW dirty files this session.
+  return commitOnly(state, thresholds, cap);
+}
+
+// The uncommitted-accumulation gate, on its own so the unobservable-projection
+// path can reach it without re-running the ritual ladder. Counts only NEW dirty
+// files for this session; `state.commit.observed` already suppressed the counts
+// upstream when the working tree itself could not be read.
+function commitOnly(state, thresholds, cap) {
   const uc = thresholds.uncommitted;
   const files = state.commit?.newDirtyFiles || 0;
   const dirtyMin = state.commit?.dirtyAgeMin;
@@ -742,8 +758,19 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { w
   const [{ project }, plansMod] = await Promise.all([
     import('./projections.mjs'), import('./plans.mjs'),
   ]);
+  // A projection that CANNOT BE READ is not the same observation as a
+  // projection that says "nothing here", and conflating them inverts the fail
+  // direction of this whole module. `proj = {}` makes sessions/claims/stops
+  // read as empty — no session, no lane, no slice-stop — so a corrupt, racing
+  // or unreadable projection would BLOCK every write while telling the operator
+  // they skipped a ritual they actually performed. The contract a few lines
+  // above states the opposite rule for exactly this reason: an input the caller
+  // could not resolve is UNKNOWN (`observed:false`), never silently measured.
+  // The commit gate below already works this way (`observed`/`suppressed`);
+  // this flag gives the session/lane/goal/slice gates the same discipline.
   let proj = {};
-  try { proj = await project(repoRoot); } catch { proj = {}; }
+  let ritualObserved = true;
+  try { proj = await project(repoRoot); } catch { proj = {}; ritualObserved = false; }
   let openPlans = [];
   try { openPlans = (await plansMod.listPlans(repoRoot)).filter((p) => p.status === 'open'); } catch { openPlans = []; }
 
@@ -802,6 +829,10 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { w
     && !!(counter && counter.lastSliceStopId && (counter.editsSinceSlice || 0) === 0 && newDirtyPaths.length > 0);
 
   return {
+    // `observed` rides the ritual half of the state exactly as it rides
+    // `commit` below: false means the projection could not be read, so every
+    // field here is absence-of-evidence, not evidence-of-absence.
+    ritualObserved,
     session: { registered },
     lane: { claimed },
     goalOrPlan: { active: goalActive || openPlans.length > 0 },

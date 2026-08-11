@@ -18,6 +18,7 @@
 import { mkdtemp, mkdir, writeFile, appendFile, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { hermeticEnv } from './_hermetic-env.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -143,7 +144,7 @@ try {
   await writeFile(join(fixture, '.maddu', 'lanes', 'claims.json'), JSON.stringify({ schemaVersion: 1, claims: [] }) + '\n');
   await writeFile(join(fixture, 'CLAUDE.md'), '# Project\n\nKeep this.\n');
   const run = (args, env = {}) => spawnSync(process.execPath, [BIN, ...args], {
-    cwd: fixture, encoding: 'utf8', timeout: 120000, env: { ...process.env, ...env },
+    cwd: fixture, encoding: 'utf8', timeout: 120000, env: hermeticEnv(env),
   });
 
   ok(run(['register']).status === 0, 'register exits 0 in the e2e fixture');

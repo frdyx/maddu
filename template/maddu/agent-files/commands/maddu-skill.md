@@ -15,7 +15,7 @@ Parse `$ARGUMENTS` as `<verb> <args>`. Supported verbs:
 - `show <id>` → `./maddu/run skill show <id>`.
 - `add` / `create` → `./maddu/run skill add --title "..." [--when "..."] [--tags a,b] [--body "..."]`.
 - `apply <id>` → read the skill body via `skill show`, inline the recipe into the current turn, then follow it step-by-step.
-- `from-slice <slice-id>` → `./maddu/run skill from-slice --slice <id>` to extract a new skill from a finished slice's hindsight.
+- `from-slice <slice-id>` → `./maddu/run skill from-slice <slice-id>` to extract a new skill from a finished slice's hindsight.
 - `delete <id>` → `./maddu/run skill delete <id>` (ask before executing — skills are non-trivial to recreate).
 
 If `$ARGUMENTS` is empty, default to `list`.

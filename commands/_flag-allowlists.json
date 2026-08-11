@@ -1,0 +1,618 @@
+{
+  "_generated": "scripts/generate-flag-allowlists.mjs — do not hand-edit; scripts/test/flag-allowlists.mjs reds when stale",
+  "version": 1,
+  "open": [
+    "format",
+    "git",
+    "install",
+    "lint",
+    "test"
+  ],
+  "verbs": {
+    "advise": [
+      "no-auth-check",
+      "parent",
+      "prompt",
+      "session",
+      "stub-only",
+      "timeout-sec"
+    ],
+    "agents": [
+      "agent",
+      "all",
+      "dry-run",
+      "path",
+      "remove",
+      "yes"
+    ],
+    "approval": [
+      "action",
+      "decision",
+      "dry-run",
+      "id",
+      "lane",
+      "parent",
+      "reason",
+      "session",
+      "summary",
+      "tool"
+    ],
+    "architecture": [
+      "baseline",
+      "fail-on",
+      "force",
+      "json",
+      "repo"
+    ],
+    "audit": [
+      "json"
+    ],
+    "auth": [
+      "by",
+      "confirm",
+      "label",
+      "minutes",
+      "parent",
+      "session",
+      "value",
+      "value-file"
+    ],
+    "autonomy": [
+      "json",
+      "lane",
+      "no-emit",
+      "parent",
+      "session"
+    ],
+    "blueprint": [
+      "distill",
+      "full",
+      "json",
+      "no-auth-check",
+      "parent",
+      "repo",
+      "runtime",
+      "session",
+      "since",
+      "slug",
+      "timeout-sec"
+    ],
+    "bridges": [],
+    "brief": [
+      "drain",
+      "dry-run",
+      "for-agent",
+      "json",
+      "parent",
+      "session",
+      "tags",
+      "triggers"
+    ],
+    "checkpoint": [
+      "apply",
+      "by",
+      "lane",
+      "mode",
+      "parent",
+      "session",
+      "title"
+    ],
+    "ci": [
+      "json",
+      "parent",
+      "session",
+      "strict"
+    ],
+    "coordinator": [
+      "dry-run",
+      "iter-cap",
+      "parent",
+      "runtime",
+      "session",
+      "synthetic-cmd"
+    ],
+    "cost": [
+      "by",
+      "json",
+      "parent",
+      "session",
+      "unreported-count",
+      "usd"
+    ],
+    "debt": [
+      "json",
+      "no-write",
+      "repo"
+    ],
+    "doctor": [
+      "all",
+      "gate",
+      "severity",
+      "verbose"
+    ],
+    "events": [
+      "after",
+      "bridge",
+      "limit",
+      "parent",
+      "session",
+      "type"
+    ],
+    "evolve": [
+      "json",
+      "parent",
+      "session",
+      "to"
+    ],
+    "experience": [
+      "format",
+      "json",
+      "lane",
+      "limit",
+      "out",
+      "since",
+      "until"
+    ],
+    "export": [
+      "endpoint",
+      "follow",
+      "header",
+      "interval",
+      "otel",
+      "parent",
+      "pretty",
+      "service",
+      "session",
+      "since"
+    ],
+    "fleet": [
+      "all",
+      "apply",
+      "json",
+      "max",
+      "only",
+      "plan"
+    ],
+    "focus": [
+      "parent",
+      "session"
+    ],
+    "global": [
+      "action",
+      "by",
+      "cron",
+      "decision",
+      "disabled",
+      "lane",
+      "natural",
+      "targets",
+      "title",
+      "tool",
+      "value"
+    ],
+    "goal": [
+      "abandon",
+      "constraint",
+      "force",
+      "json",
+      "note",
+      "objective",
+      "parent",
+      "session",
+      "success"
+    ],
+    "governance": [
+      "approve",
+      "force",
+      "parent",
+      "reason",
+      "session"
+    ],
+    "handoff": [
+      "body",
+      "json",
+      "parent",
+      "plain",
+      "session"
+    ],
+    "help": [
+      "format",
+      "topic"
+    ],
+    "hooks": [
+      "dry-run",
+      "no-guardrails",
+      "parent",
+      "retire-inert-write-twins",
+      "session",
+      "statusline"
+    ],
+    "import": [
+      "by",
+      "file",
+      "kind",
+      "parent",
+      "session"
+    ],
+    "init": [
+      "force"
+    ],
+    "insights": [
+      "include-imported",
+      "json",
+      "no-transcripts",
+      "role"
+    ],
+    "lane": [
+      "adopt",
+      "focus",
+      "force",
+      "integration-ref",
+      "json",
+      "lane",
+      "parent",
+      "prune",
+      "reason",
+      "recover",
+      "session",
+      "worktree"
+    ],
+    "learn": [
+      "adopt",
+      "dir",
+      "from-claude-memory",
+      "json",
+      "no-auth-check",
+      "parent",
+      "recent-days",
+      "root",
+      "runtime",
+      "session",
+      "since",
+      "slug",
+      "spine",
+      "stub-only",
+      "threshold",
+      "timeout-sec"
+    ],
+    "log": [
+      "json",
+      "lane",
+      "op",
+      "parent",
+      "rebuild",
+      "session",
+      "since",
+      "window"
+    ],
+    "loop": [
+      "goal",
+      "iterate",
+      "lane",
+      "max-iter",
+      "parent",
+      "plan",
+      "session",
+      "verify"
+    ],
+    "mailbox": [
+      "body",
+      "from",
+      "id",
+      "parent",
+      "session",
+      "subject",
+      "summary",
+      "type"
+    ],
+    "mcp": [
+      "approve",
+      "args",
+      "by",
+      "command",
+      "disabled",
+      "display",
+      "env",
+      "lanes",
+      "name",
+      "notes",
+      "parent",
+      "session",
+      "skip-provenance",
+      "transport",
+      "url"
+    ],
+    "memory": [
+      "all",
+      "force",
+      "json",
+      "kind",
+      "lane",
+      "limit",
+      "parent",
+      "prior",
+      "reason",
+      "rebuild",
+      "session",
+      "tags",
+      "text",
+      "trust"
+    ],
+    "model": [
+      "confirm",
+      "force-list",
+      "json",
+      "model",
+      "parent",
+      "reason",
+      "reverted-to",
+      "session",
+      "wait"
+    ],
+    "orient": [
+      "curate",
+      "curate-budget",
+      "digest",
+      "json",
+      "no-verify",
+      "parent",
+      "session"
+    ],
+    "phase": [
+      "name",
+      "notes",
+      "parent",
+      "session",
+      "tier"
+    ],
+    "pipeline": [
+      "goal",
+      "json",
+      "parent",
+      "session"
+    ],
+    "plan": [
+      "force",
+      "goal",
+      "intent",
+      "name",
+      "note",
+      "parent",
+      "phase",
+      "phases",
+      "plan",
+      "reason",
+      "session",
+      "summary"
+    ],
+    "plugin": [
+      "json",
+      "trust"
+    ],
+    "register": [
+      "label",
+      "parent",
+      "role",
+      "session"
+    ],
+    "review": [
+      "limit",
+      "parent",
+      "reviewer",
+      "session",
+      "slice"
+    ],
+    "runtime": [
+      "approval",
+      "args",
+      "binary",
+      "by",
+      "detect",
+      "display",
+      "lane",
+      "lanes",
+      "mcp",
+      "name",
+      "notes",
+      "parent",
+      "protocol",
+      "session",
+      "streaming",
+      "tools"
+    ],
+    "schedule": [
+      "action-kind",
+      "action-value",
+      "at",
+      "by",
+      "cron",
+      "disabled",
+      "natural",
+      "parent",
+      "session",
+      "title"
+    ],
+    "search": [
+      "kinds",
+      "limit",
+      "parent",
+      "session",
+      "sort"
+    ],
+    "self-test": [
+      "bail",
+      "fail-on-skip",
+      "json",
+      "list",
+      "no-report",
+      "only",
+      "profile",
+      "skip"
+    ],
+    "session": [
+      "focus",
+      "handoff",
+      "id",
+      "json",
+      "label",
+      "lane",
+      "parent",
+      "role",
+      "root",
+      "runtime",
+      "session",
+      "session-id"
+    ],
+    "skill": [
+      "body",
+      "by",
+      "parent",
+      "reason",
+      "session",
+      "source-url",
+      "tag",
+      "tags",
+      "title",
+      "trust",
+      "when"
+    ],
+    "slice": [
+      "max-files",
+      "max-growth-pct",
+      "parent",
+      "paths",
+      "reason",
+      "session",
+      "slice-id"
+    ],
+    "slice-stop": [
+      "action",
+      "gates",
+      "lane",
+      "learnings",
+      "next",
+      "no-git-diff",
+      "parent",
+      "paths",
+      "reason",
+      "session",
+      "slice-id",
+      "summary",
+      "targets",
+      "triggered-by"
+    ],
+    "sources": [
+      "force",
+      "parent",
+      "reason",
+      "session"
+    ],
+    "spine": [
+      "assess",
+      "command",
+      "event",
+      "json",
+      "keep",
+      "parent",
+      "replay",
+      "runner-arg",
+      "seq",
+      "session",
+      "status",
+      "upgrade",
+      "verify"
+    ],
+    "start": [
+      "force-active",
+      "port"
+    ],
+    "status": [
+      "line",
+      "parent",
+      "session"
+    ],
+    "stop": [],
+    "suggest": [
+      "emit-command",
+      "emit-lane",
+      "json",
+      "task"
+    ],
+    "task": [
+      "add-blocker",
+      "blocked-by",
+      "by",
+      "created-by",
+      "description",
+      "id",
+      "lane",
+      "owner",
+      "parent",
+      "remove-blocker",
+      "session",
+      "status",
+      "tags",
+      "title"
+    ],
+    "team": [
+      "json",
+      "label",
+      "lanes",
+      "members",
+      "n",
+      "parent",
+      "runtime",
+      "session",
+      "t",
+      "task",
+      "team-id"
+    ],
+    "trust": [
+      "cve",
+      "fresh",
+      "hash",
+      "json",
+      "lane",
+      "parent",
+      "session",
+      "version"
+    ],
+    "upgrade": [
+      "dry-run",
+      "force"
+    ],
+    "usage": [
+      "dry-run",
+      "from",
+      "parent",
+      "session",
+      "since"
+    ],
+    "wiki": [
+      "force",
+      "json",
+      "parent",
+      "session"
+    ],
+    "worker": [
+      "args",
+      "by",
+      "code",
+      "command",
+      "focus",
+      "id",
+      "lane",
+      "parent",
+      "pid",
+      "reason",
+      "runner-arg",
+      "session"
+    ],
+    "workspace": [
+      "id",
+      "label",
+      "path",
+      "role"
+    ]
+  }
+}

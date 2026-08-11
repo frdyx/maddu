@@ -16,3 +16,8 @@ docs/event-schema.md text eol=lf
 docs/event-schema.json text eol=lf
 template/maddu/docs/event-schema.md text eol=lf
 template/maddu/docs/event-schema.json text eol=lf
+
+# Flag-allowlist artifact: rendered with LF and byte-compared by
+# scripts/test/flag-allowlists.mjs. Pin to LF so a Windows checkout doesn't
+# rewrite it to CRLF (the suite also normalizes on read).
+commands/_flag-allowlists.json text eol=lf

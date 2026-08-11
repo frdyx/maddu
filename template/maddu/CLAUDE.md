@@ -82,13 +82,13 @@ The detailed form of those three steps:
 Long work should heartbeat every meaningful step:
 
 ```bash
-maddu session heartbeat --session-id <id> --focus "<what changed / what's next>"
+maddu session heartbeat --session <id> --focus "<what changed / what's next>"
 ```
 
 Before stopping your CLI session:
 
 ```bash
-maddu session close --session-id <id> --focus "<handoff summary>"
+maddu session close --session <id> --focus "<handoff summary>"
 ```
 
 ## The slice-stop ritual
@@ -247,7 +247,7 @@ is a real verb you can call directly. Run `maddu help` for flags.
 4. Append a question to the inbox:
 
    ```bash
-   maddu mailbox send --lane harness --text "QUESTION: <what's blocking>"
+   maddu mailbox send harness --type question --subject "QUESTION: <what's blocking>"
    ```
 
    The cockpit operator sees it.

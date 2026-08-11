@@ -55,7 +55,7 @@ Three surfaces work out of the box, mirroring the other runtimes:
 
 ```bash
 # 1. Direct spawn (rare; usually you let `team` / `pipeline` do this).
-maddu runtime spawn hermes --lane backend --focus "..."
+maddu runtime spawn hermes --lane backend
 
 # 2. Non-claiming advisor query.
 maddu advise hermes "review this design and flag risks"

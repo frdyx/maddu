@@ -380,6 +380,38 @@ async function main() {
     }
   }
 
+  // A1 unknown-flag guard: parseFlags accepts any --key, so a typo'd or stale
+  // flag is silently ignored and falls through to ambient resolution (how
+  // `session close --session-id` closed the wrong session, defect A2). Every
+  // --token in rest is definitively a flag key (a parseFlags VALUE can never
+  // start with --), checked against the generated per-verb allowlist. Unknown
+  // → warn on stderr, verb still runs; MADDU_STRICT_FLAGS=1 → exit 2.
+  // FAIL-OPEN: artifact or guard module absent/unreadable (older install) →
+  // guard inert. Runs BEFORE the drain so the warning lands even when a
+  // broken drain blocks the dispatch.
+  try {
+    const guard = await import(pathToFileURL(join(repoRoot, 'commands', '_flag-guard.mjs')).href);
+    const allowlists = JSON.parse(await readFile(join(repoRoot, 'commands', '_flag-allowlists.json'), 'utf8'));
+    const findings = guard.checkUnknownFlags({ verb: raw, rest, allowlists });
+    if (findings.length) {
+      const strict = process.env.MADDU_STRICT_FLAGS === '1';
+      // Flag NAMES are caller-typed text echoed to stderr — a pasted token
+      // (`--ghp_…`) must come back redacted, never verbatim (same law as
+      // commands/spine.mjs#redactFlagNames; fail-CLOSED to '(unprintable)').
+      // Suggestions come from the allowlist, never from caller input.
+      let redact = () => '(unprintable)';
+      try {
+        const scan = await loadOptionalLib('secret-scan.mjs');
+        if (scan && typeof scan.redactText === 'function') redact = (n) => scan.redactText(String(n)).text;
+      } catch {}
+      for (const f of findings) {
+        console.error(`maddu: unknown flag --${redact(f.key)} for "${raw}"${f.suggestion ? ` — did you mean --${f.suggestion}?` : ''}`);
+      }
+      if (strict) process.exit(2);
+      console.error(`maddu: unknown flags are IGNORED today and will become an error; set MADDU_STRICT_FLAGS=1 to fail now`);
+    }
+  } catch {}
+
   // Ordering law (see prepareMutationWitness): drain BEFORE the command's
   // witness ctx exists, arm, then dispatch inside the ALS context.
   await drainMutationBreaches(witnessState, raw, rest);
