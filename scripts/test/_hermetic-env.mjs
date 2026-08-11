@@ -42,6 +42,12 @@ const SCRUB = Object.freeze([
   'MADDU_TEST_LEARN_DETECTOR',
   'MADDU_ASSESS_TEST_STDIN',
   'MADDU_REPLAY_TEST_CLEANUP_FAIL',
+  'MADDU_TEST_MINT_HOLD_MS',
+  // The SessionStart hook appends `export MADDU_SESSION_ID=...` to
+  // CLAUDE_ENV_FILE when set — an inherited value lets a fixture's
+  // session-start fire WRITE INTO the developer's live env file, pinning a
+  // fixture-only sid on the host session.
+  'CLAUDE_ENV_FILE',
 ]);
 
 // DELIBERATELY NOT SCRUBBED — tuning knobs CI legitimately sets for the whole

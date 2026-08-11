@@ -18,7 +18,7 @@
 
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, stat, rm } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
 import { gitRun } from './git-exec.mjs';
 import { withAppendLock } from './append-lock.mjs';
@@ -439,16 +439,28 @@ async function readSessionsMapStrict(p) {
   return parsed;
 }
 async function writeJson(p, obj) {
+  // Tracked outside the try so the reclaim below can see it: EVERY failure
+  // after the name is chosen can leave the file behind — writeFile can die
+  // mid-write (ENOSPC, quota) and rename can fail on a target we cannot
+  // replace (read-only file, cross-device). The name is unique per attempt,
+  // so an orphan per call accumulates for as long as the condition lasts.
+  let tmp = null;
   try {
     await mkdir(disciplineDirOf(p), { recursive: true });
     // Atomic replace (UNIQUE temp + rename — a shared temp name lets two
     // concurrent writers consume each other's file) so a lock-free reader
     // never observes a torn half-written file while a writer is mid-update.
-    const tmp = `${p}.tmp.${process.pid}-${randomBytes(4).toString('hex')}`;
+    tmp = `${p}.tmp.${process.pid}-${randomBytes(4).toString('hex')}`;
     await writeFile(tmp, JSON.stringify(obj, null, 2));
     await rename(tmp, p);
+    tmp = null;   // renamed away — there is nothing left to reclaim
     return true;
-  } catch { return false; }
+  } catch {
+    // force:true so a temp that was never created is a no-op. The caller's
+    // false and the untouched target are exactly as before.
+    if (tmp) { try { await rm(tmp, { force: true }); } catch { /* orphan beats a throw */ } }
+    return false;
+  }
 }
 function disciplineDirOf(filePath) { return filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))); }
 
@@ -627,6 +639,70 @@ export async function withBindingTransaction(repoRoot, fn) {
   }
   if (cbThrew) throw cbError;
   return result;
+}
+
+// Preflight PROBE for writers that must not spend SIDE EFFECTS on a bind that
+// is already doomed — the PreToolUse recovery mint, which otherwise registers a
+// session (a spine append), discovers the bind fails, and appends again to roll
+// it back, on every single edit until the map is repaired.
+// Healthy = the strict read succeeds. A MISSING file is healthy: the first bind
+// creates it. A present-but-corrupt or wrong-shaped one is not, because
+// bindClaudeSessionIn's strict read throws and returns false only AFTER the
+// caller has already appended. Deliberately stricter than resolveMadduSession,
+// whose lenient read (corrupt → empty map → null) is right for read-only
+// resolution but hides exactly this condition from writers.
+export async function bindingMapHealthy(repoRoot) {
+  try { await readSessionsMapStrict(sessionsMapPath(repoRoot)); return true; }
+  catch { return false; }
+}
+
+// Writability PROOF for callers that must not spend an IRREVERSIBLE side
+// effect — an append to the append-only spine — before knowing the binding
+// they will publish afterwards can actually be written. Readability is not
+// writability: a valid but read-only file, a read-only directory, and a full
+// disk all satisfy bindingMapHealthy and then fail the bind.
+//
+// Proving a filesystem write means performing one, and it must be the write
+// that is actually coming. Two halves, both required:
+//   SIZE — a quota or ENOSPC boundary can sit BETWEEN the current map and the
+//     map with one more binding in it, so rewriting the current content would
+//     pass forever while every real bind fails. The prospective content (the
+//     current map plus this claudeId, with a placeholder entry the same shape
+//     and size as a real one) is written to a unique scratch file in the SAME
+//     directory — same filesystem, same quota — and immediately removed. It is
+//     never renamed over the map, so nothing is published.
+//   TARGET — the map itself must be replaceable, which the scratch write says
+//     nothing about (a read-only sessions.json accepts neighbours happily). A
+//     no-op rewrite of the map's own content exercises the real temp+rename
+//     path; a missing map is materialized as an empty one, which binds no one.
+// Without a usable claudeId only the TARGET half runs — the caller's bind will
+// refuse that id anyway.
+// Never throws; false covers unreadable, unwritable, and out-of-space alike.
+// 'In' convention: the caller MUST hold the binding lock. Under that lock the
+// no-op rewrite cannot clobber a concurrent bind; without it, it could.
+const PROBE_SID_PLACEHOLDER = `ses_${'0'.repeat(14)}_${'0'.repeat(6)}`; // makeId('ses') shape
+export async function bindingMapWritableIn(repoRoot, claudeId) {
+  let scratch = null;
+  try {
+    const p = sessionsMapPath(repoRoot);
+    const cur = await readSessionsMapStrict(p);
+    if (claudeIdOk(claudeId)) {
+      // Null-prototype copy for the same reason bindClaudeSessionIn uses one:
+      // a grammar-valid `__proto__` key must stay a plain own entry.
+      const prospective = Object.create(null);
+      for (const k of Object.keys(cur)) prospective[k] = cur[k];
+      prospective[claudeId] = { madduId: PROBE_SID_PLACEHOLDER, at: Date.now() };
+      await mkdir(disciplineDirOf(p), { recursive: true });
+      scratch = `${p}.probe.${process.pid}-${randomBytes(4).toString('hex')}`;
+      await writeFile(scratch, JSON.stringify(prospective, null, 2));
+      await rm(scratch, { force: true });
+      scratch = null;
+    }
+    return await writeJson(p, cur);
+  } catch {
+    if (scratch) { try { await rm(scratch, { force: true }); } catch { /* orphan beats a throw */ } }
+    return false;
+  }
 }
 
 // Unlocked inner bind — caller MUST hold the binding lock. `boundAt` is real

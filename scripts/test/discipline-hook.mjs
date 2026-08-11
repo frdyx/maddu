@@ -48,9 +48,13 @@ try {
   repo = await mkdtemp(join(tmpdir(), 'maddu-disc-'));
   await mkdir(join(repo, '.maddu'), { recursive: true }); // marker → CLI resolves state root here
 
-  // (a) mutating Edit, no session governs → deny with a remedy reason
+  // (a) mutating Edit, no session governs → deny with a remedy reason.
+  // ANONYMOUS payload (no session_id) as of the B1/B2 fix: a claude-id-carrying
+  // unbound caller now self-heals via the PreToolUse mint (see
+  // session-mint.mjs) — the session block is reachable only when there is no
+  // claude id to bind a fresh session to.
   {
-    const { out } = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'x.js' }, session_id: 'claude-hermetic' });
+    const { out } = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'x.js' } });
     let json = null; try { json = JSON.parse(out.trim() || '{}'); } catch {}
     const hso = json && json.hookSpecificOutput;
     ok('Edit + no session → permissionDecision:deny', !!hso && hso.permissionDecision === 'deny', out.trim().slice(0, 80));
@@ -95,14 +99,14 @@ try {
   // (c3) Bash WRITE with no session → deny (P4: the classifier flags the write,
   // and enforcement blocks it exactly like an Edit).
   {
-    const { out } = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'echo x > src/a.js' }, session_id: 'claude-hermetic' });
+    const { out } = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'echo x > src/a.js' } });
     let json = null; try { json = JSON.parse(out.trim() || '{}'); } catch {}
     const hso = json && json.hookSpecificOutput;
     ok('Bash `echo x > f` + no session → permissionDecision:deny', !!hso && hso.permissionDecision === 'deny', out.trim().slice(0, 80));
   }
   // (c4) compound write riding a remedy token is still gated (Codex bypass closed)
   {
-    const { out } = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'maddu register && echo x > src/a.js' }, session_id: 'claude-hermetic' });
+    const { out } = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'maddu register && echo x > src/a.js' } });
     let json = null; try { json = JSON.parse(out.trim() || '{}'); } catch {}
     ok('Bash `maddu register && echo > f` → deny (not a remedy)', !!(json && json.hookSpecificOutput && json.hookSpecificOutput.permissionDecision === 'deny'));
   }

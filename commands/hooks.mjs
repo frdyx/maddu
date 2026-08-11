@@ -230,6 +230,264 @@ async function hookFireNoop(reason) {
   } catch {}
 }
 
+// PreToolUse recovery mint (B1/B2). The caller carries a validated Claude
+// session id but has NO live Máddu session: its SessionStart binding points at
+// a session someone else's SessionEnd already closed, or the sid it inherited
+// through the environment is dead. The only sound recovery is to MINT a fresh
+// session bound to this claude id — ADOPTING an existing one (the active-session
+// cache, the newest live session) was rejected as unsound (audit P2 F11),
+// because it lets an unbound caller record its work under another agent's
+// identity.
+//
+// FAIL-SOFT in every direction: a helper missing from an older installed
+// runtime, a busy lock, or any throw returns null and the caller degrades to
+// the pre-fix resolution. A mint must never be why a tool call is blocked.
+async function mintFreshBoundSession(repoRoot, {
+  claudeId, workRoot, disc, spine, projections, sessionLifecycle, sessionActive,
+}) {
+  try {
+    // Version skew: without the FULL register+bind transaction, a mint would
+    // be unbound or unrecorded — both worse than no mint — so refuse outright
+    // rather than half-perform it.
+    if (!claudeId || !disc || !spine || !sessionLifecycle) return null;
+    if (typeof disc.withBindingTransaction !== 'function') return null;
+    if (typeof disc.bindClaudeSessionIn !== 'function') return null;
+    if (typeof sessionLifecycle.registerSessionUniqueIn !== 'function') return null;
+    if (typeof sessionLifecycle.withCloseLock !== 'function') return null;
+    if (typeof sessionLifecycle.isLockFailed !== 'function') return null;
+    if (!spine.EVENT_TYPES || !spine.EVENT_TYPES.SESSION_AUTO_REGISTERED) return null;
+    // The under-lock revalidation below needs BOTH of these; without them the
+    // no-live decision could never be rechecked and concurrent callers would
+    // double-mint (r1 F1).
+    if (typeof disc.resolveMadduSession !== 'function') return null;
+    if (!projections || typeof projections.project !== 'function') return null;
+    // Bind-before-register (r6 F1) mints the id HERE rather than letting the
+    // registrar generate one, so the same generator must be reachable.
+    if (typeof spine.genSessionId !== 'function') return null;
+
+    const refOk = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
+    const label = basename(repoRoot) || 'agent';
+    // CP5 (PR-B) applies here as at SessionStart: an ambient parent is
+    // grammar-gated + existence-checked, and an unusable one drops the LINK,
+    // never the mint.
+    let parentEnv = null;
+    try { parentEnv = await resolveParentId(repoRoot, null, { projections }); }
+    catch { parentEnv = null; }
+    const makeEvent = (sessionId) => ({
+      type: spine.EVENT_TYPES.SESSION_AUTO_REGISTERED,
+      actor: sessionId,
+      lane: null,
+      data: {
+        sessionId,
+        parentSessionId: parentEnv,
+        // Provenance marker (SessionStart writes 'cli'): a recovery mint stays
+        // distinguishable on the spine, so a RUN of them reads as the
+        // lifecycle defect it compensates for and not as normal traffic.
+        source: 'pretooluse-mint',
+        label,
+        role: 'implementer',
+      },
+    });
+
+    // Observe the dirty tree BEFORE the transaction (r1 F4). Captured after
+    // the mint, the baseline would swallow an edit made by a parallel caller
+    // that resolved the new binding in the meantime — silently erasing that
+    // edit's commit pressure. A pre-transaction snapshot fails the other way:
+    // a racing edit lands OUTSIDE the baseline and counts as new dirt, which
+    // is the safe direction. Best-effort; a failed observation leaves the
+    // counter unwritten and the first gate call seeds baselineInit fail-open.
+    let baseObs = null;
+    try {
+      if (disc.mutateCounter && disc.dirtyFilesDetailed && workRoot) {
+        const obs = await disc.dirtyFilesDetailed(workRoot);
+        if (obs && obs.ok) baseObs = obs;
+      }
+    } catch { baseObs = null; }
+
+    // Test seam (session-mint.mjs concurrency case): hold between the no-live
+    // decision and the transaction so a racing second caller provably reaches
+    // the same decision before either takes the lock — the under-lock
+    // revalidation is then the ONLY thing standing between this race and a
+    // double-mint. PRODUCTION-GATED on MADDU_SELF_TEST === '1', exactly like
+    // seamThrow: a test-injection switch must be DOUBLY opted in so an ambient
+    // value can never alter production behavior — an inherited
+    // MADDU_TEST_MINT_HOLD_MS would otherwise delay every real recovery mint
+    // by up to the cap, on top of whatever the locks already cost. The cap is
+    // the second bound, not the first.
+    //
+    // The marker line is the seam's EVIDENCE. Child wall-clock cannot prove a
+    // rendezvous happened — a CPU-starved child that never raced still reports
+    // a long runtime — so each racer records that it entered the hold from
+    // INSIDE the hold, which is reachable only after deciding to mint on
+    // observed-dead state. Counting markers is how the suite knows both
+    // callers made that decision before either took the lock; a missing marker
+    // means rendezvous-not-achieved, not a passing test.
+    if (process.env.MADDU_SELF_TEST === '1') {
+      const holdMs = Number(process.env.MADDU_TEST_MINT_HOLD_MS || 0);
+      if (Number.isFinite(holdMs) && holdMs > 0) {
+        try {
+          await appendFile(
+            join(repoRoot, '.maddu', 'state', 'test-mint-hold.ndjson'),
+            JSON.stringify({ pid: process.pid, ts: Date.now() }) + '\n');
+        } catch { /* evidence must never break the mint it observes */ }
+        await new Promise((r) => setTimeout(r, Math.min(holdMs, 5000)));
+      }
+    }
+
+    // OPTIMIZATION only (r5 F1, demoted by r6 F1): skip the lock churn when
+    // the map is already visibly corrupt. The append-free GUARANTEE comes from
+    // the bind-before-register order inside the transaction, not from here —
+    // this probe proves the map is READABLE and can say nothing about whether
+    // it is writable, so a valid-but-read-only map sails through it. Nothing
+    // downstream may rely on it having run: an older installed lib without the
+    // probe takes the same path, just after paying for the locks.
+    if (typeof disc.bindingMapHealthy === 'function' && !(await disc.bindingMapHealthy(repoRoot))) {
+      return null;
+    }
+
+    // Prove-writable + register + bind as ONE transaction, holding the same
+    // two locks fireSessionStart does: the bind commits while the close lock
+    // still protects the liveness proof, so no interleaved close can kill the
+    // sid in the gap.
+    const bt = await disc.withBindingTransaction(repoRoot, async () =>
+      sessionLifecycle.withCloseLock(repoRoot, async () => {
+        // Revalidate the no-live decision UNDER the lock (r1 F1). The caller
+        // decided to mint before taking either lock, so two concurrent
+        // PreToolUse calls for the same claude id would both register and the
+        // second bind would overwrite the first — orphaning a live session.
+        // Re-reading OUR OWN binding is not adoption (F11 still holds): if a
+        // concurrent mint or a SessionStart already healed this claude id, the
+        // sid we find is the one this caller is entitled to. A throw here
+        // (unreadable bindings map or projection) propagates to the outer
+        // catch → null, matching the rule that an unobservable state never
+        // mints.
+        // The live set is read ONCE and answers two questions: is our own
+        // binding already healed, and is a candidate id free. Both locks are
+        // held and every registration path takes the close lock, so no session
+        // can become active between this read and the register below.
+        const now = await projections.project(repoRoot);
+        const live = Array.isArray(now.activeSessions) ? now.activeSessions : [];
+        const prior = await disc.resolveMadduSession(repoRoot, claudeId);
+        if (refOk(prior) && live.some((s) => s && s.id === prior)) {
+          return { sid: prior, created: false };
+        }
+        // ORDER: prove writable → register → bind (r8). Three invariants, in
+        // priority order:
+        //   1. NEVER publish a binding to a session that does not exist. The
+        //      binding is visible to lock-free resolvers the instant it lands,
+        //      and pre-compact resolves bindings WITHOUT a liveness check — a
+        //      binding to a never-registered session makes it append a
+        //      checkpoint attributed to a session that never existed, false
+        //      forever on an append-only spine. So the bind goes LAST.
+        //   2. NEVER append before the map has proven writable. The append
+        //      cannot be taken back; the bind that follows it can still fail.
+        //      Readability says nothing about this, so the proof performs a
+        //      real write of the map's own content, publishing nothing.
+        //   3. The single bind IS the completion stamp, and it is the LAST
+        //      mutating act in the transaction, so boundAt dates as close to
+        //      release as this design can get — which is what the SessionEnd
+        //      <10s freshness guard needs. No re-stamp, nothing to fail
+        //      silently.
+        // Crash windows are now benign in one direction only: dying before the
+        // bind leaves a registered-but-unbound session, which is truthful on
+        // the spine and sweepable by the janitor.
+        // Skew: the self-heal REFUSES to run on a runtime that does not ship
+        // the proof. Falling through would resurrect the storm this whole
+        // ordering exists to prevent — on an unwritable-but-valid map every
+        // call would register and roll back, permanently, one pair at a time.
+        // An older install therefore keeps exactly today's behavior (session
+        // deny plus its recovery remedy — no regression, no storm), and
+        // `maddu upgrade` restores the mint.
+        if (typeof disc.bindingMapWritableIn !== 'function') return null;
+        if (!(await disc.bindingMapWritableIn(repoRoot, claudeId))) return null;
+        // Draw until an id is free. The cheap pre-check skips ids that clash
+        // with a LIVE session; the registrar checks against ALL history, so a
+        // same-second collision with a CLOSED session comes back as 'exists'
+        // and must be redrawn rather than abandoned (r8 F3). Nothing has been
+        // published at this point, so a retry costs nothing. Bounded at three
+        // draws — a persistent clash means something is wrong, not busy.
+        let sid = null, reg = null;
+        for (let attempt = 0; attempt < 3 && !sid; attempt++) {
+          const cand = spine.genSessionId();
+          if (live.some((s) => s && s.id === cand)) continue;
+          const r = await sessionLifecycle.registerSessionUniqueIn(repoRoot, { id: cand, makeEvent });
+          if (r.status === 'registered') { sid = cand; reg = r; break; }
+          if (r.status === 'exists') continue;   // historical collision → redraw
+          return null;                           // invalid-id / spine-corrupt / unknown
+        }
+        if (!sid) return null;
+        // Cache the active session BEFORE the bind (r9 F3) so the bind is the
+        // transaction's last mutating act and boundAt is not aged by whatever
+        // follows it. A cache entry for a registered-but-not-yet-bound session
+        // is harmless: nothing resolves IDENTITY from this file — the
+        // no-cache-fallback rule (audit P2 F11) is exactly what makes ordering
+        // it first safe.
+        if (sessionActive && sessionActive.writeActiveSession) {
+          await sessionActive.writeActiveSession(repoRoot, {
+            sessionId: sid,
+            registeredAt: reg.event ? reg.event.ts : null,
+            role: 'implementer',
+            label,
+            lane: null,
+          });
+        }
+        // The completion stamp. A false here means the map turned unwritable
+        // between the proof and now — rare, and bounded to ONE rollback pair
+        // because the NEXT call fails at the proof above and appends nothing.
+        // Roll the registration back so the spine does not carry a session no
+        // caller can reach (In-variant: both locks are still held).
+        // Accepted residual: a stall INSIDE this single-file write still ages
+        // boundAt. That is within the SessionEnd guard's documented
+        // deliberately-fail-open heuristic — I/O pathological enough to stall
+        // this write would stall the guard's own read of the same file.
+        const bound = await disc.bindClaudeSessionIn(repoRoot, claudeId, sid);
+        if (bound === false) {
+          try {
+            if (typeof sessionLifecycle.closeSessionIfActiveIn === 'function'
+                && spine.EVENT_TYPES.SESSION_CLOSED) {
+              await sessionLifecycle.closeSessionIfActiveIn(repoRoot, {
+                sessionId: sid,
+                eventType: spine.EVENT_TYPES.SESSION_CLOSED,
+                data: { handoff: { summary: 'recovery mint rolled back: binding became unwritable after the write proof', auto: true } },
+              });
+            }
+          } catch { /* rollback is best-effort — the janitor sweeps the leak */ }
+          return null;
+        }
+        return { sid, created: true };
+      }));
+    // Either lock busy → null. Deliberately NOT fireSessionStart's
+    // register-WITHOUT-binding fallback: an unbound mint leaves the caller
+    // still unbound, so the next tool call mints again — a session storm, one
+    // per call, for as long as the lock stays hot. Letting legacy behavior
+    // stand for this single call is the far cheaper failure.
+    if (sessionLifecycle.isLockFailed(bt)) return null;
+    if (disc.isBindingLockFailed && disc.isBindingLockFailed(bt)) return null;
+    if (!bt || typeof bt.sid !== 'string' || !bt.sid) return null;
+
+    // Seed the discipline baseline exactly as fireSessionStart's CREATED path
+    // does — and only on a created mint: a reused sid already carries its own
+    // accumulated history, and re-baselining would erase its commit pressure.
+    // Without this a fresh sid inherits the whole pre-existing dirty tree as
+    // its OWN new dirt, and the commit gate could block the very call this
+    // mint just unblocked.
+    try {
+      if (bt.created && baseObs && disc.mutateCounter) {
+        await disc.mutateCounter(repoRoot, bt.sid, (c) => {
+          c.dirtyBaseline = baseObs.paths.slice();
+          c.dirtyFirstSeen = [];
+          c.firstDirtyTs = null;
+          c.baselineInit = true;
+          c.workRoot = workRoot;
+          c.dirtyV = 2;
+          return c;
+        });
+      }
+    } catch { /* baseline capture is best-effort */ }
+    return bt.sid;
+  } catch { return null; /* never throw into the gate */ }
+}
+
 async function fireSessionStart() {
   let note = 'Máddu session discipline active. Run `maddu register`, claim a lane, and `maddu slice-stop` at each slice boundary.';
   // Hoisted so the post-containment verdict below can see whether a session
@@ -523,7 +781,7 @@ export default async function hooks(argv) {
         // Load the discipline lib BEFORE reading/parsing stdin so a malformed-input
         // throw still lands in the catch with `disc` available to witness (F6).
         disc = await loadLib('discipline.mjs');
-        const { paths, projections, spine } = await loadSpineLib();
+        const { paths, projections, spine, sessionLifecycle, sessionActive } = await loadSpineLib();
         repoRoot = await resolveRepoRoot(paths);
         seamThrow('handler');
         let raw = '';
@@ -549,21 +807,61 @@ export default async function hooks(argv) {
           : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
         if (kind === 'read' || kind === 'remedy') process.exit(0);
 
-        // CENTRALIZED acting-sid resolution (v1.111.0): validated ONCE, then
-        // every consumer — auto-claim, enforcement, the witness path — uses
-        // the SAME result, so an invalid env value or legacy nonconforming
-        // binding can never produce a lane claim or witness event upstream of
-        // the check. Precedence: env → SessionStart binding. NO active-
-        // session-cache fallback (audit P2 F11): an unbound Claude caller
-        // must stay unbound rather than inherit the cached active session.
+        // CENTRALIZED acting-sid resolution (v1.111.0), LIVENESS-AWARE since
+        // B1/B2: validated ONCE, then every consumer — auto-claim, enforcement,
+        // the witness path — uses the SAME result, so an invalid env value or
+        // legacy nonconforming binding can never produce a lane claim or
+        // witness event upstream of the check. Precedence is by LIVENESS
+        // first, source second: a grammar-valid but DEAD env sid (inherited
+        // from a parent process, or closed underneath us) must lose to the
+        // caller's own live SessionStart binding, and a binding pointing at a
+        // session that another agent's SessionEnd already closed must lose to
+        // a freshly minted one. Still NO active-session-cache fallback and no
+        // adoption of any existing session (audit P2 F11) — an unbound Claude
+        // caller mints ITS OWN session rather than inheriting someone else's.
         const refOk = spine.isRefId || ((v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v));
         const envSid = process.env.MADDU_SESSION_ID;
-        sid = refOk(envSid) ? envSid : null;
-        if (!sid && disc && claudeSessionId) {
+        const envCand = refOk(envSid) ? envSid : null;
+        let boundSid = null;
+        if (disc && claudeSessionId) {
           try {
             const bound = await disc.resolveMadduSession(repoRoot, claudeSessionId);
-            if (refOk(bound)) sid = bound;
-          } catch { /* fall through */ }
+            if (refOk(bound)) boundSid = bound;
+          } catch { /* unresolvable binding reads as absent */ }
+        }
+        // ONE projection read decides liveness. An UNREADABLE projection is
+        // unobservable, NOT evidence of death (E1): it softens the resolution
+        // back to the legacy env→binding precedence and never hardens it into
+        // a mint — minting against a projection we cannot read would spawn a
+        // session per tool call for as long as the read keeps failing.
+        let liveProj = null;
+        try { liveProj = await projections.project(repoRoot); } catch { liveProj = null; }
+        const isLive = (id) => !!id && !!liveProj && Array.isArray(liveProj.activeSessions)
+          && liveProj.activeSessions.some((s) => s && s.id === id);
+        if (liveProj) {
+          sid = isLive(envCand) ? envCand : (isLive(boundSid) ? boundSid : null);
+          if (!sid && claudeSessionId) {
+            sid = await mintFreshBoundSession(repoRoot, {
+              claudeId: claudeSessionId, workRoot, disc, spine, projections,
+              sessionLifecycle, sessionActive,
+            });
+          }
+          // A refused or failed mint degrades to EXACTLY the pre-fix result,
+          // not to no session at all.
+          //
+          // ADJUDICATED (r1 F3), against the objection that falling back to a
+          // sid we just observed to be DEAD — and thereby denying the edit —
+          // breaks fail-open. It is held deliberately. The deny is the
+          // discipline VERDICT on an observed dead identity, not an internal
+          // error; genuine internal errors still fail open inside
+          // enforcePreTool. Allowing the edit whenever the mint loses a lock
+          // would make enforcement bypassable by hammering the binding lock,
+          // which is a far worse property than one blocked call. And the state
+          // is self-healing rather than terminal: the next tool call re-reads
+          // the projection and re-attempts the mint.
+          if (!sid) sid = envCand || boundSid;
+        } else {
+          sid = envCand || boundSid;
         }
         // claudeSessionId is already validated-or-null (gated at the source
         // above), so the fallback key is filename-safe by construction.
