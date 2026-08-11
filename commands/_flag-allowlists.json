@@ -194,9 +194,11 @@
       "abandon",
       "constraint",
       "force",
+      "impl",
       "json",
       "note",
       "objective",
+      "oracle",
       "parent",
       "session",
       "success"
@@ -286,10 +288,13 @@
       "window"
     ],
     "loop": [
+      "from-goal",
       "goal",
+      "impl",
       "iterate",
       "lane",
       "max-iter",
+      "oracle",
       "parent",
       "plan",
       "session",

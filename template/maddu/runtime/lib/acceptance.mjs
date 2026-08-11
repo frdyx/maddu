@@ -84,6 +84,7 @@
 
 export {
   refuseBlankCommand,
+  refuseDeclaredSet,
   acceptanceIdFor,
   expandAcceptance,
   oracleDigest,

@@ -69,7 +69,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
-import { listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE, validWsResolutions, buildWsGrandfather, wsStampGrandfathered, readPartitionLineAt } from './spine-append-core.mjs';
+import { readActiveReplicaId, listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE, validWsResolutions, buildWsGrandfather, wsStampGrandfathered, readPartitionLineAt } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
@@ -1340,6 +1340,47 @@ async function wsIdentityPass(repoRoot, push, { partitioned, eventsDir }) {
   }
 }
 
+// THE spine read-mode predicate — one function, so no two surfaces can disagree
+// about whether a checkout supports the reasoning that only holds over a single
+// totally-ordered chain (the acceptance proof's O-clauses, the digests a receipt
+// records). 'flat' | 'partitioned' | 'unknown'.
+//
+// TWO SIGNALS, EITHER SUFFICIENT, because they disagree exactly where it
+// matters. Active replica configuration says "this checkout WRITES a partition";
+// segment-bearing partition directories say "this checkout HOLDS partitions". A
+// freshly synced clone has the second without the first — no replica of its own
+// yet, but a partitioned spine underneath — and calling that 'flat' would let a
+// consumer hash and reason over a tree its digests do not describe.
+//
+// EVERY UNCERTAINTY IS 'unknown', never 'flat'. `listPartitionIds` swallows its
+// own enumeration errors to an empty list, which is the fail-OPEN direction
+// here, so this walks `by-replica` itself: an absent directory genuinely means
+// no partitions, but an unreadable one means we cannot tell. Consumers already
+// fail closed on anything that is not 'flat' — `deriveProofs` refuses and
+// `observeAcceptance` voids its receipt — so an honest 'unknown' costs a proof,
+// while a wrong 'flat' would mint one.
+export async function resolveSpineMode(repoRoot) {
+  try {
+    if (await readActiveReplicaId(repoRoot)) return 'partitioned';
+    const byReplicaDir = join(pathsFor(repoRoot).events, 'by-replica');
+    let entries;
+    try {
+      entries = await readdir(byReplicaDir, { withFileTypes: true });
+    } catch (e) {
+      if (e && e.code === 'ENOENT') return 'flat';
+      return 'unknown';
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const segs = await readdir(partitionDir(repoRoot, e.name));
+      if (segs.some((f) => SEGMENT_RE.test(f))) return 'partitioned';
+    }
+    return 'flat';
+  } catch {
+    return 'unknown';
+  }
+}
+
 // audit P3 — the verified-read the recency/success GATES use as their authority.
 // A single uncapped, parse-clean forward pass verifies the chain AND returns the
 // exact events it verified (coverage inherent). integrity:
@@ -1364,9 +1405,16 @@ export async function readVerifiedEvents(repoRoot, { maxEvents = Infinity, allow
   if (isSync) {
     events.sort((a, b) => (Date.parse((a && a.ts) || '') || 0) - (Date.parse((b && b.ts) || '') || 0));
   }
+  // `mode` is the SCANNED-CHAIN question ("may a reader reason over this as one
+  // totally-ordered spine?"), answered by the shared predicate so a caller that
+  // resolves it separately gets the same word. It deliberately does NOT drive
+  // the sort above: that decision is about the segments THIS scan concatenated,
+  // and re-deciding it from configuration would reorder a flat legacy stream in
+  // a checkout that merely holds a replica config.
   return {
     events,
     integrity,
+    mode: await resolveSpineMode(repoRoot),
     capped: res.capped,
     failCount: res.counts.FAIL,
     warnCount: res.counts.WARN,

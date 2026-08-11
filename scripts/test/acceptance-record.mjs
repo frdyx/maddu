@@ -348,6 +348,39 @@ async function main() {
     ok('missing rctx.spineLib throws (caller bug, loud)', threw);
   }
 
+  // ── W1 return extension: fingerprint/settled are RETURN-ONLY evidence ─────
+  // (supervisor cases from pr2-w1-plan.md A1 — the stuck heuristic consumes
+  // the return; the funnel-CLEAN receipt shape must not grow these keys.)
+  {
+    const root = await makeRepo('fingerprint');
+    // Two failing runs whose ONLY difference is their output must fingerprint
+    // differently — the whole point of the field (same exit, different bug).
+    const say = (word) => `"${NODE}" -e "console.log('${word}');process.exit(1)"`;
+    const f1 = await R.observeAcceptance(roots(root), decl(root, { command: say('failure-alpha') }), rctx(), ctx());
+    const f2 = await R.observeAcceptance(roots(root), decl(root, { command: say('failure-beta') }), rctx(), ctx());
+    ok('return carries settled:true and a string fingerprint on a normal run',
+      f1.ran.settled === true && typeof f1.ran.fingerprint === 'string' && f1.ran.fingerprintTruncated === false,
+      JSON.stringify({ settled: f1.ran.settled, fp: typeof f1.ran.fingerprint, tr: f1.ran.fingerprintTruncated }));
+    ok('two failures differing only by output fingerprint differently',
+      typeof f2.ran.fingerprint === 'string' && f1.ran.fingerprint !== f2.ran.fingerprint);
+    // Truncation: cap the output below what the command writes → the
+    // fingerprint must be NULL (a shared long prefix must not read as "same
+    // failure"), flagged truncated.
+    const big = `"${NODE}" -e "process.stdout.write('P'.repeat(4096));process.exit(1)"`;
+    const t = await R.observeAcceptance(roots(root), decl(root, { command: big }), rctx(), ctx({ maxOutputBytes: 64 }));
+    ok('truncated run reports fingerprint:null + fingerprintTruncated:true',
+      t.ran.fingerprint === null && t.ran.fingerprintTruncated === true,
+      JSON.stringify({ fp: t.ran.fingerprint, tr: t.ran.fingerprintTruncated }));
+    // The offender for the return-only law: no RAN receipt may carry any of
+    // the three keys — a receipt field would be a second, spine-visible answer
+    // the schema never declared.
+    const { events } = await derived(root);
+    const leaked = rans(events).filter((e) =>
+      'fingerprint' in e.data || 'fingerprintTruncated' in e.data || 'settled' in e.data);
+    ok('receipts never carry fingerprint/fingerprintTruncated/settled', leaked.length === 0,
+      JSON.stringify(leaked.map((e) => Object.keys(e.data))));
+  }
+
   return failed ? 1 : 0;
 }
 

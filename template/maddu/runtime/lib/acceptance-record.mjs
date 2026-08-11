@@ -241,10 +241,18 @@ function optionalString(v, label) {
 //
 // Returns, when the command executed:
 //   { ok:true, ran:{exit, signal, timed_out, spawn_error, outcome_class,
-//     duration_ms}, receipt:{recorded, eligible, refusal_reason, acceptanceId} }
+//     duration_ms, settled, fingerprint, fingerprintTruncated},
+//     receipt:{recorded, eligible, refusal_reason, acceptanceId} }
 // `receipt.recorded:false` means an append failed — the run still happened and
 // its result is still returned. Lock-busy returns the 2a refusal with the void
 // receipt attached; the three pre-lock refusals return a typed refusal alone.
+//
+// `settled`, `fingerprint` and `fingerprintTruncated` are RETURN-ONLY, never
+// receipt fields. A loop's stuck detection consumes them in-process to tell two
+// different failures apart from the same failure repeated; they are derivable
+// evidence about one run, not identity, and a truncated run reports
+// `fingerprint:null` so the caller disables the check rather than halting on a
+// shared prefix.
 export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
   const { workRoot, stateRoot } = requireRootsPair(roots);
   if (!isPlainRecord(decl)) throw new TypeError('observeAcceptance takes a plain declaration record');
@@ -497,6 +505,9 @@ export async function observeAcceptance(roots, decl, rctx, ctx = {}) {
       spawn_error: ran.spawn_error,
       outcome_class: ran.outcome_class,
       duration_ms: ran.duration_ms,
+      settled: ran.settled,
+      fingerprint: ran.fingerprint,
+      fingerprintTruncated: ran.fingerprintTruncated,
     },
     receipt,
   };

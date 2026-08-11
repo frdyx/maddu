@@ -105,6 +105,44 @@ export function refuseBlankCommand(command) {
   return { ok: true, command };
 }
 
+// ── refuseDeclaredSet ──────────────────────────────────────────────────────
+
+// The DECLARATION-TIME shape check for one declared pattern set, so a bad
+// declaration is refused at the surface that took it instead of throwing out of
+// `acceptanceIdFor` later, with a receipt half-written and nowhere to report it.
+//
+// It is the SAME budget `canonicalPatterns` enforces, read from the same two
+// constants — a second copy of the numbers is how a CLI starts accepting a
+// declaration the identity function will reject. What it does NOT check is
+// anything about the filesystem: containment, symlinks and zero-match are
+// OBSERVATION-time refusals by design, because they depend on a working tree
+// that may not look the same when the command finally runs.
+//
+// Returns a typed refusal rather than throwing: a CLI needs to exit with the
+// reason, and `acceptanceIdFor`'s throw is reserved for caller bugs that have
+// already passed a surface like this one.
+export function refuseDeclaredSet(patterns, label) {
+  if (!Array.isArray(patterns)) {
+    return refuse('pattern-invalid', 'set-invalid', `${label} must be an array of pattern strings`);
+  }
+  if (patterns.length > MAX_PATTERNS) {
+    return refuse('pattern-invalid', 'set-invalid', `${label} declares too many patterns (max ${MAX_PATTERNS})`);
+  }
+  for (let i = 0; i < patterns.length; i++) {
+    const p = patterns[i];
+    if (typeof p !== 'string') {
+      return refuse('pattern-invalid', 'set-invalid', `${label} must contain only strings`, { patternIndex: i });
+    }
+    if (!p.trim()) {
+      return refuse('pattern-invalid', 'set-invalid', `${label} contains a blank pattern`, { pattern: p, patternIndex: i });
+    }
+    if (p.length > MAX_PATTERN_LEN) {
+      return refuse('pattern-invalid', 'set-invalid', `${label} exceeds the pattern length budget (${MAX_PATTERN_LEN})`, { pattern: p, patternIndex: i });
+    }
+  }
+  return { ok: true, patterns };
+}
+
 // ── acceptanceIdFor ────────────────────────────────────────────────────────
 
 // Encode one identity term with its TYPE, so `1` and `'1'` can never collide.
