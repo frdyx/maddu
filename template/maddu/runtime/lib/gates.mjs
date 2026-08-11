@@ -129,7 +129,11 @@ export async function runGates(repoRoot, opts = {}) {
     });
     if (emitEvents) {
       try {
-        await ctx.spine.append(repoRoot, {
+        // The STATE root, like every other receipt (funnel r6 #2): under a
+        // split pair the authoritative spine is the one readers consult, and
+        // a work-rooted append would leave orient/cockpit showing stale gate
+        // results beside a worktree-local record nobody reads.
+        await ctx.spine.append(ctx.roots?.stateRoot || repoRoot, {
           type: ctx.spine.EVENT_TYPES.GATE_RAN,
           actor: attribution?.actor || null,
           lane: attribution?.lane || null,

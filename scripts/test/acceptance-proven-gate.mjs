@@ -388,6 +388,36 @@ async function main() {
         await RES.findStateRoot(bare, { MADDU_STATE_ROOT: primary }) === null,
         String(await RES.findStateRoot(bare, { MADDU_STATE_ROOT: primary })));
     }
+    {
+      // Blank pointer = an interrupted attachment (funnel r6 #1): canonical
+      // resolveRoots throws, so the standalone walk must too — falling back
+      // to local state would report against a record other commands refuse.
+      const blank = await mkdtemp(join(scratch, 'blank-'));
+      await writeFile(join(blank, '.maddu-state-root'), '\n');
+      await mkdir(join(blank, '.maddu'), { recursive: true });
+      let threw = false;
+      try { await RES.findStateRoot(blank, {}); } catch { threw = true; }
+      ok('findStateRoot: a BLANK pointer throws (interrupted attachment)', threw);
+    }
+
+    // Split-pair GATE_RAN lands on the STATE root (funnel r6 #2): the
+    // authoritative spine is the one readers consult; a work-rooted append
+    // would leave orient/cockpit blind to the run.
+    {
+      const gateRans = async (root) => (await spine.readAll(root)).filter((e) => e.type === 'GATE_RAN' && e.data?.gateId === 'acceptance-proven').length;
+      const beforePrimary = await gateRans(primary);
+      const beforeLocal = await gateRans(work);
+      const emitScript = join(scratch, 'run-gates-emit.mjs');
+      await writeFile(emitScript, [
+        `import { runGates } from ${JSON.stringify(LIB('gates.mjs'))};`,
+        `await runGates(${JSON.stringify(primary)}, { emitEvents: true, onlyId: 'acceptance-proven' });`,
+        `console.log('done');`,
+      ].join('\n'));
+      const er = spawnSync(NODE, [emitScript], { cwd: work, encoding: 'utf8', timeout: 180000, env: hermeticEnv() });
+      ok('split pair: GATE_RAN appended to the STATE root, not the worktree',
+        er.status === 0 && (await gateRans(primary)) === beforePrimary + 1 && (await gateRans(work)) === beforeLocal,
+        `exit=${er.status} primary ${beforePrimary}->${await gateRans(primary)} local ${beforeLocal}->${await gateRans(work)}`);
+    }
   }
 
   return failed === 0 ? 0 : 1;

@@ -21,9 +21,10 @@ export async function findRepoRoot(startDir = process.cwd()) {
 // a `.maddu-state-root` file names the primary checkout whose `.maddu/` this
 // tree shares, and a consumer that walks past it reads a local/empty spine
 // instead of the shared record. Same standalone discipline as findRepoRoot —
-// no runtime-library dependency. A pointer whose target does not hold a
-// `.maddu/` directory is ignored (misconfiguration must not silently retarget
-// state), falling back to the plain walk-up.
+// no runtime-library dependency. A non-blank pointer or env target that does
+// not hold `.maddu/` THROWS — canonical resolveRoots calls that a
+// misconfiguration, and silently retargeting (or silently falling back)
+// would report against a state every other command refuses to use.
 export async function findStateRoot(startDir = process.cwd(), env = process.env) {
   // FULL canonical parity with paths.mjs resolveRoots (funnel r3 #3, r5 #1):
   // the WORK-ROOT MARKER is found first (nearest dir holding `.maddu/` or the
@@ -37,15 +38,14 @@ export async function findStateRoot(startDir = process.cwd(), env = process.env)
   const hasStateDir = async (p) => {
     try { return (await stat(join(p, '.maddu'))).isDirectory(); } catch { return false; }
   };
+  const isPointerFile = async (p) => {
+    try { return (await stat(p)).isFile(); } catch { return false; }
+  };
   let dir = resolve(startDir);
   let workRoot = null;
   while (true) {
     if (await hasStateDir(dir)) { workRoot = dir; break; }
-    try {
-      await stat(join(dir, '.maddu-state-root'));
-      workRoot = dir;
-      break;
-    } catch {}
+    if (await isPointerFile(join(dir, '.maddu-state-root'))) { workRoot = dir; break; }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -59,16 +59,19 @@ export async function findStateRoot(startDir = process.cwd(), env = process.env)
     }
     return target;
   }
-  let pointerTarget = null;
-  try {
-    const raw = (await readFile(join(workRoot, '.maddu-state-root'), 'utf8')).trim();
-    if (raw) pointerTarget = resolve(workRoot, raw);
-  } catch {}
-  if (pointerTarget !== null) {
-    if (!(await hasStateDir(pointerTarget))) {
+  // The pointer read mirrors paths.mjs VERBATIM (funnel r6 #1): FILE only,
+  // FIRST line, blank ⇒ throw, read failures propagate — an interrupted
+  // attachment's empty pointer must refuse, not silently select the local
+  // state every other command refuses to use.
+  const pointerPath = join(workRoot, '.maddu-state-root');
+  if (await isPointerFile(pointerPath)) {
+    const raw = (await readFile(pointerPath, 'utf8')).split(/\r?\n/)[0].trim();
+    if (!raw) throw new Error('.maddu-state-root is empty — refusing to guess a state root');
+    const target = resolve(workRoot, raw);
+    if (!(await hasStateDir(target))) {
       throw new Error('.maddu-state-root points at a directory with no .maddu/ — fix or remove the pointer (target not echoed)');
     }
-    return pointerTarget;
+    return target;
   }
   return (await hasStateDir(workRoot)) ? workRoot : null;
 }
