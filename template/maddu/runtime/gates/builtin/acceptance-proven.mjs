@@ -145,10 +145,20 @@ export default {
     // declared conditions but no oracle/implementation sets need three different
     // next actions, and none of them is "your proofs are clean".
     if (!active) {
+      // A goal that EXISTS but is closed is not "nothing declared" (gate
+      // funnel r1 #2): telling the operator to declare a goal they just
+      // completed would be a false diagnosis; a closed goal proves nothing
+      // forward and says so.
+      if (goal && goal.status && goal.status !== 'active') {
+        return { ok: false, message: say(`the declared goal is ${goal.status}, not active — a closed goal proves nothing forward; declare a new one to prove new work`) };
+      }
       return { ok: false, message: say('no active goal declares acceptance criteria — declare one with `maddu goal set "<objective>" --success "<cmd>::<text>" --oracle "<glob>" --impl "<glob>"`') };
     }
     const conditions = Array.isArray(goal.success) ? goal.success : [];
-    const verifiableCount = conditions.filter((c) => c && c.verify).length;
+    // PRESENCE, not truthiness (gate funnel r1 #1): a malformed falsy verify
+    // is still a declared verification and must stay in the denominator so
+    // the declaration-invalid arm below can name it.
+    const verifiableCount = conditions.filter((c) => c && c.verify != null).length;
     if (verifiableCount === 0) {
       return {
         ok: false,
@@ -159,10 +169,18 @@ export default {
     const oracleDeclared = Array.isArray(goal.oracle) && goal.oracle.length > 0;
     const implDeclared = Array.isArray(goal.implementation) && goal.implementation.length > 0;
     if (!oracleDeclared || !implDeclared) {
+      // The explanation names the clause THE MISSING SET starves (gate funnel
+      // r1 #3) — claiming the oracle is undeclared when only --impl is
+      // missing would be a false statement about the declaration.
       const missing = [!oracleDeclared ? '--oracle' : null, !implDeclared ? '--impl' : null].filter(Boolean).join(' and ');
+      const why = !oracleDeclared && !implDeclared
+        ? 'no declared oracle can be frozen and no implementation movement can be bound'
+        : !oracleDeclared
+          ? 'an acceptance with no declared oracle can never satisfy the frozen-oracle clause'
+          : 'an acceptance with no declared implementation set can never bind a proof to the current bytes';
       return {
         ok: false,
-        message: say(`the active goal declares no ${missing} set — an acceptance with no declared oracle can never satisfy the frozen-oracle clause, so no proof can form`),
+        message: say(`the active goal declares no ${missing} set — ${why}, so no proof can form`),
         evidence: { oracleDeclared, implDeclared },
       };
     }
@@ -195,7 +213,7 @@ export default {
     // `historically-proven`: a proof whose implementation bytes have moved
     // since the GREEN never ran the code in the tree, and rendering it green
     // would be the stale-claim this whole track exists to prevent.
-    const verifiable = rows.filter((r) => r.verify);
+    const verifiable = rows.filter((r) => r.verify != null);
     const live = verifiable.filter((r) => r.state === 'live');
     const notLive = verifiable.filter((r) => r.state !== 'live');
     const counts = `${live.length}/${verifiable.length} live`;

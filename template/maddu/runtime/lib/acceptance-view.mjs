@@ -153,7 +153,16 @@ export function goalAcceptanceDecls(goal, workRoot) {
   const implPatterns = Array.isArray(goal?.implementation) ? goal.implementation : [];
   const declEventId = goal?.declEventId ?? null;
   return success.map((cond) => {
-    if (!cond || !cond.verify) return null;
+    // ABSENT and INVALID are different rows (gate funnel r1 #1): a condition
+    // with no verify at all is text-only (null arm, out of the denominator),
+    // but a PRESENT non-string or blank command — `verify:0`, `verify:false`
+    // — is a malformed declaration and must reach the error arm, or a falsy
+    // value would silently shrink the denominator and let the gate green over
+    // a declaration it could not encode.
+    if (!cond || cond.verify === undefined || cond.verify === null) return null;
+    if (typeof cond.verify !== 'string' || !cond.verify.trim()) {
+      return { cond, decl: null, id: null, error: 'condition verify must be a non-blank string when present' };
+    }
     const decl = {
       command: cond.verify,
       cwd: workRoot,

@@ -500,11 +500,14 @@ renders that state wherever gates run, and is green only when *every*
 verifiable condition is `live`.
 
 What that closes, precisely: **RED-then-edit-the-test.** Editing the
-oracle after the RED destroys the proof (`oracle-changed`), and there is
-**no re-baseline verb** — unlike `sources rebuild`, no command exists
-that re-greens an acceptance. The only route back is to observe the new
-test exit nonzero and then exit zero, which is the work you were
-avoiding. `historically-proven` (the pair exists but the implementation
+oracle between the RED and the GREEN means the pair fails the
+frozen-oracle clause — the two observations recorded different oracle
+digests, so **no qualifying pair ever forms**. (`oracle-changed` is the
+*post-proof* stale reason: an already-formed proof whose oracle moves
+afterwards drops out of `live`.) There is **no re-baseline verb** —
+unlike `sources rebuild`, no command exists that re-greens an
+acceptance. The only route back is to observe the new test exit nonzero
+and then exit zero, which is the work you were avoiding. `historically-proven` (the pair exists but the implementation
 has moved since) is explicitly **not** green, so a stale proof cannot
 keep rendering over code the GREEN never ran.
 

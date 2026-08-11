@@ -264,6 +264,40 @@ async function main() {
     ok('orient survives the malformed declaration (exit 0)', o.status === 0, o.stderr.slice(0, 200));
   }
 
+  // ── FALSY malformed verify cannot shrink the denominator (funnel r1 #1) ──
+  // The planted offender: one PROVABLE condition plus `verify:0`. A
+  // truthiness-based mapping drops the malformed row as "text-only" and
+  // greens 1/1; presence-based validation must red as declaration-invalid.
+  {
+    const root = await makeRepo('falsy-verify');
+    await spine.append(root, {
+      type: 'GOAL_DECLARED', actor: null, lane: null,
+      data: { objective: 'falsy fixture', constraints: [], success: [{ text: 'good', verify: oracleCmd(root) }, { text: 'bad', verify: 0 }], oracle: ['oracle/**'], implementation: ['src/**'] },
+    });
+    run(['orient'], root);
+    await writeFile(join(root, 'src', 'a.txt'), 'impl-v2 fixed\n');
+    run(['orient'], root);                       // the good condition is now provable
+    const r = await gate.run(ctxFor(root));
+    ok('falsy verify → red declaration-invalid, never a shrunken-denominator green',
+      r.ok === false && /declaration|encoded|identity/i.test(r.message), JSON.stringify(r));
+  }
+
+  // ── refusal wording honesty (funnel r1 #2/#3) ────────────────────────────
+  {
+    const noGoal = await makeRepo('word-nogoal');
+    const a = await gate.run(ctxFor(noGoal));
+    const done = await provenRepo('word-done');
+    run(['goal', 'done', '--force'], done);
+    const b = await gate.run(ctxFor(done));
+    ok('closed-goal refusal is DISTINCT from no-goal (no false "declare one")',
+      b.ok === false && b.message !== a.message && !/declare one/i.test(b.message), JSON.stringify(b.message));
+    const oracleOnly = await makeRepo('word-oracleonly');
+    run(['goal', 'set', '--objective', 'x', '--success', 'true::t', '--oracle', 'oracle/**'], oracleOnly);
+    const c = await gate.run(ctxFor(oracleOnly));
+    ok('impl-missing refusal names the implementation-binding clause, not the oracle',
+      c.ok === false && /--impl/.test(c.message) && !/no declared oracle/i.test(c.message), JSON.stringify(c.message));
+  }
+
   // ── attached worktree through the REAL runner (r3 #3) ────────────────────
   {
     const primary = await makeRepo('wt-primary');
