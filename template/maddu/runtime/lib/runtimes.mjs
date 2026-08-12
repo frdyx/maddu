@@ -11,7 +11,7 @@
 // runtime-spawned workers appear immediately in /swarm and the stuck-banner.
 
 import { mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, extname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
@@ -293,6 +293,142 @@ async function writeHealth(repoRoot, h) {
   await writeFile(healthFile(repoRoot), JSON.stringify(redactLeaves(h), null, 2) + '\n');
 }
 
+// --- Side-effect-free probe (harness-parity PR1) -------------------------
+//
+// `detectRuntime` below both PROBES and PERSISTS (health projection +
+// RUNTIME_DETECTED append). Callers that only want to know what is installed —
+// `runtime doctor`, which owns its own event and its own projection — must not
+// be forced to write another surface's state as a side effect of asking. So the
+// subprocess half lives here, pure: it spawns, reads, and returns. Nothing
+// else. `detectRuntime` keeps its persistence layered on top, byte-for-byte
+// unchanged in behaviour.
+//
+// SHELL-FREE BY DEFAULT. `shell: false` (the default) resolves the command
+// against PATH ourselves and spawns the resolved file with an argv array, so a
+// command name can never be re-parsed as a command line. That resolution is
+// also what makes `notFound` DEFINITIVE: if no file matched on PATH, the binary
+// genuinely is not installed. Under `shell: true` (the legacy descriptor path,
+// where `detect.command` is a whole command line) a missing binary is
+// indistinguishable from a failing one — the shell reports its own exit code —
+// so `notFound` is never set there, and no caller may infer "not installed".
+
+async function isFileAt(p) {
+  try { return (await stat(p)).isFile(); } catch { return false; }
+}
+
+// Resolve a bare command name to a concrete file, the way a shell would, but
+// without one. Returns the absolute path, or null when nothing on PATH matches.
+//
+// Windows needs PATHEXT: the CLIs Máddu probes (`claude`, `codex`, `gemini`)
+// install as `.cmd` shims, and Node's shell-free spawn looks only for an exact
+// filename — so a plain spawn('codex') reports ENOENT on a machine where codex
+// is installed and working. Resolving here means a Windows probe reports what
+// is actually true instead of a false 'not-installed'.
+export async function resolveCommandPath(command, env = process.env) {
+  if (typeof command !== 'string' || !command) return null;
+  const win = process.platform === 'win32';
+  const exts = win
+    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const withExtensions = (base) => {
+    if (!win) return [base];
+    const out = [];
+    if (extname(base)) out.push(base);            // caller already named the extension
+    for (const e of exts) out.push(base + e);
+    if (!extname(base)) out.push(base);           // extension-less file (rare, but legal)
+    return out;
+  };
+  // A command carrying a path separator is a path, not a PATH lookup.
+  const hasSeparator = command.includes('/') || command.includes('\\');
+  const bases = (hasSeparator || isAbsolute(command))
+    ? [resolvePath(command)]
+    : String(env.PATH || env.Path || '').split(delimiter).filter(Boolean).map((d) => join(d, command));
+  for (const base of bases) {
+    for (const cand of withExtensions(base)) {
+      if (await isFileAt(cand)) return cand;
+    }
+  }
+  return null;
+}
+
+// Probe a command and report what happened. NEVER writes anything.
+//
+//   probeRuntime({ command: 'codex', args: ['--version'] })            shell-free
+//   probeRuntime({ command: 'codex --version', shell: true })          legacy command line
+//
+// Returns { command, args, shell, resolvedPath, ok, exitCode, stdout, stderr,
+//           notFound, timedOut, errorCode, throwMessage, at }.
+//   notFound     — shell-free only: PATH resolution found nothing, or the spawn
+//                  itself reported ENOENT. This is the ONLY definitive
+//                  "not installed" signal.
+//   timedOut     — the probe was killed at `timeoutMs`; the exit code is
+//                  whatever the kill produced, and says nothing about the CLI.
+//   throwMessage — spawn threw synchronously (an async 'error' event instead
+//                  resolves exit code -1, matching the legacy detect path).
+export async function probeRuntime(spec = {}) {
+  const {
+    command = null,
+    args = [],
+    shell = false,
+    timeoutMs = DEFAULT_DETECT_TIMEOUT_MS,
+    expectExit = 0,
+    env = process.env,
+    cwd = undefined,
+  } = spec;
+  const result = {
+    command, args: Array.isArray(args) ? [...args] : [], shell: !!shell, resolvedPath: null,
+    ok: false, exitCode: null, stdout: '', stderr: '',
+    notFound: false, timedOut: false, errorCode: null, throwMessage: null,
+    at: new Date().toISOString(),
+  };
+  if (!command) {
+    if (!shell) result.notFound = true;
+    return result;
+  }
+
+  let target = command;
+  let argv = result.args;
+  if (!shell) {
+    const resolved = await resolveCommandPath(command, env);
+    if (!resolved) { result.notFound = true; return result; }
+    result.resolvedPath = resolved;
+    const ext = extname(resolved).toLowerCase();
+    if (process.platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
+      // A batch shim can only be executed by the command processor. This is
+      // still argv-shaped — the arguments are passed as a vector, not
+      // interpolated into a command string — so no metacharacter in an
+      // argument can become syntax.
+      target = env.ComSpec || env.COMSPEC || 'cmd.exe';
+      argv = ['/d', '/s', '/c', resolved, ...result.args];
+    } else {
+      target = resolved;
+    }
+  }
+
+  try {
+    const child = spawn(target, argv, { shell: !!shell, cwd, env });
+    let stdout = '', stderr = '';
+    child.stdout?.on('data', (b) => { stdout += b.toString('utf8'); });
+    child.stderr?.on('data', (b) => { stderr += b.toString('utf8'); });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch {} }, timeoutMs);
+    const code = await new Promise((done) => {
+      child.on('error', (err) => { result.errorCode = err?.code || null; done(-1); });
+      child.on('close', (c) => done(c));
+    });
+    clearTimeout(timer);
+    result.timedOut = timedOut;
+    result.exitCode = code;
+    result.stdout = stdout.trim().slice(0, 2000);
+    result.stderr = stderr.trim().slice(0, 2000);
+    result.ok = code === expectExit;
+    if (!shell && result.errorCode === 'ENOENT') result.notFound = true;
+  } catch (err) {
+    result.throwMessage = err.message;
+  }
+  return result;
+}
+
 export async function detectRuntime(repoRoot, name, by = null) {
   const r = await readRuntime(repoRoot, name);
   if (!r) throw new Error(`runtime ${name} not found`);
@@ -301,25 +437,16 @@ export async function detectRuntime(repoRoot, name, by = null) {
   if (!cmd) {
     result.error = 'no detect.command and no binary defined';
   } else {
-    try {
-      const child = spawn(cmd, { shell: true });
-      let stdout = '', stderr = '';
-      child.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
-      child.stderr.on('data', (b) => { stderr += b.toString('utf8'); });
-      const timer = setTimeout(() => { try { child.kill(); } catch {} }, DEFAULT_DETECT_TIMEOUT_MS);
-      const code = await new Promise((resolve) => {
-        child.on('error', () => resolve(-1));
-        child.on('close', (c) => resolve(c));
-      });
-      clearTimeout(timer);
-      result.exitCode = code;
-      result.stdout = stdout.trim().slice(0, 2000);
-      result.stderr = stderr.trim().slice(0, 2000);
-      result.ok = code === (r.detect?.expectExit ?? 0);
-      if (result.ok && stdout.trim()) result.version = stdout.trim().split('\n')[0].slice(0, 80);
-    } catch (err) {
-      result.error = err.message;
-    }
+    // A descriptor's `detect.command` is a whole COMMAND LINE, so it keeps
+    // running through a shell exactly as it always has. Only the spawn/collect
+    // mechanics moved into probeRuntime.
+    const probe = await probeRuntime({ command: cmd, shell: true, expectExit: r.detect?.expectExit ?? 0 });
+    result.exitCode = probe.exitCode;
+    result.stdout = probe.stdout;
+    result.stderr = probe.stderr;
+    result.ok = probe.ok;
+    if (probe.throwMessage) result.error = probe.throwMessage;
+    if (result.ok && result.stdout) result.version = result.stdout.split('\n')[0].slice(0, 80);
   }
   // Persist into health projection.
   const h = await readHealth(repoRoot);
