@@ -82,6 +82,22 @@ export async function runGates(repoRoot, opts = {}) {
   // Build the gate execution context. Lazy-load spine/projections/verify
   // (matches commands/_spine.mjs:loadSpineLib resolution).
   const ctx = ctxOverride || (await buildCtx(repoRoot, rootsOverride));
+  // HYDRATE roots on custom contexts (funnel r9 #1): ctxOverride callers
+  // (slice-stop's completion gates) predate the pair, and stamping their
+  // receipts with `repoRoot` would misattribute a worktree's verdict to the
+  // primary checkout in every scoped readout.
+  if (!validRootsPair(ctx.roots)) {
+    if (validRootsPair(rootsOverride)) {
+      ctx.roots = { workRoot: rootsOverride.workRoot, stateRoot: rootsOverride.stateRoot };
+    } else {
+      try {
+        const paths = await import(pathToFileURL(join(__dirname, 'paths.mjs')).href);
+        ctx.roots = await resolveGateRoots(paths, repoRoot);
+      } catch {
+        ctx.roots = { workRoot: repoRoot, stateRoot: repoRoot };
+      }
+    }
+  }
 
   const all = await discoverGates(repoRoot);
   const gates = all.filter((g) => {

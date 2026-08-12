@@ -437,6 +437,31 @@ async function main() {
       const scopedSummary = GL.summarizeGates(evs, { workRoot: primary });
       ok('a primary-scoped summary does not borrow the worktree\'s lastTs',
         scopedSummary.lastTs !== stamped.ts, JSON.stringify({ lastTs: scopedSummary.lastTs, worktreeTs: stamped.ts }));
+
+      // A CUSTOM ctx without roots must still stamp the true checkout (funnel
+      // r9 #1 — slice-stop's completion gates pass ctxOverride): the runner
+      // hydrates the pair from the invocation cwd, never `repoRoot`.
+      const ctxScript = join(scratch, 'run-gates-custom-ctx.mjs');
+      await writeFile(ctxScript, [
+        `import { pathToFileURL } from 'node:url';`,
+        `import { join } from 'node:path';`,
+        `const L = (f) => pathToFileURL(join(${JSON.stringify(process.cwd())}, 'template', 'maddu', 'runtime', 'lib', f)).href;`,
+        `const { runGates } = await import(L('gates.mjs'));`,
+        `const spine = await import(L('spine.mjs'));`,
+        `const verify = await import(L('verify.mjs'));`,
+        `const projections = await import(L('projections.mjs'));`,
+        `const ctx = { repoRoot: ${JSON.stringify(primary)}, spine, verify, projections, project: (r) => projections.project(r || ${JSON.stringify(primary)}) };`,
+        `await runGates(${JSON.stringify(primary)}, { emitEvents: true, onlyId: 'acceptance-proven', ctx });`,
+        `console.log('done');`,
+      ].join('\n'));
+      const cr = spawnSync(NODE, [ctxScript], { cwd: work, encoding: 'utf8', timeout: 180000, env: hermeticEnv() });
+      const evs2 = await spine.readAll(primary);
+      const rans2 = evs2.filter((e) => e.type === 'GATE_RAN' && e.data?.gateId === 'acceptance-proven');
+      const lastStamp = rans2[rans2.length - 1];
+      ok('custom ctx without roots: receipt stamped with the INVOKING checkout',
+        cr.status === 0 && !!lastStamp
+        && lastStamp.data.workRoot.toLowerCase().replace(/[\\/]+$/, '') === work.toLowerCase().replace(/[\\/]+$/, ''),
+        `exit=${cr.status} ${JSON.stringify(lastStamp && lastStamp.data.workRoot)} ${cr.stderr.slice(0, 150)}`);
     }
   }
 
