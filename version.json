@@ -1,5 +1,5 @@
 {
-  "version": "1.122.0",
-  "phase": "strict-flags-default",
+  "version": "1.122.1",
+  "phase": "harness-parity-pr0",
   "released": "2026-08-12"
 }
