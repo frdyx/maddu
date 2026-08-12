@@ -375,7 +375,7 @@ async function main() {
     // Truncation: cap the output below what the command writes → the
     // fingerprint must be NULL (a shared long prefix must not read as "same
     // failure"), flagged truncated.
-    const big = `"${NODE}" -e "process.stdout.write('P'.repeat(4096));process.exit(1)"`;
+    const big = `"${NODE}" -e "process.stdout.write('P'.repeat(4096), () => process.exit(1))"`;
     const t = await R.observeAcceptance(roots(root), decl(root, { command: big }), rctx(), ctx({ maxOutputBytes: 64 }));
     ok('truncated run reports fingerprint:null + fingerprintTruncated:true',
       t.ran.fingerprint === null && t.ran.fingerprintTruncated === true,

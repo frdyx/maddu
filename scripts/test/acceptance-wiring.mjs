@@ -382,7 +382,9 @@ async function main() {
     // Identical failures whose fingerprint is unavailable (truncated) must
     // not halt either — the planted offender for the null-signature rule: a
     // naive implementation fingerprints the shared prefix and false-halts.
-    const big = `"${NODE}" -e "process.stdout.write('P'.repeat(2*1024*1024));process.exit(1)"`;
+    // exit() in the write callback — Linux discards queued pipe writes on
+    // process.exit, and an under-cap fixture would fingerprint for real.
+    const big = `"${NODE}" -e "process.stdout.write('P'.repeat(2*1024*1024), () => process.exit(1))"`;
     const r = run(['loop', 'ralph', '--goal', 's3', '--verify', big,
       '--oracle', 'oracle/**', '--impl', 'src/**', '--max-iter', '2'], root);
     const halted = (await spineEvents(root)).all.find((e) => e.type === 'LOOP_HALTED');

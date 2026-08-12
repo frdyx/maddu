@@ -198,9 +198,13 @@ if (!CONTROL_OK) {
 
 {
   // A bodyless lock (creator died between open('wx') and the record write) is
-  // reclaimed after the grace, rather than hanging forever.
+  // reclaimed after the grace, rather than hanging forever. The wait must
+  // OUTLAST the effective grace: CI raises MADDU_LOCK_BODYLESS_GRACE_MS (a
+  // raise-only knob the hermetic scrub deliberately keeps), and a fixed 9s
+  // wait under a 20s grace reads lock-busy on a healthy lock.
   await writeFile(LOCK, '', 'utf8');
-  const r = await A.withAcceptanceLock(roots, async () => 'reclaimed', { maxWaitMs: 9000 });
+  const grace = Math.max(Number(process.env.MADDU_LOCK_BODYLESS_GRACE_MS) || 0, 4000);
+  const r = await A.withAcceptanceLock(roots, async () => 'reclaimed', { maxWaitMs: grace + 8000 });
   ok('a bodyless lock is reclaimed after the grace', r && r.ok === true && r.value === 'reclaimed', JSON.stringify(r));
   await rm(LOCK, { force: true });
 }
@@ -363,7 +367,10 @@ const fpOf = async (body) => {
   // Over the cap: truncated must be flagged AND the fingerprint must be null.
   // A truncated hash over a shared long prefix would collide across genuinely
   // different failures, and a false stuck-halt is worse than no detection.
-  const r = await fpOf('const c="x".repeat(64*1024); for(let i=0;i<40;i++) process.stdout.write(c); process.exit(1);');
+  // exit() INSIDE the last write's callback: on Linux process.exit discards
+  // queued async pipe writes, and a fixture whose output never reaches the
+  // cap proves nothing about truncation.
+  const r = await fpOf('const c="x".repeat(64*1024); for(let i=0;i<39;i++) process.stdout.write(c); process.stdout.write(c, () => process.exit(1));');
   ok('output over the cap sets fingerprintTruncated', r.fingerprintTruncated === true, JSON.stringify({ t: r.fingerprintTruncated, f: r.fingerprint }));
   ok('a truncated run reports fingerprint null (disables stuck detection)', r.fingerprint === null, `fingerprint=${r.fingerprint}`);
 }
