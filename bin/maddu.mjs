@@ -42,7 +42,7 @@ Commands:
   skill          Subcommands: list | show | create | from-slice | apply | delete. (Phase B4)
   worker         Subcommands: list | register | heartbeat | exit | kill | show. (Phase B5)
   search         Cross-corpus search over events, memory, skills, mailbox. (Phase B6)
-  runtime        Subcommands: list | show | register | detect | spawn | remove. (Phase C1)
+  runtime        Subcommands: list | show | register | detect | doctor | spawn | remove. (Phase C1)
   mcp            Subcommands: list | show | register | enable | disable | test | remove | visible. (Phase C2)
   schedule       Subcommands: list | show | create | parse | enable | disable | tick | remove. (Phase C3)
   checkpoint     Subcommands: list | show | create | worktree | rollback | remove. (Phase C4)

@@ -408,12 +408,14 @@
       "slice"
     ],
     "runtime": [
+      "all",
       "approval",
       "args",
       "binary",
       "by",
       "detect",
       "display",
+      "json",
       "lane",
       "lanes",
       "mcp",
