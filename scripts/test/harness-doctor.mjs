@@ -375,6 +375,17 @@ const armRoot = await makeRoot('arm');
   // The strict flag guard covers the new subcommand's flags.
   const flagged = run(['runtime', 'doctor', 'openhands', '--bogus-flag-zz']);
   ok('CLI: an unknown flag on doctor refuses (strict-by-default)', flagged.status === 2, `exit=${flagged.status}`);
+
+  // Funnel r1 #7 — the doctor must never observe something other than what
+  // was asked for: name + --all is ambiguous, extra positionals are refused.
+  const both = run(['runtime', 'doctor', 'codex', '--all']);
+  ok('CLI: a name AND --all together exit 2 (never silently observe everything)',
+    both.status === 2 && /not both/.test(both.stderr), `exit=${both.status} ${both.stderr.slice(0, 150)}`);
+  const extra = run(['runtime', 'doctor', 'openhands', 'straggler']);
+  ok('CLI: an unexpected extra positional exits 2',
+    extra.status === 2 && /unexpected argument/.test(extra.stderr), `exit=${extra.status} ${extra.stderr.slice(0, 150)}`);
+  ok('CLI: the refused invocations observed NOTHING (spine unchanged)',
+    (await eventsOfType(root)).length === 1);
 }
 
 // ── teardown ────────────────────────────────────────────────────────────────

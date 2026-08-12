@@ -223,6 +223,15 @@ const validEntry = (over = {}) => ({
     H.extractVersion(codex, 'v0.144.0 (stable)') === '0.144.0');
   ok('the truncation hole is closed END-TO-END: a continued version reads assumed/unparsable, never verified',
     (() => { const r = H.compareObserved(codex, { installed: true, version: H.extractVersion(codex, '0.144.0.1') }); return r.status === 'assumed' && r.drift === 'unparsable'; })());
+  // Defense in depth: even a SLOPPY (unbounded) entry pattern must not let a
+  // fragment of a larger token through — the boundary check lives in
+  // extractVersion itself, not in each author's regex discipline.
+  const sloppy = validEntry({ detect: { command: 'fx', args: ['--version'], versionPattern: '(\\d+\\.\\d+\\.\\d+)' } });
+  ok('sloppy pattern + continued token still refuses (boundary check is in code, not the regex)',
+    H.extractVersion(sloppy, 'fx 1.2.3.4') === null, JSON.stringify(H.extractVersion(sloppy, 'fx 1.2.3.4')));
+  ok('sloppy pattern still extracts a CLEAN token', H.extractVersion(sloppy, 'fx 1.2.3 ok') === '1.2.3');
+  ok('a capture starting mid-version is refused (digit/dot before)',
+    H.extractVersion(sloppy, 'build 7.1.2.3') === null, JSON.stringify(H.extractVersion(sloppy, 'build 7.1.2.3')));
 }
 
 // ── configCandidatesFor ─────────────────────────────────────────────────────

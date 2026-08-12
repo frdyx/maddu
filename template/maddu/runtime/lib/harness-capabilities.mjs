@@ -316,15 +316,34 @@ export function compareTriples(a, b) {
 
 // Extract a version out of raw probe output using the entry's declared
 // pattern. Returns the captured string, or null when nothing matched.
+//
+// TOKEN-BOUNDARY HARDENING (funnel r1 #2, defense in depth): even when an
+// entry's pattern is sloppier than the shipped one, a capture that is a
+// FRAGMENT of a larger token in the output ('1.2.3' inside '1.2.3.4' or
+// '1.2.3beta') is refused here — extraction honesty must not depend on every
+// manifest author writing a perfectly bounded regex. Held-back readings
+// surface as 'unparsable', which is the honest answer for output whose
+// version token the declared pattern cannot cleanly delimit.
 export function extractVersion(entry, output) {
   if (typeof output !== 'string' || !output) return null;
   const pattern = entry?.detect?.versionPattern;
   if (typeof pattern !== 'string' || !pattern) return null;
   let re;
-  try { re = new RegExp(pattern); } catch { return null; }
+  try { re = new RegExp(pattern, 'd'); } catch { return null; }
   const m = re.exec(output);
   if (!m) return null;
-  return (m[1] || m[0] || '').trim() || null;
+  const groupIdx = m[1] !== undefined ? 1 : 0;
+  const token = (m[groupIdx] || '').trim();
+  if (!token) return null;
+  const span = m.indices?.[groupIdx];
+  if (!span) return null;
+  const before = span[0] > 0 ? output[span[0] - 1] : '';
+  const after = span[1] < output.length ? output[span[1]] : '';
+  // A digit/dot before means the capture started mid-version; any
+  // token-continuation character after means it ended mid-version.
+  if (/[0-9.]/.test(before)) return null;
+  if (/[0-9A-Za-z.+-]/.test(after)) return null;
+  return token;
 }
 
 // ---------------------------------------------------------------------------
