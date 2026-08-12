@@ -168,12 +168,26 @@ and the charter in [`docs/charter.md`](../docs/charter.md).
 
 ## Provider / runtime resolution
 
-Each lane may declare a preferred runtime + model in
-`.maddu/lanes/catalog.json`. Resolution order on worker spawn:
+The runtime is chosen explicitly per spawn (the name given to
+`maddu runtime spawn <name>` or `coordinator --runtime <name>`). The model
+HINT comes from the runtime descriptor (`.maddu/runtimes/<name>.json`)
+`modelPreference` — a flat string or per-stage
+`{ default, plan?, exec?, verify?, review? }` — resolved for the spawn's
+stage and forwarded to the worker as `MADDU_MODEL_HINT` env. The worker
+decides whether to honor it (the framework never makes the model call).
+When resolution yields nothing, no new hint is set — but a nested worker
+may still inherit its parent's `MADDU_MODEL_HINT` through the `MADDU_*`
+env passthrough.
 
-1. Per-spawn override — `--runtime` / `--model` flag.
-2. Lane default — `catalog.json` `lanes[<laneId>].defaults`.
-3. Global default — `.maddu/state/runtime-defaults.json`.
+Lane and pipeline-stage model preferences share the same shape; lane
+*defaults* also appear in the cockpit's lane routing panel, while
+configured pipeline-stage preferences are gate-validated but not
+cockpit-visible. The shipped spawn call sites do not currently feed either
+into the resolution — on a spawned worker only the runtime descriptor's
+preference takes effect, with one exception: the focus director passes its
+configured `.maddu/config/focus.json` `model` as a direct hint.
+Field-level details and validation status:
+[`docs/25-model-routing.md`](../docs/25-model-routing.md).
 
 If the resolved provider is not signed in, the bridge returns
 `{error: 'PROVIDER_AUTH_MISSING', provider}` and the cockpit `/auth` route

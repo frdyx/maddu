@@ -11,6 +11,31 @@ narrative summary.
 
 ---
 
+## [v1.122.1] · 2026-08-12 · worker brief: runtime resolution documented as implemented
+
+Docs-truth patch (harness-parity campaign PR0). The worker brief
+(`template/maddu/CLAUDE.md`) documented a three-tier provider/runtime
+resolution ending in a global `.maddu/state/runtime-defaults.json` — a file
+**no code path reads or writes** (and a config file under `.maddu/state/`
+would contradict projection semantics anyway). The section now documents
+only what a spawned worker actually reaches: the runtime is chosen
+explicitly per spawn, and the model hint comes from the runtime
+descriptor's `modelPreference` (flat or per-stage), forwarded as
+`MADDU_MODEL_HINT`. Lane-catalog and pipeline-stage preferences share the
+shape and are gate-validated (lane defaults also show in the cockpit;
+pipeline-stage preferences do NOT — the stage-hints panel reads run
+projections that carry no preference), but the shipped spawn call sites do
+not currently feed them into resolution — the brief now says
+so instead of implying they take effect (one real exception documented: the
+focus director passes its configured `focus.json` `model` as a direct
+hint). Two cockpit strings that told the operator lanes "inherit the global
+default" (the removed phantom tier) now say "no lane default set", and
+`docs/25-model-routing.md` no longer advertises a nonexistent `--model-hint`
+flag or an unwired precedence chain as live — its table now carries a
+wired-today column, including the lane field divergence (gate validates
+top-level `modelPreference`, cockpit reads `defaults.modelPreference`).
+No behavior change.
+
 ## [v1.122.0] · 2026-08-12 · unknown flags are strict by default
 
 The A1 flip, operator-approved after the v1.120.0 warn soak: an unknown

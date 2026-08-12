@@ -429,5 +429,12 @@
     "fixed_in": "1.122.0",
     "consumer_impact": "STRICT BY DEFAULT (operator-approved after one release of warn soak): an unknown flag on any allowlisted verb exits 2 with the redacted flag name and a did-you-mean suggestion. MADDU_STRICT_FLAGS=0 is a TEMPORARY warn-only opt-out for callers mid-migration (the warning says so); =1 remains accepted. Open/unlisted verbs stay fail-open as before.",
     "ledger_ref": "branch fix/a1-strict-flags-default; flag-allowlists suite 45 asserts incl. default-strict, legacy =1, and temporary-opt-out cases"
+  },
+  {
+    "symptom": "The worker brief (template/maddu/CLAUDE.md) documented a global runtime-resolution tier at .maddu/state/runtime-defaults.json that NO code path reads or writes - agents following the brief could create a dead config file and expect it to take effect.",
+    "area": "worker brief / runtime resolution docs",
+    "fixed_in": "1.122.1",
+    "consumer_impact": "Documentation-only: the brief now describes what a spawned worker actually reaches - explicit per-spawn runtime choice plus the runtime descriptor's modelPreference (flat or per-stage) forwarded as MADDU_MODEL_HINT - and states plainly that lane-catalog and pipeline-stage preferences, while shape-validated (lane defaults also cockpit-visible; pipeline-stage preferences are not, since the stage-hints panel reads run projections that carry no preference), are not currently fed into resolution by the shipped spawn call sites. Two cockpit strings that said lanes 'inherit the global default' now say 'no lane default set'. No behavior change.",
+    "ledger_ref": "branch fix/harness-parity-pr0-runtime-defaults; harness-parity campaign PR0"
   }
 ]

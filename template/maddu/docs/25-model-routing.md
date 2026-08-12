@@ -1,21 +1,33 @@
 # 25. Model routing hints
 
-v0.19 adds a way to express **model preferences** without breaking hard rule #5. A lane can prefer Claude Sonnet for plan stages and Haiku for exec. A specific pipeline stage can override to use a faster model. The framework never imports a provider SDK to make that happen — it only forwards the preference as `MADDU_MODEL_HINT=<value>` to the worker subprocess. The worker decides whether to honor it.
+v0.19 adds a way to express **model preferences** without breaking hard rule #5. A lane or a pipeline stage can **declare** a preference (Claude Sonnet for plan, Haiku for exec); today those declarations are shape-validated (and lane defaults appear in the cockpit), while the preference that actually reaches a spawned worker comes from the runtime descriptor (or the focus director's direct hint) — see the wiring column below. The framework never imports a provider SDK — it only forwards the resolved preference as `MADDU_MODEL_HINT=<value>` to the worker subprocess. The worker decides whether to honor it.
 
 The cockpit's `#modelrouting` route (v0.19.2) gives you a read-only view of the per-runtime, per-lane, and per-pipeline preferences at a glance. See [04-cockpit-tour.md](04-cockpit-tour.md#modelrouting-v0192) for the layout.
 
 ## The `modelPreference` field
 
-Three places accept `modelPreference`, with override precedence (highest wins):
+The resolver (`resolveModelHint`) accepts four preference inputs, with
+override precedence (highest wins). **Wiring status matters**: the
+precedence chain describes what the resolver honors when a caller supplies
+the inputs — it is not a promise that every tier is fed on every spawn.
 
-| Source | Where | Example |
+| Source | Where | Wired into shipped spawns today? |
 |---|---|---|
-| 1. Per-spawn CLI flag | `--model-hint <id>` on the spawn caller | `--model-hint claude-haiku-4-5-20251001` |
-| 2. Pipeline stage | `.maddu/config/pipelines/<name>.json` `stages[i].modelPreference` | per-stage override |
-| 3. Lane | `.maddu/lanes/catalog.json` `lanes[].modelPreference` | per-lane override |
-| 4. Runtime descriptor | `.maddu/runtimes/<name>.json` `modelPreference` | the runtime's own default |
+| 1. Caller-resolved hint | programmatic `opts.modelHint` / `opts.modelHintOverride` on `spawnWorker` — **no CLI flag exposes this** | Only by the focus director, which passes `.maddu/config/focus.json` `model` as a direct hint |
+| 2. Pipeline stage | `.maddu/config/pipelines/<name>.json` `stages[i].modelPreference` | **Not yet** — declared and gate-validated; no shipped call site passes it, and the cockpit's stage-hints panel reads pipeline *run* projections (which carry no `modelPreference`), so configured stage preferences do not appear there either |
+| 3. Lane | `.maddu/lanes/catalog.json` `lanes[].modelPreference` | **Not yet** — declared only; and note the field divergence: the gate validates this top-level field while the cockpit displays `defaults.modelPreference`, so no single lane field is both validated and visible |
+| 4. Runtime descriptor | `.maddu/runtimes/<name>.json` `modelPreference` | **Yes** — read on every `spawnWorker` call |
 
-At every tier, `modelPreference` may be either:
+> **Lane field note:** the `model-hint-shape` gate validates a lane's
+> top-level `modelPreference`, while the cockpit's lane routing panel reads
+> `defaults.modelPreference`. Since neither is fed into spawn resolution
+> yet, both are declarative today; the wiring change should also settle on
+> one field.
+
+At the runtime / lane / pipeline tiers, `modelPreference` may be either of
+the shapes below. The direct tier (tier 1) accepts **plain strings only** —
+`opts.modelHint`, `opts.modelHintOverride`, and `focus.json` `model` are
+ignored unless they are non-empty strings.
 
 - A **flat string** — applies to every stage.
   ```json
@@ -37,6 +49,17 @@ Valid stage keys: `default`, `plan`, `exec`, `verify`, `review`. Any other key f
 ## How resolution works
 
 `spawnWorker` walks the precedence chain via `resolveModelHint(...)` from `template/maddu/runtime/lib/runtimes.mjs`. The first tier that provides a non-empty string wins. If every tier is null, no env var is set and the worker runs without a hint.
+
+In practice, because shipped call sites currently pass only the runtime
+descriptor's preference (and the focus director its direct hint), the
+resolved value on a spawned worker today comes from tier 1 (focus) or
+tier 4 (descriptor).
+
+One inheritance subtlety: when resolution returns null, **no new hint is
+set** — but the spawn env passes `MADDU_*` variables through, so a nested
+worker can inherit its *parent's* `MADDU_MODEL_HINT` even though its own
+`WORKER_SPAWNED` event records `modelHint: null`. The event records what
+this spawn resolved, not every hint the process environment may carry.
 
 Resolved value lands in the spawned process's environment as:
 
