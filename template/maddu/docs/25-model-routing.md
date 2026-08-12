@@ -1,6 +1,6 @@
 # 25. Model routing hints
 
-v0.19 adds a way to express **model preferences** without breaking hard rule #5. A lane or a pipeline stage can **declare** a preference (Claude Sonnet for plan, Haiku for exec); today those declarations are validated and displayed, while the preference that actually reaches a spawned worker comes from the runtime descriptor (or the focus director's direct hint) — see the wiring column below. The framework never imports a provider SDK — it only forwards the resolved preference as `MADDU_MODEL_HINT=<value>` to the worker subprocess. The worker decides whether to honor it.
+v0.19 adds a way to express **model preferences** without breaking hard rule #5. A lane or a pipeline stage can **declare** a preference (Claude Sonnet for plan, Haiku for exec); today those declarations are shape-validated (and lane defaults appear in the cockpit), while the preference that actually reaches a spawned worker comes from the runtime descriptor (or the focus director's direct hint) — see the wiring column below. The framework never imports a provider SDK — it only forwards the resolved preference as `MADDU_MODEL_HINT=<value>` to the worker subprocess. The worker decides whether to honor it.
 
 The cockpit's `#modelrouting` route (v0.19.2) gives you a read-only view of the per-runtime, per-lane, and per-pipeline preferences at a glance. See [04-cockpit-tour.md](04-cockpit-tour.md#modelrouting-v0192) for the layout.
 
@@ -14,7 +14,7 @@ the inputs — it is not a promise that every tier is fed on every spawn.
 | Source | Where | Wired into shipped spawns today? |
 |---|---|---|
 | 1. Caller-resolved hint | programmatic `opts.modelHint` / `opts.modelHintOverride` on `spawnWorker` — **no CLI flag exposes this** | Only by the focus director, which passes `.maddu/config/focus.json` `model` as a direct hint |
-| 2. Pipeline stage | `.maddu/config/pipelines/<name>.json` `stages[i].modelPreference` | **Not yet** — declared, validated, cockpit-visible; no shipped call site passes it |
+| 2. Pipeline stage | `.maddu/config/pipelines/<name>.json` `stages[i].modelPreference` | **Not yet** — declared and gate-validated; no shipped call site passes it, and the cockpit's stage-hints panel reads pipeline *run* projections (which carry no `modelPreference`), so configured stage preferences do not appear there either |
 | 3. Lane | `.maddu/lanes/catalog.json` `lanes[].modelPreference` | **Not yet** — declared only; and note the field divergence: the gate validates this top-level field while the cockpit displays `defaults.modelPreference`, so no single lane field is both validated and visible |
 | 4. Runtime descriptor | `.maddu/runtimes/<name>.json` `modelPreference` | **Yes** — read on every `spawnWorker` call |
 

@@ -22,8 +22,10 @@ only what a spawned worker actually reaches: the runtime is chosen
 explicitly per spawn, and the model hint comes from the runtime
 descriptor's `modelPreference` (flat or per-stage), forwarded as
 `MADDU_MODEL_HINT`. Lane-catalog and pipeline-stage preferences share the
-shape and are gate-validated and cockpit-visible, but the shipped spawn
-call sites do not currently feed them into resolution — the brief now says
+shape and are gate-validated (lane defaults also show in the cockpit;
+pipeline-stage preferences do NOT — the stage-hints panel reads run
+projections that carry no preference), but the shipped spawn call sites do
+not currently feed them into resolution — the brief now says
 so instead of implying they take effect (one real exception documented: the
 focus director passes its configured `focus.json` `model` as a direct
 hint). Two cockpit strings that told the operator lanes "inherit the global
