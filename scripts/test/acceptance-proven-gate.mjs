@@ -432,6 +432,11 @@ async function main() {
       const unscoped = GL.latestGateRuns(evs).find((r) => r.gateId === 'acceptance-proven');
       ok('a primary-scoped ledger excludes the worktree\'s receipt (no cross-checkout masking)',
         !scoped && !!unscoped, JSON.stringify({ scoped, unscoped: !!unscoped }));
+      // …including its TIMESTAMP (funnel r8 #1): a scoped summary must not
+      // label its verdict with another checkout's run time.
+      const scopedSummary = GL.summarizeGates(evs, { workRoot: primary });
+      ok('a primary-scoped summary does not borrow the worktree\'s lastTs',
+        scopedSummary.lastTs !== stamped.ts, JSON.stringify({ lastTs: scopedSummary.lastTs, worktreeTs: stamped.ts }));
     }
   }
 

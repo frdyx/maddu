@@ -68,9 +68,11 @@ export function summarizeGates(events, opts = {}) {
   const failing = runs.filter((r) => r.status === 'fail');
   const warning = runs.filter((r) => r.status === 'warn');
   const ok = runs.filter((r) => r.status === 'ok').length;
+  // From the SCOPED runs, not a raw event rescan (funnel r8 #1): a verdict
+  // must not borrow another checkout's run time as its "last run" label.
   let lastTs = null;
-  for (const ev of (Array.isArray(events) ? events : [])) {
-    if (ev && ev.type === 'GATE_RAN' && ev.ts) lastTs = ev.ts;
+  for (const r of runs) {
+    if (r.ts && (lastTs === null || r.ts > lastTs)) lastTs = r.ts;
   }
   return {
     ran: runs.length > 0,
