@@ -436,5 +436,12 @@
     "fixed_in": "1.122.1",
     "consumer_impact": "Documentation-only: the brief now describes what a spawned worker actually reaches - explicit per-spawn runtime choice plus the runtime descriptor's modelPreference (flat or per-stage) forwarded as MADDU_MODEL_HINT - and states plainly that lane-catalog and pipeline-stage preferences, while shape-validated (lane defaults also cockpit-visible; pipeline-stage preferences are not, since the stage-hints panel reads run projections that carry no preference), are not currently fed into resolution by the shipped spawn call sites. Two cockpit strings that said lanes 'inherit the global default' now say 'no lane default set'. No behavior change.",
     "ledger_ref": "branch fix/harness-parity-pr0-runtime-defaults; harness-parity campaign PR0"
+  },
+  {
+    "symptom": "Maddu could enforce discipline only on Claude Code and had no recorded, verifiable statement of what any OTHER harness (Codex, Hermes, OpenHands, Gemini) could support - integration claims lived in research prose, could go stale silently, and nothing distinguished a verified capability from an assumed one on any operator surface.",
+    "area": "harness capability manifest + runtime doctor (Track A PR1)",
+    "fixed_in": "1.123.0",
+    "consumer_impact": "maddu runtime doctor <name>|--all observes a harness against a versioned in-repo capability manifest and puts the comparison on the record: HARNESS_CAPABILITY_OBSERVED (contract 1.19.0->1.20.0) carries status verified|assumed|not-installed with an explicit drift reason (below-range/above-range/unparsable/prerelease/no-verified-range/probe-failed), per-candidate config observations ({path,status}, portable - no absolute paths on the record), the enforcement ceiling, volatile markers, and the emitting workRoot. Honesty is shape-enforced: blocking claims need 2 distinct sources (gemini ceilings at observe), version windows are observed-or-null (never invented), a shell-arm probe can never prove absence, and a claim is only ever held BACK by the decision table, never upgraded. Projection .maddu/state/harness-capabilities.json is lock-serialized and rebuildable from the spine. Zero new top-level verbs or gates; budget 73/76 unchanged.",
+    "ledger_ref": "branch feat/harness-parity-pr1-doctor; plan .maddu/state/harness-parity-pr1-plan.md (2 capped Codex plan rounds, 14 findings adjudicated); suites harness-capabilities 80 + harness-doctor 45 asserts"
   }
 ]
