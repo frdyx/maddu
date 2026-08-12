@@ -376,6 +376,11 @@ async function main() {
       asProjectTest.valid.length === 0 && asReplay.valid.length === 1);
 
     // ── 11. flag validation ──
+    // An UNKNOWN flag is refused by the dispatcher's strict guard since
+    // v1.122.0 (did-you-mean, exit 2) BEFORE the verb's own usage dump can
+    // fire — either refusal is a correct exit-2; the guard's is the better
+    // message. The other rows use KNOWN flags misused, which only the verb
+    // itself can judge.
     for (const [label, args] of [
       ['unknown flag', ['spine', 'verify', '--replya', shaPass]],
       ['valueless --replay', ['spine', 'verify', '--replay']],
@@ -383,7 +388,8 @@ async function main() {
       ['--json with value', ['spine', 'verify', '--replay', shaPass, '--json=false']],
     ]) {
       const oo = runCli(rPass, args);
-      ok(`flag validation: ${label} → usage exit 2`, oo.status === 2 && /Usage: maddu spine verify/.test(oo.stderr));
+      ok(`flag validation: ${label} → usage exit 2`,
+        oo.status === 2 && (/Usage: maddu spine verify/.test(oo.stderr) || /unknown flag/.test(oo.stderr)));
     }
     const oPlain = runCli(rPass, ['spine', 'verify']);
     ok('flag validation: plain `spine verify` integrity walk still works', oPlain.status === 0 && /spine integrity|events/.test(oPlain.stdout));

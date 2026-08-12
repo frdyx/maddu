@@ -385,7 +385,8 @@ async function main() {
   // `session close --session-id` closed the wrong session, defect A2). Every
   // --token in rest is definitively a flag key (a parseFlags VALUE can never
   // start with --), checked against the generated per-verb allowlist. Unknown
-  // → warn on stderr, verb still runs; MADDU_STRICT_FLAGS=1 → exit 2.
+  // → exit 2 (strict by default since v1.122.0); MADDU_STRICT_FLAGS=0 is the
+  // temporary warn-only opt-out.
   // FAIL-OPEN: artifact or guard module absent/unreadable (older install) →
   // guard inert. Runs BEFORE the drain so the warning lands even when a
   // broken drain blocks the dispatch.
@@ -394,7 +395,12 @@ async function main() {
     const allowlists = JSON.parse(await readFile(join(repoRoot, 'commands', '_flag-allowlists.json'), 'utf8'));
     const findings = guard.checkUnknownFlags({ verb: raw, rest, allowlists });
     if (findings.length) {
-      const strict = process.env.MADDU_STRICT_FLAGS === '1';
+      // STRICT BY DEFAULT (A1 flip, operator-approved after the v1.120.0 warn
+      // soak): an unknown flag exits 2 — a typo'd or stale flag silently
+      // falling through to ambient resolution is how `--session-id` once
+      // closed the wrong session at exit 0. MADDU_STRICT_FLAGS=0 is the
+      // temporary opt-out for callers mid-migration; '1' remains accepted.
+      const strict = process.env.MADDU_STRICT_FLAGS !== '0';
       // Flag NAMES are caller-typed text echoed to stderr — a pasted token
       // (`--ghp_…`) must come back redacted, never verbatim (same law as
       // commands/spine.mjs#redactFlagNames; fail-CLOSED to '(unprintable)').
@@ -407,8 +413,11 @@ async function main() {
       for (const f of findings) {
         console.error(`maddu: unknown flag --${redact(f.key)} for "${raw}"${f.suggestion ? ` — did you mean --${f.suggestion}?` : ''}`);
       }
-      if (strict) process.exit(2);
-      console.error(`maddu: unknown flags are IGNORED today and will become an error; set MADDU_STRICT_FLAGS=1 to fail now`);
+      if (strict) {
+        console.error(`maddu: unknown flags are an error (strict by default since v1.122.0); set MADDU_STRICT_FLAGS=0 to temporarily warn instead`);
+        process.exit(2);
+      }
+      console.error(`maddu: unknown flags IGNORED (MADDU_STRICT_FLAGS=0) — this opt-out is temporary; fix the flag`);
     }
   } catch {}
 

@@ -422,5 +422,12 @@
     "fixed_in": "1.121.0",
     "consumer_impact": "goal set gains --oracle/--impl declared sets (shape-validated, exit 2); orient runs every verifiable condition of an acceptance-active goal through observeAcceptance (exactly once, receipts on the STATE-root spine) and renders per-condition proof state derived from ONE post-observation verified read (unproven renders the derivation own reason; --json proofs is an aligned per-condition array with event-id strings); loop ralph adopts --from-goal or --verify+sets (a loop that cannot succeed refuses at the door), records an iteration-0 baseline RED, reuses the declaration identity per iteration, and stuck detection keys acceptanceId:exit:fingerprint with truncation disabling the check (position-anchored timing canonicalizer - a duration-shaped TEST NAME is identity, not elapsed time); the acceptance-proven WARN gate renders N/M live with the honest-limits pointer on EVERY message wherever gates run (doctor/audit/ci; permanently advisory - ci pin refuses warn gates); gate receipts land on the shared state root STAMPED with the emitting checkout workRoot and readouts scope by checkout (a worktree green can never mask the primary red); findStateRoot mirrors canonical resolveRoots verbatim including misconfiguration throws. Contract 1.19.0; budget gates 76/76 audit-checks 17/17 attributed.",
     "ledger_ref": "branch feat/acceptance-lib-core (16 commits; W1 funnel CLEAN at round 6, gate funnel CLEAN at round 10 under adjudicated boundaries; suites acceptance-core/derive/observe/record/wiring/proven-gate 34+34+47+36+67+45 asserts; self-test 215/215) / PR-2"
+  },
+  {
+    "symptom": "Unknown flags still only WARNED by default after the v1.120.0 soak: a typo or stale flag was ignored, its value fell through to ambient resolution, and the verb ran anyway at exit 0 - the exact shape that once made session close --session-id close a DIFFERENT session cleanly.",
+    "area": "CLI flag validation / dispatcher",
+    "fixed_in": "1.122.0",
+    "consumer_impact": "STRICT BY DEFAULT (operator-approved after one release of warn soak): an unknown flag on any allowlisted verb exits 2 with the redacted flag name and a did-you-mean suggestion. MADDU_STRICT_FLAGS=0 is a TEMPORARY warn-only opt-out for callers mid-migration (the warning says so); =1 remains accepted. Open/unlisted verbs stay fail-open as before.",
+    "ledger_ref": "branch fix/a1-strict-flags-default; flag-allowlists suite 45 asserts incl. default-strict, legacy =1, and temporary-opt-out cases"
   }
 ]

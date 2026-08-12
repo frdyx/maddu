@@ -175,11 +175,14 @@ const run = (args, envOverrides = {}) => spawnSync(process.execPath, [BIN, ...ar
   env: hermeticEnv({ MADDU_STRICT_FLAGS: '', ...envOverrides }),
 });
 {
+  // STRICT BY DEFAULT (v1.122.0 flip, post-soak, operator-approved): an
+  // unset/blank env refuses the unknown flag.
   const r = run(['session', 'list', '--bogus-zz-a1']);
-  ok('CLI: unknown flag warns on stderr', r.stderr.includes('unknown flag --bogus-zz-a1'), r.stderr.slice(0, 200));
-  ok('CLI: verb still runs (warn-then-block, not block)', r.status === 0, `exit=${r.status}`);
-  ok('CLI: warning names the future hard-fail + the strict escape hatch',
-    /will become an error/.test(r.stderr) && /MADDU_STRICT_FLAGS/.test(r.stderr));
+  ok('CLI default: unknown flag exits 2 (strict by default)', r.status === 2, `exit=${r.status}`);
+  ok('CLI default: unknown flag named on stderr', r.stderr.includes('unknown flag --bogus-zz-a1'), r.stderr.slice(0, 200));
+  ok('CLI default: verb did NOT run', !r.stdout.includes('ACTIVE'), r.stdout.slice(0, 120));
+  ok('CLI default: the refusal names the temporary opt-out',
+    /MADDU_STRICT_FLAGS=0/.test(r.stderr), r.stderr.slice(0, 250));
 }
 {
   const r = run(['session', 'list', '--sesion', 'x']);
@@ -187,8 +190,14 @@ const run = (args, envOverrides = {}) => spawnSync(process.execPath, [BIN, ...ar
 }
 {
   const r = run(['session', 'list', '--bogus-zz-a1'], { MADDU_STRICT_FLAGS: '1' });
-  ok('CLI strict: exit 2', r.status === 2, `exit=${r.status}`);
-  ok('CLI strict: verb did NOT run', !r.stdout.includes('ACTIVE'), r.stdout.slice(0, 120));
+  ok('CLI strict=1 (legacy spelling): exit 2', r.status === 2, `exit=${r.status}`);
+}
+{
+  // The temporary opt-out: warn on stderr, verb still runs, and the warning
+  // says the opt-out is temporary rather than implying a stable mode.
+  const r = run(['session', 'list', '--bogus-zz-a1'], { MADDU_STRICT_FLAGS: '0' });
+  ok('CLI opt-out=0: warns but verb still runs', r.status === 0 && r.stderr.includes('unknown flag --bogus-zz-a1'), `exit=${r.status} ${r.stderr.slice(0, 150)}`);
+  ok('CLI opt-out=0: warning marks the opt-out as temporary', /temporary/.test(r.stderr), r.stderr.slice(0, 250));
 }
 {
   const r = run(['session', 'list']);

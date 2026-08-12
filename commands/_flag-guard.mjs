@@ -4,10 +4,10 @@
 // key set, so a typo'd or stale flag is silently ignored and the value falls
 // through to ambient resolution — that is how `session close --session-id`
 // closed the wrong session at exit 0 (defect A2). The dispatcher calls
-// checkUnknownFlags before every verb; unknown keys WARN on stderr (the verb
-// still runs), and MADDU_STRICT_FLAGS=1 turns the warning into exit 2.
-// Hard-fail-by-default is the follow-up flip once the doc-flag census is
-// empty — the operator chose warn-then-block, not day-one breakage.
+// checkUnknownFlags before every verb; unknown keys EXIT 2 (strict by
+// default since v1.122.0, flipped after the v1.120.0 warn soak per the
+// operator's warn-then-block ruling). MADDU_STRICT_FLAGS=0 is the temporary
+// warn-only opt-out for callers mid-migration; '1' remains accepted.
 //
 // Exactness note: parseFlags never lets a VALUE start with `--`
 // (`argv[i+1].startsWith('--')` demotes it to `true`), so every `--token` in
