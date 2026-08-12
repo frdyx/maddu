@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.122.0] · 2026-08-12 · unknown flags are strict by default
+
+The A1 flip, operator-approved after the v1.120.0 warn soak: an unknown
+flag on any allowlisted verb now **exits 2** (redacted flag name +
+did-you-mean) instead of warning and running anyway — a typo'd or stale
+flag silently falling through to ambient resolution is how
+`session close --session-id` once closed a *different* session at exit 0.
+`MADDU_STRICT_FLAGS=0` is a **temporary** warn-only opt-out for callers
+mid-migration (the warning says so); `=1` remains accepted; open/unlisted
+verbs stay fail-open. No other changes.
+
 ## [v1.121.0] · 2026-08-12 · acceptance proofs — RED→GREEN against a frozen oracle
 
 One PR (PR-2, `feat/acceptance-lib-core`, 16 commits). One new gate
