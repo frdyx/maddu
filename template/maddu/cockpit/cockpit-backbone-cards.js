@@ -117,7 +117,7 @@ export function renderModelRoutingLanes(lanes) {
 
 export function renderModelRoutingPipelines(pipelines) {
   if (!pipelines.length) {
-    return placeholder('No pipelines with stage hints', 'Pipeline stages can declare `modelPreference` to route different stages to different models.');
+    return placeholder('No pipelines with stage hints', 'Pipeline stages can declare `modelPreference` per stage (declarative today — not yet fed into spawn resolution).');
   }
   const wrap = el('div', {});
   for (const p of pipelines.slice(-10).reverse()) {
@@ -133,7 +133,7 @@ export function renderModelRoutingPipelines(pipelines) {
     ]));
   }
   if (!wrap.childNodes.length) {
-    return placeholder('No stage-level modelPreference set', 'Add `modelPreference` to a pipeline stage to route just that stage to a specific model.');
+    return placeholder('No stage-level modelPreference set', 'Add `modelPreference` to a pipeline stage to declare a per-stage preference (declarative today — not yet fed into spawn resolution).');
   }
   return wrap;
 }

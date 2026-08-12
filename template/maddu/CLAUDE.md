@@ -175,6 +175,9 @@ HINT comes from the runtime descriptor (`.maddu/runtimes/<name>.json`)
 `{ default, plan?, exec?, verify?, review? }` — resolved for the spawn's
 stage and forwarded to the worker as `MADDU_MODEL_HINT` env. The worker
 decides whether to honor it (the framework never makes the model call).
+When resolution yields nothing, no new hint is set — but a nested worker
+may still inherit its parent's `MADDU_MODEL_HINT` through the `MADDU_*`
+env passthrough.
 
 Lane and pipeline-stage model preferences share the same shape and appear
 in the cockpit's routing panels, but the shipped spawn call sites do not
