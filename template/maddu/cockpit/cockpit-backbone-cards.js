@@ -101,7 +101,7 @@ export function renderModelRoutingLanes(lanes) {
   }
   const rows = lanes.filter((l) => l.defaults && l.defaults.modelPreference != null);
   if (!rows.length) {
-    return placeholder('No lane modelPreference set', 'Lanes inherit the global default. Set `defaults.modelPreference` in `.maddu/lanes/catalog.json` to override per lane.');
+    return placeholder('No lane modelPreference set', 'No lane default set — the runtime descriptor’s modelPreference (if any) applies. Set `defaults.modelPreference` in `.maddu/lanes/catalog.json` to declare one per lane.');
   }
   const wrap = el('div', {});
   for (const lane of rows) {

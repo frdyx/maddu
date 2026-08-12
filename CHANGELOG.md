@@ -18,9 +18,15 @@ Docs-truth patch (harness-parity campaign PR0). The worker brief
 resolution ending in a global `.maddu/state/runtime-defaults.json` — a file
 **no code path reads or writes** (and a config file under `.maddu/state/`
 would contradict projection semantics anyway). The section now documents
-the real four-tier chain implemented by `resolveModelHint`: per-spawn flag →
-pipeline stage → lane catalog default → runtime descriptor
-`modelPreference` (flat or per-stage). No behavior change.
+only what a spawned worker actually reaches: the runtime is chosen
+explicitly per spawn, and the model hint comes from the runtime
+descriptor's `modelPreference` (flat or per-stage), forwarded as
+`MADDU_MODEL_HINT`. Lane-catalog and pipeline-stage preferences share the
+shape and are gate-validated and cockpit-visible, but the shipped spawn
+call sites do not currently feed them into resolution — the brief now says
+so instead of implying they take effect. Two cockpit strings that told the
+operator lanes "inherit the global default" (the removed phantom tier) now
+say "no lane default set". No behavior change.
 
 ## [v1.122.0] · 2026-08-12 · unknown flags are strict by default
 

@@ -288,7 +288,7 @@ export function renderSettings(ctx) {
             const defRead = el('div', { class: 'lanes-cell lanes-cell-defaults' });
             const summary = def.runtime || def.model || def.provider
               ? `${def.runtime || '—'}  ·  ${def.model || '—'}` + (def.provider ? `  ·  ${def.provider}` : '')
-              : el('span', { style: 'color:var(--m-fg-3)' }, 'inherit global default');
+              : el('span', { style: 'color:var(--m-fg-3)' }, 'no lane default set');
             const summarySpan = typeof summary === 'string' ? el('span', { class: 'lanes-defaults-summary' }, summary) : summary;
             const editBtn = el('button', { class: 'lanes-edit-btn' }, def.runtime || def.model ? 'Edit' : 'Bind');
             defRead.appendChild(summarySpan);
