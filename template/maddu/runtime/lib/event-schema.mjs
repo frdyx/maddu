@@ -234,7 +234,25 @@
 // receipt without it stays visible in every scope. Optional because every
 // pre-1.19.0 receipt lacks it. Framework-minted name on a framework-owned
 // event (the 1.17.0 ownership argument); additive → minor.
-export const EVENT_CONTRACT_VERSION = '1.19.0';
+//
+// 1.20.0 (2026-08-12, harness-parity PR1) — added HARNESS_CAPABILITY_OBSERVED:
+// the reading `maddu runtime doctor` takes when it compares the repo-versioned
+// harness capability manifest against what is actually installed. The payload
+// is deliberately shaped so the RECORD carries the honesty, not the presenter:
+// `status` ('verified' | 'assumed' | 'not-installed') and `drift` (why a claim
+// was held back) travel with every capability, so a consumer reading the spine
+// months later cannot mistake an assumed surface for a verified one, and a
+// not-installed harness is a VALID observation rather than a missing row.
+// `workRoot` scopes the config half of the reading to the checkout it was taken
+// in — the same lesson GATE_RAN learned in 1.19.0, applied before two checkouts
+// can collapse into one another's answer. Nullable fields are transcribed from
+// the producer: `cliVersion` is null when nothing parsed, `drift`/`probeFailure`
+// are null on a clean verified reading, `configPath` is null when every
+// candidate is absent — the payload shape never depends on which branch
+// produced it. Framework-minted names on a framework-owned event type (the
+// 1.17.0 ownership argument); a new event type → additive → minor bump;
+// baseline refreshed with this change.
+export const EVENT_CONTRACT_VERSION = '1.20.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -463,6 +481,7 @@ export const EVENT_SCHEMA = {
   MODEL_PROMOTION_APPROVED: { summary: "A proposed promotion was confirmed against its own allowing approval decision.", data: { schemaVersion: 'number', proposalId: 'string', approval_ref: 'string', model_id: 'string', checkpointKey: 'string', to_stage: 'string' }, frozen: true },
   MODEL_RELEASED: { summary: "A checkpoint approved to released was recorded as released with a rollback plan.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', rollback_plan: 'string' }, frozen: true },
   MODEL_ROLLED_BACK: { summary: "A released checkpoint was rolled back to an earlier stage.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', reverted_to: 'string' }, frozen: true },
+  HARNESS_CAPABILITY_OBSERVED: { summary: "A harness's native hook surface was compared against the repo-versioned capability manifest — an observation, not an enforcement receipt.", data: { harness: 'string', status: 'string', cliVersion: 'string|null', manifestVersion: 'string', capabilities: 'array', enforcementCeiling: 'string', drift: 'string|null', probeFailure: 'string|null', volatile: 'object|null', configPath: 'string|null', configs: 'array', workRoot: 'string|null' } },
 };
 
 // Parity + shape validation used by the event-schema-complete gate and the

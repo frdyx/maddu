@@ -1,6 +1,6 @@
 {
-  "version": "1.19.0",
-  "fingerprint": "3556e729",
+  "version": "1.20.0",
+  "fingerprint": "3a94a308",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -566,6 +566,23 @@
           "by": "string|null",
           "sliceEventId": "string",
           "triggered_by": "object|null"
+        }
+      },
+      "HARNESS_CAPABILITY_OBSERVED": {
+        "frozen": false,
+        "data": {
+          "capabilities": "array",
+          "cliVersion": "string|null",
+          "configPath": "string|null",
+          "configs": "array",
+          "drift": "string|null",
+          "enforcementCeiling": "string",
+          "harness": "string",
+          "manifestVersion": "string",
+          "probeFailure": "string|null",
+          "status": "string",
+          "volatile": "object|null",
+          "workRoot": "string|null"
         }
       },
       "IMPORT_ACCEPTED": {
