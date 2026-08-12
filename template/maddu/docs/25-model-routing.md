@@ -6,14 +6,23 @@ The cockpit's `#modelrouting` route (v0.19.2) gives you a read-only view of the 
 
 ## The `modelPreference` field
 
-Three places accept `modelPreference`, with override precedence (highest wins):
+The resolver (`resolveModelHint`) accepts four preference inputs, with
+override precedence (highest wins). **Wiring status matters**: the
+precedence chain describes what the resolver honors when a caller supplies
+the inputs — it is not a promise that every tier is fed on every spawn.
 
-| Source | Where | Example |
+| Source | Where | Wired into shipped spawns today? |
 |---|---|---|
-| 1. Per-spawn CLI flag | `--model-hint <id>` on the spawn caller | `--model-hint claude-haiku-4-5-20251001` |
-| 2. Pipeline stage | `.maddu/config/pipelines/<name>.json` `stages[i].modelPreference` | per-stage override |
-| 3. Lane | `.maddu/lanes/catalog.json` `lanes[].modelPreference` | per-lane override |
-| 4. Runtime descriptor | `.maddu/runtimes/<name>.json` `modelPreference` | the runtime's own default |
+| 1. Caller-resolved hint | programmatic `opts.modelHint` / `opts.modelHintOverride` on `spawnWorker` — **no CLI flag exposes this** | Only by the focus director, which passes `.maddu/config/focus.json` `model` as a direct hint |
+| 2. Pipeline stage | `.maddu/config/pipelines/<name>.json` `stages[i].modelPreference` | **Not yet** — declared, validated, cockpit-visible; no shipped call site passes it |
+| 3. Lane | `.maddu/lanes/catalog.json` `lanes[].modelPreference` | **Not yet** — same status as pipeline stages |
+| 4. Runtime descriptor | `.maddu/runtimes/<name>.json` `modelPreference` | **Yes** — read on every `spawnWorker` call |
+
+> **Lane field note:** the `model-hint-shape` gate validates a lane's
+> top-level `modelPreference`, while the cockpit's lane routing panel reads
+> `defaults.modelPreference`. Since neither is fed into spawn resolution
+> yet, both are declarative today; the wiring change should also settle on
+> one field.
 
 At every tier, `modelPreference` may be either:
 
@@ -37,6 +46,11 @@ Valid stage keys: `default`, `plan`, `exec`, `verify`, `review`. Any other key f
 ## How resolution works
 
 `spawnWorker` walks the precedence chain via `resolveModelHint(...)` from `template/maddu/runtime/lib/runtimes.mjs`. The first tier that provides a non-empty string wins. If every tier is null, no env var is set and the worker runs without a hint.
+
+In practice, because shipped call sites currently pass only the runtime
+descriptor's preference (and the focus director its direct hint), the
+resolved value on a spawned worker today comes from tier 1 (focus) or
+tier 4 (descriptor).
 
 Resolved value lands in the spawned process's environment as:
 

@@ -24,9 +24,15 @@ descriptor's `modelPreference` (flat or per-stage), forwarded as
 `MADDU_MODEL_HINT`. Lane-catalog and pipeline-stage preferences share the
 shape and are gate-validated and cockpit-visible, but the shipped spawn
 call sites do not currently feed them into resolution — the brief now says
-so instead of implying they take effect. Two cockpit strings that told the
-operator lanes "inherit the global default" (the removed phantom tier) now
-say "no lane default set". No behavior change.
+so instead of implying they take effect (one real exception documented: the
+focus director passes its configured `focus.json` `model` as a direct
+hint). Two cockpit strings that told the operator lanes "inherit the global
+default" (the removed phantom tier) now say "no lane default set", and
+`docs/25-model-routing.md` no longer advertises a nonexistent `--model-hint`
+flag or an unwired precedence chain as live — its table now carries a
+wired-today column, including the lane field divergence (gate validates
+top-level `modelPreference`, cockpit reads `defaults.modelPreference`).
+No behavior change.
 
 ## [v1.122.0] · 2026-08-12 · unknown flags are strict by default
 

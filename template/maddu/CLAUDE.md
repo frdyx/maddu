@@ -176,11 +176,13 @@ HINT comes from the runtime descriptor (`.maddu/runtimes/<name>.json`)
 stage and forwarded to the worker as `MADDU_MODEL_HINT` env. The worker
 decides whether to honor it (the framework never makes the model call).
 
-Lane-catalog `defaults.modelPreference` and pipeline-stage
-`modelPreference` use the same shape and are validated by the
-`model-hint-shape` gate and shown in the cockpit's routing panels, but the
-shipped spawn call sites do not currently feed them into the resolution —
-only the runtime descriptor's preference takes effect on a spawned worker.
+Lane and pipeline-stage model preferences share the same shape and appear
+in the cockpit's routing panels, but the shipped spawn call sites do not
+currently feed them into the resolution — on a spawned worker only the
+runtime descriptor's preference takes effect, with one exception: the
+focus director passes its configured `.maddu/config/focus.json` `model`
+as a direct hint. Field-level details and validation status:
+[`docs/25-model-routing.md`](../docs/25-model-routing.md).
 
 If the resolved provider is not signed in, the bridge returns
 `{error: 'PROVIDER_AUTH_MISSING', provider}` and the cockpit `/auth` route
