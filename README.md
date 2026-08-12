@@ -11,7 +11,7 @@
 *New to AI agents?* They're terminal tools that write and change code for you. Máddu is the layer underneath them that puts their work **on a record**: one agent per lane, sensitive changes waiting on your approval, recorded steps replayable and checkable, instead of a black box that vanishes when the session closes.
 
 [![maddu ci](https://img.shields.io/github/actions/workflow/status/frdyx/maddu/maddu-ci.yml?style=flat-square&labelColor=050B17&label=maddu%20ci)](https://github.com/frdyx/maddu/actions/workflows/maddu-ci.yml)
-[![Version 1.118.0](https://img.shields.io/badge/version-1.118.0-D0FF00?style=flat-square&labelColor=050B17)](version.json)
+[![Version](https://img.shields.io/github/v/release/frdyx/maddu?style=flat-square&labelColor=050B17&color=D0FF00&label=version)](https://github.com/frdyx/maddu/releases/latest)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-56B8FF?style=flat-square&labelColor=050B17)](https://nodejs.org)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-F5F1E8?style=flat-square&labelColor=050B17)](LICENSE)
 [![Local-first](https://img.shields.io/badge/local--first-no_cloud-56B8FF?style=flat-square&labelColor=050B17)](#why-maddu)
@@ -103,7 +103,7 @@ Everything under `.maddu/state/` is a *projection*: rebuildable from the spine, 
 Append-only and hash-chained means a naive after-the-fact edit can't pass unnoticed — it breaks the forward `prev_hash` link and `spine verify` FAILs — and since v1.117.0 every event is also stamped with a **workspace identity** derived from the spine's own genesis line, riding inside the hash preimage, so a chain-valid line lifted from *another* workspace's spine can't re-chain here either (the chain is unkeyed, so a determined actor who recomputes the whole chain, truncates the tail, or edits only the last event is out of scope — the OS's job; see the [threat model](docs/34-threat-model.md)). Máddu goes one step further: every event conforms to a **published, versioned contract** — 193 typed event types emitted as a real JSON Schema ([`docs/event-schema.json`](docs/event-schema.json), draft 2020-12), fingerprinted so it can't silently drift (a shape change fails CI without a matching semver bump; the version rides on the record itself as `x-contractVersion`). So your governance record isn't only tamper-detecting — it's **independently checkable**: someone who trusts neither you nor Máddu can validate the spine against its own published contract with off-the-shelf tooling.
 
 ```
-docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · x-contractVersion 1.17.0)
+docs/event-schema.json     the published contract (JSON Schema, draft 2020-12 · versioned as x-contractVersion)
                            → validate any spine event against it with ajv, check-jsonschema, or any validator
 ```
 
@@ -113,7 +113,7 @@ What the contract attests is precise — and worth stating precisely: a third pa
 
 ```bash
 $ npx github:frdyx/maddu init
-Máddu v1.118.0 installed.
+Máddu v<latest> installed.
 
 Next step: open this repo in Claude Code or Codex CLI and type:
 
