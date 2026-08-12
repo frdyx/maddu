@@ -169,11 +169,15 @@ and the charter in [`docs/charter.md`](../docs/charter.md).
 ## Provider / runtime resolution
 
 Each lane may declare a preferred runtime + model in
-`.maddu/lanes/catalog.json`. Resolution order on worker spawn:
+`.maddu/lanes/catalog.json`; each runtime descriptor
+(`.maddu/runtimes/<name>.json`) may carry its own `modelPreference`.
+Resolution order on worker spawn (higher wins):
 
 1. Per-spawn override — `--runtime` / `--model` flag.
-2. Lane default — `catalog.json` `lanes[<laneId>].defaults`.
-3. Global default — `.maddu/state/runtime-defaults.json`.
+2. Pipeline stage — the running stage's `modelPreference`.
+3. Lane default — `catalog.json` `lanes[<laneId>].defaults`.
+4. Runtime descriptor — `modelPreference` (flat string, or per-stage
+   `{ default, plan?, exec?, verify?, review? }`).
 
 If the resolved provider is not signed in, the bridge returns
 `{error: 'PROVIDER_AUTH_MISSING', provider}` and the cockpit `/auth` route

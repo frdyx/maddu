@@ -11,6 +11,17 @@ narrative summary.
 
 ---
 
+## [v1.122.1] · 2026-08-12 · worker brief: runtime resolution documented as implemented
+
+Docs-truth patch (harness-parity campaign PR0). The worker brief
+(`template/maddu/CLAUDE.md`) documented a three-tier provider/runtime
+resolution ending in a global `.maddu/state/runtime-defaults.json` — a file
+**no code path reads or writes** (and a config file under `.maddu/state/`
+would contradict projection semantics anyway). The section now documents
+the real four-tier chain implemented by `resolveModelHint`: per-spawn flag →
+pipeline stage → lane catalog default → runtime descriptor
+`modelPreference` (flat or per-stage). No behavior change.
+
 ## [v1.122.0] · 2026-08-12 · unknown flags are strict by default
 
 The A1 flip, operator-approved after the v1.120.0 warn soak: an unknown
