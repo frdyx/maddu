@@ -180,7 +180,8 @@ export default async function runtime(argv) {
   // 'assumed' means it did not, and the drift reason says why.
   if (sub === 'doctor') {
     const first = rest[0] && !rest[0].startsWith('--') ? rest[0] : null;
-    const { flags } = parseFlags(first ? rest.slice(1) : rest);
+    const afterName = first ? rest.slice(1) : rest;
+    const { flags, positional } = parseFlags(afterName);
     const wantAll = !!flags.all;
     const asJson = !!flags.json;
 
@@ -188,6 +189,20 @@ export default async function runtime(argv) {
     const doctorLib = await loadLib('harness-doctor.mjs');
     const validNames = caps.listHarnessNames();
 
+    // `<name> | --all` is an EXCLUSIVE choice, and extra positionals are a
+    // caller mistake — silently observing something other than what was
+    // asked for is the one thing a doctor must never do (funnel r1 #7).
+    // parseFlags consumes flag VALUES, so anything left in `positional` is a
+    // genuinely unexpected argument.
+    if (first && wantAll) {
+      console.error(`maddu runtime doctor: give a harness name OR --all, not both (got "${first}" and --all)`);
+      process.exit(2);
+    }
+    if (positional.length) {
+      console.error(`maddu runtime doctor: unexpected argument "${positional[0]}"`);
+      console.error('usage: maddu runtime doctor <name> | --all  [--json]');
+      process.exit(2);
+    }
     if (!first && !wantAll) {
       console.error('usage: maddu runtime doctor <name> | --all  [--json]');
       console.error(`  known harnesses: ${validNames.join(', ')}`);

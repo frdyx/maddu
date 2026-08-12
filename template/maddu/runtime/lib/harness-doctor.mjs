@@ -19,13 +19,13 @@
 // the projection. Inside a lane worktree those differ, and reading configs from
 // one while recording against the other is the whole point.
 
-import { mkdir, open, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { append, readAll, EVENT_TYPES } from './spine.mjs';
 import { withAppendLock } from './append-lock.mjs';
-import { probeRuntime, readRuntime } from './runtimes.mjs';
+import { probeRuntime, readRuntimeStrict } from './runtimes.mjs';
 import {
   HARNESS_CAPABILITIES,
   HARNESS_CAPABILITIES_VERSION,
@@ -40,9 +40,13 @@ import {
 export const PROJECTION_LOCK_WAIT_MS = 3000;
 export const PROJECTION_FILE = 'harness-capabilities.json';
 
-// A harness config is scanned for the Máddu stanza marker, not parsed. Bounded
-// so a pathological file can never be pulled wholly into memory.
-const MAX_CONFIG_SCAN_BYTES = 512 * 1024;
+// A harness config is scanned for the Máddu stanza marker, not parsed. The
+// WHOLE file is scanned in fixed-size chunks with a marker-length overlap —
+// bounded MEMORY, not bounded coverage: a stanza past any byte offset still
+// counts (funnel r1 #6). The projection read below keeps a hard size bound
+// instead, because a projection larger than that is not ours.
+const CONFIG_SCAN_CHUNK_BYTES = 64 * 1024;
+const MAX_PROJECTION_READ_BYTES = 512 * 1024;
 
 export class UnknownHarnessError extends Error {
   constructor(name, validNames) {
@@ -75,16 +79,48 @@ export function resolveConfigCandidate(candidate, workRoot, home = homedir()) {
   return resolvePath(join(workRoot, candidate));
 }
 
-async function isFileAt(p) {
-  try { return (await stat(p)).isFile(); } catch { return false; }
+// stat with the distinction the config observation needs: ENOENT is definitive
+// absence; any other stat failure is an inspection failure, never absence.
+async function statKind(p) {
+  try {
+    const s = await stat(p);
+    return s.isFile() ? 'file' : 'not-file';
+  } catch (err) {
+    return err?.code === 'ENOENT' ? 'absent' : 'error';
+  }
+}
+
+// Scan a file for a marker substring, whole file, fixed memory. Returns
+// 'found' | 'not-found' | 'error'. The chunk overlap keeps a marker that
+// straddles a chunk boundary visible.
+async function scanFileForMarker(p, marker) {
+  let fh = null;
+  try {
+    fh = await open(p, 'r');
+    const buf = Buffer.alloc(CONFIG_SCAN_CHUNK_BYTES);
+    let carry = '';
+    let pos = 0;
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, 0, CONFIG_SCAN_CHUNK_BYTES, pos);
+      if (bytesRead <= 0) return 'not-found';
+      const text = carry + buf.subarray(0, bytesRead).toString('utf8');
+      if (text.includes(marker)) return 'found';
+      carry = text.slice(-(marker.length - 1));
+      pos += bytesRead;
+    }
+  } catch {
+    return 'error';
+  } finally {
+    try { await fh?.close(); } catch {}
+  }
 }
 
 async function readBounded(p) {
   let fh = null;
   try {
     fh = await open(p, 'r');
-    const buf = Buffer.alloc(MAX_CONFIG_SCAN_BYTES);
-    const { bytesRead } = await fh.read(buf, 0, MAX_CONFIG_SCAN_BYTES, 0);
+    const buf = Buffer.alloc(MAX_PROJECTION_READ_BYTES);
+    const { bytesRead } = await fh.read(buf, 0, MAX_PROJECTION_READ_BYTES, 0);
     return buf.subarray(0, bytesRead).toString('utf8');
   } catch {
     return null;
@@ -124,9 +160,32 @@ function probeFailureReason(probe) {
 // observation. Only a shell-free probe whose PATH resolution found nothing is
 // definitive.
 async function probeHarness(stateRoot, entry, opts = {}) {
-  const descriptor = opts.descriptor !== undefined
-    ? opts.descriptor
-    : await readRuntime(stateRoot, entry.name).catch(() => null);
+  let descriptor;
+  if (opts.descriptor !== undefined) {
+    descriptor = opts.descriptor;
+  } else {
+    // Absence and damage are different answers (funnel r1 #1): a MISSING
+    // descriptor means "nothing registered — probe the manifest default"; a
+    // descriptor that exists but cannot be read or parsed means the operator
+    // registered SOMETHING, and probing a fallback command against a corrupt
+    // registration could verify the wrong binary. That reading is held at
+    // 'assumed' without running any probe at all.
+    const strict = await readRuntimeStrict(stateRoot, entry.name)
+      .catch(() => ({ descriptor: null, missing: false, unreadable: true }));
+    if (strict.unreadable) {
+      return {
+        installed: true,
+        version: null,
+        probeFailure: 'descriptor-unreadable',
+        probeSource: 'runtime-descriptor',
+        probeCommand: null,
+        resolvedPath: null,
+        exitCode: null,
+        rawOutput: '',
+      };
+    }
+    descriptor = strict.descriptor;
+  }
   const override = descriptor?.detect?.command;
   const spec = (typeof override === 'string' && override)
     ? { command: override, shell: true, expectExit: descriptor?.detect?.expectExit ?? 0 }
@@ -157,7 +216,10 @@ async function probeHarness(stateRoot, entry, opts = {}) {
 // Per-candidate, in manifest order, nothing discarded. A candidate is scanned
 // for the Máddu stanza only when the manifest declares it stanza-capable
 // (`sentinel.files`); anything else that merely exists reads
-// 'present-no-stanza'. PR1 does no parsing of a foreign harness's config
+// 'present-no-stanza'. Failure honesty (funnel r1 #6): only ENOENT is
+// 'absent'; a candidate that exists but cannot be inspected — or whose stanza
+// scan errors mid-read — reads 'unreadable', never a definitive claim in
+// either direction. PR1 does no parsing of a foreign harness's config
 // semantics beyond this substring scan.
 export async function observeConfigs(entry, workRoot, { platform = process.platform, home = homedir() } = {}) {
   const candidates = configCandidatesFor(entry, platform);
@@ -167,12 +229,20 @@ export async function observeConfigs(entry, workRoot, { platform = process.platf
   for (const candidate of candidates) {
     const resolved = resolveConfigCandidate(candidate, workRoot, home);
     let status = 'absent';
-    if (resolved && await isFileAt(resolved)) {
-      status = 'present-no-stanza';
-      if (marker && scanSet.has(candidate)) {
-        const text = await readBounded(resolved);
-        if (text != null && text.includes(marker)) status = 'stanza-present';
+    if (resolved) {
+      const kind = await statKind(resolved);
+      if (kind === 'error') {
+        status = 'unreadable';
+      } else if (kind === 'file') {
+        status = 'present-no-stanza';
+        if (marker && scanSet.has(candidate)) {
+          const scan = await scanFileForMarker(resolved, marker);
+          if (scan === 'found') status = 'stanza-present';
+          else if (scan === 'error') status = 'unreadable';
+        }
       }
+      // 'not-file' (a directory at the candidate path) stays 'absent': there
+      // is no config FILE there, and nothing was unreadable.
     }
     out.push({ path: candidate, status, resolved });
   }
@@ -218,8 +288,12 @@ export async function observeHarness(roots, harnessName, opts = {}) {
 }
 
 // The event payload. `configs` is stripped to { path, status } — the resolved
-// absolute paths stay in the CLI presentation, so the record is portable
-// between machines and carries no operator home directory.
+// absolute paths stay in the CLI presentation, so the record carries no
+// operator HOME directory. `workRoot` is the one machine path deliberately
+// kept: it is the checkout-scoping coordinate, exactly as GATE_RAN carries it
+// (v1.121.0), so a worktree's observation can never masquerade as the
+// primary's (funnel r1 #4 — adjudicated: consistency with the shipped
+// GATE_RAN precedent wins over path-free purity).
 export function observationEventData(observation) {
   return {
     harness: observation.harness,
@@ -260,36 +334,39 @@ let tmpSeq = 0;
 // is unique per writer and the rename happens INSIDE the lock, so a concurrent
 // materialization can never publish a half-written file or clobber a newer one.
 //
-// Lock-acquisition failure is reported, never thrown — the projection is a
-// cache of the spine and can always be rebuilt; a busy lock must not turn a
-// successful observation into a failed command.
+// EVERY failure here is reported, never thrown (funnel r1 #8): the projection
+// is a cache of the spine and can always be rebuilt, and by the time this
+// runs the observation event has already been appended — a cache-refresh
+// problem must not turn a successful observation into a failed command. The
+// reason distinguishes a busy lock from a real read/write failure, and a
+// failed writer removes its own tmp file.
 export async function materializeHarnessCapabilities(stateRoot, opts = {}) {
   try {
     await mkdir(pathsFor(stateRoot).statePrjDir, { recursive: true });
   } catch (err) {
     return { ok: false, reason: 'state-dir-unavailable', error: err.message };
   }
-  let cbThrew = false, cbError;
-  let result;
+  let cbResult;
   try {
-    result = await withAppendLock(projectionLockPath(stateRoot), async () => {
-      // Boolean-tracked so a callback that throws a falsy value still
-      // propagates instead of masquerading as lock contention.
+    await withAppendLock(projectionLockPath(stateRoot), async () => {
+      let tmp = null;
       try {
         const events = await readAll(stateRoot);
         const projection = reduceHarnessCapabilities(events);
         const target = harnessCapabilitiesProjectionPath(stateRoot);
-        const tmp = `${target}.${process.pid}.${++tmpSeq}.tmp`;
+        tmp = `${target}.${process.pid}.${++tmpSeq}.tmp`;
         await writeFile(tmp, JSON.stringify(projection, null, 2) + '\n');
         await rename(tmp, target);
-        return { ok: true, path: target, projection };
-      } catch (e) { cbThrew = true; cbError = e; return undefined; }
+        cbResult = { ok: true, path: target, projection };
+      } catch (e) {
+        if (tmp) { try { await unlink(tmp); } catch {} }
+        cbResult = { ok: false, reason: 'projection-write-failed', error: e?.message || String(e) };
+      }
     }, { maxWaitMs: opts.maxWaitMs ?? PROJECTION_LOCK_WAIT_MS });
   } catch {
     return { ok: false, reason: 'lock-busy' };
   }
-  if (cbThrew) throw cbError;
-  return result;
+  return cbResult ?? { ok: false, reason: 'projection-write-failed', error: 'materializer produced no result' };
 }
 
 export async function readHarnessCapabilitiesProjection(stateRoot) {

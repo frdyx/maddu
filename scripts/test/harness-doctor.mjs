@@ -230,6 +230,37 @@ const armRoot = await makeRoot('arm');
   catch (e) { threw = e; }
   ok('unknown harness throws UnknownHarnessError with validNames', threw && threw.name === 'UnknownHarnessError' && Array.isArray(threw.validNames) && threw.validNames.includes('fx'),
     String(threw && threw.message));
+
+  // Funnel r1 #1 — a registered descriptor that exists but cannot be parsed
+  // must hold the reading at 'assumed', never silently fall back to the
+  // manifest probe (which could verify the wrong binary). No opts.descriptor
+  // here: the strict read path itself is under test.
+  const corrupt = await makeRoot('corrupt');
+  await mkdir(join(corrupt, '.maddu', 'runtimes'), { recursive: true });
+  await writeFile(join(corrupt, '.maddu', 'runtimes', 'fx.json'), '{ this is not json');
+  const rc = await D.observeHarness({ workRoot: corrupt, stateRoot: corrupt }, 'fx',
+    { manifest: manifestOf(fxEntry()), home: fakeHome, platform: process.platform });
+  ok("corrupt registered descriptor -> 'assumed'/'descriptor-unreadable', NEVER a silent manifest fallback",
+    rc.status === 'assumed' && rc.drift === 'probe-failed' && rc.probeFailure === 'descriptor-unreadable' && rc.probeSource === 'runtime-descriptor',
+    JSON.stringify({ status: rc.status, drift: rc.drift, probeFailure: rc.probeFailure, probeSource: rc.probeSource }));
+
+  // Funnel r1 #2 end-to-end — a probe printing a CONTINUED version token must
+  // come out unparsable, not truncated-and-verified.
+  const cont = fxEntry({ name: 'cont', detect: printCmd('fx 1.2.3.4') });
+  const rcont = await D.observeHarness({ workRoot: armRoot, stateRoot: armRoot }, 'cont', baseOpts(manifestOf(cont)));
+  ok("probe output 'fx 1.2.3.4' -> 'assumed'/unparsable end-to-end (truncation hole closed)",
+    rcont.status === 'assumed' && rcont.drift === 'unparsable' && rcont.cliVersion === null,
+    JSON.stringify({ status: rcont.status, drift: rcont.drift, cliVersion: rcont.cliVersion }));
+
+  // Funnel r1 #6 — a stanza BEYOND the old 512 KiB read bound must still be
+  // found: coverage is unbounded, memory is not.
+  const bigRoot = await makeRoot('big');
+  await mkdir(join(bigRoot, 'fx'), { recursive: true });
+  await writeFile(join(bigRoot, 'fx', 'hooks.json'), '/* pad */ '.repeat(80000) + '\n"node maddu.mjs hooks fire pre_tool"\n');
+  const rbig = await D.observeHarness({ workRoot: bigRoot, stateRoot: bigRoot }, 'fx', baseOpts(manifestOf(fxEntry())));
+  ok('a stanza past 512 KiB is still found (whole-file scan, bounded memory)',
+    rbig.configs.find((c) => c.path === 'fx/hooks.json')?.status === 'stanza-present',
+    JSON.stringify(rbig.configs));
 }
 
 // ── resolveConfigCandidate units ────────────────────────────────────────────
@@ -281,6 +312,25 @@ const armRoot = await makeRoot('arm');
 
   ok('reading a never-materialized projection returns null',
     (await D.readHarnessCapabilitiesProjection(await makeRoot('empty'))) === null);
+
+  // Funnel r1 #8 — a projection WRITE failure after the observation appended
+  // must be reported, never thrown: the observation succeeded and the
+  // projection is a rebuildable cache. A directory squatting on the target
+  // path makes the rename fail deterministically on every platform.
+  const wf = await makeRoot('wfail');
+  const wfManifest = manifestOf(fxEntry({ detect: printCmd('fx 1.2.3') }));
+  await mkdir(D.harnessCapabilitiesProjectionPath(wf), { recursive: true });
+  let wfOut = null, wfThrew = null;
+  try { wfOut = await D.runHarnessDoctor({ workRoot: wf, stateRoot: wf }, 'fx', baseOpts(wfManifest)); }
+  catch (e) { wfThrew = e; }
+  ok('a post-append projection write failure is REPORTED, not thrown',
+    wfThrew === null && wfOut && wfOut.projection && wfOut.projection.ok === false && wfOut.projection.reason === 'projection-write-failed',
+    wfThrew ? String(wfThrew) : JSON.stringify(wfOut && wfOut.projection));
+  ok('the observation event still landed despite the projection failure',
+    (await eventsOfType(wf)).length === 1);
+  const prjDir = join(D.harnessCapabilitiesProjectionPath(wf), '..');
+  const leftovers = (await (await import('node:fs/promises')).readdir(prjDir)).filter((f) => f.includes('.tmp'));
+  ok('the failed writer removed its own tmp file', leftovers.length === 0, JSON.stringify(leftovers));
 }
 
 // ── runHarnessDoctorAll over an injected manifest ───────────────────────────

@@ -248,6 +248,27 @@ export async function readRuntime(repoRoot, name) {
   } catch { return null; }
 }
 
+// Like readRuntime, but absence and damage are DIFFERENT answers. A caller
+// deciding "no descriptor → use my own default" must not make that decision
+// on a descriptor that exists and cannot be read/parsed — silently probing a
+// fallback command against a corrupt registration answers a different
+// question than the operator asked (harness-parity funnel r1 #1).
+export async function readRuntimeStrict(repoRoot, name) {
+  const p = join(runtimesDir(repoRoot), `${name}.json`);
+  let text;
+  try {
+    text = await readFile(p, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { descriptor: null, missing: true, unreadable: false };
+    return { descriptor: null, missing: false, unreadable: true };
+  }
+  try {
+    return { descriptor: JSON.parse(text), missing: false, unreadable: false };
+  } catch {
+    return { descriptor: null, missing: false, unreadable: true };
+  }
+}
+
 export async function saveRuntime(repoRoot, patch, by = null) {
   if (!patch.name) throw new Error('runtime name required');
   await ensureDir(runtimesDir(repoRoot));
@@ -388,6 +409,7 @@ export async function probeRuntime(spec = {}) {
 
   let target = command;
   let argv = result.args;
+  let viaComSpec = false;
   if (!shell) {
     const resolved = await resolveCommandPath(command, env);
     if (!resolved) { result.notFound = true; return result; }
@@ -400,6 +422,7 @@ export async function probeRuntime(spec = {}) {
       // argument can become syntax.
       target = env.ComSpec || env.COMSPEC || 'cmd.exe';
       argv = ['/d', '/s', '/c', resolved, ...result.args];
+      viaComSpec = true;
     } else {
       target = resolved;
     }
@@ -422,7 +445,12 @@ export async function probeRuntime(spec = {}) {
     result.stdout = stdout.trim().slice(0, 2000);
     result.stderr = stderr.trim().slice(0, 2000);
     result.ok = code === expectExit;
-    if (!shell && result.errorCode === 'ENOENT') result.notFound = true;
+    // A spawn ENOENT is definitive absence ONLY when the spawn target was the
+    // resolved executable itself. When the shim is routed through ComSpec, the
+    // shim was already PROVEN present by resolution — an ENOENT there means
+    // the command processor is broken, which says nothing about the harness
+    // (harness-parity funnel r1 #3).
+    if (!shell && !viaComSpec && result.errorCode === 'ENOENT') result.notFound = true;
   } catch (err) {
     result.throwMessage = err.message;
   }

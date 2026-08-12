@@ -211,6 +211,18 @@ const validEntry = (over = {}) => ({
     H.extractVersion(codex, 'codex-cli 0.144.0 (build abc)') === '0.144.0');
   ok('extractVersion returns null on versionless output', H.extractVersion(codex, 'no numbers here') === null);
   ok('extractVersion returns null on empty output', H.extractVersion(codex, '') === null);
+  // Funnel r1 #2 — the trailing-boundary hole: a four-component or
+  // letter-continued version must NOT truncate to a verifiable triple.
+  ok("extractVersion REFUSES to truncate '0.144.0.1' to a verifiable token",
+    H.extractVersion(codex, 'codex-cli 0.144.0.1') === null, JSON.stringify(H.extractVersion(codex, 'codex-cli 0.144.0.1')));
+  ok("extractVersion REFUSES '0.144.0beta' (no [-+] separator is not a prerelease)",
+    H.extractVersion(codex, '0.144.0beta') === null, JSON.stringify(H.extractVersion(codex, '0.144.0beta')));
+  ok("extractVersion still accepts a real prerelease '0.144.0-rc1.5'",
+    H.extractVersion(codex, 'codex 0.144.0-rc1.5 ready') === '0.144.0-rc1.5');
+  ok("extractVersion still accepts 'v0.144.0' and a following parenthetical",
+    H.extractVersion(codex, 'v0.144.0 (stable)') === '0.144.0');
+  ok('the truncation hole is closed END-TO-END: a continued version reads assumed/unparsable, never verified',
+    (() => { const r = H.compareObserved(codex, { installed: true, version: H.extractVersion(codex, '0.144.0.1') }); return r.status === 'assumed' && r.drift === 'unparsable'; })());
 }
 
 // ── configCandidatesFor ─────────────────────────────────────────────────────
@@ -266,12 +278,15 @@ const validEntry = (over = {}) => ({
   ok('reducer: manifestVersion carried through', p.manifestVersion === '1.0.0');
   ok('reducer: schemaVersion stamped', p.schemaVersion === H.HARNESS_PROJECTION_SCHEMA_VERSION && p.schemaVersion === 1);
 
-  // ts tie -> id decides, deterministically.
+  // ts tie -> the caller's INPUT order decides (canonical spine order for a
+  // readAll input). Random event ids carry no ordering information, so an id
+  // that sorts EARLIER but arrives LATER must still win (funnel r1 #5).
   const tie = H.reduceHarnessCapabilities([
     ev('evt_b', '2026-08-12T10:00:01.000Z', 'codex', { status: 'verified' }),
     ev('evt_a', '2026-08-12T10:00:01.000Z', 'codex', { status: 'not-installed' }),
   ]);
-  ok('reducer: ts tie broken by id (later id wins)', tie.harnesses.codex.eventId === 'evt_b', tie.harnesses.codex.eventId);
+  ok('reducer: ts tie keeps input (canonical) order — the LAST appended wins, not the larger id',
+    tie.harnesses.codex.eventId === 'evt_a', tie.harnesses.codex.eventId);
 
   ok('reducer: non-array input yields an empty projection',
     Object.keys(H.reduceHarnessCapabilities(null).harnesses).length === 0);
@@ -288,8 +303,8 @@ const validEntry = (over = {}) => ({
     JSON.stringify(H.DRIFT_REASONS));
   ok('OBSERVED_STATUSES is verified|assumed|not-installed',
     JSON.stringify([...H.OBSERVED_STATUSES].sort()) === JSON.stringify(['assumed', 'not-installed', 'verified'].sort()));
-  ok('CONFIG_STATUSES is absent|present-no-stanza|stanza-present',
-    JSON.stringify([...H.CONFIG_STATUSES].sort()) === JSON.stringify(['absent', 'present-no-stanza', 'stanza-present'].sort()));
+  ok('CONFIG_STATUSES is absent|present-no-stanza|stanza-present|unreadable (funnel r1 #6)',
+    JSON.stringify([...H.CONFIG_STATUSES].sort()) === JSON.stringify(['absent', 'present-no-stanza', 'stanza-present', 'unreadable'].sort()));
   ok('manifest version constant is a semver string', /^\d+\.\d+\.\d+$/.test(H.HARNESS_CAPABILITIES_VERSION));
 }
 

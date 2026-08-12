@@ -47,7 +47,7 @@ export const HARNESS_VERIFIED_DATE = '2026-08-12';
 
 export const BLOCKING_KINDS = ['block', 'observe'];
 export const TRANSPORT_KINDS = ['stdin-json', 'argv', 'unknown'];
-export const CONFIG_STATUSES = ['absent', 'present-no-stanza', 'stanza-present'];
+export const CONFIG_STATUSES = ['absent', 'present-no-stanza', 'stanza-present', 'unreadable'];
 export const OBSERVED_STATUSES = ['verified', 'assumed', 'not-installed'];
 export const DRIFT_REASONS = [
   'below-range', 'above-range', 'unparsable', 'prerelease',
@@ -63,8 +63,11 @@ const MADDU_STANZA_MARKER = 'hooks fire';
 // Version-string grammar shared by every manifest probe. Tolerant of a name
 // prefix and a leading `v` (`codex-cli 0.144.0`, `v1.2.3`, `2.1.228 (Claude
 // Code)`); a prerelease/build suffix is CAPTURED so compareObserved can see it
-// and refuse to call the reading verified.
-const SEMVER_PROBE_PATTERN = '(?:^|[^0-9])v?(\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)';
+// and refuse to call the reading verified. The token is BOUNDED on both
+// sides: `0.144.0.1` or `0.144.0beta` must not truncate to a verifiable
+// `0.144.0` (funnel r1 #2) — a continuation character after the candidate
+// rejects the match, and a leading `.` cannot start one mid-version.
+const SEMVER_PROBE_PATTERN = '(?:^|[^0-9.])v?(\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?)(?![0-9A-Za-z.-])';
 
 // Config-path syntax used by `configPaths` and `sentinel.files`:
 //   'a/b.json'   — relative to the WORK root (the checkout being inspected)
@@ -571,18 +574,22 @@ export function validateHarnessManifest(manifest = HARNESS_CAPABILITIES) {
 export const HARNESS_PROJECTION_SCHEMA_VERSION = 1;
 
 // Reduce HARNESS_CAPABILITY_OBSERVED events into the latest observation per
-// harness. Pure and order-tolerant: events are ordered by (ts, id) so a caller
-// that hands over an unsorted or merged-partition read still gets the same
-// answer. Everything here is rebuildable from the spine — the projection file
-// is a cache, never an authority.
+// harness. Pure and order-tolerant for MERGED input: events are stably sorted
+// by ts, and a timestamp TIE keeps the caller's input order — for a spine
+// read that is canonical append order, which is the true order two same-
+// millisecond appends happened in. Random event ids carry no ordering
+// information, so they must never break a tie (funnel r1 #5). Everything here
+// is rebuildable from the spine — the projection file is a cache, never an
+// authority.
 export function reduceHarnessCapabilities(events = []) {
   const observed = (Array.isArray(events) ? events : [])
     .filter((e) => e && e.type === 'HARNESS_CAPABILITY_OBSERVED' && e.data && typeof e.data.harness === 'string' && e.data.harness);
 
+  // Array.prototype.sort is stable, so equal-ts events keep input order.
   const ordered = [...observed].sort((a, b) => {
     const ta = String(a.ts || ''), tb = String(b.ts || '');
     if (ta !== tb) return ta < tb ? -1 : 1;
-    return String(a.id || '') < String(b.id || '') ? -1 : 1;
+    return 0;
   });
 
   const harnesses = {};
