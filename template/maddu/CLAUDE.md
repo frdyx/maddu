@@ -179,12 +179,14 @@ When resolution yields nothing, no new hint is set — but a nested worker
 may still inherit its parent's `MADDU_MODEL_HINT` through the `MADDU_*`
 env passthrough.
 
-Lane and pipeline-stage model preferences share the same shape and appear
-in the cockpit's routing panels, but the shipped spawn call sites do not
-currently feed them into the resolution — on a spawned worker only the
-runtime descriptor's preference takes effect, with one exception: the
-focus director passes its configured `.maddu/config/focus.json` `model`
-as a direct hint. Field-level details and validation status:
+Lane and pipeline-stage model preferences share the same shape; lane
+*defaults* also appear in the cockpit's lane routing panel, while
+configured pipeline-stage preferences are gate-validated but not
+cockpit-visible. The shipped spawn call sites do not currently feed either
+into the resolution — on a spawned worker only the runtime descriptor's
+preference takes effect, with one exception: the focus director passes its
+configured `.maddu/config/focus.json` `model` as a direct hint.
+Field-level details and validation status:
 [`docs/25-model-routing.md`](../docs/25-model-routing.md).
 
 If the resolved provider is not signed in, the bridge returns
