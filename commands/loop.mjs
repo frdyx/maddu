@@ -12,8 +12,8 @@
 
 import { spawn } from 'node:child_process';
 import { parseFlags, requireFlag } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
-import { loadLib } from './_libroot.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, envActingSid } from './_spine.mjs';
+import { loadLib, loadLibOptional } from './_libroot.mjs';
 
 const ANSI = { bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m', pass: '\x1b[32m', warn: '\x1b[33m', fail: '\x1b[31m' };
 
@@ -33,12 +33,20 @@ async function loadLoopsLib() {
   return loadLib('loops.mjs');
 }
 
+// `shell: true` rather than a hand-rolled `cmd.exe /c` argv. On POSIX the two
+// are identical (`sh -c <cmd>`), but on Windows they are not: `cmd.exe /c` with
+// the command as ONE argv entry hits cmd's quote-stripping rule, so any command
+// whose first token is a quoted path — `"C:\Program Files\nodejs\node.exe" …`,
+// i.e. the DEFAULT Node install location — never launches at all. It reports
+// `'"C:\Program Files\..."' is not recognized` and exits nonzero, which a loop
+// then reads as a genuine verify/iterate failure and iterates against forever.
+// Node's own `shell:true` emits `cmd.exe /d /s /c "<cmd>"`, whose `/s` rule
+// handles exactly this; it is also what `evalCondition` and the acceptance
+// executor already use, so this makes the three agree instead of adding a
+// fourth convention.
 function runShell(cmd, cwd) {
   return new Promise((resolve) => {
-    const isWin = process.platform === 'win32';
-    const shell = isWin ? 'cmd.exe' : 'sh';
-    const args = isWin ? ['/c', cmd] : ['-c', cmd];
-    const ch = spawn(shell, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const ch = spawn(cmd, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true });
     let stdout = '', stderr = '';
     ch.stdout.on('data', (b) => stdout += b.toString());
     ch.stderr.on('data', (b) => stderr += b.toString());
@@ -46,21 +54,42 @@ function runShell(cmd, cwd) {
   });
 }
 
+// A repeatable flag as a raw list, UNFILTERED — `--oracle` with no value parses
+// to `true`, and dropping it silently would run a loop against a declared set
+// one pattern shorter than the operator typed. The validator refuses it loudly.
+function flagList(raw) {
+  if (raw === undefined) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+function reportLoop(res) {
+  if (res.ok) {
+    console.log(`${ANSI.pass}completed${ANSI.reset}  loop ${res.loopId}  iters=${res.iters}`);
+    process.exit(0);
+  }
+  console.error(`${ANSI.fail}halted${ANSI.reset}     loop ${res.loopId}  iters=${res.iters}  reason=${res.reason}`);
+  if (res.signature) console.error(`           signature: ${res.signature}`);
+  process.exit(1);
+}
+
 export default async function loopCmd(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
-  const { paths } = await loadSpineLib();
+  const { paths, spine, projections, verify: verifyLib } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const loopsLib = await loadLoopsLib();
   const sessionId = await envActingSid();
 
   if (!sub) { console.error('usage: maddu loop <ralph|plan|status|cancel> [args]'); process.exit(2); }
 
-  if (sub === 'ralph' || sub === 'plan') {
+  // The PLAN loop is untouched by PR-2: no acceptance, no baseline, no intent
+  // fields — its LOOP_STARTED payload stays byte-identical to what it has
+  // always written.
+  if (sub === 'plan') {
     const { flags } = parseFlags(rest);
     const goal = typeof flags.goal === 'string' ? flags.goal : (typeof flags.plan === 'string' ? `plan-loop ${flags.plan}` : null);
     if (!goal) {
-      console.error('usage: maddu loop ralph --goal "<task>" [--max-iter N] [--verify "<bash>"] [--iterate "<bash>"]');
+      console.error('usage: maddu loop plan --plan <plan-id> [--max-iter N] [--verify "<bash>"] [--iterate "<bash>"]');
       process.exit(2);
     }
     const verifyCmd = typeof flags.verify === 'string' ? flags.verify : null;
@@ -81,22 +110,243 @@ export default async function loopCmd(argv) {
       return { summary: `iterate exit=${r.code}` };
     } : null;
 
-    const triggered_by = sub === 'plan' && typeof flags.plan === 'string' ? { planId: flags.plan } : null;
-    console.log(`${ANSI.bold}loop:${sub}${ANSI.reset}  goal: ${goal}`);
-    const res = await loopsLib.runLoop(repoRoot, {
-      kind: sub === 'plan' ? 'plan-loop' : 'ralph',
+    console.log(`${ANSI.bold}loop:plan${ANSI.reset}  goal: ${goal}`);
+    reportLoop(await loopsLib.runLoop(repoRoot, {
+      kind: 'plan-loop',
       goal, verify, iterate, maxIter,
       by: sessionId, lane: typeof flags.lane === 'string' ? flags.lane : null,
-      triggered_by,
-    });
-    if (res.ok) {
-      console.log(`${ANSI.pass}completed${ANSI.reset}  loop ${res.loopId}  iters=${res.iters}`);
-      process.exit(0);
-    } else {
-      console.error(`${ANSI.fail}halted${ANSI.reset}     loop ${res.loopId}  iters=${res.iters}  reason=${res.reason}`);
-      if (res.signature) console.error(`           signature: ${res.signature}`);
-      process.exit(1);
+      triggered_by: typeof flags.plan === 'string' ? { planId: flags.plan } : null,
+    }));
+  }
+
+  // ── ralph — every ralph loop is now an ACCEPTANCE loop ───────────────────
+  //
+  // PR-2 W1. A ralph loop asks one question — "is it green yet?" — and until
+  // now it would answer that question with an unrecorded shell exit code, or,
+  // with no `--verify` at all, burn every iteration on a synthetic
+  // `no-verify-supplied` failure until the cap. Both are refused at the door
+  // now: a loop that cannot succeed must say so before it spends anything, and
+  // a loop that CAN succeed records what it observed.
+  //
+  // BREAKING for a bare `ralph --verify "<cmd>"`: an acceptance with no declared
+  // oracle and implementation can never satisfy O3 or O8, so it could iterate to
+  // green and still prove nothing. The refusal is loud and typed rather than
+  // silently recording unprovable observations.
+  if (sub === 'ralph') {
+    const { flags } = parseFlags(rest);
+    const fromGoal = Object.hasOwn(flags, 'from-goal');
+    // PRESENCE and VALUE are separate questions (funnel r1 #1): a bare
+    // `--verify` or `--verify=` still names the ad-hoc intent, so it must
+    // still CONFLICT with --from-goal rather than silently vanishing into a
+    // goal adoption that reports green on flags the operator never reconciled.
+    const verifySupplied = Object.hasOwn(flags, 'verify');
+    const verifyCmd = typeof flags.verify === 'string' && flags.verify.trim() ? flags.verify : null;
+    const iterateCmd = typeof flags.iterate === 'string' ? flags.iterate : null;
+    const maxIter = typeof flags['max-iter'] === 'string' ? Number(flags['max-iter']) : null;
+    const lane = typeof flags.lane === 'string' ? flags.lane : null;
+
+    if (fromGoal && verifySupplied) {
+      console.error('--from-goal and --verify are two answers to one question: --from-goal adopts the active goal\'s conditions, --verify declares an ad-hoc one. Pick one.');
+      process.exit(2);
     }
+    if (!fromGoal && !verifyCmd) {
+      console.error('maddu loop ralph needs something to verify: --from-goal (adopt the active goal\'s conditions) or --verify "<cmd>" --oracle "<glob>" --impl "<glob>".');
+      process.exit(2);
+    }
+
+    const acceptance = await loadLibOptional('acceptance.mjs');
+    const recorder = await loadLibOptional('acceptance-record.mjs');
+    if (!acceptance?.refuseDeclaredSet || !recorder?.observeAcceptance) {
+      console.error('maddu loop ralph needs the acceptance library — this install predates it; run `maddu upgrade` first.');
+      process.exit(2);
+    }
+
+    // Roots: the observed command runs in the WORK root and its digests
+    // describe that tree; loop events and receipts append to the STATE root.
+    const rootsPair = await resolveWorkAndStateRoots(paths);
+    const workRoot = rootsPair ? rootsPair.workRoot : repoRoot;
+    const stateRoot = rootsPair ? rootsPair.stateRoot : repoRoot;
+
+    let conditions = null;         // [{ text, verify }]
+    let oraclePatterns = null;
+    let implPatterns = null;
+    let declEventId = null;
+    let label = null;
+    let verifyOverride = false;
+
+    if (fromGoal) {
+      // --from-goal is EXPLICIT and never inferred. It requires a goal this
+      // loop can actually prove something about: driving a legacy goal through
+      // it would complete on void receipts with no possible proof, which is
+      // exactly the "green because nothing was checked" outcome the track
+      // exists to close.
+      const proj = await projections.project(repoRoot);
+      const g = proj.goal || null;
+      if (!g) { console.error('--from-goal: no goal declared — set one with `maddu goal set`.'); process.exit(3); }
+      if (g.status !== 'active') { console.error(`--from-goal: the goal is ${g.status}, not active — set a new one with \`maddu goal set\`.`); process.exit(3); }
+      const verifiable = (Array.isArray(g.success) ? g.success : []).filter((c) => c.verify);
+      if (!verifiable.length) { console.error('--from-goal: the active goal declares no verifiable success condition (`--success "<cmd>::<text>"`).'); process.exit(3); }
+      if (!Array.isArray(g.oracle) || !g.oracle.length || !Array.isArray(g.implementation) || !g.implementation.length) {
+        console.error('--from-goal: the active goal declares no acceptance sets — re-declare it with `maddu goal set … --oracle "<glob>" --impl "<glob>"`.');
+        process.exit(3);
+      }
+      // A goal declared by a pre-validation CLI can carry sets acceptanceIdFor
+      // would throw on (over-budget pattern, blank entry). Refuse at the door
+      // with the reason instead of surfacing a per-condition throw every
+      // iteration as "not green".
+      for (const [setLabel, patterns] of [['goal oracle', g.oracle], ['goal implementation', g.implementation]]) {
+        const r = acceptance.refuseDeclaredSet(patterns, setLabel);
+        if (r.ok !== true) { console.error(`--from-goal: ${r.reason}: ${r.detail}`); process.exit(3); }
+      }
+      conditions = verifiable;
+      oraclePatterns = g.oracle;
+      implPatterns = g.implementation;
+      declEventId = g.declEventId ?? null;
+      label = g.objective || 'goal';
+    } else {
+      oraclePatterns = flagList(flags.oracle);
+      implPatterns = flagList(flags.impl);
+      if (!oraclePatterns.length || !implPatterns.length) {
+        console.error('--verify needs its declared sets: --oracle "<glob>" (the files that must stay frozen) and --impl "<glob>" (the files that must move). Without them nothing this loop observes can ever become a proof.');
+        process.exit(2);
+      }
+      for (const [flagLabel, patterns] of [['--oracle', oraclePatterns], ['--impl', implPatterns]]) {
+        const r = acceptance.refuseDeclaredSet(patterns, flagLabel);
+        if (r.ok !== true) { console.error(`${r.reason}: ${r.detail}`); process.exit(2); }
+      }
+      label = typeof flags.goal === 'string' ? flags.goal : null;
+      if (!label) {
+        console.error('usage: maddu loop ralph --goal "<task>" --verify "<bash>" --oracle "<glob>" --impl "<glob>" [--iterate "<bash>"] [--max-iter N]');
+        process.exit(2);
+      }
+      conditions = [{ text: label, verify: verifyCmd }];
+      // An ad-hoc verify alongside an active goal that HAS verifiable
+      // conditions is a real ambiguity — the loop is about to report green on
+      // something the goal never asked for. Name both and record the override
+      // rather than silently picking one.
+      const proj = await projections.project(repoRoot);
+      const g = proj.goal || null;
+      const goalVerifiable = g && g.status === 'active' ? (Array.isArray(g.success) ? g.success : []).filter((c) => c.verify) : [];
+      if (goalVerifiable.length) {
+        verifyOverride = true;
+        console.error(`${ANSI.warn}warning${ANSI.reset}  --verify overrides the active goal "${g.objective}" and its ${goalVerifiable.length} verifiable condition(s); this loop observes the ad-hoc command only.`);
+      }
+    }
+
+    // The read mode is resolved ONCE, at loop start. It is a property of the
+    // checkout, and re-verifying the chain every iteration would make each
+    // iteration cost O(spine); a checkout does not change sync mode mid-loop
+    // except by operator action, and if it did the receipt voids harmlessly.
+    const mode = typeof verifyLib?.resolveSpineMode === 'function'
+      ? await verifyLib.resolveSpineMode(stateRoot) : 'unknown';
+    const roots = { workRoot, stateRoot };
+    const declSource = fromGoal ? 'goal' : 'flag';
+
+    // ONE decl per condition, built once and REUSED by the baseline and every
+    // iteration — identity must be byte-stable across them or the RED and the
+    // GREEN land under different acceptanceIds and pair with nothing. The
+    // ad-hoc scope nonce is the loopId, which only exists once `runLoop` has
+    // minted it, so the decls are built on FIRST USE (the baseline, always
+    // before iteration 1) and memoized from there. Every callback inside one
+    // `runLoop` receives the same loopId, so the memo can never straddle two.
+    let decls = null;
+    const declsFor = (loopId) => {
+      if (decls) return decls;
+      decls = conditions.map((c) => ({
+        command: c.verify,
+        cwd: workRoot,
+        declEventId: fromGoal ? declEventId : null,
+        scopeNonce: fromGoal ? null : loopId,
+        oraclePatterns,
+        implPatterns,
+        tierPolicy: 'worktree',
+        schemaVersion: '1',
+      }));
+      return decls;
+    };
+
+    // SERIALIZED: the observation lock admits one observer per state root, so
+    // running the set in parallel would turn its own siblings into lock-busy
+    // voids instead of runs.
+    const observeAll = async (phase, loopId) => {
+      const out = [];
+      for (const decl of declsFor(loopId)) {
+        let res;
+        try {
+          res = await recorder.observeAcceptance(roots, decl, {
+            declSource, phase, loopId, spineLib: spine, actor: sessionId, lane,
+          }, { mode });
+        } catch (err) {
+          res = { ok: false, reason: (err && err.message) || 'observation error' };
+        }
+        out.push(res);
+      }
+      return out;
+    };
+
+    const classOf = (res) => (res && res.ok === true && res.ran ? res.ran.outcome_class : null);
+
+    // Iteration 0: the RED recorded while the work is still untouched, before
+    // any iterate can fix it. An all-green baseline does NOT skip the loop —
+    // the operator asked for it — and its GREEN can still close a qualifying
+    // earlier orient-recorded RED.
+    const baseline = async ({ loopId }) => {
+      const results = await observeAll('baseline', loopId);
+      const red = results.filter((r) => classOf(r) === 'process-fail').length;
+      const green = results.filter((r) => classOf(r) === 'process-pass').length;
+      const other = results.length - red - green;
+      console.log(`${ANSI.dim}baseline:${ANSI.reset}  ${red} red · ${green} green${other ? ` · ${other} not observed` : ''}  (${results.length} acceptance${results.length === 1 ? '' : 's'})`);
+    };
+
+    const verify = async (iter, { loopId }) => {
+      const results = await observeAll('iteration', loopId);
+      let ok = results.length > 0;
+      // A signature is a claim that two iterations failed the SAME way. Any
+      // observation that did not run (lock-busy, a refusal) or whose output was
+      // truncated past the fingerprint cap makes that claim unsupportable, so
+      // the whole signature goes null and stuck detection stands down for this
+      // iteration rather than halting on a shared prefix or a synthesized error
+      // string. `res.ok !== true` is normalized BEFORE any property access —
+      // a no-run carries no `ran` at all.
+      let fingerprintable = true;
+      const parts = [];
+      for (const res of results) {
+        if (!res || res.ok !== true) { ok = false; fingerprintable = false; continue; }
+        const ran = res.ran || {};
+        if (ran.outcome_class !== 'process-pass') ok = false;
+        if (ran.fingerprint == null) fingerprintable = false;
+        else parts.push(`${(res.receipt && res.receipt.acceptanceId) || ''}:${ran.exit}:${ran.fingerprint}`);
+      }
+      const failed = results.filter((r) => classOf(r) !== 'process-pass').length;
+      return {
+        ok,
+        // Order-stable by construction: `parts` follows the fixed decl order.
+        signature: fingerprintable ? parts.join('|') : null,
+        summary: ok ? `acceptance green (${results.length})` : `${failed}/${results.length} acceptance(s) not green`,
+      };
+    };
+
+    const iterate = iterateCmd ? async (iter) => {
+      // WORK root, like the observed verify: in an attached worktree an
+      // iterate editing the primary while verify observes the worktree could
+      // never converge.
+      const r = await runShell(iterateCmd, workRoot);
+      return { summary: `iterate exit=${r.code}` };
+    } : null;
+
+    console.log(`${ANSI.bold}loop:ralph${ANSI.reset}  goal: ${label}`);
+    const res = await loopsLib.runLoop(repoRoot, {
+      kind: 'ralph',
+      goal: label, verify, iterate, baseline,
+      startedData: { baselineRequested: true, verifySource: declSource, verifyOverride },
+      maxIter,
+      by: sessionId, lane,
+      triggered_by: null,
+    });
+    if (res.baselineError) {
+      console.error(`${ANSI.warn}baseline observation failed${ANSI.reset}  ${res.baselineError} — the loop ran anyway; its first RED may be missing.`);
+    }
+    reportLoop(res);
   }
 
   if (sub === 'status') {

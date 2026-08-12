@@ -188,7 +188,53 @@
 // If that reasoning is ever rejected, the fix is to change `classifyChange` so
 // narrowing-by-declaration reports major CONTRACT-WIDE — not to price one
 // release differently from its five predecessors. Additive → minor.
-export const EVENT_CONTRACT_VERSION = '1.17.0';
+// 1.18.0 (2026-08-11, PR-2 acceptance proof — the observation's shape) — the
+// four types the acceptance proof reads or writes gain their declared fields.
+// This is the contract's ONE bump for PR-2: every shape change the track needs
+// lands here, and the gate campaign that follows adds no event shape.
+//   - GOAL_DECLARED += `oracle` / `implementation`: the declared sets, whose
+//     patterns are identity terms of every acceptance the goal declares. Both
+//     are declared WITHOUT `?`, matching `success` (v1.6.0): every event this
+//     CLI writes carries them, and a pre-W1 event's absence is handled by the
+//     projection's array guard, exactly as `success` has been since it landed.
+//   - LOOP_STARTED += `baselineRequested` / `verifySource` / `verifyOverride`:
+//     the loop's declared verification INTENT, so the record says which answer
+//     a loop was given (goal-adopted or ad-hoc flags) and whether it overrode
+//     an active goal. Optional — plan loops and acceptance-less ralph loops
+//     write the same five-field payload they always have.
+//   - VERIFICATION_STARTED += the acceptance IDENTITY fields. `deriveProofs`
+//     checks identity agreement across the STARTED→RAN pair, so these are not
+//     decoration: a STARTED without them reads as a mismatch and voids the
+//     receipt.
+//   - VERIFICATION_RAN += the same identity fields plus the observation's own
+//     result — `observation_status`/`refusal_reason` (eligible vs void and
+//     why), the process outcome (`exit`, `signal`, `timed_out`, `spawn_error`,
+//     `duration_ms`, `outcome_class`), the redacted `command`, the two set
+//     records `oracle`/`impl`, and the conditional `subject`.
+//     NULLABILITY IS TRANSCRIBED FROM THE PRODUCER, not guessed: a no-run path
+//     (lock-busy) writes the keys with `exit`/`signal`/`duration_ms`/
+//     `outcome_class` null rather than omitting them, so the payload shape
+//     never depends on which branch produced it — declaring those non-nullable
+//     would red the contract on the exact receipts that record a refusal.
+//     `subject` is the one genuinely conditional field (written only for a
+//     supported tier policy).
+// EVERY addition is OPTIONAL (`?`) except the two on GOAL_DECLARED, because
+// VERIFICATION_STARTED / VERIFICATION_RAN carry several kinds — a project-test
+// receipt has no `exit` and never will — and LOOP_STARTED's three ride only the
+// acceptance-wired ralph branch. The 1.17.0 ownership argument applies
+// unchanged: these are framework-minted names on framework-owned event types
+// whose every in-tree emitter is the framework itself, so the generic-looking
+// ones (`command`, `exit`, `subject`) squat on no plugin's namespace.
+// Additive → minor bump; baseline refreshed with this change.
+//
+// 1.19.0 (2026-08-11, PR-2 gate campaign, funnel r7): GATE_RAN.data gains
+// `workRoot?` — the CHECKOUT a verdict describes. Gate receipts moved to the
+// SHARED state-root spine (funnel r6), so two checkouts' receipts collapse in
+// latest-per-gate readouts unless scoped; readers filter by it, and a legacy
+// receipt without it stays visible in every scope. Optional because every
+// pre-1.19.0 receipt lacks it. Framework-minted name on a framework-owned
+// event (the 1.17.0 ownership argument); additive → minor.
+export const EVENT_CONTRACT_VERSION = '1.19.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -293,8 +339,8 @@ export const EVENT_SCHEMA = {
   EMAIL_SENT: { summary: "An email was sent.", data: { length: 'number', to: 'string' } },
   EMAIL_OUTBOUND_FAILED: { summary: "An outbound email failed to send.", data: { error: 'string', reason: 'string', to: 'string' } },
   FOLLOWUP_OPENED: { summary: "A follow-up was opened from a slice review finding.", data: { draftScope: 'array', fromReviewEventId: 'string', severity: 'string' } },
-  GATE_RAN: { summary: "A verification gate ran and recorded its verdict.", data: { durationMs: 'number', evidence: 'object|null', gateId: 'string', ok: 'boolean', severity: 'string', sliceId: 'string', status: 'string' } },
-  GOAL_DECLARED: { summary: "A goal with success conditions and constraints was declared.", data: { constraints: 'array', objective: 'string', success: 'array' } },
+  GATE_RAN: { summary: "A verification gate ran and recorded its verdict.", data: { durationMs: 'number', evidence: 'object|null', gateId: 'string', ok: 'boolean', severity: 'string', sliceId: 'string', status: 'string', workRoot: 'string?' } },
+  GOAL_DECLARED: { summary: "A goal with success conditions and constraints was declared, plus the acceptance sets (oracle / implementation) its success conditions are proven against.", data: { constraints: 'array', implementation: 'array', objective: 'string', oracle: 'array', success: 'array' } },
   GOAL_COMPLETED: { summary: "A declared goal was marked done or abandoned, closing the goal lifecycle.", data: { note: 'string|null', objective: 'string|null', outcome: 'string' } },
   PENDING_ACTION_DRAINED: { summary: "A queued pending action was drained (executed or resolved).", data: { actionId: 'string', detail: 'string', kind: 'string', outcome: 'string', payload: 'object' } },
   PENDING_ACTION_ENQUEUED: { summary: "An action was enqueued for later draining.", data: { actionId: 'string', kind: 'string', payload: 'object' } },
@@ -340,7 +386,7 @@ export const EVENT_SCHEMA = {
   PLAN_REVISED: { summary: "A plan was revised (phases added/removed/modified).", data: { planId: 'string', by: 'string|null', diff: 'object' } },
   PLAN_COMPLETED: { summary: "A plan was completed.", data: { planId: 'string' } },
   PLAN_CANCELLED: { summary: "A plan was cancelled.", data: { planId: 'string', reason: 'string|null' } },
-  LOOP_STARTED: { summary: "A loop (ralph or plan-loop) started.", data: { loopId: 'string', kind: 'string', goal: 'string', maxIter: 'number', cooldownMs: 'number' } },
+  LOOP_STARTED: { summary: "A loop (ralph or plan-loop) started. The three intent fields ride only an acceptance-wired ralph loop: where its verification came from, whether a baseline observation was requested, and whether ad-hoc flags overrode an active goal's conditions.", data: { loopId: 'string', kind: 'string', goal: 'string', maxIter: 'number', cooldownMs: 'number', baselineRequested: 'boolean?', verifySource: 'string?', verifyOverride: 'boolean?' } },
   LOOP_ITERATION_STARTED: { summary: "A loop iteration started.", data: { loopId: 'string', kind: 'string', iter: 'number' } },
   LOOP_ITERATION_COMPLETED: { summary: "A loop iteration completed.", data: { loopId: 'string', kind: 'string', iter: 'number', ok: 'boolean', signature: 'string|null', summary: 'string|null' } },
   LOOP_HALTED: { summary: "A loop halted before its goal.", data: { loopId: 'string', kind: 'string|null', iter: 'number|null', reason: 'string', signature: 'string' } },
@@ -384,8 +430,8 @@ export const EVENT_SCHEMA = {
   DISCIPLINE_SKIPPED: { summary: "A mutating tool was let through without a discipline check (enforcement off, a self-disable attempt, or the enforcement hook uninstalled) — a witness so a bypass is never silent.", data: { blocked: 'boolean?', enforcement: 'string|null', reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
   MUTATION_UNWITNESSED: { summary: "A mutating seam exited claiming success with zero spine appends and no declared no-op — silence made loud. CLI breaches are spooled synchronously at exit and drained onto the spine by the next dispatcher run (via:'breach-drain'); bridge breaches append inline (via:'inline'). breachId dedupes the at-least-once drain.", data: { breachId: 'string', breachTs: 'string', exitCode: 'number|null', label: 'string', method: 'string|null', path: 'string|null', sessionId: 'string|null', sub: 'string|null', surface: 'string', verb: 'string|null', via: 'string' } },
   ENFORCEMENT_ERROR: { summary: "The self-discipline enforcement path threw and fell open — recorded so a persistent enforcement bug can't hide behind a silent fail-open.", data: { reason: 'string', sessionId: 'string|null', tool: 'string|null' } },
-  VERIFICATION_STARTED: { summary: "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.", data: { kind: 'string', profile: 'string|null' } },
-  VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.", data: { conditionCount: 'number?', conditionPlanDigest: 'string?', planDigest: 'string?', planTaskCount: 'number?', tasksTruncated: 'boolean?', allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?' } },
+  VERIFICATION_STARTED: { summary: "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative. An acceptance observation additionally carries its declaration identity here, because the proof derivation requires the STARTED and the RAN to agree on it.", data: { kind: 'string', profile: 'string|null', acceptanceId: 'string?', commandSha256: 'string?', declEventId: 'string|null?', declSource: 'string?', loopId: 'string|null?', phase: 'string|null?', scopeNonce: 'string|null?' } },
+  VERIFICATION_RAN: { summary: "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection. An acceptance observation adds its declaration identity, its eligibility verdict (observation_status / refusal_reason), the process outcome, the redacted command, and the two declared set records; a path that recorded a receipt WITHOUT running (lock-busy) writes the outcome fields null rather than omitting them.", data: { conditionCount: 'number?', conditionPlanDigest: 'string?', planDigest: 'string?', planTaskCount: 'number?', tasksTruncated: 'boolean?', allMet: 'boolean?', complete: 'boolean', conditions: 'array?', counts: 'object|null', kind: 'string', metCount: 'number?', objective: 'string|null?', pendingCount: 'number?', profile: 'string|null', result: 'string', setAt: 'string|null?', startedId: 'string', verifiable: 'number?', acceptanceId: 'string?', commandSha256: 'string?', declEventId: 'string|null?', declSource: 'string?', loopId: 'string|null?', phase: 'string|null?', scopeNonce: 'string|null?', observation_status: 'string?', refusal_reason: 'string|null?', command: 'string?', exit: 'number|null?', signal: 'string|null?', timed_out: 'boolean?', spawn_error: 'boolean?', duration_ms: 'number|null?', outcome_class: 'string|null?', oracle: 'object?', impl: 'object?', subject: 'object?' } },
   ANCHOR_STAMPED: { summary: "A spine receipt was stamped into the OpenTimestamps calendars as a new anchor.", data: { seq: 'number', payload_digest: 'string', calendars: 'array', proof_files: 'array' } },
   ANCHOR_UPGRADED: { summary: "An anchor's OpenTimestamps proof file changed (partial merge or completed Bitcoin attestation).", data: { seq: 'number', payload_digest: 'string', complete: 'boolean', proof_files: 'array' } },
   ASSURANCE_ASSESSED: { summary: "An operator-run consume ceremony recorded an assurance assessment — ledger convenience only, labeled non-authoritative by every consumer.", data: { subject_sha: 'string', receipt_digest: 'string', level: 'string', evidence: 'object', assessed_by: 'string', note: 'string?' } },

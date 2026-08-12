@@ -24,12 +24,28 @@ export function runStatus(data) {
 
 // Latest run per gate id, chronological (spine) order assumed. Returns records
 // { gateId, status, severity, ts, eventId, durationMs } sorted by gateId.
-export function latestGateRuns(events) {
+//
+// `opts.workRoot` scopes the ledger to ONE checkout (funnel r7 #1): a shared
+// state root receives receipts from every attached worktree, and a
+// latest-per-gate collapse across checkouts lets one tree's green mask
+// another's red. A receipt with NO workRoot (legacy) stays visible in every
+// scope — an old record must not vanish the day readers learn to filter.
+// Lexical comparison, case-insensitive on win32 (the drive-letter-case rule).
+function sameCheckout(a, b) {
+  const norm = (p) => String(p).replace(/[\\/]+$/, '');
+  return process.platform === 'win32'
+    ? norm(a).toLowerCase() === norm(b).toLowerCase()
+    : norm(a) === norm(b);
+}
+
+export function latestGateRuns(events, opts = {}) {
   const list = Array.isArray(events) ? events : [];
+  const scope = typeof opts.workRoot === 'string' && opts.workRoot ? opts.workRoot : null;
   const byGate = new Map(); // gateId -> record (last wins)
   for (const ev of list) {
     if (!ev || ev.type !== 'GATE_RAN') continue;
     const d = ev.data || {};
+    if (scope && typeof d.workRoot === 'string' && d.workRoot && !sameCheckout(d.workRoot, scope)) continue;
     const gateId = d.gateId || '(unknown)';
     byGate.set(gateId, {
       gateId,
@@ -47,14 +63,16 @@ export function latestGateRuns(events) {
 //   { ran, total, ok, warn, fail, failing:[...], warning:[...], green, lastTs }
 // green = ran > 0 and no hard fails. `failing` are hard fails (would block a
 // land); `warning` are soft warns (advisory). lastTs is the newest run time.
-export function summarizeGates(events) {
-  const runs = latestGateRuns(events);
+export function summarizeGates(events, opts = {}) {
+  const runs = latestGateRuns(events, opts);
   const failing = runs.filter((r) => r.status === 'fail');
   const warning = runs.filter((r) => r.status === 'warn');
   const ok = runs.filter((r) => r.status === 'ok').length;
+  // From the SCOPED runs, not a raw event rescan (funnel r8 #1): a verdict
+  // must not borrow another checkout's run time as its "last run" label.
   let lastTs = null;
-  for (const ev of (Array.isArray(events) ? events : [])) {
-    if (ev && ev.type === 'GATE_RAN' && ev.ts) lastTs = ev.ts;
+  for (const r of runs) {
+    if (r.ts && (lastTs === null || r.ts > lastTs)) lastTs = r.ts;
   }
   return {
     ran: runs.length > 0,

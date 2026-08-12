@@ -15,12 +15,35 @@
 
 import { isStaleTs } from './success-eval.mjs';
 
+// A plain record, for the optional `startedData` only. A non-record (a string,
+// say) spread into the payload would decompose into indexed character keys, so
+// anything that is not a plain object is IGNORED rather than spread.
+function isRecordArg(v) {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
 // Emit the STARTED → RAN pair around an in-process run. `run()` returns the
 // runner's result object; the caller's `derive` maps it to the receipt payload
 // { complete, result:'pass'|'fail', counts }. Best-effort spine appends: a
 // verification still RUNS if the spine is unavailable (the gate just reads it as
-// "no receipt" → non-green, never a false pass). Returns { startedId, result }.
-export async function recordVerification(repoRoot, spineLib, { kind, profile = null, run, derive }) {
+// "no receipt" → non-green, never a false pass).
+//
+// `startedData` (optional) carries EXTRA fields on the STARTED payload, for
+// kinds whose consumer checks identity agreement between the two events rather
+// than kind/profile alone — acceptance receipts compare
+// {acceptanceId, scopeNonce, commandSha256} across the pair, and a STARTED
+// without them reads `null ≠ the RAN's value` and poisons every receipt as
+// void/'identity-mismatch'. It is spread BEFORE the fixed fields, so the keys
+// the U2 pairing grammar owns (`kind`, `profile`) can never be overridden by a
+// caller: a STARTED whose kind disagreed with its RAN's would silently unpair.
+//
+// Returns { startedId, ranId, result }. `ranId` is null when the RAN was
+// skipped (no STARTED id, or `derive` returned null) or its append FAILED — so
+// a caller can report honestly whether the pair actually landed instead of
+// inferring it from a run that completed.
+export async function recordVerification(repoRoot, spineLib, { kind, profile = null, startedData = null, run, derive }) {
   const spine = spineLib && spineLib.spine ? spineLib.spine : spineLib;
   const T = (spine && spine.EVENT_TYPES) || {};
   const canAppend = !!(spine && spine.append);
@@ -31,13 +54,14 @@ export async function recordVerification(repoRoot, spineLib, { kind, profile = n
         type: T.VERIFICATION_STARTED || 'VERIFICATION_STARTED',
         actor: (spineLib && spineLib.actor) || null,
         lane: (spineLib && spineLib.lane) || null,
-        data: { kind, profile },
+        data: { ...(isRecordArg(startedData) ? startedData : null), kind, profile },
       });
       startedId = (started && started.id) || null;
     } catch { startedId = null; }
   }
   // Run regardless of whether the STARTED append succeeded.
   const result = await run();
+  let ranId = null;
   if (canAppend && startedId) {
     const payload = derive ? derive(result) : {};
     // derive returns null/undefined to signal "no real result to record" (e.g. a
@@ -45,16 +69,17 @@ export async function recordVerification(repoRoot, spineLib, { kind, profile = n
     // STARTED remains, but callers guard those no-run modes before calling here.
     if (payload != null) {
       try {
-        await spine.append(repoRoot, {
+        const ran = await spine.append(repoRoot, {
           type: T.VERIFICATION_RAN || 'VERIFICATION_RAN',
           actor: (spineLib && spineLib.actor) || null,
           lane: (spineLib && spineLib.lane) || null,
           data: { kind, startedId, profile, complete: true, result: 'pass', counts: null, ...payload },
         });
+        ranId = (ran && ran.id) || null;
       } catch { /* a dangling STARTED remains → the gate reads it as non-green */ }
     }
   }
-  return { startedId, result };
+  return { startedId, ranId, result };
 }
 
 // U2 pairing over the full event list for one kind. A RAN is VALID iff exactly

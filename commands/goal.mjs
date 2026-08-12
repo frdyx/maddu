@@ -7,8 +7,18 @@
 // measurable success condition. The part before `::` is a shell command that
 // exits 0 when met (consumed by `maddu orient`); the part after is the human
 // description. No `::` → text-only, unverifiable. Mirrors posto's goal.success[].
+//
+// PR-2 W1 — `--oracle "<glob>"` / `--impl "<glob>"` (both repeatable) declare
+// the goal's ACCEPTANCE sets: the files whose bytes must stay frozen across a
+// RED→GREEN pair, and the files that must move. They are recorded on
+// GOAL_DECLARED as `oracle[]` / `implementation[]`; only their SHAPE is checked
+// here (the acceptance library's own budget), because whether a pattern matches
+// anything, escapes the repo or crosses a symlink is a question about a working
+// tree that may look different when the command finally runs — those refusals
+// belong to the observation and its receipt, not to the declaration.
 
 import { parseFlags, requireFlag } from './_args.mjs';
+import { loadLibOptional } from './_libroot.mjs';
 import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 
 function parseSuccess(raw) {
@@ -20,6 +30,40 @@ function parseSuccess(raw) {
       if (idx === -1) return { text: s.trim(), verify: null };
       return { verify: s.slice(0, idx).trim() || null, text: s.slice(idx + 2).trim() };
     });
+}
+
+// A repeatable flag as a raw list, UNFILTERED. `--oracle` with no value parses
+// to `true`, and dropping it silently would record a goal whose declared set is
+// one pattern shorter than the operator typed — the validator refuses it loudly
+// instead.
+function flagList(raw) {
+  if (raw === undefined) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+// Validate one declared set through the acceptance library's PUBLIC validator —
+// the same budget `acceptanceIdFor` enforces, so a declaration this surface
+// accepts can never throw out of the identity computation later. Exits 2 with
+// the refusal's reason.
+//
+// A newer CLI running against an older install has no acceptance library at
+// all; declaring a set it cannot validate would write an unchecked identity
+// term into an append-only event, so that combination REFUSES rather than
+// recording on trust.
+async function validateDeclaredSets(sets) {
+  if (sets.every(([, patterns]) => patterns.length === 0)) return;
+  const acceptance = await loadLibOptional('acceptance');
+  if (!acceptance || typeof acceptance.refuseDeclaredSet !== 'function') {
+    console.error('--oracle/--impl need the acceptance library — this install predates it; run `maddu upgrade` first.');
+    process.exit(2);
+  }
+  for (const [label, patterns] of sets) {
+    const r = acceptance.refuseDeclaredSet(patterns, label);
+    if (r.ok !== true) {
+      console.error(`${r.reason}: ${r.detail}`);
+      process.exit(2);
+    }
+  }
 }
 
 export default async function command(argv) {
@@ -43,13 +87,20 @@ export default async function command(argv) {
     if (success.length > 5) {
       console.error(`warning: ${success.length} success conditions — keep it to ≤5 measurable ones (posto convention); recording all anyway.`);
     }
+    const oracle = flagList(flags.oracle);
+    const implementation = flagList(flags.impl);
+    await validateDeclaredSets([['--oracle', oracle], ['--impl', implementation]]);
     const ev = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.GOAL_DECLARED,
       actor: await envActingSid(),
-      data: { objective, constraints, success },
+      // Both sets are ALWAYS arrays on a new event, empty when undeclared, so a
+      // reader never has to distinguish "declared nothing" from "predates the
+      // field" on anything this CLI wrote.
+      data: { objective, constraints, success, oracle, implementation },
     });
     console.log(`goal set: ${objective}`);
     console.log(`constraints: ${constraints.length}  ·  success conditions: ${success.length} (${success.filter((s) => s.verify).length} verifiable)`);
+    console.log(`acceptance: oracle ${oracle.length} pattern${oracle.length === 1 ? '' : 's'}  ·  implementation ${implementation.length}`);
     console.log(`event: ${ev.id}`);
     return;
   }
@@ -102,6 +153,6 @@ export default async function command(argv) {
     return;
   }
 
-  console.error('Usage: maddu goal <set|show|done> [--objective "…"] [--constraint "…" …] [--success "<verify-cmd>::<text>" …] [--note "…"] [--abandon]');
+  console.error('Usage: maddu goal <set|show|done> [--objective "…"] [--constraint "…" …] [--success "<verify-cmd>::<text>" …] [--oracle "<glob>" …] [--impl "<glob>" …] [--note "…"] [--abandon]');
   process.exit(2);
 }

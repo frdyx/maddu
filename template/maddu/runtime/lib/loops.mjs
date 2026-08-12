@@ -17,7 +17,18 @@ function genLoopId() {
 
 async function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
-export async function runLoop(repoRoot, { kind = 'ralph', goal, verify, iterate, maxIter = null, cooldownMs = null, by = null, lane = null, triggered_by = null }) {
+// `baseline` (optional) runs ONCE after LOOP_STARTED and before iteration 1 —
+// the iteration-0 observation, taken while the work is still untouched. It gets
+// `({ loopId })` and its throw is CAUGHT: a loop is the primitive, the
+// observation machinery watching it is not, and plumbing that could kill the
+// loop it observes would make recording a proof more dangerous than not having
+// one. The failure is summarized on the returned result instead.
+//
+// `startedData` (optional) adds the caller's intent fields to LOOP_STARTED. It
+// is spread BEFORE the five fixed fields so a caller can never overwrite the
+// loop's own identity, and an absent one leaves the payload byte-identical to
+// what plan loops and acceptance-less ralph loops have always written.
+export async function runLoop(repoRoot, { kind = 'ralph', goal, verify, iterate, baseline = null, startedData = null, maxIter = null, cooldownMs = null, by = null, lane = null, triggered_by = null }) {
   if (typeof verify !== 'function') throw new Error('runLoop: verify(iter) callback required');
   const gov = await readEffectiveGovernance(repoRoot); // phase-tier aware (v1.91.0)
   const effMax = maxIter != null ? maxIter : effectiveValue(gov, 'loop-max-iter-default');
@@ -28,8 +39,14 @@ export async function runLoop(repoRoot, { kind = 'ralph', goal, verify, iterate,
     type: EVENT_TYPES.LOOP_STARTED,
     actor: by, lane,
     triggered_by,
-    data: { loopId, kind, goal, maxIter: effMax, cooldownMs: effCooldown },
+    data: { ...(startedData && typeof startedData === 'object' ? startedData : {}), loopId, kind, goal, maxIter: effMax, cooldownMs: effCooldown },
   });
+
+  let baselineError = null;
+  if (typeof baseline === 'function') {
+    try { await baseline({ loopId }); }
+    catch (err) { baselineError = err?.message || String(err); }
+  }
 
   let lastFailSig = null;
   let consecutiveFails = 0;
@@ -108,5 +125,8 @@ export async function runLoop(repoRoot, { kind = 'ralph', goal, verify, iterate,
     result = { ok: false, loopId, iters: effMax, reason: 'max-iter-reached' };
   }
 
+  // Present ONLY when the baseline actually threw, so a caller that never
+  // passed one sees exactly the result shape it always has.
+  if (baselineError !== null) result.baselineError = baselineError;
   return result;
 }

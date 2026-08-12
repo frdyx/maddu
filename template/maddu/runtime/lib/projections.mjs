@@ -582,6 +582,14 @@ export async function project(repoRoot) {
           // v1.6.0 — measurable success conditions [{ text, verify }]. Older
           // GOAL_DECLARED events without it project to [] (forward-compat).
           success: Array.isArray(ev.data.success) ? ev.data.success : [],
+          // PR-2 W1 — the declared acceptance sets, array-guarded exactly like
+          // `success` so a pre-W1 GOAL_DECLARED projects two empty sets rather
+          // than undefined. `declEventId` is the goal's own event id: it is an
+          // identity term of every acceptance declared BY this goal, so a
+          // consumer must be able to reach it without re-reading the spine.
+          oracle: Array.isArray(ev.data.oracle) ? ev.data.oracle : [],
+          implementation: Array.isArray(ev.data.implementation) ? ev.data.implementation : [],
+          declEventId: ev.id,
           setAt: ev.ts,
           // Goal lifecycle: a freshly declared goal is active until GOAL_COMPLETED.
           status: 'active',

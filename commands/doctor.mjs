@@ -23,7 +23,7 @@ import { join, dirname } from 'node:path';
 import { createServer, request as httpRequest } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
-import { findRepoRoot } from './_resolve.mjs';
+import { findRepoRoot, findStateRoot } from './_resolve.mjs';
 import { exists, readMadduJson, frameworkVersion } from './_manifest.mjs';
 
 const ANSI = {
@@ -294,12 +294,18 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
   }
 
   // ── Gate runner — built-in gates + operator gates ──
+  // `repoRoot` stays the CHECKOUT root every gate has always read (funnel r4
+  // #2 — re-rooting it regressed install/pin gates from worktrees); the
+  // resolved pair rides the explicit `roots` override so pair-aware gates
+  // (acceptance-proven) read the shared spine, and an explicit target is
+  // never mispaired with the invoker's standing worktree (r4 #3).
   const gatesLib = await loadGatesLib();
   if (gatesLib?.runGates) {
     const result = await gatesLib.runGates(repoRoot, {
       onlyId: gateOpts.onlyId,
       severity: gateOpts.severity,
       emitEvents: true,
+      roots: { workRoot: repoRoot, stateRoot: gateOpts.stateRoot || repoRoot },
     });
     for (const run of result.runs) checks.push(gateRunToCheck(run, tagLabel));
     // State containment isn't a gate (no security-relevant invariant; it's
@@ -479,7 +485,24 @@ export default async function doctor(argv) {
     }
     repoTargets = regResult.workspaces.map((w) => ({ repoRoot: w.path, label: workspaceDoctorLabel(w) }));
   } else {
-    const cwdRepo = await findRepoRoot(process.cwd());
+    // TWO roots, two scopes (gate funnel r2 #1, narrowed r3 #1): checkout
+    // checks (install integrity, package rules) keep the nearest `.maddu`
+    // holder — the tree the operator is standing in — while the GATES read
+    // the SHARED spine the `.maddu-state-root` pointer names; using the state
+    // root for everything would scan the primary checkout's files from a
+    // worktree and falsely pass its edits.
+    const workRepo = await findRepoRoot(process.cwd());
+    let stateRepo = null;
+    try {
+      stateRepo = await findStateRoot(process.cwd());
+    } catch (err) {
+      // A misconfigured MADDU_STATE_ROOT / pointer is a hard finding, not a
+      // silent fallback (funnel r5 #1) — every other command refuses this
+      // state, so doctor must not report health against a substitute.
+      console.log(`${tag('FAIL')}  ${err.message}`);
+      process.exit(1);
+    }
+    const cwdRepo = workRepo || stateRepo;
     if (!cwdRepo) {
       if (regResult.workspaces.length > 0) {
         console.log(`${tag('WARN')}  not inside a .maddu/ repo; pass --all to check every registered workspace.`);
@@ -488,7 +511,7 @@ export default async function doctor(argv) {
         process.exit(1);
       }
     } else {
-      repoTargets = [{ repoRoot: cwdRepo, label: null }];
+      repoTargets = [{ repoRoot: cwdRepo, stateRoot: stateRepo || cwdRepo, label: null }];
     }
   }
 
@@ -507,8 +530,8 @@ export default async function doctor(argv) {
     onlyId: typeof flags.gate === 'string' ? flags.gate : undefined,
     severity: typeof flags.severity === 'string' ? flags.severity : undefined,
   };
-  for (const { repoRoot, label } of repoTargets) {
-    checks.push(...await runRepoChecks(repoRoot, label, gateOpts));
+  for (const { repoRoot, stateRoot, label } of repoTargets) {
+    checks.push(...await runRepoChecks(repoRoot, label, { ...gateOpts, stateRoot: stateRoot || repoRoot }));
   }
 
   // ── Port availability (machine-wide, not per-workspace) ──

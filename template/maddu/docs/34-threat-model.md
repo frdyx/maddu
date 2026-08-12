@@ -480,13 +480,51 @@ set that matches zero files reports failure, and an EMPTY config reports
 "nothing pinned" — neither is ever a pass, so misconfiguration cannot
 read as clean.
 
+**Máddu's second signal (acceptance proofs — narrower, and about the
+oracle itself):** `tracked-source-drift` watches the machinery that
+decides what a result *means*. It says nothing about whether the check
+itself has ever rejected anything — which is the other half of this
+scenario: write (or relax) a test that passes unconditionally, then
+truthfully report green. **Acceptance proofs** (v1.120.0,
+[56-acceptance-proof.md](56-acceptance-proof.md)) address exactly that
+half and nothing more. An operator declares, on the goal, a command plus
+an **oracle** set and an **implementation** set (`maddu goal set
+--success … --oracle "<glob>" --impl "<glob>"`); `maddu orient` and
+`maddu loop ralph` observe that command and append
+`VERIFICATION_STARTED`/`VERIFICATION_RAN` receipts carrying the
+acceptance identity. A proof is then **derived** — every time somebody
+looks — from two receipts: the command **exited nonzero** and later
+**exited zero**, while the declared oracle bytes stayed identical and
+the declared implementation bytes moved. The `acceptance-proven` gate
+renders that state wherever gates run, and is green only when *every*
+verifiable condition is `live`.
+
+What that closes, precisely: **RED-then-edit-the-test.** Editing the
+oracle between the RED and the GREEN means the pair fails the
+frozen-oracle clause — the two observations recorded different oracle
+digests, so **no qualifying pair ever forms**. (`oracle-changed` is the
+*post-proof* stale reason: an already-formed proof whose oracle moves
+afterwards drops out of `live`.) There is **no re-baseline verb** —
+unlike `sources rebuild`, no command exists that re-greens an
+acceptance. The only route back is to observe the new test exit nonzero
+and then exit zero, which is the work you were avoiding. `historically-proven` (the pair exists but the implementation
+has moved since) is explicitly **not** green, so a stale proof cannot
+keep rendering over code the GREEN never ran.
+
+What it does not close is larger than what it does, so state it in the
+same breath: the guarantee is scoped to the **declared sets** and to the
+**process exit code**, and nothing more.
+
 **Máddu does NOT enforce (say this plainly):**
 
 - **Re-baselining is permitted.** Any actor can run `maddu sources
   rebuild --reason "refactor"` and the gate goes green again. This is
   bounded by **visibility, not by construction** — the re-pin is on the
   spine with a reason (and the session id when one is active; `by` is
-  null otherwise), but nothing stops it.
+  null otherwise), but nothing stops it. *(Acceptance proofs have no
+  such verb — but the actor can re-declare the GOAL, which changes the
+  acceptance identity and simply leaves the new declaration unproven,
+  visibly, rather than green.)*
 - **Hash chaining authenticates continuity, not truthful appends.** A
   validly chained event can still be a dishonest one (see scenario 11).
 - **Test bodies under `scripts/test/` are deliberately NOT pinned.** They
@@ -494,12 +532,56 @@ read as clean.
   time — and a pin that is rebuilt by reflex asserts nothing. What is
   pinned is the machinery that decides what a result *means* — which is
   why this feature is named verdict-machinery drift detection, not "oracle
-  integrity": **test assertions ARE the oracle, and they are not covered.**
-  Independent review of test bodies is an external possibility (CODEOWNERS
-  + required code-owner review), currently INERT in this repo — see below.
+  integrity": **test assertions ARE the oracle, and they are not covered
+  by `tracked-source-drift`.** That statement remains true and is not
+  softened by acceptance proofs: acceptance binds only the oracle set an
+  operator explicitly *declared on a goal*, for the window between one
+  observation and the next, and only for the specific command that
+  declaration names. Every test body outside a declared set — and every
+  test at all on a repo with no acceptance-active goal — is covered by
+  nothing. Independent review of test bodies is an external possibility
+  (CODEOWNERS + required code-owner review), currently INERT in this
+  repo — see below.
 - **Same-count, same-name tests can be gutted.** Emptying a test file's
   assertions while keeping the file is invisible to a hash pin of *other*
-  files, and skip/`only` detection does not exist at all.
+  files, and skip/`only` detection does not exist at all. Within a
+  *declared* oracle set an acceptance proof narrows this: gutting the
+  oracle after the fact moves its digest and reads `oracle-changed`, not
+  green. It does **not** stop the same trick done *before* the RED — an
+  assertion checking almost nothing, observed nonzero for an unrelated
+  reason and then zero, yields an entirely honest and entirely worthless
+  proof (`A WEAK ORACLE PROVEN RED→GREEN IS STILL A WEAK ORACLE`).
+- **An undeclared set is not a covered set.** A goal with no `--oracle` /
+  `--impl` is a legacy goal: it evaluates its conditions and records no
+  acceptance receipts at all. The `acceptance-proven` gate reports that
+  as a distinct refusal rather than a pass — nothing-declared never
+  renders like proven-clean — but the reporting is the whole of the
+  protection.
+- **Acceptance proofs are refused, not degraded, in team-sync mode.** A
+  proof rests on one totally-ordered history in which a RED provably
+  precedes a GREEN; a partitioned (replica-synced) spine has no such
+  order. Derivation returns `unsupported: team-sync` and observations are
+  persisted as **void** receipts (`refusal_reason:
+  unsupported-team-sync`). Neither `orient` nor the gate ever renders
+  team-sync as green — but equally, a team-synced repo gets no acceptance
+  coverage whatsoever.
+- **The full acceptance residuals are exported, not summarized.** The
+  authoritative list is `ACCEPTANCE_HONEST_LIMITS`
+  (`template/maddu/runtime/lib/acceptance.mjs`), reproduced verbatim in
+  [56-acceptance-proof.md](56-acceptance-proof.md) and rendered as a
+  pointer beside every proof readout. The residuals that bear directly on
+  *this* scenario: **endpoint equality, not continuous immutability** — a
+  run that mutates the oracle or the implementation and restores it
+  before the post-hash is not detected and leaves no recorded difference;
+  **mutation from outside Máddu is unbounded** — only Máddu's own
+  sanctioned concurrency is serialized, so a concurrent iterate editing
+  declared bytes mid-observation is invisible; **a receipt is a
+  cooperative actor's assertion that it ran something** — the spine chain
+  is an unkeyed SHA-256, so fabricated receipts carrying a correctly
+  computed `prev_hash` verify, and deriving a proof rather than storing
+  it removes the minting verb, not the forgery; **no commit binding** —
+  nothing ties a proof to a reviewable commit; **no causation** — a moved
+  implementation digest proves co-occurrence only.
 - **`.maddu/gates/` is NOT in the default pin patterns at all** — the
   `unpinned` class only sees new files matching *pinned* patterns, so gate
   shadowing under `.maddu/gates/` is invisible to this gate unless the
@@ -529,9 +611,11 @@ read as clean.
 
 **The honest claim:** Máddu is a **cooperative accountability system
 inside the repository's existing authority boundary.** It records
-declared verification, surfaces verdict-machinery drift, and makes
-re-baselining a visible, reasoned act (attributed to the active session
-when one exists). It cannot prove those
+declared verification, surfaces verdict-machinery drift, derives — for
+declared oracle/implementation sets only — whether a command was ever
+observed to exit nonzero before it exited zero, and makes re-baselining a
+visible, reasoned act (attributed to the active session when one exists).
+It cannot prove those
 records or verdicts against an actor who can modify the repository, the
 verifier, the baseline, and the event history under the same OS
 authority. It does **not** prevent an authorized actor from weakening

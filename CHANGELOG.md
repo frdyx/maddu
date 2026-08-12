@@ -11,6 +11,61 @@ narrative summary.
 
 ---
 
+## [v1.121.0] · 2026-08-12 · acceptance proofs — RED→GREEN against a frozen oracle
+
+One PR (PR-2, `feat/acceptance-lib-core`, 16 commits). One new gate
+(`acceptance-proven`, budget 75→76 attributed), no new verbs, contract
+1.19.0 (GOAL_DECLARED sets, LOOP_STARTED intent fields, acceptance receipt
+fields, GATE_RAN `workRoot`).
+
+**What a proof claims.** That one declared command **exited nonzero** and
+later **exited zero** while the declared ORACLE bytes stayed identical and
+the declared IMPLEMENTATION bytes moved. Process-level, never
+"a test failed"; the full honest-limits list ships as an export
+(`ACCEPTANCE_HONEST_LIMITS`) and every rendering surface carries the
+pointer. There is no re-baseline verb — re-declaring destroys proofs, and
+the only route back to green is observing the new RED then the new GREEN.
+
+**Declaration.** `maddu goal set … --oracle "<glob>" --impl "<glob>"`
+(repeatable, shape-validated at the door). Legacy goals without sets keep
+the exact pre-1.121 evaluation path — no acceptance receipts, no noise.
+
+**Observation (W1).** `maddu orient` runs every verifiable condition of an
+acceptance-active goal through `observeAcceptance` — exactly once per
+orient, serialized under the observation lock, receipts on the STATE-root
+spine — then derives per-condition proof state from ONE post-observation
+verified read (`resolveSpineMode` is the one flat/partitioned/unknown
+predicate; team-sync refuses, a broken chain suppresses). `loop ralph`
+adopts the goal's conditions (`--from-goal`) or one ad-hoc acceptance
+(`--verify` + loop-level `--oracle`/`--impl`); a loop that cannot succeed
+refuses at the door (the old `no-verify-supplied` iteration burn is gone);
+an iteration-0 **baseline observation** records the RED before the first
+iterate can fix the work; stuck detection keys
+`acceptanceId:exit:fingerprint`, with a position-anchored timing
+canonicalizer (a duration-shaped test NAME is identity, not elapsed time)
+and truncation disabling the check rather than false-halting.
+
+**The gate.** `acceptance-proven` (WARN, permanently advisory — `ci pin`
+structurally refuses warn gates) renders `N/M live` wherever gates run
+(doctor / `audit acceptance` / ci), with three DISTINCT nothing-declared
+refusals, and honest arms for team-sync, integrity, goal-changed,
+declaration-invalid, expired. Orient and the gate share ONE view lib
+(`acceptance-view.mjs`): one decl mapping, one goal fold from the verified
+read's own events, one derivation — the two surfaces cannot drift.
+
+**Worktree honesty.** Gate receipts land on the shared state root, stamped
+with the emitting checkout's `workRoot`; scoped readouts (orient) exclude
+foreign checkouts including their timestamps, so a worktree's green can
+never mask the primary's red. `findStateRoot` mirrors canonical
+`resolveRoots` verbatim — misconfigured `MADDU_STATE_ROOT`/pointer targets
+throw, surfaced as doctor/audit FAIL.
+
+Review: W1 diff funnel CLEAN at round 6, gate funnel CLEAN at round 10,
+both under explicitly adjudicated boundaries; 43 plan-round findings
+adjudicated before implementation. Suites: acceptance-core 34 ·
+derive 34 · observe 47 · record 36 · wiring 67 · proven-gate 45;
+self-test **215/215**.
+
 ## [v1.120.0] · 2026-08-11 · session-lifecycle recovery mint + CLI honesty fixes
 
 Two PRs (#302, #303). No new verbs, no new gates; one new event provenance

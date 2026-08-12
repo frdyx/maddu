@@ -12,7 +12,14 @@
 //     run: async (ctx) => ({ ok, message, evidence }),
 //   }
 //
-// ctx = { repoRoot, paths, spine, projections, project, verify, readMadduJson, frameworkVersion }
+// ctx = { repoRoot, roots, paths, spine, projections, project, verify, readMadduJson, frameworkVersion }
+//
+// `ctx.roots = { workRoot, stateRoot }` is ADDITIVE (v1.120.0): `repoRoot` is
+// the STATE root, which inside an attached lane worktree is redirected to the
+// primary checkout. A gate that hashes the working tree (acceptance-proven)
+// needs the root the operator is actually editing, and would otherwise digest
+// the wrong tree. Gates must tolerate its absence — a caller passing its own
+// `ctx` override supplies whatever it knows.
 //
 // Runner emits one GATE_RAN event per gate run (unless emitEvents:false).
 // Returns { runs:[{gateId, severity, ok, message, evidence, durationMs, ts, label, description}], summary }.
@@ -65,11 +72,32 @@ export async function runGates(repoRoot, opts = {}) {
   // enrichment — { actor?, lane?, sliceId? }. Callers that know which session
   // is running the gates (slice-stop does) stamp it so the autonomy scorer can
   // bind gate runs exactly instead of by time window. Absent → legacy shape.
-  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null, attribution = null } = opts;
+  // opts.roots (gate funnel r4 #2/#3) — an EXPLICIT {workRoot, stateRoot}
+  // pair from a caller that already resolved both (doctor). It beats the
+  // cwd-derived resolution below, because a caller iterating explicit targets
+  // (`doctor --all`) must not have the invoker's standing worktree paired
+  // onto a workspace it merely shares a state root with.
+  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null, attribution = null, roots: rootsOverride = null } = opts;
 
   // Build the gate execution context. Lazy-load spine/projections/verify
   // (matches commands/_spine.mjs:loadSpineLib resolution).
-  const ctx = ctxOverride || (await buildCtx(repoRoot));
+  const ctx = ctxOverride || (await buildCtx(repoRoot, rootsOverride));
+  // HYDRATE roots on custom contexts (funnel r9 #1): ctxOverride callers
+  // (slice-stop's completion gates) predate the pair, and stamping their
+  // receipts with `repoRoot` would misattribute a worktree's verdict to the
+  // primary checkout in every scoped readout.
+  if (!validRootsPair(ctx.roots)) {
+    if (validRootsPair(rootsOverride)) {
+      ctx.roots = { workRoot: rootsOverride.workRoot, stateRoot: rootsOverride.stateRoot };
+    } else {
+      try {
+        const paths = await import(pathToFileURL(join(__dirname, 'paths.mjs')).href);
+        ctx.roots = await resolveGateRoots(paths, repoRoot);
+      } catch {
+        ctx.roots = { workRoot: repoRoot, stateRoot: repoRoot };
+      }
+    }
+  }
 
   const all = await discoverGates(repoRoot);
   const gates = all.filter((g) => {
@@ -117,7 +145,11 @@ export async function runGates(repoRoot, opts = {}) {
     });
     if (emitEvents) {
       try {
-        await ctx.spine.append(repoRoot, {
+        // The STATE root, like every other receipt (funnel r6 #2): under a
+        // split pair the authoritative spine is the one readers consult, and
+        // a work-rooted append would leave orient/cockpit showing stale gate
+        // results beside a worktree-local record nobody reads.
+        await ctx.spine.append(ctx.roots?.stateRoot || repoRoot, {
           type: ctx.spine.EVENT_TYPES.GATE_RAN,
           actor: attribution?.actor || null,
           lane: attribution?.lane || null,
@@ -128,6 +160,12 @@ export async function runGates(repoRoot, opts = {}) {
           // as a hard fail.
           data: {
             gateId: g.id, ok, status, severity: g.severity, durationMs, evidence,
+            // The CHECKOUT this verdict describes (funnel r7 #1): receipts on
+            // a SHARED spine from two checkouts would otherwise collapse in
+            // latest-per-gate readouts, letting a worktree's green mask the
+            // primary's red. Readers filter by scope; legacy receipts without
+            // it stay visible everywhere.
+            workRoot: ctx.roots?.workRoot || repoRoot,
             ...(attribution?.sliceId ? { sliceId: attribution.sliceId } : {}),
           },
         });
@@ -141,7 +179,39 @@ export async function runGates(repoRoot, opts = {}) {
   };
 }
 
-async function buildCtx(repoRoot) {
+// The work/state root PAIR for gates that read the working tree.
+//
+// The pair is resolved from the INVOCATION cwd and ACCEPTED ONLY when its
+// stateRoot is the very `repoRoot` this run was handed. That equality is the
+// whole safety argument: `runGates` can be called with an explicit root that has
+// nothing to do with where the process is standing (the fleet runner, a test
+// harness, `--repo`), and silently pairing that root with the cwd's working tree
+// would make a gate hash one repo while judging another. When they disagree — or
+// when anything at all fails to resolve — the fallback is the EQUAL pair, which
+// is exactly today's behavior for every gate that only knows `repoRoot`.
+async function resolveGateRoots(paths, repoRoot) {
+  try {
+    if (typeof paths.resolveRoots !== 'function') return { workRoot: repoRoot, stateRoot: repoRoot };
+    const pair = await paths.resolveRoots(process.cwd());
+    // EITHER leg may be the root this run was handed (funnel r4): ci hands
+    // the state root, doctor hands the work root — both name the same
+    // workspace the invoker is standing in. A root matching neither leg is a
+    // foreign target (fleet runner, test harness) and gets the equal pair.
+    if (pair && typeof pair.workRoot === 'string' && pair.workRoot
+      && (pair.stateRoot === repoRoot || pair.workRoot === repoRoot)) {
+      return { workRoot: pair.workRoot, stateRoot: pair.stateRoot };
+    }
+  } catch {}
+  return { workRoot: repoRoot, stateRoot: repoRoot };
+}
+
+function validRootsPair(p) {
+  return !!(p && typeof p === 'object'
+    && typeof p.workRoot === 'string' && p.workRoot
+    && typeof p.stateRoot === 'string' && p.stateRoot);
+}
+
+async function buildCtx(repoRoot, rootsOverride = null) {
   const paths = await import(pathToFileURL(join(__dirname, 'paths.mjs')).href);
   const spine = await import(pathToFileURL(join(__dirname, 'spine.mjs')).href);
   const projections = await import(pathToFileURL(join(__dirname, 'projections.mjs')).href);
@@ -149,6 +219,7 @@ async function buildCtx(repoRoot) {
   try { verify = await import(pathToFileURL(join(__dirname, 'verify.mjs')).href); } catch {}
   return {
     repoRoot,
+    roots: validRootsPair(rootsOverride) ? { workRoot: rootsOverride.workRoot, stateRoot: rootsOverride.stateRoot } : await resolveGateRoots(paths, repoRoot),
     paths,
     spine,
     projections,

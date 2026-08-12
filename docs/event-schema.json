@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.17.0",
+  "x-contractVersion": "1.19.0",
   "type": "object",
   "required": [
     "v",
@@ -2605,6 +2605,9 @@
               },
               "status": {
                 "type": "string"
+              },
+              "workRoot": {
+                "type": "string"
               }
             }
           }
@@ -2622,15 +2625,21 @@
       "then": {
         "properties": {
           "data": {
-            "description": "A goal with success conditions and constraints was declared.",
+            "description": "A goal with success conditions and constraints was declared, plus the acceptance sets (oracle / implementation) its success conditions are proven against.",
             "type": "object",
             "additionalProperties": true,
             "properties": {
               "constraints": {
                 "type": "array"
               },
+              "implementation": {
+                "type": "array"
+              },
               "objective": {
                 "type": "string"
+              },
+              "oracle": {
+                "type": "array"
               },
               "success": {
                 "type": "array"
@@ -4286,7 +4295,7 @@
       "then": {
         "properties": {
           "data": {
-            "description": "A loop (ralph or plan-loop) started.",
+            "description": "A loop (ralph or plan-loop) started. The three intent fields ride only an acceptance-wired ralph loop: where its verification came from, whether a baseline observation was requested, and whether ad-hoc flags overrode an active goal's conditions.",
             "type": "object",
             "additionalProperties": true,
             "properties": {
@@ -4304,6 +4313,15 @@
               },
               "cooldownMs": {
                 "type": "number"
+              },
+              "baselineRequested": {
+                "type": "boolean"
+              },
+              "verifySource": {
+                "type": "string"
+              },
+              "verifyOverride": {
+                "type": "boolean"
               }
             }
           }
@@ -5856,7 +5874,7 @@
       "then": {
         "properties": {
           "data": {
-            "description": "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative.",
+            "description": "A verification run (goal success-eval, project/self test, or heavy suite) was opened before it ran — a dangling STARTED with no paired RAN is read as non-green, so a crash can't leave a stale pass authoritative. An acceptance observation additionally carries its declaration identity here, because the proof derivation requires the STARTED and the RAN to agree on it.",
             "type": "object",
             "additionalProperties": true,
             "properties": {
@@ -5864,6 +5882,39 @@
                 "type": "string"
               },
               "profile": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "acceptanceId": {
+                "type": "string"
+              },
+              "commandSha256": {
+                "type": "string"
+              },
+              "declEventId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "declSource": {
+                "type": "string"
+              },
+              "loopId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scopeNonce": {
                 "type": [
                   "string",
                   "null"
@@ -5885,7 +5936,7 @@
       "then": {
         "properties": {
           "data": {
-            "description": "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection.",
+            "description": "A verification RECEIPT appended from the runner's in-process result (never a re-read state file) and referencing its paired VERIFICATION_STARTED — the recency/success readouts trust this tamper-detecting spine receipt, not a hand-writable projection. An acceptance observation adds its declaration identity, its eligibility verdict (observation_status / refusal_reason), the process outcome, the redacted command, and the two declared set records; a path that recorded a receipt WITHOUT running (lock-busy) writes the outcome fields null rather than omitting them.",
             "type": "object",
             "additionalProperties": true,
             "properties": {
@@ -5954,6 +6005,90 @@
               },
               "verifiable": {
                 "type": "number"
+              },
+              "acceptanceId": {
+                "type": "string"
+              },
+              "commandSha256": {
+                "type": "string"
+              },
+              "declEventId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "declSource": {
+                "type": "string"
+              },
+              "loopId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scopeNonce": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "observation_status": {
+                "type": "string"
+              },
+              "refusal_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "command": {
+                "type": "string"
+              },
+              "exit": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "signal": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timed_out": {
+                "type": "boolean"
+              },
+              "spawn_error": {
+                "type": "boolean"
+              },
+              "duration_ms": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "outcome_class": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "oracle": {
+                "type": "object"
+              },
+              "impl": {
+                "type": "object"
+              },
+              "subject": {
+                "type": "object"
               }
             }
           }

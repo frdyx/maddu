@@ -37,16 +37,65 @@ export function evalCondition(cond, repoRoot, runVerify) {
   }
 }
 
+// PR-2 W1 — the SECOND entry point into the same state vocabulary: one
+// `observeAcceptance` result mapped onto the exact met/pending semantics
+// `evalCondition` produces from a spawnSync result. Two producers, one
+// vocabulary, so the CLI render, the cache and the success receipt cannot
+// disagree about what "met" means depending on which path evaluated it.
+//
+// It takes the WHOLE observation result, not its `ran` half, because the
+// no-run outcomes are exactly the ones a caller must not mistake for a verdict:
+// a lock-busy refusal carries no `ran` at all, and reading `res.ran.exit` off
+// it would throw inside orient. A result that is not `ok` is PENDING WITH A
+// NOTE and deliberately carries NO `exitCode` — an exit code on a run that
+// never happened is a fact about nothing, and `evalCondition`'s own no-exit
+// branch (`r.error || r.status == null`) sets the same note-without-code shape.
+//
+// The three run outcomes map by `outcome_class` and nothing else:
+//   process-pass → met     (exitCode 0 — the class IS "exited zero")
+//   process-fail → pending (+ the real exit code)
+//   infra-fail   → pending (+ a note; a timeout, signal or spawn error is not
+//                           evidence about the condition, only about the run)
+export function evalConditionFromResult(cond, res) {
+  const r = res && typeof res === 'object' ? res : {};
+  if (r.ok !== true) {
+    const reason = (typeof r.reason === 'string' && r.reason.trim()) ? r.reason : 'unknown';
+    return { ...cond, state: 'pending', note: `acceptance observation did not run (${reason})` };
+  }
+  const ran = r.ran && typeof r.ran === 'object' ? r.ran : {};
+  if (ran.outcome_class === 'process-pass') return { ...cond, state: 'met', exitCode: 0 };
+  if (ran.outcome_class === 'process-fail') return { ...cond, state: 'pending', exitCode: ran.exit };
+  const note = ran.spawn_error ? 'command could not be spawned'
+    : ran.timed_out ? 'command timed out'
+      : ran.signal ? `command died on signal ${ran.signal}`
+        : 'no exit code';
+  return { ...cond, state: 'pending', note };
+}
+
+// The AGGREGATE formulas, extracted so the legacy spawn path and the acceptance
+// path compute progress from one function rather than two copies that drift.
+// Lifted out of `evalSuccess` unchanged in behavior.
+//
+// `verifiable` counts rows whose state is not 'unverifiable' rather than rows
+// carrying a `verify` string. On everything either producer emits those are the
+// same set — `evalCondition` returns 'unverifiable' exactly when `!cond.verify`
+// and every other state implies a command — so `evalSuccess` is unaffected. The
+// state is the better key because this function's other three formulas already
+// read state, and a row is what it REPORTS, not what it was declared as.
+export function summarizeEvaluated(evaluated) {
+  const rows = Array.isArray(evaluated) ? evaluated : [];
+  const metCount = rows.filter((c) => c.state === 'met').length;
+  const verifiable = rows.filter((c) => c.state !== 'unverifiable').length;
+  const pendingCount = rows.filter((c) => c.state === 'pending').length;
+  const allMet = verifiable > 0 && pendingCount === 0;
+  return { evaluated: rows, metCount, verifiable, pendingCount, allMet };
+}
+
 // Evaluate a goal's full success set → the same derivation orient computes.
 // runVerify=false returns every condition as 'skipped' without spawning.
 export function evalSuccess(goal, repoRoot, runVerify) {
   const success = Array.isArray(goal?.success) ? goal.success : [];
-  const evaluated = success.map((c) => evalCondition(c, repoRoot, runVerify));
-  const metCount = evaluated.filter((c) => c.state === 'met').length;
-  const verifiable = evaluated.filter((c) => c.verify).length;
-  const pendingCount = evaluated.filter((c) => c.state === 'pending').length;
-  const allMet = verifiable > 0 && pendingCount === 0;
-  return { evaluated, metCount, verifiable, pendingCount, allMet };
+  return summarizeEvaluated(success.map((c) => evalCondition(c, repoRoot, runVerify)));
 }
 
 function cachePath(repoRoot) {

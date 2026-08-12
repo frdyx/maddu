@@ -1,6 +1,6 @@
 {
-  "version": "1.17.0",
-  "fingerprint": "0cf0ae16",
+  "version": "1.19.0",
+  "fingerprint": "3556e729",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -517,7 +517,8 @@
           "ok": "boolean",
           "severity": "string",
           "sliceId": "string",
-          "status": "string"
+          "status": "string",
+          "workRoot": "string?"
         }
       },
       "GOAL_COMPLETED": {
@@ -532,7 +533,9 @@
         "frozen": false,
         "data": {
           "constraints": "array",
+          "implementation": "array",
           "objective": "string",
+          "oracle": "array",
           "success": "array"
         }
       },
@@ -721,11 +724,14 @@
       "LOOP_STARTED": {
         "frozen": false,
         "data": {
+          "baselineRequested": "boolean?",
           "cooldownMs": "number",
           "goal": "string",
           "kind": "string",
           "loopId": "string",
-          "maxIter": "number"
+          "maxIter": "number",
+          "verifyOverride": "boolean?",
+          "verifySource": "string?"
         }
       },
       "MAILBOX_READ": {
@@ -1663,31 +1669,57 @@
       "VERIFICATION_RAN": {
         "frozen": false,
         "data": {
+          "acceptanceId": "string?",
           "allMet": "boolean?",
+          "command": "string?",
+          "commandSha256": "string?",
           "complete": "boolean",
           "conditionCount": "number?",
           "conditionPlanDigest": "string?",
           "conditions": "array?",
           "counts": "object|null",
+          "declEventId": "string|null?",
+          "declSource": "string?",
+          "duration_ms": "number|null?",
+          "exit": "number|null?",
+          "impl": "object?",
           "kind": "string",
+          "loopId": "string|null?",
           "metCount": "number?",
           "objective": "string|null?",
+          "observation_status": "string?",
+          "oracle": "object?",
+          "outcome_class": "string|null?",
           "pendingCount": "number?",
+          "phase": "string|null?",
           "planDigest": "string?",
           "planTaskCount": "number?",
           "profile": "string|null",
+          "refusal_reason": "string|null?",
           "result": "string",
+          "scopeNonce": "string|null?",
           "setAt": "string|null?",
+          "signal": "string|null?",
+          "spawn_error": "boolean?",
           "startedId": "string",
+          "subject": "object?",
           "tasksTruncated": "boolean?",
+          "timed_out": "boolean?",
           "verifiable": "number?"
         }
       },
       "VERIFICATION_STARTED": {
         "frozen": false,
         "data": {
+          "acceptanceId": "string?",
+          "commandSha256": "string?",
+          "declEventId": "string|null?",
+          "declSource": "string?",
           "kind": "string",
-          "profile": "string|null"
+          "loopId": "string|null?",
+          "phase": "string|null?",
+          "profile": "string|null",
+          "scopeNonce": "string|null?"
         }
       },
       "WORKER_ENV_FILTERED": {

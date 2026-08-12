@@ -36,7 +36,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
-import { findRepoRoot } from './_resolve.mjs';
+import { findRepoRoot, findStateRoot } from './_resolve.mjs';
 import { exists } from './_libroot.mjs';
 
 const ANSI = {
@@ -126,6 +126,11 @@ const GATE_IDS = {
   // the import graph can't see). Baselined monoliths may only shrink; a new or
   // grown one fails. Skips when no contract / mass config.
   mass: 'architecture-mass',
+  // PR-2 gate campaign (funnel r2 #2) — acceptance-proven: the declared-
+  // verification readout. Doctor and CI already run every builtin gate; audit
+  // running a curated subset that silently omitted it made "renders wherever
+  // gates run" false on exactly one surface.
+  acceptance: 'acceptance-proven',
   // v1.19.0 — generated-artifacts-current: every single-sourced artifact is
   // byte-equal to a fresh render of its authored source, and no payload file is
   // an orphan (no source). The enforcement arm of the generated-artifact
@@ -145,7 +150,7 @@ function gateRunToCheck(run) {
 // Run one or all of the reusable gates via the gate runner. repoRoot is the
 // cwd repo (used by the runner for ctx); the coherence gates resolve the
 // framework source from their own __dirname regardless.
-async function runGateChecks(repoRoot, onlyGateId) {
+async function runGateChecks(repoRoot, onlyGateId, roots = null) {
   const gatesLib = await loadGatesLib();
   if (!gatesLib?.runGates) {
     return [{ level: 'WARN', label: 'gate runner', detail: 'gates.mjs not available' }];
@@ -153,7 +158,7 @@ async function runGateChecks(repoRoot, onlyGateId) {
   const checks = [];
   const ids = onlyGateId ? [onlyGateId] : Object.values(GATE_IDS);
   for (const id of ids) {
-    const result = await gatesLib.runGates(repoRoot, { onlyId: id, emitEvents: false });
+    const result = await gatesLib.runGates(repoRoot, { onlyId: id, emitEvents: false, ...(roots ? { roots } : {}) });
     if (result.runs.length === 0) {
       checks.push({ level: 'WARN', label: id, detail: 'gate not found' });
     } else {
@@ -580,7 +585,7 @@ async function checkGovernanceBudget() {
   return { level: 'PASS', label: 'governance budget', detail: `${summary}${latency.level === 'OK' ? ` · ${latency.message}` : ''}` };
 }
 
-const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget', 'positioning']);
+const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget', 'positioning', 'acceptance']);
 
 export default async function audit(argv) {
   const { flags, positional } = parseFlags(argv);
@@ -608,6 +613,21 @@ export default async function audit(argv) {
   if (!sub || sub === 'architecture') checks.push(...await runGateChecks(repoRoot, GATE_IDS.architecture));
   if (!sub || sub === 'mass') checks.push(...await runGateChecks(repoRoot, GATE_IDS.mass));
   if (!sub || sub === 'generated') checks.push(...await runGateChecks(repoRoot, GATE_IDS.generated));
+  // The acceptance gate reads the SHARED spine (funnel r3 #2, explicit pair
+  // per r4): from an attached worktree the proof record lives at the
+  // pointer's target while the digests describe the tree the operator is
+  // standing in; every other audit check here is checkout-scoped and keeps
+  // `repoRoot` alone.
+  if (!sub || sub === 'acceptance') {
+    try {
+      checks.push(...await runGateChecks(repoRoot, GATE_IDS.acceptance,
+        { workRoot: repoRoot, stateRoot: (await findStateRoot(process.cwd())) || repoRoot }));
+    } catch (err) {
+      // Misconfigured state override/pointer (funnel r5 #1): a hard finding,
+      // never a silent fallback to a state other commands refuse.
+      checks.push({ level: 'FAIL', label: 'acceptance proven', detail: err.message });
+    }
+  }
 
   // Audit-only checks.
   if (!sub || sub === 'slash') checks.push(await checkSlashOnRamp());
