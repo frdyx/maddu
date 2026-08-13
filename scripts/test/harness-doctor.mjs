@@ -82,7 +82,7 @@ const fxEntry = (over = {}) => ({
     darwin: ['fx/hooks.json', '~/fxglobal/hooks.json'],
     linux: ['fx/hooks.json', '~/fxglobal/hooks.json'],
   },
-  sentinel: { marker: 'hooks fire', files: ['fx/hooks.json'] },
+  sentinel: { markers: ['maddu.mjs', 'hooks fire'], files: ['fx/hooks.json'] },
   detect: printCmd('fx 1.2.3'),
   enforcementCeiling: 'block',
   verifiedAgainst: {
@@ -153,7 +153,7 @@ const ctrlRoot = await makeRoot('ctl');
   const work = await makeRoot('work');
   const state = await makeRoot('state');
   await mkdir(join(work, 'fx'), { recursive: true });
-  await writeFile(join(work, 'fx', 'hooks.json'), 'x hooks fire x\n');
+  await writeFile(join(work, 'fx', 'hooks.json'), 'x maddu.mjs hooks fire x\n');
   const manifest = manifestOf(fxEntry());
   await D.runHarnessDoctor({ workRoot: work, stateRoot: state }, 'fx', baseOpts(manifest));
   const onState = await eventsOfType(state);
@@ -261,6 +261,17 @@ const armRoot = await makeRoot('arm');
   ok('a stanza past 512 KiB is still found (whole-file scan, bounded memory)',
     rbig.configs.find((c) => c.path === 'fx/hooks.json')?.status === 'stanza-present',
     JSON.stringify(rbig.configs));
+
+  // Funnel r6 #5 — the sentinel is an ALL-OF marker set: a config carrying
+  // only the generic 'hooks fire' prose (someone else's hook comment) must
+  // NOT read stanza-present.
+  const proseRoot = await makeRoot('prose');
+  await mkdir(join(proseRoot, 'fx'), { recursive: true });
+  await writeFile(join(proseRoot, 'fx', 'hooks.json'), '{ "note": "these hooks fire on save" }\n');
+  const rprose = await D.observeHarness({ workRoot: proseRoot, stateRoot: proseRoot }, 'fx', baseOpts(manifestOf(fxEntry())));
+  ok("a config with ONLY the generic fragment reads present-no-stanza (all-of marker set)",
+    rprose.configs.find((c) => c.path === 'fx/hooks.json')?.status === 'present-no-stanza',
+    JSON.stringify(rprose.configs));
 
   // Funnel r4 #3 — a DIRECTORY occupying a candidate path is 'unreadable'
   // (something is there but it is not an inspectable config file); only a

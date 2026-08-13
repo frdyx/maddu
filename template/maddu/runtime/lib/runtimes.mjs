@@ -10,7 +10,7 @@
 // /bridge/workers/<id>/heartbeat — that surface is shared with Slice 12 so
 // runtime-spawned workers appear immediately in /swarm and the stuck-banner.
 
-import { mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
 import { delimiter, dirname, extname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -385,7 +385,14 @@ export async function resolveCommandPathDetailed(command, env = process.env) {
       try {
         if ((await stat(cand)).isFile()) return { path: cand, inconclusive: false };
       } catch (e) {
-        if (e?.code !== 'ENOENT' && e?.code !== 'ENOTDIR') sawError = true;
+        if (e?.code === 'ENOENT') {
+          // stat follows symlinks: a DANGLING link stats ENOENT although an
+          // entry exists — a broken installation, not clean absence
+          // (funnel r6 #3). lstat is the tiebreaker.
+          try { await lstat(cand); sawError = true; } catch {}
+        } else if (e?.code !== 'ENOTDIR') {
+          sawError = true;
+        }
       }
     }
   }
@@ -498,7 +505,14 @@ export async function probeRuntime(spec = {}) {
     if (process.platform !== 'win32') {
       const killGroup = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} };
       const handlers = ['SIGINT', 'SIGTERM'].map((sig) => {
-        const h = () => { killGroup(); process.kill(process.pid, sig); };
+        const h = () => {
+          killGroup();
+          // The ORIGINAL signal already reached every other listener (the
+          // bridge's shutdown handlers, say) — re-raising would run them
+          // TWICE (funnel r6 #1). Re-raise only when this transient handler
+          // was the sole listener and default exit behavior needs restoring.
+          if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
+        };
         process.once(sig, h);
         return [sig, h];
       });

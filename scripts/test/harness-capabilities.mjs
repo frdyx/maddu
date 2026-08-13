@@ -55,7 +55,7 @@ const validEntry = (over = {}) => ({
     darwin: ['fx/hooks.json', '~/fx/hooks.json'],
     linux: ['fx/hooks.json', '~/fx/hooks.json'],
   },
-  sentinel: { marker: 'hooks fire', files: ['fx/hooks.json'] },
+  sentinel: { markers: ['maddu.mjs', 'hooks fire'], files: ['fx/hooks.json'] },
   detect: { command: 'fx', args: ['--version'], versionPattern: '(\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)' },
   enforcementCeiling: 'block',
   verifiedAgainst: {
@@ -96,7 +96,8 @@ const validEntry = (over = {}) => ({
     ['one-source blocking HOOK even under an observe ceiling is caught (ceiling-consistency)', validEntry({ enforcementCeiling: 'observe' }), /strongest claim/i],
     ['half-open range (min set, max null)', validEntry({ verifiedAgainst: { range: { min: '1.2.0', max: null }, date: 'd', sources: ['a', 'b'] } }), /BOTH bounds or NEITHER/i],
     ['inverted range (min > max)', validEntry({ verifiedAgainst: { range: { min: '2.0.0', max: '1.0.0' }, date: 'd', sources: ['a', 'b'] } }), /min > max/i],
-    ['sentinel file that is not a declared configPaths candidate', validEntry({ sentinel: { marker: 'hooks fire', files: ['elsewhere/hooks.json'] } }), /not a declared configPaths candidate/i],
+    ['sentinel file that is not a declared configPaths candidate', validEntry({ sentinel: { markers: ['maddu.mjs', 'hooks fire'], files: ['elsewhere/hooks.json'] } }), /not a declared configPaths candidate/i],
+    ['empty sentinel marker set', validEntry({ sentinel: { markers: [], files: ['fx/hooks.json'] } }), /sentinel\.markers/i],
     ['detect.command carrying shell metacharacters', validEntry({ detect: { command: 'fx --version | tee /tmp/x', args: [], versionPattern: '(\\d+\\.\\d+\\.\\d+)' } }), /shell metacharacters|shell-free/i],
     ['empty hooks object', validEntry({ hooks: {} }), /non-empty object/i],
     ['unknown blocking kind', validEntry({ hooks: { pre_tool: { blocking: 'enforce', transport: 'stdin-json' } } }), /blocking/i],
@@ -238,7 +239,7 @@ const validEntry = (over = {}) => ({
 {
   const e = validEntry({
     configPaths: { win32: ['w.json'], darwin: ['d.json'], linux: ['l.json'] },
-    sentinel: { marker: 'hooks fire', files: ['w.json'] },
+    sentinel: { markers: ['maddu.mjs', 'hooks fire'], files: ['w.json'] },
   });
   ok('platform list is returned for a known platform', JSON.stringify(H.configCandidatesFor(e, 'win32')) === JSON.stringify(['w.json']));
   ok('unknown platform falls back to the linux list', JSON.stringify(H.configCandidatesFor(e, 'freebsd')) === JSON.stringify(['l.json']));
@@ -268,28 +269,33 @@ const validEntry = (over = {}) => ({
       ...over,
     },
   });
-  // Deliberately OUT OF ORDER: the newest codex reading arrives first.
+  // INPUT ORDER IS THE AUTHORITY (funnel r1 #5, r6 #2): for a spine read,
+  // input order is canonical append order — the one truth that survives
+  // same-millisecond appends AND a wall clock stepping BACKWARD between two
+  // appends on one chain. A timestamp re-sort could only ever disagree with
+  // the chain, so the reducer must not sort at all. Here the clock runs
+  // backward (later append carries an earlier ts) and append order wins.
   const events = [
-    ev('evt_3', '2026-08-12T10:00:03.000Z', 'codex', { status: 'verified', cliVersion: '0.144.0', drift: null }),
+    ev('evt_1', '2026-08-12T10:00:03.000Z', 'codex', { status: 'verified', cliVersion: '0.144.0', drift: null }),
     { id: 'evt_x', ts: '2026-08-12T10:00:09.000Z', type: 'SLICE_STOP', data: { harness: 'codex' } },
-    ev('evt_1', '2026-08-12T10:00:01.000Z', 'codex', { status: 'not-installed' }),
-    ev('evt_2', '2026-08-12T10:00:02.000Z', 'hermes'),
+    ev('evt_2', '2026-08-12T10:00:01.000Z', 'codex', { status: 'not-installed' }),
+    ev('evt_3', '2026-08-12T10:00:02.000Z', 'hermes'),
     { id: 'evt_y', ts: '2026-08-12T10:00:08.000Z', type: 'HARNESS_CAPABILITY_OBSERVED', data: { harness: '' } },
   ];
   const p = H.reduceHarnessCapabilities(events);
-  ok('reducer: latest-per-harness wins under out-of-order input',
-    p.harnesses.codex?.status === 'verified' && p.harnesses.codex?.eventId === 'evt_3',
+  ok('reducer: the LAST APPENDED observation wins even when its ts is older (backward clock)',
+    p.harnesses.codex?.status === 'not-installed' && p.harnesses.codex?.eventId === 'evt_2',
     JSON.stringify(p.harnesses.codex && { status: p.harnesses.codex.status, eventId: p.harnesses.codex.eventId }));
-  ok('reducer: other harnesses keep their own latest', p.harnesses.hermes?.eventId === 'evt_2');
+  ok('reducer: other harnesses keep their own latest', p.harnesses.hermes?.eventId === 'evt_3');
   ok('reducer: foreign event types are ignored', !('undefined' in p.harnesses) && Object.keys(p.harnesses).length === 2);
   ok('reducer: an observation with an empty harness name is ignored', !('' in p.harnesses));
-  ok('reducer: updatedAt is the newest OBSERVED ts', p.updatedAt === '2026-08-12T10:00:03.000Z', p.updatedAt);
+  ok('reducer: updatedAt is the LAST APPENDED observation ts (chain head, not max ts)',
+    p.updatedAt === '2026-08-12T10:00:02.000Z', p.updatedAt);
   ok('reducer: manifestVersion carried through', p.manifestVersion === '1.0.0');
   ok('reducer: schemaVersion stamped', p.schemaVersion === H.HARNESS_PROJECTION_SCHEMA_VERSION && p.schemaVersion === 1);
 
-  // ts tie -> the caller's INPUT order decides (canonical spine order for a
-  // readAll input). Random event ids carry no ordering information, so an id
-  // that sorts EARLIER but arrives LATER must still win (funnel r1 #5).
+  // Same-ts tie: input (append) order decides. Random event ids carry no
+  // ordering information, so an id that sorts EARLIER but arrives LATER wins.
   const tie = H.reduceHarnessCapabilities([
     ev('evt_b', '2026-08-12T10:00:01.000Z', 'codex', { status: 'verified' }),
     ev('evt_a', '2026-08-12T10:00:01.000Z', 'codex', { status: 'not-installed' }),

@@ -19,7 +19,7 @@
 // the projection. Inside a lane worktree those differ, and reading configs from
 // one while recording against the other is the whole point.
 
-import { mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { pathsFor } from './paths.mjs';
@@ -79,14 +79,18 @@ export function resolveConfigCandidate(candidate, workRoot, home = homedir()) {
   return resolvePath(join(workRoot, candidate));
 }
 
-// stat with the distinction the config observation needs: ENOENT is definitive
-// absence; any other stat failure is an inspection failure, never absence.
+// stat with the distinction the config observation needs: only a definitive
+// nothing-there is 'absent'; any other stat failure is an inspection failure,
+// never absence. stat follows symlinks, so its ENOENT needs an lstat
+// tiebreak: a DANGLING config symlink is an existing (broken) entry, not a
+// missing one (funnel r6 #4).
 async function statKind(p) {
   try {
     const s = await stat(p);
     return s.isFile() ? 'file' : 'not-file';
   } catch (err) {
-    return err?.code === 'ENOENT' ? 'absent' : 'error';
+    if (err?.code !== 'ENOENT') return 'error';
+    try { await lstat(p); return 'error'; } catch { return 'absent'; }
   }
 }
 
@@ -230,7 +234,9 @@ async function probeHarness(stateRoot, entry, opts = {}) {
 export async function observeConfigs(entry, workRoot, { platform = process.platform, home = homedir() } = {}) {
   const candidates = configCandidatesFor(entry, platform);
   const scanSet = new Set(Array.isArray(entry?.sentinel?.files) ? entry.sentinel.files : []);
-  const marker = entry?.sentinel?.marker || null;
+  const markers = Array.isArray(entry?.sentinel?.markers)
+    ? entry.sentinel.markers.filter((m) => typeof m === 'string' && m)
+    : [];
   const out = [];
   for (const candidate of candidates) {
     const resolved = resolveConfigCandidate(candidate, workRoot, home);
@@ -239,15 +245,22 @@ export async function observeConfigs(entry, workRoot, { platform = process.platf
       const kind = await statKind(resolved);
       if (kind === 'error' || kind === 'not-file') {
         // SOMETHING occupies the path but it is not an inspectable config
-        // file (a directory, a socket, an EACCES). Only a definitive ENOENT
-        // may read 'absent' — that is the documented contract (funnel r4 #3).
+        // file (a directory, a socket, an EACCES, a dangling symlink). Only
+        // a definitive nothing-there may read 'absent' (funnel r4 #3, r6 #4).
         status = 'unreadable';
       } else if (kind === 'file') {
         status = 'present-no-stanza';
-        if (marker && scanSet.has(candidate)) {
-          const scan = await scanFileForMarker(resolved, marker);
-          if (scan === 'found') status = 'stanza-present';
-          else if (scan === 'error') status = 'unreadable';
+        if (markers.length && scanSet.has(candidate)) {
+          // ALL markers must appear (funnel r6 #5); any scan error makes the
+          // reading unreadable rather than a definitive claim either way.
+          let found = 0, errored = false;
+          for (const marker of markers) {
+            const scan = await scanFileForMarker(resolved, marker);
+            if (scan === 'found') found++;
+            else if (scan === 'error') { errored = true; break; }
+          }
+          if (errored) status = 'unreadable';
+          else if (found === markers.length) status = 'stanza-present';
         }
       }
     }

@@ -83,7 +83,7 @@ Entries carry a `volatile` marker when the surface is known to be moving — for
 
 #### Config observation
 
-Every candidate config path in the manifest is reported, in manifest order, with `absent`, `present-no-stanza`, `stanza-present`, or `unreadable`. Only a definitive ENOENT reads `absent`; a candidate that exists but cannot be inspected (or whose stanza scan errors mid-read) reads `unreadable` — an inspection failure, never implied absence. `configPath` is the first candidate that is not absent. The stanza scan covers the whole file with bounded memory. PR1 scans for the Máddu stanza marker only — it does not parse a harness's own configuration semantics.
+Every candidate config path in the manifest is reported, in manifest order, with `absent`, `present-no-stanza`, `stanza-present`, or `unreadable`. Only a definitive nothing-there reads `absent` (a dangling symlink does not); a candidate that exists but cannot be inspected (or whose stanza scan errors mid-read) reads `unreadable` — an inspection failure, never implied absence. `configPath` is the first candidate that is not absent. `stanza-present` requires **every** fragment of the Máddu sentinel marker set to appear (a config merely containing the words "hooks fire" does not qualify), and the scan covers the whole file with bounded memory. PR1 scans for those fragments only — it does not parse a harness's own configuration semantics.
 
 Repo-local candidates resolve against the **work** root (the checkout being inspected) while the event and projection are written against the **state** root, so inside a lane worktree the reading describes the right checkout.
 

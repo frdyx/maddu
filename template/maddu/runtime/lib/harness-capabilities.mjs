@@ -54,11 +54,14 @@ export const DRIFT_REASONS = [
   'no-verified-range', 'probe-failed',
 ];
 
-// The marker Máddu writes into a harness config when it installs its hooks —
-// the same sentinel claude-hooks.mjs matches on (`maddu.mjs … hooks fire …`).
-// Scanning for it is the ONLY thing PR1 does with a foreign config file: no
-// parsing of the harness's own config semantics.
-const MADDU_STANZA_MARKER = 'hooks fire';
+// The marker SET Máddu writes into a harness config when it installs its
+// hooks — the fragments a claude-hooks.mjs stanza actually carries
+// (`… maddu.mjs … hooks fire …`). ALL fragments must appear for a config to
+// read stanza-present: 'hooks fire' alone is ordinary prose in someone
+// else's hook config, and a false stanza-present would persist into the
+// record (funnel r6 #5). Scanning for these is the ONLY thing PR1 does with
+// a foreign config file: no parsing of the harness's own config semantics.
+const MADDU_STANZA_MARKERS = ['maddu.mjs', 'hooks fire'];
 
 // Version-string grammar shared by every manifest probe. Tolerant of a name
 // prefix and a leading `v` (`codex-cli 0.144.0`, `v1.2.3`, `2.1.228 (Claude
@@ -93,7 +96,7 @@ export const HARNESS_CAPABILITIES = {
       linux: ['.claude/settings.json', '.claude/settings.local.json', '~/.claude/settings.json'],
     },
     sentinel: {
-      marker: MADDU_STANZA_MARKER,
+      markers: MADDU_STANZA_MARKERS,
       files: ['.claude/settings.json', '.claude/settings.local.json', '~/.claude/settings.json'],
     },
     detect: { command: 'claude', args: ['--version'], versionPattern: SEMVER_PROBE_PATTERN },
@@ -132,7 +135,7 @@ export const HARNESS_CAPABILITIES = {
       linux: ['.codex/hooks.json', '~/.codex/hooks.json', '~/.codex/config.toml'],
     },
     sentinel: {
-      marker: MADDU_STANZA_MARKER,
+      markers: MADDU_STANZA_MARKERS,
       files: ['.codex/hooks.json', '~/.codex/hooks.json', '~/.codex/config.toml'],
     },
     detect: { command: 'codex', args: ['--version'], versionPattern: SEMVER_PROBE_PATTERN },
@@ -174,7 +177,7 @@ export const HARNESS_CAPABILITIES = {
       linux: ['.hermes/hooks.json', '~/.hermes/hooks.json', '~/.hermes/config.json'],
     },
     sentinel: {
-      marker: MADDU_STANZA_MARKER,
+      markers: MADDU_STANZA_MARKERS,
       files: ['.hermes/hooks.json', '~/.hermes/hooks.json', '~/.hermes/config.json'],
     },
     detect: { command: 'hermes', args: ['--version'], versionPattern: SEMVER_PROBE_PATTERN },
@@ -211,7 +214,7 @@ export const HARNESS_CAPABILITIES = {
       linux: ['.openhands/hooks.json', '~/.openhands/hooks.json', '~/.openhands/config.toml'],
     },
     sentinel: {
-      marker: MADDU_STANZA_MARKER,
+      markers: MADDU_STANZA_MARKERS,
       files: ['.openhands/hooks.json', '~/.openhands/hooks.json', '~/.openhands/config.toml'],
     },
     detect: { command: 'openhands', args: ['--version'], versionPattern: SEMVER_PROBE_PATTERN },
@@ -245,7 +248,7 @@ export const HARNESS_CAPABILITIES = {
       linux: ['.gemini/settings.json', '~/.gemini/settings.json'],
     },
     sentinel: {
-      marker: MADDU_STANZA_MARKER,
+      markers: MADDU_STANZA_MARKERS,
       files: ['.gemini/settings.json', '~/.gemini/settings.json'],
     },
     detect: { command: 'gemini', args: ['--version'], versionPattern: SEMVER_PROBE_PATTERN },
@@ -474,12 +477,17 @@ export function validateHarnessEntry(name, entry) {
   }
 
   // sentinel — the scan set must be a subset of the declared candidates, so a
-  // stanza can never be "looked for" somewhere the doctor never inspects.
+  // stanza can never be "looked for" somewhere the doctor never inspects. The
+  // markers are an ALL-OF set (funnel r6 #5): a single generic fragment would
+  // false-positive on unrelated hook configs.
   const sentinel = entry.sentinel;
   if (!sentinel || typeof sentinel !== 'object' || Array.isArray(sentinel)) {
-    errs.push(`${at('sentinel')} must be an object { marker, files }`);
+    errs.push(`${at('sentinel')} must be an object { markers, files }`);
   } else {
-    if (!isNonEmptyString(sentinel.marker)) errs.push(`${at('sentinel.marker')} must be a non-empty string`);
+    if (!Array.isArray(sentinel.markers) || sentinel.markers.length === 0
+        || sentinel.markers.some((m) => !isNonEmptyString(m))) {
+      errs.push(`${at('sentinel.markers')} must be a non-empty array of non-empty strings`);
+    }
     if (!Array.isArray(sentinel.files) || sentinel.files.length === 0) {
       errs.push(`${at('sentinel.files')} must be a non-empty array`);
     } else {
@@ -593,23 +601,16 @@ export function validateHarnessManifest(manifest = HARNESS_CAPABILITIES) {
 export const HARNESS_PROJECTION_SCHEMA_VERSION = 1;
 
 // Reduce HARNESS_CAPABILITY_OBSERVED events into the latest observation per
-// harness. Pure and order-tolerant for MERGED input: events are stably sorted
-// by ts, and a timestamp TIE keeps the caller's input order — for a spine
-// read that is canonical append order, which is the true order two same-
-// millisecond appends happened in. Random event ids carry no ordering
-// information, so they must never break a tie (funnel r1 #5). Everything here
-// is rebuildable from the spine — the projection file is a cache, never an
-// authority.
+// harness, in INPUT ORDER. For a spine read that is canonical append order —
+// the one authority that survives same-millisecond appends AND a wall clock
+// stepping backward between two appends on one chain (funnel r1 #5, r6 #2).
+// readAll() already defines partition merge order, so re-sorting here by
+// timestamp could only ever DISAGREE with the chain. Random event ids carry
+// no ordering information either. Everything here is rebuildable from the
+// spine — the projection file is a cache, never an authority.
 export function reduceHarnessCapabilities(events = []) {
-  const observed = (Array.isArray(events) ? events : [])
+  const ordered = (Array.isArray(events) ? events : [])
     .filter((e) => e && e.type === 'HARNESS_CAPABILITY_OBSERVED' && e.data && typeof e.data.harness === 'string' && e.data.harness);
-
-  // Array.prototype.sort is stable, so equal-ts events keep input order.
-  const ordered = [...observed].sort((a, b) => {
-    const ta = String(a.ts || ''), tb = String(b.ts || '');
-    if (ta !== tb) return ta < tb ? -1 : 1;
-    return 0;
-  });
 
   const harnesses = {};
   let updatedAt = null;
