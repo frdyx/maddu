@@ -507,6 +507,34 @@ const armRoot = await makeRoot('arm');
     viaDoctor.status === 'verified' && viaDetect.ok === true,
     JSON.stringify({ doctor: viaDoctor.status, detect: viaDetect.ok }));
 
+  // r5 #2 (POSIX only) — a resolved executable whose shebang interpreter is
+  // missing spawn-ENOENTs AFTER resolution proved it exists: a broken
+  // installation must read 'assumed', never 'not-installed'.
+  if (process.platform !== 'win32') {
+    const shebangDir = join(scratch, 'shebang');
+    await mkdir(shebangDir, { recursive: true });
+    const broken = join(shebangDir, 'brokenfx');
+    await writeFile(broken, '#!/definitely/not/an/interpreter\necho fx 1.2.3\n', { mode: 0o755 });
+    const brokenEntry = fxEntry({ name: 'broken', detect: { command: broken, args: [], versionPattern: entry.detect.versionPattern } });
+    const rb = await D.observeHarness({ workRoot: root, stateRoot: root }, 'broken', baseOpts(manifestOf(brokenEntry)));
+    ok("POSIX: a broken-shebang executable reads 'assumed' (post-resolution ENOENT is damage, not absence)",
+      rb.status === 'assumed' && /spawn-error/.test(rb.probeFailure || ''),
+      JSON.stringify({ status: rb.status, drift: rb.drift, probeFailure: rb.probeFailure }));
+  }
+
+  // r5 #2/#3 tripwire — `notFound` has exactly TWO assignment sites (the
+  // no-command arm and the conclusive resolution-null arm) and the probe
+  // region carries the SIGINT group-cleanup (r5 #1). A third notFound source
+  // reopening post-spawn absence inference must trip this.
+  const runtimesSrc = readFileSync(join(process.cwd(), 'template', 'maddu', 'runtime', 'lib', 'runtimes.mjs'), 'utf8');
+  ok('absence has exactly two sources: no command given, or a CONCLUSIVE empty resolution walk',
+    (runtimesSrc.match(/notFound = true/g) || []).length === 2,
+    `found ${(runtimesSrc.match(/notFound = true/g) || []).length} assignment sites`);
+  ok('the probe region carries transient SIGINT/SIGTERM group cleanup (detached probes are never orphaned)',
+    /SIGINT/.test(runtimesSrc) && /removeListener/.test(runtimesSrc));
+  ok("an inconclusive PATH walk is a probe failure ('PATH-UNREADABLE'), never absence",
+    /PATH-UNREADABLE/.test(runtimesSrc));
+
   // #5: acquisition failures are reported, never thrown, and 'lock-busy' is
   // scoped to the timeout the arbiter actually raises. A directory squatting
   // on the lock path can ONLY surface as ELOCKTIMEOUT (EEXIST → bodyless

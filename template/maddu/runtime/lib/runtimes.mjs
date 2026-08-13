@@ -345,20 +345,23 @@ async function writeHealth(repoRoot, h) {
 // indistinguishable from a failing one — the shell reports its own exit code —
 // so `notFound` is never set there, and no caller may infer "not installed".
 
-async function isFileAt(p) {
-  try { return (await stat(p)).isFile(); } catch { return false; }
-}
-
 // Resolve a bare command name to a concrete file, the way a shell would, but
-// without one. Returns the absolute path, or null when nothing on PATH matches.
+// without one.
 //
 // Windows needs PATHEXT: the CLIs Máddu probes (`claude`, `codex`, `gemini`)
 // install as `.cmd` shims, and Node's shell-free spawn looks only for an exact
 // filename — so a plain spawn('codex') reports ENOENT on a machine where codex
 // is installed and working. Resolving here means a Windows probe reports what
 // is actually true instead of a false 'not-installed'.
-export async function resolveCommandPath(command, env = process.env) {
-  if (typeof command !== 'string' || !command) return null;
+//
+// The DETAILED variant also reports whether the search was CONCLUSIVE: a stat
+// that fails with anything other than "definitely nothing there" (an EACCES
+// PATH component, say) means "nothing found" is NOT proof of absence — the
+// caller must hold the reading back instead of recording 'not-installed'
+// (funnel PR1 r5 #3). ENOENT/ENOTDIR keep their classic PATH-walk meaning of
+// "this candidate simply isn't there".
+export async function resolveCommandPathDetailed(command, env = process.env) {
+  if (typeof command !== 'string' || !command) return { path: null, inconclusive: false };
   const win = process.platform === 'win32';
   const exts = win
     ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((s) => s.trim()).filter(Boolean)
@@ -376,12 +379,21 @@ export async function resolveCommandPath(command, env = process.env) {
   const bases = (hasSeparator || isAbsolute(command))
     ? [resolvePath(command)]
     : String(env.PATH || env.Path || '').split(delimiter).filter(Boolean).map((d) => join(d, command));
+  let sawError = false;
   for (const base of bases) {
     for (const cand of withExtensions(base)) {
-      if (await isFileAt(cand)) return cand;
+      try {
+        if ((await stat(cand)).isFile()) return { path: cand, inconclusive: false };
+      } catch (e) {
+        if (e?.code !== 'ENOENT' && e?.code !== 'ENOTDIR') sawError = true;
+      }
     }
   }
-  return null;
+  return { path: null, inconclusive: sawError };
+}
+
+export async function resolveCommandPath(command, env = process.env) {
+  return (await resolveCommandPathDetailed(command, env)).path;
 }
 
 // Probe a command and report what happened. NEVER writes anything.
@@ -423,8 +435,19 @@ export async function probeRuntime(spec = {}) {
   let argv = result.args;
   let viaComSpec = false;
   if (!shell) {
-    const resolved = await resolveCommandPath(command, env);
-    if (!resolved) { result.notFound = true; return result; }
+    const det = await resolveCommandPathDetailed(command, env);
+    if (!det.path) {
+      if (det.inconclusive) {
+        // The PATH walk hit an error it could not see through — "nothing
+        // found" is not proof of absence here (funnel PR1 r5 #3).
+        result.errorCode = 'PATH-UNREADABLE';
+        result.exitCode = -1;
+        return result;
+      }
+      result.notFound = true;
+      return result;
+    }
+    const resolved = det.path;
     result.resolvedPath = resolved;
     const ext = extname(resolved).toLowerCase();
     if (process.platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
@@ -467,6 +490,24 @@ export async function probeRuntime(spec = {}) {
     let timedOut = false;
     let settleTimer = null;
     let settled = false;
+    // A detached POSIX probe no longer receives the terminal's SIGINT: if the
+    // operator interrupts the doctor mid-probe, the group must not be left
+    // orphaned (funnel r5 #1). Transient handlers kill the group and re-raise;
+    // they are removed on every settlement path.
+    let dropSignalCleanup = null;
+    if (process.platform !== 'win32') {
+      const killGroup = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} };
+      const handlers = ['SIGINT', 'SIGTERM'].map((sig) => {
+        const h = () => { killGroup(); process.kill(process.pid, sig); };
+        process.once(sig, h);
+        return [sig, h];
+      });
+      process.on('exit', killGroup);
+      dropSignalCleanup = () => {
+        for (const [sig, h] of handlers) process.removeListener(sig, h);
+        process.removeListener('exit', killGroup);
+      };
+    }
     const code = await new Promise((resolve) => {
       const done = (c) => {
         if (settled) return;
@@ -478,6 +519,7 @@ export async function probeRuntime(spec = {}) {
         try { child.stdout?.destroy(); } catch {}
         try { child.stderr?.destroy(); } catch {}
         try { child.unref?.(); } catch {}
+        try { dropSignalCleanup?.(); } catch {}
         resolve(c);
       };
       const timer = setTimeout(() => {
@@ -514,12 +556,12 @@ export async function probeRuntime(spec = {}) {
     // (funnel PR1 r4 #1).
     const wantExit = Number.isInteger(expectExit) ? expectExit : 0;
     result.ok = !timedOut && code === wantExit;
-    // A spawn ENOENT is definitive absence ONLY when the spawn target was the
-    // resolved executable itself. When the shim is routed through ComSpec, the
-    // shim was already PROVEN present by resolution — an ENOENT there means
-    // the command processor is broken, which says nothing about the harness
-    // (harness-parity funnel r1 #3).
-    if (!shell && !viaComSpec && result.errorCode === 'ENOENT') result.notFound = true;
+    // A post-spawn ENOENT NEVER establishes absence: by this point resolution
+    // has already PROVEN a file exists at the resolved path. On POSIX, execve
+    // returns ENOENT for an existing script whose shebang interpreter is
+    // missing — a broken installation, not an absent one (funnel r5 #2; the
+    // ComSpec variant of the same trap was r1 #3). The ONLY source of
+    // `notFound` is the resolution walk finding nothing, conclusively.
   } catch (err) {
     result.throwMessage = err.message;
   }
