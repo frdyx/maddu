@@ -296,6 +296,25 @@ const armRoot = await makeRoot('arm');
   ok("a descriptor parsing to JSON null holds at 'assumed'/descriptor-unreadable",
     rnull.status === 'assumed' && rnull.probeFailure === 'descriptor-unreadable',
     JSON.stringify({ status: rnull.status, probeFailure: rnull.probeFailure }));
+
+  // Funnel r9 #3 — a PARSEABLE descriptor whose nested detect shape is
+  // malformed (command: 42) is damage too, never a silent manifest fallback.
+  const badDetectRoot = await makeRoot('baddetect');
+  await mkdir(join(badDetectRoot, '.maddu', 'runtimes'), { recursive: true });
+  await writeFile(join(badDetectRoot, '.maddu', 'runtimes', 'fx.json'), JSON.stringify({ name: 'fx', detect: { command: 42 } }) + '\n');
+  const rbad = await D.observeHarness({ workRoot: badDetectRoot, stateRoot: badDetectRoot }, 'fx',
+    { manifest: manifestOf(fxEntry()), home: fakeHome, platform: process.platform });
+  ok("a descriptor with detect.command 42 holds at 'assumed'/descriptor-unreadable (no manifest fallback)",
+    rbad.status === 'assumed' && rbad.probeFailure === 'descriptor-unreadable',
+    JSON.stringify({ status: rbad.status, probeFailure: rbad.probeFailure }));
+
+  // Funnel r9 #5 — a probe drowning in output stays bounded and settles:
+  // retention is capped at read time, the pipes keep draining.
+  const noisy = fxEntry({ name: 'noisy', detect: { command: 'node', args: ['-e', "const s='x'.repeat(65536); for (let i=0;i<160;i++) process.stdout.write(s); console.log('fx 9.9.9')"], versionPattern: fxEntry().detect.versionPattern } });
+  const rn = await D.observeHarness({ workRoot: armRoot, stateRoot: armRoot }, 'noisy', baseOpts(manifestOf(noisy)));
+  ok('a 10MB-output probe settles with bounded retention (rawOutput <= 2000 chars)',
+    typeof rn.status === 'string' && (rn.rawOutput || '').length <= 2000,
+    JSON.stringify({ status: rn.status, rawLen: (rn.rawOutput || '').length }));
 }
 
 // ── resolveConfigCandidate units ────────────────────────────────────────────

@@ -527,9 +527,13 @@ export async function probeRuntime(spec = {}) {
       windowsVerbatimArguments: viaComSpec,
       detached: process.platform !== 'win32',
     });
+    // Retention is CAPPED AT READ TIME while both pipes keep draining — a
+    // noisy or hostile CLI must not grow memory until the timeout
+    // (funnel r9 #5). The final result slices to 2000 as before.
+    const RETAIN = 4096;
     let stdout = '', stderr = '';
-    child.stdout?.on('data', (b) => { stdout += b.toString('utf8'); });
-    child.stderr?.on('data', (b) => { stderr += b.toString('utf8'); });
+    child.stdout?.on('data', (b) => { if (stdout.length < RETAIN) stdout += b.toString('utf8'); });
+    child.stderr?.on('data', (b) => { if (stderr.length < RETAIN) stderr += b.toString('utf8'); });
     let timedOut = false;
     let settleTimer = null;
     let settled = false;

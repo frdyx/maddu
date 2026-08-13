@@ -18,6 +18,16 @@
 // configs are being inspected; `stateRoot` owns the descriptors, the spine, and
 // the projection. Inside a lane worktree those differ, and reading configs from
 // one while recording against the other is the whole point.
+//
+// DOCUMENTED LIMITS (adjudicated, funnel r9 #1/#2/#4): observations are
+// LEAF-level reads, not filesystem forensics. Damage in an ANCESTOR of a
+// candidate path (a dangling or unreadable prefix directory) is
+// indistinguishable from absence at the leaf and reads 'absent'/'not-
+// installed'; a config replaced DURING the single-pass marker scan can be
+// read across versions. The doctor is an advisory observation on a
+// cooperative machine — walking ancestors or locking foreign config files
+// would be disproportionate to that claim, and the WARN-tier surfaces that
+// consume these events never gate on them.
 
 import { lstat, mkdir, open, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -101,26 +111,34 @@ async function statKind(p) {
   }
 }
 
-// Scan a file for a marker substring, whole file, fixed memory. Returns
-// 'found' | 'not-found' | 'error'. The chunk overlap keeps a marker that
+// Scan a file for EVERY marker substring in ONE pass over ONE file handle,
+// whole file, fixed memory. Returns { status: 'complete' | 'error',
+// foundAll: boolean }. One pass matters beyond efficiency: per-marker
+// re-opens could stitch fragments of two different file VERSIONS into a
+// false all-found if the config is replaced mid-inspection (funnel r9 #4).
+// (A replacement during this single pass remains a documented limit — the
+// observation is a read, not a lock.) The chunk overlap keeps a marker that
 // straddles a chunk boundary visible.
-async function scanFileForMarker(p, marker) {
+async function scanFileForMarkers(p, markers) {
   let fh = null;
   try {
     fh = await open(p, 'r');
     const buf = Buffer.alloc(CONFIG_SCAN_CHUNK_BYTES);
+    const overlap = Math.max(0, Math.max(...markers.map((m) => m.length)) - 1);
+    const remaining = new Set(markers);
     let carry = '';
     let pos = 0;
     for (;;) {
       const { bytesRead } = await fh.read(buf, 0, CONFIG_SCAN_CHUNK_BYTES, pos);
-      if (bytesRead <= 0) return 'not-found';
+      if (bytesRead <= 0) return { status: 'complete', foundAll: remaining.size === 0 };
       const text = carry + buf.subarray(0, bytesRead).toString('utf8');
-      if (text.includes(marker)) return 'found';
-      carry = text.slice(-(marker.length - 1));
+      for (const m of [...remaining]) if (text.includes(m)) remaining.delete(m);
+      if (remaining.size === 0) return { status: 'complete', foundAll: true };
+      carry = text.slice(-overlap);
       pos += bytesRead;
     }
   } catch {
-    return 'error';
+    return { status: 'error', foundAll: false };
   } finally {
     try { await fh?.close(); } catch {}
   }
@@ -183,7 +201,19 @@ async function probeHarness(stateRoot, entry, opts = {}) {
     // 'assumed' without running any probe at all.
     const strict = await readRuntimeStrict(stateRoot, entry.name)
       .catch(() => ({ descriptor: null, missing: false, unreadable: true }));
-    if (strict.unreadable) {
+    // A descriptor that is present but carries a MALFORMED detect shape
+    // (detect not an object, or a non-string non-null command — `42`, say)
+    // is damage too: falling back to the manifest probe would answer a
+    // different question than the registration asked (funnel r9 #3). Only a
+    // descriptor with NO detect override at all falls through to the
+    // manifest arm.
+    const detectShapeBroken = (d) => {
+      if (!d || d.detect === undefined || d.detect === null) return false;
+      if (typeof d.detect !== 'object' || Array.isArray(d.detect)) return true;
+      const c = d.detect.command;
+      return c !== undefined && c !== null && typeof c !== 'string';
+    };
+    if (strict.unreadable || detectShapeBroken(strict.descriptor)) {
       return {
         installed: true,
         version: null,
@@ -258,16 +288,12 @@ export async function observeConfigs(entry, workRoot, { platform = process.platf
       } else if (kind === 'file') {
         status = 'present-no-stanza';
         if (markers.length && scanSet.has(candidate)) {
-          // ALL markers must appear (funnel r6 #5); any scan error makes the
-          // reading unreadable rather than a definitive claim either way.
-          let found = 0, errored = false;
-          for (const marker of markers) {
-            const scan = await scanFileForMarker(resolved, marker);
-            if (scan === 'found') found++;
-            else if (scan === 'error') { errored = true; break; }
-          }
-          if (errored) status = 'unreadable';
-          else if (found === markers.length) status = 'stanza-present';
+          // ALL markers must appear, established in ONE pass over one handle
+          // (funnel r6 #5, r9 #4); a scan error makes the reading unreadable
+          // rather than a definitive claim either way.
+          const scan = await scanFileForMarkers(resolved, markers);
+          if (scan.status === 'error') status = 'unreadable';
+          else if (scan.foundAll) status = 'stanza-present';
         }
       }
     }
