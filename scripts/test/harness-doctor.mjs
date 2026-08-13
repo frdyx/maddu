@@ -261,6 +261,30 @@ const armRoot = await makeRoot('arm');
   ok('a stanza past 512 KiB is still found (whole-file scan, bounded memory)',
     rbig.configs.find((c) => c.path === 'fx/hooks.json')?.status === 'stanza-present',
     JSON.stringify(rbig.configs));
+
+  // Funnel r4 #3 — a DIRECTORY occupying a candidate path is 'unreadable'
+  // (something is there but it is not an inspectable config file); only a
+  // definitive ENOENT reads 'absent'. And the candidate still counts as
+  // non-absent for configPath, so a blocking local path is never skipped.
+  const dirRoot = await makeRoot('dircfg');
+  await mkdir(join(dirRoot, 'fx', 'hooks.json'), { recursive: true });
+  const rdir = await D.observeHarness({ workRoot: dirRoot, stateRoot: dirRoot }, 'fx', baseOpts(manifestOf(fxEntry())));
+  ok("a directory at a candidate path reads 'unreadable', never 'absent'",
+    rdir.configs.find((c) => c.path === 'fx/hooks.json')?.status === 'unreadable',
+    JSON.stringify(rdir.configs));
+  ok('the unreadable candidate still wins configPath (non-absent, nothing skipped)',
+    rdir.configPath === 'fx/hooks.json', String(rdir.configPath));
+
+  // Funnel r4 #2 — a descriptor file whose JSON parses to null/scalar/array
+  // is DAMAGE, not absence: no silent manifest fallback.
+  const nullRoot = await makeRoot('nulldesc');
+  await mkdir(join(nullRoot, '.maddu', 'runtimes'), { recursive: true });
+  await writeFile(join(nullRoot, '.maddu', 'runtimes', 'fx.json'), 'null\n');
+  const rnull = await D.observeHarness({ workRoot: nullRoot, stateRoot: nullRoot }, 'fx',
+    { manifest: manifestOf(fxEntry()), home: fakeHome, platform: process.platform });
+  ok("a descriptor parsing to JSON null holds at 'assumed'/descriptor-unreadable",
+    rnull.status === 'assumed' && rnull.probeFailure === 'descriptor-unreadable',
+    JSON.stringify({ status: rnull.status, probeFailure: rnull.probeFailure }));
 }
 
 // ── resolveConfigCandidate units ────────────────────────────────────────────
@@ -453,7 +477,11 @@ const armRoot = await makeRoot('arm');
   // r3 #1 — a timed-out probe must kill the WHOLE tree and settle within its
   // deadline: a surviving grandchild used to hold the close event (and the
   // doctor) open indefinitely.
-  const spawner = "require('child_process').spawn(process.execPath, ['-e','setInterval(()=>{},1000)'], {stdio:'ignore'}); setInterval(()=>{},1000)";
+  // The descendant INHERITS the probe's pipes (stdio 'inherit') — with only
+  // an immediate-child kill, the surviving grandchild holds the pipe open and
+  // the close event never fires; only a genuine tree-kill (or the settlement
+  // deadline + pipe release) lets this settle (funnel r4 #1 fixture).
+  const spawner = "require('child_process').spawn(process.execPath, ['-e','setInterval(()=>{},1000)'], {stdio:'inherit'}); setInterval(()=>{},1000)";
   const treeEntry = fxEntry({ name: 'tree', detect: { command: 'node', args: ['-e', spawner], versionPattern: entry.detect.versionPattern } });
   const t0 = Date.now();
   const rt = await D.observeHarness({ workRoot: root, stateRoot: root }, 'tree', { ...baseOpts(manifestOf(treeEntry)), timeoutMs: 500 });

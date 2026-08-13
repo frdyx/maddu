@@ -45,10 +45,11 @@ never prove absence). An absent CLI is a valid observation at exit 0.
 
 Suites (supervisor-authored, implementer never writes its own):
 harness-capabilities 88 asserts (14 planted validator offenders,
-extraction-boundary defense) + harness-doctor 63 (probe-arm honesty
-incl. tree-killed timeouts and spaced-path `.cmd` shims, roots pair,
-projection race, lock honesty, CLI exit codes). Diff funnel: 3 rounds,
-18 findings (15 fixed, 3 adjudicated). Budget untouched: verbs 73/73,
+extraction-boundary defense) + harness-doctor 69 (probe-arm honesty
+incl. tree-killed timeouts with a pipe-inheriting-descendant fixture and
+spaced-path `.cmd` shims — two asserts are win32-only — roots pair,
+projection race, lock honesty, CLI exit codes). Diff funnel: 4 rounds,
+22 findings (19 fixed, 3 adjudicated). Budget untouched: verbs 73/73,
 gates 76/76.
 
 ## [v1.122.1] · 2026-08-12 · worker brief: runtime resolution documented as implemented

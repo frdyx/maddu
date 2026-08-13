@@ -267,7 +267,15 @@ export async function readRuntimeStrict(repoRoot, name) {
     return { descriptor: null, missing: false, unreadable: true };
   }
   try {
-    return { descriptor: JSON.parse(text), missing: false, unreadable: false };
+    const parsed = JSON.parse(text);
+    // A descriptor is an OBJECT. `null`, a scalar, or an array parse cleanly
+    // but are damage, not a registration — falling back to a default probe on
+    // them answers a different question than the operator asked (funnel PR1
+    // r4 #2).
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { descriptor: null, missing: false, unreadable: true };
+    }
+    return { descriptor: parsed, missing: false, unreadable: false };
   } catch {
     return { descriptor: null, missing: false, unreadable: true };
   }
@@ -460,7 +468,18 @@ export async function probeRuntime(spec = {}) {
     let settleTimer = null;
     let settled = false;
     const code = await new Promise((resolve) => {
-      const done = (c) => { if (!settled) { settled = true; resolve(c); } };
+      const done = (c) => {
+        if (settled) return;
+        settled = true;
+        // Release our ends of the pipes and detach from the child on EVERY
+        // settlement path — a killed-but-unreaped descendant holding the
+        // inherited pipe must not keep this process (or a test runner)
+        // alive after the deadline resolved the probe (funnel PR1 r4 #1).
+        try { child.stdout?.destroy(); } catch {}
+        try { child.stderr?.destroy(); } catch {}
+        try { child.unref?.(); } catch {}
+        resolve(c);
+      };
       const timer = setTimeout(() => {
         timedOut = true;
         // Settlement deadline from KILL INITIATION: even a kill that fails to
@@ -490,8 +509,11 @@ export async function probeRuntime(spec = {}) {
     // detectRuntime alike) reads a descriptor's declared exit the same way —
     // a string '0' must not verify under one and fail under the other
     // (funnel PR1 r3 #2). Only an integer counts; anything else means 0.
+    // A timed-out probe is NEVER ok, even if the kill raced a clean exit —
+    // ok:true + timedOut:true is a contradiction no caller should ever see
+    // (funnel PR1 r4 #1).
     const wantExit = Number.isInteger(expectExit) ? expectExit : 0;
-    result.ok = code === wantExit;
+    result.ok = !timedOut && code === wantExit;
     // A spawn ENOENT is definitive absence ONLY when the spawn target was the
     // resolved executable itself. When the shim is routed through ComSpec, the
     // shim was already PROVEN present by resolution — an ENOENT there means

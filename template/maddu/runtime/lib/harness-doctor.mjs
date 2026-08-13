@@ -237,7 +237,10 @@ export async function observeConfigs(entry, workRoot, { platform = process.platf
     let status = 'absent';
     if (resolved) {
       const kind = await statKind(resolved);
-      if (kind === 'error') {
+      if (kind === 'error' || kind === 'not-file') {
+        // SOMETHING occupies the path but it is not an inspectable config
+        // file (a directory, a socket, an EACCES). Only a definitive ENOENT
+        // may read 'absent' — that is the documented contract (funnel r4 #3).
         status = 'unreadable';
       } else if (kind === 'file') {
         status = 'present-no-stanza';
@@ -247,8 +250,6 @@ export async function observeConfigs(entry, workRoot, { platform = process.platf
           else if (scan === 'error') status = 'unreadable';
         }
       }
-      // 'not-file' (a directory at the candidate path) stays 'absent': there
-      // is no config FILE there, and nothing was unreadable.
     }
     out.push({ path: candidate, status, resolved });
   }
