@@ -40,7 +40,11 @@ function statusBadge(status) {
 function configBadge(status) {
   if (status === 'stanza-present') return `${ANSI.pass}stanza-present${ANSI.reset}`;
   if (status === 'present-no-stanza') return `${ANSI.info}present-no-stanza${ANSI.reset}`;
-  return `${ANSI.dim}absent${ANSI.reset}`;
+  if (status === 'absent') return `${ANSI.dim}absent${ANSI.reset}`;
+  // 'unreadable' (and anything unrecognized) must never render as definitive
+  // absence — the file may well be there (funnel r2 #2).
+  if (status === 'unreadable') return `${ANSI.warn}unreadable${ANSI.reset}`;
+  return `${ANSI.warn}${status || 'unknown'}${ANSI.reset}`;
 }
 
 function rangeLabel(range) {
@@ -193,7 +197,16 @@ export default async function runtime(argv) {
     // caller mistake — silently observing something other than what was
     // asked for is the one thing a doctor must never do (funnel r1 #7).
     // parseFlags consumes flag VALUES, so anything left in `positional` is a
-    // genuinely unexpected argument.
+    // genuinely unexpected argument. --all/--json are arity-ZERO here: a
+    // token parseFlags attached to them ('doctor --all codex') is a swallowed
+    // positional, not a value (funnel r2 #1).
+    for (const bf of ['all', 'json']) {
+      if (flags[bf] !== undefined && flags[bf] !== true) {
+        console.error(`maddu runtime doctor: --${bf} takes no value (got ${JSON.stringify(flags[bf])})`);
+        console.error('usage: maddu runtime doctor <name> | --all  [--json]');
+        process.exit(2);
+      }
+    }
     if (first && wantAll) {
       console.error(`maddu runtime doctor: give a harness name OR --all, not both (got "${first}" and --all)`);
       process.exit(2);

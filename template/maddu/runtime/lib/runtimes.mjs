@@ -416,12 +416,23 @@ export async function probeRuntime(spec = {}) {
     result.resolvedPath = resolved;
     const ext = extname(resolved).toLowerCase();
     if (process.platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
-      // A batch shim can only be executed by the command processor. This is
-      // still argv-shaped — the arguments are passed as a vector, not
-      // interpolated into a command string — so no metacharacter in an
-      // argument can become syntax.
+      // A batch shim can only be executed by the command processor, and the
+      // `/s /c` tail has to be built as ONE correctly quoted string under
+      // windowsVerbatimArguments — letting libuv quote a spaced shim path
+      // per-argv-entry breaks cmd's own quote stripping ('C:\Program' is not
+      // recognized — funnel r2 #4). Inputs come from the manifest/descriptor,
+      // but a literal double quote can still not be represented safely inside
+      // a cmd string, so it is REFUSED (an honest probe failure), never
+      // interpolated.
+      const parts = [resolved, ...result.args].map(String);
+      if (parts.some((p) => p.includes('"'))) {
+        result.errorCode = 'UNQUOTABLE';
+        result.exitCode = -1;
+        return result;
+      }
+      const inner = parts.map((p) => (/[ \t]/.test(p) ? `"${p}"` : p)).join(' ');
       target = env.ComSpec || env.COMSPEC || 'cmd.exe';
-      argv = ['/d', '/s', '/c', resolved, ...result.args];
+      argv = ['/d', '/s', '/c', `"${inner}"`];
       viaComSpec = true;
     } else {
       target = resolved;
@@ -429,7 +440,7 @@ export async function probeRuntime(spec = {}) {
   }
 
   try {
-    const child = spawn(target, argv, { shell: !!shell, cwd, env });
+    const child = spawn(target, argv, { shell: !!shell, cwd, env, windowsVerbatimArguments: viaComSpec });
     let stdout = '', stderr = '';
     child.stdout?.on('data', (b) => { stdout += b.toString('utf8'); });
     child.stderr?.on('data', (b) => { stderr += b.toString('utf8'); });

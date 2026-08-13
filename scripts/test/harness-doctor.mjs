@@ -384,8 +384,81 @@ const armRoot = await makeRoot('arm');
   const extra = run(['runtime', 'doctor', 'openhands', 'straggler']);
   ok('CLI: an unexpected extra positional exits 2',
     extra.status === 2 && /unexpected argument/.test(extra.stderr), `exit=${extra.status} ${extra.stderr.slice(0, 150)}`);
+
+  // Funnel r2 #1 — a positional swallowed AS a boolean flag's value is the
+  // same mistake in a different coat: --all/--json are arity-zero.
+  const swallowedByAll = run(['runtime', 'doctor', '--all', 'codex']);
+  ok("CLI: 'doctor --all codex' exits 2 (--all takes no value)",
+    swallowedByAll.status === 2 && /takes no value/.test(swallowedByAll.stderr),
+    `exit=${swallowedByAll.status} ${swallowedByAll.stderr.slice(0, 150)}`);
+  const swallowedByJson = run(['runtime', 'doctor', 'openhands', '--json', 'straggler']);
+  ok("CLI: 'doctor <name> --json straggler' exits 2 (--json takes no value)",
+    swallowedByJson.status === 2 && /takes no value/.test(swallowedByJson.stderr),
+    `exit=${swallowedByJson.status} ${swallowedByJson.stderr.slice(0, 150)}`);
+
   ok('CLI: the refused invocations observed NOTHING (spine unchanged)',
     (await eventsOfType(root)).length === 1);
+
+  // Funnel r2 #2 tripwire — the presenter must know all four config statuses;
+  // an 'unreadable' reading must never render through an absent-shaped
+  // fallback. Source tripwire, same style as the census suites.
+  const presenterSrc = readFileSync(join(process.cwd(), 'commands', 'runtime.mjs'), 'utf8');
+  ok("presenter handles 'unreadable' explicitly (never renders it as absent)",
+    /unreadable/.test(presenterSrc) && /status === 'absent'/.test(presenterSrc),
+    'configBadge lacks an explicit unreadable/absent split');
+}
+
+// ── Funnel r2 #3 (adjudicated) + #4 + #5 fixtures ───────────────────────────
+{
+  const root = await makeRoot('r2');
+  // #3: a registered descriptor's INTEGER expectExit is honored — doctor and
+  // `runtime detect` must not disagree about the same registration…
+  const entry = fxEntry();
+  const nonzeroOk = await D.observeHarness({ workRoot: root, stateRoot: root }, 'fx', {
+    manifest: manifestOf(entry), home: fakeHome, platform: process.platform,
+    descriptor: { detect: { command: `"${NODE}" -e "console.log('fx 1.2.3'); process.exit(3)"`, expectExit: 3 } },
+  });
+  ok('descriptor with integer expectExit=3 and matching exit reads verified (registration semantics honored)',
+    nonzeroOk.status === 'verified' && nonzeroOk.cliVersion === '1.2.3',
+    JSON.stringify({ status: nonzeroOk.status, drift: nonzeroOk.drift, probeFailure: nonzeroOk.probeFailure }));
+  // …but a NON-integer expectExit is a truthy surprise, not a registration:
+  // it falls back to 0 and the nonzero exit reads as a probe failure.
+  const bogusExit = await D.observeHarness({ workRoot: root, stateRoot: root }, 'fx', {
+    manifest: manifestOf(entry), home: fakeHome, platform: process.platform,
+    descriptor: { detect: { command: `"${NODE}" -e "console.log('fx 1.2.3'); process.exit(3)"`, expectExit: '3' } },
+  });
+  ok("descriptor with a STRING expectExit falls back to 0 -> 'assumed'/probe-failed",
+    bogusExit.status === 'assumed' && bogusExit.probeFailure === 'nonzero-exit',
+    JSON.stringify({ status: bogusExit.status, probeFailure: bogusExit.probeFailure }));
+
+  // #4 (win32 only): a .cmd shim under a SPACED directory must probe cleanly.
+  if (process.platform === 'win32') {
+    const spaced = join(scratch, 'space dir');
+    await mkdir(spaced, { recursive: true });
+    await writeFile(join(spaced, 'fxver.cmd'), '@echo fx 1.2.3\r\n');
+    const cmdEntry = fxEntry({ name: 'shim', detect: { command: join(spaced, 'fxver.cmd'), args: [], versionPattern: entry.detect.versionPattern } });
+    const rs = await D.observeHarness({ workRoot: root, stateRoot: root }, 'shim', baseOpts(manifestOf(cmdEntry)));
+    ok('win32: a .cmd shim in a spaced path probes verified (quoted /s /c tail)',
+      rs.status === 'verified' && rs.cliVersion === '1.2.3',
+      JSON.stringify({ status: rs.status, drift: rs.drift, probeFailure: rs.probeFailure, raw: rs.probeCommand }));
+    // A literal double quote in the shim path/args cannot be represented
+    // safely inside a cmd string — refused as a probe failure, never spliced.
+    const quoted = fxEntry({ name: 'quoted', detect: { command: join(spaced, 'fxver.cmd'), args: ['--tag="x"'], versionPattern: entry.detect.versionPattern } });
+    const rq = await D.observeHarness({ workRoot: root, stateRoot: root }, 'quoted', baseOpts(manifestOf(quoted)));
+    ok('win32: a double quote in probe args is refused as spawn-error:UNQUOTABLE, never interpolated',
+      rq.status === 'assumed' && /UNQUOTABLE/.test(rq.probeFailure || ''),
+      JSON.stringify({ status: rq.status, probeFailure: rq.probeFailure }));
+  }
+
+  // #5: a non-timeout lock acquisition failure is NOT 'lock-busy'. A directory
+  // squatting on the lock path fails acquisition with a real error.
+  const lockDir = join(paths.pathsFor(root).statePrjDir, 'harness-capabilities.lock');
+  await mkdir(lockDir, { recursive: true });
+  const misc = await D.materializeHarnessCapabilities(root, { maxWaitMs: 300 });
+  ok("a non-timeout lock failure reports 'lock-unavailable' with the real error, not 'lock-busy'",
+    misc && misc.ok === false && misc.reason === 'lock-unavailable' && typeof misc.error === 'string',
+    JSON.stringify(misc));
+  await rm(lockDir, { recursive: true, force: true });
 }
 
 // ── teardown ────────────────────────────────────────────────────────────────

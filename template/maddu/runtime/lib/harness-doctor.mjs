@@ -187,8 +187,14 @@ async function probeHarness(stateRoot, entry, opts = {}) {
     descriptor = strict.descriptor;
   }
   const override = descriptor?.detect?.command;
+  // A registered descriptor's expectExit is honored — it is the operator's
+  // own registration semantics, read exactly the way `runtime detect` reads
+  // it (funnel r2 #3, adjudicated: doctor and detect must not disagree about
+  // the same registration). Hardening: only an INTEGER counts; any other
+  // shape falls back to 0 rather than becoming a truthy surprise.
+  const declaredExit = descriptor?.detect?.expectExit;
   const spec = (typeof override === 'string' && override)
-    ? { command: override, shell: true, expectExit: descriptor?.detect?.expectExit ?? 0 }
+    ? { command: override, shell: true, expectExit: Number.isInteger(declaredExit) ? declaredExit : 0 }
     : { command: entry.detect?.command || null, args: entry.detect?.args || [], shell: false };
   if (opts.timeoutMs) spec.timeoutMs = opts.timeoutMs;
 
@@ -363,8 +369,12 @@ export async function materializeHarnessCapabilities(stateRoot, opts = {}) {
         cbResult = { ok: false, reason: 'projection-write-failed', error: e?.message || String(e) };
       }
     }, { maxWaitMs: opts.maxWaitMs ?? PROJECTION_LOCK_WAIT_MS });
-  } catch {
-    return { ok: false, reason: 'lock-busy' };
+  } catch (err) {
+    // Only a TIMEOUT on a live holder is "busy". Any other acquisition
+    // failure (permissions, a directory squatting on the lock path, …) is a
+    // different problem and deserves its own diagnosis (funnel r2 #5).
+    if (err?.code === 'ELOCKTIMEOUT') return { ok: false, reason: 'lock-busy' };
+    return { ok: false, reason: 'lock-unavailable', error: err?.message || String(err) };
   }
   return cbResult ?? { ok: false, reason: 'projection-write-failed', error: 'materializer produced no result' };
 }
