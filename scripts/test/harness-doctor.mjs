@@ -307,6 +307,13 @@ const armRoot = await makeRoot('arm');
   ok("a descriptor with detect.command 42 holds at 'assumed'/descriptor-unreadable (no manifest fallback)",
     rbad.status === 'assumed' && rbad.probeFailure === 'descriptor-unreadable',
     JSON.stringify({ status: rbad.status, probeFailure: rbad.probeFailure }));
+  // r10 #1 — the same damage passed through the opts.descriptor seam must
+  // hold identically: no source of a malformed detect may fall back.
+  const rbadOpts = await D.observeHarness({ workRoot: armRoot, stateRoot: armRoot }, 'fx',
+    { ...baseOpts(manifestOf(fxEntry())), descriptor: { detect: { command: 42 } } });
+  ok("opts.descriptor with detect.command 42 holds at descriptor-unreadable too (r10 seam parity)",
+    rbadOpts.status === 'assumed' && rbadOpts.probeFailure === 'descriptor-unreadable',
+    JSON.stringify({ status: rbadOpts.status, probeFailure: rbadOpts.probeFailure }));
 
   // Funnel r9 #5 — a probe drowning in output stays bounded and settles:
   // retention is capped at read time, the pipes keep draining.

@@ -532,8 +532,14 @@ export async function probeRuntime(spec = {}) {
     // (funnel r9 #5). The final result slices to 2000 as before.
     const RETAIN = 4096;
     let stdout = '', stderr = '';
-    child.stdout?.on('data', (b) => { if (stdout.length < RETAIN) stdout += b.toString('utf8'); });
-    child.stderr?.on('data', (b) => { if (stderr.length < RETAIN) stderr += b.toString('utf8'); });
+    // The cap is enforced per append — a below-threshold check alone would
+    // let one large final chunk overshoot by its full size (funnel r10 #2).
+    child.stdout?.on('data', (b) => {
+      if (stdout.length < RETAIN) stdout += b.toString('utf8').slice(0, RETAIN - stdout.length);
+    });
+    child.stderr?.on('data', (b) => {
+      if (stderr.length < RETAIN) stderr += b.toString('utf8').slice(0, RETAIN - stderr.length);
+    });
     let timedOut = false;
     let settleTimer = null;
     let settled = false;

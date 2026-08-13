@@ -44,13 +44,19 @@ resolution failure → `not-installed` (a legacy shell descriptor probe can
 never prove absence). An absent CLI is a valid observation at exit 0.
 
 Suites (supervisor-authored, implementer never writes its own):
-harness-capabilities 88 asserts (14 planted validator offenders,
-extraction-boundary defense) + harness-doctor 69 (probe-arm honesty
-incl. tree-killed timeouts with a pipe-inheriting-descendant fixture and
-spaced-path `.cmd` shims — two asserts are win32-only — roots pair,
-projection race, lock honesty, CLI exit codes). Diff funnel: 4 rounds,
-22 findings (19 fixed, 3 adjudicated). Budget untouched: verbs 73/73,
-gates 76/76.
+harness-capabilities 89 asserts (15 planted validator offenders,
+extraction-boundary defense) + harness-doctor 80 assertion sites (2
+win32-only, 3 POSIX-only): probe-arm honesty incl. tree-killed timeouts
+with a pipe-inheriting-descendant fixture, spaced/metacharacter `.cmd`
+shim paths, broken-shebang and dangling-symlink absence honesty,
+PATH-walk fidelity, roots pair, projection race, lock honesty, CLI exit
+codes. Diff funnel: 10 rounds, 43 findings — 37 fixed, 6 adjudicated
+(workRoot rides the event per the GATE_RAN precedent; descriptor
+expectExit doctor/detect parity; verb-level flag-allowlist granularity;
+tallies finalized once; leaf-level observation depth — ancestor damage
+and mid-scan replacement are documented limits). Terminated by the
+recorded termination rule at round 10 after two one-line corrections of
+round-9 patches. Budget untouched: verbs 73/73, gates 76/76.
 
 ## [v1.122.1] · 2026-08-12 · worker brief: runtime resolution documented as implemented
 

@@ -189,9 +189,32 @@ function probeFailureReason(probe) {
 // observation. Only a shell-free probe whose PATH resolution found nothing is
 // definitive.
 async function probeHarness(stateRoot, entry, opts = {}) {
+  // A descriptor that is present but carries a MALFORMED detect shape
+  // (detect not an object, or a non-string non-null command — `42`, say)
+  // is damage: falling back to the manifest probe would answer a different
+  // question than the registration asked (funnel r9 #3). This applies to
+  // WHICHEVER source supplied the descriptor — the on-disk read or a
+  // caller-passed opts.descriptor (funnel r10 #1).
+  const detectShapeBroken = (d) => {
+    if (!d || d.detect === undefined || d.detect === null) return false;
+    if (typeof d.detect !== 'object' || Array.isArray(d.detect)) return true;
+    const c = d.detect.command;
+    return c !== undefined && c !== null && typeof c !== 'string';
+  };
+  const unreadableReading = () => ({
+    installed: true,
+    version: null,
+    probeFailure: 'descriptor-unreadable',
+    probeSource: 'runtime-descriptor',
+    probeCommand: null,
+    resolvedPath: null,
+    exitCode: null,
+    rawOutput: '',
+  });
   let descriptor;
   if (opts.descriptor !== undefined) {
     descriptor = opts.descriptor;
+    if (detectShapeBroken(descriptor)) return unreadableReading();
   } else {
     // Absence and damage are different answers (funnel r1 #1): a MISSING
     // descriptor means "nothing registered — probe the manifest default"; a
@@ -201,29 +224,8 @@ async function probeHarness(stateRoot, entry, opts = {}) {
     // 'assumed' without running any probe at all.
     const strict = await readRuntimeStrict(stateRoot, entry.name)
       .catch(() => ({ descriptor: null, missing: false, unreadable: true }));
-    // A descriptor that is present but carries a MALFORMED detect shape
-    // (detect not an object, or a non-string non-null command — `42`, say)
-    // is damage too: falling back to the manifest probe would answer a
-    // different question than the registration asked (funnel r9 #3). Only a
-    // descriptor with NO detect override at all falls through to the
-    // manifest arm.
-    const detectShapeBroken = (d) => {
-      if (!d || d.detect === undefined || d.detect === null) return false;
-      if (typeof d.detect !== 'object' || Array.isArray(d.detect)) return true;
-      const c = d.detect.command;
-      return c !== undefined && c !== null && typeof c !== 'string';
-    };
     if (strict.unreadable || detectShapeBroken(strict.descriptor)) {
-      return {
-        installed: true,
-        version: null,
-        probeFailure: 'descriptor-unreadable',
-        probeSource: 'runtime-descriptor',
-        probeCommand: null,
-        resolvedPath: null,
-        exitCode: null,
-        rawOutput: '',
-      };
+      return unreadableReading();
     }
     descriptor = strict.descriptor;
   }
