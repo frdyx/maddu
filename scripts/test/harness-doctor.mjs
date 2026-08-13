@@ -546,6 +546,40 @@ const armRoot = await makeRoot('arm');
   ok("an inconclusive PATH walk is a probe failure ('PATH-UNREADABLE'), never absence",
     /PATH-UNREADABLE/.test(runtimesSrc));
 
+  // r7 #1/#2 — PATH-walk fidelity: an unset/empty PATH is an inconclusive
+  // walk (never absence); an empty PATH component means '.'; on POSIX a
+  // non-executable early candidate must not shadow a working later one.
+  {
+    const RT2 = await import(LIB('runtimes.mjs'));
+    const noPath = await RT2.probeRuntime({ command: 'fx-none-such', args: [], env: { PATH: '' } });
+    ok('an empty PATH is an INCONCLUSIVE walk (PATH-UNREADABLE), never not-installed',
+      noPath.notFound === false && noPath.errorCode === 'PATH-UNREADABLE',
+      JSON.stringify({ notFound: noPath.notFound, errorCode: noPath.errorCode }));
+
+    const { delimiter: DELIM } = await import('node:path');
+    const binDir = join(scratch, 'pathbin');
+    await mkdir(binDir, { recursive: true });
+    await writeFile(join(binDir, 'somefx'), '#!/bin/sh\necho fx\n', { mode: 0o755 });
+    const det = await RT2.resolveCommandPathDetailed('somefx', { PATH: `${DELIM}${binDir}` });
+    ok('an empty PATH component is preserved (walk continues to later components)',
+      det.path !== null && det.path.includes('pathbin'), JSON.stringify(det));
+
+    if (process.platform !== 'win32') {
+      const shadowA = join(scratch, 'shadowA');
+      const shadowB = join(scratch, 'shadowB');
+      await mkdir(shadowA, { recursive: true });
+      await mkdir(shadowB, { recursive: true });
+      await writeFile(join(shadowA, 'shfx'), 'not executable\n', { mode: 0o644 });
+      await writeFile(join(shadowB, 'shfx'), '#!/bin/sh\necho fx\n', { mode: 0o755 });
+      const shadowed = await RT2.resolveCommandPathDetailed('shfx', { PATH: `${shadowA}${DELIM}${shadowB}` });
+      ok('POSIX: a non-executable early candidate does not shadow a working later one',
+        shadowed.path === join(shadowB, 'shfx'), JSON.stringify(shadowed));
+      const onlyBad = await RT2.resolveCommandPathDetailed('shfx', { PATH: shadowA });
+      ok('POSIX: only a non-executable candidate found -> inconclusive, never clean absence',
+        onlyBad.path === null && onlyBad.inconclusive === true, JSON.stringify(onlyBad));
+    }
+  }
+
   // #5: acquisition failures are reported, never thrown, and 'lock-busy' is
   // scoped to the timeout the arbiter actually raises. A directory squatting
   // on the lock path can ONLY surface as ELOCKTIMEOUT (EEXIST → bodyless

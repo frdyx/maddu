@@ -10,7 +10,7 @@
 // /bridge/workers/<id>/heartbeat — that surface is shared with Slice 12 so
 // runtime-spawned workers appear immediately in /swarm and the stuck-banner.
 
-import { lstat, mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
+import { access, constants as fsConstants, lstat, mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
 import { delimiter, dirname, extname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -376,14 +376,40 @@ export async function resolveCommandPathDetailed(command, env = process.env) {
   };
   // A command carrying a path separator is a path, not a PATH lookup.
   const hasSeparator = command.includes('/') || command.includes('\\');
-  const bases = (hasSeparator || isAbsolute(command))
-    ? [resolvePath(command)]
-    : String(env.PATH || env.Path || '').split(delimiter).filter(Boolean).map((d) => join(d, command));
+  let bases;
   let sawError = false;
+  if (hasSeparator || isAbsolute(command)) {
+    bases = [resolvePath(command)];
+  } else {
+    const rawPath = env.PATH ?? env.Path;
+    if (typeof rawPath !== 'string' || rawPath === '') {
+      // No search path at all: the walk never happened, so "nothing found"
+      // would be a conclusion without a search (funnel r7 #2).
+      return { path: null, inconclusive: true };
+    }
+    // An EMPTY PATH component has a defined meaning — the current directory —
+    // so it is preserved as '.', never filtered away (funnel r7 #2).
+    bases = rawPath.split(delimiter).map((d) => join(d === '' ? '.' : d, command));
+  }
   for (const base of bases) {
     for (const cand of withExtensions(base)) {
       try {
-        if ((await stat(cand)).isFile()) return { path: cand, inconclusive: false };
+        if ((await stat(cand)).isFile()) {
+          // POSIX PATH semantics skip a NON-EXECUTABLE candidate and keep
+          // searching — a non-executable `codex` early in PATH must not
+          // shadow a working one later (funnel r7 #1). If nothing executable
+          // turns up, the skipped candidate makes the walk inconclusive
+          // (a broken install is not clean absence). Windows has no X_OK.
+          if (process.platform !== 'win32') {
+            try {
+              await access(cand, fsConstants.X_OK);
+            } catch {
+              sawError = true;
+              continue;
+            }
+          }
+          return { path: cand, inconclusive: false };
+        }
       } catch (e) {
         if (e?.code === 'ENOENT') {
           // stat follows symlinks: a DANGLING link stats ENOENT although an
