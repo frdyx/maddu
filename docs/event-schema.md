@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.19.0` · **Event types:** 193
+**Contract version:** `1.20.0` · **Event types:** 194
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -34,7 +34,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (193)
+## Events (194)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -231,3 +231,4 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `MODEL_PROMOTION_APPROVED` 🔒 | A proposed promotion was confirmed against its own allowing approval decision. | `schemaVersion: number`, `proposalId: string`, `approval_ref: string`, `model_id: string`, `checkpointKey: string`, `to_stage: string` |
 | `MODEL_RELEASED` 🔒 | A checkpoint approved to released was recorded as released with a rollback plan. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpointKey: string`, `rollback_plan: string` |
 | `MODEL_ROLLED_BACK` 🔒 | A released checkpoint was rolled back to an earlier stage. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpointKey: string`, `reverted_to: string` |
+| `HARNESS_CAPABILITY_OBSERVED` | A harness's native hook surface was compared against the repo-versioned capability manifest — an observation, not an enforcement receipt. | `harness: string`, `status: string`, `cliVersion: string\|null`, `manifestVersion: string`, `capabilities: array`, `enforcementCeiling: string`, `drift: string\|null`, `probeFailure: string\|null`, `volatile: object\|null`, `configPath: string\|null`, `configs: array`, `workRoot: string\|null` |

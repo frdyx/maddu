@@ -219,6 +219,7 @@ export const EVENT_DISPOSITIONS = {
   MODEL_PROMOTION_APPROVED: { disp: 'dormant', reason: "fires only on `maddu model promote --confirm` against an allowing decision (phase 3)" },
   MODEL_RELEASED: { disp: 'dormant', reason: "fires only on `maddu model release` after an approved promotion to released (phase 3)" },
   MODEL_ROLLED_BACK: { disp: 'dormant', reason: "fires only on `maddu model rollback` of a released checkpoint (phase 3)" },
+  HARNESS_CAPABILITY_OBSERVED: { disp: 'dormant', reason: "fires only on `maddu runtime doctor` — an operator-run observation of a harness's hook surface, not part of any automatic flow" },
 };
 
 export const DISP_KINDS = new Set(['active', 'dormant', 'plugin']);

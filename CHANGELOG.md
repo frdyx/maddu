@@ -11,6 +11,53 @@ narrative summary.
 
 ---
 
+## [v1.123.0] · 2026-08-12 · harness capability manifest + `runtime doctor`
+
+Harness-parity campaign PR1 (adopted sovereign-accountability strategy,
+Track A). The observability half of cross-harness discipline: Máddu can now
+say, on the record, what it knows about each agent harness's native hook
+surface — and how much of that knowledge is actually verified against what
+is installed HERE.
+
+**The manifest** (`harness-capabilities.mjs`, versioned 1.0.0, pure data):
+five entries — claude-code, codex, hermes, openhands, gemini — each carrying
+its hook events (`block`/`observe` per event), per-OS config candidates, a
+Máddu-stanza sentinel, a shell-free probe spec, an `enforcementCeiling`, and
+`verifiedAgainst` `{range, date, sources}`. Honesty is shape-ENFORCED: a
+blocking claim requires **two distinct sources** (gemini therefore ceilings
+at `observe`); a version window must be observed, both bounds or neither
+(hermes/openhands/gemini carry `null` windows rather than invented ones);
+the ceiling can never understate a hook's claim; hermes's `serve` gap and
+gemini's Antigravity migration ride as `volatile` markers.
+
+**The doctor** (`maddu runtime doctor <name>` / `--all`, no new top-level
+verb): probes the CLI **without side effects** (a pure `probeRuntime` was
+extracted from `detectRuntime`, which keeps its persistence unchanged),
+reads config candidates per-candidate from the WORK root, compares against
+the manifest, appends one `HARNESS_CAPABILITY_OBSERVED` per harness to the
+STATE-root spine (contract 1.19.0 → **1.20.0**), and materializes a
+rebuildable `.maddu/state/harness-capabilities.json` under a projection
+lock. The decision table only ever holds a claim BACK: inside the observed
+window → `verified`; below/above/unparsable/prerelease/no-window/probe-
+failure → `assumed` with a drift reason; only definitive shell-free PATH
+resolution failure → `not-installed` (a legacy shell descriptor probe can
+never prove absence). An absent CLI is a valid observation at exit 0.
+
+Suites (supervisor-authored, implementer never writes its own):
+harness-capabilities 89 asserts (15 planted validator offenders,
+extraction-boundary defense) + harness-doctor 80 assertion sites (2
+win32-only, 3 POSIX-only): probe-arm honesty incl. tree-killed timeouts
+with a pipe-inheriting-descendant fixture, spaced/metacharacter `.cmd`
+shim paths, broken-shebang and dangling-symlink absence honesty,
+PATH-walk fidelity, roots pair, projection race, lock honesty, CLI exit
+codes. Diff funnel: 10 rounds, 43 findings — 37 fixed, 6 adjudicated
+(workRoot rides the event per the GATE_RAN precedent; descriptor
+expectExit doctor/detect parity; verb-level flag-allowlist granularity;
+tallies finalized once; leaf-level observation depth — ancestor damage
+and mid-scan replacement are documented limits). Terminated by the
+recorded termination rule at round 10 after two one-line corrections of
+round-9 patches. Budget untouched: verbs 73/73, gates 76/76.
+
 ## [v1.122.1] · 2026-08-12 · worker brief: runtime resolution documented as implemented
 
 Docs-truth patch (harness-parity campaign PR0). The worker brief

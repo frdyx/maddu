@@ -10,9 +10,10 @@
 // /bridge/workers/<id>/heartbeat — that surface is shared with Slice 12 so
 // runtime-spawned workers appear immediately in /swarm and the stuck-banner.
 
-import { mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { access, constants as fsConstants, lstat, mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
+import { delimiter, dirname, extname, isAbsolute, join, resolve as resolvePath } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, genWorkerId, normalizeParentId, isRefId } from './spine.mjs';
@@ -111,6 +112,9 @@ export function validateModelPreference(pref, where) {
 
 const DESCRIPTOR_SCHEMA = 1;
 const DEFAULT_DETECT_TIMEOUT_MS = 5000;
+const PROBE_KILL_SETTLE_MS = 3000;      // probe settlement deadline from kill initiation
+const PROBE_TASKKILL_TIMEOUT_MS = 5000; // bound on the taskkill invocation itself
+const pExecFile = promisify(execFile);
 
 function runtimesDir(repoRoot) {
   return join(pathsFor(repoRoot).state, 'runtimes'); // .maddu/runtimes
@@ -248,6 +252,35 @@ export async function readRuntime(repoRoot, name) {
   } catch { return null; }
 }
 
+// Like readRuntime, but absence and damage are DIFFERENT answers. A caller
+// deciding "no descriptor → use my own default" must not make that decision
+// on a descriptor that exists and cannot be read/parsed — silently probing a
+// fallback command against a corrupt registration answers a different
+// question than the operator asked (harness-parity funnel r1 #1).
+export async function readRuntimeStrict(repoRoot, name) {
+  const p = join(runtimesDir(repoRoot), `${name}.json`);
+  let text;
+  try {
+    text = await readFile(p, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { descriptor: null, missing: true, unreadable: false };
+    return { descriptor: null, missing: false, unreadable: true };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    // A descriptor is an OBJECT. `null`, a scalar, or an array parse cleanly
+    // but are damage, not a registration — falling back to a default probe on
+    // them answers a different question than the operator asked (funnel PR1
+    // r4 #2).
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { descriptor: null, missing: false, unreadable: true };
+    }
+    return { descriptor: parsed, missing: false, unreadable: false };
+  } catch {
+    return { descriptor: null, missing: false, unreadable: true };
+  }
+}
+
 export async function saveRuntime(repoRoot, patch, by = null) {
   if (!patch.name) throw new Error('runtime name required');
   await ensureDir(runtimesDir(repoRoot));
@@ -293,6 +326,311 @@ async function writeHealth(repoRoot, h) {
   await writeFile(healthFile(repoRoot), JSON.stringify(redactLeaves(h), null, 2) + '\n');
 }
 
+// --- Side-effect-free probe (harness-parity PR1) -------------------------
+//
+// `detectRuntime` below both PROBES and PERSISTS (health projection +
+// RUNTIME_DETECTED append). Callers that only want to know what is installed —
+// `runtime doctor`, which owns its own event and its own projection — must not
+// be forced to write another surface's state as a side effect of asking. So the
+// subprocess half lives here, pure: it spawns, reads, and returns. Nothing
+// else. `detectRuntime` keeps its persistence layered on top, byte-for-byte
+// unchanged in behaviour.
+//
+// SHELL-FREE BY DEFAULT. `shell: false` (the default) resolves the command
+// against PATH ourselves and spawns the resolved file with an argv array, so a
+// command name can never be re-parsed as a command line. That resolution is
+// also what makes `notFound` DEFINITIVE: if no file matched on PATH, the binary
+// genuinely is not installed. Under `shell: true` (the legacy descriptor path,
+// where `detect.command` is a whole command line) a missing binary is
+// indistinguishable from a failing one — the shell reports its own exit code —
+// so `notFound` is never set there, and no caller may infer "not installed".
+
+// Resolve a bare command name to a concrete file, the way a shell would, but
+// without one.
+//
+// Windows needs PATHEXT: the CLIs Máddu probes (`claude`, `codex`, `gemini`)
+// install as `.cmd` shims, and Node's shell-free spawn looks only for an exact
+// filename — so a plain spawn('codex') reports ENOENT on a machine where codex
+// is installed and working. Resolving here means a Windows probe reports what
+// is actually true instead of a false 'not-installed'.
+//
+// The DETAILED variant also reports whether the search was CONCLUSIVE: a stat
+// that fails with anything other than "definitely nothing there" (an EACCES
+// PATH component, say) means "nothing found" is NOT proof of absence — the
+// caller must hold the reading back instead of recording 'not-installed'
+// (funnel PR1 r5 #3). ENOENT/ENOTDIR keep their classic PATH-walk meaning of
+// "this candidate simply isn't there".
+export async function resolveCommandPathDetailed(command, env = process.env) {
+  if (typeof command !== 'string' || !command) return { path: null, inconclusive: false };
+  const win = process.platform === 'win32';
+  const exts = win
+    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const withExtensions = (base) => {
+    if (!win) return [base];
+    const out = [];
+    if (extname(base)) out.push(base);            // caller already named the extension
+    for (const e of exts) out.push(base + e);
+    if (!extname(base)) out.push(base);           // extension-less file (rare, but legal)
+    return out;
+  };
+  // A command carrying a path separator is a path, not a PATH lookup.
+  const hasSeparator = command.includes('/') || command.includes('\\');
+  let bases;
+  let sawError = false;
+  if (hasSeparator || isAbsolute(command)) {
+    bases = [resolvePath(command)];
+  } else {
+    const rawPath = env.PATH ?? env.Path;
+    if (typeof rawPath !== 'string' || rawPath === '') {
+      // No search path at all: the walk never happened, so "nothing found"
+      // would be a conclusion without a search (funnel r7 #2).
+      return { path: null, inconclusive: true };
+    }
+    // An EMPTY PATH component has a defined meaning — the current directory —
+    // so it is preserved as '.', never filtered away (funnel r7 #2).
+    bases = rawPath.split(delimiter).map((d) => join(d === '' ? '.' : d, command));
+  }
+  for (const base of bases) {
+    for (const cand of withExtensions(base)) {
+      try {
+        if ((await stat(cand)).isFile()) {
+          // POSIX PATH semantics skip a NON-EXECUTABLE candidate and keep
+          // searching — a non-executable `codex` early in PATH must not
+          // shadow a working one later (funnel r7 #1). If nothing executable
+          // turns up, the skipped candidate makes the walk inconclusive
+          // (a broken install is not clean absence). Windows has no X_OK.
+          if (process.platform !== 'win32') {
+            try {
+              await access(cand, fsConstants.X_OK);
+            } catch {
+              sawError = true;
+              continue;
+            }
+          }
+          return { path: cand, inconclusive: false };
+        }
+      } catch (e) {
+        if (e?.code === 'ENOENT') {
+          // stat follows symlinks: a DANGLING link stats ENOENT although an
+          // entry exists — a broken installation, not clean absence
+          // (funnel r6 #3). lstat is the tiebreaker, and ITS errors must not
+          // read as absence either: only a definitive nothing-there
+          // (ENOENT/ENOTDIR) keeps the walk conclusive (funnel r8 #2).
+          try {
+            await lstat(cand);
+            sawError = true;
+          } catch (le) {
+            if (le?.code !== 'ENOENT' && le?.code !== 'ENOTDIR') sawError = true;
+          }
+        } else if (e?.code !== 'ENOTDIR') {
+          sawError = true;
+        }
+      }
+    }
+  }
+  return { path: null, inconclusive: sawError };
+}
+
+export async function resolveCommandPath(command, env = process.env) {
+  return (await resolveCommandPathDetailed(command, env)).path;
+}
+
+// Probe a command and report what happened. NEVER writes anything.
+//
+//   probeRuntime({ command: 'codex', args: ['--version'] })            shell-free
+//   probeRuntime({ command: 'codex --version', shell: true })          legacy command line
+//
+// Returns { command, args, shell, resolvedPath, ok, exitCode, stdout, stderr,
+//           notFound, timedOut, errorCode, throwMessage, at }.
+//   notFound     — shell-free only: PATH resolution found nothing, or the spawn
+//                  itself reported ENOENT. This is the ONLY definitive
+//                  "not installed" signal.
+//   timedOut     — the probe was killed at `timeoutMs`; the exit code is
+//                  whatever the kill produced, and says nothing about the CLI.
+//   throwMessage — spawn threw synchronously (an async 'error' event instead
+//                  resolves exit code -1, matching the legacy detect path).
+export async function probeRuntime(spec = {}) {
+  const {
+    command = null,
+    args = [],
+    shell = false,
+    timeoutMs = DEFAULT_DETECT_TIMEOUT_MS,
+    expectExit = 0,
+    env = process.env,
+    cwd = undefined,
+  } = spec;
+  const result = {
+    command, args: Array.isArray(args) ? [...args] : [], shell: !!shell, resolvedPath: null,
+    ok: false, exitCode: null, stdout: '', stderr: '',
+    notFound: false, timedOut: false, errorCode: null, throwMessage: null,
+    at: new Date().toISOString(),
+  };
+  if (!command) {
+    if (!shell) result.notFound = true;
+    return result;
+  }
+
+  let target = command;
+  let argv = result.args;
+  let viaComSpec = false;
+  if (!shell) {
+    const det = await resolveCommandPathDetailed(command, env);
+    if (!det.path) {
+      if (det.inconclusive) {
+        // The PATH walk hit an error it could not see through — "nothing
+        // found" is not proof of absence here (funnel PR1 r5 #3).
+        result.errorCode = 'PATH-UNREADABLE';
+        result.exitCode = -1;
+        return result;
+      }
+      result.notFound = true;
+      return result;
+    }
+    const resolved = det.path;
+    result.resolvedPath = resolved;
+    const ext = extname(resolved).toLowerCase();
+    if (process.platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
+      // A batch shim can only be executed by the command processor, and the
+      // `/s /c` tail has to be built as ONE correctly quoted string under
+      // windowsVerbatimArguments — letting libuv quote a spaced shim path
+      // per-argv-entry breaks cmd's own quote stripping ('C:\Program' is not
+      // recognized — funnel r2 #4). EVERY part is quoted, not just spaced
+      // ones: an unquoted `&`, `^`, or `(` in a path like C:\tools&sdk would
+      // be reparsed as cmd syntax (funnel r8 #3). Inside double quotes those
+      // are literal — what can NEVER be represented safely is the quote
+      // itself, `%` (expands even quoted), and `!` (expands under
+      // registry-enabled delayed expansion), so those are REFUSED as an
+      // honest probe failure, never interpolated.
+      const parts = [resolved, ...result.args].map(String);
+      if (parts.some((p) => /["%!]/.test(p))) {
+        result.errorCode = 'UNQUOTABLE';
+        result.exitCode = -1;
+        return result;
+      }
+      const inner = parts.map((p) => `"${p}"`).join(' ');
+      target = env.ComSpec || env.COMSPEC || 'cmd.exe';
+      argv = ['/d', '/s', '/c', `"${inner}"`];
+      viaComSpec = true;
+    } else {
+      target = resolved;
+    }
+  }
+
+  try {
+    // POSIX children get their own process GROUP so a timeout can kill the
+    // whole tree — killing only the immediate shell leaves descendants alive
+    // and the close event pending, hanging the probe past its budget (funnel
+    // PR1 r3 #1; same pattern as verify-replay). Windows uses taskkill /T.
+    const child = spawn(target, argv, {
+      shell: !!shell, cwd, env,
+      windowsVerbatimArguments: viaComSpec,
+      detached: process.platform !== 'win32',
+    });
+    // Retention is CAPPED AT READ TIME while both pipes keep draining — a
+    // noisy or hostile CLI must not grow memory until the timeout
+    // (funnel r9 #5). The final result slices to 2000 as before.
+    const RETAIN = 4096;
+    let stdout = '', stderr = '';
+    // The cap is enforced per append — a below-threshold check alone would
+    // let one large final chunk overshoot by its full size (funnel r10 #2).
+    child.stdout?.on('data', (b) => {
+      if (stdout.length < RETAIN) stdout += b.toString('utf8').slice(0, RETAIN - stdout.length);
+    });
+    child.stderr?.on('data', (b) => {
+      if (stderr.length < RETAIN) stderr += b.toString('utf8').slice(0, RETAIN - stderr.length);
+    });
+    let timedOut = false;
+    let settleTimer = null;
+    let settled = false;
+    // A detached POSIX probe no longer receives the terminal's SIGINT: if the
+    // operator interrupts the doctor mid-probe, the group must not be left
+    // orphaned (funnel r5 #1). Transient handlers kill the group and re-raise;
+    // they are removed on every settlement path.
+    let dropSignalCleanup = null;
+    if (process.platform !== 'win32') {
+      const killGroup = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} };
+      const handlers = ['SIGINT', 'SIGTERM'].map((sig) => {
+        // Whether OTHER listeners exist is captured BEFORE registering the
+        // transient one — at fire time our once-handler has already been
+        // removed, so a listener count taken then can read 0 even though
+        // other handlers existed and already ran on the original signal
+        // (funnel r6 #1, r8 #1). Re-raise only when no other listener existed
+        // at registration AND none was added since.
+        const hadOthers = process.listenerCount(sig) > 0;
+        const h = () => {
+          killGroup();
+          if (!hadOthers && process.listenerCount(sig) === 0) process.kill(process.pid, sig);
+        };
+        process.once(sig, h);
+        return [sig, h];
+      });
+      process.on('exit', killGroup);
+      dropSignalCleanup = () => {
+        for (const [sig, h] of handlers) process.removeListener(sig, h);
+        process.removeListener('exit', killGroup);
+      };
+    }
+    const code = await new Promise((resolve) => {
+      const done = (c) => {
+        if (settled) return;
+        settled = true;
+        // Release our ends of the pipes and detach from the child on EVERY
+        // settlement path — a killed-but-unreaped descendant holding the
+        // inherited pipe must not keep this process (or a test runner)
+        // alive after the deadline resolved the probe (funnel PR1 r4 #1).
+        try { child.stdout?.destroy(); } catch {}
+        try { child.stderr?.destroy(); } catch {}
+        try { child.unref?.(); } catch {}
+        try { dropSignalCleanup?.(); } catch {}
+        resolve(c);
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        // Settlement deadline from KILL INITIATION: even a kill that fails to
+        // reap every descendant cannot hold the probe open forever.
+        settleTimer = setTimeout(() => done(null), PROBE_KILL_SETTLE_MS);
+        (async () => {
+          try {
+            if (process.platform === 'win32') {
+              await pExecFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { timeout: PROBE_TASKKILL_TIMEOUT_MS });
+            } else {
+              process.kill(-child.pid, 'SIGKILL');
+            }
+          } catch {
+            try { child.kill('SIGKILL'); } catch {}
+          }
+        })();
+      }, timeoutMs);
+      child.on('error', (err) => { result.errorCode = err?.code || null; clearTimeout(timer); done(-1); });
+      child.on('close', (c) => { clearTimeout(timer); done(c); });
+    });
+    if (settleTimer) clearTimeout(settleTimer);
+    result.timedOut = timedOut;
+    result.exitCode = code;
+    result.stdout = stdout.trim().slice(0, 2000);
+    result.stderr = stderr.trim().slice(0, 2000);
+    // expectExit is normalized HERE, once, so every caller (doctor probes and
+    // detectRuntime alike) reads a descriptor's declared exit the same way —
+    // a string '0' must not verify under one and fail under the other
+    // (funnel PR1 r3 #2). Only an integer counts; anything else means 0.
+    // A timed-out probe is NEVER ok, even if the kill raced a clean exit —
+    // ok:true + timedOut:true is a contradiction no caller should ever see
+    // (funnel PR1 r4 #1).
+    const wantExit = Number.isInteger(expectExit) ? expectExit : 0;
+    result.ok = !timedOut && code === wantExit;
+    // A post-spawn ENOENT NEVER establishes absence: by this point resolution
+    // has already PROVEN a file exists at the resolved path. On POSIX, execve
+    // returns ENOENT for an existing script whose shebang interpreter is
+    // missing — a broken installation, not an absent one (funnel r5 #2; the
+    // ComSpec variant of the same trap was r1 #3). The ONLY source of
+    // `notFound` is the resolution walk finding nothing, conclusively.
+  } catch (err) {
+    result.throwMessage = err.message;
+  }
+  return result;
+}
+
 export async function detectRuntime(repoRoot, name, by = null) {
   const r = await readRuntime(repoRoot, name);
   if (!r) throw new Error(`runtime ${name} not found`);
@@ -301,25 +639,16 @@ export async function detectRuntime(repoRoot, name, by = null) {
   if (!cmd) {
     result.error = 'no detect.command and no binary defined';
   } else {
-    try {
-      const child = spawn(cmd, { shell: true });
-      let stdout = '', stderr = '';
-      child.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
-      child.stderr.on('data', (b) => { stderr += b.toString('utf8'); });
-      const timer = setTimeout(() => { try { child.kill(); } catch {} }, DEFAULT_DETECT_TIMEOUT_MS);
-      const code = await new Promise((resolve) => {
-        child.on('error', () => resolve(-1));
-        child.on('close', (c) => resolve(c));
-      });
-      clearTimeout(timer);
-      result.exitCode = code;
-      result.stdout = stdout.trim().slice(0, 2000);
-      result.stderr = stderr.trim().slice(0, 2000);
-      result.ok = code === (r.detect?.expectExit ?? 0);
-      if (result.ok && stdout.trim()) result.version = stdout.trim().split('\n')[0].slice(0, 80);
-    } catch (err) {
-      result.error = err.message;
-    }
+    // A descriptor's `detect.command` is a whole COMMAND LINE, so it keeps
+    // running through a shell exactly as it always has. Only the spawn/collect
+    // mechanics moved into probeRuntime.
+    const probe = await probeRuntime({ command: cmd, shell: true, expectExit: r.detect?.expectExit ?? 0 });
+    result.exitCode = probe.exitCode;
+    result.stdout = probe.stdout;
+    result.stderr = probe.stderr;
+    result.ok = probe.ok;
+    if (probe.throwMessage) result.error = probe.throwMessage;
+    if (result.ok && result.stdout) result.version = result.stdout.split('\n')[0].slice(0, 80);
   }
   // Persist into health projection.
   const h = await readHealth(repoRoot);

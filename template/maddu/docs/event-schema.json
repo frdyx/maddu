@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.19.0",
+  "x-contractVersion": "1.20.0",
   "type": "object",
   "required": [
     "v",
@@ -220,7 +220,8 @@
         "MODEL_PROMOTION_PROPOSED",
         "MODEL_PROMOTION_APPROVED",
         "MODEL_RELEASED",
-        "MODEL_ROLLED_BACK"
+        "MODEL_ROLLED_BACK",
+        "HARNESS_CAPABILITY_OBSERVED"
       ]
     },
     "actor": {
@@ -7205,6 +7206,80 @@
               },
               "reverted_to": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "HARNESS_CAPABILITY_OBSERVED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A harness's native hook surface was compared against the repo-versioned capability manifest — an observation, not an enforcement receipt.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "harness": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "cliVersion": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "manifestVersion": {
+                "type": "string"
+              },
+              "capabilities": {
+                "type": "array"
+              },
+              "enforcementCeiling": {
+                "type": "string"
+              },
+              "drift": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "probeFailure": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "volatile": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "configPath": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "configs": {
+                "type": "array"
+              },
+              "workRoot": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           }

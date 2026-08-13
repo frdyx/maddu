@@ -447,7 +447,18 @@ export const EVENT_TYPES = {
   MODEL_PROMOTION_PROPOSED:     'MODEL_PROMOTION_PROPOSED',
   MODEL_PROMOTION_APPROVED:     'MODEL_PROMOTION_APPROVED',
   MODEL_RELEASED:               'MODEL_RELEASED',
-  MODEL_ROLLED_BACK:            'MODEL_ROLLED_BACK'
+  MODEL_ROLLED_BACK:            'MODEL_ROLLED_BACK',
+  // Harness-parity PR1 — `maddu runtime doctor` compared the repo-versioned
+  // capability manifest (lib/harness-capabilities.mjs) against what is
+  // actually installed, and this is the reading. An OBSERVATION, never an
+  // enforcement receipt: `status` is 'verified' only when the detected CLI
+  // version falls inside the window the manifest's review actually covered,
+  // and 'assumed' (with a `drift` reason) whenever it does not — a claim is
+  // never upgraded by observing it.
+  //   data: { harness, status, cliVersion, manifestVersion, capabilities,
+  //           enforcementCeiling, drift, probeFailure, volatile, configPath,
+  //           configs: [{ path, status }], workRoot }
+  HARNESS_CAPABILITY_OBSERVED:  'HARNESS_CAPABILITY_OBSERVED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;
