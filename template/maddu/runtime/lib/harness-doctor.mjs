@@ -90,7 +90,14 @@ async function statKind(p) {
     return s.isFile() ? 'file' : 'not-file';
   } catch (err) {
     if (err?.code !== 'ENOENT') return 'error';
-    try { await lstat(p); return 'error'; } catch { return 'absent'; }
+    try {
+      await lstat(p);
+      return 'error';
+    } catch (le) {
+      // Only a definitive nothing-there is absence; an lstat that fails any
+      // other way is an inspection failure (funnel r8 #2).
+      return (le?.code === 'ENOENT' || le?.code === 'ENOTDIR') ? 'absent' : 'error';
+    }
   }
 }
 

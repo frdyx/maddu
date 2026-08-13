@@ -483,6 +483,23 @@ const armRoot = await makeRoot('arm');
     ok('win32: a double quote in probe args is refused as spawn-error:UNQUOTABLE, never interpolated',
       rq.status === 'assumed' && /UNQUOTABLE/.test(rq.probeFailure || ''),
       JSON.stringify({ status: rq.status, probeFailure: rq.probeFailure }));
+
+    // r8 #3 — cmd metacharacters in a shim PATH are neutralized by quoting
+    // every part ('tools&sdk' must not split the command), while % stays
+    // unrepresentable and is refused.
+    const ampDir = join(scratch, 'tools&sdk (x86)');
+    await mkdir(ampDir, { recursive: true });
+    await writeFile(join(ampDir, 'ampfx.cmd'), '@echo fx 1.2.3\r\n');
+    const ampEntry = fxEntry({ name: 'amp', detect: { command: join(ampDir, 'ampfx.cmd'), args: [], versionPattern: entry.detect.versionPattern } });
+    const ra = await D.observeHarness({ workRoot: root, stateRoot: root }, 'amp', baseOpts(manifestOf(ampEntry)));
+    ok('win32: a .cmd shim under an ampersand/parenthesis path probes verified (every part quoted)',
+      ra.status === 'verified' && ra.cliVersion === '1.2.3',
+      JSON.stringify({ status: ra.status, drift: ra.drift, probeFailure: ra.probeFailure }));
+    const pctEntry = fxEntry({ name: 'pct', detect: { command: join(spaced, 'fxver.cmd'), args: ['--who=%USERNAME%'], versionPattern: entry.detect.versionPattern } });
+    const rp = await D.observeHarness({ workRoot: root, stateRoot: root }, 'pct', baseOpts(manifestOf(pctEntry)));
+    ok('win32: % in probe args is refused (expands even inside quotes), never interpolated',
+      rp.status === 'assumed' && /UNQUOTABLE/.test(rp.probeFailure || ''),
+      JSON.stringify({ status: rp.status, probeFailure: rp.probeFailure }));
   }
 
   // r3 #1 — a timed-out probe must kill the WHOLE tree and settle within its

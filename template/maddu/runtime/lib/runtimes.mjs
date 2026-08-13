@@ -414,8 +414,15 @@ export async function resolveCommandPathDetailed(command, env = process.env) {
         if (e?.code === 'ENOENT') {
           // stat follows symlinks: a DANGLING link stats ENOENT although an
           // entry exists — a broken installation, not clean absence
-          // (funnel r6 #3). lstat is the tiebreaker.
-          try { await lstat(cand); sawError = true; } catch {}
+          // (funnel r6 #3). lstat is the tiebreaker, and ITS errors must not
+          // read as absence either: only a definitive nothing-there
+          // (ENOENT/ENOTDIR) keeps the walk conclusive (funnel r8 #2).
+          try {
+            await lstat(cand);
+            sawError = true;
+          } catch (le) {
+            if (le?.code !== 'ENOENT' && le?.code !== 'ENOTDIR') sawError = true;
+          }
         } else if (e?.code !== 'ENOTDIR') {
           sawError = true;
         }
@@ -488,17 +495,20 @@ export async function probeRuntime(spec = {}) {
       // `/s /c` tail has to be built as ONE correctly quoted string under
       // windowsVerbatimArguments — letting libuv quote a spaced shim path
       // per-argv-entry breaks cmd's own quote stripping ('C:\Program' is not
-      // recognized — funnel r2 #4). Inputs come from the manifest/descriptor,
-      // but a literal double quote can still not be represented safely inside
-      // a cmd string, so it is REFUSED (an honest probe failure), never
-      // interpolated.
+      // recognized — funnel r2 #4). EVERY part is quoted, not just spaced
+      // ones: an unquoted `&`, `^`, or `(` in a path like C:\tools&sdk would
+      // be reparsed as cmd syntax (funnel r8 #3). Inside double quotes those
+      // are literal — what can NEVER be represented safely is the quote
+      // itself, `%` (expands even quoted), and `!` (expands under
+      // registry-enabled delayed expansion), so those are REFUSED as an
+      // honest probe failure, never interpolated.
       const parts = [resolved, ...result.args].map(String);
-      if (parts.some((p) => p.includes('"'))) {
+      if (parts.some((p) => /["%!]/.test(p))) {
         result.errorCode = 'UNQUOTABLE';
         result.exitCode = -1;
         return result;
       }
-      const inner = parts.map((p) => (/[ \t]/.test(p) ? `"${p}"` : p)).join(' ');
+      const inner = parts.map((p) => `"${p}"`).join(' ');
       target = env.ComSpec || env.COMSPEC || 'cmd.exe';
       argv = ['/d', '/s', '/c', `"${inner}"`];
       viaComSpec = true;
@@ -531,13 +541,16 @@ export async function probeRuntime(spec = {}) {
     if (process.platform !== 'win32') {
       const killGroup = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} };
       const handlers = ['SIGINT', 'SIGTERM'].map((sig) => {
+        // Whether OTHER listeners exist is captured BEFORE registering the
+        // transient one — at fire time our once-handler has already been
+        // removed, so a listener count taken then can read 0 even though
+        // other handlers existed and already ran on the original signal
+        // (funnel r6 #1, r8 #1). Re-raise only when no other listener existed
+        // at registration AND none was added since.
+        const hadOthers = process.listenerCount(sig) > 0;
         const h = () => {
           killGroup();
-          // The ORIGINAL signal already reached every other listener (the
-          // bridge's shutdown handlers, say) — re-raising would run them
-          // TWICE (funnel r6 #1). Re-raise only when this transient handler
-          // was the sole listener and default exit behavior needs restoring.
-          if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
+          if (!hadOthers && process.listenerCount(sig) === 0) process.kill(process.pid, sig);
         };
         process.once(sig, h);
         return [sig, h];
