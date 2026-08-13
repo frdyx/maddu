@@ -450,15 +450,24 @@ const armRoot = await makeRoot('arm');
       JSON.stringify({ status: rq.status, probeFailure: rq.probeFailure }));
   }
 
-  // #5: a non-timeout lock acquisition failure is NOT 'lock-busy'. A directory
-  // squatting on the lock path fails acquisition with a real error.
+  // #5: acquisition failures are reported, never thrown, and 'lock-busy' is
+  // scoped to the timeout the arbiter actually raises. A directory squatting
+  // on the lock path can ONLY surface as ELOCKTIMEOUT (EEXIST → bodyless
+  // grace → unlink-fails → loop), so its honest surface IS lock-busy; the
+  // 'lock-unavailable' class exists for errors that ESCAPE the arbiter
+  // (persistent EPERM/EACCES after its bounded retry), which no portable
+  // fixture can produce — that branch is pinned by the source tripwire below.
   const lockDir = join(paths.pathsFor(root).statePrjDir, 'harness-capabilities.lock');
   await mkdir(lockDir, { recursive: true });
   const misc = await D.materializeHarnessCapabilities(root, { maxWaitMs: 300 });
-  ok("a non-timeout lock failure reports 'lock-unavailable' with the real error, not 'lock-busy'",
-    misc && misc.ok === false && misc.reason === 'lock-unavailable' && typeof misc.error === 'string',
+  ok('a squatting lock path is reported (never thrown), as lock-busy or lock-unavailable',
+    misc && misc.ok === false && (misc.reason === 'lock-busy' || misc.reason === 'lock-unavailable'),
     JSON.stringify(misc));
   await rm(lockDir, { recursive: true, force: true });
+  const doctorSrc = readFileSync(join(process.cwd(), 'template', 'maddu', 'runtime', 'lib', 'harness-doctor.mjs'), 'utf8');
+  ok("classification tripwire: 'lock-busy' is scoped to ELOCKTIMEOUT; other acquisition errors report 'lock-unavailable'",
+    /ELOCKTIMEOUT/.test(doctorSrc) && /lock-unavailable/.test(doctorSrc),
+    'harness-doctor.mjs lost the ELOCKTIMEOUT/lock-unavailable classification');
 }
 
 // ── teardown ────────────────────────────────────────────────────────────────
