@@ -450,6 +450,35 @@ const armRoot = await makeRoot('arm');
       JSON.stringify({ status: rq.status, probeFailure: rq.probeFailure }));
   }
 
+  // r3 #1 — a timed-out probe must kill the WHOLE tree and settle within its
+  // deadline: a surviving grandchild used to hold the close event (and the
+  // doctor) open indefinitely.
+  const spawner = "require('child_process').spawn(process.execPath, ['-e','setInterval(()=>{},1000)'], {stdio:'ignore'}); setInterval(()=>{},1000)";
+  const treeEntry = fxEntry({ name: 'tree', detect: { command: 'node', args: ['-e', spawner], versionPattern: entry.detect.versionPattern } });
+  const t0 = Date.now();
+  const rt = await D.observeHarness({ workRoot: root, stateRoot: root }, 'tree', { ...baseOpts(manifestOf(treeEntry)), timeoutMs: 500 });
+  const elapsed = Date.now() - t0;
+  ok('a probe whose child spawns a survivor still times out honestly',
+    rt.status === 'assumed' && rt.probeFailure === 'timeout',
+    JSON.stringify({ status: rt.status, probeFailure: rt.probeFailure }));
+  ok('the timed-out probe settles within its kill deadline (tree-kill, not wait-forever)',
+    elapsed < 6000, `elapsed=${elapsed}ms`);
+
+  // r3 #2 — expectExit normalization lives in probeRuntime, so doctor and
+  // detectRuntime read the SAME registration the same way: a string '0' with
+  // exit 0 verifies under doctor AND detects ok.
+  const RT = await import(LIB('runtimes.mjs'));
+  await mkdir(join(root, '.maddu', 'runtimes'), { recursive: true });
+  await writeFile(join(root, '.maddu', 'runtimes', 'fx.json'), JSON.stringify({
+    name: 'fx', detect: { command: `"${NODE}" -e "console.log('fx 1.2.3')"`, expectExit: '0' },
+  }) + '\n');
+  const viaDoctor = await D.observeHarness({ workRoot: root, stateRoot: root }, 'fx',
+    { manifest: manifestOf(entry), home: fakeHome, platform: process.platform });
+  const viaDetect = await RT.detectRuntime(root, 'fx');
+  ok("a string expectExit '0' registration reads the SAME under doctor and detect (both ok)",
+    viaDoctor.status === 'verified' && viaDetect.ok === true,
+    JSON.stringify({ doctor: viaDoctor.status, detect: viaDetect.ok }));
+
   // #5: acquisition failures are reported, never thrown, and 'lock-busy' is
   // scoped to the timeout the arbiter actually raises. A directory squatting
   // on the lock path can ONLY surface as ELOCKTIMEOUT (EEXIST → bodyless

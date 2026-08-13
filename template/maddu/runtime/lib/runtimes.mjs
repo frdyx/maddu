@@ -12,7 +12,8 @@
 
 import { mkdir, readFile, readdir, stat, writeFile, unlink, open } from 'node:fs/promises';
 import { delimiter, dirname, extname, isAbsolute, join, resolve as resolvePath } from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { pathsFor } from './paths.mjs';
 import { append, EVENT_TYPES, genWorkerId, normalizeParentId, isRefId } from './spine.mjs';
@@ -111,6 +112,9 @@ export function validateModelPreference(pref, where) {
 
 const DESCRIPTOR_SCHEMA = 1;
 const DEFAULT_DETECT_TIMEOUT_MS = 5000;
+const PROBE_KILL_SETTLE_MS = 3000;      // probe settlement deadline from kill initiation
+const PROBE_TASKKILL_TIMEOUT_MS = 5000; // bound on the taskkill invocation itself
+const pExecFile = promisify(execFile);
 
 function runtimesDir(repoRoot) {
   return join(pathsFor(repoRoot).state, 'runtimes'); // .maddu/runtimes
@@ -440,22 +444,54 @@ export async function probeRuntime(spec = {}) {
   }
 
   try {
-    const child = spawn(target, argv, { shell: !!shell, cwd, env, windowsVerbatimArguments: viaComSpec });
+    // POSIX children get their own process GROUP so a timeout can kill the
+    // whole tree — killing only the immediate shell leaves descendants alive
+    // and the close event pending, hanging the probe past its budget (funnel
+    // PR1 r3 #1; same pattern as verify-replay). Windows uses taskkill /T.
+    const child = spawn(target, argv, {
+      shell: !!shell, cwd, env,
+      windowsVerbatimArguments: viaComSpec,
+      detached: process.platform !== 'win32',
+    });
     let stdout = '', stderr = '';
     child.stdout?.on('data', (b) => { stdout += b.toString('utf8'); });
     child.stderr?.on('data', (b) => { stderr += b.toString('utf8'); });
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch {} }, timeoutMs);
-    const code = await new Promise((done) => {
-      child.on('error', (err) => { result.errorCode = err?.code || null; done(-1); });
-      child.on('close', (c) => done(c));
+    let settleTimer = null;
+    let settled = false;
+    const code = await new Promise((resolve) => {
+      const done = (c) => { if (!settled) { settled = true; resolve(c); } };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        // Settlement deadline from KILL INITIATION: even a kill that fails to
+        // reap every descendant cannot hold the probe open forever.
+        settleTimer = setTimeout(() => done(null), PROBE_KILL_SETTLE_MS);
+        (async () => {
+          try {
+            if (process.platform === 'win32') {
+              await pExecFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { timeout: PROBE_TASKKILL_TIMEOUT_MS });
+            } else {
+              process.kill(-child.pid, 'SIGKILL');
+            }
+          } catch {
+            try { child.kill('SIGKILL'); } catch {}
+          }
+        })();
+      }, timeoutMs);
+      child.on('error', (err) => { result.errorCode = err?.code || null; clearTimeout(timer); done(-1); });
+      child.on('close', (c) => { clearTimeout(timer); done(c); });
     });
-    clearTimeout(timer);
+    if (settleTimer) clearTimeout(settleTimer);
     result.timedOut = timedOut;
     result.exitCode = code;
     result.stdout = stdout.trim().slice(0, 2000);
     result.stderr = stderr.trim().slice(0, 2000);
-    result.ok = code === expectExit;
+    // expectExit is normalized HERE, once, so every caller (doctor probes and
+    // detectRuntime alike) reads a descriptor's declared exit the same way —
+    // a string '0' must not verify under one and fail under the other
+    // (funnel PR1 r3 #2). Only an integer counts; anything else means 0.
+    const wantExit = Number.isInteger(expectExit) ? expectExit : 0;
+    result.ok = code === wantExit;
     // A spawn ENOENT is definitive absence ONLY when the spawn target was the
     // resolved executable itself. When the shim is routed through ComSpec, the
     // shim was already PROVEN present by resolution — an ENOENT there means
