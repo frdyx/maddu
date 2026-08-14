@@ -17,30 +17,21 @@
 // `plan list` could never see. The same shape existed in `task
 // complete/update` and `worker heartbeat/exit/kill`.
 //
-// What is asserted here:
+// What is asserted here, in three layers:
 //   1. LIBRARY  — plans.mjs throws MADDU_PLAN_REF and appends nothing, proven
 //                 with the CLI bypassed (a consumer install resolves its OWN
 //                 frozen lib ahead of the framework template, so the guarantee
 //                 has to hold at this layer, not only in the command).
 //   2. COMMAND  — the exact-then-ordinal resolution ladder, exit 3 refusals,
 //                 and every regression path that already worked.
-//   3. TWINS    — task complete/update and worker heartbeat/exit/kill, which
-//                 had the identical shape and the same hand-typed ids.
-//   4. VERIFY   — orphan_plan_phase / duplicate_plan_phase surface mutations a
-//                 PRE-FIX spine lost, which is permanent damage an operator can
-//                 only learn about from the verifier.
-//   5. RACE     — the post-append winner confirmation, made deterministic by a
-//                 double-gated test seam, plus the bridge route guards.
-//   6. LOOP     — `loop cancel` on an unknown id, and the phantom loop an
-//                 orphaned halt used to conjure into `loop status`.
-//
-// Cross-replica / merged-order coverage lives on feat/merged-order-referential,
-// which carries the sync-mode verifier work this PR deliberately excludes.
+//   3. VERIFY   — orphan_plan_phase surfaces mutations a PRE-FIX spine lost,
+//                 which is permanent damage an operator can only learn about
+//                 from the verifier.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -524,6 +515,182 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
+  // ── layer 7: merged-order referential pass on a SYNCED workspace ──────
+  // Before this, sync mode ran no referential family at all: importPartitions
+  // calls the same verifier, which lands on referential:false. A phase
+  // mutation lost on a synced workspace was invisible to every check.
+  {
+    const repo = await freshRepo('ppr-sync');
+    const planId = newPlan(repo, 'Synced', 'audit,redesign');
+    const sync = await import(pathToFileURL(join(LIB, 'spine-sync.mjs')).href);
+    const initRes = await sync.syncInit(repo);
+    ok('sync: workspace migrated to partitioned mode', initRes.ok === true, JSON.stringify(initRes).slice(0, 100));
+
+    // The residue a pre-fix replica would carry.
+    await spine.append(repo, {
+      type: spine.EVENT_TYPES.PLAN_PHASE_COMPLETED,
+      actor: null, lane: null,
+      data: { planId, name: 'nonexistent', summary: null },
+    });
+
+    const res = await verify.verifySpine(repo);
+    const row = (res.issues || []).find((i) => i.kind === 'orphan_plan_phase');
+    ok('sync: merged pass FINDS the orphaned phase mutation', !!row, (res.issues || []).map((i) => i.kind).join(',') || 'none');
+    ok('sync: merged-order findings are flagged as such', row?.mergedOrder === true, JSON.stringify(row || {}).slice(0, 90));
+    ok('sync: capped at WARN (a ts merge is not a causal order)', row?.level === 'WARN', row?.level);
+    ok('sync: the workspace is not reded by it', (res.counts?.FAIL || 0) === 0, JSON.stringify(res.counts));
+    ok('sync: merged finding carries replica provenance', typeof row?.replicaId === 'string' && row.replicaId.length > 0, row?.replicaId || 'missing');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 8: a genuine TWO-replica merge ──────────────────────────────
+  // Layer 7 has one partition, so it proves the sync branch runs but not the
+  // k-way ordering. Here the parent lives in replica A and the child in
+  // replica B: per-partition scanning can never resolve it, and only a merge
+  // under the projection's own contract can. This is the case the pass exists
+  // for.
+  {
+    const repo = await freshRepo('ppr-2rep');
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    const eid = (n) => `evt_2026081415${String(n).padStart(4, '0')}_${String(n).padStart(6, '0')}`;
+    const mkPart = async (rid, evts) => {
+      const dir = join(repo, '.maddu', 'events', 'by-replica', rid);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, '000000000001.ndjson'),
+        evts.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    };
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
+
+    // repA carries a TIMESTAMP REGRESSION: the plan is created at 10:00:02 but
+    // its phase-add is stamped 09:59:59. Physical order within the partition is
+    // create-then-add, and kWayMergeStreams preserves that. A flat sort by ts —
+    // the ordering this pass used before round 4 — would hoist the add above
+    // its own PLAN_CREATED and report a false orphan. So this fixture
+    // DISCRIMINATES the real merge contract from the rejected one.
+    await mkPart('repA', [
+      {
+        v: 1, id: eid(1), ts: '2026-08-14T10:00:02.000Z', type: 'PLAN_CREATED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', title: 'Split', phases: [], goal: null }, prev_hash: null,
+      },
+      {
+        v: 1, id: eid(2), ts: '2026-08-14T09:59:59.000Z', type: 'PLAN_PHASE_ADDED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', name: 'audit', intent: 'regressed clock', at: '2026-08-14T09:59:59.000Z' }, prev_hash: null,
+      },
+    ]);
+    // repB: the orphan FIRST, so it is the first repB event in merged order
+    // and its predecessor is a repA event — a genuine replica transition at
+    // the finding. That is what makes the provenance assertion below
+    // discriminating: stamping replicaId after the push would attribute this
+    // warning to repA. Then a legitimate completion of repA's phase, which
+    // per-partition scanning could never resolve.
+    await mkPart('repB', [
+      {
+        v: 1, id: eid(3), ts: '2026-08-14T10:00:03.000Z', type: 'PLAN_PHASE_COMPLETED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', name: 'ghost', summary: null }, prev_hash: null,
+      },
+      {
+        v: 1, id: eid(4), ts: '2026-08-14T10:00:04.000Z', type: 'PLAN_PHASE_COMPLETED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', name: 'audit', summary: null }, prev_hash: null,
+      },
+    ]);
+
+    const r2 = await verify.verifySpine(repo);
+    const orphans = (r2.issues || []).filter((i) => i.kind === 'orphan_plan_phase');
+    const kinds = (r2.issues || []).map((i) => i.kind);
+    ok('2-replica: the genuine cross-replica orphan is found', orphans.length === 1, `${orphans.length}: ${kinds.join(',')}`);
+    ok('2-replica: it names "ghost", not the legitimate "audit"',
+      /unknown phase "ghost"/.test(orphans[0]?.detail || ''), (orphans[0]?.detail || '').slice(0, 80));
+    // The discriminator: under a flat ts sort, "audit" would ALSO be orphaned
+    // because its add (09:59:59) would sort before its plan (10:00:02).
+    ok('2-replica: a ts regression inside one replica does NOT fake an orphan',
+      !orphans.some((o) => /unknown phase "audit"/.test(o.detail || '')),
+      orphans.map((o) => o.detail).join(' | ').slice(0, 110));
+    ok('2-replica: the plan itself is NOT reported orphaned (parent is in repA)',
+      !kinds.includes('orphan_plan_event'), kinds.join(','));
+    ok('2-replica: no FAIL on a merely-skewed workspace', (r2.counts?.FAIL || 0) === 0, JSON.stringify(r2.counts));
+    // Provenance is stamped. NOTE, honestly: this does NOT discriminate the
+    // "stamp after the push" ordering bug. That bug can only bite a push made
+    // before the stamp — in practice only ts_before_install — and such a
+    // finding cannot sit at a replica transition: the merge orders by ts, so
+    // an event below the install floor reaches the merge after the install
+    // only by being later in its OWN stream, which makes its predecessor that
+    // same stream. The ordering fix is therefore defensive, not a closed
+    // reachable path, and no fixture can prove otherwise. Recorded rather than
+    // dressed up as coverage.
+    ok('2-replica: findings carry a replicaId', orphans[0]?.replicaId === 'repB',
+      orphans[0]?.replicaId || 'missing');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 9: the sync install floor must match the flat fold ───────────
+  // The floor is the FIRST valid FRAMEWORK_INSTALLED in order, not the minimum
+  // timestamp. Taking the minimum would let a later re-install stamped earlier
+  // lower the floor retroactively and silently suppress ts_before_install
+  // warnings that flat replay raises.
+  {
+    const repo = await freshRepo('ppr-floor');
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
+    const eid = (n) => `evt_2026081416${String(n).padStart(4, '0')}_${String(n).padStart(6, '0')}`;
+    const dir = join(repo, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '000000000001.ndjson'), [
+      // install at Jan 2 — this is the floor
+      { v: 1, id: eid(1), ts: '2026-01-02T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null },
+      // an event BEFORE that floor — must warn
+      { v: 1, id: eid(2), ts: '2026-01-01T12:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'early' }, prev_hash: null },
+      // a later RE-install stamped earlier — must NOT lower the floor
+      { v: 1, id: eid(3), ts: '2026-01-01T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    const rf = await verify.verifySpine(repo);
+    const before = (rf.issues || []).filter((i) => i.kind === 'ts_before_install');
+    ok('floor: sync mode raises ts_before_install at all', before.length >= 1,
+      (rf.issues || []).map((i) => i.kind).join(',') || 'none');
+    ok('floor: a later re-install stamped earlier does NOT suppress it',
+      before.some((i) => /2026-01-01T12:00:00/.test(i.detail || '')),
+      before.map((i) => i.detail).join(' | ').slice(0, 110));
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 10: floor SEMANTICS, not just selection ─────────────────────
+  // Flat mode learns the floor when replay REACHES the install, so events
+  // ordered before it are checked against a null floor and never warn.
+  // Pre-computing the floor matched flat's selection but not its semantics.
+  // Two replicas here also prove each finding carries its OWN replicaId.
+  {
+    const repo = await freshRepo('ppr-floor2');
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
+    const eid = (n) => `evt_2026081417${String(n).padStart(4, '0')}_${String(n).padStart(6, '0')}`;
+    const part = async (rid, evts) => {
+      const d = join(repo, '.maddu', 'events', 'by-replica', rid);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), evts.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    };
+    // repA: an event that PRECEDES the install in merged order. Flat would not
+    // warn on it (floor still null when replay reaches it), so nor may sync.
+    await part('repA', [
+      { v: 1, id: eid(1), ts: '2026-03-01T00:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'pre-install' }, prev_hash: null },
+    ]);
+    // repB: the install, then a genuinely-earlier event AFTER it.
+    await part('repB', [
+      { v: 1, id: eid(2), ts: '2026-03-02T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null },
+      { v: 1, id: eid(3), ts: '2026-03-01T12:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'post-install-but-earlier' }, prev_hash: null },
+    ]);
+
+    const rf2 = await verify.verifySpine(repo);
+    const warns = (rf2.issues || []).filter((i) => i.kind === 'ts_before_install');
+    ok('floor: an event ORDERED BEFORE the install does not warn (flat parity)',
+      !warns.some((i) => /pre-install/.test(i.detail || '') || i.eventId === eid(1)),
+      warns.map((i) => i.eventId).join(','));
+    ok('floor: an earlier-stamped event AFTER the install does warn',
+      warns.some((i) => i.eventId === eid(3)), warns.map((i) => i.eventId).join(',') || 'none');
+    // (Provenance across a replica transition is asserted in the 2-replica
+    // layer above, where the finding's predecessor is genuinely from another
+    // replica — here both are repB, so it would not discriminate.)
+    await rm(repo, { recursive: true, force: true });
+  }
 
   console.log(`\nplan-phase-referential: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
