@@ -209,11 +209,17 @@ async function main() {
       ok('cli: exact name beats ordinal (phases named "2","1")', st['1'] === 'completed' && st['2'] === 'pending', JSON.stringify(st));
     }
 
-    // block-phase resolves through the same ladder.
+    // block-phase resolves through the same ladder. Target it on a plan whose
+    // phases are NAMED, so the ordinal rung is genuinely exercised — blocking
+    // "4" on this plan would have matched the auto-added phase named "4" by
+    // exact name and passed even with no ordinal rung at all.
     {
-      const r = run(['plan', 'block-phase', planId, '--phase', '4', '--reason', 'waiting'], repo);
-      ok('cli: block-phase accepts an ordinal', r.status === 0 && /blocked\s+phase\s+4/.test(r.stdout || ''));
-      const bad = run(['plan', 'block-phase', planId, '--phase', '99', '--reason', 'x'], repo);
+      const named = newPlan(repo, 'BlockNamed', 'alpha,beta,gamma');
+      const r = run(['plan', 'block-phase', named, '--phase', '2', '--reason', 'waiting'], repo);
+      ok('cli: block-phase ordinal 2 resolves to the SECOND named phase',
+        r.status === 0 && /blocked\s+phase\s+beta/.test(r.stdout || ''), (r.stdout || '').trim());
+      ok('cli: block-phase ordinal persisted', (await phaseStates(repo, named)).beta === 'blocked');
+      const bad = run(['plan', 'block-phase', named, '--phase', '99', '--reason', 'x'], repo);
       ok('cli: block-phase unknown phase → exit 3', bad.status === 3);
     }
 
@@ -250,6 +256,28 @@ async function main() {
       ok('twins: task complete prints the real title', /real task/.test(done.stdout || ''), (done.stdout || '').trim());
     }
 
+    // Worker lifecycle: the positive path must survive, AND a heartbeat on a
+    // terminal worker must be refused — existence alone is not enough, because
+    // the WORKER_HEARTBEAT fold only applies while the worker is running.
+    {
+      const sr = run(['session', 'register', '--runtime', 'claude-code', '--role', 'implementer', '--label', 'probe', '--focus', 'probe'], repo);
+      const sid = (/ses_[0-9a-z_]+/.exec(sr.stdout || '') || [])[0];
+      const wr = run(['worker', 'register', '--session', sid, '--command', 'sleep 1'], repo);
+      const wid = (/wrk_[0-9a-z_]+/.exec(wr.stdout || '') || [])[0];
+      ok('twins: worker register still works', !!wid, (wr.stderr || '').slice(0, 90));
+
+      ok('twins: heartbeat on a LIVE worker exits 0', run(['worker', 'heartbeat', wid], repo).status === 0);
+      const beats = await countEvents(repo, 'WORKER_HEARTBEAT');
+      ok('twins: live heartbeat was recorded', beats === 1, `${beats}`);
+
+      ok('twins: exit on a real worker exits 0', run(['worker', 'exit', wid, '--code', '0'], repo).status === 0);
+
+      const dead = run(['worker', 'heartbeat', wid], repo);
+      ok('twins: heartbeat AFTER exit → exit 3 (fold would discard it)', dead.status === 3, `status ${dead.status}`);
+      ok('twins: refusal explains the terminal status', /is exited/.test(dead.stderr || ''), (dead.stderr || '').slice(0, 80));
+      ok('twins: no heartbeat appended for the terminal worker', await countEvents(repo, 'WORKER_HEARTBEAT') === beats);
+    }
+
     await rm(repo, { recursive: true, force: true });
   }
 
@@ -284,13 +312,30 @@ async function main() {
       /unknown phase "1"/.test(row?.detail || '') && /silently discarded/.test(row?.detail || ''),
       (row?.detail || '').slice(0, 90));
 
+    // Duplicate phase declarations are the same loss in the other direction:
+    // the projection keeps the FIRST add and drops the second intent.
+    {
+      const dupRepo = await freshRepo('ppr-dup');
+      const dp = newPlan(dupRepo, 'Dup', 'alpha');
+      await spine.append(dupRepo, {
+        type: spine.EVENT_TYPES.PLAN_PHASE_ADDED,
+        actor: null, lane: null,
+        data: { planId: dp, name: 'alpha', intent: 'second intent', at: new Date().toISOString() },
+      });
+      const dres = await verify.verifySpine(dupRepo);
+      const drow = (dres.issues || []).find((i) => i.kind === 'duplicate_plan_phase');
+      ok('verify: duplicate_plan_phase raised for a re-declared phase', !!drow, (dres.issues || []).map((i) => i.kind).join(','));
+      ok('verify: duplicate message names the discarded intent', /silently discarded/.test(drow?.detail || ''));
+      await rm(dupRepo, { recursive: true, force: true });
+    }
+
     // A clean plan must not trip it.
     const clean = await freshRepo('ppr-clean');
     const cid = newPlan(clean, 'Clean', 'a,b');
     run(['plan', 'complete-phase', cid, '--phase', '1'], clean);
     const cres = await verify.verifySpine(clean);
     ok('verify: no false positive on a well-formed plan',
-      !(cres.issues || []).some((i) => i.kind === 'orphan_plan_phase'));
+      !(cres.issues || []).some((i) => i.kind === 'orphan_plan_phase' || i.kind === 'duplicate_plan_phase'));
 
     await rm(repo, { recursive: true, force: true });
     await rm(clean, { recursive: true, force: true });

@@ -855,7 +855,16 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
           // operator learns a past phase state was silently lost.
           if (pid && ev.type === 'PLAN_PHASE_ADDED' && ev.data?.name != null) {
             if (!planPhases.has(pid)) planPhases.set(pid, new Set());
-            planPhases.get(pid).add(ev.data.name);
+            const known = planPhases.get(pid);
+            // The projection dedupes by name and keeps the FIRST add, so a
+            // second add of the same name silently discards its intent — the
+            // same loss, in the other direction.
+            if (known.has(ev.data.name)) {
+              push(issue('WARN', 'duplicate_plan_phase',
+                `${ev.id}: PLAN_PHASE_ADDED re-declares existing phase "${ev.data.name}" in plan ${pid} — the projection keeps the first declaration, so this intent was silently discarded`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
+            known.add(ev.data.name);
           }
           if (pid && (ev.type === 'PLAN_PHASE_COMPLETED' || ev.type === 'PLAN_PHASE_BLOCKED')) {
             const known = planPhases.get(pid);

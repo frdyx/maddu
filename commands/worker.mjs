@@ -42,12 +42,27 @@ function fmt(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') :
 // folds all no-op on an unknown id, so `worker kill wrk_typo` used to print
 // red `killed` and exit 0 having changed nothing. Check the referent before
 // appending — same lookup as `worker show`.
-async function assertWorkerRef(projections, repoRoot, id) {
+//
+// `requireLive`: the WORKER_HEARTBEAT fold applies only while the worker is
+// still running, so existence alone is not enough for a heartbeat — beating a
+// worker that already exited or was killed is silently discarded too. Note
+// `stuck` is a READ-TIME annotation over a nominally-running worker
+// (projections.mjs), so it must stay heartbeat-able; only the terminal states
+// are refused.
+const LIVE_STATUSES = new Set(['running', 'stuck']);
+
+async function assertWorkerRef(projections, repoRoot, id, { requireLive = false } = {}) {
   const proj = await projections.project(repoRoot);
-  if (!proj.workers.find((x) => x.id === id)) {
+  const w = proj.workers.find((x) => x.id === id);
+  if (!w) {
     console.error(`worker ${id} not found`);
     process.exit(3);
   }
+  if (requireLive && !LIVE_STATUSES.has(w.status)) {
+    console.error(`worker ${id} is ${w.status} — a heartbeat would not be recorded`);
+    process.exit(3);
+  }
+  return w;
 }
 
 export default async function worker(argv) {
@@ -121,7 +136,7 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker heartbeat <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
-    await assertWorkerRef(projections, repoRoot, id);
+    await assertWorkerRef(projections, repoRoot, id, { requireLive: true });
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_HEARTBEAT,
       actor: await explicitSessionFlag(flags),

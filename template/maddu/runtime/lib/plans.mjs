@@ -74,7 +74,21 @@ export async function addPhase(repoRoot, { planId, name, intent, by = null }) {
   // A duplicate name is a no-op in the projection (the dedupe below), which
   // would silently discard the caller's new intent. Refuse instead.
   await assertPhaseRef(repoRoot, planId, name, 'absent');
-  await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: by, lane: null, data: { planId, name, intent, at: new Date().toISOString() } });
+  const ev = await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: by, lane: null, data: { planId, name, intent, at: new Date().toISOString() } });
+  // Read-decide-write race: the check above runs BEFORE the serialized append,
+  // so two concurrent `add-phase` calls (which auto-number to the same next
+  // value) can both observe the name as absent and both append. The projection
+  // keeps the first and drops the second — reintroducing, under concurrency,
+  // the exact silent discard this guard exists to prevent. Pre-checking cannot
+  // fix that; confirming afterwards can. If our event was not the one that
+  // took effect, fail loudly rather than report a success we did not perform.
+  const all = await readAll(repoRoot);
+  const winner = all.find((e) => e.type === EVENT_TYPES.PLAN_PHASE_ADDED
+    && e.data?.planId === planId && e.data?.name === name);
+  if (winner && ev?.id && winner.id !== ev.id) {
+    await refreshPlanArtifacts(repoRoot, planId);
+    throw planRefError(`phase "${name}" was added concurrently by ${winner.actor || 'another actor'}; this intent was NOT recorded — re-run against the current plan`);
+  }
   await refreshPlanArtifacts(repoRoot, planId);
 }
 
