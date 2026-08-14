@@ -101,7 +101,7 @@ id its guard just validated — which could retarget a different real task.
 made the merged-order pass possible **and** returned the file under the monolith
 ratchet.
 
-**Coverage:** `scripts/test/plan-phase-referential.mjs` — 120 asserts across
+**Coverage:** `scripts/test/plan-phase-referential.mjs` — 122 asserts across
 seven layers: the library (CLI bypassed, because a consumer install resolves its
 own frozen lib ahead of the framework template), the command surface, the
 task/worker twins, the verifier, the bridge routes, creation-time duplicates and

@@ -573,9 +573,14 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       // the sequential partition scan made ts_before_install depend on which
       // replica happened to be scanned first. Derived from the merged set, it
       // is order-independent.
+      // FIRST valid install in merged order — matching the flat fold's
+      // first-wins rule, NOT the minimum timestamp. A later re-install stamped
+      // earlier would otherwise lower the floor retroactively and suppress
+      // warnings that flat replay legitimately raises.
       for (const m of merged) {
         if (m.ev.type === 'FRAMEWORK_INSTALLED' && !Number.isNaN(m.tsMs)) {
-          if (refState.installedAt === null || m.tsMs < refState.installedAt) refState.installedAt = m.tsMs;
+          refState.installedAt = m.tsMs;
+          break;
         }
       }
       capIssuesAtWarn = true;

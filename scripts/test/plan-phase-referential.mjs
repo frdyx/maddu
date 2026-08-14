@@ -608,6 +608,37 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
+  // ── layer 9: the sync install floor must match the flat fold ───────────
+  // The floor is the FIRST valid FRAMEWORK_INSTALLED in order, not the minimum
+  // timestamp. Taking the minimum would let a later re-install stamped earlier
+  // lower the floor retroactively and silently suppress ts_before_install
+  // warnings that flat replay raises.
+  {
+    const repo = await freshRepo('ppr-floor');
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
+    const eid = (n) => `evt_2026081416${String(n).padStart(4, '0')}_${String(n).padStart(6, '0')}`;
+    const dir = join(repo, '.maddu', 'events', 'by-replica', 'repA');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '000000000001.ndjson'), [
+      // install at Jan 2 — this is the floor
+      { v: 1, id: eid(1), ts: '2026-01-02T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null },
+      // an event BEFORE that floor — must warn
+      { v: 1, id: eid(2), ts: '2026-01-01T12:00:00.000Z', type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'early' }, prev_hash: null },
+      // a later RE-install stamped earlier — must NOT lower the floor
+      { v: 1, id: eid(3), ts: '2026-01-01T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    const rf = await verify.verifySpine(repo);
+    const before = (rf.issues || []).filter((i) => i.kind === 'ts_before_install');
+    ok('floor: sync mode raises ts_before_install at all', before.length >= 1,
+      (rf.issues || []).map((i) => i.kind).join(',') || 'none');
+    ok('floor: a later re-install stamped earlier does NOT suppress it',
+      before.some((i) => /2026-01-01T12:00:00/.test(i.detail || '')),
+      before.map((i) => i.detail).join(' | ').slice(0, 110));
+    await rm(repo, { recursive: true, force: true });
+  }
+
   console.log(`\nplan-phase-referential: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
