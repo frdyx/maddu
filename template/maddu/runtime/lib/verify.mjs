@@ -172,6 +172,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
   const openedTeams = new Set();          // TEAM_OPENED.data.teamId
   const startedPipelines = new Set();     // PIPELINE_STARTED.data.pipelineRunId
   const createdPlans = new Set();         // PLAN_CREATED.data.planId
+  const planPhases = new Map();           // planId → Set of known phase names
   const startedLoops = new Set();         // LOOP_STARTED.data.loopId
   const startedCoordinators = new Set();  // COORDINATOR_STARTED.data.coordinatorId
   const invokedAdvisors = new Set();      // ADVISOR_INVOKED.data.advisorId
@@ -827,7 +828,10 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
         }
 
         case 'PLAN_CREATED':
-          if (ev.data?.planId) createdPlans.add(ev.data.planId);
+          if (ev.data?.planId) {
+            createdPlans.add(ev.data.planId);
+            planPhases.set(ev.data.planId, new Set((ev.data.phases || []).map((p) => p?.name).filter((n) => n != null)));
+          }
           break;
         case 'PLAN_PHASE_ADDED':
         case 'PLAN_PHASE_COMPLETED':
@@ -840,6 +844,26 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
             push(issue('WARN', 'orphan_plan_event',
               `${ev.id}: ${ev.type} references unknown plan ${pid} (no prior PLAN_CREATED)`,
               { segment: segName, line: lineNo, eventId: ev.id }));
+            break;
+          }
+          // Phase-name-level referential check (v1.124.0). The orphan check
+          // above is planId-level only, so a completion naming a phase that
+          // never existed inside a REAL plan looked clean — yet
+          // projectPlanState drops it, which is how a phase could be
+          // reported complete and stay pending forever. These events are
+          // permanent (append-only), so surfacing them is the only way an
+          // operator learns a past phase state was silently lost.
+          if (pid && ev.type === 'PLAN_PHASE_ADDED' && ev.data?.name != null) {
+            if (!planPhases.has(pid)) planPhases.set(pid, new Set());
+            planPhases.get(pid).add(ev.data.name);
+          }
+          if (pid && (ev.type === 'PLAN_PHASE_COMPLETED' || ev.type === 'PLAN_PHASE_BLOCKED')) {
+            const known = planPhases.get(pid);
+            if (known && ev.data?.name != null && !known.has(ev.data.name)) {
+              push(issue('WARN', 'orphan_plan_phase',
+                `${ev.id}: ${ev.type} references unknown phase "${ev.data.name}" in plan ${pid} (never declared by PLAN_CREATED or PLAN_PHASE_ADDED) — this mutation was silently discarded by the projection`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
           }
           break;
         }

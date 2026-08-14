@@ -781,7 +781,12 @@ async function handleBridge(req, res, url, ctx) {
     try {
       const lib = await import('./lib/plans.mjs');
       const state = await lib.readPlan(repoRoot, planId);
-      if (!state || !state.planId) return sendJson(res, 404, { error: 'plan not found', planId });
+      // `planId` is seeded unconditionally by projectPlanState from the
+      // caller's own string, so it was never a usable sentinel — this 404
+      // could not fire and an unknown id returned 200 with an empty skeleton
+      // that the cockpit drawer rendered as a blank plan. `title` is set only
+      // by PLAN_CREATED, which is the test `plan show` and coordinator use.
+      if (!state || !state.title) return sendJson(res, 404, { error: 'plan not found', planId });
       return sendJson(res, 200, state);
     } catch (err) { return sendJson(res, 500, { error: err.message }); }
   }

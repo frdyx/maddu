@@ -38,6 +38,18 @@ function fmtAge(ms) {
 
 function fmt(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
 
+// Referential guard (v1.124.0). The WORKER_HEARTBEAT / _EXITED / _KILLED
+// folds all no-op on an unknown id, so `worker kill wrk_typo` used to print
+// red `killed` and exit 0 having changed nothing. Check the referent before
+// appending — same lookup as `worker show`.
+async function assertWorkerRef(projections, repoRoot, id) {
+  const proj = await projections.project(repoRoot);
+  if (!proj.workers.find((x) => x.id === id)) {
+    console.error(`worker ${id} not found`);
+    process.exit(3);
+  }
+}
+
 export default async function worker(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
@@ -109,6 +121,7 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker heartbeat <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    await assertWorkerRef(projections, repoRoot, id);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_HEARTBEAT,
       actor: await explicitSessionFlag(flags),
@@ -123,6 +136,7 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker exit <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    await assertWorkerRef(projections, repoRoot, id);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_EXITED,
       actor: await explicitSessionFlag(flags),
@@ -137,6 +151,7 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker kill <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    await assertWorkerRef(projections, repoRoot, id);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_KILLED,
       actor: flags.by || null,

@@ -9,9 +9,9 @@
 //   maddu plan new "<title>" [--phases "audit,redesign,migrate,verify"] [--goal "..."]
 //   maddu plan list
 //   maddu plan show <plan-id>
-//   maddu plan add-phase <plan-id> --phase <n> --intent "..."
-//   maddu plan complete-phase <plan-id> --phase <n> [--summary "..."]
-//   maddu plan block-phase <plan-id> --phase <n> --reason "..."
+//   maddu plan add-phase <plan-id> --phase <name|n> --intent "..."
+//   maddu plan complete-phase <plan-id> --phase <name|n> [--summary "..."]
+//   maddu plan block-phase <plan-id> --phase <name|n> --reason "..."
 //   maddu plan revise <plan-id> --note "..."
 //   maddu plan complete <plan-id> [--summary "..."]
 //   maddu plan cancel <plan-id> [--reason "..."]
@@ -50,6 +50,65 @@ function resolvePhaseName(flags) {
   return null;
 }
 
+// Load a plan or refuse. `planId` is always truthy in the projection (it is
+// seeded from the caller's own string), so `title` — set only by
+// PLAN_CREATED — is the existence sentinel. Same test as `plan show`.
+async function loadPlanOrExit(plans, repoRoot, planId) {
+  const p = await plans.readPlan(repoRoot, planId);
+  if (!p.title) { console.error(`plan ${planId} not found`); process.exit(3); }
+  return p;
+}
+
+// Phase-reference resolution ladder (v1.124.0).
+//
+// The CLI reference has always documented the identifier as `--phase <n>` — a
+// NUMBER — while `plan new --phases "a,b,c"` creates NAMED phases and only an
+// exact string match was ever attempted. Following the docs therefore hit a
+// silent no-op. The ladder makes `<n>` true without changing any invocation
+// that already works:
+//
+//   1. exact name   — plans whose phases really are named "1","2","3" (what
+//                     add-phase auto-numbering produces) keep winning first
+//   2. 1-based ordinal — "3" on audit/redesign/verify resolves to `verify`
+//   3. otherwise    — refuse, and show what the phases actually are
+//
+// Deliberately NO case-insensitive and NO prefix matching: two rungs means
+// there is no ambiguity class to adjudicate.
+function resolvePhaseRef(plan, token) {
+  const phases = plan.phases || [];
+  const exact = phases.find((p) => p.name === token);
+  if (exact) return exact.name;
+  if (/^\d+$/.test(String(token))) {
+    const idx = Number(token) - 1;
+    if (idx >= 0 && idx < phases.length) return phases[idx].name;
+  }
+  return null;
+}
+
+function failPhaseRef(plan, token) {
+  const phases = plan.phases || [];
+  const listing = phases.length
+    ? phases.map((p) => `${p.name} (${p.status})`).join(' · ')
+    : '(none — add one with `maddu plan add-phase`)';
+  console.error(`plan ${plan.planId} has no phase "${token}"`);
+  console.error(`  phases: ${listing}`);
+  if (phases.length) {
+    console.error(`  hint: pass a phase name, an ordinal 1-${phases.length}, or omit --phase to take the next open one`);
+  }
+  process.exit(3);
+}
+
+// Render a library referential refusal (MADDU_PLAN_REF) as a clean CLI error
+// instead of letting bin/maddu.mjs print a stack. The command layer normally
+// resolves first, so this is the backstop for races and non-CLI callers.
+async function guardPlanRef(fn) {
+  try { return await fn(); }
+  catch (err) {
+    if (err && err.code === 'MADDU_PLAN_REF') { console.error(err.message); process.exit(3); }
+    throw err;
+  }
+}
+
 function printPlanHelp() {
   console.log([
     'usage: maddu plan <subcommand> [args]',
@@ -58,9 +117,9 @@ function printPlanHelp() {
     '  new "<title>" [--phases a,b,c] [--goal "..."]',
     '  list',
     '  show <plan-id>',
-    '  add-phase <plan-id> --phase <n> [--intent "..."]',
-    '  complete-phase <plan-id> --phase <n> [--summary "..."]',
-    '  block-phase <plan-id> --phase <n> --reason "..."',
+    '  add-phase <plan-id> --phase <name|n> [--intent "..."]',
+    '  complete-phase <plan-id> --phase <name|n> [--summary "..."]',
+    '  block-phase <plan-id> --phase <name|n> --reason "..."',
     '  revise <plan-id> --note "..."',
     '  complete <plan-id> [--summary "..."]',
     '  cancel <plan-id> [--reason "..."]',
@@ -132,26 +191,30 @@ export default async function planCmd(argv) {
   if (sub === 'add-phase') {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
-    if (!planId) { console.error('usage: maddu plan add-phase <plan-id> [--phase <n>] [--intent "..."]'); process.exit(2); }
+    if (!planId) { console.error('usage: maddu plan add-phase <plan-id> [--phase <name|n>] [--intent "..."]'); process.exit(2); }
     // Forgiving form: `maddu plan add-phase <plan-id> "<intent>"`. plan-id is
     // positional[0]; the intent is positional[1]. --intent stays canonical.
     const positionalIntent = positional.length > 1 ? positional[1] : null;
     const intent = (typeof flags.intent === 'string') ? flags.intent : (positionalIntent || '');
+    const plan = await loadPlanOrExit(plans, repoRoot, planId);
     // Phase identifier: --phase (preferred) / --name (deprecated). When
     // omitted, auto-assign the next phase number = max(existing numeric
     // phase names, count) + 1 so the natural positional-intent form needs
     // no phase number.
     let phase = resolvePhaseName(flags);
     if (!phase) {
-      const p = await plans.readPlan(repoRoot, planId);
-      const existing = p.phases || [];
+      const existing = plan.phases || [];
       const maxNum = existing.reduce((m, ph) => {
         const n = Number(ph.name);
         return Number.isInteger(n) && n > m ? n : m;
       }, 0);
       phase = String(Math.max(maxNum, existing.length) + 1);
+    } else if ((plan.phases || []).some((p) => p.name === phase)) {
+      // A duplicate used to print `added` and silently discard the intent.
+      console.error(`plan ${planId} already has a phase "${phase}"`);
+      process.exit(3);
     }
-    await plans.addPhase(repoRoot, { planId, name: phase, intent, by: sessionId });
+    await guardPlanRef(() => plans.addPhase(repoRoot, { planId, name: phase, intent, by: sessionId }));
     console.log(`${ANSI.pass}added${ANSI.reset}  phase  ${phase}`);
     return;
   }
@@ -159,15 +222,16 @@ export default async function planCmd(argv) {
   if (sub === 'complete-phase') {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
-    if (!planId) { console.error('usage: maddu plan complete-phase <plan-id> [--phase <n>] [--summary "..."]'); process.exit(2); }
-    // Forgiving form: phase number may come from --phase (preferred),
+    if (!planId) { console.error('usage: maddu plan complete-phase <plan-id> [--phase <name|n>] [--summary "..."]'); process.exit(2); }
+    // Forgiving form: phase identifier may come from --phase (preferred),
     // --name (deprecated), positional[1], or — if all omitted — default to
     // the lowest still-open (pending) phase.
-    let phase = resolvePhaseName(flags);
-    if (!phase && positional.length > 1) phase = positional[1];
-    if (!phase) {
-      const p = await plans.readPlan(repoRoot, planId);
-      const open = (p.phases || []).filter((ph) => ph.status === 'pending');
+    const plan = await loadPlanOrExit(plans, repoRoot, planId);
+    let token = resolvePhaseName(flags);
+    if (!token && positional.length > 1) token = positional[1];
+    let phase;
+    if (!token) {
+      const open = (plan.phases || []).filter((ph) => ph.status === 'pending');
       // "Lowest open phase number": prefer numeric ordering, fall back to
       // declaration order (first pending).
       const sorted = [...open].sort((a, b) => {
@@ -177,8 +241,11 @@ export default async function planCmd(argv) {
       });
       if (sorted.length === 0) { console.error('no open phase to complete'); process.exit(3); }
       phase = sorted[0].name;
+    } else {
+      phase = resolvePhaseRef(plan, token);
+      if (!phase) failPhaseRef(plan, token);
     }
-    await plans.completePhase(repoRoot, { planId, name: phase, summary: typeof flags.summary === 'string' ? flags.summary : null, by: sessionId });
+    await guardPlanRef(() => plans.completePhase(repoRoot, { planId, name: phase, summary: typeof flags.summary === 'string' ? flags.summary : null, by: sessionId }));
     console.log(`${ANSI.pass}completed${ANSI.reset}  phase  ${phase}`);
     return;
   }
@@ -186,10 +253,14 @@ export default async function planCmd(argv) {
   if (sub === 'block-phase') {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
-    const phase = resolvePhaseName(flags);
-    if (!planId) { console.error('usage: maddu plan block-phase <plan-id> --phase <n> --reason "..."'); process.exit(2); }
-    if (!phase) { console.error('--phase required'); process.exit(2); }
-    await plans.blockPhase(repoRoot, { planId, name: phase, reason: requireFlag(flags, 'reason'), by: sessionId });
+    let token = resolvePhaseName(flags);
+    if (!token && positional.length > 1) token = positional[1];
+    if (!planId) { console.error('usage: maddu plan block-phase <plan-id> --phase <name|n> --reason "..."'); process.exit(2); }
+    if (!token) { console.error('--phase required'); process.exit(2); }
+    const plan = await loadPlanOrExit(plans, repoRoot, planId);
+    const phase = resolvePhaseRef(plan, token);
+    if (!phase) failPhaseRef(plan, token);
+    await guardPlanRef(() => plans.blockPhase(repoRoot, { planId, name: phase, reason: requireFlag(flags, 'reason'), by: sessionId }));
     console.log(`${ANSI.warn}blocked${ANSI.reset}  phase  ${phase}`);
     return;
   }
@@ -199,7 +270,8 @@ export default async function planCmd(argv) {
     const planId = resolvePlanId(flags, positional);
     if (!planId) { console.error('usage: maddu plan revise <plan-id> --note "..."'); process.exit(2); }
     const note = typeof flags.note === 'string' ? flags.note : '';
-    await plans.revisePlan(repoRoot, { planId, diff: { note, by: sessionId }, by: sessionId });
+    await loadPlanOrExit(plans, repoRoot, planId);
+    await guardPlanRef(() => plans.revisePlan(repoRoot, { planId, diff: { note, by: sessionId }, by: sessionId }));
     console.log(`${ANSI.pass}revised${ANSI.reset}  ${planId}`);
     return;
   }
@@ -208,13 +280,14 @@ export default async function planCmd(argv) {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
     if (!planId) { console.error('usage: maddu plan complete <plan-id> [--summary "..."]'); process.exit(2); }
+    await loadPlanOrExit(plans, repoRoot, planId);
     // Gates-before-done: completing a plan should pass its gates first (tier-
     // scaled + fail-open). `cancel` is the honest terminal state and is not gated.
     const { checkGatesBeforeDone, reportGatesBeforeDone } = await import('./_gates-before-done.mjs');
     const gate = await checkGatesBeforeDone(repoRoot, { force: !!flags.force });
     const gateInfo = reportGatesBeforeDone(gate, 'plan');
     if (!gateInfo.proceed) process.exit(3);
-    await plans.completePlan(repoRoot, { planId, by: sessionId, gate: gateInfo });
+    await guardPlanRef(() => plans.completePlan(repoRoot, { planId, by: sessionId, gate: gateInfo }));
     console.log(`${ANSI.pass}completed${ANSI.reset}  ${planId}`);
     return;
   }
@@ -223,7 +296,8 @@ export default async function planCmd(argv) {
     const { flags, positional } = parseFlags(rest);
     const planId = resolvePlanId(flags, positional);
     if (!planId) { console.error('usage: maddu plan cancel <plan-id> [--reason "..."]'); process.exit(2); }
-    await plans.cancelPlan(repoRoot, { planId, reason: typeof flags.reason === 'string' ? flags.reason : null, by: sessionId });
+    await loadPlanOrExit(plans, repoRoot, planId);
+    await guardPlanRef(() => plans.cancelPlan(repoRoot, { planId, reason: typeof flags.reason === 'string' ? flags.reason : null, by: sessionId }));
     console.log(`${ANSI.warn}cancelled${ANSI.reset}  ${planId}`);
     return;
   }

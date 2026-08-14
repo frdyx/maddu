@@ -1,0 +1,303 @@
+#!/usr/bin/env node
+// plan-phase-referential (v1.124.0) — no mutation may report success it did
+// not perform.
+//
+// THE DEFECT THIS GUARDS (present v1.1.0 → v1.123.0, zero coverage)
+// ────────────────────────────────────────────────────────────────
+// Appenders emitted state-bearing events without checking the referent, and
+// the projections silently discarded what they could not resolve. So:
+//
+//   maddu plan complete-phase <id> --phase 1     # phases: audit,redesign,verify
+//   → green "completed  phase  1", exit 0, and state.json still "pending"
+//
+// The CLI reference documented the identifier as `--phase <n>` — a NUMBER —
+// while `plan new --phases "a,b,c"` creates NAMED phases, so following the
+// docs hit the silent no-op exactly. A typo'd PLAN id was worse: it fabricated
+// `.maddu/plans/<typo>/{state.json,plan.md}` — a phantom plan on disk that
+// `plan list` could never see. The same shape existed in `task
+// complete/update` and `worker heartbeat/exit/kill`.
+//
+// What is asserted here, in three layers:
+//   1. LIBRARY  — plans.mjs throws MADDU_PLAN_REF and appends nothing, proven
+//                 with the CLI bypassed (a consumer install resolves its OWN
+//                 frozen lib ahead of the framework template, so the guarantee
+//                 has to hold at this layer, not only in the command).
+//   2. COMMAND  — the exact-then-ordinal resolution ladder, exit 3 refusals,
+//                 and every regression path that already worked.
+//   3. VERIFY   — orphan_plan_phase surfaces mutations a PRE-FIX spine lost,
+//                 which is permanent damage an operator can only learn about
+//                 from the verifier.
+//
+// Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
+
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { hermeticEnv } from './_hermetic-env.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(HERE, '..', '..');
+const CLI = join(ROOT, 'bin', 'maddu.mjs');
+const LIB = join(ROOT, 'template', 'maddu', 'runtime', 'lib');
+const plans = await import(pathToFileURL(join(LIB, 'plans.mjs')).href);
+const verify = await import(pathToFileURL(join(LIB, 'verify.mjs')).href);
+const spine = await import(pathToFileURL(join(LIB, 'spine.mjs')).href);
+
+let passed = 0;
+let failed = 0;
+function ok(name, cond, extra = '') {
+  console.log(`  ${cond ? '[PASS]' : '[FAIL]'} ${name}${extra ? ` - ${extra}` : ''}`);
+  if (cond) passed++; else failed++;
+}
+
+// The plan/task/worker verbs colour their success tokens, so a raw
+// `/completed\s+phase/` never matches — the reset escape sits between them.
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const strip = (s) => String(s || '').replace(ANSI_RE, '');
+
+function run(args, cwd) {
+  const r = spawnSync(process.execPath, [CLI, ...args], {
+    cwd, encoding: 'utf8', timeout: 30000, env: hermeticEnv(),
+  });
+  return { ...r, stdout: strip(r.stdout), stderr: strip(r.stderr) };
+}
+
+async function freshRepo(tag) {
+  const repo = await mkdtemp(join(tmpdir(), `maddu-${tag}-`));
+  await mkdir(join(repo, '.maddu', 'events'), { recursive: true });
+  return repo;
+}
+
+async function phaseStates(repo, planId) {
+  const s = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
+  return Object.fromEntries((s.phases || []).map((p) => [p.name, p.status]));
+}
+
+async function countEvents(repo, type) {
+  return (await spine.readAll(repo)).filter((e) => e.type === type).length;
+}
+
+function newPlan(repo, title, phases) {
+  const r = run(['plan', 'new', title, '--phases', phases], repo);
+  const m = /pln_[0-9a-z_]+/.exec(r.stdout || '');
+  return m ? m[0] : null;
+}
+
+async function main() {
+  // ── layer 1: the library guarantee, CLI bypassed ──────────────────────
+  {
+    const repo = await freshRepo('ppr-lib');
+    const planId = newPlan(repo, 'Lib', 'audit,redesign,verify');
+    ok('setup: plan created', !!planId);
+
+    const throws = async (label, fn) => {
+      try { await fn(); return { threw: false, code: null }; }
+      catch (e) { return { threw: true, code: e?.code || null }; }
+    };
+
+    for (const [label, fn] of [
+      ['completePhase unknown phase', () => plans.completePhase(repo, { planId, name: '1' })],
+      ['blockPhase unknown phase', () => plans.blockPhase(repo, { planId, name: '99', reason: 'x' })],
+      ['addPhase duplicate name', () => plans.addPhase(repo, { planId, name: 'audit', intent: 'dup' })],
+      ['completePhase unknown plan', () => plans.completePhase(repo, { planId: 'pln_nope', name: 'audit' })],
+      ['blockPhase unknown plan', () => plans.blockPhase(repo, { planId: 'pln_nope', name: 'a', reason: 'x' })],
+      ['revisePlan unknown plan', () => plans.revisePlan(repo, { planId: 'pln_nope', diff: {} })],
+      ['completePlan unknown plan', () => plans.completePlan(repo, { planId: 'pln_nope' })],
+      ['cancelPlan unknown plan', () => plans.cancelPlan(repo, { planId: 'pln_nope', reason: 'x' })],
+    ]) {
+      const r = await throws(label, fn);
+      ok(`lib: ${label} throws MADDU_PLAN_REF`, r.threw && r.code === 'MADDU_PLAN_REF', r.code || 'no throw');
+    }
+
+    ok('lib: no PLAN_PHASE_COMPLETED appended by refusals', await countEvents(repo, 'PLAN_PHASE_COMPLETED') === 0);
+    ok('lib: no PLAN_PHASE_BLOCKED appended by refusals', await countEvents(repo, 'PLAN_PHASE_BLOCKED') === 0);
+    ok('lib: no PLAN_REVISED appended by refusals', await countEvents(repo, 'PLAN_REVISED') === 0);
+
+    // The phantom-plan class: artifacts must never exist for an id that had
+    // no PLAN_CREATED, whatever was attempted against it.
+    const dirs = await readdir(join(repo, '.maddu', 'plans'));
+    ok('lib: no phantom plan directory fabricated', dirs.length === 1 && dirs[0] === planId, dirs.join(','));
+
+    // ...and the valid call still works.
+    let valid = true;
+    try { await plans.completePhase(repo, { planId, name: 'audit' }); } catch { valid = false; }
+    ok('lib: valid completePhase still resolves', valid);
+    ok('lib: valid completion persisted', (await phaseStates(repo, planId)).audit === 'completed');
+
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 2: the command surface ──────────────────────────────────────
+  {
+    const repo = await freshRepo('ppr-cli');
+    const planId = newPlan(repo, 'Cli', 'audit,redesign,verify');
+
+    // THE headline case: the documented `--phase <n>` form.
+    {
+      const r = run(['plan', 'complete-phase', planId, '--phase', '1'], repo);
+      ok('cli: --phase 1 (ordinal) exits 0', r.status === 0, (r.stderr || '').slice(0, 120));
+      ok('cli: --phase 1 resolves to the FIRST phase', /completed\s+phase\s+audit/.test(r.stdout || ''), (r.stdout || '').trim());
+      const st = await phaseStates(repo, planId);
+      ok('cli: ordinal completion persisted to state.json', st.audit === 'completed');
+      const md = await readFile(join(repo, '.maddu', 'plans', planId, 'plan.md'), 'utf8');
+      ok('cli: plan.md shows [x] for the completed phase', /- \[x\] \*\*audit\*\*/.test(md));
+    }
+
+    // Exact name still wins, and the auto-target path is untouched.
+    ok('cli: exact name still works', /completed\s+phase\s+redesign/.test(run(['plan', 'complete-phase', planId, '--phase', 'redesign'], repo).stdout || ''));
+    ok('cli: omitted --phase takes the lowest pending', /completed\s+phase\s+verify/.test(run(['plan', 'complete-phase', planId], repo).stdout || ''));
+
+    // Refusals: exit 3, useful message, nothing appended.
+    const before = await countEvents(repo, 'PLAN_PHASE_COMPLETED');
+    for (const [label, token] of [
+      ['out-of-range ordinal', '7'],
+      ['unknown name', 'nope'],
+      ['wrong case (no case-insensitive rung)', 'Audit'],
+      ['prefix (no prefix rung)', 'aud'],
+    ]) {
+      const r = run(['plan', 'complete-phase', planId, '--phase', token], repo);
+      ok(`cli: ${label} → exit 3`, r.status === 3, `status ${r.status}`);
+      ok(`cli: ${label} → lists the real phases`, /phases: audit/.test(r.stderr || ''), (r.stderr || '').slice(0, 90));
+    }
+    ok('cli: refusals appended NO event', await countEvents(repo, 'PLAN_PHASE_COMPLETED') === before);
+
+    // Unknown plan id on every subcommand, and no phantom directory.
+    for (const args of [
+      ['plan', 'complete-phase', 'pln_nope', '--phase', '1'],
+      ['plan', 'block-phase', 'pln_nope', '--phase', '1', '--reason', 'x'],
+      ['plan', 'add-phase', 'pln_nope', 'intent'],
+      ['plan', 'revise', 'pln_nope', '--note', 'x'],
+      ['plan', 'complete', 'pln_nope'],
+      ['plan', 'cancel', 'pln_nope'],
+    ]) {
+      const r = run(args, repo);
+      ok(`cli: ${args[1]} on unknown plan → exit 3`, r.status === 3, `status ${r.status}: ${(r.stderr || '').slice(0, 70)}`);
+    }
+    {
+      const dirs = await readdir(join(repo, '.maddu', 'plans'));
+      ok('cli: unknown plan ids fabricated no directory', dirs.length === 1, dirs.join(','));
+    }
+
+    // add-phase: duplicate refused, intent preserved; auto-numbering intact.
+    {
+      const dup = run(['plan', 'add-phase', planId, '--phase', 'audit', '--intent', 'REWRITTEN'], repo);
+      ok('cli: add-phase duplicate → exit 3', dup.status === 3, `status ${dup.status}`);
+      const s = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
+      ok('cli: refused duplicate did not overwrite the original intent', s.phases.find((p) => p.name === 'audit').intent === '');
+      const add = run(['plan', 'add-phase', planId, 'new work'], repo);
+      ok('cli: add-phase auto-numbering still works', /added\s+phase\s+4/.test(add.stdout || ''), (add.stdout || '').trim());
+    }
+
+    // Re-completion records the repeat (append-only: every attempt is a receipt).
+    {
+      const n1 = await countEvents(repo, 'PLAN_PHASE_COMPLETED');
+      const r = run(['plan', 'complete-phase', planId, '--phase', 'audit'], repo);
+      const n2 = await countEvents(repo, 'PLAN_PHASE_COMPLETED');
+      ok('cli: re-completing a completed phase exits 0', r.status === 0);
+      ok('cli: re-completion appends a second event', n2 === n1 + 1, `${n1} → ${n2}`);
+      ok('cli: re-completion leaves status completed', (await phaseStates(repo, planId)).audit === 'completed');
+    }
+
+    // Exact-match must beat the ordinal rung.
+    {
+      const p2 = newPlan(repo, 'Numeric', '2,1');
+      run(['plan', 'complete-phase', p2, '--phase', '1'], repo);
+      const st = await phaseStates(repo, p2);
+      ok('cli: exact name beats ordinal (phases named "2","1")', st['1'] === 'completed' && st['2'] === 'pending', JSON.stringify(st));
+    }
+
+    // block-phase resolves through the same ladder.
+    {
+      const r = run(['plan', 'block-phase', planId, '--phase', '4', '--reason', 'waiting'], repo);
+      ok('cli: block-phase accepts an ordinal', r.status === 0 && /blocked\s+phase\s+4/.test(r.stdout || ''));
+      const bad = run(['plan', 'block-phase', planId, '--phase', '99', '--reason', 'x'], repo);
+      ok('cli: block-phase unknown phase → exit 3', bad.status === 3);
+    }
+
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 2b: the Tier-1 twins ────────────────────────────────────────
+  {
+    const repo = await freshRepo('ppr-twins');
+
+    for (const [label, args] of [
+      ['task complete', ['task', 'complete', 'tsk_typo']],
+      ['task update', ['task', 'update', 'tsk_typo', '--status', 'doing']],
+      ['worker heartbeat', ['worker', 'heartbeat', 'wrk_typo']],
+      ['worker exit', ['worker', 'exit', 'wrk_typo', '--code', '0']],
+      ['worker kill', ['worker', 'kill', 'wrk_typo']],
+    ]) {
+      const r = run(args, repo);
+      ok(`twins: ${label} on unknown id → exit 3`, r.status === 3, `status ${r.status}`);
+      ok(`twins: ${label} says not found`, /not found/.test(r.stderr || ''), (r.stderr || '').slice(0, 70));
+    }
+    for (const t of ['TASK_COMPLETED', 'TASK_UPDATED', 'WORKER_KILLED', 'WORKER_HEARTBEAT', 'WORKER_EXITED']) {
+      ok(`twins: no ${t} appended by refusals`, await countEvents(repo, t) === 0);
+    }
+
+    // Happy paths must survive the guard.
+    {
+      const c = run(['task', 'create', 'real task'], repo);
+      const tid = (/tsk_[0-9a-z_]+/.exec(c.stdout || '') || [])[0];
+      ok('twins: task create still works', !!tid);
+      ok('twins: task update on a real id exits 0', run(['task', 'update', tid, '--status', 'doing'], repo).status === 0);
+      const done = run(['task', 'complete', tid], repo);
+      ok('twins: task complete on a real id exits 0', done.status === 0);
+      ok('twins: task complete prints the real title', /real task/.test(done.stdout || ''), (done.stdout || '').trim());
+    }
+
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 3: the verifier names damage a pre-fix spine already took ───
+  {
+    const repo = await freshRepo('ppr-verify');
+    const planId = newPlan(repo, 'Poisoned', 'audit,redesign');
+
+    // Synthesise what the PRE-FIX code used to write: a completion naming a
+    // phase that never existed, inside a plan that does. The guarded
+    // appenders can no longer produce this, so it is written through the
+    // spine directly — which is exactly the historical residue piggy's
+    // repo carries and can never remove (append-only).
+    await spine.append(repo, {
+      type: spine.EVENT_TYPES.PLAN_PHASE_COMPLETED,
+      actor: null, lane: null,
+      data: { planId, name: '1', summary: null },
+    });
+    await spine.append(repo, {
+      type: spine.EVENT_TYPES.PLAN_PHASE_BLOCKED,
+      actor: null, lane: null,
+      data: { planId, name: '99', reason: 'legacy' },
+    });
+
+    const res = await verify.verifySpine(repo);
+    const kinds = (res.issues || []).map((i) => i.kind);
+    ok('verify: orphan_plan_phase raised for the lost completion',
+      kinds.filter((k) => k === 'orphan_plan_phase').length === 2, kinds.join(','));
+    const row = (res.issues || []).find((i) => i.kind === 'orphan_plan_phase');
+    ok('verify: WARN, not FAIL (historical residue is not corruption)', row?.level === 'WARN', row?.level);
+    ok('verify: message names the phase and says it was discarded',
+      /unknown phase "1"/.test(row?.detail || '') && /silently discarded/.test(row?.detail || ''),
+      (row?.detail || '').slice(0, 90));
+
+    // A clean plan must not trip it.
+    const clean = await freshRepo('ppr-clean');
+    const cid = newPlan(clean, 'Clean', 'a,b');
+    run(['plan', 'complete-phase', cid, '--phase', '1'], clean);
+    const cres = await verify.verifySpine(clean);
+    ok('verify: no false positive on a well-formed plan',
+      !(cres.issues || []).some((i) => i.kind === 'orphan_plan_phase'));
+
+    await rm(repo, { recursive: true, force: true });
+    await rm(clean, { recursive: true, force: true });
+  }
+
+  console.log(`\nplan-phase-referential: ${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+}
+
+main().catch((e) => { console.error('harness error:', e); process.exit(2); });

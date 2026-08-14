@@ -11,6 +11,78 @@ narrative summary.
 
 ---
 
+## [v1.124.0] · 2026-08-14 · no mutation reports success it did not perform
+
+A correctness release. Reported by an agent working in a consumer repo, which
+ran `maddu plan complete-phase` three times, was told `completed phase 1` each
+time, believed it, and recorded a phase state that had never been written.
+
+**The defect.** Appenders emitted state-bearing events without checking the
+referent; the projections silently discarded whatever they could not resolve.
+`projectPlanState` did `phases.find(x => x.name === ev.data.name); if (p) {…}`
+with no `else`, so an unresolvable name meant the event landed on the spine and
+changed nothing — while the CLI printed green and exited 0. The CLI reference
+had always documented the identifier as `--phase <n>`, a **number**, while
+`plan new --phases "a,b,c"` creates **named** phases, so following the
+documentation hit the silent no-op precisely. A typo'd *plan* id was worse: it
+fabricated `.maddu/plans/<typo>/{state.json,plan.md}`, a phantom untitled plan
+on disk that `plan list` could never see or clean up.
+
+Present since v1.1.0 — 122 releases — with zero test coverage. `kanban-coherent`
+and `plan-state-derivable` both stayed green, because the board and the artifact
+faithfully agreed with the projection that had dropped the event. The Atlas
+audit had recorded the behaviour in 2026-08 (`state-machines/plan.json`,
+`invalidTransitions`) and it was never remediated.
+
+**What changed.**
+
+- **`plans.mjs` is now the gate.** `completePhase` / `blockPhase` / `addPhase`
+  and the plan-level mutations validate the referent and throw
+  `MADDU_PLAN_REF`, appending nothing. The projection stays a dumb exact fold —
+  teaching it to guess would rewrite the meaning of recorded history and break
+  the replay determinism `isPlanStateDerivable` asserts.
+- **`--phase` resolution ladder:** exact name first (so plans whose phases really
+  are named `1,2,3` are unchanged), then 1-based ordinal — which finally makes
+  the documented `<n>` form true — otherwise exit 3 listing the actual phases.
+  Deliberately **no** case-insensitive and **no** prefix rung: two rungs means
+  no ambiguity class to adjudicate.
+- **Every plan subcommand validates the plan id** (exit 3), `add-phase` refuses
+  a duplicate instead of discarding the new intent, and `refreshPlanArtifacts`
+  refuses to write for a title-less plan — killing the phantom-directory class.
+- **Re-completion records the repeat.** Completing an already-completed phase is
+  not an error and is not suppressed: it appends a second event and exits 0.
+  Every attempt leaves a receipt.
+- **The coordinator stops lying.** `completePhase` was wrapped in a bare
+  `try {} catch {}` and `COORDINATOR_PHASE_COMPLETED` was emitted regardless — a
+  green phase the plan never recorded. It now halts with
+  `reason=phase-completion-failed`.
+- **`GET /bridge/plans/<unknown>` 404s.** Its guard tested `state.planId`, which
+  `projectPlanState` seeds unconditionally, so the 404 could never fire and the
+  cockpit drawer rendered a blank plan for any id.
+- **The Tier-1 twins.** `task complete`, `task update`, `worker heartbeat`,
+  `worker exit`, and `worker kill` had the identical shape and now exit 3 on an
+  unknown id. `task complete`'s `t?.title || ''` — which existed only to paper
+  over the missing guard — is gone.
+- **`maddu spine verify` gained `orphan_plan_phase`** (WARN). The existing check
+  was planId-level only, so a completion naming a phase that never existed
+  inside a *real* plan looked clean. That residue is permanent on an append-only
+  spine; naming it is the only way an operator learns a past phase state was
+  silently lost.
+
+**Not changed:** the event contract. Payload shapes are untouched, so
+`EVENT_CONTRACT_VERSION` stays 1.20.0 and no baseline refresh is required.
+
+**Coverage:** `scripts/test/plan-phase-referential.mjs` — 69 asserts across the
+library layer (CLI bypassed, because a consumer install resolves its own frozen
+lib ahead of the framework template), the command surface, the twins, and the
+verifier. Anti-vacuity control: 17/52 against the pre-fix code.
+
+> **Existing installs must run `maddu upgrade`.** `init`/`upgrade` copy
+> `commands/` and `template/maddu/runtime/**` into the repo, and `_libroot.mjs`
+> prefers those copies — publishing to `main` alone fixes nobody.
+
+---
+
 ## [v1.123.0] · 2026-08-12 · harness capability manifest + `runtime doctor`
 
 Harness-parity campaign PR1 (adopted sovereign-accountability strategy,

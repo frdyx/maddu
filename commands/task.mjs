@@ -163,6 +163,13 @@ export default async function task(argv) {
     if (flags.tags !== undefined) data.tags = csv(flags.tags);
     if (flags['add-blocker']) data.addBlockers = csv(flags['add-blocker']);
     if (flags['remove-blocker']) data.removeBlockers = csv(flags['remove-blocker']);
+    // The TASK_UPDATED fold no-ops on an unknown id, so an unrecognised id
+    // used to print `updated` and silently discard every field. Check the
+    // referent before appending — same lookup as `task show` above.
+    {
+      const proj = await projections.project(repoRoot);
+      if (!proj.tasks.find((x) => x.id === id)) { console.error(`task ${id} not found`); process.exit(3); }
+    }
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.TASK_UPDATED,
       actor: flags.by || null,
@@ -177,6 +184,14 @@ export default async function task(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu task complete <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    // Same referential guard as `update`: TASK_COMPLETED folds to nothing on
+    // an unknown id. The `t?.title || ''` below used to paper over exactly
+    // this — printing green `done` with a blank title for an id that never
+    // existed.
+    {
+      const proj = await projections.project(repoRoot);
+      if (!proj.tasks.find((x) => x.id === id)) { console.error(`task ${id} not found`); process.exit(3); }
+    }
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.TASK_COMPLETED,
       actor: flags.by || null,
@@ -186,7 +201,7 @@ export default async function task(argv) {
     // Re-project to surface unblocked dependents to the operator.
     const proj = await projections.project(repoRoot);
     const t = proj.tasks.find((x) => x.id === id);
-    console.log(`${ANSI.pass}done${ANSI.reset}  ${id}  ${t?.title || ''}`);
+    console.log(`${ANSI.pass}done${ANSI.reset}  ${id}  ${t.title}`);
     if (t?.blocks?.length) {
       console.log(`  ${ANSI.dim}unblocked:${ANSI.reset}`);
       for (const b of t.blocks) {
