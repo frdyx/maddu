@@ -19,7 +19,7 @@ function ok(name, cond, extra = '') {
 }
 
 // ── normalize + recurrence-hash: the SAME lesson with different paths matches ──
-const a = 'In the Bash tool use forward-slash paths (C:/Users/FRDY/proj-a) not backslash.';
+const a = 'In the Bash tool use forward-slash paths (C:/Users/ALICE/proj-a) not backslash.';
 const b = 'in the bash tool use forward-slash paths (C:\\Users\\BOB\\proj-b), not backslash';
 ok('different paths normalize to the same essence', normalizeLesson(a) === normalizeLesson(b), `${normalizeLesson(a)} || ${normalizeLesson(b)}`);
 ok('same essence → same recurrence-hash', recurrenceHash(a) === recurrenceHash(b));
