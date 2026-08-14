@@ -149,8 +149,19 @@ export default async function planCmd(argv) {
     const phases = typeof flags.phases === 'string'
       ? flags.phases.split(',').map((s) => s.trim()).filter(Boolean).map((name) => ({ name, intent: '' }))
       : [];
+    // A duplicate name here would be permanently unaddressable — the fold
+    // resolves by first match, so the twin can never be completed. Refuse
+    // before minting the plan (the library enforces this too).
+    {
+      const seen = new Set();
+      const dup = phases.find((p) => (seen.has(p.name) ? true : (seen.add(p.name), false)));
+      if (dup) {
+        console.error(`duplicate phase name "${dup.name}" — phase names must be unique within a plan`);
+        process.exit(2);
+      }
+    }
     const goal = typeof flags.goal === 'string' ? flags.goal : null;
-    const r = await plans.createPlan(repoRoot, { title, phases, goal, by: sessionId });
+    const r = await guardPlanRef(() => plans.createPlan(repoRoot, { title, phases, goal, by: sessionId }));
     console.log(`${ANSI.pass}created${ANSI.reset}  ${r.planId}  "${title}"  (${phases.length} phase${phases.length === 1 ? '' : 's'})`);
     console.log(`  ${ANSI.dim}artifact: ${r.dir.replace(repoRoot, '').replace(/^[\\/]/, '')}/plan.md${ANSI.reset}`);
     return;

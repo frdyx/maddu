@@ -409,6 +409,98 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
+  // ── layer 5: creation-time duplicates, epoch, and the deterministic race ──
+  {
+    const repo = await freshRepo('ppr-dup2');
+
+    // A duplicate name declared at CREATION is the worst variant: the fold
+    // resolves by first match, so the twin can never be completed — no
+    // resolution ladder can reach it. Refused at both layers.
+    {
+      const r = run(['plan', 'new', 'Dupes', '--phases', 'audit,audit'], repo);
+      ok('creation: duplicate phase names refused by the CLI', r.status === 2, `status ${r.status}`);
+      ok('creation: refusal names the offender', /duplicate phase name "audit"/.test(r.stderr || ''), (r.stderr || '').slice(0, 80));
+      let code = null;
+      try { await plans.createPlan(repo, { title: 'X', phases: [{ name: 'a' }, { name: 'a' }] }); }
+      catch (e) { code = e.code; }
+      ok('creation: library refuses duplicates too', code === 'MADDU_PLAN_REF', code || 'no throw');
+      ok('creation: no plan was minted for the refused duplicate', (await readdir(join(repo, '.maddu', 'plans')).catch(() => [])).length === 0);
+    }
+
+    // The post-append winner confirmation, made deterministic by the test seam
+    // (a rival append lands between the pre-check and ours). Without the seam
+    // this path is reachable only by scheduling luck, so reverting the
+    // confirmation could pass unnoticed.
+    {
+      const planId = newPlan(repo, 'RaceSeam', 'alpha');
+      let code = null;
+      process.env.MADDU_TEST_ADDPHASE_RACE = '1';
+      try { await plans.addPhase(repo, { planId, name: 'contested', intent: 'ours' }); }
+      catch (e) { code = e.code; }
+      finally { delete process.env.MADDU_TEST_ADDPHASE_RACE; }
+      ok('race: losing the append race throws MADDU_PLAN_REF', code === 'MADDU_PLAN_REF', code || 'no throw');
+      const s = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
+      const contested = s.phases.find((p) => p.name === 'contested');
+      ok('race: the RIVAL intent is what survived', contested?.intent === 'rival intent', JSON.stringify(contested));
+      ok('race: our discarded intent is not in the projection', contested?.intent !== 'ours');
+    }
+
+    // Winner selection must use the same epoch as the projection: an add that
+    // predates the effective PLAN_CREATED is not in force, and treating it as
+    // the winner would fabricate a failure for an add that actually applied.
+    {
+      const planId = 'pln_epoch_probe';
+      await spine.append(repo, { type: spine.EVENT_TYPES.PLAN_PHASE_ADDED, actor: null, lane: null, data: { planId, name: 'ghost', intent: 'pre-epoch', at: new Date().toISOString() } });
+      await spine.append(repo, { type: spine.EVENT_TYPES.PLAN_CREATED, actor: null, lane: null, data: { planId, title: 'Epoch', phases: [], goal: null } });
+      let threw = null;
+      try { await plans.addPhase(repo, { planId, name: 'ghost', intent: 'post-epoch' }); }
+      catch (e) { threw = e.code; }
+      ok('epoch: an add predating PLAN_CREATED does not fake a lost race', threw === null, threw || '');
+      const s2 = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
+      ok('epoch: the post-epoch intent is the one recorded', s2.phases.find((p) => p.name === 'ghost')?.intent === 'post-epoch');
+    }
+
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 6: loop cancel + the phantom-loop inverse ───────────────────
+  {
+    const repo = await freshRepo('ppr-loop');
+    const bad = run(['loop', 'cancel', 'lop_typo'], repo);
+    ok('loop: cancel on an unknown loop → exit 3', bad.status === 3, `status ${bad.status}`);
+    ok('loop: no LOOP_HALTED appended', await countEvents(repo, 'LOOP_HALTED') === 0);
+    const status = run(['loop', 'status'], repo);
+    ok('loop: no phantom loop conjured into status', !/lop_typo/.test(status.stdout || ''), (status.stdout || '').trim().slice(0, 80));
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 7: merged-order referential pass on a SYNCED workspace ──────
+  // Before this, sync mode ran no referential family at all: importPartitions
+  // calls the same verifier, which lands on referential:false. A phase
+  // mutation lost on a synced workspace was invisible to every check.
+  {
+    const repo = await freshRepo('ppr-sync');
+    const planId = newPlan(repo, 'Synced', 'audit,redesign');
+    const sync = await import(pathToFileURL(join(LIB, 'spine-sync.mjs')).href);
+    const initRes = await sync.syncInit(repo);
+    ok('sync: workspace migrated to partitioned mode', initRes.ok === true, JSON.stringify(initRes).slice(0, 100));
+
+    // The residue a pre-fix replica would carry.
+    await spine.append(repo, {
+      type: spine.EVENT_TYPES.PLAN_PHASE_COMPLETED,
+      actor: null, lane: null,
+      data: { planId, name: 'nonexistent', summary: null },
+    });
+
+    const res = await verify.verifySpine(repo);
+    const row = (res.issues || []).find((i) => i.kind === 'orphan_plan_phase');
+    ok('sync: merged pass FINDS the orphaned phase mutation', !!row, (res.issues || []).map((i) => i.kind).join(',') || 'none');
+    ok('sync: merged-order findings are flagged as such', row?.mergedOrder === true, JSON.stringify(row || {}).slice(0, 90));
+    ok('sync: capped at WARN (a ts merge is not a causal order)', row?.level === 'WARN', row?.level);
+    ok('sync: the workspace is not reded by it', (res.counts?.FAIL || 0) === 0, JSON.stringify(res.counts));
+    await rm(repo, { recursive: true, force: true });
+  }
+
   console.log(`\nplan-phase-referential: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

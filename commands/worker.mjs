@@ -137,23 +137,22 @@ export default async function worker(argv) {
     if (!id) { console.error('usage: maddu worker heartbeat <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
     await assertWorkerRef(projections, repoRoot, id, { requireLive: true });
-    const hb = await spine.append(repoRoot, {
+    // NOTE: no post-append confirmation here, deliberately — unlike addPhase.
+    // A timestamp is not a receipt identity: a second heartbeat for the same
+    // worker landing before our re-projection would make US report failure
+    // though ours applied, and millisecond collisions can read as success when
+    // an exit won the race. A false refusal is worse than the loss it detects.
+    // The asymmetry with addPhase is real: a lost phase-add permanently
+    // discards operator intent, whereas a heartbeat lost to a genuine exit
+    // race leaves a stale liveness timestamp on a worker that is correctly
+    // terminal — nothing to recover. The pre-check above catches every
+    // non-racing case, which is the reachable one.
+    await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_HEARTBEAT,
       actor: await explicitSessionFlag(flags),
       lane: null,
       data: { id, focus: flags.focus || null }
     });
-    // The liveness check above runs BEFORE the serialized append, so a worker
-    // can exit in between and the fold then ignores this heartbeat — the same
-    // silent discard, via a race instead of a typo. Confirm afterwards that it
-    // actually landed rather than report a success we did not perform.
-    {
-      const after = (await projections.project(repoRoot)).workers.find((x) => x.id === id);
-      if (!after || after.lastHeartbeat !== hb?.ts) {
-        console.error(`worker ${id} became ${after?.status || 'unknown'} before this heartbeat was applied — NOT recorded`);
-        process.exit(3);
-      }
-    }
     if (process.stdout.isTTY) console.log(`heartbeat  ${id}`);
     return;
   }

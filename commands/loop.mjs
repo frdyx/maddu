@@ -358,6 +358,9 @@ export default async function loopCmd(argv) {
     for (const ev of loopEvents) {
       const id = ev.data?.loopId;
       if (!id) continue;
+      // Anchor on LOOP_STARTED. Creating the row from any LOOP_* event let an
+      // orphaned halt conjure a loop that was never started.
+      if (!byId[id] && ev.type !== 'LOOP_STARTED') continue;
       if (!byId[id]) byId[id] = { loopId: id, kind: ev.data.kind, started: null, iters: 0, status: 'open', goal: ev.data.goal || null };
       if (ev.type === 'LOOP_STARTED') byId[id].started = ev.ts;
       else if (ev.type === 'LOOP_ITERATION_COMPLETED') byId[id].iters = ev.data.iter || byId[id].iters;
@@ -379,6 +382,25 @@ export default async function loopCmd(argv) {
     const loopId = rest[0];
     if (!loopId) { console.error('usage: maddu loop cancel <loop-id>'); process.exit(2); }
     const { spine } = await loadSpineLib();
+    // Referential guard (v1.124.0). `loopId` is typed by the operator and was
+    // appended unvalidated, so `loop cancel lop_typo` printed `cancelled` and
+    // exited 0. Worse than a no-op: the loop readers anchored on ANY LOOP_*
+    // event, so the orphaned halt CONJURED a phantom halted loop into
+    // `loop status` and the cockpit — a loop that never existed, reported as
+    // cancelled. The loop's existence is established by LOOP_STARTED.
+    {
+      const all = await spine.readAll(repoRoot);
+      const live = all.filter((e) => e.data?.loopId === loopId);
+      if (!live.some((e) => e.type === 'LOOP_STARTED')) {
+        console.error(`loop ${loopId} not found`);
+        process.exit(3);
+      }
+      const terminal = live.find((e) => e.type === 'LOOP_HALTED' || e.type === 'LOOP_COMPLETED');
+      if (terminal) {
+        console.error(`loop ${loopId} is already ${terminal.type === 'LOOP_HALTED' ? 'halted' : 'completed'}`);
+        process.exit(3);
+      }
+    }
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LOOP_HALTED,
       actor: sessionId, lane: null,

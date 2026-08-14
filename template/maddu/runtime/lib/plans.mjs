@@ -58,6 +58,21 @@ async function assertPhaseRef(repoRoot, planId, name, expect) {
 
 export async function createPlan(repoRoot, { title, phases = [], goal = null, by = null }) {
   if (!title || typeof title !== 'string') throw new Error('plan title required');
+  // Duplicate names at creation are permanently unaddressable: the projection
+  // resolves a phase by `.find(x => x.name === …)`, which always returns the
+  // FIRST match, so a second phase sharing a name can never be completed or
+  // blocked — every attempt silently updates its twin and reports success.
+  // The resolution ladder cannot rescue it either: ordinal 2 resolves to the
+  // duplicate NAME, which folds back onto the first. Refuse at creation.
+  {
+    const seen = new Set();
+    for (const p of phases) {
+      const n = p?.name;
+      if (n == null) continue;
+      if (seen.has(n)) throw planRefError(`duplicate phase name "${n}" — phase names must be unique within a plan`);
+      seen.add(n);
+    }
+  }
   const planId = genPlanId();
   const dir = planDir(repoRoot, planId);
   await mkdir(join(dir, 'revisions'), { recursive: true });
@@ -74,6 +89,13 @@ export async function addPhase(repoRoot, { planId, name, intent, by = null }) {
   // A duplicate name is a no-op in the projection (the dedupe below), which
   // would silently discard the caller's new intent. Refuse instead.
   await assertPhaseRef(repoRoot, planId, name, 'absent');
+  // Test seam: simulate another actor winning the append race in the window
+  // between the check above and our append below. Without it the post-append
+  // confirmation is only reachable by real scheduling luck, so reverting it
+  // could pass a fixture. Scrubbed by scripts/test/_hermetic-env.mjs.
+  if (process.env.MADDU_TEST_ADDPHASE_RACE === '1') {
+    await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: 'rival', lane: null, data: { planId, name, intent: 'rival intent', at: new Date().toISOString() } });
+  }
   const ev = await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: by, lane: null, data: { planId, name, intent, at: new Date().toISOString() } });
   // Read-decide-write race: the check above runs BEFORE the serialized append,
   // so two concurrent `add-phase` calls (which auto-number to the same next
@@ -88,7 +110,17 @@ export async function addPhase(repoRoot, { planId, name, intent, by = null }) {
   // then drops one intent — see the KNOWN GAP note in verify.mjs's sync-mode
   // branch. Do not read this guard as a distributed guarantee.
   const all = await readAll(repoRoot);
-  const winner = all.find((e) => e.type === EVENT_TYPES.PLAN_PHASE_ADDED
+  // Winner selection must respect the same epoch the projection uses:
+  // projectPlanState RESETS `phases` on every PLAN_CREATED, so a
+  // PLAN_PHASE_ADDED that predates the effective (last) PLAN_CREATED is not
+  // the one in force. Scanning all of history would let a stale pre-reset
+  // event masquerade as the winner and make us report "NOT recorded" for an
+  // add that actually applied.
+  let epoch = 0;
+  for (let i = 0; i < all.length; i++) {
+    if (all[i].type === EVENT_TYPES.PLAN_CREATED && all[i].data?.planId === planId) epoch = i;
+  }
+  const winner = all.slice(epoch).find((e) => e.type === EVENT_TYPES.PLAN_PHASE_ADDED
     && e.data?.planId === planId && e.data?.name === name);
   if (winner && ev?.id && winner.id !== ev.id) {
     await refreshPlanArtifacts(repoRoot, planId);

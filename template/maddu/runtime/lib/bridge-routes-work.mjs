@@ -75,21 +75,16 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
           return reply(res, 409, { error: 'worker is not live', id, status: w.status });
         }
       }
-      const hb = await append(repoRoot, {
+      // No post-append confirmation, deliberately — see commands/worker.mjs:
+      // a timestamp is not a receipt identity, and a concurrent heartbeat for
+      // the same worker would make this one falsely 409 though it applied.
+      // High-frequency callers would also pay a second O(history) replay.
+      await append(repoRoot, {
         type: EVENT_TYPES.WORKER_HEARTBEAT,
         actor: sidr.sessionId,
         lane: null,
         data: { id, focus: body.focus || null }
       });
-      // Same race as the CLI verb: the liveness check precedes the serialized
-      // append, so the worker can exit in between and the fold drops this
-      // heartbeat. Confirm it landed instead of returning 200 over a discard.
-      {
-        const after = (await project(repoRoot)).workers.find((x) => x.id === id);
-        if (!after || after.lastHeartbeat !== hb?.ts) {
-          return reply(res, 409, { error: 'heartbeat not applied — worker became terminal', id, status: after?.status || null });
-        }
-      }
       return reply(res, 200, { ok: true });
     }
     if (rest.endsWith('/exit') && req.method === 'POST') {

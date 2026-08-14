@@ -63,19 +63,50 @@ audit had recorded the behaviour in 2026-08 (`state-machines/plan.json`,
   `worker exit`, and `worker kill` had the identical shape and now exit 3 on an
   unknown id. `task complete`'s `t?.title || ''` — which existed only to paper
   over the missing guard — is gone.
-- **`maddu spine verify` gained `orphan_plan_phase`** (WARN). The existing check
-  was planId-level only, so a completion naming a phase that never existed
-  inside a *real* plan looked clean. That residue is permanent on an append-only
-  spine; naming it is the only way an operator learns a past phase state was
-  silently lost.
+- **`maddu spine verify` gained `orphan_plan_phase` and `duplicate_plan_phase`**
+  (WARN). The existing check was planId-level only, so a completion naming a
+  phase that never existed inside a *real* plan looked clean. That residue is
+  permanent on an append-only spine; naming it is the only way an operator
+  learns a past phase state was silently lost.
+- **Referential integrity now runs on synced workspaces.** `verify.mjs` carried
+  a comment deferring cross-replica referential checks to `spine import` —
+  but `importPartitions` calls that same verifier, which lands on
+  `referential: false`. The deferral pointed at a step that never performed it,
+  so on a synced workspace **no** referential family was checked at all: not
+  plans, not tasks, not workers, not parent-sessions. A merged-order pass now
+  replays the same rules over the k-way merge, capped at WARN because a
+  timestamp merge across independent replicas is not a causal order and reding
+  a healthy workspace would be worse than the gap. This is also the only way to
+  see a cross-replica duplicate phase-add, where each replica correctly
+  believes it won.
 
 **Not changed:** the event contract. Payload shapes are untouched, so
 `EVENT_CONTRACT_VERSION` stays 1.20.0 and no baseline refresh is required.
 
-**Coverage:** `scripts/test/plan-phase-referential.mjs` — 69 asserts across the
-library layer (CLI bypassed, because a consumer install resolves its own frozen
-lib ahead of the framework template), the command surface, the twins, and the
-verifier. Anti-vacuity control: 17/52 against the pre-fix code.
+Four rounds of adversarial diff review ran against this change; every finding was
+fixed, including one guard of my own that had to be **removed** — a post-append
+heartbeat confirmation whose timestamp comparison could falsely refuse a
+heartbeat that had in fact landed. A false refusal is the same lie as a silent
+discard, pointed the other way.
+
+Also here: `plan new --phases "a,a"` is refused (a duplicate name is permanently
+unaddressable, since the fold always resolves to the first match); `loop cancel`
+validates its operator-typed id, and the loop readers anchor on `LOOP_STARTED`
+so an orphaned halt can no longer **conjure a phantom loop** into the cockpit;
+and the bridge task route no longer lets a body-supplied `id` override the URL
+id its guard just validated — which could retarget a different real task.
+
+`verify.mjs` was split, with the 691-line referential switch moving to
+`verify-referential.mjs` (proven byte-identical on an 11,174-event spine). That
+made the merged-order pass possible **and** returned the file under the monolith
+ratchet.
+
+**Coverage:** `scripts/test/plan-phase-referential.mjs` — 111 asserts across
+seven layers: the library (CLI bypassed, because a consumer install resolves its
+own frozen lib ahead of the framework template), the command surface, the
+task/worker twins, the verifier, the bridge routes, creation-time duplicates and
+a deterministic append-race seam, loop cancel, and a real synced workspace.
+Anti-vacuity control: **26/85** against the pre-fix code.
 
 > **Existing installs must run `maddu upgrade`.** `init`/`upgrade` copy
 > `commands/` and `template/maddu/runtime/**` into the repo, and `_libroot.mjs`
