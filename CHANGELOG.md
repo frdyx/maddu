@@ -68,46 +68,38 @@ audit had recorded the behaviour in 2026-08 (`state-machines/plan.json`,
   phase that never existed inside a *real* plan looked clean. That residue is
   permanent on an append-only spine; naming it is the only way an operator
   learns a past phase state was silently lost.
-- **Referential integrity now runs on synced workspaces.** `verify.mjs` carried
-  a comment deferring cross-replica referential checks to `spine import` —
-  but `importPartitions` calls that same verifier, which lands on
-  `referential: false`. The deferral pointed at a step that never performed it,
-  so on a synced workspace **no** referential family was checked at all: not
-  plans, not tasks, not workers, not parent-sessions. A merged-order pass now
-  replays the same rules over the k-way merge, capped at WARN because a
-  timestamp merge across independent replicas is not a causal order and reding
-  a healthy workspace would be worse than the gap. This is also the only way to
-  see a cross-replica duplicate phase-add, where each replica correctly
-  believes it won.
-
 **Not changed:** the event contract. Payload shapes are untouched, so
 `EVENT_CONTRACT_VERSION` stays 1.20.0 and no baseline refresh is required.
 
-Four rounds of adversarial diff review ran against this change; every finding was
-fixed, including one guard of my own that had to be **removed** — a post-append
-heartbeat confirmation whose timestamp comparison could falsely refuse a
-heartbeat that had in fact landed. A false refusal is the same lie as a silent
-discard, pointed the other way.
+Adversarial diff review ran against this change across several rounds; every
+finding was fixed, including one guard of my own that had to be **removed** — a
+post-append heartbeat confirmation whose timestamp comparison could falsely
+refuse a heartbeat that had in fact landed. A false refusal is the same lie as a
+silent discard, pointed the other way.
 
 Also here: `plan new --phases "a,a"` is refused (a duplicate name is permanently
 unaddressable, since the fold always resolves to the first match); `loop cancel`
-validates its operator-typed id, and the loop readers anchor on `LOOP_STARTED`
-so an orphaned halt can no longer **conjure a phantom loop** into the cockpit;
-and the bridge task route no longer lets a body-supplied `id` override the URL
-id its guard just validated — which could retarget a different real task.
+validates its operator-typed id, and the loop readers anchor on the *existence*
+of a `LOOP_STARTED` so an orphaned halt can no longer **conjure a phantom loop**
+into the cockpit; and the bridge task route no longer lets a body-supplied `id`
+override the URL id its guard just validated — which could retarget a different
+real task.
 
-`verify.mjs` was split, with the 691-line referential switch moving to
-`verify-referential.mjs` (proven byte-identical on an 11,174-event spine). That
-made the merged-order pass possible **and** returned the file under the monolith
-ratchet.
+**Coverage:** `scripts/test/plan-phase-referential.mjs` — 109 asserts across six
+layers: the library (CLI bypassed, because a consumer install resolves its own
+frozen lib ahead of the framework template), the command surface, the task/worker
+twins, the verifier, the bridge routes plus a deterministic append-race seam, and
+loop cancel. Anti-vacuity control: **26/83** against the pre-fix code.
 
-**Coverage:** `scripts/test/plan-phase-referential.mjs` — 122 asserts across
-seven layers: the library (CLI bypassed, because a consumer install resolves its
-own frozen lib ahead of the framework template), the command surface, the
-task/worker twins, the verifier, the bridge routes, creation-time duplicates and
-a deterministic append-race seam, loop cancel, a real synced workspace, and a
-two-replica cross-partition merge.
-Anti-vacuity control: **31/89** against the pre-fix code.
+**Deliberately NOT in this release.** On a *synced* (partitioned) workspace, no
+referential family is checked in merged order: `verify.mjs` defers that to
+`spine import`, and `importPartitions` calls the same verifier with
+`referential: false`, so the deferral goes nowhere. That gap is pre-existing and
+affects every family — plans, tasks, workers, parent-sessions — not just the
+checks added here. It is fixed on `feat/merged-order-referential`, held back as
+its own change because it carries a verifier module split and a change to
+sync-mode semantics, which do not belong in a correctness patch. The guarantees
+above are single-checkout, not distributed.
 
 > **Existing installs must run `maddu upgrade`.** `init`/`upgrade` copy
 > `commands/` and `template/maddu/runtime/**` into the repo, and `_libroot.mjs`

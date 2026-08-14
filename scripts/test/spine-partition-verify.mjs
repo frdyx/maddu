@@ -80,32 +80,16 @@ async function main() {
     await rm(repo, { recursive: true, force: true });
   }
 
-  // C. Referential in sync mode runs on the MERGED order (v1.124.0).
-  //
-  //    This assertion used to be the inverse — that a LANE_RELEASED with no
-  //    prior LANE_CLAIMED produces NOTHING in sync mode, because the check
-  //    "needs the merged order → import/phase 3". That deferral pointed at a
-  //    step which never performed it: importPartitions calls this same
-  //    verifier, which lands on referential:false. The result was that NO
-  //    referential family was ever checked on a synced workspace.
-  //
-  //    Now the per-partition scans still defer (chain integrity is
-  //    per-partition), and a merged-order pass replays the same rules over the
-  //    k-way merge. Findings are capped at WARN and flagged `mergedOrder`,
-  //    because a timestamp merge across independent replicas is not a causal
-  //    order — an apparent child-before-parent may be clock skew, and reding a
-  //    healthy synced workspace would be worse than the gap.
+  // C. Referential is DEFERRED in sync mode: a LANE_RELEASED with no prior
+  //    LANE_CLAIMED inside a partition must NOT produce orphan_lane_release
+  //    (that check needs the merged order → import/phase 3).
   {
     const repo = await mkdtemp(join(tmpdir(), 'maddu-pv-ref-'));
     await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
     await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
     await writePartition(repo, 'repA', [{ type: 'LANE_RELEASED', lane: 'harness', actor: 'ses_x', data: {} }]);
     const r = await verifySpine(repo);
-    const orphan = r.issues.find((i) => i.kind === 'orphan_lane_release');
-    ok(!!orphan, 'sync mode: merged-order pass DOES catch the orphan release');
-    ok(orphan?.mergedOrder === true, `orphan is flagged mergedOrder (got ${orphan?.mergedOrder})`);
-    ok(orphan?.level === 'WARN', `merged-order finding capped at WARN (got ${orphan?.level})`);
-    ok((r.counts?.FAIL || 0) === 0, `a synced workspace is not reded by it (FAIL=${r.counts?.FAIL})`);
+    ok(!r.issues.some((i) => i.kind === 'orphan_lane_release'), 'sync mode: referential switch deferred (no orphan_lane_release)');
     await rm(repo, { recursive: true, force: true });
   }
 
