@@ -608,15 +608,8 @@ async function main() {
     ok('2-replica: the plan itself is NOT reported orphaned (parent is in repA)',
       !kinds.includes('orphan_plan_event'), kinds.join(','));
     ok('2-replica: no FAIL on a merely-skewed workspace', (r2.counts?.FAIL || 0) === 0, JSON.stringify(r2.counts));
-    // Provenance is stamped. NOTE, honestly: this does NOT discriminate the
-    // "stamp after the push" ordering bug. That bug can only bite a push made
-    // before the stamp — in practice only ts_before_install — and such a
-    // finding cannot sit at a replica transition: the merge orders by ts, so
-    // an event below the install floor reaches the merge after the install
-    // only by being later in its OWN stream, which makes its predecessor that
-    // same stream. The ordering fix is therefore defensive, not a closed
-    // reachable path, and no fixture can prove otherwise. Recorded rather than
-    // dressed up as coverage.
+    // Provenance is stamped. (The discriminating case for the "stamp after the
+    // push" ordering bug is layer 11 below.)
     ok('2-replica: findings carry a replicaId', orphans[0]?.replicaId === 'repB',
       orphans[0]?.replicaId || 'missing');
     await rm(repo, { recursive: true, force: true });
@@ -686,9 +679,49 @@ async function main() {
       warns.map((i) => i.eventId).join(','));
     ok('floor: an earlier-stamped event AFTER the install does warn',
       warns.some((i) => i.eventId === eid(3)), warns.map((i) => i.eventId).join(',') || 'none');
-    // (Provenance across a replica transition is asserted in the 2-replica
-    // layer above, where the finding's predecessor is genuinely from another
-    // replica — here both are repB, so it would not discriminate.)
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 11: provenance ACROSS a replica transition ──────────────────
+  // I previously argued this case was unreachable — that a ts_before_install
+  // could never sit at a replica transition, because the merge orders by
+  // timestamp so an event below the floor only arrives after the install by
+  // being later in its own stream. That was wrong, and the gap is instructive:
+  // kWayMergeStreams compares raw timestamp STRINGS, while the floor check
+  // compares PARSED milliseconds. A non-UTC offset splits the two.
+  //
+  //   install (repA):  2026-01-02T00:00:00.000Z       → 00:00:00Z
+  //   event   (repB):  2026-01-02T01:00:00.000+02:00  → 2026-01-01T23:00:00Z
+  //
+  // The event string sorts AFTER the install ("…T01…" > "…T00…"), so it merges
+  // second and is the first repB event — a genuine transition — yet it parses
+  // EARLIER than the floor, so it warns. Stamping provenance after the push
+  // attributes that warning to repA. The verifier does not require canonical
+  // toISOString() input, so this is a real accepted-input path, not a
+  // contrivance.
+  {
+    const repo = await freshRepo('ppr-prov');
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
+    const eid = (n) => `evt_2026081418${String(n).padStart(4, '0')}_${String(n).padStart(6, '0')}`;
+    const part = async (rid, evts) => {
+      const d = join(repo, '.maddu', 'events', 'by-replica', rid);
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, '000000000001.ndjson'), evts.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    };
+    await part('repA', [
+      { v: 1, id: eid(1), ts: '2026-01-02T00:00:00.000Z', type: 'FRAMEWORK_INSTALLED', actor: null, lane: null, data: {}, prev_hash: null },
+    ]);
+    await part('repB', [
+      { v: 1, id: eid(2), ts: '2026-01-02T01:00:00.000+02:00', type: 'GOAL_DECLARED', actor: null, lane: null, data: { objective: 'offset-skew' }, prev_hash: null },
+    ]);
+
+    const rp = await verify.verifySpine(repo);
+    const w = (rp.issues || []).find((i) => i.kind === 'ts_before_install' && i.eventId === eid(2));
+    ok('provenance: the offset-skewed event warns (parses before the floor)', !!w,
+      (rp.issues || []).map((i) => i.kind).join(',') || 'none');
+    ok('provenance: it is attributed to ITS OWN replica across the transition',
+      w?.replicaId === 'repB', w?.replicaId || 'missing');
     await rm(repo, { recursive: true, force: true });
   }
 

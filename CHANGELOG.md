@@ -54,10 +54,10 @@ the floor applies only from the point replay reaches it.
 byte-identical on an 11,174-event spine. This is what made the merged pass
 possible and returned the file under the monolith ratchet.
 
-**Coverage:** `plan-phase-referential.mjs` grows to **125 asserts** across ten
+**Coverage:** `plan-phase-referential.mjs` grows to **127 asserts** across eleven
 layers, adding a real synced workspace via `syncInit`, a two-replica merge whose
 timestamp regression *discriminates* the real merge contract from the rejected
-flat sort, and install-floor selection and semantics.
+flat sort, install-floor selection and semantics, and a provenance case across a replica transition that only exists because the merge compares timestamp STRINGS while the floor check compares parsed milliseconds — a non-UTC offset splits the two.
 `spine-partition-verify.mjs` section C previously asserted the old contract
 ("referential is deferred in sync mode"); it now asserts the merged pass fires,
 is WARN-capped, and does not red the workspace.
