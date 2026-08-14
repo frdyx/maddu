@@ -227,7 +227,22 @@ export async function runCoordinator(repoRoot, { planId, runtime = null, session
 
     // Mark the phase complete on the plan (emits PLAN_PHASE_COMPLETED →
     // refreshes state.json + plan.md artifacts via Phase 5).
-    try { await completePhase(repoRoot, { planId, name: phase.name, summary: `coordinator ${coordinatorId} OK`, by: sessionId }); } catch {}
+    //
+    // This used to be `try { … } catch {}`, which meant a failed plan
+    // mutation was invisible and COORDINATOR_PHASE_COMPLETED was emitted
+    // anyway — the coordinator reporting a green phase the plan never
+    // recorded. A phase that cannot be marked complete is a halt, not a pass.
+    try {
+      await completePhase(repoRoot, { planId, name: phase.name, summary: `coordinator ${coordinatorId} OK`, by: sessionId });
+    } catch (err) {
+      await append(repoRoot, {
+        type: EVENT_TYPES.COORDINATOR_HALTED,
+        actor: sessionId, lane: null,
+        triggered_by: { planId, coordinatorId, phase: phase.name },
+        data: { coordinatorId, planId, phase: phase.name, reason: 'phase-completion-failed', signature: err?.message || String(err), exitCode: null },
+      });
+      return { ok: false, reason: 'phase-completion-failed', phase: phase.name, coordinatorId };
+    }
 
     await append(repoRoot, {
       type: EVENT_TYPES.COORDINATOR_PHASE_COMPLETED,

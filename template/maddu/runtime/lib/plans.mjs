@@ -22,8 +22,57 @@ async function exists(p) { try { await stat(p); return true; } catch { return fa
 function plansRoot(repoRoot) { return join(pathsFor(repoRoot).state, 'plans'); }
 function planDir(repoRoot, planId) { return join(plansRoot(repoRoot), planId); }
 
+// Referential guard (v1.124.0). Until now every phase mutation appended its
+// event unconditionally, and projectPlanState() below silently dropped any
+// event whose referent it could not resolve — so `complete-phase` on an
+// unknown phase name printed green success, exited 0, and changed nothing.
+// The projection MUST stay a total function over an untrusted historical
+// stream (replay determinism is asserted by isPlanStateDerivable), so the
+// appender is where the reference gets checked.
+//
+// A plan exists iff its projection carries a `title` — `planId` is seeded
+// unconditionally at projection time, so it is never a usable sentinel. This
+// is the same test used by `plan show`, coordinator.mjs, and
+// maybeAutoReviseFromSliceStop below.
+function planRefError(message) {
+  const err = new Error(message);
+  err.code = 'MADDU_PLAN_REF';
+  return err;
+}
+
+// Resolve a plan + assert a phase reference, or throw MADDU_PLAN_REF.
+// `expect: 'present'` demands the phase exist (complete/block); `expect:
+// 'absent'` demands it not (add). Returns the projected plan.
+async function assertPhaseRef(repoRoot, planId, name, expect) {
+  const plan = await readPlan(repoRoot, planId);
+  if (!plan.title) throw planRefError(`plan ${planId} not found`);
+  const found = (plan.phases || []).some((p) => p.name === name);
+  if (expect === 'present' && !found) {
+    throw planRefError(`plan ${planId} has no phase "${name}"`);
+  }
+  if (expect === 'absent' && found) {
+    throw planRefError(`plan ${planId} already has a phase "${name}"`);
+  }
+  return plan;
+}
+
 export async function createPlan(repoRoot, { title, phases = [], goal = null, by = null }) {
   if (!title || typeof title !== 'string') throw new Error('plan title required');
+  // Duplicate names at creation are permanently unaddressable: the projection
+  // resolves a phase by `.find(x => x.name === …)`, which always returns the
+  // FIRST match, so a second phase sharing a name can never be completed or
+  // blocked — every attempt silently updates its twin and reports success.
+  // The resolution ladder cannot rescue it either: ordinal 2 resolves to the
+  // duplicate NAME, which folds back onto the first. Refuse at creation.
+  {
+    const seen = new Set();
+    for (const p of phases) {
+      const n = p?.name;
+      if (n == null) continue;
+      if (seen.has(n)) throw planRefError(`duplicate phase name "${n}" — phase names must be unique within a plan`);
+      seen.add(n);
+    }
+  }
   const planId = genPlanId();
   const dir = planDir(repoRoot, planId);
   await mkdir(join(dir, 'revisions'), { recursive: true });
@@ -37,21 +86,81 @@ export async function createPlan(repoRoot, { title, phases = [], goal = null, by
 }
 
 export async function addPhase(repoRoot, { planId, name, intent, by = null }) {
-  await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: by, lane: null, data: { planId, name, intent, at: new Date().toISOString() } });
+  // A duplicate name is a no-op in the projection (the dedupe below), which
+  // would silently discard the caller's new intent. Refuse instead.
+  await assertPhaseRef(repoRoot, planId, name, 'absent');
+  // Test seam: simulate another actor winning the append race in the window
+  // between the check above and our append below. Without it the post-append
+  // confirmation is only reachable by real scheduling luck, so reverting it
+  // could pass a fixture. Scrubbed by scripts/test/_hermetic-env.mjs.
+  //
+  // PRODUCTION-GATED on MADDU_SELF_TEST === '1' as well — this file ships into
+  // consumer installs, and an inherited or mistyped variable would otherwise
+  // permanently write a fake rival intent and refuse the operator's real add.
+  // Same double-gate as the hooks test seams (commands/hooks.mjs:177).
+  if (process.env.MADDU_SELF_TEST === '1' && process.env.MADDU_TEST_ADDPHASE_RACE === '1') {
+    await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: 'rival', lane: null, data: { planId, name, intent: 'rival intent', at: new Date().toISOString() } });
+  }
+  const ev = await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: by, lane: null, data: { planId, name, intent, at: new Date().toISOString() } });
+  // Read-decide-write race: the check above runs BEFORE the serialized append,
+  // so two concurrent `add-phase` calls (which auto-number to the same next
+  // value) can both observe the name as absent and both append. The projection
+  // keeps the first and drops the second — reintroducing, under concurrency,
+  // the exact silent discard this guard exists to prevent. Pre-checking cannot
+  // fix that; confirming afterwards can. If our event was not the one that
+  // took effect, fail loudly rather than report a success we did not perform.
+  //
+  // SCOPE: this covers history visible to THIS checkout. Two replicas adding
+  // the same phase offline will each confirm itself the winner, and the merge
+  // then drops one intent — see the KNOWN GAP note in verify.mjs's sync-mode
+  // branch. Do not read this guard as a distributed guarantee.
+  const all = await readAll(repoRoot);
+  // Winner selection must respect the same epoch the projection uses:
+  // projectPlanState RESETS `phases` on every PLAN_CREATED, so a
+  // PLAN_PHASE_ADDED that predates the effective (last) PLAN_CREATED is not
+  // the one in force. Scanning all of history would let a stale pre-reset
+  // event masquerade as the winner and make us report "NOT recorded" for an
+  // add that actually applied.
+  let epoch = 0;
+  for (let i = 0; i < all.length; i++) {
+    if (all[i].type === EVENT_TYPES.PLAN_CREATED && all[i].data?.planId === planId) epoch = i;
+  }
+  const winner = all.slice(epoch).find((e) => e.type === EVENT_TYPES.PLAN_PHASE_ADDED
+    && e.data?.planId === planId && e.data?.name === name);
+  if (winner && ev?.id && winner.id !== ev.id) {
+    await refreshPlanArtifacts(repoRoot, planId);
+    throw planRefError(`phase "${name}" was added concurrently by ${winner.actor || 'another actor'}; this intent was NOT recorded — re-run against the current plan`);
+  }
   await refreshPlanArtifacts(repoRoot, planId);
 }
 
 export async function completePhase(repoRoot, { planId, name, summary = null, by = null }) {
+  // Status is deliberately NOT checked: re-completing an already-completed
+  // phase records the repeat (every attempt leaves a receipt on an
+  // append-only spine), and blocked -> completed is the only way out of a
+  // blocked phase since no unblock event exists.
+  await assertPhaseRef(repoRoot, planId, name, 'present');
   await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_COMPLETED, actor: by, lane: null, data: { planId, name, summary } });
   await refreshPlanArtifacts(repoRoot, planId);
 }
 
 export async function blockPhase(repoRoot, { planId, name, reason, by = null }) {
+  await assertPhaseRef(repoRoot, planId, name, 'present');
   await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_BLOCKED, actor: by, lane: null, data: { planId, name, reason } });
   await refreshPlanArtifacts(repoRoot, planId);
 }
 
+// Plan-level mutations take the same referential guard: without it a typo'd
+// id appended a real event and fabricated an untitled plan directory that
+// `plan list` could never see.
+async function assertPlanRef(repoRoot, planId) {
+  const plan = await readPlan(repoRoot, planId);
+  if (!plan.title) throw planRefError(`plan ${planId} not found`);
+  return plan;
+}
+
 export async function revisePlan(repoRoot, { planId, diff, by = null }) {
+  await assertPlanRef(repoRoot, planId);
   await append(repoRoot, { type: EVENT_TYPES.PLAN_REVISED, actor: by, lane: null, data: { planId, by, diff } });
   await refreshPlanArtifacts(repoRoot, planId);
 }
@@ -59,6 +168,7 @@ export async function revisePlan(repoRoot, { planId, diff, by = null }) {
 export async function completePlan(repoRoot, { planId, by = null, gate = null }) {
   // gate (optional): the gates-before-done result — recorded as open, non-load-
   // bearing fields so a --force completion that bypassed red gates leaves evidence.
+  await assertPlanRef(repoRoot, planId);
   const data = { planId };
   if (gate) { data.gatesFailed = gate.failCount || 0; data.gatesForced = !!gate.forced; }
   await append(repoRoot, { type: EVENT_TYPES.PLAN_COMPLETED, actor: by, lane: null, data });
@@ -66,6 +176,7 @@ export async function completePlan(repoRoot, { planId, by = null, gate = null })
 }
 
 export async function cancelPlan(repoRoot, { planId, reason = null, by = null }) {
+  await assertPlanRef(repoRoot, planId);
   await append(repoRoot, { type: EVENT_TYPES.PLAN_CANCELLED, actor: by, lane: null, data: { planId, reason } });
   await refreshPlanArtifacts(repoRoot, planId);
 }
@@ -154,6 +265,11 @@ function renderPlanMarkdown(state) {
 
 async function refreshPlanArtifacts(repoRoot, planId) {
   const state = await readPlan(repoRoot, planId);
+  // Publish nothing before it exists. Writing artifacts unconditionally used
+  // to fabricate `.maddu/plans/<typo>/{state.json,plan.md}` for any id that
+  // never had a PLAN_CREATED — untitled phantom plans on disk that `plan
+  // list` (which folds PLAN_CREATED) could never see or clean up.
+  if (!state.title) return;
   const dir = planDir(repoRoot, planId);
   await mkdir(join(dir, 'revisions'), { recursive: true });
   await writeFile(join(dir, 'state.json'), JSON.stringify(state, null, 2) + '\n');

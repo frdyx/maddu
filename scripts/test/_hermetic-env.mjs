@@ -43,6 +43,7 @@ const SCRUB = Object.freeze([
   'MADDU_ASSESS_TEST_STDIN',
   'MADDU_REPLAY_TEST_CLEANUP_FAIL',
   'MADDU_TEST_MINT_HOLD_MS',
+  'MADDU_TEST_ADDPHASE_RACE',
   // The SessionStart hook appends `export MADDU_SESSION_ID=...` to
   // CLAUDE_ENV_FILE when set — an inherited value lets a fixture's
   // session-start fire WRITE INTO the developer's live env file, pinning a

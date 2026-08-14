@@ -741,10 +741,10 @@ $ maddu plan new "<title>" [--phases "a,b,c"] [--goal "..."]
 $ maddu plan list
 $ maddu plan show <plan-id>
 $ maddu plan add-phase <plan-id> "<intent>"   # auto-numbers the next phase
-#   (or pin the number explicitly: --phase <n> [--intent "..."])
+#   (or pin the name explicitly: --phase <name|n> [--intent "..."])
 $ maddu plan complete-phase <plan-id>          # completes the next open phase
-#   (or target one: <plan-id> <n>  /  <plan-id> --phase <n> [--summary "..."])
-$ maddu plan block-phase <plan-id> --phase <n> --reason "..."
+#   (or target one: <plan-id> <name|n>  /  <plan-id> --phase <name|n> [--summary "..."])
+$ maddu plan block-phase <plan-id> --phase <name|n> --reason "..."
 $ maddu plan revise <plan-id> --note "..."
 $ maddu plan complete <plan-id> [--summary "..."]
 $ maddu plan cancel <plan-id> [--reason "..."]
@@ -756,6 +756,24 @@ $ maddu plan kanban
 # emits a one-time stderr warning. `maddu plan kanban` now aggregates
 # phase status — completed/pending/blocked phases each surface in their
 # own column.
+#
+# v1.124.0 — phase reference resolution. `--phase` accepts either the
+# phase NAME or a 1-based ORDINAL, resolved in that order:
+#
+#   1. exact name    — `--phase audit`, and plans whose phases really are
+#                      named "1","2","3" (what add-phase auto-numbering
+#                      produces) keep matching by name first
+#   2. 1-based ordinal — `--phase 1` on a plan with phases
+#                      audit/redesign/verify resolves to `audit`
+#   3. otherwise     — refuses with exit 3 and lists the actual phases
+#
+# There is deliberately NO case-insensitive and NO prefix matching:
+# `--phase Audit` and `--phase aud` are refused, not guessed.
+#
+# Every plan subcommand also validates the plan id (exit 3 on unknown), and
+# add-phase refuses a duplicate phase name rather than discarding the new
+# intent. Before v1.124.0 all of these appended an event the projection
+# silently dropped, printed green success, and exited 0 — see FIXED-IN.
 
 # Loops (Phase 6)
 # v1.1.1: verify exit=0 → completes; non-zero → iterates; identical fail

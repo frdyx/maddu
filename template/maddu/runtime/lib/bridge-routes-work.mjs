@@ -63,6 +63,22 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
       const body = (await readBody(req)) || {};
       const sidr = readBodySessionId(body, { required: false });
       if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
+      // Referential guard (v1.124.0) — the bridge is a public appender for the
+      // same events as the CLI verbs, so it needs the same check: an unknown
+      // id folds to nothing and used to return 200 over a discarded write.
+      // A heartbeat additionally only folds while the worker is live (`stuck`
+      // is a read-time annotation over running, so it stays beatable).
+      {
+        const w = (await project(repoRoot)).workers.find((x) => x.id === id);
+        if (!w) return reply(res, 404, { error: 'worker not found', id });
+        if (w.status !== 'running' && w.status !== 'stuck') {
+          return reply(res, 409, { error: 'worker is not live', id, status: w.status });
+        }
+      }
+      // No post-append confirmation, deliberately — see commands/worker.mjs:
+      // a timestamp is not a receipt identity, and a concurrent heartbeat for
+      // the same worker would make this one falsely 409 though it applied.
+      // High-frequency callers would also pay a second O(history) replay.
       await append(repoRoot, {
         type: EVENT_TYPES.WORKER_HEARTBEAT,
         actor: sidr.sessionId,
@@ -76,6 +92,9 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
       const body = (await readBody(req)) || {};
       const sidr = readBodySessionId(body, { required: false });
       if (!sidr.ok) return reply(res, sidr.status, { error: sidr.error });
+      if (!(await project(repoRoot)).workers.find((x) => x.id === id)) {
+        return reply(res, 404, { error: 'worker not found', id });
+      }
       await append(repoRoot, {
         type: EVENT_TYPES.WORKER_EXITED,
         actor: sidr.sessionId,
@@ -87,6 +106,9 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
     if (rest.endsWith('/kill') && req.method === 'POST') {
       const id = rest.slice(0, -'/kill'.length);
       const body = (await readBody(req)) || {};
+      if (!(await project(repoRoot)).workers.find((x) => x.id === id)) {
+        return reply(res, 404, { error: 'worker not found', id });
+      }
       await append(repoRoot, {
         type: EVENT_TYPES.WORKER_KILLED,
         actor: body.by || null,
@@ -198,6 +220,11 @@ export async function routeTasks({ req, res, path, repoRoot }) {
     if (rest.endsWith('/complete') && req.method === 'POST') {
       const id = rest.slice(0, -'/complete'.length);
       const body = (await readBody(req)) || {};
+      // Referential guard (v1.124.0): TASK_COMPLETED folds to nothing on an
+      // unknown id, so this route used to 200 over a discarded write.
+      if (!(await project(repoRoot)).tasks.find((x) => x.id === id)) {
+        return reply(res, 404, { error: 'task not found', id });
+      }
       const ev = await append(repoRoot, {
         type: EVENT_TYPES.TASK_COMPLETED,
         actor: body.by || null,
@@ -209,11 +236,19 @@ export async function routeTasks({ req, res, path, repoRoot }) {
     if (rest.endsWith('/update') && req.method === 'POST') {
       const id = rest.slice(0, -'/update'.length);
       const body = (await readBody(req)) || {};
+      if (!(await project(repoRoot)).tasks.find((x) => x.id === id)) {
+        return reply(res, 404, { error: 'task not found', id });
+      }
       const ev = await append(repoRoot, {
         type: EVENT_TYPES.TASK_UPDATED,
         actor: body.by || null,
         lane: body.lane !== undefined ? body.lane : null,
-        data: { id, ...body, by: undefined }
+        // `id` LAST: spreading body after it let a caller-supplied `body.id`
+        // override the URL id the guard above validated — so
+        // POST /bridge/tasks/tsk_real/update {"id":"tsk_other"} passed the
+        // check on tsk_real and then mutated a DIFFERENT task (or appended a
+        // discarded event for a nonexistent one). The path is authoritative.
+        data: { ...body, id, by: undefined }
       });
       return reply(res, 200, { ok: true, event: ev });
     }

@@ -354,11 +354,28 @@ export default async function loopCmd(argv) {
     const all = await spine.readAll(repoRoot);
     const loopEvents = all.filter((e) => /^LOOP_/.test(e.type));
     if (loopEvents.length === 0) { console.log('(no loop activity)'); return; }
+    // Which loops genuinely exist — order-independent, so clock skew across
+    // replicas cannot hide a loop whose start sorts after its own halt.
+    // Hydrate each row from its OWN LOOP_STARTED, never from whichever event
+    // merged first: a cancel from a clock-behind replica sorting ahead of the
+    // start would otherwise build the row from the halt, leaving `kind` null —
+    // which then threw on `l.kind.padEnd()` below.
     const byId = {};
+    for (const e of loopEvents) {
+      if (e.type !== 'LOOP_STARTED' || !e.data?.loopId) continue;
+      byId[e.data.loopId] = {
+        loopId: e.data.loopId, kind: e.data.kind || null, started: e.ts,
+        iters: 0, status: 'open', goal: e.data.goal || null,
+      };
+    }
     for (const ev of loopEvents) {
       const id = ev.data?.loopId;
       if (!id) continue;
-      if (!byId[id]) byId[id] = { loopId: id, kind: ev.data.kind, started: null, iters: 0, status: 'open', goal: ev.data.goal || null };
+      // Anchor on the EXISTENCE of a start (the rows above), not on ordering:
+      // an orphaned halt must not conjure a loop that was never started, but
+      // discarding events that merely sort before the start would drop a
+      // legitimate halt whose start lives in a clock-skewed replica.
+      if (!byId[id]) continue;
       if (ev.type === 'LOOP_STARTED') byId[id].started = ev.ts;
       else if (ev.type === 'LOOP_ITERATION_COMPLETED') byId[id].iters = ev.data.iter || byId[id].iters;
       else if (ev.type === 'LOOP_HALTED') { byId[id].status = 'halted'; byId[id].reason = ev.data.reason; }
@@ -369,7 +386,7 @@ export default async function loopCmd(argv) {
     console.log(`${ANSI.bold}LOOPS  (${list.length})${ANSI.reset}`);
     for (const l of list) {
       const c = l.status === 'completed' ? ANSI.pass : (l.status === 'halted' ? ANSI.fail : ANSI.dim);
-      console.log(`  ${l.loopId}  ${l.kind.padEnd(10)} ${c}${l.status}${ANSI.reset}  iters=${l.iters}  ${ANSI.dim}${l.goal || ''}${ANSI.reset}`);
+      console.log(`  ${l.loopId}  ${String(l.kind || '—').padEnd(10)} ${c}${l.status}${ANSI.reset}  iters=${l.iters}  ${ANSI.dim}${l.goal || ''}${ANSI.reset}`);
       if (l.reason) console.log(`    ${ANSI.dim}reason: ${l.reason}${ANSI.reset}`);
     }
     return;
@@ -379,6 +396,25 @@ export default async function loopCmd(argv) {
     const loopId = rest[0];
     if (!loopId) { console.error('usage: maddu loop cancel <loop-id>'); process.exit(2); }
     const { spine } = await loadSpineLib();
+    // Referential guard (v1.124.0). `loopId` is typed by the operator and was
+    // appended unvalidated, so `loop cancel lop_typo` printed `cancelled` and
+    // exited 0. Worse than a no-op: the loop readers anchored on ANY LOOP_*
+    // event, so the orphaned halt CONJURED a phantom halted loop into
+    // `loop status` and the cockpit — a loop that never existed, reported as
+    // cancelled. The loop's existence is established by LOOP_STARTED.
+    {
+      const all = await spine.readAll(repoRoot);
+      const live = all.filter((e) => e.data?.loopId === loopId);
+      if (!live.some((e) => e.type === 'LOOP_STARTED')) {
+        console.error(`loop ${loopId} not found`);
+        process.exit(3);
+      }
+      const terminal = live.find((e) => e.type === 'LOOP_HALTED' || e.type === 'LOOP_COMPLETED');
+      if (terminal) {
+        console.error(`loop ${loopId} is already ${terminal.type === 'LOOP_HALTED' ? 'halted' : 'completed'}`);
+        process.exit(3);
+      }
+    }
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.LOOP_HALTED,
       actor: sessionId, lane: null,

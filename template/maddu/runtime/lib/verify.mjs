@@ -172,6 +172,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
   const openedTeams = new Set();          // TEAM_OPENED.data.teamId
   const startedPipelines = new Set();     // PIPELINE_STARTED.data.pipelineRunId
   const createdPlans = new Set();         // PLAN_CREATED.data.planId
+  const planPhases = new Map();           // planId → Set of known phase names
   const startedLoops = new Set();         // LOOP_STARTED.data.loopId
   const startedCoordinators = new Set();  // COORDINATOR_STARTED.data.coordinatorId
   const invokedAdvisors = new Set();      // ADVISOR_INVOKED.data.advisorId
@@ -827,7 +828,24 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
         }
 
         case 'PLAN_CREATED':
-          if (ev.data?.planId) createdPlans.add(ev.data.planId);
+          if (ev.data?.planId) {
+            createdPlans.add(ev.data.planId);
+            // Collapsing straight into a Set would HIDE a creation-time
+            // duplicate — the worst kind, since the twin can never be
+            // completed (the fold always resolves to the first match).
+            const declared = new Set();
+            for (const p of (ev.data.phases || [])) {
+              const n = p?.name;
+              if (n == null) continue;
+              if (declared.has(n)) {
+                push(issue('WARN', 'duplicate_plan_phase',
+                  `${ev.id}: PLAN_CREATED declares phase "${n}" more than once in plan ${ev.data.planId} — the duplicate is permanently unaddressable (every completion resolves to the first)`,
+                  { segment: segName, line: lineNo, eventId: ev.id }));
+              }
+              declared.add(n);
+            }
+            planPhases.set(ev.data.planId, declared);
+          }
           break;
         case 'PLAN_PHASE_ADDED':
         case 'PLAN_PHASE_COMPLETED':
@@ -840,6 +858,30 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
             push(issue('WARN', 'orphan_plan_event',
               `${ev.id}: ${ev.type} references unknown plan ${pid} (no prior PLAN_CREATED)`,
               { segment: segName, line: lineNo, eventId: ev.id }));
+            break;
+          }
+          // Phase-name-level check (v1.124.0). The orphan check above is
+          // planId-level only, so a completion naming a phase that never
+          // existed inside a REAL plan looked clean — yet projectPlanState
+          // drops it. These events are permanent, so surfacing them is the
+          // only way an operator learns a past phase state was lost.
+          if (pid && ev.type === 'PLAN_PHASE_ADDED' && ev.data?.name != null) {
+            if (!planPhases.has(pid)) planPhases.set(pid, new Set());
+            const known = planPhases.get(pid);
+            if (known.has(ev.data.name)) {
+              push(issue('WARN', 'duplicate_plan_phase',
+                `${ev.id}: PLAN_PHASE_ADDED re-declares existing phase "${ev.data.name}" in plan ${pid} — the projection keeps the first declaration, so this intent was silently discarded`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
+            known.add(ev.data.name);
+          }
+          if (pid && (ev.type === 'PLAN_PHASE_COMPLETED' || ev.type === 'PLAN_PHASE_BLOCKED')) {
+            const known = planPhases.get(pid);
+            if (known && ev.data?.name != null && !known.has(ev.data.name)) {
+              push(issue('WARN', 'orphan_plan_phase',
+                `${ev.id}: ${ev.type} references unknown phase "${ev.data.name}" in plan ${pid} (never declared by PLAN_CREATED or PLAN_PHASE_ADDED) — this mutation was silently discarded by the projection`,
+                { segment: segName, line: lineNo, eventId: ev.id }));
+            }
           }
           break;
         }

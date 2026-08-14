@@ -38,6 +38,33 @@ function fmtAge(ms) {
 
 function fmt(iso) { return iso ? iso.replace('T', ' ').replace(/\.\d+Z$/, 'Z') : '—'; }
 
+// Referential guard (v1.124.0). The WORKER_HEARTBEAT / _EXITED / _KILLED
+// folds all no-op on an unknown id, so `worker kill wrk_typo` used to print
+// red `killed` and exit 0 having changed nothing. Check the referent before
+// appending — same lookup as `worker show`.
+//
+// `requireLive`: the WORKER_HEARTBEAT fold applies only while the worker is
+// still running, so existence alone is not enough for a heartbeat — beating a
+// worker that already exited or was killed is silently discarded too. Note
+// `stuck` is a READ-TIME annotation over a nominally-running worker
+// (projections.mjs), so it must stay heartbeat-able; only the terminal states
+// are refused.
+const LIVE_STATUSES = new Set(['running', 'stuck']);
+
+async function assertWorkerRef(projections, repoRoot, id, { requireLive = false } = {}) {
+  const proj = await projections.project(repoRoot);
+  const w = proj.workers.find((x) => x.id === id);
+  if (!w) {
+    console.error(`worker ${id} not found`);
+    process.exit(3);
+  }
+  if (requireLive && !LIVE_STATUSES.has(w.status)) {
+    console.error(`worker ${id} is ${w.status} — a heartbeat would not be recorded`);
+    process.exit(3);
+  }
+  return w;
+}
+
 export default async function worker(argv) {
   const sub = argv[0];
   const rest = argv.slice(1);
@@ -109,6 +136,17 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker heartbeat <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    await assertWorkerRef(projections, repoRoot, id, { requireLive: true });
+    // NOTE: no post-append confirmation here, deliberately — unlike addPhase.
+    // A timestamp is not a receipt identity: a second heartbeat for the same
+    // worker landing before our re-projection would make US report failure
+    // though ours applied, and millisecond collisions can read as success when
+    // an exit won the race. A false refusal is worse than the loss it detects.
+    // The asymmetry with addPhase is real: a lost phase-add permanently
+    // discards operator intent, whereas a heartbeat lost to a genuine exit
+    // race leaves a stale liveness timestamp on a worker that is correctly
+    // terminal — nothing to recover. The pre-check above catches every
+    // non-racing case, which is the reachable one.
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_HEARTBEAT,
       actor: await explicitSessionFlag(flags),
@@ -123,6 +161,7 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker exit <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    await assertWorkerRef(projections, repoRoot, id);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_EXITED,
       actor: await explicitSessionFlag(flags),
@@ -137,6 +176,7 @@ export default async function worker(argv) {
     const id = rest[0];
     if (!id) { console.error('usage: maddu worker kill <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
+    await assertWorkerRef(projections, repoRoot, id);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_KILLED,
       actor: flags.by || null,
