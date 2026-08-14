@@ -70,9 +70,14 @@ import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 import { EVENT_TYPES, hashLine } from './spine.mjs';
 import { makeReferentialStep } from './verify-referential.mjs';
-import { readActiveReplicaId, listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE, validWsResolutions, buildWsGrandfather, wsStampGrandfathered, readPartitionLineAt } from './spine-append-core.mjs';
+import { kWayMergeStreams, readActiveReplicaId, listPartitionIds, partitionDir, FLAT_LOCK_VERSION, readFlatGenesisLine, wsFromLine, scanWsAuthorityEvents, resolveWsAuthority, verifyAnchorNomination, readIdentityCache, WS_ID_RE, validWsResolutions, buildWsGrandfather, wsStampGrandfathered, readPartitionLineAt } from './spine-append-core.mjs';
 
 const SEGMENT_RE = /^(\d{12})\.ndjson$/;
+
+// Bound on events retained for the sync-mode merged-order pass. Past this the
+// pass is skipped with a named WARN rather than risking memory exhaustion on
+// the uncapped `spine verify` / `spine import` paths.
+const MERGED_PASS_MAX_EVENTS = 250_000;
 const EVENT_ID_RE = /^evt_\d{14}_[0-9a-f]{6}$/;
 
 // FRAMEWORK_INSTALLED / FRAMEWORK_UPGRADED / DOCTOR_REPORT events use
@@ -137,7 +142,15 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
   // so an apparent child-before-parent may be clock skew, not damage — FAILing
   // would red a healthy synced workspace, worse than the gap it closes.
   let capIssuesAtWarn = false;
-  const mergedBuffer = [];   // sync mode only — events awaiting the merged pass
+  // Sync mode only — per-replica streams awaiting the merged pass, keyed by
+  // replicaId so they can be merged under the SAME contract the projection
+  // uses (kWayMergeStreams: physical order within a stream, interleaved by
+  // (ts, replicaId)). A flat sort would reorder a stream against itself
+  // whenever a timestamp regresses, and then miss the very orphan the
+  // projection sees.
+  const mergedStreams = new Map();
+  let mergedBuffered = 0;
+  let mergedOverflow = false;
   const push = (it) => {
     if (currentPartition) it.replicaId = currentPartition;
     if (capIssuesAtWarn && it.level === 'FAIL') { it.level = 'WARN'; it.mergedOrder = true; }
@@ -430,6 +443,15 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
             `${ev.id}: ts ${ev.ts} is more than 60s in the future`,
             { segment: segName, line: lineNo, eventId: ev.id }));
         }
+        // Track the install floor HERE, not only inside referentialStep: the
+        // ts-sanity check below runs in every mode, but referentialStep is
+        // deferred in sync mode, so relying on it left `installedAt` null for
+        // the whole partition scan and `ts_before_install` could never fire on
+        // a synced workspace. Idempotent (first-wins), so flat mode is
+        // unchanged — the referential case sets the same value.
+        if (ev.type === 'FRAMEWORK_INSTALLED' && refState.installedAt === null && !Number.isNaN(tsMs)) {
+          refState.installedAt = tsMs;
+        }
         // Sanity: not before FRAMEWORK_INSTALLED.
         if (refState.installedAt !== null && tsMs < refState.installedAt) {
           push(issue('WARN', 'ts_before_install',
@@ -453,7 +475,20 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       // Sync mode defers referential rules to the merged-order pass; buffer the
       // already-parsed event for it rather than re-reading (readAll silently
       // skips malformed lines, which the scan has already accounted for).
-      else mergedBuffer.push({ ev, segName, lineNo, tsMs });
+      // Bounded by construction: past the cap we stop retaining and say so,
+      // rather than let an adversarially large synced spine exhaust memory on
+      // the uncapped `spine verify` / `spine import` paths.
+      else if (!mergedOverflow) {
+        if (mergedBuffered >= MERGED_PASS_MAX_EVENTS) {
+          mergedOverflow = true;
+          mergedStreams.clear();
+        } else {
+          const rid = currentPartition || '(flat)';
+          if (!mergedStreams.has(rid)) mergedStreams.set(rid, []);
+          mergedStreams.get(rid).push({ ts: ev.ts, ev, segName, lineNo, tsMs, replicaId: currentPartition });
+          mergedBuffered++;
+        }
+      }
 
       evCount++;
       result.events++;
@@ -514,14 +549,28 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     // capped at WARN. This is what makes a cross-replica duplicate phase-add
     // visible — the case no local appender guard can see, because each replica
     // correctly believes it won.
-    mergedBuffer.sort((a, b) => (a.ev.ts || '').localeCompare(b.ev.ts || '')
-      || (a.segName || '').localeCompare(b.segName || '') || a.lineNo - b.lineNo);
-    capIssuesAtWarn = true;
-    try {
-      for (const m of mergedBuffer) referentialStep(m.ev, m.segName, m.lineNo, m.tsMs);
-    } finally {
-      capIssuesAtWarn = false;
-      mergedBuffer.length = 0;
+    if (mergedOverflow) {
+      push(issue('WARN', 'merged_referential_skipped',
+        `merged-order referential pass skipped: more than ${MERGED_PASS_MAX_EVENTS} events in sync mode — re-run with a maxEvents cap, or verify per-replica`));
+    } else {
+      // The SAME merge the projection performs, so an orphan the projection
+      // sees is an orphan this pass sees.
+      const merged = kWayMergeStreams(
+        [...mergedStreams.entries()].map(([replicaId, events]) => ({ replicaId, events })));
+      capIssuesAtWarn = true;
+      try {
+        for (const m of merged) {
+          // Stamp provenance: segment names repeat across partitions, and
+          // cross-partition event-id collisions are tolerated, so a merged
+          // finding without a replicaId is not locatable.
+          currentPartition = m.replicaId;
+          referentialStep(m.ev, m.segName, m.lineNo, m.tsMs);
+        }
+      } finally {
+        capIssuesAtWarn = false;
+        currentPartition = null;
+        mergedStreams.clear();
+      }
     }
   } else {
     // Default single-machine mode — the unchanged single flat chain, referential ON.

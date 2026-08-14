@@ -362,8 +362,25 @@ async function main() {
     const rejected = results.filter((r) => r.status === 'rejected');
     ok('race: exactly one concurrent add-phase succeeds', fulfilled.length === 1, `${fulfilled.length} fulfilled`);
     ok('race: the loser throws MADDU_PLAN_REF', rejected.length === 1 && rejected[0].reason?.code === 'MADDU_PLAN_REF', rejected[0]?.reason?.code || 'none');
-    const st = await phaseStates(repo, planId);
-    ok('race: projection holds exactly one "shared" phase', Object.keys(st).filter((n) => n === 'shared').length === 1, JSON.stringify(st));
+    // Do NOT assert on projected key count — the fold de-duplicates by name,
+    // so that is green whether one add or two reached the spine.
+    //
+    // Two events on the spine IS correct here: both callers cleared the
+    // pre-check, and an append-only log cannot un-append the loser. What must
+    // hold is that the loser is DETECTED (it threw, above), that the FIRST
+    // append is the one in force, and that the residue is reported rather than
+    // left silent — which is the whole thesis of this release.
+    {
+      const added = (await spine.readAll(repo))
+        .filter((e) => e.type === 'PLAN_PHASE_ADDED' && e.data?.planId === planId && e.data?.name === 'shared');
+      ok('race: the effective phase is the FIRST append', added.length > 0
+        && (await phaseStates(repo, planId))['shared'] === 'pending');
+      const vres = await verify.verifySpine(repo);
+      const dup = (vres.issues || []).filter((i) => i.kind === 'duplicate_plan_phase');
+      ok('race: any losing residue is REPORTED, never silent',
+        added.length === 1 ? dup.length === 0 : dup.length >= 1,
+        `${added.length} appended, ${dup.length} duplicate_plan_phase`);
+    }
 
     // Bridge guards. Exercised through the route functions directly, matching
     // the res-stub pattern in scripts/test/bridge-routes-work.mjs.
@@ -433,16 +450,27 @@ async function main() {
     // confirmation could pass unnoticed.
     {
       const planId = newPlan(repo, 'RaceSeam', 'alpha');
-      let code = null;
+      // The seam is double-gated on MADDU_SELF_TEST so it cannot fire in a
+      // consumer install; prove that too.
+      let inert = null;
       process.env.MADDU_TEST_ADDPHASE_RACE = '1';
+      try { await plans.addPhase(repo, { planId, name: 'inert-probe', intent: 'x' }); }
+      catch (e) { inert = e.code; }
+      ok('seam: inert without MADDU_SELF_TEST (production-safe)', inert === null, inert || '');
+
+      let code = null;
+      process.env.MADDU_SELF_TEST = '1';
       try { await plans.addPhase(repo, { planId, name: 'contested', intent: 'ours' }); }
       catch (e) { code = e.code; }
-      finally { delete process.env.MADDU_TEST_ADDPHASE_RACE; }
+      finally { delete process.env.MADDU_TEST_ADDPHASE_RACE; delete process.env.MADDU_SELF_TEST; }
       ok('race: losing the append race throws MADDU_PLAN_REF', code === 'MADDU_PLAN_REF', code || 'no throw');
       const s = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
       const contested = s.phases.find((p) => p.name === 'contested');
+      // `!== 'ours'` alone would pass if the phase were absent entirely, so
+      // assert presence first.
+      ok('race: the contested phase exists in the projection', !!contested, JSON.stringify(s.phases));
       ok('race: the RIVAL intent is what survived', contested?.intent === 'rival intent', JSON.stringify(contested));
-      ok('race: our discarded intent is not in the projection', contested?.intent !== 'ours');
+      ok('race: our discarded intent is not what was recorded', !!contested && contested.intent !== 'ours');
     }
 
     // Winner selection must use the same epoch as the projection: an add that
@@ -498,6 +526,46 @@ async function main() {
     ok('sync: merged-order findings are flagged as such', row?.mergedOrder === true, JSON.stringify(row || {}).slice(0, 90));
     ok('sync: capped at WARN (a ts merge is not a causal order)', row?.level === 'WARN', row?.level);
     ok('sync: the workspace is not reded by it', (res.counts?.FAIL || 0) === 0, JSON.stringify(res.counts));
+    ok('sync: merged finding carries replica provenance', typeof row?.replicaId === 'string' && row.replicaId.length > 0, row?.replicaId || 'missing');
+    await rm(repo, { recursive: true, force: true });
+  }
+
+  // ── layer 8: a genuine TWO-replica merge ──────────────────────────────
+  // Layer 7 has one partition, so it proves the sync branch runs but not the
+  // k-way ordering. Here the parent lives in replica A and the child in
+  // replica B: per-partition scanning can never resolve it, and only a merge
+  // under the projection's own contract can. This is the case the pass exists
+  // for.
+  {
+    const repo = await freshRepo('ppr-2rep');
+    await mkdir(join(repo, '.maddu', 'config'), { recursive: true });
+    const eid = (n) => `evt_2026081415${String(n).padStart(4, '0')}_${String(n).padStart(6, '0')}`;
+    const mkPart = async (rid, evts) => {
+      const dir = join(repo, '.maddu', 'events', 'by-replica', rid);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, '000000000001.ndjson'),
+        evts.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    };
+    await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
+
+    // repA: the plan exists, with phase "audit".
+    await mkPart('repA', [{
+      v: 1, id: eid(1), ts: '2026-08-14T10:00:00.000Z', type: 'PLAN_CREATED', actor: null, lane: null,
+      data: { planId: 'pln_two_rep', title: 'Split', phases: [{ name: 'audit', intent: '' }], goal: null }, prev_hash: null,
+    }]);
+    // repB: completes a phase that does NOT exist — resolvable only after merge.
+    await mkPart('repB', [{
+      v: 1, id: eid(2), ts: '2026-08-14T10:00:01.000Z', type: 'PLAN_PHASE_COMPLETED', actor: null, lane: null,
+      data: { planId: 'pln_two_rep', name: 'ghost', summary: null }, prev_hash: null,
+    }]);
+
+    const r2 = await verify.verifySpine(repo);
+    const kinds = (r2.issues || []).map((i) => i.kind);
+    ok('2-replica: cross-replica orphan phase found only via the merge',
+      kinds.includes('orphan_plan_phase'), kinds.join(',') || 'none');
+    ok('2-replica: the plan itself is NOT reported orphaned (parent is in repA)',
+      !kinds.includes('orphan_plan_event'), kinds.join(','));
+    ok('2-replica: no FAIL on a merely-skewed workspace', (r2.counts?.FAIL || 0) === 0, JSON.stringify(r2.counts));
     await rm(repo, { recursive: true, force: true });
   }
 

@@ -750,14 +750,18 @@ async function handleBridge(req, res, url, ctx) {
   if (path === '/bridge/loops' && req.method === 'GET') {
     const events = await readAll(repoRoot);
     const loopEvents = events.filter((e) => e.type && e.type.startsWith('LOOP_'));
+    // Anchor on the EXISTENCE of a start, not on it sorting first — an orphaned
+    // LOOP_HALTED used to conjure a phantom halted loop into the cockpit (the
+    // inverse of the silent-drop family: fabricating an entity rather than
+    // discarding a mutation), but an order-based test would drop a legitimate
+    // halt whose start lives in a replica with a skewed clock.
+    const startedLoopIds = new Set(
+      loopEvents.filter((e) => e.type === 'LOOP_STARTED' && e.data?.loopId).map((e) => e.data.loopId));
     const byId = {};
     for (const ev of loopEvents) {
       const id = ev.data?.loopId;
       if (!id) continue;
-      // Anchor on LOOP_STARTED — an orphaned LOOP_HALTED used to conjure a
-      // phantom halted loop into the cockpit (the inverse of the silent-drop
-      // family: fabricating an entity instead of discarding a mutation).
-      if (!byId[id] && ev.type !== 'LOOP_STARTED') continue;
+      if (!startedLoopIds.has(id)) continue;
       if (!byId[id]) byId[id] = { loopId: id, kind: ev.data.kind || null, started: null, iters: 0, status: 'open', goal: ev.data.goal || null };
       if (ev.type === 'LOOP_STARTED') { byId[id].started = ev.ts; byId[id].cooldownMs = ev.data.cooldownMs; byId[id].maxIter = ev.data.maxIter; }
       else if (ev.type === 'LOOP_ITERATION_COMPLETED') byId[id].iters = Math.max(byId[id].iters, ev.data.iter || 0);

@@ -354,13 +354,20 @@ export default async function loopCmd(argv) {
     const all = await spine.readAll(repoRoot);
     const loopEvents = all.filter((e) => /^LOOP_/.test(e.type));
     if (loopEvents.length === 0) { console.log('(no loop activity)'); return; }
+    // Which loops genuinely exist — order-independent, so clock skew across
+    // replicas cannot hide a loop whose start sorts after its own halt.
+    const startedLoopIds = new Set(
+      loopEvents.filter((e) => e.type === 'LOOP_STARTED' && e.data?.loopId).map((e) => e.data.loopId));
     const byId = {};
     for (const ev of loopEvents) {
       const id = ev.data?.loopId;
       if (!id) continue;
-      // Anchor on LOOP_STARTED. Creating the row from any LOOP_* event let an
-      // orphaned halt conjure a loop that was never started.
-      if (!byId[id] && ev.type !== 'LOOP_STARTED') continue;
+      // Anchor on the EXISTENCE of a LOOP_STARTED anywhere (pre-scanned above),
+      // not on it sorting first. Creating a row from any LOOP_* event let an
+      // orphaned halt conjure a loop that was never started; but discarding
+      // events that merely sort before the start would drop a legitimate halt
+      // whose start lives in another replica with a skewed clock.
+      if (!startedLoopIds.has(id)) continue;
       if (!byId[id]) byId[id] = { loopId: id, kind: ev.data.kind, started: null, iters: 0, status: 'open', goal: ev.data.goal || null };
       if (ev.type === 'LOOP_STARTED') byId[id].started = ev.ts;
       else if (ev.type === 'LOOP_ITERATION_COMPLETED') byId[id].iters = ev.data.iter || byId[id].iters;

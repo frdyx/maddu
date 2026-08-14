@@ -93,7 +93,12 @@ export async function addPhase(repoRoot, { planId, name, intent, by = null }) {
   // between the check above and our append below. Without it the post-append
   // confirmation is only reachable by real scheduling luck, so reverting it
   // could pass a fixture. Scrubbed by scripts/test/_hermetic-env.mjs.
-  if (process.env.MADDU_TEST_ADDPHASE_RACE === '1') {
+  //
+  // PRODUCTION-GATED on MADDU_SELF_TEST === '1' as well — this file ships into
+  // consumer installs, and an inherited or mistyped variable would otherwise
+  // permanently write a fake rival intent and refuse the operator's real add.
+  // Same double-gate as the hooks test seams (commands/hooks.mjs:177).
+  if (process.env.MADDU_SELF_TEST === '1' && process.env.MADDU_TEST_ADDPHASE_RACE === '1') {
     await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: 'rival', lane: null, data: { planId, name, intent: 'rival intent', at: new Date().toISOString() } });
   }
   const ev = await append(repoRoot, { type: EVENT_TYPES.PLAN_PHASE_ADDED, actor: by, lane: null, data: { planId, name, intent, at: new Date().toISOString() } });
