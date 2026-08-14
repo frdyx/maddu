@@ -75,12 +75,21 @@ export async function routeWorkers({ req, res, path, repoRoot }) {
           return reply(res, 409, { error: 'worker is not live', id, status: w.status });
         }
       }
-      await append(repoRoot, {
+      const hb = await append(repoRoot, {
         type: EVENT_TYPES.WORKER_HEARTBEAT,
         actor: sidr.sessionId,
         lane: null,
         data: { id, focus: body.focus || null }
       });
+      // Same race as the CLI verb: the liveness check precedes the serialized
+      // append, so the worker can exit in between and the fold drops this
+      // heartbeat. Confirm it landed instead of returning 200 over a discard.
+      {
+        const after = (await project(repoRoot)).workers.find((x) => x.id === id);
+        if (!after || after.lastHeartbeat !== hb?.ts) {
+          return reply(res, 409, { error: 'heartbeat not applied — worker became terminal', id, status: after?.status || null });
+        }
+      }
       return reply(res, 200, { ok: true });
     }
     if (rest.endsWith('/exit') && req.method === 'POST') {
@@ -239,7 +248,12 @@ export async function routeTasks({ req, res, path, repoRoot }) {
         type: EVENT_TYPES.TASK_UPDATED,
         actor: body.by || null,
         lane: body.lane !== undefined ? body.lane : null,
-        data: { id, ...body, by: undefined }
+        // `id` LAST: spreading body after it let a caller-supplied `body.id`
+        // override the URL id the guard above validated — so
+        // POST /bridge/tasks/tsk_real/update {"id":"tsk_other"} passed the
+        // check on tsk_real and then mutated a DIFFERENT task (or appended a
+        // discarded event for a nonexistent one). The path is authoritative.
+        data: { ...body, id, by: undefined }
       });
       return reply(res, 200, { ok: true, event: ev });
     }

@@ -82,6 +82,11 @@ export async function addPhase(repoRoot, { planId, name, intent, by = null }) {
   // the exact silent discard this guard exists to prevent. Pre-checking cannot
   // fix that; confirming afterwards can. If our event was not the one that
   // took effect, fail loudly rather than report a success we did not perform.
+  //
+  // SCOPE: this covers history visible to THIS checkout. Two replicas adding
+  // the same phase offline will each confirm itself the winner, and the merge
+  // then drops one intent — see the KNOWN GAP note in verify.mjs's sync-mode
+  // branch. Do not read this guard as a distributed guarantee.
   const all = await readAll(repoRoot);
   const winner = all.find((e) => e.type === EVENT_TYPES.PLAN_PHASE_ADDED
     && e.data?.planId === planId && e.data?.name === name);

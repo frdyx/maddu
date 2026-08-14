@@ -1160,6 +1160,17 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     // independently, report-only. Cross-replica referential integrity is deferred
     // to `spine import` (phase 3), which sees the k-way-merged order. Any residual
     // flat legacy segments are scanned as their own (referential-off) chain too.
+    //
+    // ⚠ KNOWN GAP (v1.124.0, pre-existing): that deferral is not currently
+    // honoured. `importPartitions` (spine-sync.mjs) calls this same verifier,
+    // which lands here with referential:false — so NO referential family
+    // (orphan_plan_event, orphan_plan_phase, duplicate_plan_phase,
+    // orphan_task_event, parent-session, …) is ever checked in merged order on
+    // a synced workspace. A local appender guard cannot cover it either: two
+    // replicas can each add the same plan phase offline, each confirm itself
+    // the local winner, and the merge then silently drops one intent. Closing
+    // this needs a merged-order referential pass at import, for every family —
+    // tracked as follow-up, deliberately out of scope for the plan-phase fix.
     currentPartition = null;
     if (!(await scanChain(eventsDir, { referential: false }))) return result;
     for (const rid of nonEmptyParts) {

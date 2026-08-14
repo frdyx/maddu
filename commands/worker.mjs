@@ -137,12 +137,23 @@ export default async function worker(argv) {
     if (!id) { console.error('usage: maddu worker heartbeat <id>'); process.exit(2); }
     const { flags } = parseFlags(rest.slice(1));
     await assertWorkerRef(projections, repoRoot, id, { requireLive: true });
-    await spine.append(repoRoot, {
+    const hb = await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.WORKER_HEARTBEAT,
       actor: await explicitSessionFlag(flags),
       lane: null,
       data: { id, focus: flags.focus || null }
     });
+    // The liveness check above runs BEFORE the serialized append, so a worker
+    // can exit in between and the fold then ignores this heartbeat — the same
+    // silent discard, via a race instead of a typo. Confirm afterwards that it
+    // actually landed rather than report a success we did not perform.
+    {
+      const after = (await projections.project(repoRoot)).workers.find((x) => x.id === id);
+      if (!after || after.lastHeartbeat !== hb?.ts) {
+        console.error(`worker ${id} became ${after?.status || 'unknown'} before this heartbeat was applied — NOT recorded`);
+        process.exit(3);
+      }
+    }
     if (process.stdout.isTTY) console.log(`heartbeat  ${id}`);
     return;
   }

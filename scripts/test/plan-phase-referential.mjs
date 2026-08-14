@@ -341,6 +341,74 @@ async function main() {
     await rm(clean, { recursive: true, force: true });
   }
 
+  // ── layer 4: the race-sensitive guards ────────────────────────────────
+  // Without these, reverting the addPhase post-append confirmation or the five
+  // bridge guards would leave this fixture green.
+  {
+    const repo = await freshRepo('ppr-race');
+    const planId = newPlan(repo, 'Race', 'alpha');
+
+    // Concurrent add-phase. Whichever way the interleaving falls — both
+    // pre-checks passing and the post-append confirmation catching the loser,
+    // or the second pre-check catching it — the observable contract is the
+    // same: exactly one succeeds, the loser throws MADDU_PLAN_REF, and the
+    // projection ends with ONE phase of that name. A silent double-success is
+    // the defect.
+    const results = await Promise.allSettled([
+      plans.addPhase(repo, { planId, name: 'shared', intent: 'intent A' }),
+      plans.addPhase(repo, { planId, name: 'shared', intent: 'intent B' }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    ok('race: exactly one concurrent add-phase succeeds', fulfilled.length === 1, `${fulfilled.length} fulfilled`);
+    ok('race: the loser throws MADDU_PLAN_REF', rejected.length === 1 && rejected[0].reason?.code === 'MADDU_PLAN_REF', rejected[0]?.reason?.code || 'none');
+    const st = await phaseStates(repo, planId);
+    ok('race: projection holds exactly one "shared" phase', Object.keys(st).filter((n) => n === 'shared').length === 1, JSON.stringify(st));
+
+    // Bridge guards. Exercised through the route functions directly, matching
+    // the res-stub pattern in scripts/test/bridge-routes-work.mjs.
+    const { routeWorkers, routeTasks } = await import(pathToFileURL(join(LIB, 'bridge-routes-work.mjs')).href);
+    const mkRes = () => {
+      const cap = { status: null, body: null };
+      return { cap, writeHead(s) { cap.status = s; }, end(b) { cap.body = b; } };
+    };
+    const post = async (fn, path, body) => {
+      const res = mkRes();
+      const payload = JSON.stringify(body || {});
+      const req = { method: 'POST', async *[Symbol.asyncIterator]() { yield Buffer.from(payload); } };
+      await fn({ req, res, path, url: new URL(`http://127.0.0.1${path}`), repoRoot: repo });
+      return res.cap;
+    };
+
+    for (const [label, fn, path] of [
+      ['workers/<id>/heartbeat', routeWorkers, '/bridge/workers/wrk_typo/heartbeat'],
+      ['workers/<id>/exit', routeWorkers, '/bridge/workers/wrk_typo/exit'],
+      ['workers/<id>/kill', routeWorkers, '/bridge/workers/wrk_typo/kill'],
+      ['tasks/<id>/complete', routeTasks, '/bridge/tasks/tsk_typo/complete'],
+      ['tasks/<id>/update', routeTasks, '/bridge/tasks/tsk_typo/update'],
+    ]) {
+      const cap = await post(fn, path, {});
+      ok(`bridge: POST ${label} on unknown id → 404`, cap.status === 404, `status ${cap.status}`);
+    }
+    for (const t of ['WORKER_HEARTBEAT', 'WORKER_EXITED', 'WORKER_KILLED', 'TASK_COMPLETED', 'TASK_UPDATED']) {
+      ok(`bridge: no ${t} appended by refusals`, await countEvents(repo, t) === 0);
+    }
+
+    // The path id is authoritative: a body-supplied id must not retarget.
+    {
+      const c = run(['task', 'create', 'target'], repo);
+      const real = (/tsk_[0-9a-z_]+/.exec(c.stdout || '') || [])[0];
+      const other = run(['task', 'create', 'bystander'], repo);
+      const bystander = (/tsk_[0-9a-z_]+/.exec(other.stdout || '') || [])[0];
+      const cap = await post(routeTasks, `/bridge/tasks/${real}/update`, { id: bystander, status: 'doing' });
+      ok('bridge: task update accepts the guarded path id', cap.status === 200, `status ${cap.status}`);
+      const ev = (await spine.readAll(repo)).filter((e) => e.type === 'TASK_UPDATED').pop();
+      ok('bridge: body.id CANNOT retarget the update', ev?.data?.id === real, `targeted ${ev?.data?.id}, expected ${real}`);
+    }
+
+    await rm(repo, { recursive: true, force: true });
+  }
+
   console.log(`\nplan-phase-referential: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
