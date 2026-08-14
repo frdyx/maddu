@@ -11,6 +11,64 @@ narrative summary.
 
 ---
 
+## [v1.125.0] · 2026-08-14 · referential integrity on synced workspaces
+
+v1.124.0 stopped mutating verbs reporting success they had not performed, but
+its guarantees were single-checkout. This closes the distributed half.
+
+**The gap.** `verify.mjs` carried a comment deferring cross-replica referential
+integrity to `spine import`. `importPartitions` calls that *same* verifier,
+which lands on `referential: false` — so on a synced (partitioned) workspace
+**no referential family was ever checked**: not plans, not tasks, not workers,
+not parent-sessions. A documented deferral to a step that never performed it is
+worse than an admitted gap, because it reads as coverage.
+
+**The pass.** Per-partition scans still verify each replica's chain; referential
+rules need the k-way-**merged** order, since a child in one replica can
+reference a parent in another. The scans now buffer their already-parsed events
+per replica, and `kWayMergeStreams` — the projection's own merge — orders them.
+Using the projection's contract rather than a hand-rolled sort matters: a flat
+timestamp sort reorders a stream against itself whenever a timestamp regresses,
+and then misses the very orphan the projection sees.
+
+Findings are capped at **WARN** and flagged `mergedOrder`. A timestamp merge
+across independent replicas is not a causal order, so an apparent
+child-before-parent may be clock skew — reding a healthy synced workspace would
+be worse than the gap it closes. Each finding carries its own `replicaId`;
+segment names repeat across partitions, so a finding without one is not
+locatable.
+
+Bounded by construction at 250k events, past which the pass is skipped with a
+named `merged_referential_skipped` WARN. `spine verify` and `spine import` both
+run uncapped, so unbounded retention was a real exhaustion path. The warning
+suggests no remediation, deliberately: a lower `maxEvents` returns *before* this
+pass, and a higher one overflows again.
+
+The pass also applies the projection's migration read-consistency rule, so a
+`spine sync init` race no longer reports phantom duplicates the projection never
+sees, and it learns the install floor inline — matching flat's semantics, where
+the floor applies only from the point replay reaches it.
+
+**`verify.mjs` split.** The 691-line referential switch moved to
+`verify-referential.mjs` behind a factory, 1518 → 817 lines. Verified
+byte-identical on an 11,174-event spine. This is what made the merged pass
+possible and returned the file under the monolith ratchet.
+
+**Coverage:** `plan-phase-referential.mjs` grows to **127 asserts** across eleven
+layers, adding a real synced workspace via `syncInit`, a two-replica merge whose
+timestamp regression *discriminates* the real merge contract from the rejected
+flat sort, install-floor selection and semantics, and a provenance case across a replica transition that only exists because the merge compares timestamp STRINGS while the floor check compares parsed milliseconds — a non-UTC offset splits the two.
+`spine-partition-verify.mjs` section C previously asserted the old contract
+("referential is deferred in sync mode"); it now asserts the merged pass fires,
+is WARN-capped, and does not red the workspace.
+
+**Still not guaranteed:** two replicas can each add the same plan phase offline
+and each correctly believe it won. This pass *reports* that after sync; nothing
+prevents it. A real guarantee needs merge-time reconciliation, not an appender
+guard.
+
+---
+
 ## [v1.124.0] · 2026-08-14 · no mutation reports success it did not perform
 
 A correctness release. Reported by an agent working in a consumer repo, which
