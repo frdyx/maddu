@@ -30,9 +30,9 @@ on disk that `plan list` could never see or clean up.
 
 Present since v1.1.0 — 122 releases — with zero test coverage. `kanban-coherent`
 and `plan-state-derivable` both stayed green, because the board and the artifact
-faithfully agreed with the projection that had dropped the event. The Atlas
-audit had recorded the behaviour in 2026-08 (`state-machines/plan.json`,
-`invalidTransitions`) and it was never remediated.
+faithfully agreed with the projection that had dropped the event: a gate that
+compares a projection against an artifact rebuilt from that same projection
+cannot see a dropped event by construction.
 
 **What changed.**
 
