@@ -569,32 +569,29 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
       // sees is an orphan this pass sees.
       const merged = kWayMergeStreams(
         [...mergedStreams.entries()].map(([replicaId, events]) => ({ replicaId, events })));
-      // The install floor must be known BEFORE the replay: learning it during
-      // the sequential partition scan made ts_before_install depend on which
-      // replica happened to be scanned first. Derived from the merged set, it
-      // is order-independent.
-      // FIRST valid install in merged order — matching the flat fold's
-      // first-wins rule, NOT the minimum timestamp. A later re-install stamped
-      // earlier would otherwise lower the floor retroactively and suppress
-      // warnings that flat replay legitimately raises.
-      for (const m of merged) {
-        if (m.ev.type === 'FRAMEWORK_INSTALLED' && !Number.isNaN(m.tsMs)) {
-          refState.installedAt = m.tsMs;
-          break;
-        }
-      }
       capIssuesAtWarn = true;
       try {
         for (const m of merged) {
+          // Provenance FIRST — segment names repeat across partitions and
+          // cross-partition event-id collisions are tolerated, so every push
+          // below must already carry this event's replicaId, not the previous
+          // event's (or none, on the first).
+          currentPartition = m.replicaId;
+          // Learn the install floor DURING the replay, exactly as flat mode
+          // does: first parseable FRAMEWORK_INSTALLED wins, and events that
+          // precede it in order are checked against a null floor (i.e. not
+          // checked). Pre-computing the floor before the replay matched flat's
+          // SELECTION but not its SEMANTICS — it made events sitting before
+          // the install warn, which flat never does. Merged order is
+          // deterministic, so learning it inline is order-independent too.
+          if (m.ev.type === 'FRAMEWORK_INSTALLED' && refState.installedAt === null && !Number.isNaN(m.tsMs)) {
+            refState.installedAt = m.tsMs;
+          }
           if (refState.installedAt !== null && m.tsMs < refState.installedAt) {
             push(issue('WARN', 'ts_before_install',
               `${m.ev.id}: ts ${m.ev.ts} is earlier than FRAMEWORK_INSTALLED`,
               { segment: m.segName, line: m.lineNo, eventId: m.ev.id }));
           }
-          // Stamp provenance: segment names repeat across partitions, and
-          // cross-partition event-id collisions are tolerated, so a merged
-          // finding without a replicaId is not locatable.
-          currentPartition = m.replicaId;
           referentialStep(m.ev, m.segName, m.lineNo, m.tsMs);
         }
       } finally {
