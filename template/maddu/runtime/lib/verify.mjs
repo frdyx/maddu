@@ -443,17 +443,11 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
             `${ev.id}: ts ${ev.ts} is more than 60s in the future`,
             { segment: segName, line: lineNo, eventId: ev.id }));
         }
-        // Track the install floor HERE, not only inside referentialStep: the
-        // ts-sanity check below runs in every mode, but referentialStep is
-        // deferred in sync mode, so relying on it left `installedAt` null for
-        // the whole partition scan and `ts_before_install` could never fire on
-        // a synced workspace. Idempotent (first-wins), so flat mode is
-        // unchanged — the referential case sets the same value.
-        if (ev.type === 'FRAMEWORK_INSTALLED' && refState.installedAt === null && !Number.isNaN(tsMs)) {
-          refState.installedAt = tsMs;
-        }
-        // Sanity: not before FRAMEWORK_INSTALLED.
-        if (refState.installedAt !== null && tsMs < refState.installedAt) {
+        // Sanity: not before FRAMEWORK_INSTALLED. Flat mode only — in sync mode
+        // the floor is learned per-partition in scan order, so the same event
+        // would warn or not depending on which replica was scanned first. The
+        // merged pass runs this check instead, over an order-independent floor.
+        if (referential && refState.installedAt !== null && tsMs < refState.installedAt) {
           push(issue('WARN', 'ts_before_install',
             `${ev.id}: ts ${ev.ts} is earlier than FRAMEWORK_INSTALLED`,
             { segment: segName, line: lineNo, eventId: ev.id }));
@@ -550,16 +544,48 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     // visible — the case no local appender guard can see, because each replica
     // correctly believes it won.
     if (mergedOverflow) {
+      // No remediation is suggested on purpose: a LOWER maxEvents returns
+      // before this pass runs, and a higher one overflows again. The honest
+      // statement is that referential coverage did not run on this spine.
       push(issue('WARN', 'merged_referential_skipped',
-        `merged-order referential pass skipped: more than ${MERGED_PASS_MAX_EVENTS} events in sync mode — re-run with a maxEvents cap, or verify per-replica`));
+        `merged-order referential pass skipped: sync spine exceeds ${MERGED_PASS_MAX_EVENTS} events — cross-replica referential integrity was NOT verified on this run`));
     } else {
+      // Match the projection's migration read-consistency rule
+      // (spine-append-core.mjs): a `spine sync init` racing a read can capture
+      // an event in BOTH the flat-legacy stream and its byte-identical
+      // partition copy. Drop the flat copy when its id lives in a real
+      // partition — otherwise a healthy migration reports phantom duplicates
+      // the projection never sees. Never collapse partition-vs-partition ids.
+      const flat = mergedStreams.get('(flat)');
+      if (flat && [...mergedStreams.keys()].some((k) => k !== '(flat)')) {
+        const partitionIds = new Set();
+        for (const [k, entries] of mergedStreams) {
+          if (k === '(flat)') continue;
+          for (const e of entries) partitionIds.add(e.ev.id);
+        }
+        mergedStreams.set('(flat)', flat.filter((e) => !partitionIds.has(e.ev.id)));
+      }
       // The SAME merge the projection performs, so an orphan the projection
       // sees is an orphan this pass sees.
       const merged = kWayMergeStreams(
         [...mergedStreams.entries()].map(([replicaId, events]) => ({ replicaId, events })));
+      // The install floor must be known BEFORE the replay: learning it during
+      // the sequential partition scan made ts_before_install depend on which
+      // replica happened to be scanned first. Derived from the merged set, it
+      // is order-independent.
+      for (const m of merged) {
+        if (m.ev.type === 'FRAMEWORK_INSTALLED' && !Number.isNaN(m.tsMs)) {
+          if (refState.installedAt === null || m.tsMs < refState.installedAt) refState.installedAt = m.tsMs;
+        }
+      }
       capIssuesAtWarn = true;
       try {
         for (const m of merged) {
+          if (refState.installedAt !== null && m.tsMs < refState.installedAt) {
+            push(issue('WARN', 'ts_before_install',
+              `${m.ev.id}: ts ${m.ev.ts} is earlier than FRAMEWORK_INSTALLED`,
+              { segment: m.segName, line: m.lineNo, eventId: m.ev.id }));
+          }
           // Stamp provenance: segment names repeat across partitions, and
           // cross-partition event-id collisions are tolerated, so a merged
           // finding without a replicaId is not locatable.

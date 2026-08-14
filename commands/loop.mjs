@@ -356,19 +356,26 @@ export default async function loopCmd(argv) {
     if (loopEvents.length === 0) { console.log('(no loop activity)'); return; }
     // Which loops genuinely exist — order-independent, so clock skew across
     // replicas cannot hide a loop whose start sorts after its own halt.
-    const startedLoopIds = new Set(
-      loopEvents.filter((e) => e.type === 'LOOP_STARTED' && e.data?.loopId).map((e) => e.data.loopId));
+    // Hydrate each row from its OWN LOOP_STARTED, never from whichever event
+    // merged first: a cancel from a clock-behind replica sorting ahead of the
+    // start would otherwise build the row from the halt, leaving `kind` null —
+    // which then threw on `l.kind.padEnd()` below.
     const byId = {};
+    for (const e of loopEvents) {
+      if (e.type !== 'LOOP_STARTED' || !e.data?.loopId) continue;
+      byId[e.data.loopId] = {
+        loopId: e.data.loopId, kind: e.data.kind || null, started: e.ts,
+        iters: 0, status: 'open', goal: e.data.goal || null,
+      };
+    }
     for (const ev of loopEvents) {
       const id = ev.data?.loopId;
       if (!id) continue;
-      // Anchor on the EXISTENCE of a LOOP_STARTED anywhere (pre-scanned above),
-      // not on it sorting first. Creating a row from any LOOP_* event let an
-      // orphaned halt conjure a loop that was never started; but discarding
-      // events that merely sort before the start would drop a legitimate halt
-      // whose start lives in another replica with a skewed clock.
-      if (!startedLoopIds.has(id)) continue;
-      if (!byId[id]) byId[id] = { loopId: id, kind: ev.data.kind, started: null, iters: 0, status: 'open', goal: ev.data.goal || null };
+      // Anchor on the EXISTENCE of a start (the rows above), not on ordering:
+      // an orphaned halt must not conjure a loop that was never started, but
+      // discarding events that merely sort before the start would drop a
+      // legitimate halt whose start lives in a clock-skewed replica.
+      if (!byId[id]) continue;
       if (ev.type === 'LOOP_STARTED') byId[id].started = ev.ts;
       else if (ev.type === 'LOOP_ITERATION_COMPLETED') byId[id].iters = ev.data.iter || byId[id].iters;
       else if (ev.type === 'LOOP_HALTED') { byId[id].status = 'halted'; byId[id].reason = ev.data.reason; }
@@ -379,7 +386,7 @@ export default async function loopCmd(argv) {
     console.log(`${ANSI.bold}LOOPS  (${list.length})${ANSI.reset}`);
     for (const l of list) {
       const c = l.status === 'completed' ? ANSI.pass : (l.status === 'halted' ? ANSI.fail : ANSI.dim);
-      console.log(`  ${l.loopId}  ${l.kind.padEnd(10)} ${c}${l.status}${ANSI.reset}  iters=${l.iters}  ${ANSI.dim}${l.goal || ''}${ANSI.reset}`);
+      console.log(`  ${l.loopId}  ${String(l.kind || '—').padEnd(10)} ${c}${l.status}${ANSI.reset}  iters=${l.iters}  ${ANSI.dim}${l.goal || ''}${ANSI.reset}`);
       if (l.reason) console.log(`    ${ANSI.dim}reason: ${l.reason}${ANSI.reset}`);
     }
     return;

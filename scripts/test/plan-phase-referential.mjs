@@ -373,8 +373,13 @@ async function main() {
     {
       const added = (await spine.readAll(repo))
         .filter((e) => e.type === 'PLAN_PHASE_ADDED' && e.data?.planId === planId && e.data?.name === 'shared');
-      ok('race: the effective phase is the FIRST append', added.length > 0
-        && (await phaseStates(repo, planId))['shared'] === 'pending');
+      // Compare the projected INTENT against the first append's intent — a
+      // status check alone is green regardless of which add won.
+      const s = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
+      const eff = s.phases.find((p) => p.name === 'shared');
+      ok('race: the effective phase carries the FIRST append\'s intent',
+        !!eff && added.length > 0 && eff.intent === added[0].data.intent,
+        `projected "${eff?.intent}" vs first-append "${added[0]?.data?.intent}"`);
       const vres = await verify.verifySpine(repo);
       const dup = (vres.issues || []).filter((i) => i.kind === 'duplicate_plan_phase');
       ok('race: any losing residue is REPORTED, never silent',
@@ -451,18 +456,26 @@ async function main() {
     {
       const planId = newPlan(repo, 'RaceSeam', 'alpha');
       // The seam is double-gated on MADDU_SELF_TEST so it cannot fire in a
-      // consumer install; prove that too.
-      let inert = null;
-      process.env.MADDU_TEST_ADDPHASE_RACE = '1';
-      try { await plans.addPhase(repo, { planId, name: 'inert-probe', intent: 'x' }); }
-      catch (e) { inert = e.code; }
-      ok('seam: inert without MADDU_SELF_TEST (production-safe)', inert === null, inert || '');
+      // consumer install; prove that too. Save/restore rather than delete —
+      // _hermetic-env deliberately allows an ambient MADDU_SELF_TEST, so a CI
+      // run with it set would otherwise arm the "inert" probe and clobber it.
+      const priorSelfTest = process.env.MADDU_SELF_TEST;
+      const priorRace = process.env.MADDU_TEST_ADDPHASE_RACE;
+      let inert = null, code = null;
+      try {
+        delete process.env.MADDU_SELF_TEST;
+        process.env.MADDU_TEST_ADDPHASE_RACE = '1';
+        try { await plans.addPhase(repo, { planId, name: 'inert-probe', intent: 'x' }); }
+        catch (e) { inert = e.code; }
+        ok('seam: inert without MADDU_SELF_TEST (production-safe)', inert === null, inert || '');
 
-      let code = null;
-      process.env.MADDU_SELF_TEST = '1';
-      try { await plans.addPhase(repo, { planId, name: 'contested', intent: 'ours' }); }
-      catch (e) { code = e.code; }
-      finally { delete process.env.MADDU_TEST_ADDPHASE_RACE; delete process.env.MADDU_SELF_TEST; }
+        process.env.MADDU_SELF_TEST = '1';
+        try { await plans.addPhase(repo, { planId, name: 'contested', intent: 'ours' }); }
+        catch (e) { code = e.code; }
+      } finally {
+        if (priorSelfTest === undefined) delete process.env.MADDU_SELF_TEST; else process.env.MADDU_SELF_TEST = priorSelfTest;
+        if (priorRace === undefined) delete process.env.MADDU_TEST_ADDPHASE_RACE; else process.env.MADDU_TEST_ADDPHASE_RACE = priorRace;
+      }
       ok('race: losing the append race throws MADDU_PLAN_REF', code === 'MADDU_PLAN_REF', code || 'no throw');
       const s = JSON.parse(await readFile(join(repo, '.maddu', 'plans', planId, 'state.json'), 'utf8'));
       const contested = s.phases.find((p) => p.name === 'contested');
@@ -548,21 +561,47 @@ async function main() {
     };
     await writeFile(join(repo, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repA' }));
 
-    // repA: the plan exists, with phase "audit".
-    await mkPart('repA', [{
-      v: 1, id: eid(1), ts: '2026-08-14T10:00:00.000Z', type: 'PLAN_CREATED', actor: null, lane: null,
-      data: { planId: 'pln_two_rep', title: 'Split', phases: [{ name: 'audit', intent: '' }], goal: null }, prev_hash: null,
-    }]);
-    // repB: completes a phase that does NOT exist — resolvable only after merge.
-    await mkPart('repB', [{
-      v: 1, id: eid(2), ts: '2026-08-14T10:00:01.000Z', type: 'PLAN_PHASE_COMPLETED', actor: null, lane: null,
-      data: { planId: 'pln_two_rep', name: 'ghost', summary: null }, prev_hash: null,
-    }]);
+    // repA carries a TIMESTAMP REGRESSION: the plan is created at 10:00:02 but
+    // its phase-add is stamped 09:59:59. Physical order within the partition is
+    // create-then-add, and kWayMergeStreams preserves that. A flat sort by ts —
+    // the ordering this pass used before round 4 — would hoist the add above
+    // its own PLAN_CREATED and report a false orphan. So this fixture
+    // DISCRIMINATES the real merge contract from the rejected one.
+    await mkPart('repA', [
+      {
+        v: 1, id: eid(1), ts: '2026-08-14T10:00:02.000Z', type: 'PLAN_CREATED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', title: 'Split', phases: [], goal: null }, prev_hash: null,
+      },
+      {
+        v: 1, id: eid(2), ts: '2026-08-14T09:59:59.000Z', type: 'PLAN_PHASE_ADDED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', name: 'audit', intent: 'regressed clock', at: '2026-08-14T09:59:59.000Z' }, prev_hash: null,
+      },
+    ]);
+    // repB: completes a phase that exists only in repA (legitimate), plus one
+    // that exists nowhere (a genuine orphan). Per-partition scanning can
+    // resolve neither; only the merge can tell them apart.
+    await mkPart('repB', [
+      {
+        v: 1, id: eid(3), ts: '2026-08-14T10:00:03.000Z', type: 'PLAN_PHASE_COMPLETED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', name: 'audit', summary: null }, prev_hash: null,
+      },
+      {
+        v: 1, id: eid(4), ts: '2026-08-14T10:00:04.000Z', type: 'PLAN_PHASE_COMPLETED', actor: null, lane: null,
+        data: { planId: 'pln_two_rep', name: 'ghost', summary: null }, prev_hash: null,
+      },
+    ]);
 
     const r2 = await verify.verifySpine(repo);
+    const orphans = (r2.issues || []).filter((i) => i.kind === 'orphan_plan_phase');
     const kinds = (r2.issues || []).map((i) => i.kind);
-    ok('2-replica: cross-replica orphan phase found only via the merge',
-      kinds.includes('orphan_plan_phase'), kinds.join(',') || 'none');
+    ok('2-replica: the genuine cross-replica orphan is found', orphans.length === 1, `${orphans.length}: ${kinds.join(',')}`);
+    ok('2-replica: it names "ghost", not the legitimate "audit"',
+      /unknown phase "ghost"/.test(orphans[0]?.detail || ''), (orphans[0]?.detail || '').slice(0, 80));
+    // The discriminator: under a flat ts sort, "audit" would ALSO be orphaned
+    // because its add (09:59:59) would sort before its plan (10:00:02).
+    ok('2-replica: a ts regression inside one replica does NOT fake an orphan',
+      !orphans.some((o) => /unknown phase "audit"/.test(o.detail || '')),
+      orphans.map((o) => o.detail).join(' | ').slice(0, 110));
     ok('2-replica: the plan itself is NOT reported orphaned (parent is in repA)',
       !kinds.includes('orphan_plan_event'), kinds.join(','));
     ok('2-replica: no FAIL on a merely-skewed workspace', (r2.counts?.FAIL || 0) === 0, JSON.stringify(r2.counts));
