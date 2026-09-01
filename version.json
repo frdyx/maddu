@@ -1,5 +1,5 @@
 {
-  "version": "1.125.0",
-  "phase": "merged-order-referential",
-  "released": "2026-08-14"
+  "version": "1.126.0",
+  "phase": "sources-install-layout",
+  "released": "2026-09-01"
 }

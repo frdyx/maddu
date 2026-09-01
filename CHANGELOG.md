@@ -11,6 +11,56 @@ narrative summary.
 
 ---
 
+## [v1.126.0] · 2026-09-01 · `maddu sources` was dead in every install
+
+Reported from a consumer repo, not found here: `maddu sources` — both
+`status` and `rebuild` — failed at module load on every installed repo since
+v1.106.0. Nineteen releases, six weeks.
+
+**The defect.** `commands/` ships twice: at the framework root in this
+checkout, and copied to `<repo>/maddu/commands/` by `maddu init`. The runtime
+library moves with it — `template/maddu/runtime/lib/` here,
+`maddu/runtime/lib/` there — which is why `commands/_libroot.mjs` exists and
+why ~40 command modules resolve their libs through it. When v1.106.0 extracted
+the pin hashing into `content-pins.mjs`, `commands/sources.mjs` reached for it
+with a **static** `../template/maddu/runtime/lib/content-pins.mjs` import. In
+an install that resolves to `<repo>/maddu/template/…`, a path present in no
+install: `ERR_MODULE_NOT_FOUND`, thrown before the first line of the handler.
+
+**Why it was the worst possible command to lose.** The `tracked-source-drift`
+gate warns when verdict-machinery files change, and names `maddu sources
+rebuild` as the remedy. So the warning could not be cleared through its own
+command — the finding stayed on screen and the only documented way to answer it
+did not load. This repo has been carrying that warning since 2026-07-20, the
+same day the import landed; the pin baseline is 19 files stale as a result.
+
+**Why nothing caught it.** Every suite under `scripts/test/` runs in the source
+checkout, where `../template/maddu/runtime/lib/` is a real directory. The
+defect was invisible by construction to the entire self-test surface — it was
+not a missing assertion but a missing *layout*.
+
+**The fix.** `sources.mjs` resolves `content-pins` through `loadLib()` like
+every other command. One line of behavior; no change to the refusal ladder,
+the reason requirement, or the recorded `SOURCE_HASH_RECOMPUTED` snapshot.
+
+**The cover.** `scripts/test/command-import-layout.mjs` builds a synthetic
+consumer install (`maddu/commands` + `maddu/runtime`, and deliberately no
+`maddu/template`), moves cwd into it, and imports all 87 command modules from
+there. It carries an anti-vacuity control: a planted module with exactly the
+old bad import, which the suite requires to FAIL — a scan that has stopped
+detecting cannot report green. Proven as a regression guard, not asserted to
+be one: reverting `sources.mjs` alone turns the suite red (4 pass · 2 fail)
+and restoring it turns it green.
+
+**What this does not prove.** The suite proves command modules *load* in an
+install; it does not execute their handlers there, so an install-only failure
+deeper than module resolution would still pass it. The end-to-end check for
+this fix was run by hand against a real `maddu init` install: `sources status`
+on an unpinned tree, the reasonless-rebuild refusal, `rebuild --reason`, a
+clean re-read, and drift detection after editing a tracked file.
+
+---
+
 ## [v1.125.0] · 2026-08-14 · referential integrity on synced workspaces
 
 v1.124.0 stopped mutating verbs reporting success they had not performed, but

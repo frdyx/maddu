@@ -18,13 +18,7 @@
 
 import path from 'node:path';
 
-import {
-  computeDrift,
-  expandPins,
-  hashFile,
-  pinPatterns,
-  readPinConfig,
-} from '../template/maddu/runtime/lib/content-pins.mjs';
+import { loadLib } from './_libroot.mjs';
 import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
 
 const CONFIG_HINT = [
@@ -68,6 +62,16 @@ export default async function command(argv) {
   const sub = argv[0];
   const { paths, spine, projections } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
+
+  // content-pins lives at maddu/runtime/lib/ in a consumer install but at
+  // template/maddu/runtime/lib/ in this checkout, so it must be resolved
+  // through _libroot rather than reached by a framework-relative import. A
+  // static import here left `maddu sources` dead on EVERY install from
+  // v1.106.0 through v1.125.0: the tracked-source-drift gate kept warning
+  // and its own remedy command could not even load. Covered by
+  // scripts/test/command-import-layout.mjs.
+  const { computeDrift, expandPins, hashFile, pinPatterns, readPinConfig } =
+    await loadLib('content-pins.mjs');
 
   if (sub === 'rebuild') {
     const parsed = readReason(argv);
