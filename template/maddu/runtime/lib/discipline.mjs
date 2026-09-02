@@ -224,9 +224,35 @@ export function normErrorSig(e) {
   return m.split('\n')[0].replace(/[A-Za-z]:\\[^\s]+|\/[^\s/][^\s]*/g, '<path>').slice(0, 120);
 }
 
+// Name the condition that ACTUALLY fired. Both the edit count and the slice
+// age can trip this gate, but one message rendered only the edit wording, so
+// an age-triggered block printed "slice-stop overdue (0 edits since the last
+// one)". Self-contradictory on its face, and it sent the operator after the
+// wrong cause: no amount of not-editing clears an age threshold.
+function sliceWhy(edits, sliceMin, byEdits, byAge) {
+  const parts = [];
+  if (byEdits) parts.push(`${edits} edit${edits === 1 ? '' : 's'} since the last one`);
+  if (byAge) parts.push(`last one was ${Math.round(sliceMin)} min ago`);
+  return parts.join(' - ');
+}
+
+// Pin the session in the remedy. This gate reads ONE session's counter (the
+// one bound to this caller) and only that session's OWN slice-stop resets it:
+// a null id must never reset, or a busy fleet would clear a counter its owner
+// never sliced (see nextCounter). So a slice-stop recorded against a different
+// live session leaves the block exactly where it stood, which presents as a
+// gate that cannot be cleared by the very command it demands. Naming the
+// session keeps the remedy true when several Maddu sessions are alive at once.
+function sliceRemedy(state) {
+  const sid = state?.session?.id;
+  return sid
+    ? `maddu slice-stop --session ${sid} "SLICE STOP: ..."`
+    : 'maddu slice-stop "SLICE STOP: ..."';
+}
+
 // ── The PURE decision core ──────────────────────────────────────────────────
 // state: {
-//   session:   { registered:boolean },
+//   session:   { registered:boolean, id:string|null },
 //   lane:      { claimed:boolean },
 //   goalOrPlan:{ active:boolean },
 //   slice:     { ageMin:number|null },        // minutes since last SLICE_STOP (null = none yet)
@@ -273,12 +299,14 @@ export function decide({ thresholds, state, counter, toolCtx }) {
   const ss = thresholds.slicestop;
   if (edits > 0 || state.slice?.ageMin != null) {
     const sliceMin = state.slice?.ageMin;
-    const blockSlice = edits >= ss.blockEdits || (sliceMin != null && sliceMin >= ss.blockMin);
-    const warnSlice  = edits >= ss.warnEdits  || (sliceMin != null && sliceMin >= ss.warnMin);
-    if (blockSlice) return mk(cap('block'), 'slice-stop',
-      `slice-stop overdue (${edits} edits since the last one)`, 'maddu slice-stop "SLICE STOP: ..."');
-    if (warnSlice) return mk(cap('warn'), 'slice-stop',
-      `slice-stop getting stale (${edits} edits)`, 'maddu slice-stop "SLICE STOP: ..."');
+    const blockByEdits = edits >= ss.blockEdits;
+    const blockByAge   = sliceMin != null && sliceMin >= ss.blockMin;
+    const warnByEdits  = edits >= ss.warnEdits;
+    const warnByAge    = sliceMin != null && sliceMin >= ss.warnMin;
+    if (blockByEdits || blockByAge) return mk(cap('block'), 'slice-stop',
+      `slice-stop overdue (${sliceWhy(edits, sliceMin, blockByEdits, blockByAge)})`, sliceRemedy(state));
+    if (warnByEdits || warnByAge) return mk(cap('warn'), 'slice-stop',
+      `slice-stop getting stale (${sliceWhy(edits, sliceMin, warnByEdits, warnByAge)})`, sliceRemedy(state));
   }
   return commitOnly(state, thresholds, cap);
 }
@@ -909,7 +937,7 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { w
     // `commit` below: false means the projection could not be read, so every
     // field here is absence-of-evidence, not evidence-of-absence.
     ritualObserved,
-    session: { registered },
+    session: { registered, id: sessionId || null },
     lane: { claimed },
     goalOrPlan: { active: goalActive || openPlans.length > 0 },
     slice: { ageMin: sliceAgeMin, lastStopId: lastStop ? lastStop.id : null },
