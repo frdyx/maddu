@@ -12,6 +12,7 @@ The CLI is invoked via the `maddu` binary (installed by `maddu init` or via `npx
 - For `slice-stop --learnings` and `--next`, separators are **semicolons** (because entries often contain commas).
 - Most write subcommands accept an optional `--by <id>` for the actor field.
 - *(v1.1.1)* `--help` / `-h` is detected at the dispatcher before any flag validation. `maddu <verb> --help` always returns help text — never `--<flag> required` errors. Verbs with bespoke usage (start, stop, workspace, plan, lane, install) print their own; others fall back to the global discovery surface (`maddu help`).
+- *(v1.122.0)* Unknown flags are a hard error (exit 2); `MADDU_STRICT_FLAGS=0` downgrades that to a warning during a migration. **Five verbs are deliberately exempt** — `format`, `git`, `install`, `lint`, `test` — because they forward argv verbatim to git / npm / eslint / your project test runner, so those flags belong to the underlying tool rather than to Máddu (guarding them would break `maddu git commit --amend`). The open set is a curated constant, never inferred, precisely so a newly added verb cannot drift into it.
 
 ## `maddu init`
 
@@ -33,6 +34,8 @@ $ maddu upgrade [--force] [--dry-run]
 
 - `--dry-run` — print the plan and stop.
 - `--force` — overwrite locally-modified framework files (warns either way).
+
+*(v1.127.0)* Locally-modified files are skipped, but the framework version still moves — so the install is **partially** upgraded. That outcome now says so: the run prints `Upgraded to vX — PARTIAL` with the count and the remedy, and records the skipped paths as `partial_upgrade` in `maddu.json`. Until they are resolved, a later `maddu upgrade` reports the stranded files and **exits 1** instead of answering "Already on framework vX. Nothing to do." — which was false while files were still outstanding. `--force` applies them and clears the marker.
 
 See [upgrade-policy.md](upgrade-policy.md).
 

@@ -58,6 +58,22 @@ export default async function upgrade(argv) {
       const { loadLibOptional } = await import('./_libroot.mjs');
       (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-current');
     } catch {}
+    // A prior upgrade that skipped locally-modified files bumped
+    // framework_version anyway, so those files are stranded at their old
+    // content while the manifest claims the new version. Saying "nothing to
+    // do" there is a false report about state, and the repo-wide rule is that
+    // no command reports success it did not perform (v1.124.0). Report the
+    // stranded set and exit non-zero, the same way `maddu sources status`
+    // exits 1 when pins have drifted.
+    const stranded = Array.isArray(madduJson.partial_upgrade?.paths) ? madduJson.partial_upgrade.paths : [];
+    if (stranded.length) {
+      console.error(`Framework version is v${toVersion}, but ${stranded.length} managed file(s) were never updated to it.`);
+      console.error(`  Locally modified when v${madduJson.partial_upgrade.version} was applied, so upgrade left them alone:`);
+      for (const p of stranded.slice(0, 20)) console.error(`    ${p}`);
+      if (stranded.length > 20) console.error(`    ... and ${stranded.length - 20} more`);
+      console.error(`  Resolve with: maddu upgrade --force   (overwrites those local edits)`);
+      process.exit(1);
+    }
     console.log(`Already on framework v${toVersion}. Nothing to do.`);
     console.log(`  (pass --force to re-overwrite all framework files anyway)`);
     return;
@@ -141,12 +157,21 @@ export default async function upgrade(argv) {
   // Drop manifest entries for skipped-removed files? No — keep them so we can
   // re-detect on the next upgrade.
 
+  // Skipped files keep their OLD content while framework_version moves to the
+  // new one. Record which, so the next run can say so instead of reporting
+  // "Already on framework vX. Nothing to do." over a half-applied install.
+  const strandedPaths = actions.skip.map((a) => a.relPath).sort();
   const next = {
     ...madduJson,
     framework_version: toVersion,
     upgraded_at: new Date().toISOString(),
     managed: newManaged
   };
+  if (strandedPaths.length) {
+    next.partial_upgrade = { version: toVersion, at: new Date().toISOString(), paths: strandedPaths };
+  } else {
+    delete next.partial_upgrade;
+  }
   await writeMadduJson(repoRoot, next);
 
   // The project-local CLI shims (maddu/run, maddu/run.cmd) ride along
@@ -277,7 +302,13 @@ export default async function upgrade(argv) {
     });
   }
 
-  console.log(`\nUpgraded to v${toVersion}. (event ${ev.id})`);
+  if (strandedPaths.length) {
+    console.log(`\nUpgraded to v${toVersion} - PARTIAL. (event ${ev.id})`);
+    console.log(`  ${strandedPaths.length} managed file(s) were NOT updated: locally modified, left in place.`);
+    console.log(`  They stay at their previous content until: maddu upgrade --force`);
+  } else {
+    console.log(`\nUpgraded to v${toVersion}. (event ${ev.id})`);
+  }
 
   // Activation nudge (usage-audit Tier 3): hooks are the proven activation
   // lever — the ritual-active repos in the 2026-07-16 fleet audit are the
