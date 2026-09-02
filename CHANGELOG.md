@@ -11,6 +11,64 @@ narrative summary.
 
 ---
 
+## [v1.127.0] · 2026-09-02 · a half-applied upgrade stops calling itself finished
+
+A consumer repo reported `maddu upgrade` silently half-applying — `update:0 /
+add:213 / skip:282`, exit 0 — and blamed CRLF hashing. The diagnosis was wrong
+and the symptom was real.
+
+**The CRLF claim is falsified.** `sha256OfFile` has EOL-normalized since
+v1.74.1 (`be8fb48`), so a CRLF file and an LF file with the same content hash
+the same. Proven, not assumed: a v1.122.0 install fixture and a CRLF-converted
+copy of it produce byte-identical upgrade plans (`update:26 / add:3 / skip:0`).
+The experiment was checked for vacuity first — content-editing five managed
+files does move them into `skip`, so the null result is a measurement rather
+than a scan that quietly matched nothing.
+
+**What was actually wrong.** `skip` does not mean "unchanged" — it means
+"locally modified, left alone", which is correct. What was not correct is what
+happened next: `framework_version` was bumped to the target regardless, so the
+manifest asserted a version the install did not have. The next `maddu upgrade`
+then hit the `fromVersion === toVersion` early-return and printed **"Already on
+framework vX. Nothing to do."** That statement was false — there were files
+still to do — and nothing named `--force` as the way to reach them. Skipped
+files were stranded permanently.
+
+This is the family the repo already has a rule for: no command reports success
+it did not perform (v1.124.0). The report was honest about each individual file
+(a warning per skip) and dishonest about the whole.
+
+**The fix.** Skipped paths are recorded as `partial_upgrade` in `maddu.json`.
+A run that could not apply everything says `Upgraded to vX — PARTIAL` with the
+count and the remedy. A later run over an unresolved partial reports the
+stranded files and **exits 1** rather than claiming there is nothing to do —
+the same convention as `maddu sources status`, which already exits 1 on drift.
+`--force` applies them and clears the marker. `fleet upgrade --apply` is
+unaffected: it halts on a non-zero delivery, and the partial run itself still
+exits 0.
+
+**Also in this release.** The shipped agent-instruction sections
+(`CLAUDE.section.md`, and the `AGENTS.section.md` derived from it) carried a
+double-encoded `á` — bytes `C3 83 C2 A1`, rendering as `MÃ¡ddu` — in front of
+every agent in every install. Repaired, and the repo swept for the `C3 83 C2`
+signature by bytes rather than by the mangled string, so correctly-encoded
+characters nearby (`E2 80 A6`, an ellipsis) were left alone.
+
+**Closed without code.** Two further reports resolved to "no defect": a
+`--detail → --summary` flag migration (`--detail` has never existed anywhere in
+this repo's history — the identical search finds 20 commits for `--dry-run`,
+so the search works), and the five open passthrough verbs `format`/`git`/
+`install`/`lint`/`test`, which are exempt by design because they forward argv
+to the underlying tool. Both are now documented so they stop being re-filed.
+
+**A question worth recording:** plugins cannot register CLI verbs. The
+dispatcher gates on a hardcoded `COMMANDS` constant and resolves
+`commands/<verb>.mjs`; a plugin manifest declares `server`, `boot`,
+`eventTypes` and `libs`, and nothing else. So the flag guard's unlisted-verb
+fail-open has no plugin exposure in an install.
+
+---
+
 ## [v1.126.0] · 2026-09-01 · `maddu sources` was dead in every install
 
 Reported from a consumer repo, not found here: `maddu sources` — both

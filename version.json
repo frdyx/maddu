@@ -1,5 +1,5 @@
 {
-  "version": "1.126.0",
-  "phase": "sources-install-layout",
-  "released": "2026-09-01"
+  "version": "1.127.0",
+  "phase": "partial-upgrade-honesty",
+  "released": "2026-09-02"
 }
