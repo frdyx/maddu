@@ -121,8 +121,21 @@ async function main() {
       cwd: ROOT, encoding: 'utf8', env: hermeticEnv(),
     });
     const said = `${spawned.stdout || ''}${spawned.stderr || ''}`;
+    // What is proven here is that the guard FIRES — not what it decides. This
+    // assertion used to pin the verdict (`status === 1 && 'NOT DONE'`), which
+    // made this suite passable ONLY while PR2 was unstarted; and unlike
+    // check-fire-core-extracted.mjs — kept out of scripts/test/ for exactly
+    // that reason — this file IS swept by the self-test runner, so the moment
+    // the work it exists to judge succeeded, CI went red. So: the CLI must
+    // print exactly one recognizable verdict, and its exit code must AGREE
+    // with the verdict it printed. Silence satisfies neither half — that is
+    // the failure mode above — and a guard that prints one answer while
+    // exiting the other fails in EITHER tree state, where the old pin could
+    // only ever be satisfied in one of them.
+    const saidDone = /PR2 fire-core extraction: done\b/.test(said);
+    const saidNotDone = said.includes('PR2 fire-core extraction: NOT DONE');
     ok('invoked as the goal invokes it, the CLI runs and reports',
-      spawned.status === 1 && said.includes('NOT DONE'),
+      saidDone !== saidNotDone && spawned.status === (saidDone ? 0 : 1),
       `exit ${spawned.status} / ${said.split('\n')[0]}`);
     ok('a silent exit 0 is not how it answers', said.trim().length > 0);
   } finally {
