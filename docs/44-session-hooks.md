@@ -212,6 +212,16 @@ governance tier, **allows, nudges, or denies** the edit.
   slice-stop message that merely *mentions* `>` is not mistaken for a redirect.
 - **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
   uncommitted pileup. The deny names the first stale ritual and its exact remedy.
+- **The deny names its own trigger and its own session (v1.128.0).** The
+  slice-stop gate fires on the edit count **or** the slice age, and the message
+  says which — both, when both tripped. And because the gate reads exactly one
+  session's counter (only that session's *own* slice-stop resets it, so a busy
+  fleet can never clear a counter its owner never sliced), the remedy pins that
+  session: `maddu slice-stop --session <id> "SLICE STOP: ..."`. When several
+  Máddu sessions are alive at once — a closed hook-bound one, a hand-registered
+  one, an auto-created one — the bare form resolves *the active session*, which
+  may not be the one the gate is reading, and the block survives a slice-stop
+  that looked correct. Follow the pinned remedy verbatim and it always clears.
 - **Liveness-aware identity + the recovery mint (v1.120.0).** The gate resolves
   *which* session a caller acts as by **liveness**, not grammar alone: a live
   `$MADDU_SESSION_ID` wins, else the caller's own **live** SessionStart binding —

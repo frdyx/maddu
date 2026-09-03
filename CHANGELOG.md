@@ -11,6 +11,49 @@ narrative summary.
 
 ---
 
+## [v1.128.0] · 2026-09-03 · the gate stops misreporting its own state
+
+Two defects in the discipline gate, both found by being blocked by it while
+shipping v1.127.0. Neither changes when the gate fires — only what it says
+when it does, which was the part that was wrong.
+
+**It named the wrong cause.** `decide()` blocks on the edit count **or** the
+slice age, but one message rendered only the edit wording. An age-triggered
+block therefore printed `slice-stop overdue (0 edits since the last one)` —
+self-contradictory on its face, and it pointed at a cause no amount of
+not-editing could clear. The trigger is now split (`blockByEdits` /
+`blockByAge`, and the warn pair) and the message names whichever actually
+fired, both when both did: `slice-stop overdue (6 edits since the last one -
+last one was 20 min ago)`.
+
+**Its remedy could be untrue.** The gate reads one session's counter — the one
+bound to the caller — and only that session's own slice-stop resets it. That
+rule is deliberate: a null id must never reset, or a busy fleet would clear a
+counter its owner never sliced. But the remedy it printed was the bare
+`maddu slice-stop "SLICE STOP: ..."`, which resolves *the active session* —
+and when several Máddu sessions are alive at once (a closed hook-bound one, a
+hand-registered one, an auto-created one) that is a different session, whose
+slice-stop leaves the block exactly where it stood. Following the remedy
+verbatim did nothing, four times in a row, and the only way to find the right
+session was to decode a hex filename under `.maddu/state/discipline/v2/`. The
+remedy now pins it: `maddu slice-stop --session <id> "SLICE STOP: ..."`, from a
+new `state.session.id` threaded through `gatherRitualState`.
+
+Seven assertions added to the `decide()` unit contract. Five fail against the
+previous implementation; the two that pass are the controls — edit-triggered
+wording was already correct, and the bare-remedy fallback for an unknown
+session is unchanged behavior.
+
+Both were filed as spine tasks first (`tsk_20260902231740_a5e746`,
+`tsk_20260902231750_551246`) rather than fixed in passing, and both are the
+same shape as the two releases before them: the enforcement layer wrong about
+itself. `maddu sources` warned about drift while its own remedy could not
+load; `maddu upgrade` reported success over files it had not touched; the gate
+blocked and misnamed why. That class is exactly what Máddu exists to catch in
+everything else, and exactly what its own suites are worst positioned to see.
+
+---
+
 ## [v1.127.0] · 2026-09-02 · a half-applied upgrade stops calling itself finished
 
 A consumer repo reported `maddu upgrade` silently half-applying — `update:0 /

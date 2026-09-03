@@ -144,6 +144,46 @@ ok('standard 6 edits → warn', d(standard, good, { editsSinceSlice: 6 }).verdic
 ok('standard 12 edits → block', d(standard, good, { editsSinceSlice: 12 }).verdict === 'block');
 ok('strict 20 min → block by time', d(strict, { ...good, slice: { ageMin: 20 } }, { editsSinceSlice: 1 }).verdict === 'block');
 
+// The block message must name the condition that actually fired. An
+// age-triggered block used to render the edit wording, printing
+// "slice-stop overdue (0 edits since the last one)" — self-contradictory, and
+// it pointed at a cause no amount of not-editing could clear.
+ok('age-triggered block names the AGE, not an edit count', (() => {
+  const r = d(strict, { ...good, slice: { ageMin: 20 } }, { editsSinceSlice: 0 });
+  return r.verdict === 'block' && /last one was 20 min ago/.test(r.reason) && !/edits? since/.test(r.reason);
+})());
+ok('edit-triggered block names the EDITS, not an age', (() => {
+  const r = d(strict, { ...good, slice: { ageMin: 0 } }, { editsSinceSlice: 6 });
+  return r.verdict === 'block' && /6 edits since the last one/.test(r.reason) && !/min ago/.test(r.reason);
+})());
+ok('both conditions fired → both named', (() => {
+  const r = d(strict, { ...good, slice: { ageMin: 20 } }, { editsSinceSlice: 6 });
+  return /6 edits since the last one/.test(r.reason) && /20 min ago/.test(r.reason);
+})());
+ok('edit count is pluralized correctly', (() => {
+  const one = resolveThresholds('strict', { slicestop: { blockEdits: 1 } });
+  const r1 = d(one, { ...good, slice: { ageMin: 0 } }, { editsSinceSlice: 1 });
+  const r6 = d(strict, { ...good, slice: { ageMin: 0 } }, { editsSinceSlice: 6 });
+  return r1.reason.includes('(1 edit since') && r6.reason.includes('(6 edits since');
+})());
+ok('warn message names its trigger too', (() => {
+  const r = d(standard, { ...good, slice: { ageMin: 30 } }, { editsSinceSlice: 0 });
+  return r.verdict === 'warn' && /last one was 30 min ago/.test(r.reason);
+})());
+
+// The gate reads ONE session's counter and only that session's own slice-stop
+// resets it, so a slice-stop recorded against a different live session leaves
+// the block standing. Naming the session keeps the remedy true.
+ok('remedy pins the session the counter belongs to', (() => {
+  const s = { ...good, session: { registered: true, id: 'ses_20260101120000_abc123' }, slice: { ageMin: 20 } };
+  const r = d(strict, s, { editsSinceSlice: 0 });
+  return r.remedy === 'maddu slice-stop --session ses_20260101120000_abc123 "SLICE STOP: ..."';
+})());
+ok('remedy falls back to the bare form when no session id is known', (() => {
+  const r = d(strict, { ...good, slice: { ageMin: 20 } }, { editsSinceSlice: 0 });
+  return r.remedy === 'maddu slice-stop "SLICE STOP: ..."';
+})());
+
 // commit pileup — new dirty over baseline
 ok('strict 15 dirty files → block commit', (() => { const r = d(strict, { ...good, commit: { newDirtyFiles: 15, dirtyAgeMin: 0, slicedButDirty: false } }, { editsSinceSlice: 1 }); return r.verdict === 'block' && r.blocker === 'commit'; })());
 ok('standard 15 dirty → warn', d(standard, { ...good, commit: { newDirtyFiles: 15, dirtyAgeMin: 0, slicedButDirty: false } }, { editsSinceSlice: 1 }).verdict === 'warn');
