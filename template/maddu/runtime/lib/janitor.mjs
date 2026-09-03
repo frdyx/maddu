@@ -93,7 +93,7 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
   try {
     const { events, parseErrors } = await readAllStrict(repoRoot);
     if (typeof parseErrors === 'number' && parseErrors > 0) {
-      process.stderr.write('[maddu janitor] spine has malformed lines — session pass skipped this round (run maddu verify)\n');
+      process.stderr.write('[maddu janitor] spine has malformed lines — session pass skipped this round (run maddu spine verify)\n');
       return { staleEmitted: 0, closedEmitted: 0, orphanedWorktrees: [] };
     }
     const view = reduceSessions(events, { nowMs });
@@ -138,7 +138,7 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
     });
     if (r.status === 'marked') staleEmitted++;
     else if (r.status === 'spine-corrupt') {
-      process.stderr.write('[maddu janitor] spine has malformed lines — stale marking skipped this round (run maddu verify)\n');
+      process.stderr.write('[maddu janitor] spine has malformed lines — stale marking skipped this round (run maddu spine verify)\n');
       break;
     }
   }
@@ -166,7 +166,7 @@ export async function runJanitor(repoRoot, projection, nowMs = Date.now()) {
     });
     if (r.status === 'closed') closedDone.push(s);
     else if (r.status === 'spine-corrupt') {
-      process.stderr.write('[maddu janitor] spine has malformed lines — auto-close skipped this round (run maddu verify)\n');
+      process.stderr.write('[maddu janitor] spine has malformed lines — auto-close skipped this round (run maddu spine verify)\n');
       break;
     }
   }
@@ -240,7 +240,7 @@ export async function reconcileStale(repoRoot, projections, nowMs = Date.now()) 
   try {
     const rep = await reapOrphanClaims(repoRoot, { firedAt, nowMs });
     if (rep.status === 'spine-corrupt') {
-      process.stderr.write('[maddu janitor] spine has malformed lines — orphan-claim pass skipped this round (run maddu verify)\n');
+      process.stderr.write('[maddu janitor] spine has malformed lines — orphan-claim pass skipped this round (run maddu spine verify)\n');
     } else if (rep.status === 'lock') {
       process.stderr.write('[maddu janitor] lane claims lock busy — orphan-claim pass skipped this round\n');
     } else {

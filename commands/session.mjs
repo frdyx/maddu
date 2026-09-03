@@ -128,7 +128,7 @@ async function doRegister(spine, sessionActive, repoRoot, { id, role, label, foc
     if (res.status === 'lock' || res.status === 'spine-corrupt') {
       console.error(res.status === 'lock'
         ? '(session lock busy — retry, or omit --id)'
-        : '(spine has malformed lines — explicit-id registration refused; run maddu verify)');
+        : '(spine has malformed lines — explicit-id registration refused; run maddu spine verify)');
       process.exit(1);
     }
     sessionId = res.sessionId; ev = res.event;
@@ -316,7 +316,7 @@ export default async function session(argv) {
         process.exit(1);
       }
       if (res.status === 'spine-corrupt') {
-        console.error('(spine has malformed lines — close refused; run maddu verify)');
+        console.error('(spine has malformed lines — close refused; run maddu spine verify)');
         process.exit(1);
       }
     } else {

@@ -32,7 +32,7 @@ const reply = (res, code, body) => { sendJson(res, code, body); return true; };
 function replyOwnershipError(res, r) {
   switch (r.status) {
     case 'lock': return reply(res, 503, { error: 'lane lock busy — retry' });
-    case 'spine-corrupt': return reply(res, 409, { error: 'spine has malformed lines — mutation refused; run maddu verify' });
+    case 'spine-corrupt': return reply(res, 409, { error: 'spine has malformed lines — mutation refused; run maddu spine verify' });
     case 'partial': return reply(res, 500, { error: 'append failed mid-transaction', partial: true, stage: r.stage });
     case 'unregistered': return reply(res, 409, { error: 'session not registered or not active — register before claiming' });
     case 'session-closed': return reply(res, 409, { error: 'session is closed — register a fresh session' });
@@ -69,7 +69,7 @@ export async function routeSessions({ req, res, path, repoRoot }) {
     if (r.status === 'exists') return reply(res, 409, { error: 'session id already exists — omit id to register a new session' });
     if (r.status === 'invalid-id') return reply(res, 400, { error: 'invalid session id (must match ses_[A-Za-z0-9_]{1,64}) — omit id to generate one' });
     if (r.status === 'lock') return reply(res, 503, { error: 'session lock busy — retry' });
-    if (r.status === 'spine-corrupt') return reply(res, 409, { error: 'spine has malformed lines — explicit-id registration refused; run maddu verify' });
+    if (r.status === 'spine-corrupt') return reply(res, 409, { error: 'spine has malformed lines — explicit-id registration refused; run maddu spine verify' });
     return reply(res, 200, { ok: true, sessionId: r.sessionId, event: r.event });
   }
   if (path === '/bridge/sessions/heartbeat' && req.method === 'POST') {

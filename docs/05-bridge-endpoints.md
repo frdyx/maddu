@@ -92,7 +92,7 @@ instead of fishing fields out of `/bridge/status`.
 >   manufactured an immediately-orphaned claim). **Migration:** register the
 >   session (`POST /bridge/sessions/register`) before claiming.
 > - Shared failure surfacing: **503** lane lock busy · **409** spine malformed
->   (run `maddu verify`) · **500** `{partial:true, stage}` if an append failed
+>   (run `maddu spine verify`) · **500** `{partial:true, stage}` if an append failed
 >   after an earlier one landed (append-only — re-run to complete).
 
 ## Slice-stop

@@ -86,10 +86,10 @@ v1.111.0 serializes all of it:
   stale detection).
 - **Malformed spines refuse mutations.** Lifecycle writers gate on parse
   accounting: garbled/truncated lines → close/stale-mark refuse and the
-  janitor skips the round (with a note pointing at `maddu verify`);
+  janitor skips the round (with a note pointing at `maddu spine verify`);
   registration of *generated* ids still works. This targets ACCIDENTAL
   corruption only — a parseable adversarial edit passes parse accounting
-  and is the verification layer's domain (`maddu verify`'s hash chain,
+  and is the verification layer's domain (`maddu spine verify`'s hash chain,
   threat model §13), not the lifecycle helpers'.
 
 **Concurrent-session residual (documented, not fixed):** with two live
@@ -156,7 +156,7 @@ but still `400` a **present** malformed value.
 must both parse and name an *ever-registered* session (closed parents stay
 valid — the ever-registered set, not just live sessions); a dangling or
 malformed parent link is dropped rather than written as a reference that
-`maddu verify` would later FAIL.
+`maddu spine verify` would later FAIL.
 
 **Binding maps are prototype-safe.** The Claude→Máddu binding uses a
 null-prototype write copy and `Object.hasOwn` reads, so a grammar-valid but
