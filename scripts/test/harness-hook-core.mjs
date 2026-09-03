@@ -44,6 +44,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { hermeticEnv } from './_hermetic-env.mjs';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BIN = join(ROOT, 'bin', 'maddu.mjs');
 
@@ -71,7 +73,10 @@ function run(args, input, env = {}) {
   const r = spawnSync(process.execPath, [BIN, ...args], {
     cwd: FIXTURE, encoding: 'utf8',
     input: input === undefined ? undefined : (typeof input === 'string' ? input : JSON.stringify(input)),
-    env: { ...process.env, ...env },
+    // hermeticEnv scrubs host session identity (and the very seam vars this
+    // suite sets) before the overrides are applied, so a fixture can never
+    // inherit the developer's live session — or a stale MADDU_HOOK_TEST_THROW.
+    env: hermeticEnv(env),
   });
   exits.push({ args: args.join(' '), status: r.status });
   return { status: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
