@@ -44,7 +44,7 @@
 //     preempt-release resurrects an earlier claimant, so a forged prior could
 //     MATCH and pass (and a late-imported reorder could spuriously mismatch).
 //     The gate cannot prove the writer's local snapshot on a merged history, and
-//     forgery detection belongs to the integrity layer (`maddu verify`), not a
+//     forgery detection belongs to the integrity layer (`maddu spine verify`), not a
 //     discipline gate. Sync mode therefore relies ONLY on the import-stable
 //     prior-once-claimed check.
 //   - Backward compat: pre-PR-C triples carry NO forceGroup → only the
@@ -127,7 +127,7 @@ export default {
       // holder — so a forged prior could MATCH and pass, or a legitimate
       // late-imported reorder could spuriously mismatch. The gate cannot prove
       // the writer's local snapshot on a merged history, and forgery detection is
-      // the integrity layer's domain (the hash chain / `maddu verify`), not a
+      // the integrity layer's domain (the hash chain / `maddu spine verify`), not a
       // discipline gate's. So in sync mode the strengthened holder check is
       // withheld entirely; only the import-stable prior-once-claimed check above
       // governs. (Was a sync "advisory warn" — dropped as unsound: it could be

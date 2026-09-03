@@ -19,7 +19,7 @@
 //                          corruption (truncated/garbled lines) — a parseable
 //                          adversarial edit passes parse accounting while
 //                          breaking the hash chain; chain integrity is the
-//                          verification layer's domain (`maddu verify`,
+//                          verification layer's domain (`maddu spine verify`,
 //                          threat-model §13), not these helpers'.
 //   parseErrors > 0      → REFUSE mutation ('spine-corrupt'): a duplicate
 //                          close corrupts the record further; fail toward the

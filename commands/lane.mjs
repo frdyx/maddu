@@ -56,7 +56,7 @@ function exitOwnershipFailure(r, lid, sid) {
       process.exit(3);
       break;
     case 'spine-corrupt':
-      console.error(`spine has malformed lines — lane "${lid}" mutation refused. Run \`maddu verify\`.`);
+      console.error(`spine has malformed lines — lane "${lid}" mutation refused. Run \`maddu spine verify\`.`);
       process.exit(1);
       break;
     case 'partial': {
@@ -559,7 +559,7 @@ export default async function lane(argv) {
         process.exit(3);
         break;
       case 'spine-corrupt':
-        console.error(`spine has malformed lines — release refused. Run \`maddu verify\`.`);
+        console.error(`spine has malformed lines — release refused. Run \`maddu spine verify\`.`);
         process.exit(1);
         break;
       case 'partial': {

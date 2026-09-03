@@ -29,7 +29,7 @@ export default {
     } catch (err) {
       return {
         ok: false,
-        message: `catalog.json is not valid JSON (${err.message}). Restore from a backup or rebuild via \`maddu init --rebuild-catalog\`.`,
+        message: `catalog.json is not valid JSON (${err.message}). Restore it from version control, or hand-edit it back to valid JSON.`,
         evidence: { path: catalogPath, parseError: err.message },
       };
     }
@@ -67,7 +67,7 @@ export default {
     }
     return {
       ok: false,
-      message: `catalog.json shape problems: ${problems.length}. Inspect or rebuild (\`maddu lanes reset\` if available, otherwise hand-edit).`,
+      message: `catalog.json shape problems: ${problems.length}. Hand-edit the listed entries, or restore the file from version control.`,
       evidence: { problems },
     };
   },

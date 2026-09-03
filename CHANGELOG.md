@@ -11,6 +11,54 @@ narrative summary.
 
 ---
 
+## [v1.129.0] · 2026-09-03 · a command Máddu tells you to run is a command Máddu has
+
+v1.128.0 closed the last of three releases in which the enforcement layer was
+wrong about itself, and named the shape they shared: the suites exercise what
+a component **decides** and never read the sentence it **prints**. `decide()`
+had 119 passing assertions and not one looked at its reason or remedy string.
+This closes the mechanical half of that gap, and the gap had things in it.
+
+**`maddu verify` is not a command.** There is no `commands/verify.mjs` and no
+`verify` in the dispatcher's `COMMANDS`, so it exits 2 with "unknown command".
+It was printed as the operator's remedy in **17 places** — `commands/lane.mjs`,
+`commands/session.mjs`, the janitor, the lane bridge routes,
+`session-lifecycle.mjs`, the `lane-force-discipline` gate, and two docs. Most
+of those fire on `spine has malformed lines`, so the remedy was a dead end at
+exactly the moment the operator most needed one. All 17 now say
+`maddu spine verify`, which exists.
+
+**Two more were invented outright** in the `lanes-catalog-parseable` gate:
+`maddu init --rebuild-catalog` (no such flag — and unknown flags have been a
+hard error since v1.122.0, so pasting it exits 2) and `maddu lanes reset` (no
+such verb, hedged with *"if available"* — an author telling you they were not
+sure either). Both now name the real recovery: version control, or hand-editing
+the file.
+
+**The guard.** `scripts/test/remedy-strings.mjs` parses every backtick-marked
+`maddu <verb> [--flags]` in the shipped source and checks it against the two
+artifacts that decide whether it would run — the `COMMANDS` constant and
+`_flag-allowlists.json`. Backticks are the discriminator: this codebase already
+marks commands that way, so unmarked English ("the maddu repo", "maddu is")
+stays out. That refinement alone cut false positives from 28 to 2.
+
+Six of its ten assertions are **anti-vacuity controls**, and two of them started
+life as false positives rather than as ideas: a flag inside a quoted argument
+(`--detect "claude --version"`) must not be read as a flag of its own, and a
+second command on the same line must not donate its flags to the first. The
+other four require a planted dead verb and dead flag to be caught, and a real
+command and plain prose to be left alone. Proven as a regression guard:
+stashing only the source fixes turns the sweep red (8 pass · 2 fail) with every
+control still green.
+
+**What it does not do.** It proves a remedy is *runnable*, never that it
+*works*. Whether a command actually clears the condition that printed it is the
+judgement half of the same task, and needs a fixture per gate — `maddu sources`
+is the proof that half is not hypothetical, since that gate named a remedy that
+had been dead for nineteen releases.
+
+---
+
 ## [v1.128.0] · 2026-09-03 · the gate stops misreporting its own state
 
 Two defects in the discipline gate, both found by being blocked by it while
