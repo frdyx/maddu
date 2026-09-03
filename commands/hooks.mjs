@@ -16,8 +16,8 @@
 // install/remove touch a HOST-repo file (.claude/settings.json) outside
 // .maddu/, so they run only on explicit invocation — never silently at init.
 
-import { join, basename } from 'node:path';
-import { mkdir, readFile, writeFile, rm, appendFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 
 import { parseFlags } from './_args.mjs';
 import { loadSpineLib, resolveRepoRoot, resolveWorkAndStateRoots, resolveParentId } from './_spine.mjs';
@@ -160,15 +160,47 @@ export default async function hooks(argv) {
     // throws here, ABOVE every arm's own containment. A `hooks fire` that exits
     // non-zero fails the user's tool call, so degrade the way each arm degrades
     // on a bootstrap failure instead: exit 0, and let SessionStart say why.
-    let core = null;
-    try { core = await hookCore(); } catch { core = null; }
-    if (!core) {
+    let core = null, loadErr = null;
+    try { core = await hookCore(); } catch (e) { loadErr = e; core = null; }
+    // `typeof core?.fire`, not `!core`: the factory's return shape is now a
+    // CROSS-FILE contract, and a module that loads but hands back the wrong
+    // object would otherwise throw a TypeError out of `hooks()` at the call
+    // below — a stack trace and exit 1, which is the one thing a hook may
+    // never do.
+    if (typeof core?.fire !== 'function') {
+      // Declare the append-free exit BEFORE taking it, exactly as every other
+      // arm in this file does. `hooks` is a MUTATING-tier verb and `fire`
+      // matches none of its readShapes (commands/_tiers.mjs), so every
+      // invocation arms a mutation witness; an exit 0 with zero spine appends
+      // and no declared no-op is a BREACH. bin/maddu.mjs's exit handler then
+      // spools it, prints MUTATION_UNWITNESSED, and rewrites the code to 1 —
+      // the exact non-zero exit this path exists to prevent — and the spooled
+      // row makes the NEXT mutating invocation run the drain, which exits 1
+      // before dispatch if it fails. Silence here is not a small omission.
+      try {
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-unavailable');
+      } catch { /* the excuse is best-effort — never why a hook fails */ }
       if (event === 'session-start') {
+        // Report what actually happened rather than asserting a cause. ONLY
+        // MADDU_LIB_NOT_FOUND means nothing resolved, and it is the only case
+        // `maddu upgrade` addresses — it also covers being invoked from a
+        // directory that is not the repo root, since _libroot keys the
+        // installed path on process.cwd(), which is why the remedy names the
+        // root. Every other reason lands here too: a module present but
+        // unreadable, or one that throws on import (a syntax error or a bad
+        // transitive import would disable all four hooks on EVERY install that
+        // shipped it). Telling that operator the file is missing sends them to
+        // an upgrade that faithfully recopies the broken file, so say the real
+        // reason and let them see it.
+        const absent = loadErr && loadErr.code === 'MADDU_LIB_NOT_FOUND';
+        const why = absent
+          ? 'no hook fire-core resolved from this directory — run `maddu upgrade` from the repo root'
+          : `the hook fire-core failed to load (${String((loadErr && loadErr.message) || 'unexpected module shape').split('\n')[0].slice(0, 140)})`;
         try {
           process.stdout.write(JSON.stringify({
             hookSpecificOutput: {
               hookEventName: 'SessionStart',
-              additionalContext: 'Máddu session discipline did not start — the installed runtime in this repo has no hook fire-core. Run `maddu upgrade`, and `maddu register` + `maddu slice-stop` by hand until it is fixed.',
+              additionalContext: `Máddu session discipline did not start — ${why}. Run \`maddu register\` and \`maddu slice-stop\` by hand until it is fixed.`,
             },
           }) + '\n');
         } catch { /* stdout gone — still exit 0 */ }
@@ -215,7 +247,15 @@ export default async function hooks(argv) {
     // Mutation-witness declared no-op: writes the HOST file
     // (.claude/settings.json) — no spine event exists for it (r2 F2: the
     // declaration is arm-local, never verb-wide).
-    await (await hookCore()).noop('host-file-write:claude-settings');
+    //
+    // Declared INLINE, the way every other command declares one, rather than
+    // through the fire core. This arm is not on the firing path, and routing it
+    // through `hookCore()` made `maddu hooks remove` — the documented fast
+    // off-switch for the discipline hook — throw MADDU_LIB_NOT_FOUND before it
+    // did anything, on exactly the half-applied install where an operator most
+    // needs to switch enforcement off. `hookCore()` is now called from inside
+    // its containment and nowhere else.
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('host-file-write:claude-settings');
     const { flags } = parseFlags(rest);
     // `uninstall` is an alias for `remove` — it's the off-switch operators reach
     // for when the discipline hook needs to come out fast, so both names work.

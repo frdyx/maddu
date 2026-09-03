@@ -49,8 +49,16 @@ async function resolveLibFile(file) {
   throw err;
 }
 
-// Import a single runtime-lib module by basename (with or without the
-// `.mjs` suffix). Returns the module namespace.
+// Import a single runtime-lib module by name (with or without the `.mjs`
+// suffix). Returns the module namespace.
+//
+// The name is a basename, or a forward-slash path RELATIVE to the lib root —
+// `harness/fire-core.mjs` resolves in both layouts, because `resolveLibFile`
+// joins it onto whichever lib directory won and `join` normalizes the
+// separator on Windows. This said "by basename" until `commands/hooks.mjs`
+// became the first caller to pass a subpath (v1.130.0); the wording was
+// describing the callers, not a restriction this function enforces. It still
+// enforces none: the name is trusted, and every caller passes a literal.
 export async function loadLib(name) {
   const file = name.endsWith('.mjs') ? name : `${name}.mjs`;
   return import(pathToFileURL(await resolveLibFile(file)).href);
