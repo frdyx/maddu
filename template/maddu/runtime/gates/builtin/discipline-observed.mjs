@@ -43,6 +43,39 @@ export default {
       hookWired = groups.some((g) => (g.hooks || []).some((h) => /maddu\.mjs.*hooks fire pre-tool-use|hooks fire pre-tool-use/.test(String(h.command || ''))));
     } catch { /* fail-safe: treat as unknown */ }
 
+    // …and does that wiring actually LOAD? Until the hook-firing core moved to
+    // runtime/lib/harness/fire-core.mjs, a missing settings entry was the ONLY
+    // route to "configured but silently does nothing", so testing for it was a
+    // complete implementation of this gate's contract. The move opened a second
+    // route: an install whose settings are perfectly wired but whose core is
+    // absent, unreadable or unparseable fires a hook that contains its own
+    // failure, exits 0, and emits no decision at all. Enforcement is off and
+    // every readout still says "wired".
+    //
+    // install-integrity catches the file MISSING after a completed upgrade
+    // (critical), but only WARNS when it is present and corrupt — a broken
+    // module cannot be told apart from a deliberate local edit — and it cannot
+    // report a path its manifest never recorded, which is the state a crashed
+    // upgrade leaves behind. So the honest test is the direct one: import it.
+    // Importing is side-effect-free (the module only exports a factory) and
+    // fires no hook.
+    // The export is checked, not just the import: commands/hooks.mjs degrades
+    // on `typeof core?.fire !== 'function'`, so a module that loads but does
+    // not produce a usable core is just as dead as one that will not parse. A
+    // file truncated inside its own header comment block, for instance, is
+    // perfectly valid JavaScript that exports nothing.
+    let coreLoads = false, coreWhy = null;
+    try {
+      const mod = await import(lib('harness/fire-core.mjs'));
+      coreLoads = typeof mod.createHookFireCore === 'function';
+      if (!coreLoads) coreWhy = 'loaded but exports no createHookFireCore';
+    } catch (e) {
+      // Name the reason. "Not installed" sends the operator to `maddu upgrade`;
+      // a parse or resolution failure means the module is BROKEN rather than
+      // missing, and an upgrade would faithfully recopy it.
+      coreWhy = e && e.code === 'ERR_MODULE_NOT_FOUND' ? 'not installed' : String((e && (e.code || e.name)) || 'load failed');
+    }
+
     // Gather current ritual state (best-effort; fail-open to a healthy read).
     let sid = null;
     try {
@@ -67,6 +100,9 @@ export default {
 
     const problems = [];
     if (enforcing && !hookWired) problems.push(`enforcement is "${enforcement}" but the PreToolUse hook is NOT installed — run \`maddu hooks install\` (discipline currently does nothing)`);
+    // Wired-but-unloadable has the same OUTCOME as not wired — discipline does
+    // nothing — so it is reported with the same weight, and a different remedy.
+    if (enforcing && hookWired && !coreLoads) problems.push(`enforcement is "${enforcement}" and the PreToolUse hook IS installed, but its fire-core does not load (${coreWhy}) — discipline currently does nothing; run \`maddu upgrade\`, and if that does not fix it the module is broken rather than missing`);
 
     // audit P2 (C6c/F9): out-of-band config provenance. Replay the recorded
     // governance changes and reconcile STORED config (mode + the discipline-
