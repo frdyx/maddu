@@ -205,6 +205,49 @@ function claimName(base) {
   return `${base}.draining.${Date.now()}-${hostname().replace(/-/g, '_').slice(0, 32)}-${process.pid}-${randomBytes(4).toString('hex')}`;
 }
 
+// ── Idempotency layer 0: the in-process reservation ─────────────────────────
+// The rename claim serialises drainers ACROSS processes and is atomic. It does
+// NOT make two drainers INSIDE one process safe, and that was not theoretical:
+// under CPU starvation, 22 of 300 runs of the two-interleaved-drainers scenario
+// appended the same breach twice — the same row credited by drainer A and
+// drainer B, with both reporting success. In an append-only ledger a breach
+// recorded twice is a false count of how often the framework caught itself
+// unwitnessed, which is exactly the number this spool exists to make truthful.
+//
+// Why the two existing layers do not close it. Both are checks that sit BEFORE
+// an `await`, so they are time-of-check/time-of-use: A can test `hasBreachId`,
+// find nothing, and suspend at the append; B then tests the same id, also finds
+// nothing (A has not written yet), and appends too. A check cannot fix a race
+// that a check opened. What closes it is a RESERVATION taken synchronously —
+// between the test and the reservation there is no suspension point, so exactly
+// one drainer can ever pass.
+//
+// Bounded because a long-lived process (the bridge) drains repeatedly. Ids are
+// unique per breach and a drained row never returns, so forgetting an old id can
+// never cause a false skip — only the reappearance of a genuine duplicate, which
+// the cross-process layers already handle.
+const DRAIN_MEMO_MAX = 512;
+const reservedBreachIds = new Set();
+// Returns true if THIS call took the reservation, false if someone already holds
+// it. Synchronous and total — the caller must not await between asking and
+// acting on the answer.
+function reserveBreachId(id) {
+  if (reservedBreachIds.has(id)) return false;
+  reservedBreachIds.add(id);
+  if (reservedBreachIds.size > DRAIN_MEMO_MAX) {
+    // Set iterates in insertion order, so this drops the oldest entries.
+    const it = reservedBreachIds.values();
+    for (let i = reservedBreachIds.size - DRAIN_MEMO_MAX; i > 0; i--) {
+      reservedBreachIds.delete(it.next().value);
+    }
+  }
+  return true;
+}
+// Released only when the append FAILED — the row is restored to the spool and
+// must remain drainable. A successful append keeps its reservation forever (or
+// until the bound evicts it), which is the whole point.
+function releaseBreachId(id) { reservedBreachIds.delete(id); }
+
 // Reclaim stale claims (rename back to the bare spool name) so a crashed
 // drainer never strands a breach. Sync + fail-open per file.
 export function reclaimStaleClaimsSync(stateRoot, { now = Date.now() } = {}) {
@@ -288,11 +331,25 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
       failed++; errors.push({ name, error: 'unparseable spool row' });
       continue;
     }
+    // Taken OUTSIDE the try so the catch can tell whether this drainer actually
+    // holds the reservation. Releasing one we never took would hand another
+    // drainer's in-flight id back to the pool mid-append — the very double-drain
+    // this closes, reintroduced by its own error path.
+    const reserved = reserveBreachId(row.breachId);
     try {
-      // Idempotency layer 1: skip an already-drained breachId (a prior run
-      // crashed between append and unlink) — clean up, count as drained.
-      let alreadyOnSpine = false;
-      if (typeof hasBreachId === 'function') {
+      // Idempotency layer 0: take the in-process reservation FIRST, and take it
+      // synchronously. Every other check here is separated from the append by an
+      // await, so it can only observe a state that another drainer in this
+      // process may already have left behind. This one cannot be raced: if the
+      // reservation is refused, another drainer in this process has this exact
+      // breachId in flight or already on the spine, and the correct action is
+      // the same as for layer 1 — consume the row without appending it again.
+      let alreadyOnSpine = !reserved;
+      // Layer 1 covers the case layer 0 cannot see: a PREVIOUS process that
+      // crashed between append and unlink. Only consulted when we hold the
+      // reservation, and released again if it says the row is already recorded,
+      // so a later legitimate drain of a genuinely different row is unaffected.
+      if (!alreadyOnSpine && typeof hasBreachId === 'function') {
         try { alreadyOnSpine = await hasBreachId(row.breachId); } catch {}
       }
       if (!alreadyOnSpine) {
@@ -317,6 +374,11 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
       try { await unlink(join(dir, drainedName)); } catch {}
       drained++;
     } catch (err) {
+      // The append failed, so this row is going back on the spool and MUST stay
+      // drainable — hold the reservation and the next drain would skip it
+      // forever, turning a transient append failure into a permanently lost
+      // breach. Releasing is safe precisely because nothing was recorded.
+      if (reserved) releaseBreachId(row.breachId);
       try { await rename(join(dir, claimed), join(dir, name)); } catch {}
       failed++; errors.push({ name, error: err?.message || String(err), code: err?.code ?? null });
     }

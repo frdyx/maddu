@@ -62,9 +62,9 @@ async function readUpgradeMarker(repoRoot) {
   try {
     const m = JSON.parse(raw);
     if (m && Array.isArray(m.paths)) return m;
-    return { malformed: true, why: 'present but not a marker (no paths array)', paths: [] };
+    return { malformed: true, why: 'not a marker (no paths array)', paths: [] };
   } catch {
-    return { malformed: true, why: 'present but not valid JSON — probably truncated mid-write', paths: [] };
+    return { malformed: true, why: 'not valid JSON — probably truncated mid-write', paths: [] };
   }
 }
 
