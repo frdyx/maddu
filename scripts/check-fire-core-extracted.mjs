@@ -82,6 +82,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -137,15 +138,37 @@ function copyTree(src, dst) {
   }
 }
 
-// Claim 4's experiment: the same tree, minus the extracted module, judged by the
-// same lock. Returns `{ ran: false, why }` when the experiment itself could not
-// be set up — never a verdict it did not earn.
+// Claim 4's experiment: the same tree with the extracted module NEUTERED, judged
+// by the same lock. Returns `{ ran: false, why }` when the experiment itself
+// could not be set up — never a verdict it did not earn.
+//
+// CONTENT ablation, not PRESENCE ablation, and the difference is the whole
+// claim. Deleting lib/harness/ only asks "does anything break when this file
+// disappears" — which a sentinel answers just as loudly as a real core. Keep a
+// tree whose hooks.mjs still holds the entire firing machinery inline, add an
+// unused `harness/sentinel.mjs`, and load it for no reason: claims 1-3 pass,
+// deletion breaks the load, the lock goes red, and the checker reports an
+// extraction that never happened. Replacing each module with a VALID but inert
+// one instead asks the question the oracle actually means: does the locked
+// behavior depend on what these modules EXPORT? A sentinel exports nothing
+// anyone uses, so an inert stand-in changes nothing and the tree is correctly
+// refused; the real core's absent exports take the lock red.
+//
+// KNOWN LIMIT, stated rather than papered over: this measures COUPLING, and
+// coupling is forgeable. A tree whose hooks.mjs *calls* into the sentinel
+// (`sentinel.assertPresent()`) breaks under an inert stand-in too and reads DONE
+// again. Generating the stand-in from the real export names as no-ops pushes
+// that case out; a cheat comparing a VALUE survives even that. There is no fixed
+// point here — the unforgeable claim is that the dispatch is no longer IN
+// hooks.mjs, and deciding that needs a parser, not a checker. What this rules
+// out is the accident and the lazy fake, not a determined adversary.
 //
 // The lock here is NOT the injected one. A differential decided by a constant is
 // not a differential: an injected always-green runner would report the locked
-// behavior surviving the module's removal on every tree, and an injected
-// always-red one would report it broken on every tree. This run has to be real
-// or it proves nothing, so it calls defaultLockRunner directly.
+// behavior surviving on every tree, and an injected always-red one would report
+// it broken on every tree. This run has to be real or it proves nothing, so it
+// calls defaultLockRunner directly.
+const INERT_MODULE = 'export {};\n';
 export function defaultAblationRunner(root) {
   let sandbox = null;
   try {
@@ -156,10 +179,14 @@ export function defaultAblationRunner(root) {
       copyTree(src, join(sandbox, ...parts));
     }
     const target = join(sandbox, ...HARNESS);
-    rmSync(target, { recursive: true, force: true });
-    if (existsSync(target)) return { ran: false, why: 'lib/harness/ survived removal from the sandbox copy' };
+    if (!existsSync(target)) return { ran: false, why: 'lib/harness/ did not survive the sandbox copy' };
+    const neutered = readdirSync(target, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.mjs'))
+      .map((e) => e.name);
+    if (!neutered.length) return { ran: false, why: 'the sandbox copy of lib/harness/ holds no .mjs file to neuter' };
+    for (const name of neutered) writeFileSync(join(target, name), INERT_MODULE);
     const r = defaultLockRunner(sandbox);
-    return { ran: true, status: r.status, output: r.output };
+    return { ran: true, status: r.status, output: r.output, neutered };
   } catch (err) {
     return { ran: false, why: `the sandbox copy failed — ${err?.message || err}` };
   } finally {
@@ -252,11 +279,11 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
     const here = attemptedIn(lock.output);
     const there = attemptedIn(ablated.output);
     if (!ablated.ran) {
-      reasons.push(`the removal experiment could not run, so delegation is unproven — ${ablated.why}`);
+      reasons.push(`the neutering experiment could not run, so delegation is unproven — ${ablated.why}`);
     } else if (ablated.status === 0) {
-      reasons.push('the behavior lock still passes with template/maddu/runtime/lib/harness/ removed — nothing the lock covers depends on the module, so the core was copied, not extracted');
+      reasons.push('the behavior lock still passes with every module under template/maddu/runtime/lib/harness/ replaced by an inert one — nothing the lock covers depends on what they export, so the core was copied or stubbed, not extracted');
     } else if (!here || there !== here) {
-      reasons.push(`the removal experiment is not attributable — the lock attempted ${here} assertion(s) in the repo but ${there} without lib/harness/, so its failure may be the copy rather than the missing module`);
+      reasons.push(`the neutering experiment is not attributable — the lock attempted ${here} assertion(s) in the repo but ${there} with lib/harness/ neutered, so its failure may be the copy rather than the inert modules`);
     }
   }
 

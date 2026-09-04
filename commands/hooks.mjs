@@ -207,7 +207,41 @@ export default async function hooks(argv) {
       }
       process.exit(0);
     }
-    return core.fire(event);
+    // THE CALL IS CONTAINED, not just the load. The guard above is shape-only —
+    // it proves `fire` is a function, not that calling it survives. A core that
+    // loads, constructs, and then throws (or returns a promise that rejects)
+    // escaped through here as an uncaught error: a stack trace on stderr and
+    // exit 1, which is precisely the non-zero exit this whole branch exists to
+    // prevent. `await` rather than `return` is load-bearing: `return core.fire()`
+    // hands the promise back to the caller and a rejection leaves by a different
+    // route than a synchronous throw, so only awaiting catches both.
+    //
+    // Every arm inside the core ends in process.exit, so reaching the catch at
+    // all means the core failed. Declare the no-op first — `hooks` is a
+    // mutating-tier verb, so exiting 0 with no spine append and no declared
+    // excuse is a mutation-witness breach that gets rewritten back to exit 1,
+    // which would defeat the containment while appearing to implement it.
+    try {
+      await core.fire(event);
+    } catch (err) {
+      try {
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-threw');
+      } catch { /* the excuse is best-effort — never why a hook fails */ }
+      if (event === 'session-start') {
+        try {
+          process.stdout.write(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'SessionStart',
+              additionalContext: `Máddu session discipline did not start — the hook fire-core failed while running (${String((err && err.message) || err).split('\n')[0].slice(0, 140)}). Run \`maddu doctor\`; run \`maddu register\` and \`maddu slice-stop\` by hand until it is fixed.`,
+            },
+          }) + '\n');
+        } catch { /* stdout gone — still exit 0 */ }
+      }
+      process.exit(0);
+    }
+    // Unreachable in practice: every arm exits. Belt and braces if one ever
+    // returns normally — a hook that falls out of its handler still exits 0.
+    process.exit(0);
   }
 
   // Shared bootstrap for the NON-fire subcommands (install/status/remove).

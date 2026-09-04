@@ -11,7 +11,7 @@
 //   .maddu/lanes/project/  .maddu/briefs/project/  .maddu/wiki/project/
 //   .maddu/harness/project/
 
-import { readdir, readFile, stat, writeFile, mkdir, copyFile, chmod } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile, mkdir, copyFile, chmod, rename, unlink } from 'node:fs/promises';
 import { join, dirname, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -84,9 +84,27 @@ export async function readJson(p) {
   return JSON.parse(await readFile(p, 'utf8'));
 }
 
+// ATOMIC. Write to a sibling temp file, then rename over the target — rename is
+// atomic on both NTFS and POSIX, so a reader sees either the whole old file or
+// the whole new one, never a prefix.
+//
+// An in-place writeFile truncates first, so a kill or a full disk mid-write left
+// TRUNCATED JSON. For maddu.json that was unrecoverable rather than merely
+// annoying: `maddu upgrade` and the install-integrity gate both parse it before
+// they consult the interrupted-upgrade marker, so the advertised recovery
+// command died on a SyntaxError and the gate reported the file "missing" while
+// it sat on disk. The state the marker exists to describe became unreachable
+// through the file that has to be read to reach it.
 export async function writeJson(p, obj) {
   await mkdir(dirname(p), { recursive: true });
-  await writeFile(p, JSON.stringify(obj, null, 2) + '\n');
+  const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await writeFile(tmp, JSON.stringify(obj, null, 2) + '\n');
+    await rename(tmp, p);
+  } catch (err) {
+    try { await unlink(tmp); } catch {}
+    throw err;
+  }
 }
 
 async function* walk(dir) {

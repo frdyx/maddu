@@ -15,9 +15,14 @@ async function sha256OfFile(p) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+// null = genuinely absent; THROWS = present but unparseable. The two need
+// different verdicts and different remedies, and collapsing them into null made
+// the gate report a truncated manifest as "missing".
 async function readMadduJson(repoRoot) {
-  try { return JSON.parse(await readFile(join(repoRoot, 'maddu.json'), 'utf8')); }
+  let raw;
+  try { raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8'); }
   catch { return null; }
+  return JSON.parse(raw);
 }
 
 // `maddu upgrade` writes this before it touches a file and deletes it once the
@@ -38,10 +43,15 @@ export default {
   severity: 'critical',
   description: 'Every framework-managed file present and hash-matched.',
   run: async (ctx) => {
-    const madduJson = await readMadduJson(ctx.repoRoot);
-    if (!madduJson) {
-      return { ok: false, message: `maddu.json missing at ${ctx.repoRoot}`, evidence: null };
-    }
+    // THE MARKER IS READ FIRST, before maddu.json is parsed. A crashed upgrade
+    // could leave the manifest truncated (the write is atomic now, but an older
+    // install can still carry one), and parsing first meant this gate answered
+    // "maddu.json missing" over a file sitting on disk — describing the symptom
+    // it happened to trip over rather than the interrupted upgrade that caused
+    // it, and sending the operator to `maddu init` instead of `maddu upgrade`.
+    // The marker is the more specific fact and it does not depend on the
+    // manifest being readable, so it is consulted first.
+    //
     // An upgrade records its intent before it touches a file and clears it only
     // once the manifest is written, so this marker standing means the apply loop
     // did not finish. That state is invisible to everything below: the manifest
@@ -63,6 +73,22 @@ export default {
         message: `an upgrade to v${u.version} did not finish (started ${u.at}) — this install is half-applied; re-run \`maddu upgrade\` to complete it (no --force needed; --force would also overwrite local edits)`,
         evidence: { upgrade_in_progress: u },
       };
+    }
+    // No marker: now the manifest has to be readable, and "unreadable" is a
+    // distinct verdict from "absent" — saying missing about a file that exists
+    // sends the operator to the wrong remedy.
+    let madduJson = null, readErr = null;
+    try { madduJson = await readMadduJson(ctx.repoRoot); }
+    catch (err) { readErr = err; }
+    if (readErr) {
+      return {
+        ok: false,
+        message: `maddu.json is present but not valid JSON — ${String((readErr && readErr.message) || readErr).split('\n')[0]}`,
+        evidence: { repoRoot: ctx.repoRoot, unreadable: 'maddu.json' },
+      };
+    }
+    if (!madduJson) {
+      return { ok: false, message: `maddu.json missing at ${ctx.repoRoot}`, evidence: null };
     }
     const managed = madduJson.managed || {};
     const missing = [], modified = [];

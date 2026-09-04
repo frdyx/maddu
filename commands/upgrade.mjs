@@ -44,18 +44,24 @@ import {
 // indistinguishable from an operator's own edit — so the re-run would strand
 // its own work as "locally modified", leaving a permanent warning and an
 // install that demands --force forever, which would then also overwrite the
-// operator's real edits. Being in this set is the evidence that a mismatched
-// file is the framework's, not the operator's.
+// operator's real edits.
 //
-// STATED RESIDUAL: `paths` is the PLANNED set, not the APPLIED set — nothing
-// records which of them actually landed before the interruption, and recording
-// that would mean rewriting this file once per copied file. So an operator who
-// edits a framework file in the window BETWEEN a crashed upgrade and its
-// recovery loses that edit, if the file was in the plan. That is the intended
-// trade — a file the previous run was mid-way through writing held no content
-// the operator could rely on — but it is a real narrowing of the local-edit
-// protection inside one narrow window, and it is not what "planned" suggests
-// on a first reading, which is why it is written down here.
+// WHAT MEMBERSHIP DOES AND DOES NOT PROVE. Being in this set does NOT prove a
+// mismatched file is the framework's rather than the operator's — `paths` is
+// the PLANNED set, a superset of what was actually written, and a crash leaves
+// no record of where it stopped. A `--force` plan is every managed file, so a
+// crash at file 30 of 497 leaves 467 planned paths the run never went near.
+//
+// What narrows the exposure is the branch ORDER below, not this set: a planned
+// file whose hash still matches the manifest is handled as pristine and never
+// reaches the in-flight arm, so only a file that ALREADY drifted is
+// force-completed. That leaves one real loss — a framework file the operator
+// edits between the crash and the recovery — and the run announces each one
+// (`completing interrupted write of <path>`) rather than taking it silently.
+//
+// That is the trade: an announced loss inside one window, against stranding the
+// framework's own half-written file as a permanent "locally modified" and
+// forcing the operator into `--force`, which would take their real edits too.
 function markerPath(repoRoot) {
   return join(repoRoot, '.maddu', 'state', 'upgrade-in-progress.json');
 }
@@ -82,12 +88,19 @@ async function clearUpgradeMarker(repoRoot) {
 // equality alone was never sufficient evidence for saying this.
 //
 // INVARIANT, and the line to defend in review: this must stay downstream of the
-// enumeration. Clearing the marker here is sound because arriving here PROVES
-// the install is complete — nothing unlisted, nothing missing — which are the
-// only two states a half-applied install can be in. Re-introduce a
-// version-equality fast path in front of it (the exact instinct that caused the
-// defect this function exists for) and the clear silently degrades from proof
-// to inference, making the marker self-erasing garbage.
+// enumeration AND downstream of the marker read. Clearing the marker here is
+// only sound while arriving here proves the install is complete. The first
+// version of this cleared it after checking two of the three states a
+// half-applied install can be in — nothing unlisted, nothing missing — and
+// missed the third: files PRESENT BUT CORRUPT, which is what a killed
+// `--force` repair leaves behind. Every path existed, so the retry cleared the
+// marker, printed "Nothing to do", and left the corruption; if the corrupt file
+// was the hook core, enforcement was dead and the only evidence was gone.
+//
+// So a standing marker now short-circuits this function entirely (see the
+// caller). Re-introduce any fast path in front of the enumeration, or let a
+// marker reach this point, and the clear degrades from proof to inference and
+// the marker becomes self-erasing garbage.
 async function alreadyCurrent(repoRoot, madduJson, toVersion) {
   await clearUpgradeMarker(repoRoot);
   // Mutation-witness declared no-op: already-current is a success that
@@ -135,7 +148,28 @@ export default async function upgrade(argv) {
     console.error('maddu upgrade: no .maddu/ found. Run `maddu init` first.');
     process.exit(1);
   }
-  const madduJson = await readMadduJson(repoRoot);
+  // A malformed maddu.json is a DIFFERENT state from an absent one, and it used
+  // to be indistinguishable: readMadduJson throws on a parse failure, so the
+  // command died on a raw SyntaxError stack. That mattered because a truncated
+  // manifest is exactly what a crashed upgrade could leave (the write is atomic
+  // now, but an older install can still carry one), and this command is the
+  // advertised recovery — dying here made the interrupted-upgrade marker
+  // unreachable through the very file you must read to reach it. Say which file,
+  // say the marker is standing, and name a remedy that works.
+  let madduJson = null;
+  try {
+    madduJson = await readMadduJson(repoRoot);
+  } catch (err) {
+    const p = join(repoRoot, 'maddu.json');
+    console.error(`maddu upgrade: ${p} is present but not valid JSON — ${String((err && err.message) || err).split('\n')[0]}`);
+    const stranded = await readUpgradeMarker(repoRoot);
+    if (stranded) {
+      console.error(`  An upgrade to v${stranded.version} began ${stranded.at} and did not finish, so this file was probably truncated mid-write.`);
+      console.error(`  ${stranded.paths.length} file(s) were in its plan.`);
+    }
+    console.error(`  Restore it from version control, or re-run \`maddu init\` in this repo to regenerate it.`);
+    process.exit(1);
+  }
   if (!madduJson) {
     console.error(`maddu upgrade: ${repoRoot}/maddu.json missing. Run \`maddu init\` first.`);
     process.exit(1);
@@ -156,35 +190,55 @@ export default async function upgrade(argv) {
   const nextRelPaths = new Set(nextFiles.map((f) => f.relPath));
   const prevRelPaths = new Set(Object.keys(madduJson.managed || {}));
 
-  const sameVersion = fromVersion === toVersion && !force;
-  if (sameVersion) {
-    // Repairable = a shipped file the manifest never listed, or a managed file
-    // that is gone from disk. Anything else on an equal version is either
-    // identical (no work) or a local edit (deliberately left alone).
-    const neverInstalled = nextFiles.filter((f) => !prevRelPaths.has(f.relPath));
-    const absent = [];
-    for (const relPath of prevRelPaths) {
-      if (!(await exists(join(repoRoot, relPath)))) absent.push(relPath);
-    }
-    if (neverInstalled.length || absent.length) {
-      console.log(`Framework is already v${toVersion}, but this install is incomplete:`);
-      if (neverInstalled.length) console.log(`  never installed : ${neverInstalled.length}`);
-      if (absent.length) console.log(`  missing on disk : ${absent.length}`);
-      console.log(`Repairing (local edits are left alone; pass --force to overwrite those too).`);
-      // Fall through to the normal plan+apply.
-    } else {
-      return alreadyCurrent(repoRoot, madduJson, toVersion);
-    }
-  }
-
-  // A marker still standing means a previous apply was interrupted; its path
-  // set tells this run which hash mismatches are that run's unfinished work
-  // rather than the operator's edits.
+  // READ BEFORE THE VERSION DECISION. A marker still standing means a previous
+  // apply was interrupted; its path set tells this run which hash mismatches are
+  // that run's unfinished work rather than the operator's edits. It is read here
+  // rather than after the same-version branch because a killed `--force` repair
+  // leaves every path PRESENT BUT CORRUPT — nothing unlisted, nothing missing —
+  // so the "nothing to do" branch below would have cleared the marker and walked
+  // away from the corruption. The marker is the only evidence that state exists;
+  // deleting it while it is still true was the whole defect.
   const inFlight = await readUpgradeMarker(repoRoot);
   const inFlightPaths = new Set(inFlight ? inFlight.paths : []);
   if (inFlight) {
     console.log(`Recovering: an upgrade to v${inFlight.version} began ${inFlight.at} and did not finish.`);
     console.log(`  ${inFlightPaths.size} file(s) were in its plan; completing them without disturbing local edits.`);
+  }
+
+  // A standing marker SHORT-CIRCUITS the nothing-to-do exit: an interrupted
+  // apply is by definition something to do, and its damage may be invisible to
+  // the probe below (a corrupt file is present and listed).
+  // Two DIFFERENT questions, deliberately separate variables. `versionUnchanged`
+  // asks whether this run moves the framework version — it decides whether
+  // anything can honestly be called "stranded BY this upgrade". `sameVersion`
+  // asks whether this run may take the nothing-to-do exit, which additionally
+  // requires that no interrupted apply is outstanding. Collapsing them made a
+  // same-version RECOVERY brand the operator's untouched local edits as a
+  // partial upgrade, which is the permanent-alarm defect all over again.
+  const versionUnchanged = fromVersion === toVersion;
+  const sameVersion = versionUnchanged && !force && !inFlight;
+  if (sameVersion) {
+    // Repairable = a shipped file the manifest never listed, a managed file gone
+    // from disk, or a manifest entry for a file the framework no longer ships.
+    // The third is not cosmetic: the removal loop lives below this branch, so
+    // an obsolete entry was previously unreachable on the same-version path and
+    // `install-integrity` failed on it forever.
+    const neverInstalled = nextFiles.filter((f) => !prevRelPaths.has(f.relPath));
+    const absent = [];
+    for (const relPath of prevRelPaths) {
+      if (!(await exists(join(repoRoot, relPath)))) absent.push(relPath);
+    }
+    const obsolete = [...prevRelPaths].filter((p) => !nextRelPaths.has(p));
+    if (neverInstalled.length || absent.length || obsolete.length) {
+      console.log(`Framework is already v${toVersion}, but this install is incomplete:`);
+      if (neverInstalled.length) console.log(`  never installed : ${neverInstalled.length}`);
+      if (absent.length) console.log(`  missing on disk : ${absent.length}`);
+      if (obsolete.length) console.log(`  no longer shipped but still listed : ${obsolete.length}`);
+      console.log(`Repairing (local edits are left alone; pass --force to overwrite those too).`);
+      // Fall through to the normal plan+apply.
+    } else {
+      return alreadyCurrent(repoRoot, madduJson, toVersion);
+    }
   }
 
   const actions = { update: [], skip: [], add: [], remove: [], warnings: [] };
@@ -228,7 +282,17 @@ export default async function upgrade(argv) {
     if (nextRelPaths.has(relPath)) continue;
     const recorded = madduJson.managed[relPath].sha256;
     const onDisk = join(repoRoot, relPath);
-    if (!(await exists(onDisk))) continue;
+    if (!(await exists(onDisk))) {
+      // Already gone from disk — but still LISTED. This is what a crashed
+      // upgrade leaves behind: it unlinked the obsolete file and died before
+      // rewriting the manifest. `continue` here left the entry in `newManaged`
+      // forever, because that object starts as the stale manifest — so every
+      // later run skipped the file again and `install-integrity` reported it
+      // missing permanently, including after `--force`. Recording the removal
+      // drops the entry; the unlink below is already tolerant of an absent file.
+      actions.remove.push({ relPath, reason: 'already gone from disk; dropping the stale manifest entry' });
+      continue;
+    }
     let currentHash = null;
     try { currentHash = await sha256OfFile(onDisk); } catch {}
     if (currentHash === recorded || force) {
@@ -307,8 +371,13 @@ export default async function upgrade(argv) {
     upgraded_at: new Date().toISOString(),
     managed: newManaged
   };
-  if (sameVersion) {
-    // same-version repair — carry any prior record through untouched
+  if (versionUnchanged && !force) {
+    // A same-version repair or recovery — carry any prior record through
+    // untouched. NOT on --force: that is the documented remedy for a stranded
+    // set ("Resolve with: maddu upgrade --force"), it overwrites the local edits
+    // that were stranded, and so it must be allowed to clear the record. Leaving
+    // `force` out of this condition made the remedy unable to settle the install
+    // it exists to settle, so every later run kept exiting 1.
   } else if (strandedPaths.length) {
     next.partial_upgrade = { version: toVersion, at: new Date().toISOString(), paths: strandedPaths };
   } else {
@@ -451,9 +520,12 @@ export default async function upgrade(argv) {
     });
   }
 
-  if (sameVersion) {
-    // A repair, not a version move. Local edits were left alone as always, but
-    // nothing was stranded BY this run, so it is not a partial upgrade.
+  if (versionUnchanged && !force) {
+    // A repair or a recovery, not a version move. Local edits were left alone as
+    // always, but nothing was stranded BY this run, so it is not a partial
+    // upgrade and must not be reported as one. A --force run at the same version
+    // is excluded for the same reason as the manifest branch above: it is the
+    // remedy, it resolves the stranded set, and it reports as an upgrade.
     console.log(`\nRepaired install at v${toVersion}. (event ${ev.id})`);
     if (strandedPaths.length) {
       console.log(`  ${strandedPaths.length} locally-modified file(s) left untouched, as before.`);

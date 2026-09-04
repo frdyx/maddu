@@ -28,6 +28,31 @@
 // no file path from inside hooks.mjs appears below — so the extraction is free
 // to move any of it, and this suite still means the same thing afterwards.
 //
+// WHY THE INJECTED FAULT CASES ARE NOT HERE — see scripts/test/hook-fire-containment.mjs
+// That suite fires the same events against a DELIBERATELY BROKEN core (one whose
+// factory returns a `fire` that throws, or that rejects) to prove the CLI
+// contains it. Those cases cannot live in this file, for two reasons.
+//
+// First, this suite's exit code is BORROWED: it is claim 3 of
+// scripts/check-fire-core-extracted.mjs, which is in turn a success condition of
+// the Track A goal. Anything red added here does not read as "a containment case
+// is failing" — it reads as "the PR2 fire-core extraction was never done", about
+// work that is shipped and correct. A suite whose verdict is reused as evidence
+// that some OTHER work happened is frozen to present-tense claims until the
+// borrowing stops. That is not special to behavior locks: five of the six Track A
+// success conditions are suite exit codes, so the same freeze applies to
+// harness-capabilities.mjs and harness-doctor.mjs, and will apply to the adapter
+// suites the moment they are written.
+//
+// Second, this suite is deliberately MODULE-BLIND — the property quoted above,
+// and the property that qualifies it as claim 3 at all. Fault injection is
+// module-aware by construction: it must name the path it replaces. Putting a
+// module-aware suite inside a module-blind lock destroys the thing that makes
+// the lock usable as a goal term.
+//
+// What lives here is the CLAIM ("every `hooks fire` exits 0, always") tested on a
+// healthy install. What lives there is the INJECTION.
+//
 // ANTI-VACUITY, FIRST
 // A silence-based assertion is worthless if the harness cannot tell silence
 // from an answer, and a containment assertion is worthless if the seam it
