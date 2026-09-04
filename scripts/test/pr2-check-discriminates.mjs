@@ -121,8 +121,31 @@ async function main() {
       cwd: ROOT, encoding: 'utf8', env: hermeticEnv(),
     });
     const said = `${spawned.stdout || ''}${spawned.stderr || ''}`;
+    // This assertion used to pin the verdict (`status === 1 && 'NOT DONE'`),
+    // which made the suite passable ONLY while PR2 was unstarted — and unlike
+    // check-fire-core-extracted.mjs, kept out of scripts/test/ for exactly that
+    // reason, this file IS swept by the self-test runner, so the moment the
+    // work it judges succeeded, CI went red.
+    //
+    // What replaces it must not swing the other way. Relating the exit code
+    // only to the CLI's own printed string is satisfiable in both tree states
+    // but accepts a CLI that reports `done (0 module(s) in lib/harness/)` on a
+    // tree where that directory does not exist — the silent-false-green family
+    // this section exists to prevent, in its louder form. So the verdict is
+    // anchored to the TRUTH as well: the CLI must print exactly one
+    // recognizable answer, that answer must match what evaluate() sees, and the
+    // exit code must agree with both.
+    //
+    // Not circular: the fourteen asserts above already pin evaluate() against
+    // synthetic trees, so what is under test here is only the CLI wiring —
+    // direct-invocation guard, root resolution, branch, exit codes.
+    const truth = evaluate(ROOT);
+    const saidDone = /PR2 fire-core extraction: done\b/.test(said);
+    const saidNotDone = said.includes('PR2 fire-core extraction: NOT DONE');
     ok('invoked as the goal invokes it, the CLI runs and reports',
-      spawned.status === 1 && said.includes('NOT DONE'),
+      saidDone !== saidNotDone
+        && saidDone === truth.ok
+        && spawned.status === (truth.ok ? 0 : 1),
       `exit ${spawned.status} / ${said.split('\n')[0]}`);
     ok('a silent exit 0 is not how it answers', said.trim().length > 0);
   } finally {

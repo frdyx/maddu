@@ -11,6 +11,67 @@ narrative summary.
 
 ---
 
+## [v1.130.0] · 2026-09-03 · one owner for the code that fires a hook
+
+Track A PR2. Every harness adapter still to come — Codex, Hermes, OpenHands —
+needs the same machinery Claude Code's hooks already use, and it was 863 lines
+inline in `commands/hooks.mjs`. Each adapter would have had to copy it. It now
+lives in `template/maddu/runtime/lib/harness/fire-core.mjs`, where there is one
+owner, and `commands/hooks.mjs` drops from 1258 lines to 434.
+
+The move is contract-neutral and was proven so rather than asserted: every one
+of the 863 lines is identical modulo indentation, with exactly one line dropped
+— a commands-relative `_libroot` import that no runtime lib may carry, replaced
+by an injected resolver. The core takes its dependencies instead of importing
+them, because `.maddu/config/architecture.json` declares
+`{ from: "runtime-libs", allow: [] }` and the two directories are siblings in a
+consumer install but not in the framework source checkout. That asymmetry is
+the defect that left `maddu sources` dead in every install from v1.106.0 to
+v1.125.0.
+
+**The interesting part is what the review found, and where.** An adversarial
+pass across five dimensions produced five defects, and every one of them was in
+the ~60 lines this release *wrote* rather than the 863 it *moved*:
+
+- **The containment exited 1.** `hooks` is a mutating-tier verb, so every
+  `hooks fire` arms a mutation witness, and an exit 0 with no spine append and
+  no declared no-op is a breach — which `bin/maddu.mjs` spools before rewriting
+  the exit code to 1. The branch existed *because* a non-zero exit fails the
+  user's tool call, and it produced exactly that. Root cause worth naming: the
+  no-op declaration had come to live inside the module whose absence triggers
+  the branch. **Extraction moves the failure domain, not only the code.**
+- **`maddu hooks remove` — the documented fast off-switch — threw** when the
+  core was absent, failing on precisely the half-applied install where an
+  operator most needs to switch enforcement off.
+- **Absent and broken were conflated.** A syntax error in the relocated module
+  would have disabled all four hooks on every install that shipped it, while
+  telling the operator the file was missing and prescribing an upgrade that
+  would faithfully recopy it.
+- **`discipline-observed` said `hook=wired` where enforcement was dead.** That
+  gate's own header says it exists because "a repo can configure strict
+  enforcement yet never install the hook, so discipline silently does nothing".
+  Moving the core opened a second route to that exact state, which a
+  settings-file regex cannot see. The gate now probes whether the wiring
+  *loads* — import plus the exported factory, no handler executed — and says
+  which of the two it is, because the remedies differ.
+- **The success-condition oracle was weakened while being repaired**, then
+  re-anchored to the truth rather than to the CLI's own printed string.
+
+**A version bump was a delivery requirement here, not ritual.**
+`commands/upgrade.mjs` short-circuits on version equality *before* it enumerates
+files, so shipping this on an unchanged version number would have left every
+existing install answering "Nothing to do" and never receiving the new module.
+
+**Honest residuals**, all measured rather than reasoned. `install-integrity`
+FAILS on a missing core after a completed install, but only WARNS when the core
+is present and corrupt — a broken module is indistinguishable from a deliberate
+local edit — and it cannot report a path its manifest never recorded, which is
+the state a crashed upgrade leaves behind. Both of those are the states
+reachable by `maddu upgrade` alone; the failing one is reachable only by hand.
+The crash window self-heals at the next upgrade, which reports `PARTIAL`
+honestly. And `upgrade.mjs` applies every update before every add, so the new
+module is the last file written — observed at position 355 of 355.
+
 ## [v1.129.0] · 2026-09-03 · a command Máddu tells you to run is a command Máddu has
 
 v1.128.0 closed the last of three releases in which the enforcement layer was
