@@ -71,10 +71,36 @@
 // No probe code goes through a shell; the CLI is spawned with an argv array and
 // stdin is fed as a string, so backslashes in fixture paths survive.
 //
+// ROUND 3 (the sections marked R3-*)
+// Four further escapes in the same seam, added by a suite author who is not the
+// implementer, and each reproduced on a real install before being written down:
+//   R3-B1  the floor rewrites a core's non-zero exit to 0 AFTER the witness has
+//          already declined to judge it (evaluateWitness breaches only at exit
+//          0), so the invocation reports success having recorded nothing, and
+//          the floor's own "see `maddu doctor`" points at no evidence.
+//   R3-B2  the mutation-breach drain exits 1 on an unreadable spool row BEFORE
+//          the witness context exists, so the floor cannot apply and one corrupt
+//          file fails the next tool call without the core being loaded at all.
+//   R3-B3  the deny-then-EXIT twin of M5d. The buffer that discards a refusal on
+//          a throw is flushed by an unconditional exit handler, so the crashed
+//          core's deny is emitted while the code is clamped to 0.
+//   R3-M1  the floor exists only when mutation-witness.mjs loads AND a tier
+//          context arms, i.e. never on the half-applied installs it exists for.
+//
+// HONESTY ABOUT WHAT DISCRIMINATES. Not every line below separates the fixed
+// tree from the broken one, and the ones that do not are labelled `control:`,
+// `fixture:` or `boundary:` rather than counted as coverage. Specifically: on
+// the pre-fix tree the throw/rejection paths already had empty parseable stdout
+// and already emitted no deny, so those M5 rows were green before and after —
+// they pin behaviour, they do not measure a fix. The rows that carry R3 are the
+// record assertions (R3-B1), the exit code under a corrupt spool row (R3-B2),
+// the verdict of the exit twin (R3-B3), and the exit code on a partial install
+// (R3-M1). Each has a control beside it proving its channel has both states.
+//
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { spawnSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -116,6 +142,31 @@ const CORES = {
   // the section below, which is where the interesting argument lives.
   fireExits: 'export function createHookFireCore() { return { fire() { process.exit(7); } }; }\n',
 
+  // The SAME silence, exiting 0 instead of 7. It is the anti-vacuity twin of
+  // fireExits: identical in everything the witness law cares about — mutating
+  // verb, zero appends, no declared excuse — and different only in the code the
+  // core chose. Today one of them is recorded as a breach and the other is not,
+  // which is the whole of R3-B1 in two lines of fixture.
+  fireExitsZero: 'export function createHookFireCore() { return { fire() { process.exit(0); } }; }\n',
+
+  // Decides, then ends the process — the exit-shaped twin of denyThenThrow. The
+  // buffer that discards the deny on a throw is flushed by an unconditional
+  // `process.on("exit")`, so this one gets released while the floor rewrites
+  // the code to 0: Claude Code reads exit 0 plus a refusal and blocks the edit.
+  denyThenExit: [
+    'const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse",',
+    '  permissionDecision: "deny", permissionDecisionReason: "fixture: a broken core denied" } });',
+    'export function createHookFireCore() {',
+    '  return {',
+    '    fire() {',
+    '      process.stdout.write(DENY);',
+    '      process.exit(7);',
+    '    },',
+    '  };',
+    '}',
+    '',
+  ].join('\n'),
+
   // The dangerous one: it DECIDES before it fails. A deny is already on stdout
   // when the throw happens, so containment arrives too late to prevent the
   // refusal — it can only choose what to do about the second document.
@@ -155,7 +206,54 @@ function verdictOf(stdout) {
 const hasStackTrace = (text) => /^\s+at\s+\S+/m.test(text || '');
 const firstFrame = (text) => ((text || '').split('\n').find((l) => /^\s+at\s/.test(l)) || '').trim().slice(0, 60);
 
+// ── the record channel ───────────────────────────────────────────────────────
+// What an install can still SHOW about an invocation after it has ended. Two
+// places carry it, and a fix may use either: the breach spool
+// (.maddu/state/mutation-breaches/, written synchronously at exit) or the spine
+// itself once a later run has drained that spool. Read both, so an assertion
+// about "was this recorded" never depends on which stage the evidence sits in.
+async function breachSpool(dir) {
+  try { return (await readdir(join(dir, '.maddu', 'state', 'mutation-breaches'))).sort(); }
+  catch { return []; }
+}
+async function spineLines(dir) {
+  const out = [];
+  let names = [];
+  try { names = await readdir(join(dir, '.maddu', 'events')); } catch { return out; }
+  for (const n of names) {
+    if (!n.endsWith('.ndjson')) continue;
+    try {
+      for (const line of (await readFile(join(dir, '.maddu', 'events', n), 'utf8')).split('\n')) {
+        if (line.trim()) out.push(line);
+      }
+    } catch {}
+  }
+  return out;
+}
+// Is there a durable, machine-readable record that this install had an
+// invocation which reported success while recording nothing? Spool row or spine
+// event — either is an honest answer, and neither names a mechanism.
+async function unwitnessedRecorded(dir) {
+  const spool = (await breachSpool(dir)).filter((n) => !n.endsWith('.drained'));
+  if (spool.length) return { yes: true, where: `spool ${spool.join(',')}` };
+  const hit = (await spineLines(dir)).filter((l) => l.includes('MUTATION_UNWITNESSED'));
+  if (hit.length) return { yes: true, where: `spine ${hit.length} event(s)` };
+  return { yes: false, where: 'nothing on either channel' };
+}
+
 let BASE = null, PRISTINE = null;
+
+// The installed CLI, any verb. `fire` below is the hook-shaped special case;
+// this is for the boundary that says a failed drain must still block a NON-hook
+// mutating verb — the behaviour a fix to that path must not delete.
+function run(installDir, args, input) {
+  const bin = join(installDir, 'maddu', 'bin', 'maddu.mjs');
+  const r = spawnSync(process.execPath, [bin, ...args], {
+    cwd: installDir, encoding: 'utf8', env: hermeticEnv(),
+    input: input === undefined ? undefined : JSON.stringify(input),
+  });
+  return { status: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
+}
 
 function fire(installDir, event, payload) {
   const bin = join(installDir, 'maddu', 'bin', 'maddu.mjs');
@@ -377,6 +475,174 @@ async function main() {
       // gap stays visible instead of becoming folklore.
       ok('M5d: a core that failed does not leave a refusal standing',
         verdictOf(r.out) !== 'deny', verdictOf(r.out));
+    }
+
+    // ══ ROUND 3 ═════════════════════════════════════════════════════════════
+    // Four measured escapes, each reproduced on a real install before it was
+    // written here, all in the same seam from different sides: the floor that
+    // stops `hooks fire` failing a tool call does more than it says (it converts
+    // a crash into a success the witness then declines to judge) and less (it
+    // does not exist at all on the installs it was built to tolerate).
+
+    // ── R3-B1: a crash the floor rewrites to 0 must still leave a record ────
+    // evaluateWitness takes `exitCode` and returns no breach unless it is 0.
+    // The floor then sets the code to 0 AFTER that verdict. So a core that ends
+    // the process itself exits successfully having appended nothing, declared
+    // nothing, and recorded nothing — and the floor's own stderr line sends the
+    // operator to `maddu doctor`, which has nothing to show them. The repo's
+    // rule since v1.129.0 is that a command Máddu names is a command Máddu has;
+    // a diagnostic Máddu names must likewise have something to diagnose.
+    //
+    // WHAT IS ASSERTED is durable evidence on either channel — the spool now, or
+    // the spine after a later drain. Not a call site, not an argument order. A
+    // fixer may judge the witness on the code the world sees, spool from the
+    // floor itself, or record it some third way.
+    {
+      console.log('\n  R3-B1 - a crash the floor rewrites to 0 must still leave a record');
+      // ANTI-VACUITY on the exact channel the claim uses, both directions.
+      // (a) it speaks: an identically silent core that exits 0 IS recorded
+      //     today. The two cores differ in nothing the witness law cares about
+      //     — mutating verb, zero appends, no declared excuse — only in the
+      //     number they passed to process.exit.
+      const zero = await installWith('fire-exits-zero', CORES.fireExitsZero);
+      const rz = fire(zero, 'pre-tool-use', payloads(zero)['pre-tool-use']);
+      const recZero = await unwitnessedRecorded(zero);
+      note(`exit(0) core: exit ${rz.status}, record: ${recZero.where}`);
+      ok('control: a silent core that exits 0 IS recorded as unwitnessed',
+        recZero.yes, recZero.where);
+      // (b) it is not stuck on: a healthy install records no breach, so "a
+      //     record exists" is a fact about the run and not about the channel.
+      const clean = await installWith('record-channel-clean', null);
+      fire(clean, 'pre-tool-use', payloads(clean)['pre-tool-use']);
+      const recClean = await unwitnessedRecorded(clean);
+      ok('control: a healthy install fires without recording a breach',
+        !recClean.yes, recClean.where);
+
+      for (const ev of ['pre-tool-use', 'session-start']) {
+        const dir = await installWith(`fire-exits-record-${ev}`, CORES.fireExits);
+        const before = (await spineLines(dir)).length;
+        const r = fire(dir, ev, payloads(dir)[ev]);
+        const after = (await spineLines(dir)).length;
+        const rec = await unwitnessedRecorded(dir);
+        note(`exit(7) core on ${ev}: exit ${r.status}, spine ${before} -> ${after}, record: ${rec.where}`);
+        ok(`R3-B1 fixture (${ev}): the run really did record nothing`,
+          after === before, `spine ${before} -> ${after}`);
+        ok(`R3-B1 (${ev}): the floor still keeps the tool call alive`,
+          r.status === 0, `exit ${r.status}`);
+        ok(`R3-B1 (${ev}): and the success it manufactured is recorded somewhere`,
+          rec.yes, rec.where);
+      }
+    }
+
+    // ── R3-B2: an unreadable breach row must not fail the tool call ─────────
+    // The drain runs BEFORE the witness context is armed, and exits 1 on a
+    // failed row for any mutating verb. `hooks fire` is a mutating verb, and at
+    // that point there is no ctx, so the exit handler returns early and the
+    // floor cannot apply. A single corrupt file under .maddu/state/
+    // mutation-breaches/ therefore fails the next tool call outright — the one
+    // outcome this whole path exists to prevent, reached without the hook core
+    // ever being loaded.
+    {
+      console.log('\n  R3-B2 - a corrupt spool row must not take the host down with it');
+      const dir = await installWith('drain-blocks-hook', null);
+      const p = payloads(dir);
+      ok('R3-B2 fixture: the install fires cleanly before the row is planted',
+        fire(dir, 'pre-tool-use', p['pre-tool-use']).status === 0);
+      const spoolDir = join(dir, '.maddu', 'state', 'mutation-breaches');
+      await mkdir(spoolDir, { recursive: true });
+      await writeFile(join(spoolDir, 'r3b2.json'), '{ this row is not json\n');
+      ok('R3-B2 fixture: the row is on disk and cannot be parsed',
+        (await breachSpool(dir)).includes('r3b2.json'));
+
+      // ONE SHOT, deliberately. The drain quarantines the row on its first
+      // attempt, so a second identical invocation passes for a reason that has
+      // nothing to do with any fix. Every assertion below reads this one run.
+      const r = fire(dir, 'pre-tool-use', p['pre-tool-use']);
+      note(`with a corrupt row present: exit ${r.status} / ${r.err.split('\n')[0]?.slice(0, 90) || ''}`);
+      ok('R3-B2: a hook fire over a corrupt spool row does not fail the tool call',
+        r.status === 0, `exit ${r.status}`);
+      ok('R3-B2: and does not print a stack trace at the operator',
+        !hasStackTrace(r.err) && !hasStackTrace(r.out), firstFrame(`${r.err}\n${r.out}`));
+      ok('R3-B2: stdout stays empty or parseable',
+        verdictOf(r.out) !== 'unparseable', r.out.slice(0, 50));
+      // The evidence must survive the fix. "Never fail the tool call" must not
+      // be bought by deleting the row nobody could read — it is the only trace
+      // of a breach, and the census gate exists to keep reporting it.
+      const kept = await breachSpool(dir);
+      ok('R3-B2 boundary: the unreadable row is retained, not quietly discarded',
+        kept.length > 0, kept.join(',') || '(spool empty)');
+
+      // ...and a failed drain must STILL block a mutating non-hook verb. That
+      // is the designed behaviour ("spool retained; resolve before mutating"),
+      // and a fix that simply stops blocking would satisfy everything above
+      // while deleting it.
+      const ctl = await installWith('drain-blocks-mutating', null);
+      const ctlSpool = join(ctl, '.maddu', 'state', 'mutation-breaches');
+      await mkdir(ctlSpool, { recursive: true });
+      await writeFile(join(ctlSpool, 'r3b2.json'), '{ this row is not json\n');
+      const reg = run(ctl, ['register']);
+      note(`register over a corrupt row: exit ${reg.status} / ${reg.err.split('\n')[0]?.slice(0, 90) || ''}`);
+      ok('R3-B2 boundary: a corrupt row still blocks a mutating non-hook verb',
+        reg.status !== 0 && /mutation-breach drain failed/.test(reg.err), `exit ${reg.status}`);
+    }
+
+    // ── R3-B3: the deny-then-EXIT twin of M5d ───────────────────────────────
+    // M5d's core writes a deny and THROWS, and the catch empties the buffer, so
+    // the refusal is dropped. This core writes the same deny and EXITS, which no
+    // catch can see — the buffer is flushed by an unconditional `exit` handler
+    // while the floor rewrites the code to 0. Claude Code reads exit 0 plus a
+    // refusal and blocks the edit. Two equivalent crashes, opposite outcomes, on
+    // a path whose every documented posture is fail-open.
+    {
+      console.log('\n  R3-B3 - a core that denies and then exits must not leave the refusal standing');
+      // The twin, run beside it, so the red below is about HOW the core stopped
+      // rather than about denies in general.
+      const thrown = await installWith('r3-deny-throw', CORES.denyThenThrow);
+      const rt = fire(thrown, 'pre-tool-use', payloads(thrown)['pre-tool-use']);
+      ok('control: the THROW twin already discards the refusal',
+        verdictOf(rt.out) !== 'deny', verdictOf(rt.out));
+
+      const dir = await installWith('r3-deny-exit', CORES.denyThenExit);
+      const r = fire(dir, 'pre-tool-use', payloads(dir)['pre-tool-use']);
+      note(`deny-then-exit: exit ${r.status}, verdict ${verdictOf(r.out)}, stdout ${r.out.slice(0, 100)}`);
+      ok('R3-B3: the exit after the write is still contained - exit 0',
+        r.status === 0, `exit ${r.status}`);
+      ok('R3-B3: stdout carries at most ONE document',
+        verdictOf(r.out) !== 'unparseable', verdictOf(r.out));
+      ok('R3-B3: a core that failed does not leave a refusal standing',
+        verdictOf(r.out) !== 'deny', verdictOf(r.out));
+    }
+
+    // ── R3-M1: the floor must exist where it is needed most ────────────────
+    // prepareMutationWitness registers the exit handler that carries the floor
+    // ONLY if mutation-witness.mjs loads, and the handler returns early unless a
+    // tier context armed — which needs commands/_tiers.mjs. Both are exactly
+    // what a half-applied upgrade or a version-skewed install is missing. So the
+    // containment is absent in precisely the corruption states it exists to
+    // tolerate, and a core's process.exit escapes unclamped.
+    {
+      console.log('\n  R3-M1 - containment must not depend on the optional libs a broken install is missing');
+      for (const [label, victim] of [
+        ['mutation-witness', join('maddu', 'runtime', 'lib', 'mutation-witness.mjs')],
+        ['_tiers', join('maddu', 'commands', '_tiers.mjs')],
+      ]) {
+        // Liveness first: with the file gone, a HEALTHY core still fires and
+        // still exits 0. So a red below is the missing floor rather than a
+        // fixture that broke the install outright.
+        const healthy = await installWith(`partial-${label}-healthy`, null);
+        await rm(join(healthy, victim), { force: true });
+        const h = fire(healthy, 'pre-tool-use', payloads(healthy)['pre-tool-use']);
+        ok(`R3-M1 fixture (${label} absent): a healthy core still exits 0`,
+          h.status === 0, `exit ${h.status}`);
+
+        const dir = await installWith(`partial-${label}`, CORES.fireExits);
+        await rm(join(dir, victim), { force: true });
+        for (const ev of ['pre-tool-use', 'session-start']) {
+          const r = fire(dir, ev, payloads(dir)[ev]);
+          ok(`R3-M1 (${label} absent): ${ev} still exits 0 when the core exits 7`,
+            r.status === 0, `exit ${r.status}`);
+        }
+      }
     }
   } finally {
     // Runs on every path out — assertion failure, harness throw (the `finally`

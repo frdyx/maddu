@@ -21,11 +21,19 @@
 // the suite could only exist after the implementation; decoupling them — which
 // is exactly what makes the suite trustworthy — broke the assumption.
 //
-// WHAT "DONE" MEANS HERE, in four claims:
+// WHAT "DONE" MEANS HERE, in five claims:
 //   1. the extracted module exists            (a real, non-empty .mjs FILE)
 //   2. commands/hooks.mjs names it            (a module specifier, not prose)
 //   3. the behavior lock still passes         (nothing Claude Code sees changed)
 //   4. and the module is LOAD-BEARING         (delete it and the lock breaks)
+//   5. and the machinery actually LEFT        (hooks.mjs is under a size ceiling)
+//
+// Claim 5 was added after a reviewer built the forgery claims 1-4 admit: keep
+// the whole core inline, add a `harness/sentinel.mjs`, branch on a value it
+// exports. Claims 1-3 pass, and ablating the sentinel breaks the lock with an
+// identical assertion count, so claim 4 reads the break as delegation. Claims
+// 1-4 all measure COUPLING, and coupling is forgeable; claim 5 measures MASS,
+// which that forgery cannot fake, because it has to keep the ~860 lines here.
 //
 // WHY CLAIM 4 EXISTS — the gesture defect
 // Claims 1 and 2 used to be satisfiable by a gesture, and this was reproduced
@@ -285,6 +293,41 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // real runner that state cannot coexist with a green claim 3 (spawning a
   // missing script exits non-zero), so this only ever fires where the lock is
   // injected and the experiment would be meaningless.
+  // 5. and the dispatch is not still sitting in hooks.mjs.
+  //
+  // Claims 1-4 all measure COUPLING, and the funnel produced the exact forgery
+  // the limit note predicted: keep the entire core inline in hooks.mjs, add a
+  // `harness/sentinel.mjs`, and branch on a value it exports before running the
+  // inline core. Claims 1-3 pass, and ablating the sentinel breaks the lock with
+  // an identical assertion count, so claim 4 reads the break as proof of
+  // delegation. Every claim is satisfied by a tree where nothing was extracted.
+  //
+  // This claim is about MASS rather than reference, which is what that forgery
+  // cannot fake: it has to keep the ~860 lines of firing machinery inside
+  // hooks.mjs to still work. The extraction's entire content is that those lines
+  // left. hooks.mjs was 1258 lines before PR2 and 434 after, and the core module
+  // is 928 lines on its own, so a tree that re-inlines it lands near 1400. The
+  // ceiling is set with real headroom above the delegating file rather than
+  // hugging it: a bound that a few added comments can trip is a bound that gets
+  // raised on reflex until it means nothing, and then the claim is gone.
+  //
+  // Honest about what it is: a size bound is not a parse, and an adversary who
+  // re-inlines the core AND golfs it below the ceiling defeats it. It is aimed
+  // at the same targets as the rest of this file — the accident and the lazy
+  // fake — and it closes the one specific escape a reviewer demonstrated rather
+  // than claiming to close the class.
+  const HOOKS_CEILING = 900;
+  if (reasons.length === 0) {
+    try {
+      const lines = readFileSync(hooksCmd, 'utf8').split('\n').length;
+      if (lines > HOOKS_CEILING) {
+        reasons.push(`commands/hooks.mjs is ${lines} lines, over the ${HOOKS_CEILING}-line ceiling — the firing machinery this PR moves out is ~860 lines, so a file this size is consistent with the core still living here beside a reference to lib/harness/, which every other claim would accept`);
+      }
+    } catch (err) {
+      reasons.push(`commands/hooks.mjs could not be measured — ${err?.message || err}`);
+    }
+  }
+
   if (reasons.length === 0 && existsSync(join(root, ...LOCK))) {
     const ablated = runAblation(root);
     const here = attemptedIn(lock.output);

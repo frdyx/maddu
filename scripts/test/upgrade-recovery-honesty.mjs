@@ -103,9 +103,38 @@
 //   • no probe code is passed through a shell — probes are written as files and
 //     spawned with an argv array, so backslashes survive.
 //
+// ROUND 3 (the sections marked R3-*)
+// Five further measured defects in the same path, added by a suite author who is
+// not the implementer, each reproduced on a real install before being written:
+//   R3-B5  `alreadyCurrent()` deletes the marker before the upgrade lock is ever
+//          taken, so a second process on the nothing-to-do path erases a first
+//          process's live marker while that one is mid-apply.
+//   R3-B6  the install-integrity gate collapsed an unreadable marker to
+//          "absent", so the critical gate returned GREEN over an install whose
+//          own evidence says an apply began; and a verdict for a marker it could
+//          not read must not fabricate the version and time it never saw.
+//   R3-B7  with a malformed marker the command says only --force can establish
+//          safety, then continues anyway: the corrupt file is skipped as a local
+//          edit, "Repaired install" is printed, and the marker is cleared.
+//   R3-B8  the gate's own remedy (`maddu upgrade`) exits 1 beside a missing or
+//          truncated manifest, and the remedy THAT offers never clears the
+//          marker — so the critical gate is still critical after the operator
+//          has done everything they were told.
+//   R3-M2  an unlink that fails during a removal is swallowed and the manifest
+//          entry dropped anyway, leaving the file on disk and unmanaged while
+//          the run reports success.
+//
+// ONE RELATED MAJOR IS DELIBERATELY NOT ASSERTED RED: clearUpgradeMarker also
+// swallows an unlink failure, but that escape exists only in an intermediate
+// state (the marker path writable at the start of an apply and undeletable at
+// its end) which cannot be produced from outside without racing the run. The
+// R3-M3 block says so in place and pairs it with controls proving the channel it
+// would be measured on can speak, rather than shipping an assertion that is
+// green for a reason nobody checked.
+//
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFile, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -473,9 +502,19 @@ async function main() {
         !(gone && stillCorrupt), gone && stillCorrupt ? 'marker erased over an install that is still half-applied' : '');
 
       // The harm, in the terms the operator meets it in.
+      //
+      // THE EXIT CODE ALONE STOPPED BEING EVIDENCE HERE. Since the containment
+      // floor landed, a `hooks fire` that dies on a SyntaxError still exits 0 —
+      // so `status === 0` now goes green over a completely dead hook, which is
+      // exactly the state this assertion exists to catch. What a dead one still
+      // does is print: the floor says it suppressed a non-zero exit, and the
+      // raw error reaches stderr. A healthy install produces neither (shown in
+      // the control below). B1 is the one place where the plain retry is
+      // REQUIRED to repair, so the hook must genuinely work, not merely exit 0.
       const fired = fireHook(dir, 'pre-tool-use', editPayload(dir));
-      ok('B1: the install\'s own hook still fires after the retry',
-        fired.status === 0, `exit ${fired.status} / ${(fired.err.split('\n')[0] || '').slice(0, 70)}`);
+      ok('B1: the install\'s own hook still fires after the retry, and not merely exits 0',
+        fired.status === 0 && !/\bwould have exited\b/.test(fired.err) && !/\w*Error\b/.test(fired.err),
+        `exit ${fired.status} / ${(fired.err.split('\n')[0] || '').slice(0, 70)}`);
 
       // Permanence: an install that cannot be repaired by the documented remedy
       // is not repaired by running it twice either.
@@ -788,6 +827,358 @@ async function main() {
           after.status === 0,
           `exit ${after.status} / ${after.out.split('\n').filter(Boolean)[0] || ''}`);
       }
+    }
+
+    // ══ ROUND 3 ═════════════════════════════════════════════════════════════
+    // Five further measured defects in the same recovery path, written by a
+    // suite author who is not the implementer and reproduced on a real install
+    // before being written down. Four are about the marker — who may delete it,
+    // what an unreadable one means, and what a run may claim while one stands —
+    // and one is about a removal that failed and was recorded as done anyway.
+
+    // ── R3-B5: the no-op path must not erase a marker it never read ─────────
+    // `alreadyCurrent()` deletes the marker on its first line, and the marker
+    // was read a few hundred milliseconds earlier, before the framework tree was
+    // enumerated. The upgrade lock is not taken until much later, and never on
+    // this path at all — so a second process on the nothing-to-do path deletes a
+    // FIRST process's live marker while that one is mid-apply under the lock.
+    // The lock guards the apply and not the evidence.
+    //
+    // THE RACE IS MADE CHECKABLE rather than hoped for. Two ordering proofs:
+    //   • the marker is planted while the child is still running AND before its
+    //     stdout shows "Nothing to do" — the clear is the line before that
+    //     print, so a plant that precedes the print precedes the clear;
+    //   • the child's final output must be the nothing-to-do one, proving it
+    //     never saw the marker and really took the branch under test.
+    // An attempt that satisfies neither has measured nothing and is retried. If
+    // no attempt lands, the fixture assertion FAILS — a race that never reached
+    // its window must never be reported as a pass.
+    {
+      console.log('\n  R3-B5 - the nothing-to-do path must not erase a marker it never read');
+      const liveMarker = () => ({
+        version: '9.9.9', from: '9.9.8', at: new Date().toISOString(), paths: [VICTIM],
+      });
+
+      // CONTROL, first: the same marker file planted BEFORE the run is seen and
+      // acted on. Without it, "the marker survived" could be a fact about a
+      // marker the command never recognised.
+      {
+        const dir = await install('b5-marker-is-real');
+        await mkdir(join(dir, '.maddu', 'state'), { recursive: true });
+        await writeFile(markerPath(dir), JSON.stringify(liveMarker(), null, 2) + '\n');
+        const seen = maddu(dir, ['upgrade']);
+        ok('control: a marker planted before the run is recognised and recovered from',
+          /Recovering:/.test(seen.out) && seen.status === 0,
+          seen.out.split('\n').filter(Boolean)[0] || '');
+      }
+
+      const attempt = async (delayMs) => {
+        const dir = await install(`b5-race-${delayMs}`);
+        await rm(markerPath(dir), { force: true });
+        let out = '';
+        const child = spawn(process.execPath, [SRC_BIN, 'upgrade'], { cwd: dir, env: hermeticEnv() });
+        child.stdout.on('data', (c) => { out += c; });
+        child.stderr.on('data', (c) => { out += c; });
+        const done = new Promise((res) => child.on('close', res));
+        await new Promise((res) => setTimeout(res, delayMs));
+        const aliveAtPlant = child.exitCode === null;
+        const clearedAtPlant = /Nothing to do/.test(out);
+        // The concurrent upgrade in the state it is really in: the lock held by
+        // a LIVE process, the marker written, files being copied.
+        await mkdir(join(dir, '.maddu', 'state'), { recursive: true });
+        await writeFile(join(dir, '.maddu', 'state', 'upgrade.lock'),
+          JSON.stringify({ pid: process.pid, at: new Date().toISOString() }, null, 2) + '\n');
+        await writeFile(markerPath(dir), JSON.stringify(liveMarker(), null, 2) + '\n');
+        const status = await done;
+        return {
+          out, status, aliveAtPlant, clearedAtPlant,
+          tookNoOp: /Nothing to do/.test(out),
+          survived: await markerStands(dir),
+        };
+      };
+
+      let landed = null, last = null;
+      for (const d of [90, 130, 180, 240, 320]) {
+        last = await attempt(d);
+        note(`attempt +${d}ms: alive=${last.aliveAtPlant} alreadyCleared=${last.clearedAtPlant} `
+          + `noOpPath=${last.tookNoOp} markerSurvived=${last.survived}`);
+        if (last.aliveAtPlant && !last.clearedAtPlant && last.tookNoOp) { landed = last; break; }
+      }
+      const a = landed || last;
+      ok('R3-B5 fixture: an attempt landed inside the window - planted mid-run, before the clear',
+        !!landed, landed ? '' : 'no attempt satisfied both ordering proofs; the two rows below prove nothing');
+      ok('R3-B5 fixture: and that run really took the nothing-to-do branch',
+        !!a && a.tookNoOp && a.status === 0, a ? `exit ${a.status}` : 'no attempt');
+      ok('R3-B5: a marker written by a concurrent upgrade survives the no-op run',
+        !!a && a.survived, a ? (a.survived ? '' : 'erased another process\'s live marker') : 'no attempt');
+    }
+
+    // ── R3-B6: a marker the gate cannot read is not a marker that is absent ──
+    // install-integrity's own readUpgradeMarker collapsed every failure to null,
+    // one file over from where that exact collapse was fixed. A truncated or
+    // wrong-shaped marker therefore read as "settled", and an interrupted
+    // adds-first upgrade whose old manifest entries all still hash-match came
+    // back GREEN from the critical gate. The marker exists; only its detail is
+    // lost — and a verdict must not fabricate the detail it lost either.
+    {
+      console.log('\n  R3-B6 - a marker the gate cannot read is not a marker that is absent');
+      const dir = await install('b6-marker-shapes');
+      const clean = gateVerdict(dir, 'install-integrity');
+      ok('control: the gate calls this install healthy before any marker exists',
+        !!clean && clean.ok === true, clean ? `ok=${clean.ok} status=${clean.status}` : 'gate not found');
+
+      await mkdir(join(dir, '.maddu', 'state'), { recursive: true });
+      for (const [label, body] of [
+        ['truncated mid-write', '{"version":"9.9.9","at":"2026-09-04T00:00:00.0'],
+        ['present but not a marker', '{"version":"9.9.9","at":"2026-09-04T00:00:00.000Z"}'],
+        ['empty file', ''],
+      ]) {
+        await writeFile(markerPath(dir), body);
+        const v = gateVerdict(dir, 'install-integrity');
+        note(`marker ${label}: ${v ? `ok=${v.ok} status=${v.status} - ${v.message.slice(0, 90)}` : 'gate not found'}`);
+        ok(`R3-B6 (${label}): the gate does not call the install healthy`,
+          !!v && v.ok === false, v ? `ok=${v.ok} status=${v.status}` : 'gate not found');
+        // ...and it must not invent the version and timestamp it could not read.
+        // The first fix to land here reported "an upgrade to vundefined did not
+        // finish (started undefined)" — a verdict about the reader rather than
+        // about the install, and green under a bare `ok === false` check. This
+        // row is what keeps that from being an acceptable answer.
+        ok(`R3-B6 (${label}): and does not report detail it could not read`,
+          !!v && v.ok === false && !/\bundefined\b/.test(String(v.message)),
+          v ? v.message.slice(0, 100) : 'gate not found');
+      }
+
+      // CONTROLS on both sides of that claim: a VALID marker still reports its
+      // real detail, and removing the marker returns the gate to green — so the
+      // rows above are about the marker's readability, not a gate stuck red.
+      await writeFile(markerPath(dir), JSON.stringify({
+        version: '9.9.9', at: '2026-09-04T00:00:00.000Z', paths: [VICTIM],
+      }));
+      const valid = gateVerdict(dir, 'install-integrity');
+      ok('control: a VALID marker is still reported, naming what it actually records',
+        !!valid && valid.ok === false && /9\.9\.9/.test(valid.message) && !/\bundefined\b/.test(valid.message),
+        valid ? valid.message.slice(0, 90) : 'gate not found');
+      await rm(markerPath(dir), { force: true });
+      const back = gateVerdict(dir, 'install-integrity');
+      ok('control: with the marker gone the gate is green again',
+        !!back && back.ok === true, back ? `ok=${back.ok} status=${back.status}` : 'gate not found');
+    }
+
+    // ── R3-B7: a run that cannot establish safety must not report that it did ─
+    // With a malformed marker the command says the right thing — "Re-applying
+    // every framework file is the only way to be sure: maddu upgrade --force" —
+    // and then carries on regardless. The unreadable marker has no path set, so
+    // the corrupt managed file is classified as a local edit and skipped; the
+    // same-version branch records no partial state; and the marker is cleared at
+    // the end. It reports a repair while preserving the corruption and
+    // destroying the only evidence that an apply was ever interrupted.
+    {
+      console.log('\n  R3-B7 - a run that cannot establish safety must not report that it did');
+      const dir = await install('b7-malformed-marker-corrupt-file');
+      await writeFile(join(dir, VICTIM), HALF_WRITTEN);
+      await mkdir(join(dir, '.maddu', 'state'), { recursive: true });
+      await writeFile(markerPath(dir), '{"version":"9.9.9","at":"2026-09-04T00:00:00.0');
+
+      // Fixture liveness: the corruption is real, and it IS repairable by the
+      // command this run is about to name — so a red below is the run declining
+      // to do it, not a file nothing could have fixed.
+      const plan = maddu(dir, ['upgrade', '--force', '--dry-run']);
+      ok('R3-B7 fixture: the corrupt file is in the --force plan by name',
+        plan.out.includes(VICTIM), VICTIM);
+      ok('R3-B7 fixture: the marker is present and unreadable', await markerStands(dir));
+
+      const run = maddu(dir, ['upgrade']);
+      const after = await readFile(join(dir, VICTIM));
+      const repaired = after.equals(SRC_VICTIM);
+      const claimedSuccess = run.status === 0 && /Repaired install|Upgraded to v/.test(run.out);
+      const markerLeft = await markerStands(dir);
+      note(`plain upgrade: exit ${run.status}, repaired ${repaired}, marker ${markerLeft ? 'standing' : 'ERASED'}`);
+      note(`it said: ${run.out.split('\n').filter(Boolean).slice(-1)[0] || '(silence)'}`);
+
+      ok('R3-B7: the marker is not erased while the install is still corrupt',
+        repaired || markerLeft, markerLeft ? '' : 'erased the only evidence and left the corruption');
+      ok('R3-B7: and the run does not report a repair it did not perform',
+        repaired || !claimedSuccess, claimedSuccess ? run.out.split('\n').filter(Boolean).slice(-1)[0] : '');
+
+      const v = gateVerdict(dir, 'install-integrity');
+      note(`install-integrity afterwards: ${v ? `ok=${v.ok} status=${v.status} - ${v.message.slice(0, 80)}` : 'gate not found'}`);
+      ok('R3-B7: install-integrity does not call the result healthy',
+        repaired || !(v && v.ok === true), v ? `ok=${v.ok} status=${v.status} - ${v.message.slice(0, 60)}` : 'gate not found');
+
+      // The harm in the terms the operator meets it in — TIED TO THE CLAIM, not
+      // to the repair. A run that refuses, keeps the marker and says only
+      // --force can settle this has told the truth, and the hook being dead
+      // afterwards is that truth rather than a defect. What may never happen is
+      // reporting a repair over an install whose own discipline hook cannot
+      // parse itself.
+      //
+      // Exit 0 is NOT enough to call the hook alive: the containment floor
+      // clamps a dead hook's code to 0, so a status check alone goes green over
+      // a hook that dies on a SyntaxError. The floor announces when it did that,
+      // and a raw error reaches stderr — neither is something a working hook
+      // produces, and the control below shows a healthy one produces neither.
+      const fired = fireHook(dir, 'pre-tool-use', editPayload(dir));
+      const hookQuiet = !/\bwould have exited\b/.test(fired.err) && !/\w*Error\b/.test(fired.err);
+      note(`install hook afterwards: exit ${fired.status} / ${(fired.err.split('\n')[0] || '(quiet)').slice(0, 80)}`);
+      ok('R3-B7: a run that reports a repair leaves a hook that actually works',
+        !claimedSuccess || (fired.status === 0 && hookQuiet),
+        `claimed=${claimedSuccess} hook exit ${fired.status} / ${(fired.err.split('\n')[0] || '').slice(0, 60)}`);
+
+      // Controls: the same probe on a healthy install is quiet, and --force on
+      // the identical corruption repairs it. Without the first, "quiet" could be
+      // unreachable; without the second, the reds above could be a harness that
+      // cannot observe a repair at all.
+      const ctl = await install('b7-control');
+      const ctlFired = fireHook(ctl, 'pre-tool-use', editPayload(ctl));
+      ok('control: a healthy install\'s hook fires quietly',
+        ctlFired.status === 0 && !/\bwould have exited\b/.test(ctlFired.err) && !/\w*Error\b/.test(ctlFired.err),
+        `exit ${ctlFired.status} / ${(ctlFired.err.split('\n')[0] || '').slice(0, 70)}`);
+      await writeFile(join(ctl, VICTIM), HALF_WRITTEN);
+      await writeFile(markerPath(ctl), '{"version":"9.9.9","at":"2026-09-04T00:00:00.0');
+      const forced = maddu(ctl, ['upgrade', '--force']);
+      ok('control: --force repairs the identical corruption and settles the marker',
+        forced.status === 0 && (await readFile(join(ctl, VICTIM))).equals(SRC_VICTIM)
+        && !(await markerStands(ctl)), `exit ${forced.status}`);
+    }
+
+    // ── R3-B8: a remedy must run in the state the gate names it ─────────────
+    // The gate tells an install with a standing marker to re-run `maddu
+    // upgrade`. Beside a missing or truncated maddu.json that command exits 1 —
+    // it cannot read the manifest — and offers `maddu init --force`, which never
+    // touches the marker, so the critical gate is still critical after the
+    // operator has done everything they were told. The repo's own rule since
+    // v1.129.0 is that a command Máddu names is a command Máddu has; a remedy is
+    // only a remedy if running it gets the operator out.
+    {
+      console.log('\n  R3-B8 - a remedy must run, and must terminate, in the state the gate names it');
+      for (const [label, breakManifest] of [
+        ['absent manifest', async (d) => { await rm(join(d, 'maddu.json'), { force: true }); }],
+        ['truncated manifest', async (d) => {
+          const whole = await readFile(join(d, 'maddu.json'), 'utf8');
+          await writeFile(join(d, 'maddu.json'), whole.slice(0, Math.floor(whole.length * 0.6)));
+        }],
+      ]) {
+        const dir = await install(`b8-${label.replace(/\s+/g, '-')}`);
+        await mkdir(join(dir, '.maddu', 'state'), { recursive: true });
+        await writeFile(markerPath(dir), JSON.stringify({
+          version: '9.9.9', from: '9.9.8', at: '2026-09-04T00:00:00.000Z', paths: [VICTIM],
+        }));
+        await breakManifest(dir);
+
+        const v = gateVerdict(dir, 'install-integrity');
+        const offered = remediesIn(v && v.message);
+        note(`${label}: gate ${v ? `ok=${v.ok}` : 'not found'} offers [${offered.join(' / ') || 'nothing'}]`);
+        ok(`R3-B8 fixture (${label}): the gate is critical and names a way out`,
+          !!v && v.ok === false && offered.length > 0, offered.join(' / ') || 'no remedy named');
+
+        const results = offered.map((r) => ({ r, status: maddu(dir, r.replace(/^maddu\s+/, '').split(/\s+/)).status }));
+        note(`${label}: ${results.map((x) => `${x.r} -> exit ${x.status}`).join(' ; ') || 'nothing to run'}`);
+        ok(`R3-B8 (${label}): every command the gate names actually runs there`,
+          results.length > 0 && results.every((x) => x.status === 0),
+          results.map((x) => `${x.r}=${x.status}`).join(' ') || 'nothing to run');
+
+        const settled = gateVerdict(dir, 'install-integrity');
+        note(`${label}: gate afterwards ${settled ? `ok=${settled.ok} status=${settled.status} - ${settled.message.slice(0, 70)}` : 'not found'}`);
+        ok(`R3-B8 (${label}): and following that advice ends the critical verdict`,
+          !!settled && settled.ok !== false,
+          settled ? `${settled.message.slice(0, 80)}` : 'gate not found');
+      }
+    }
+
+    // ── R3-M2: a removal that failed must not be reported as done ───────────
+    // In the removal loop the unlink is wrapped in `try {} catch {}` and the
+    // manifest entry is deleted regardless. A file that could be planned but not
+    // unlinked — EPERM, an ACL, a Windows sharing violation — therefore stays on
+    // disk while the framework forgets it exists and the run reports success.
+    // A DIRECTORY planted at the path is the same failure class and is the same
+    // barrier mechanism this suite already uses to make copyFile fail.
+    {
+      console.log('\n  R3-M2 - a removal that failed must not be reported as done');
+      // CONTROL first: the identical fixture with a real FILE at the path. The
+      // removal works, the entry is dropped, the run exits 0 — so a red below is
+      // about the unlink failing, not about removal in general.
+      {
+        const ctl = await install('m2-removal-control');
+        const cmj = await backdate(ctl);
+        await writeFile(join(ctl, OBSOLETE), OBSOLETE_BODY);
+        cmj.managed[OBSOLETE] = { sha256: sha256Normalized(Buffer.from(OBSOLETE_BODY)), installedBy: OLD_VERSION };
+        await writeManifest(ctl, cmj);
+        const r = maddu(ctl, ['upgrade', '--force']);
+        ok('control: with a removable file the entry is dropped and the run exits 0',
+          r.status === 0 && !(await exists(join(ctl, OBSOLETE)))
+          && !(OBSOLETE in (await readManifest(ctl)).managed), `exit ${r.status}`);
+      }
+
+      const dir = await install('m2-unlink-fails');
+      const mj = await backdate(dir);
+      mj.managed[OBSOLETE] = { sha256: sha256Normalized(Buffer.from(OBSOLETE_BODY)), installedBy: OLD_VERSION };
+      await writeManifest(dir, mj);
+      await mkdir(join(dir, OBSOLETE), { recursive: true });
+      await writeFile(join(dir, OBSOLETE, 'keep.txt'), 'x');
+      ok('R3-M2 fixture: the path is listed, present, and cannot be unlinked',
+        OBSOLETE in (await readManifest(dir)).managed && (await exists(join(dir, OBSOLETE))));
+
+      const run = maddu(dir, ['upgrade', '--force']);
+      const stillThere = await exists(join(dir, OBSOLETE));
+      const stillListed = OBSOLETE in (await readManifest(dir)).managed;
+      const reported = run.status === 0 && /Upgraded to v|Repaired install/.test(run.out);
+      note(`upgrade --force: exit ${run.status}, path still on disk ${stillThere}, still listed ${stillListed}`);
+      ok('R3-M2: a path that could not be removed is not forgotten by the manifest',
+        !stillThere || stillListed, stillThere && !stillListed ? 'left on disk and unmanaged' : '');
+      // NOT "the run must fail". Finishing an upgrade of 497 files because one
+      // removal hit an ACL is a reasonable thing to do — reporting it as done
+      // and never saying which file is not. So the demand is that the operator
+      // can find out: either the run refuses, or it NAMES the path it left
+      // behind. `reported` is kept in the message only to show what was claimed.
+      ok('R3-M2: and a removal it could not perform is not passed over in silence',
+        !stillThere || run.status !== 0 || run.out.includes(OBSOLETE),
+        stillThere && reported ? 'reported success without naming the file it could not delete' : '');
+    }
+
+    // ── R3-M3: the marker the recovery cannot read must not crash it ────────
+    // The marker reader already has an `unreadable (<code>)` branch, so this
+    // state is one the command claims to handle. It does not: writeUpgradeMarker
+    // then throws on the same path and the advertised recovery dies with a raw
+    // stack — the same class as B2, on the file that exists to make recovery
+    // possible.
+    //
+    // ON THE RELATED MAJOR THAT IS *NOT* ASSERTED RED HERE. clearUpgradeMarker
+    // swallows an unlink failure, so an upgrade can report success while
+    // install-integrity keeps calling the install critical. That escape lives
+    // only in an intermediate state — the same path must be WRITABLE at the
+    // start of the apply and UNDELETABLE at the end — which cannot be produced
+    // from outside without racing the run. It is left undelivered rather than
+    // faked, and the two controls below prove the channel it would be measured
+    // on can speak: a standing marker IS a critical verdict, and a plain upgrade
+    // IS what clears it.
+    {
+      console.log('\n  R3-M3 - an unreadable marker must not crash the recovery');
+      const ctl = await install('m3-healthy-control');
+      const clean = maddu(ctl, ['upgrade']);
+      ok('control: `maddu upgrade` on a healthy install exits 0 with no stack',
+        clean.status === 0 && !hasStackTrace(clean.out), `exit ${clean.status}`);
+
+      const dir = await install('m3-unreadable-marker');
+      await mkdir(markerPath(dir), { recursive: true });   // present, and unreadable
+      const run = maddu(dir, ['upgrade']);
+      note(`upgrade over an unreadable marker: exit ${run.status} - ${run.out.split('\n').filter(Boolean)[0] || '(silence)'}`);
+      ok('R3-M3: the advertised recovery does not die on an unhandled exception',
+        !hasStackTrace(run.out),
+        (run.out.split('\n').find((l) => /^\s+at\s/.test(l)) || '').trim().slice(0, 70));
+      ok('R3-M3 boundary: and it names the marker rather than only the exception',
+        /marker/i.test(run.out), run.out.split('\n').filter(Boolean)[0] || '(silence)');
+
+      const stale = await install('m3-stale-marker-control');
+      await mkdir(join(stale, '.maddu', 'state'), { recursive: true });
+      await writeFile(markerPath(stale), JSON.stringify({
+        version: '9.9.9', from: '9.9.8', at: '2026-09-04T00:00:00.000Z', paths: [VICTIM],
+      }));
+      const sv = gateVerdict(stale, 'install-integrity');
+      ok('control: a marker left standing over a complete install IS a critical verdict',
+        !!sv && sv.ok === false, sv ? `ok=${sv.ok} status=${sv.status}` : 'gate not found');
+      const heal = maddu(stale, ['upgrade']);
+      ok('control: and a plain upgrade is what clears it (the documented self-heal)',
+        heal.status === 0 && !(await markerStands(stale)), `exit ${heal.status}`);
     }
   } finally {
     // Teardown runs on every path out of the block above — assertion failure,

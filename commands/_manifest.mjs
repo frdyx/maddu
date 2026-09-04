@@ -194,11 +194,26 @@ export async function sha256OfFile(p) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-// Read maddu.json from a target repo. Returns null if the file doesn't exist.
+// Read maddu.json from a target repo. THREE outcomes, matching the identical
+// read in the install-integrity gate — `null` only for genuine absence, a throw
+// with `.unreadable = true` when the file is there but this process cannot read
+// it, and a plain JSON SyntaxError when it is there and damaged.
+//
+// It used to gate on `exists()`, which collapses every stat failure to false, so
+// an ACL or sharing violation returned null and every caller said "maddu.json is
+// missing" about a file sitting right there — sending the operator to
+// re-scaffold instead of to the permission problem. `absent()` exists precisely
+// to keep that distinction; this was the one place still throwing it away.
 export async function readMadduJson(repoRoot) {
   const p = join(repoRoot, 'maddu.json');
-  if (!(await exists(p))) return null;
-  return await readJson(p);
+  if (await absent(p)) return null;
+  try { return JSON.parse(await readFile(p, 'utf8')); }
+  catch (err) {
+    if (err instanceof SyntaxError) throw err;
+    const e = new Error(`maddu.json could not be read (${(err && err.code) || 'error'})`);
+    e.unreadable = true;
+    throw e;
+  }
 }
 
 export async function writeMadduJson(repoRoot, obj) {

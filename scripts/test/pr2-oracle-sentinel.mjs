@@ -94,6 +94,39 @@
 // EOL-normalized before any anchor match — a `\n` anchor does not match `\r\n`
 // on disk, and the first version of this fixture failed exactly that way.
 //
+// CLAIM 5 (the section at the end)
+// The counterexample above is the LOAD-ONLY sentinel, and content ablation
+// already catches it: an inert stand-in still loads, nothing breaks, claim 4
+// correctly refuses. The forgery the reviewer actually built does one thing
+// more — it BRANCHES on a value the sentinel exports — and that single line
+// flips claim 4 from refusing to certifying, because an inert stand-in exports
+// no such value, the branch throws, and the lock goes red exactly as a real
+// extraction's would. Measured here rather than asserted in prose: claim 4's own
+// experiment is called on that tree and shown returning red with matching
+// attribution counts. Claims 1 through 4 all pass over a tree where nothing was
+// extracted, and only the mass bound refuses it.
+//
+// The verdict is read IN PROCESS (evaluate()) rather than off stdout, because
+// the question is WHICH claim refused. A NOT DONE for an incidental cause is the
+// inert-fixture trap, and this project has paid for it five times.
+//
+// THE RESIDUAL IS RED, DELIBERATELY, and it is a measurement, not an opinion:
+//
+//   honest commands/hooks.mjs      593 raw lines    344 code lines
+//   the forgery                   1528 raw lines    885 code lines
+//   the ceiling                    900 raw lines
+//
+// The bound is on TEXT, and the cheapest lever against text is deleting
+// comments — mechanical, behavior-preserving, no skill required, and spelled out
+// by the refusal itself, which prints both numbers. A comment-stripped re-inline
+// lands at 885 and reads DONE, 15 lines under the bound. Counting CODE lines
+// instead leaves the adversary no lever but deleting logic, which claim 3
+// already catches: the forgery would sit at 885 against a ~500 ceiling while the
+// honest file sits at 344, and review commentary — which is what actually moved
+// this file, 434 to 552 to 592 — would cost no headroom at all. That is a better
+// bound on both axes, and the red assertion stays until it is decided either
+// way, because a residual nobody can see becomes folklore.
+//
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { spawnSync } from 'node:child_process';
@@ -102,7 +135,16 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { hermeticEnv } from './_hermetic-env.mjs';
+import { hermeticEnv, SCRUBBED_VARS } from './_hermetic-env.mjs';
+import { evaluate, defaultAblationRunner } from '../check-fire-core-extracted.mjs';
+
+// The claim-5 cases call evaluate() IN PROCESS rather than spawning the oracle,
+// because the reason a verdict gives is a structured field there and a line of
+// prose on stdout. Its runners then spawn the behavior lock with THIS process's
+// environment — which, under the self-test runner, carries the developer's live
+// MADDU_SESSION_ID. That is the identity leak _hermetic-env exists for, so the
+// suite's own env is scrubbed once, here, and every in-process call inherits it.
+for (const k of SCRUBBED_VARS) delete process.env[k];
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ORACLE = join('scripts', 'check-fire-core-extracted.mjs');
@@ -155,14 +197,48 @@ const COPY = [
   ORACLE.split(/[\\/]/), LOCK.split(/[\\/]/), ['scripts', 'test', '_hermetic-env.mjs'],
 ];
 
-async function buildCounterexample(base) {
-  const tree = join(base, 'nothing-extracted');
+// Lines that count as CODE: not blank, not a comment. Deliberately anchored at
+// the start of a trimmed line, which is what makes it safe on this corpus — the
+// oracle's own header records that a naive strip is defeated by the help-text
+// glob `.maddu/config/**`, whose `/*` opens a phantom block comment. That glob
+// sits mid-line inside a string literal (commands/hooks.mjs:85), so a
+// line-start-anchored rule never sees it.
+//
+// THE DIRECTION OF ERROR IS DELIBERATE: anything ambiguous is counted as CODE,
+// so this OVER-estimates. A residual assertion that fires on an over-estimate is
+// reporting a gap that is at least as large as it says. Cross-checked against a
+// second, cruder rule (non-blank lines not starting `//`, `*` or `/*`) which
+// returns the identical numbers on both files.
+function codeLines(text) {
+  let n = 0, inBlock = false;
+  for (const raw of String(text).split('\n')) {
+    const l = raw.trim();
+    if (!l) continue;
+    if (inBlock) { if (l.includes('*/')) inBlock = false; continue; }
+    if (l.startsWith('//')) continue;
+    if (l.startsWith('/*')) { if (!l.includes('*/')) inBlock = true; continue; }
+    n++;
+  }
+  return n;
+}
+
+// The file closure both fixture trees are built from.
+async function copyClosure(base, name) {
+  const tree = join(base, name);
   for (const parts of COPY) {
     await mkdir(dirname(join(tree, ...parts)), { recursive: true });
     await cp(join(ROOT, ...parts), join(tree, ...parts), { recursive: true });
   }
+  return tree;
+}
 
-  // Splice the core back into the CLI file it came out of.
+// Splice the core back into the CLI file it came out of, and replace the
+// delegation with `delegation` — the lines that stand where
+// `loadLib('harness/fire-core.mjs')` used to. That parameter is the whole
+// difference between the two forgeries below: one merely LOADS the sentinel,
+// the other BRANCHES on what it exports, and only the second survives the
+// oracle's content ablation.
+async function inlineTheCore(tree, delegation) {
   const core = await lf(join(tree, HARNESS, 'fire-core.mjs'));
   const inlined = core
     .replace("import { join, basename } from 'node:path';", '')
@@ -184,11 +260,7 @@ async function buildCounterexample(base) {
     "import { basename as _fixtureBasename } from 'node:path';",
     "import { appendFile as _fixtureAppendFile } from 'node:fs/promises';",
     'const basename = _fixtureBasename, appendFile = _fixtureAppendFile;',
-    hooks.replace(ANCHOR, [
-      // The gesture: a module loaded for its existence and nothing else.
-      "  await loadLib('harness/sentinel.mjs');",
-      '  _fireCore = createHookFireCore({',
-    ].join('\n')),
+    hooks.replace(ANCHOR, delegation.join('\n')),
     '',
     '// ── the fire core, never extracted ─────────────────────────────────────',
     inlined,
@@ -198,6 +270,31 @@ async function buildCounterexample(base) {
   await writeFile(join(tree, HARNESS, 'sentinel.mjs'), SENTINEL);
   return tree;
 }
+
+// THE GESTURE: a module loaded for its existence and nothing else. Content
+// ablation catches this one — an inert stand-in still loads, so nothing breaks
+// and claim 4 correctly refuses the tree.
+const LOAD_ONLY = [
+  "  await loadLib('harness/sentinel.mjs');",
+  '  _fireCore = createHookFireCore({',
+];
+
+// THE FORGERY THE REVIEWER BUILT, and the reason claim 5 exists: it does not
+// merely load the sentinel, it BRANCHES on a value the sentinel exports. An
+// inert stand-in exports no SENTINEL, so the throw fires, the core never
+// constructs, and the behavior lock goes red — which is exactly the signal
+// claim 4 reads as "the module is load-bearing". Nothing was extracted, and
+// claims 1 through 4 are all satisfied.
+const VALUE_BRANCH = [
+  "  const _sentinel = await loadLib('harness/sentinel.mjs');",
+  "  if (_sentinel.SENTINEL !== true) throw new Error('fixture: the sentinel did not answer');",
+  '  _fireCore = createHookFireCore({',
+];
+
+const buildCounterexample = async (base) =>
+  inlineTheCore(await copyClosure(base, 'nothing-extracted'), LOAD_ONLY);
+const buildValueForgery = async (base) =>
+  inlineTheCore(await copyClosure(base, 'sentinel-value-branch'), VALUE_BRANCH);
 
 async function main() {
   const base = await mkdtemp(join(tmpdir(), 'maddu-pr2-sentinel-'));
@@ -252,6 +349,117 @@ async function main() {
     ok('control: the real repository still reads DONE',
       real.status === 0 && /extraction: done\b/.test(real.out),
       real.out.trim().split('\n').slice(0, 3).join(' | '));
+
+    // ══ CLAIM 5 ═════════════════════════════════════════════════════════════
+    // The section above uses the LOAD-ONLY sentinel, which content ablation
+    // already catches. This one uses the forgery the reviewer actually built:
+    // the same inline core, but hooks.mjs BRANCHES on a value the sentinel
+    // exports. That single line is the difference between a forgery claim 4
+    // refuses and one it certifies, so it is the only fixture that can show
+    // what claim 5 is for.
+    //
+    // evaluate() is called IN PROCESS here rather than spawned, because the
+    // question is WHICH claim refused — a structured field in the returned
+    // object and only prose on stdout. Asserting on the reason is not decoration:
+    // a NOT DONE for an incidental cause is the inert-fixture trap this file was
+    // written about, and it has cost this project five separate rounds.
+    console.log('\n  claim 5 - the forgery claims 1-4 certify, and the mass bound that answers it');
+    const forgery = await buildValueForgery(base);
+    const fHooks = await lf(join(forgery, 'commands', 'hooks.mjs'));
+    const fModules = (await readdir(join(forgery, HARNESS))).filter((f) => f.endsWith('.mjs'));
+
+    ok('fixture: the forgery keeps the entire fire core inline in commands/hooks.mjs',
+      fHooks.includes('function createHookFireCore(deps) {'), `${fHooks.split('\n').length} lines`);
+    ok('fixture: lib/harness/ holds one real module, and it is not the core',
+      fModules.length === 1 && fModules[0] === 'sentinel.mjs', fModules.join(', '));
+    ok('fixture: hooks.mjs carries a genuine quoted specifier for it, as claim 2 requires',
+      /(['"`])[^'"`\n]*harness\/[^'"`\n]*\.mjs\1/.test(fHooks));
+    ok('fixture: and BRANCHES on the value it exports - what makes this survive ablation',
+      /_sentinel\.SENTINEL !== true/.test(fHooks));
+
+    // Claims 1-3, measured. A refusal over a tree that no longer works would say
+    // nothing about the blind spot.
+    const fLock = runIn(forgery, LOCK);
+    note(`behavior lock on the forgery: exit ${fLock.status}, ${fLock.attempted} attempted - ${fLock.summary}`);
+    ok('fixture: claims 1-3 hold - the forgery is a working framework',
+      fLock.status === 0 && fLock.attempted > 0,
+      fLock.status === 0 ? '' : 'the tree is broken, so it is not a counterexample - re-aim the surgery');
+
+    // CLAIM 4, RUN RATHER THAN ARGUED. Its own experiment is called directly on
+    // the forgery, so "claims 1-4 certify this tree" is a measurement in this
+    // file and not a sentence in a header. Without it, a green claim 5 could be
+    // stopping a tree that claim 4 would have caught anyway.
+    const ablated = defaultAblationRunner(forgery);
+    const thereAttempted = (ablated.output || '').split('\n')
+      .filter((l) => l.includes('[PASS]') || l.includes('[FAIL]')).length;
+    note(`claim 4's own experiment on the forgery: ran=${ablated.ran} exit=${ablated.status} `
+      + `attempted ${fLock.attempted} here / ${thereAttempted} inert`);
+    ok('claim 5 premise: the forgery DEFEATS claim 4 - inert modules take the lock red',
+      ablated.ran === true && ablated.status !== 0,
+      ablated.ran ? `exit ${ablated.status}` : `experiment did not run: ${ablated.why}`);
+    ok('claim 5 premise: and claim 4\'s attribution control accepts that break',
+      fLock.attempted > 0 && thereAttempted === fLock.attempted,
+      `${fLock.attempted} vs ${thereAttempted}`);
+
+    const verdict5 = evaluate(forgery);
+    note(`evaluate(forgery): ok=${verdict5.ok}, ${verdict5.reasons.length} reason(s)`);
+    for (const r of verdict5.reasons) note(`  - ${r.slice(0, 150)}`);
+    const ceilingReason = verdict5.reasons.find((r) => /-line ceiling/.test(r));
+    ok('claim 5: the oracle refuses a tree where the machinery never left',
+      verdict5.ok === false, `ok=${verdict5.ok}`);
+    ok('claim 5: and it is claim 5 doing it - the ceiling is the ONLY reason given',
+      verdict5.reasons.length === 1 && !!ceilingReason,
+      verdict5.reasons.map((r) => r.slice(0, 70)).join(' | ') || '(no reasons)');
+
+    // ── anti-vacuity: claim 5 is not a constant no ──────────────────────────
+    // Built by the SAME machinery from the SAME files, minus the surgery. If
+    // this read NOT DONE too, everything above would be a checker broken into
+    // always refusing rather than a bound that discriminates.
+    console.log('\n  claim 5 controls - the bound must not fire on the honest tree');
+    const honest = await copyClosure(base, 'genuinely-extracted');
+    const hv = evaluate(honest);
+    ok('control: the same closure with the core still extracted reads DONE',
+      hv.ok === true, hv.reasons.map((r) => r.slice(0, 80)).join(' | '));
+
+    const honestHooks = await lf(join(honest, 'commands', 'hooks.mjs'));
+    const honestRaw = honestHooks.split('\n').length;
+    const ceiling = Number((/over the (\d+)-line ceiling/.exec(ceilingReason || '') || [])[1]);
+    ok('fixture: the ceiling is readable from the verdict, not guessed here',
+      Number.isFinite(ceiling) && ceiling > 0, String(ceiling));
+    note(`honest hooks.mjs: ${honestRaw} raw lines (${codeLines(honestHooks)} code) `
+      + `against a ${ceiling}-line ceiling - ${ceiling - honestRaw} lines of headroom`);
+
+    // The bound must survive ordinary review commentary. hooks.mjs grew 434 ->
+    // 552 -> 592 across two review rounds, almost entirely in comments, so a
+    // ceiling that a few of those can trip is one that gets raised on reflex
+    // until it means nothing. 120 lines is three rounds' worth at once.
+    await writeFile(join(honest, 'commands', 'hooks.mjs'), `${honestHooks}\n${
+      Array.from({ length: 120 }, (_, i) => `// fixture: an ordinary review comment, line ${i + 1}`).join('\n')}\n`);
+    const hv2 = evaluate(honest);
+    ok('claim 5 boundary: 120 added comment lines do not flip DONE to NOT DONE',
+      hv2.ok === true, hv2.reasons.map((r) => r.slice(0, 80)).join(' | '));
+
+    // ── THE RESIDUAL, measured ──────────────────────────────────────────────
+    // A raw line count is a bound on TEXT, and the adversary's cheapest lever
+    // against text is deleting comments — a mechanical transformation that
+    // changes no behavior, needs no skill, and is spelled out for them by the
+    // refusal itself, which prints both the count and the ceiling.
+    //
+    // MEASURED RATHER THAN PERFORMED: this asserts the arithmetic instead of
+    // running a comment-stripper over the fixture, because a regex strip can
+    // corrupt a string literal — the exact hazard the oracle's own header
+    // documents (`.maddu/config/**` opening a phantom block comment). codeLines()
+    // over-counts by construction, so a red here reports a gap AT LEAST this
+    // large.
+    //
+    // If this is red, the bound is defeated by `strip-comments` and the metric,
+    // not the number, is what needs changing: counting CODE lines leaves the
+    // adversary no lever but deleting logic, which claim 3 already catches.
+    const forgeryCode = codeLines(fHooks);
+    note(`forgery hooks.mjs: ${fHooks.split('\n').length} raw lines, of which ${forgeryCode} are code`);
+    ok('claim 5 residual: the ceiling is not defeated by deleting comments',
+      forgeryCode > ceiling,
+      `${forgeryCode} code lines against a ${ceiling}-line ceiling - a comment strip lands under it`);
   } finally {
     // Runs on every path out — assertion failure, harness throw (the `finally`
     // precedes main()'s catch), or success. The retries are the Windows hazard:

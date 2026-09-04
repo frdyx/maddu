@@ -185,7 +185,23 @@ async function prepareMutationWitness(ws) {
 
         // Record the breach FIRST and unconditionally — the floor must never
         // suppress the evidence, only the channel it used to travel on.
-        const { breach } = ws.lib.evaluateWitness(ctx, { exitCode });
+        //
+        // ASKED ABOUT THE CODE THIS RUN WILL ACTUALLY EXIT WITH, not the one the
+        // core happened to leave behind. `evaluateWitness` reports a breach only
+        // when exitCode === 0, because a command that failed owes no append. The
+        // floor below then rewrites any non-zero code to 0 — so a core that
+        // called `process.exit(7)` with zero appends and no declared no-op was
+        // evaluated at 7 (no breach, nothing recorded) and then exited 0. The run
+        // reported success, wrote nothing to the spine, and left no evidence it
+        // had happened: the floor had quietly converted a loud wrong answer into
+        // a silent unwitnessed success, which is the one outcome the mutation
+        // witness exists to make impossible.
+        //
+        // The guarantee is about what a run CLAIMS, and after the floor this run
+        // claims success. So the witness is evaluated against the post-floor
+        // code. The original code is not lost — it is named on stderr below.
+        const effectiveExitCode = isHookFire ? 0 : exitCode;
+        const { breach } = ws.lib.evaluateWitness(ctx, { exitCode: effectiveExitCode });
         if (breach) {
           const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env) ?? null;
           const breachId = ws.lib.recordBreachSync({ stateRoot, ctx, exitCode });
@@ -311,6 +327,24 @@ async function drainMutationBreaches(ws, raw, rest) {
   const isSyncInit = raw === 'spine' && rest[0] === 'sync' && rest[1] === 'init';
   const unattachedOnly = Array.isArray(res.errors) && res.errors.length > 0 && res.errors.every((e) => e.code === 'REPLICA_UNATTACHED');
   if (isSyncInit && unattachedOnly) return;
+  // Third pinned exception — and the one that is about containment rather than
+  // deadlock. `hooks fire <event>` runs inside a foreign harness that reads a
+  // non-zero exit as "this hook failed your tool call". The drain runs BEFORE
+  // `armCommandWitness` sets ws.ctx, so the hook-fire exit floor further down
+  // cannot reach this exit: the handler returns early on a null ctx. A single
+  // corrupt row in the breach spool therefore blocked the operator's edit
+  // without the hook core being reached at all — containment defeated one layer
+  // above the layer that implements it.
+  //
+  // The spool is RETAINED and the failure is still announced on stderr, so no
+  // evidence is lost and the next mutating invocation is still blocked; what is
+  // dropped is only this path's ability to fail somebody else's tool call.
+  const isHookFire = raw === 'hooks' && rest[0] === 'fire'
+    && ['session-start', 'session-end', 'pre-tool-use', 'pre-compact'].includes(rest[1]);
+  if (isHookFire) {
+    console.error(`maddu: mutation-breach drain failed (${res.failed} row(s): ${res.errors?.[0]?.error ?? 'unknown'}) — spool retained; hook fire proceeding so the tool call is not failed. Resolve before the next mutating command.`);
+    return;
+  }
   const detail = res.errors?.[0]?.error ?? 'unknown';
   const mode = await resolveInvocationMode(raw, rest); // shared classifier (r1 F7)
   if (mode !== 'read') {

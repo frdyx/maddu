@@ -12,7 +12,7 @@
 //   6. Appends FRAMEWORK_INSTALLED to the spine.
 //   7. Adds Máddu's standard .gitignore entries (token paths, no-token-export).
 
-import { mkdir, readFile, readdir, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile, appendFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseFlags } from './_args.mjs';
@@ -168,6 +168,24 @@ export default async function init(argv) {
   };
   await writeMadduJson(cwd, madduJson);
   console.log(`  wrote maddu.json (framework_version: ${fwVersion})`);
+
+  // An interrupted `maddu upgrade` leaves .maddu/state/upgrade-in-progress.json
+  // standing, and install-integrity treats that as a CRITICAL half-applied
+  // install. Clearing it here is not tidying: this line is what makes the
+  // documented remedy chain terminate. `maddu upgrade` cannot recover an install
+  // whose manifest is missing or truncated — it exits before it can read the
+  // plan — so it sends the operator to `maddu init --force`, and until now that
+  // command re-scaffolded every framework file and rewrote the manifest while
+  // leaving the marker untouched. The gate stayed red after the operator did
+  // exactly what they were told, with nothing left to try.
+  //
+  // Sound because of what has just happened above, not by assumption: every
+  // framework file has been rewritten from this checkout and `managed` recorded
+  // fresh, so the window the marker describes — file tree and manifest in
+  // disagreement — is closed by construction. Best-effort, like the upgrade's
+  // own clear: a failed unlink must never fail an install that succeeded.
+  try { await unlink(join(cwd, '.maddu', 'state', 'upgrade-in-progress.json')); }
+  catch (err) { if (err && err.code !== 'ENOENT' && err.code !== 'ENOTDIR') console.log(`  note: could not clear the stale upgrade marker (${err.code}) — \`maddu doctor\` will still flag it`); }
 
   // 5. First spine event(s) — CHAINED (audit P1). Install is single-writer, so we
   //    chain the prefix inline (no lock): genesis prev_hash=null, then the two

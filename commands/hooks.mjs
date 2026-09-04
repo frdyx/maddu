@@ -244,11 +244,51 @@ export default async function hooks(argv) {
     //
     // The flush rides an `exit` handler because every arm of the core ends in
     // process.exit, so there is no normal return to flush after.
+    // A CRASH IS A CRASH BY WHICHEVER DOOR IT LEAVES. Discarding the buffer in
+    // the `catch` below covers a core that throws — and misses a core that
+    // writes a deny and then calls `process.exit(7)`, which never reaches the
+    // catch at all. That run flushed its deny while bin/maddu.mjs clamped the
+    // status to 0, so Claude Code saw a successful hook emitting a refusal and
+    // BLOCKED the edit: a broken install silently vetoing the operator's work on
+    // a path whose every documented posture is fail-open. Two crashes with the
+    // same meaning had opposite outcomes purely because one used `throw` and the
+    // other used `exit`.
+    //
+    // So the exit code is intercepted rather than inferred. It cannot be read
+    // back at flush time: bin/maddu.mjs registered its witness handler FIRST and
+    // has already forced `process.exitCode` to 0 by the time this one runs, and
+    // that is deliberate there. Recording the core's own intent as it leaves is
+    // the only place the distinction still exists.
     let buffered = [];
+    let coreExit = 0;
     const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
     const flush = () => {
       const out = buffered; buffered = [];
+      // Non-zero means the core did not complete a decision — it stopped in the
+      // middle of one. Whatever it had begun to say is dropped, exactly as in
+      // the `catch`. The operator still learns through the breach spool and the
+      // stderr line bin/maddu.mjs writes when it applies the floor.
+      if (coreExit !== 0) return;
       for (const chunk of out) { try { realWrite(chunk); } catch {} }
+    };
+    // AND THE FLOOR IS APPLIED HERE TOO, not only in bin/maddu.mjs. That one
+    // lives inside `prepareMutationWitness`, so it exists only when the optional
+    // `mutation-witness.mjs` loads and a tier context arms — which is to say the
+    // containment was absent in exactly the partial-install and version-skew
+    // states it exists to tolerate. A hook must not fail the operator's tool
+    // call because an unrelated library is missing. Clamping in the command that
+    // owns the containment makes the guarantee local to the code that promises
+    // it; bin/maddu.mjs keeps its floor as the backstop for anything that exits
+    // before this handler is installed.
+    process.exit = (code) => {
+      coreExit = typeof code === 'number' ? code
+        : (typeof process.exitCode === 'number' ? process.exitCode : 0);
+      if (coreExit !== 0) {
+        try { process.stderr.write(`maddu: hooks fire ${event} would have exited ${coreExit}; forced to 0 so the tool call is not failed. See \`maddu doctor\`.\n`); } catch {}
+        return realExit(0);
+      }
+      return realExit(code);
     };
     process.stdout.write = (chunk, ...rest) => {
       buffered.push(chunk);

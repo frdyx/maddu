@@ -157,8 +157,19 @@ async function describeUpgradeLock(repoRoot) {
 // actually succeeded. A marker left standing over a complete install is a
 // false critical, and it self-heals — the next plain `maddu upgrade` reaches
 // the nothing-to-do path and clears it there.
+// Still best-effort — a failed delete must never fail an upgrade that actually
+// worked — but no longer SILENT. A swallowed failure here left the operator with
+// a success report on stdout and a critical `install-integrity` failure
+// afterwards, with nothing connecting the two; worse, the stale marker is then
+// read by the next plain run as an interrupted apply, whose paths it will
+// rewrite over any edit made since. Returns null on success (ENOENT included —
+// gone is the state we wanted) or the error code, for the caller to announce.
 async function clearUpgradeMarker(repoRoot) {
-  try { await unlink(markerPath(repoRoot)); } catch {}
+  try { await unlink(markerPath(repoRoot)); return null; }
+  catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return null;
+    return (err && err.code) || 'error';
+  }
 }
 
 // The genuinely-nothing-to-do exit. Reached only after the framework tree has
@@ -180,7 +191,27 @@ async function clearUpgradeMarker(repoRoot) {
 // marker reach this point, and the clear degrades from proof to inference and
 // the marker becomes self-erasing garbage.
 async function alreadyCurrent(repoRoot, madduJson, toVersion) {
-  await clearUpgradeMarker(repoRoot);
+  // THE CLEAR IS TAKEN UNDER THE LOCK, and skipped entirely if the lock is held.
+  // The lock added in v1.132 guards the APPLY; it did not guard this line, and
+  // this line deletes the apply's only evidence. The race is not hypothetical:
+  // this function is reached at the nothing-to-do exit, long before the apply
+  // path acquires the lock, so process B could read "no marker", pause, let
+  // process A take the lock and write ITS marker, then resume here and delete
+  // A's marker while A was still copying. If A was then killed, the install was
+  // half-applied with no marker standing and no record that anything began —
+  // precisely the lost-evidence failure the lock was introduced to close,
+  // reopened by the one path that never touched the lock.
+  //
+  // Failing to acquire is not an error here. It means another upgrade owns this
+  // install right now, so this run knows nothing about whether its own
+  // enumeration is still true, and the one thing it must not do is delete the
+  // other run's recovery evidence on the way out.
+  if (await acquireUpgradeLock(repoRoot)) {
+    await clearUpgradeMarker(repoRoot);
+    await releaseUpgradeLock(repoRoot);
+  } else {
+    console.error(`maddu upgrade: another upgrade is running here (${await describeUpgradeLock(repoRoot)}); leaving its recovery marker alone.`);
+  }
   // Mutation-witness declared no-op: already-current is a success that
   // deliberately touches nothing.
   try {
@@ -251,7 +282,9 @@ export default async function upgrade(argv) {
   try {
     madduJson = await readMadduJson(repoRoot);
   } catch (err) {
-    console.error(`maddu upgrade: ${join(repoRoot, 'maddu.json')} is present but not valid JSON — ${String((err && err.message) || err).split('\n')[0]}`);
+    console.error(err && err.unreadable
+      ? `maddu upgrade: ${join(repoRoot, 'maddu.json')} is present but this process cannot read it — ${String(err.message).split('\n')[0]}`
+      : `maddu upgrade: ${join(repoRoot, 'maddu.json')} is present but not valid JSON — ${String((err && err.message) || err).split('\n')[0]}`);
     sayMarker();
     console.error(REPAIR);
     process.exit(1);
@@ -296,12 +329,40 @@ export default async function upgrade(argv) {
     // every hash mismatch stays an operator edit. What this must not do is take
     // the nothing-to-do exit, which is why `sameVersion` below tests `!inFlight`
     // rather than `!inFlight?.paths.length`.
-    console.log(`An upgrade marker is present but ${inFlight.why}.`);
-    console.log(`  Something began an apply here and there is no record of it finishing.`);
-    console.log(`  Re-applying every framework file is the only way to be sure: maddu upgrade --force`);
+    console.error(`An upgrade marker is present but ${inFlight.why}.`);
+    console.error(`  Something began an apply here and there is no record of it finishing.`);
+    console.error(`  Re-applying every framework file is the only way to be sure: maddu upgrade --force`);
+    if (!force) {
+      // AND THEN IT STOPS. Saying "--force is the only way to be sure" and
+      // continuing anyway was worse than either choice alone. With no readable
+      // plan there is no path set, so every corrupt managed file reads as a hash
+      // mismatch with no marker entry — i.e. as an operator edit — and is
+      // skipped; the run then reached the manifest write, cleared the marker,
+      // and reported a repair. The corruption survived, the only evidence that
+      // an apply had been interrupted was destroyed, and the next run saw a
+      // settled install. The command performed none of what it reported, which
+      // is the one thing this repo does not allow (v1.124.0).
+      //
+      // Refusing keeps the marker standing, so `install-integrity` stays
+      // critical and the state remains visible until someone actually repairs
+      // it. The remedy named above is a command that runs and that does fix
+      // this, which is the other half of the rule (v1.129.0).
+      console.error(`  Refusing to continue: without that plan this run cannot tell your edits from the interrupted apply's half-written files, and finishing would clear the marker while leaving any corruption in place.`);
+      process.exit(1);
+    }
   } else if (inFlight) {
     console.log(`Recovering: an upgrade to v${inFlight.version} began ${inFlight.at} and did not finish.`);
-    console.log(`  ${inFlightPaths.size} file(s) were in its plan; completing them without disturbing local edits.`);
+    // Says what it DOES, not what sounds reassuring. The marker carries the
+    // PLANNED set, never the applied set — a crash records nothing about where
+    // it stopped — so a file in that plan is rewritten from the framework even
+    // if the operator edited it after the crash. "Without disturbing local
+    // edits" was true only of files outside the plan, and stating it flatly
+    // meant the one case where the operator loses work was the case the message
+    // promised was safe. The exposure is small and bounded (the window between
+    // the crash and this recovery) but it is real, so it is named here and in
+    // the integrity gate's remedy rather than left in a source comment.
+    console.log(`  ${inFlightPaths.size} file(s) were in its plan; completing them.`);
+    console.log(`  Those ${inFlightPaths.size} are re-written from the framework — including any you edited since the interruption, which cannot be told apart from that run's half-written output. Files outside the plan are left alone.`);
   }
 
   // A standing marker SHORT-CIRCUITS the nothing-to-do exit: an interrupted
@@ -442,12 +503,38 @@ export default async function upgrade(argv) {
   }
 
   const planned = [...actions.add, ...actions.update].map((a) => a.relPath);
-  await writeUpgradeMarker(repoRoot, {
-    version: toVersion,
-    from: fromVersion,
-    at: new Date().toISOString(),
-    paths: planned,
-  });
+  // IF THE INTENT CANNOT BE RECORDED, THE APPLY DOES NOT BEGIN.
+  //
+  // This used to be an unguarded await, and an unwritable marker path — a
+  // directory sitting where the file belongs, an ACL, a file held open — threw
+  // straight out of `writeJson`'s rename. The operator got a raw Node stack
+  // trace naming `async rename`, from a command whose own reader had already
+  // classified that exact state and printed a sentence about it two screens
+  // earlier: the recovery path crashing on the state it exists to recover from.
+  // The lock had been acquired by then and was never released, so the failure
+  // also left the repo refusing every subsequent upgrade until someone deleted
+  // a lock file by hand.
+  //
+  // Refusing is not caution, it is the same rule the marker itself encodes. The
+  // marker is what makes an interruption recoverable; an apply that begins
+  // without one is an apply whose failure mode is silent, and this command is
+  // about to rewrite several hundred files. Better to change nothing and say
+  // why.
+  try {
+    await writeUpgradeMarker(repoRoot, {
+      version: toVersion,
+      from: fromVersion,
+      at: new Date().toISOString(),
+      paths: planned,
+    });
+  } catch (err) {
+    await releaseUpgradeLock(repoRoot);
+    console.error(`maddu upgrade: cannot record this upgrade's recovery marker (${(err && err.code) || 'error'}), so nothing has been applied.`);
+    console.error(`    ${markerPath(repoRoot)}`);
+    console.error(`  That path must be a writable file. If a directory or a read-only file is sitting there, remove it and retry;`);
+    console.error(`  without the marker an interruption mid-apply would leave this install half-written with no record that it happened.`);
+    process.exit(1);
+  }
 
   // Apply. ADDS FIRST, and the order is load-bearing rather than tidy: a file
   // being ADDED is referenced by nothing yet, while an UPDATE can be a file
@@ -461,9 +548,27 @@ export default async function upgrade(argv) {
     await copyFile(absSource, dst);
     newManaged[relPath] = { sha256: await sha256OfFile(dst), installedBy: toVersion };
   }
+  // ENOENT is the success case (the file is already gone, which is the state we
+  // wanted). Anything else — EPERM, EBUSY, a Windows sharing violation because
+  // something has the file open — means it is STILL THERE, and dropping its
+  // manifest entry anyway would leave a framework file on disk that nothing
+  // manages, tracks, or hash-checks, while the run reported a clean removal.
+  // Keeping the entry is the honest outcome: the file stays managed, doctor can
+  // still see it, and the next upgrade retries the removal.
+  const removeFailed = [];
   for (const { relPath } of actions.remove) {
-    try { await unlink(join(repoRoot, relPath)); } catch {}
-    delete newManaged[relPath];
+    try {
+      await unlink(join(repoRoot, relPath));
+      delete newManaged[relPath];
+    } catch (err) {
+      if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) { delete newManaged[relPath]; continue; }
+      removeFailed.push({ relPath, code: (err && err.code) || 'error' });
+    }
+  }
+  if (removeFailed.length) {
+    console.error(`  ${removeFailed.length} file(s) removed upstream could not be deleted and are STILL PRESENT:`);
+    for (const { relPath, code } of removeFailed) console.error(`    ${relPath} (${code})`);
+    console.error(`  Their manifest entries are kept so they stay managed; delete them by hand or re-run \`maddu upgrade\`.`);
   }
   // Drop manifest entries for skipped-removed files? No — keep them so we can
   // re-detect on the next upgrade.
@@ -520,7 +625,12 @@ export default async function upgrade(argv) {
   // above. Everything below — shim chmod, config backfill, agent-file sync — is
   // guarded, but `spine.append` is not, and a throw there over a fully-applied
   // install must not leave a critical failure behind it.
-  await clearUpgradeMarker(repoRoot);
+  const markerLeft = await clearUpgradeMarker(repoRoot);
+  if (markerLeft) {
+    console.error(`  WARNING: the upgrade completed, but its recovery marker could not be deleted (${markerLeft}).`);
+    console.error(`    ${markerPath(repoRoot)}`);
+    console.error(`    Until it is gone, \`maddu doctor\` reports this install as half-applied, and a later plain \`maddu upgrade\` will re-write that run's planned files over any edit you make to them. Delete it by hand.`);
+  }
   // Released with the marker, and for the same reason: the window this guards is
   // the one where the file tree and its manifest disagree, and that window has
   // just closed. Everything below is post-hoc bookkeeping that a second upgrade
