@@ -11,6 +11,67 @@ narrative summary.
 
 ---
 
+## [v1.131.0] · 2026-09-04 · an interrupted upgrade can finally say so
+
+v1.130.0 needed a version bump to be deliverable at all — `maddu upgrade`
+short-circuited on version equality *before* it enumerated the framework tree,
+so an install already on the current version answered "Nothing to do" and never
+received a newly added module. Nothing in the suite said a word. That was found
+by an experiment run for an unrelated reason, and pulling on it exposed two more
+defects in the same path.
+
+**Adds now land before updates.** The apply loop ran every update before every
+add, so a release that adds a module *and* updates a file to depend on it wrote
+the dependent at position 295 and the dependency at 355 of 355. An interruption
+between them left new code with a missing dependency. The new order is
+load-bearing rather than tidy: a file being ADDED is referenced by nothing yet,
+so an interruption now leaves old code beside unreferenced new files, which
+still runs.
+
+**Version equality is no longer taken as evidence.** The framework tree is
+enumerated first, and the nothing-to-do exit is reached only once that
+enumeration has produced no adds and nothing missing from disk. A same-version
+run that finds either repairs exactly those. It records no stranded state while
+doing so — the version did not move, so nothing was stranded by that run, and
+branding a lawful local edit a partial upgrade would make every later
+`maddu upgrade` exit 1 forever over an edit the operator is entitled to keep.
+
+**A half-applied install can now be seen.** The manifest is written after the
+apply loop, so a crash leaves files that `managed` never listed — and a path
+absent from `managed` cannot be reported missing. `maddu doctor` returned
+77 pass / 6 warn / **0 fail** over an install whose enforcement was dead. Both
+plausible inferences were tried and rejected on evidence: comparing the recorded
+`framework_version` against the installed `maddu/version.json` fails because
+that file is itself managed and emitted last, so after a crash the two still
+agree; and comparing hashes fails because the apply-order fix above moves the
+interruption ahead of the update phase, so hash-drift vanishes from the very
+fixture that motivated it. Two fixes in one release, each quietly voiding the
+other's test.
+
+So `maddu upgrade` records its intent before touching a file — under
+`.maddu/state/`, not the tracked `maddu.json`, so one machine's crashed upgrade
+is never committed and never fails `install-integrity` for a teammate whose
+install is fine.
+
+**And it recovers, not merely detects.** Detection alone left the install worse
+off: a file the crashed run had half-delivered matches neither the stale
+manifest nor an operator's edit, so the re-run stranded its own work as "locally
+modified" and then demanded `--force` — which would have taken the operator's
+real edits with it. The marker therefore carries the planned apply set, and
+membership of that set is the evidence that a mismatched file is the
+framework's. Everything else keeps its protection. The residual is written into
+the code: `paths` is the planned set, not the applied set, so an edit made in
+the window between crash and recovery is lost if that file was in the plan.
+
+**The oracle was written first, by someone who did not write the fix.**
+`scripts/test/upgrade-delivery-integrity.mjs` was authored against the defects
+before any fix existed and shown red — 37 pass / 8 fail — then extended with
+recovery assertions that were themselves shown red against the prior commit
+before being accepted green, at 47 / 13. It now runs 60 assertions. It rejected
+a first attempt with a null dereference that would have shipped, and refused a
+part of its own brief that would have contradicted the existing
+`upgrade-partial-honesty` guard.
+
 ## [v1.130.0] · 2026-09-03 · one owner for the code that fires a hook
 
 Track A PR2. Every harness adapter still to come — Codex, Hermes, OpenHands —
