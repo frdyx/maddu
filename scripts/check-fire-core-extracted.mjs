@@ -26,14 +26,18 @@
 //   2. commands/hooks.mjs names it            (a module specifier, not prose)
 //   3. the behavior lock still passes         (nothing Claude Code sees changed)
 //   4. and the module is LOAD-BEARING         (delete it and the lock breaks)
-//   5. and the machinery actually LEFT        (hooks.mjs is under a size ceiling)
+//   5. and the machinery actually LEFT        (hooks.mjs is under a code-size ceiling)
 //
 // Claim 5 was added after a reviewer built the forgery claims 1-4 admit: keep
 // the whole core inline, add a `harness/sentinel.mjs`, branch on a value it
 // exports. Claims 1-3 pass, and ablating the sentinel breaks the lock with an
 // identical assertion count, so claim 4 reads the break as delegation. Claims
 // 1-4 all measure COUPLING, and coupling is forgeable; claim 5 measures MASS,
-// which that forgery cannot fake, because it has to keep the ~860 lines here.
+// which that forgery cannot fake, because it has to keep the core's ~539 lines
+// of code here. It counts CODE lines for a reason the suite proved rather than
+// argued: the first version counted raw lines, and stripping comments brought
+// the forgery to 885 against a 900 ceiling. Comments were a lever only the cheat
+// could pull; counting what runs removes it.
 //
 // WHY CLAIM 4 EXISTS — the gesture defect
 // Claims 1 and 2 used to be satisfiable by a gesture, and this was reproduced
@@ -316,12 +320,36 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // at the same targets as the rest of this file — the accident and the lazy
   // fake — and it closes the one specific escape a reviewer demonstrated rather
   // than claiming to close the class.
-  const HOOKS_CEILING = 900;
+  // CODE lines, not raw lines, and that distinction is the claim's robustness.
+  // A raw-line ceiling was tried first and the oracle's own suite broke it
+  // within the hour: re-inline the core, delete the comments, and the forgery
+  // came in at 885 raw lines against a 900 ceiling. Comments were a lever the
+  // forger could pull and the honest tree could not, because this codebase
+  // comments heavily — every line of explanation added to hooks.mjs pushed the
+  // honest file toward a bound the cheat could duck under by deleting text that
+  // does not run.
+  //
+  // Counting only lines that DO something takes the lever away from both sides.
+  // hooks.mjs is 344 code lines today; the core is 539 on its own, so a
+  // re-inlined tree lands near 883 however it is formatted. The ceiling sits at
+  // 550: a 206-line margin over the honest file, and 62% of what the cheat needs.
+  // Comment freely — it cannot move this number.
+  //
+  // The classifier is a heuristic, not a lexer, and the header above explains
+  // why a regex must never try to lex JavaScript here. This one only ever DROPS
+  // lines, so its error direction is safe: a mis-dropped line makes the count
+  // smaller, which can never manufacture a false NOT DONE. It can only make the
+  // ceiling slightly more generous, and 206 lines of margin absorb that.
+  const HOOKS_CEILING = 550;
+  const codeLines = (src) => src.split(/\r?\n/).filter((l) => {
+    const t = l.trim();
+    return t && !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+  }).length;
   if (reasons.length === 0) {
     try {
-      const lines = readFileSync(hooksCmd, 'utf8').split('\n').length;
+      const lines = codeLines(readFileSync(hooksCmd, 'utf8'));
       if (lines > HOOKS_CEILING) {
-        reasons.push(`commands/hooks.mjs is ${lines} lines, over the ${HOOKS_CEILING}-line ceiling — the firing machinery this PR moves out is ~860 lines, so a file this size is consistent with the core still living here beside a reference to lib/harness/, which every other claim would accept`);
+        reasons.push(`commands/hooks.mjs holds ${lines} lines of code, over the ${HOOKS_CEILING}-line ceiling — the firing machinery this PR moves out is ~539 lines of code, so a file this size is consistent with the core still living here beside a reference to lib/harness/, which every other claim would accept`);
       }
     } catch (err) {
       reasons.push(`commands/hooks.mjs could not be measured — ${err?.message || err}`);
