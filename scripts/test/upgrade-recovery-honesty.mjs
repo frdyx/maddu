@@ -161,7 +161,17 @@ const OBSOLETE_BODY = [
   '',
 ].join('\n');
 
-const LOCAL_EDIT = '\n<!-- operator edit -->\n';
+// A marker that cannot occur naturally in a framework file.
+//
+// The first version of this suite used the words "operator edit" — which appear
+// verbatim in maddu/docs/00-index.md ("never overwrites operator edits"). So
+// every "the local edit survived" assertion aimed at a docs file was satisfied
+// by the file's own prose and would have passed with the edit deleted, and the
+// one assertion that expected an overwrite failed for that reason rather than
+// for a defect. A substring that the corpus already contains is not a probe.
+// `plantLocalEdit` below proves the marker is ABSENT before writing it.
+const EDIT_MARK = 'maddu-fixture-operator-edit-7f3a';
+const LOCAL_EDIT = `\n<!-- ${EDIT_MARK} -->\n`;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -224,6 +234,15 @@ function gateVerdict(installDir, id) {
 // cause in the message or in the evidence, and either is an honest answer.
 const verdictText = (v) => (v ? `${v.message} ${JSON.stringify(v.evidence ?? null)}` : '');
 
+// Does this text identify the interrupted upgrade the marker records? Either
+// the marker's own timestamp — which can only come from having read it — or any
+// of the phrasings the codebase already uses for that state. Applied to the
+// GATE and to the upgrade COMMAND alike: both are asked about a half-applied
+// install, and an answer that names only the manifest sends the operator to fix
+// the wrong thing.
+const identifiesMarker = (text, marker) => !!marker && (String(text ?? '').includes(marker.at)
+  || /did not finish|half[- ]applied|interrupt/i.test(String(text ?? '')));
+
 const planCounts = (out) => ({
   update: Number((/^\s*update\s*:\s*(\d+)/m.exec(out) || [])[1] ?? -1),
   add: Number((/^\s*add\s*:\s*(\d+)/m.exec(out) || [])[1] ?? -1),
@@ -234,6 +253,23 @@ const planCounts = (out) => ({
 // state it was in. Matched on frame lines, not on the word "Error", so a
 // deliberate one-line diagnosis still passes.
 const hasStackTrace = (out) => /^\s+at\s+\S+/m.test(out || '');
+
+// WHICH PATH a run took, read off its own output. `alreadyCurrent()` prints
+// "Nothing to do." and returns before a plan is ever built; the plan+apply path
+// always prints its header. Every boundary below declares which branch it
+// reached, because the first version of this suite had a boundary that MEANT to
+// exercise the apply loop, silently took the no-op path instead, and therefore
+// pinned nothing — while looking correct. That is the inert-fixture trap
+// happening inside the anti-vacuity machinery itself, and the only defence is
+// to make the branch an observable rather than an assumption.
+const reachedApplyLoop = (out) => /^Upgrade plan:/m.test(out || '');
+
+// Every `maddu …` command a message offers as a remedy. The repo's own rule
+// (v1.129.0) is that a command Máddu tells you to run is a command Máddu has,
+// so a message naming one is making a checkable promise — and on a broken
+// install the promise is the whole value of the message.
+const remediesIn = (out) => [...String(out || '')
+  .matchAll(/\bmaddu\s+[a-z][a-z-]*(?:\s+--[a-z][a-z-]+)*/g)].map((m) => m[0].trim());
 
 // What the same-version repair probe can see today, computed independently of
 // the CLI: a fixture that accidentally left one of these non-empty would take
@@ -279,6 +315,19 @@ const install = async (name) => {
   await cp(PRISTINE, dir, { recursive: true });
   return dir;
 };
+
+// Plant an operator edit, and PROVE it is detectable before relying on it: the
+// marker must be absent beforehand. Without that half, an "the edit survived"
+// assertion is satisfied by any file whose own text already contains the
+// marker, and reports a pass over a fixture that never wrote anything.
+async function plantLocalEdit(dir, rel, label) {
+  ok(`${label}: the edit marker is absent before the fixture writes one`,
+    !(await readFile(join(dir, rel), 'utf8')).includes(EDIT_MARK), rel);
+  await appendFile(join(dir, rel), LOCAL_EDIT);
+  return rel;
+}
+const hasLocalEdit = async (dir, rel) =>
+  (await readFile(join(dir, rel), 'utf8')).includes(EDIT_MARK);
 
 const plantBarrier = async (dir) => {
   await rm(join(dir, BARRIER), { recursive: true, force: true });
@@ -430,9 +479,18 @@ async function main() {
 
       // Permanence: an install that cannot be repaired by the documented remedy
       // is not repaired by running it twice either.
+      //
+      // THE EXIT CODE IS HALF OF THIS CLAIM, and the first version of this
+      // suite checked only the bytes. A recovery that restores the file and
+      // then exits 1 forever — demanding a --force that has already happened —
+      // is not a recovery, and the byte check alone cannot see the difference.
       const second = maddu(dir, ['upgrade']);
-      ok('B1: and a second plain retry does not leave it corrupt',
-        (await readFile(join(dir, VICTIM))).equals(SRC_VICTIM), `exit ${second.status}`);
+      ok('B1: and a second plain retry leaves it repaired AND exits 0',
+        second.status === 0 && (await readFile(join(dir, VICTIM))).equals(SRC_VICTIM),
+        `exit ${second.status}`);
+      const settled = await readManifest(dir);
+      ok('B1: the recovery leaves no stranded record demanding a --force already performed',
+        settled.partial_upgrade === undefined, JSON.stringify(settled.partial_upgrade ?? null));
 
       // Control: the one path that works today, on the identical fixture.
       // Without it the four assertions above could be failing because the
@@ -476,6 +534,15 @@ async function main() {
       ok('B2: it names the file it could not read', run.out.includes('maddu.json'));
       ok('B2 boundary: and does not call a file that is present missing',
         !/maddu\.json (is )?missing/i.test(run.out));
+      // THE COMMAND, not only the gate. The first version of this suite asked
+      // the gate to name the interrupted upgrade and let `maddu upgrade` off
+      // with "no stack, mentions maddu.json, doesn't say missing" — which a
+      // command that has still never read the marker satisfies completely. The
+      // operator runs the command; the gate is what a later `doctor` says.
+      ok('B2: the upgrade itself identifies the upgrade that did not finish',
+        identifiesMarker(run.out, marker), run.out.split('\n').filter(Boolean)[0] || '(silence)');
+      ok('B2: and offers a remedy that is a command, not a description',
+        remediesIn(run.out).length > 0, remediesIn(run.out).join(' / ') || 'none named');
 
       const v = gateVerdict(dir, 'install-integrity');
       note(`install-integrity: ${v ? `ok=${v.ok} status=${v.status} - ${v.message.slice(0, 90)}` : 'gate not found'}`);
@@ -484,9 +551,7 @@ async function main() {
       ok('B2: it does not report a maddu.json that is present as missing',
         !!v && !/maddu\.json missing/i.test(v.message), v ? v.message.slice(0, 90) : '');
       ok('B2: and the verdict identifies the upgrade that did not finish',
-        !!v && !!marker && (verdictText(v).includes(marker.at)
-          || /did not finish|half[- ]applied|interrupt/i.test(verdictText(v))),
-        v ? verdictText(v).slice(0, 110) : '');
+        identifiesMarker(verdictText(v), marker), v ? verdictText(v).slice(0, 110) : '');
 
       // Control: the "missing" wording must stay reachable, for a manifest that
       // really is missing — otherwise this section could be satisfied by
@@ -497,6 +562,55 @@ async function main() {
       ok('control: a genuinely absent maddu.json is still reported missing',
         !!av && av.ok === false && /missing/i.test(av.message),
         av ? av.message.slice(0, 80) : 'gate not found');
+    }
+
+    // ── B2b: an ABSENT manifest with a standing marker ──────────────────────
+    // The truncated case above is not the only way the manifest stops
+    // answering. A kill during the very first write, or an operator deleting a
+    // file they were told was corrupt, leaves NO manifest at all — and the
+    // marker is still sitting beside it saying an apply did not finish. Reading
+    // only the manifest reduces that to "missing", which is true and useless:
+    // it describes the file, not the state, and the operator repairs the wrong
+    // thing. The control above pins that "missing" stays sayable; this pins
+    // that it must not be the WHOLE answer when the marker is there to read.
+    {
+      console.log('\n  B2b - an absent manifest must not hide a standing marker');
+      const dir = await install('b2b-absent-with-marker');
+      await plantBarrier(dir);
+      const crash = maddu(dir, ['upgrade', '--force']);
+      const marker = await readMarker(dir);
+      await clearBarrier(dir);
+      await rm(join(dir, 'maddu.json'), { force: true });
+
+      ok('B2b fixture: the manifest is gone and the marker is standing',
+        crash.status !== 0 && !(await exists(join(dir, 'maddu.json'))) && !!marker,
+        `crash exit ${crash.status}`);
+
+      const run = maddu(dir, ['upgrade']);
+      note(`upgrade over an absent manifest: exit ${run.status} - ${run.out.split('\n').filter(Boolean)[0] || '(silence)'}`);
+      ok('B2b: it does not die on an unhandled exception', !hasStackTrace(run.out),
+        (run.out.split('\n').find((l) => /^\s+at\s/.test(l)) || '').trim().slice(0, 70));
+      ok('B2b: it says more than "missing" - it names the unfinished upgrade',
+        identifiesMarker(run.out, marker), run.out.split('\n').filter(Boolean).slice(0, 2).join(' / ').slice(0, 120));
+
+      // A remedy is only a remedy if running it gets the operator out. Plain
+      // `maddu init` refuses when .maddu/ already exists, so a message naming
+      // it without --force is a dead end dressed as help — exactly the class
+      // v1.129.0 closed. Every command the message offers is tried; at least
+      // one has to work.
+      const offered = remediesIn(run.out);
+      ok('B2b: it offers at least one command as the way out', offered.length > 0,
+        offered.join(' / ') || 'none named');
+      const results = offered.map((r) => ({ r, status: maddu(dir, r.replace(/^maddu\s+/, '').split(/\s+/)).status }));
+      note(`remedies offered: ${results.map((x) => `${x.r} -> exit ${x.status}`).join(' ; ') || 'none'}`);
+      ok('B2b: and at least one of them actually runs',
+        results.some((x) => x.status === 0),
+        results.map((x) => `${x.r}=${x.status}`).join(' ') || 'nothing to try');
+      ok('B2b: after the remedy the install can account for itself again',
+        await exists(join(dir, 'maddu.json')));
+
+      const v = gateVerdict(dir, 'install-integrity');
+      note(`install-integrity after the remedy: ${v ? `ok=${v.ok} status=${v.status} - ${v.message.slice(0, 80)}` : 'gate not found'}`);
     }
 
     // ── M3 ──────────────────────────────────────────────────────────────────
@@ -568,22 +682,112 @@ async function main() {
     // ── boundary: a same-version repair still settles with no residue ────────
     // A B1 fix that reaches the apply loop more often must not reintroduce the
     // stranding upgrade-delivery-integrity's D2/R2 guard against: a legitimate
-    // local edit branded a partial upgrade makes every later run exit 1.
+    // local edit branded a partial upgrade makes every later run exit 1 forever,
+    // demanding a --force the operator has already run.
+    //
+    // THE FIRST VERSION OF THIS SECTION DID NOT TEST THAT. It made a local edit
+    // and nothing else, so both runs took `alreadyCurrent()` and returned before
+    // a plan existed — the manifest and reporting branches it claimed to pin
+    // were never executed. It passed, it looked like a boundary, and it was
+    // load-bearing for nothing. Each fixture below therefore ASSERTS WHICH PATH
+    // IT TOOK, so a boundary that stops reaching its branch fails instead of
+    // quietly going hollow.
     {
-      console.log('\n  boundary - a repair must not brand a legitimate local edit');
-      const dir = await install('boundary-local-edit');
-      const docs = Object.keys((await readManifest(dir)).managed)
-        .filter((p) => /^maddu\/docs\/.*\.md$/.test(p)).sort()[0];
-      await appendFile(join(dir, docs), LOCAL_EDIT);
-      const first = maddu(dir, ['upgrade']);
-      const second = maddu(dir, ['upgrade']);
-      ok('boundary: the edit survives a same-version run',
-        (await readFile(join(dir, docs), 'utf8')).includes('operator edit'), docs);
-      ok('boundary: which exits 0, and still exits 0 on the next run',
-        first.status === 0 && second.status === 0, `${first.status} then ${second.status}`);
-      ok('boundary: and no partial_upgrade is recorded over it',
-        (await readManifest(dir)).partial_upgrade === undefined,
-        JSON.stringify((await readManifest(dir)).partial_upgrade ?? null));
+      console.log('\n  boundaries - a repair must not brand a legitimate local edit');
+      const docsOf = async (d) => Object.keys((await readManifest(d)).managed)
+        .filter((p) => /^maddu\/docs\/.*\.md$/.test(p)).sort();
+
+      // (i) the NO-OP path, pinned as itself. Nothing to repair, so nothing may
+      // be recorded — and the run must genuinely be the short one.
+      {
+        const dir = await install('boundary-noop-path');
+        const [docs] = await docsOf(dir);
+        await plantLocalEdit(dir, docs, 'boundary (no-op path)');
+        const first = maddu(dir, ['upgrade']);
+        const second = maddu(dir, ['upgrade']);
+        ok('boundary (no-op path): the run really is the nothing-to-do one',
+          !reachedApplyLoop(first.out), first.out.split('\n').filter(Boolean)[0] || '');
+        ok('boundary (no-op path): the edit survives and both runs exit 0',
+          first.status === 0 && second.status === 0
+          && (await hasLocalEdit(dir, docs)),
+          `${first.status} then ${second.status}`);
+        ok('boundary (no-op path): and nothing is branded stranded',
+          (await readManifest(dir)).partial_upgrade === undefined,
+          JSON.stringify((await readManifest(dir)).partial_upgrade ?? null));
+      }
+
+      // (ii) the APPLY path on a same-version install — the one the first
+      // version missed. A missing managed file gives the run real work, so the
+      // plan is built, the edit is skipped, and the manifest/report branches
+      // actually execute with a skipped path in hand. That is precisely where a
+      // stranded record gets written by mistake.
+      {
+        const dir = await install('boundary-apply-path');
+        const [docs, restorable] = await docsOf(dir);
+        await plantLocalEdit(dir, docs, 'boundary (apply path)');
+        await rm(join(dir, restorable), { force: true });
+        const first = maddu(dir, ['upgrade']);
+        ok('boundary (apply path): the run reaches the plan, not the short exit',
+          reachedApplyLoop(first.out), first.out.split('\n').filter(Boolean)[0] || '');
+        ok('boundary (apply path): it repairs what was missing and exits 0',
+          first.status === 0 && (await exists(join(dir, restorable))), `exit ${first.status}`);
+        ok('boundary (apply path): the unrelated local edit survives',
+          await hasLocalEdit(dir, docs), docs);
+        ok('boundary (apply path): a same-version repair records nothing stranded',
+          (await readManifest(dir)).partial_upgrade === undefined,
+          JSON.stringify((await readManifest(dir)).partial_upgrade ?? null));
+        const second = maddu(dir, ['upgrade']);
+        ok('boundary (apply path): and the run after it exits 0 rather than demanding --force',
+          second.status === 0,
+          `exit ${second.status} / ${second.out.split('\n').filter(Boolean)[0] || ''}`);
+      }
+
+      // CONTROL for the three `partial_upgrade === undefined` assertions above
+      // and below. Each of them is a claim that a channel stayed SILENT, and a
+      // channel that never speaks is indistinguishable from one that is broken.
+      // A genuine version MOVE that withholds an operator's edit is the case
+      // where a stranded record is CORRECT — so this shows the record being
+      // written, and the follow-up run exiting 1 to demand the --force. Without
+      // it, "no partial_upgrade was recorded" would be satisfied by a manifest
+      // key nothing ever sets.
+      {
+        const dir = await install('boundary-stranded-control');
+        const [docs] = await docsOf(dir);
+        await backdate(dir);
+        await plantLocalEdit(dir, docs, 'control (stranded)');
+        const moved = maddu(dir, ['upgrade']);
+        const rec = (await readManifest(dir)).partial_upgrade;
+        ok('control: a version MOVE that withholds an edit DOES record it as stranded',
+          moved.status === 0 && !!rec && (rec.paths || []).includes(docs),
+          `exit ${moved.status} / ${JSON.stringify(rec?.paths ?? null)}`);
+        const next = maddu(dir, ['upgrade']);
+        ok('control: and the run after that exits 1 demanding --force, so the channel has both states',
+          next.status === 1, `exit ${next.status}`);
+      }
+
+      // (iii) the same-version --force repair, run to completion. This is the
+      // reported escape in its exact shape: --force applies everything, so
+      // nothing is withheld and nothing can honestly be called stranded — but
+      // the run does reach the plan and the reporting branches, and a record
+      // written here makes every later plain run exit 1 demanding a --force
+      // that has already happened.
+      {
+        const dir = await install('boundary-force-repair');
+        const [docs] = await docsOf(dir);
+        await plantLocalEdit(dir, docs, 'boundary (--force repair)');
+        const forced = maddu(dir, ['upgrade', '--force']);
+        ok('boundary (--force repair): it reaches the plan and exits 0',
+          reachedApplyLoop(forced.out) && forced.status === 0, `exit ${forced.status}`);
+        ok('boundary (--force repair): --force overwrote the edit, as it is entitled to',
+          !(await hasLocalEdit(dir, docs)), docs);
+        ok('boundary (--force repair): nothing was withheld, so nothing is recorded stranded',
+          (await readManifest(dir)).partial_upgrade === undefined,
+          JSON.stringify((await readManifest(dir)).partial_upgrade ?? null));
+        const after = maddu(dir, ['upgrade']);
+        ok('boundary (--force repair): the next plain run exits 0, not 1 demanding --force again',
+          after.status === 0,
+          `exit ${after.status} / ${after.out.split('\n').filter(Boolean)[0] || ''}`);
+      }
     }
   } finally {
     // Teardown runs on every path out of the block above — assertion failure,

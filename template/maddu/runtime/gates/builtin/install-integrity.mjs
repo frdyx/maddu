@@ -18,10 +18,20 @@ async function sha256OfFile(p) {
 // null = genuinely absent; THROWS = present but unparseable. The two need
 // different verdicts and different remedies, and collapsing them into null made
 // the gate report a truncated manifest as "missing".
+// THREE outcomes. null = genuinely absent (ENOENT). A read failure for any other
+// reason — an ACL, a sharing violation, a directory where a file belongs — is
+// NOT absence and must not be reported as "missing"; it sends the operator to
+// re-scaffold a file that is sitting right there. And a present-but-unparseable
+// file throws, which the caller distinguishes again.
 async function readMadduJson(repoRoot) {
   let raw;
   try { raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8'); }
-  catch { return null; }
+  catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return null;
+    const e = new Error(`maddu.json could not be read (${err && err.code || 'error'})`);
+    e.unreadable = true;
+    throw e;
+  }
   return JSON.parse(raw);
 }
 
@@ -83,7 +93,9 @@ export default {
     if (readErr) {
       return {
         ok: false,
-        message: `maddu.json is present but not valid JSON — ${String((readErr && readErr.message) || readErr).split('\n')[0]}`,
+        message: readErr.unreadable
+          ? `${String(readErr.message).split('\n')[0]} — it is present but this process cannot read it`
+          : `maddu.json is present but not valid JSON — ${String((readErr && readErr.message) || readErr).split('\n')[0]}`,
         evidence: { repoRoot: ctx.repoRoot, unreadable: 'maddu.json' },
       };
     }

@@ -102,6 +102,36 @@ const CORES = {
   factoryThrows: 'export function createHookFireCore() { throw new Error("fixture: the factory threw"); }\n',
   fireThrows: 'export function createHookFireCore() { return { fire() { throw new Error("fixture: the core threw"); } }; }\n',
   fireRejects: 'export function createHookFireCore() { return { async fire() { throw new Error("fixture: the core rejected"); } }; }\n',
+
+  // Returns normally instead of ending the process. The shipped core's handlers
+  // all exit, so this arm is reached only by a core that is wrong — which is
+  // exactly when the fallthrough has to be right. It is also the shape a future
+  // adapter reaches innocently, by returning a value rather than exiting, and a
+  // fallthrough that records nothing is a mutation-witness breach that gets
+  // rewritten to exit 1.
+  fireReturns: 'export function createHookFireCore() { return { fire() { return; } }; }\n',
+
+  // Ends the process itself, with a code of its own choosing. Not a throw, so
+  // no catch anywhere in hooks.mjs can see it — see the note on this case in
+  // the section below, which is where the interesting argument lives.
+  fireExits: 'export function createHookFireCore() { return { fire() { process.exit(7); } }; }\n',
+
+  // The dangerous one: it DECIDES before it fails. A deny is already on stdout
+  // when the throw happens, so containment arrives too late to prevent the
+  // refusal — it can only choose what to do about the second document.
+  denyThenThrow: [
+    'const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse",',
+    '  permissionDecision: "deny", permissionDecisionReason: "fixture: a broken core denied" } });',
+    'export function createHookFireCore() {',
+    '  return {',
+    '    fire() {',
+    '      process.stdout.write(DENY);',
+    '      throw new Error("fixture: threw after writing to stdout");',
+    '    },',
+    '  };',
+    '}',
+    '',
+  ].join('\n'),
 };
 
 // ── the verdict reader ───────────────────────────────────────────────────────
@@ -263,6 +293,90 @@ async function main() {
       const t = fire(dir, 'pre-tool-use', p['pre-tool-use']);
       ok(`M5 (${label}): a broken core never denies the tool call`,
         verdictOf(t.out) !== 'deny', verdictOf(t.out));
+    }
+
+    // ── M5b: a core that RETURNS instead of exiting ─────────────────────────
+    // The shipped core's handlers all end the process, so nothing downstream of
+    // the call ever runs today. That makes the fallthrough the least-exercised
+    // line on the path — and it is not inert, because `hooks` is a
+    // mutating-tier verb: falling out of the call having recorded nothing is a
+    // mutation-witness breach, which bin/maddu.mjs rewrites to exit 1. A hook
+    // that fails the tool call because its core returned politely is the same
+    // defect as one that fails because its core threw.
+    {
+      console.log('\n  M5b - a core that returns normally must still not fail the tool call');
+      const dir = await installWith('fire-returns', CORES.fireReturns);
+      const p = payloads(dir);
+      for (const ev of EVENTS) {
+        const r = fire(dir, ev, p[ev]);
+        ok(`M5b: ${ev} exits 0 when the core returns instead of exiting`,
+          r.status === 0, `exit ${r.status}${r.err ? ` / ${r.err.split('\n')[0].slice(0, 50)}` : ''}`);
+        ok(`M5b: ${ev} stdout stays empty or parseable`,
+          verdictOf(r.out) !== 'unparseable', r.out.slice(0, 50));
+      }
+    }
+
+    // ── M5c: a core that ends the process itself ────────────────────────────
+    // `process.exit(7)` inside fire() is not a throw, so no catch in hooks.mjs
+    // can see it. It was proposed as an ASSERTED KNOWN LIMIT. It is not one.
+    //
+    // MEASURED, not assumed: a `process.on('exit')` listener that assigns
+    // `process.exitCode = 0` overrides an explicit `process.exit(7)` — the
+    // listener observes code 7 and the process still terminates 0. That is not
+    // a theoretical mechanism for this CLI either: bin/maddu.mjs ALREADY
+    // registers such a listener and already rewrites the code through it (the
+    // mutation-witness breach path). The capability is installed; only the
+    // decision to use it here is missing.
+    //
+    // So this asserts the correct outcome. If it is ever deliberately accepted
+    // as a limit instead, this assertion is where that decision gets made,
+    // visibly, rather than by the case never having been written down.
+    {
+      console.log('\n  M5c - a core that exits the process itself must not carry its code out');
+      const dir = await installWith('fire-exits', CORES.fireExits);
+      const p = payloads(dir);
+      for (const ev of ['session-start', 'pre-tool-use']) {
+        const r = fire(dir, ev, p[ev]);
+        ok(`M5c: ${ev} exits 0 even though the core called process.exit(7)`,
+          r.status === 0, `exit ${r.status}`);
+      }
+    }
+
+    // ── M5d: a core that DECIDES, then fails ────────────────────────────────
+    // The only case where containment cannot undo the damage. The core writes a
+    // deny and then throws, so the refusal is already through the pipe before
+    // anything catches. What is still decidable is the SECOND document: append
+    // the arm's own advisory and stdout holds two JSON values, which is not
+    // parseable; suppress it and the deny stands alone.
+    //
+    // The control below proves the single-document assertion can fail, so it is
+    // measuring the output and not the reader's good manners.
+    {
+      console.log('\n  M5d - a core that writes a verdict and then throws');
+      ok('control: two concatenated documents ARE unparseable, so the check below can fail',
+        verdictOf('{"hookSpecificOutput":{"additionalContext":"a"}}{"hookSpecificOutput":{"additionalContext":"b"}}') === 'unparseable');
+
+      const dir = await installWith('deny-then-throw', CORES.denyThenThrow);
+      const r = fire(dir, 'pre-tool-use', payloads(dir)['pre-tool-use']);
+      note(`deny-then-throw: exit ${r.status}, verdict ${verdictOf(r.out)}, stdout ${r.out.slice(0, 100)}`);
+
+      ok('M5d: the throw after the write is still contained - exit 0',
+        r.status === 0, `exit ${r.status}`);
+      ok('M5d: stdout carries at most ONE document, never a second appended after it',
+        verdictOf(r.out) !== 'unparseable', verdictOf(r.out));
+      ok('M5d: and never prints a stack trace',
+        !hasStackTrace(r.err) && !hasStackTrace(r.out), firstFrame(`${r.err}\n${r.out}`));
+
+      // THE RESIDUAL, asserted rather than described. Suppressing the second
+      // document is strictly better than emitting it, but it leaves a refusal
+      // standing that was produced by a core which did not finish — the hook
+      // failing the user's tool call, which is the one thing this whole path
+      // exists to prevent. Buffering the core's stdout and discarding it when
+      // the call throws closes it; flushing on the intentional-exit path keeps
+      // a legitimate verdict. Until then this is red, and being red is how the
+      // gap stays visible instead of becoming folklore.
+      ok('M5d: a core that failed does not leave a refusal standing',
+        verdictOf(r.out) !== 'deny', verdictOf(r.out));
     }
   } finally {
     // Runs on every path out — assertion failure, harness throw (the `finally`

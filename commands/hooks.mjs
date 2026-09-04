@@ -221,15 +221,55 @@ export default async function hooks(argv) {
     // mutating-tier verb, so exiting 0 with no spine append and no declared
     // excuse is a mutation-witness breach that gets rewritten back to exit 1,
     // which would defeat the containment while appearing to implement it.
+    // stdout is a PARSED contract, so the core's output is BUFFERED and only
+    // released once the core has finished having opinions.
+    //
+    // A core that writes a verdict and then throws has not made a decision, it
+    // has crashed halfway through making one. Three options were weighed.
+    // Emitting an advisory after its output yields two JSON documents; that
+    // usually fails to parse and the tool proceeds — but only by ACCIDENT, and
+    // not reliably, since many readers stop at the first complete value and
+    // would honour a deny with trailing data. Correctness that depends on
+    // another parser's leniency is not correctness. Merely suppressing the
+    // advisory leaves the crashed core's deny standing, so a broken install
+    // silently blocks edits. Buffering discards both problems: if the catch
+    // below runs, the core failed and whatever it had started to say is dropped.
+    //
+    // DELIBERATE BEHAVIOUR CHANGE, not a side effect: a core that emits a
+    // legitimate deny and then throws during cleanup loses that refusal. That is
+    // the right way for this path to fail — every documented posture here is
+    // fail-open ("may never fail the tool call", "fails OPEN: never blocks
+    // compaction") — and the operator still learns through the breach spool and
+    // the SessionStart notice below.
+    //
+    // The flush rides an `exit` handler because every arm of the core ends in
+    // process.exit, so there is no normal return to flush after.
+    let buffered = [];
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const flush = () => {
+      const out = buffered; buffered = [];
+      for (const chunk of out) { try { realWrite(chunk); } catch {} }
+    };
+    process.stdout.write = (chunk, ...rest) => {
+      buffered.push(chunk);
+      const cb = rest.find((a) => typeof a === 'function');
+      if (cb) cb();
+      return true;
+    };
+    process.on('exit', flush);
     try {
       await core.fire(event);
     } catch (err) {
+      buffered = [];   // the core crashed — it does not get to have said anything
       try {
         (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-threw');
       } catch { /* the excuse is best-effort — never why a hook fails */ }
+      // The buffer is empty, so this is now the ONLY document on stdout and is
+      // guaranteed parseable — which is what makes emitting it safe here where
+      // suppression was necessary before.
       if (event === 'session-start') {
         try {
-          process.stdout.write(JSON.stringify({
+          realWrite(JSON.stringify({
             hookSpecificOutput: {
               hookEventName: 'SessionStart',
               additionalContext: `Máddu session discipline did not start — the hook fire-core failed while running (${String((err && err.message) || err).split('\n')[0].slice(0, 140)}). Run \`maddu doctor\`; run \`maddu register\` and \`maddu slice-stop\` by hand until it is fixed.`,
@@ -239,8 +279,14 @@ export default async function hooks(argv) {
       }
       process.exit(0);
     }
-    // Unreachable in practice: every arm exits. Belt and braces if one ever
-    // returns normally — a hook that falls out of its handler still exits 0.
+    // A core that RETURNS instead of exiting. Every shipped arm ends in
+    // process.exit, so this is unreachable today — but it is reachable by a
+    // future arm that forgets, and falling through here without declaring a
+    // no-op is a mutation-witness breach that rewrites this exit 0 back to 1.
+    // The containment would then be defeated by the one path that looked safest.
+    try {
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-returned-without-exiting');
+    } catch { /* best-effort */ }
     process.exit(0);
   }
 

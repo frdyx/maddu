@@ -180,11 +180,22 @@ export function defaultAblationRunner(root) {
     }
     const target = join(sandbox, ...HARNESS);
     if (!existsSync(target)) return { ran: false, why: 'lib/harness/ did not survive the sandbox copy' };
-    const neutered = readdirSync(target, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith('.mjs'))
-      .map((e) => e.name);
+    // RECURSIVE. A non-recursive readdir neuters only the immediate children, so
+    // a later extraction that nests the core (lib/harness/fire/fire-core.mjs)
+    // beside a top-level adapter would leave the real core intact during the
+    // experiment, the lock would stay green, and an honest tree would be
+    // reported NOT DONE. The claim says "every module under lib/harness/", so
+    // the walk has to mean it.
+    const neutered = [];
+    const walk = (dir, rel) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, e.name), r = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(abs, r);
+        else if (e.isFile() && e.name.endsWith('.mjs')) { writeFileSync(abs, INERT_MODULE); neutered.push(r); }
+      }
+    };
+    walk(target, '');
     if (!neutered.length) return { ran: false, why: 'the sandbox copy of lib/harness/ holds no .mjs file to neuter' };
-    for (const name of neutered) writeFileSync(join(target, name), INERT_MODULE);
     const r = defaultLockRunner(sandbox);
     return { ran: true, status: r.status, output: r.output, neutered };
   } catch (err) {
@@ -309,5 +320,9 @@ if (invokedDirectly) {
     for (const r of reasons) console.error(`  - ${r}`);
     process.exit(1);
   }
-  console.log(`PR2 fire-core extraction: done (${modules.length} module(s) in lib/harness/, hooks.mjs delegates, behavior lock green, and red without the module)`);
+  // "with the module inert", not "without the module" — the experiment stopped
+  // deleting the directory and started replacing its exports, and a banner that
+  // describes the wrong experiment is a small lie in the one place a reader
+  // looks to find out what was proven.
+  console.log(`PR2 fire-core extraction: done (${modules.length} module(s) in lib/harness/, hooks.mjs delegates, behavior lock green, and red with those modules inert)`);
 }

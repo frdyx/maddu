@@ -80,6 +80,17 @@ export async function requireSourceLayout(commandName) {
 
 export async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
+// exists() collapses every stat failure to false, which is right for "should I
+// bother" questions and WRONG for "is it safe to forget this file". A path whose
+// attributes are momentarily unreadable (ACL, sharing violation, transient FS
+// error) is not the same as a path that is gone, and treating it as gone lets a
+// still-present framework file be dropped from the manifest and left unmanaged.
+// Only ENOENT/ENOTDIR is absence.
+export async function absent(p) {
+  try { await stat(p); return false; }
+  catch (err) { return err && (err.code === 'ENOENT' || err.code === 'ENOTDIR'); }
+}
+
 export async function readJson(p) {
   return JSON.parse(await readFile(p, 'utf8'));
 }
@@ -97,6 +108,17 @@ export async function readJson(p) {
 // through the file that has to be read to reach it.
 export async function writeJson(p, obj) {
   await mkdir(dirname(p), { recursive: true });
+  // Sweep this writer's own earlier leftovers first. A kill between the write
+  // and the rename below leaves the temp file behind — the reader never sees it,
+  // but "always cleaned up" would be false and repeated failed upgrades would
+  // accumulate residue beside the manifest. Only this pid's files are swept, so
+  // a concurrent writer's in-flight temp is never touched.
+  const dir = dirname(p), base = `${p.split(/[\\/]/).pop()}.tmp-${process.pid}-`;
+  try {
+    for (const name of await readdir(dir)) {
+      if (name.startsWith(base)) { try { await unlink(join(dir, name)); } catch {} }
+    }
+  } catch { /* the sweep is housekeeping — never why a write fails */ }
   const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
   try {
     await writeFile(tmp, JSON.stringify(obj, null, 2) + '\n');
