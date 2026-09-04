@@ -24,6 +24,98 @@ import {
   frameworkVersion, ensureShimExecutable, requireSourceLayout, TEMPLATE_ROOT
 } from './_manifest.mjs';
 
+// ── the in-flight marker ────────────────────────────────────────────────────
+// `maddu upgrade` records its intent before it touches a file, so an install
+// can say "an apply began here and did not finish" without having to infer it.
+// Inference does not work: the manifest is written last, so a crashed upgrade
+// leaves files that `managed` never listed, and a path absent from `managed`
+// cannot be reported missing. Comparing the recorded framework_version against
+// the installed maddu/version.json fails too — version.json is itself managed
+// and emitted last, so after a crash the two still agree.
+//
+// It lives under .maddu/state/ and NOT in maddu.json, which is tracked: a
+// crashed upgrade on one machine must not be committed and then fail
+// install-integrity for every teammate whose install is fine. .maddu/* is
+// gitignored, so the marker stays device-local, which is what it describes.
+//
+// It carries the PLANNED APPLY SET, and that is what makes recovery work
+// rather than merely detection. A file the crashed run half-delivered has a
+// hash that no longer matches the stale manifest, and is otherwise
+// indistinguishable from an operator's own edit — so the re-run would strand
+// its own work as "locally modified", leaving a permanent warning and an
+// install that demands --force forever, which would then also overwrite the
+// operator's real edits. Being in this set is the evidence that a mismatched
+// file is the framework's, not the operator's.
+//
+// STATED RESIDUAL: `paths` is the PLANNED set, not the APPLIED set — nothing
+// records which of them actually landed before the interruption, and recording
+// that would mean rewriting this file once per copied file. So an operator who
+// edits a framework file in the window BETWEEN a crashed upgrade and its
+// recovery loses that edit, if the file was in the plan. That is the intended
+// trade — a file the previous run was mid-way through writing held no content
+// the operator could rely on — but it is a real narrowing of the local-edit
+// protection inside one narrow window, and it is not what "planned" suggests
+// on a first reading, which is why it is written down here.
+function markerPath(repoRoot) {
+  return join(repoRoot, '.maddu', 'state', 'upgrade-in-progress.json');
+}
+async function readUpgradeMarker(repoRoot) {
+  try {
+    const m = JSON.parse(await readFile(markerPath(repoRoot), 'utf8'));
+    return m && Array.isArray(m.paths) ? m : null;
+  } catch { return null; }
+}
+async function writeUpgradeMarker(repoRoot, marker) {
+  await mkdir(dirname(markerPath(repoRoot)), { recursive: true });
+  await writeFile(markerPath(repoRoot), JSON.stringify(marker, null, 2) + '\n');
+}
+// Best-effort by design: a failed delete must never fail an upgrade that
+// actually succeeded. A marker left standing over a complete install is a
+// false critical, and it self-heals — the next plain `maddu upgrade` reaches
+// the nothing-to-do path and clears it there.
+async function clearUpgradeMarker(repoRoot) {
+  try { await unlink(markerPath(repoRoot)); } catch {}
+}
+
+// The genuinely-nothing-to-do exit. Reached only after the framework tree has
+// been enumerated and shown to hold no file this install is missing — version
+// equality alone was never sufficient evidence for saying this.
+//
+// INVARIANT, and the line to defend in review: this must stay downstream of the
+// enumeration. Clearing the marker here is sound because arriving here PROVES
+// the install is complete — nothing unlisted, nothing missing — which are the
+// only two states a half-applied install can be in. Re-introduce a
+// version-equality fast path in front of it (the exact instinct that caused the
+// defect this function exists for) and the clear silently degrades from proof
+// to inference, making the marker self-erasing garbage.
+async function alreadyCurrent(repoRoot, madduJson, toVersion) {
+  await clearUpgradeMarker(repoRoot);
+  // Mutation-witness declared no-op: already-current is a success that
+  // deliberately touches nothing.
+  try {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-current');
+  } catch {}
+  // A prior upgrade that skipped locally-modified files bumped
+  // framework_version anyway, so those files are stranded at their old
+  // content while the manifest claims the new version. Saying "nothing to
+  // do" there is a false report about state, and the repo-wide rule is that
+  // no command reports success it did not perform (v1.124.0). Report the
+  // stranded set and exit non-zero, the same way `maddu sources status`
+  // exits 1 when pins have drifted.
+  const stranded = Array.isArray(madduJson.partial_upgrade?.paths) ? madduJson.partial_upgrade.paths : [];
+  if (stranded.length) {
+    console.error(`Framework version is v${toVersion}, but ${stranded.length} managed file(s) were never updated to it.`);
+    console.error(`  Locally modified when v${madduJson.partial_upgrade.version} was applied, so upgrade left them alone:`);
+    for (const p of stranded.slice(0, 20)) console.error(`    ${p}`);
+    if (stranded.length > 20) console.error(`    ... and ${stranded.length - 20} more`);
+    console.error(`  Resolve with: maddu upgrade --force   (overwrites those local edits)`);
+    process.exit(1);
+  }
+  console.log(`Already on framework v${toVersion}. Nothing to do.`);
+  console.log(`  (pass --force to re-overwrite all framework files anyway)`);
+}
+
 export default async function upgrade(argv) {
   const { flags } = parseFlags(argv);
   const force = !!flags.force;
@@ -51,37 +143,49 @@ export default async function upgrade(argv) {
 
   const fromVersion = madduJson.framework_version;
   const toVersion = await frameworkVersion();
-  if (fromVersion === toVersion && !force) {
-    // Mutation-witness declared no-op: already-current is a success that
-    // deliberately touches nothing.
-    try {
-      const { loadLibOptional } = await import('./_libroot.mjs');
-      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-already-current');
-    } catch {}
-    // A prior upgrade that skipped locally-modified files bumped
-    // framework_version anyway, so those files are stranded at their old
-    // content while the manifest claims the new version. Saying "nothing to
-    // do" there is a false report about state, and the repo-wide rule is that
-    // no command reports success it did not perform (v1.124.0). Report the
-    // stranded set and exit non-zero, the same way `maddu sources status`
-    // exits 1 when pins have drifted.
-    const stranded = Array.isArray(madduJson.partial_upgrade?.paths) ? madduJson.partial_upgrade.paths : [];
-    if (stranded.length) {
-      console.error(`Framework version is v${toVersion}, but ${stranded.length} managed file(s) were never updated to it.`);
-      console.error(`  Locally modified when v${madduJson.partial_upgrade.version} was applied, so upgrade left them alone:`);
-      for (const p of stranded.slice(0, 20)) console.error(`    ${p}`);
-      if (stranded.length > 20) console.error(`    ... and ${stranded.length - 20} more`);
-      console.error(`  Resolve with: maddu upgrade --force   (overwrites those local edits)`);
-      process.exit(1);
-    }
-    console.log(`Already on framework v${toVersion}. Nothing to do.`);
-    console.log(`  (pass --force to re-overwrite all framework files anyway)`);
-    return;
-  }
 
+  // Enumerated BEFORE the version check, deliberately. Version equality is not
+  // evidence that there is nothing to do: a managed file can be missing from
+  // disk, and the shipped framework can hold a file this install's manifest
+  // never listed — a release that ADDS a module, or an upgrade that died before
+  // writing the manifest. Neither is visible without walking the framework
+  // tree, and the old short-circuit returned above this walk, so `maddu upgrade`
+  // answered "Nothing to do" over an install genuinely missing a module and
+  // only `--force` could reach it.
   const nextFiles = await frameworkOwnedFiles();
   const nextRelPaths = new Set(nextFiles.map((f) => f.relPath));
   const prevRelPaths = new Set(Object.keys(madduJson.managed || {}));
+
+  const sameVersion = fromVersion === toVersion && !force;
+  if (sameVersion) {
+    // Repairable = a shipped file the manifest never listed, or a managed file
+    // that is gone from disk. Anything else on an equal version is either
+    // identical (no work) or a local edit (deliberately left alone).
+    const neverInstalled = nextFiles.filter((f) => !prevRelPaths.has(f.relPath));
+    const absent = [];
+    for (const relPath of prevRelPaths) {
+      if (!(await exists(join(repoRoot, relPath)))) absent.push(relPath);
+    }
+    if (neverInstalled.length || absent.length) {
+      console.log(`Framework is already v${toVersion}, but this install is incomplete:`);
+      if (neverInstalled.length) console.log(`  never installed : ${neverInstalled.length}`);
+      if (absent.length) console.log(`  missing on disk : ${absent.length}`);
+      console.log(`Repairing (local edits are left alone; pass --force to overwrite those too).`);
+      // Fall through to the normal plan+apply.
+    } else {
+      return alreadyCurrent(repoRoot, madduJson, toVersion);
+    }
+  }
+
+  // A marker still standing means a previous apply was interrupted; its path
+  // set tells this run which hash mismatches are that run's unfinished work
+  // rather than the operator's edits.
+  const inFlight = await readUpgradeMarker(repoRoot);
+  const inFlightPaths = new Set(inFlight ? inFlight.paths : []);
+  if (inFlight) {
+    console.log(`Recovering: an upgrade to v${inFlight.version} began ${inFlight.at} and did not finish.`);
+    console.log(`  ${inFlightPaths.size} file(s) were in its plan; completing them without disturbing local edits.`);
+  }
 
   const actions = { update: [], skip: [], add: [], remove: [], warnings: [] };
 
@@ -105,6 +209,14 @@ export default async function upgrade(argv) {
     } else if (force) {
       actions.update.push({ relPath, absSource, reason: 'local edit overwritten (--force)' });
       actions.warnings.push(`overwrote locally-modified ${relPath}`);
+    } else if (inFlight && inFlightPaths.has(relPath)) {
+      // A mismatch on a file the interrupted run had planned to write is that
+      // run's own half-finished work, not an operator edit. Completing it is
+      // the recovery; treating it as a local edit would strand the framework's
+      // own file and force the operator into --force to escape, taking their
+      // real edits with it.
+      actions.update.push({ relPath, absSource, reason: 'completing an interrupted upgrade' });
+      actions.warnings.push(`completing interrupted write of ${relPath}`);
     } else {
       actions.skip.push({ relPath, reason: 'local edit; pass --force to overwrite' });
       actions.warnings.push(`skipped locally-modified ${relPath}`);
@@ -142,9 +254,29 @@ export default async function upgrade(argv) {
     return;
   }
 
-  // Apply.
+  // Intent-first. The manifest is written only AFTER the apply loop, so an
+  // interruption leaves files on disk that `managed` never listed — and a path
+  // absent from `managed` cannot be reported missing by anything downstream.
+  // Recording the intent before touching a single file gives the install a
+  // locally-decidable "this did not finish" marker that survives a crash, a
+  // kill, or a full disk. The final writeMadduJson below rebuilds the object
+  // from `madduJson`, which has no marker, so success clears it by construction
+  // rather than by a second act that could itself fail.
+  const planned = [...actions.add, ...actions.update].map((a) => a.relPath);
+  await writeUpgradeMarker(repoRoot, {
+    version: toVersion,
+    from: fromVersion,
+    at: new Date().toISOString(),
+    paths: planned,
+  });
+
+  // Apply. ADDS FIRST, and the order is load-bearing rather than tidy: a file
+  // being ADDED is referenced by nothing yet, while an UPDATE can be a file
+  // whose new content depends on one of those adds. Updates-first meant an
+  // interruption left new code with its dependency missing — a broken install.
+  // Adds-first leaves old code beside unreferenced new files, which still runs.
   const newManaged = { ...madduJson.managed };
-  for (const { relPath, absSource } of [...actions.update, ...actions.add]) {
+  for (const { relPath, absSource } of [...actions.add, ...actions.update]) {
     const dst = join(repoRoot, relPath);
     await mkdir(dirname(dst), { recursive: true });
     await copyFile(absSource, dst);
@@ -160,6 +292,14 @@ export default async function upgrade(argv) {
   // Skipped files keep their OLD content while framework_version moves to the
   // new one. Record which, so the next run can say so instead of reporting
   // "Already on framework vX. Nothing to do." over a half-applied install.
+  //
+  // A SAME-VERSION REPAIR RECORDS NOTHING HERE, and that is the whole point:
+  // the version did not move, so nothing was stranded BY this run. A local edit
+  // that was lawful a moment ago must not be branded a partial upgrade merely
+  // because an unrelated missing file was restored alongside it — that would
+  // make every subsequent `maddu upgrade` exit 1 forever over an edit the
+  // operator is entitled to keep. Any partial_upgrade record from a genuine
+  // earlier version move is left exactly as it was, neither written nor erased.
   const strandedPaths = actions.skip.map((a) => a.relPath).sort();
   const next = {
     ...madduJson,
@@ -167,12 +307,21 @@ export default async function upgrade(argv) {
     upgraded_at: new Date().toISOString(),
     managed: newManaged
   };
-  if (strandedPaths.length) {
+  if (sameVersion) {
+    // same-version repair — carry any prior record through untouched
+  } else if (strandedPaths.length) {
     next.partial_upgrade = { version: toVersion, at: new Date().toISOString(), paths: strandedPaths };
   } else {
     delete next.partial_upgrade;
   }
   await writeMadduJson(repoRoot, next);
+  // Cleared HERE, immediately after the manifest, and not at the end of this
+  // function. The marker stands for exactly one window: the one in which the
+  // managed file set and its manifest disagree. That window closes on the line
+  // above. Everything below — shim chmod, config backfill, agent-file sync — is
+  // guarded, but `spine.append` is not, and a throw there over a fully-applied
+  // install must not leave a critical failure behind it.
+  await clearUpgradeMarker(repoRoot);
 
   // The project-local CLI shims (maddu/run, maddu/run.cmd) ride along
   // with the managed manifest — they were either added in `actions.add`
@@ -302,7 +451,14 @@ export default async function upgrade(argv) {
     });
   }
 
-  if (strandedPaths.length) {
+  if (sameVersion) {
+    // A repair, not a version move. Local edits were left alone as always, but
+    // nothing was stranded BY this run, so it is not a partial upgrade.
+    console.log(`\nRepaired install at v${toVersion}. (event ${ev.id})`);
+    if (strandedPaths.length) {
+      console.log(`  ${strandedPaths.length} locally-modified file(s) left untouched, as before.`);
+    }
+  } else if (strandedPaths.length) {
     console.log(`\nUpgraded to v${toVersion} - PARTIAL. (event ${ev.id})`);
     console.log(`  ${strandedPaths.length} managed file(s) were NOT updated: locally modified, left in place.`);
     console.log(`  They stay at their previous content until: maddu upgrade --force`);

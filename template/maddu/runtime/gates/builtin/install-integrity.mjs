@@ -20,6 +20,18 @@ async function readMadduJson(repoRoot) {
   catch { return null; }
 }
 
+// `maddu upgrade` writes this before it touches a file and deletes it once the
+// manifest is written, so its presence means an apply began and did not finish.
+// Device-local under .maddu/state/ (gitignored) rather than in maddu.json,
+// which is tracked — one machine's crashed upgrade must not be committed and
+// then fail this gate for every teammate whose install is fine.
+async function readUpgradeMarker(repoRoot) {
+  try {
+    const m = JSON.parse(await readFile(join(repoRoot, '.maddu', 'state', 'upgrade-in-progress.json'), 'utf8'));
+    return m && Array.isArray(m.paths) ? m : null;
+  } catch { return null; }
+}
+
 export default {
   id: 'install-integrity',
   label: 'install integrity',
@@ -29,6 +41,28 @@ export default {
     const madduJson = await readMadduJson(ctx.repoRoot);
     if (!madduJson) {
       return { ok: false, message: `maddu.json missing at ${ctx.repoRoot}`, evidence: null };
+    }
+    // An upgrade records its intent before it touches a file and clears it only
+    // once the manifest is written, so this marker standing means the apply loop
+    // did not finish. That state is invisible to everything below: the manifest
+    // is written LAST, so a crashed upgrade leaves files on disk that `managed`
+    // never listed, and a path absent from `managed` cannot be reported missing.
+    // Inferring it instead of reading it does not work — comparing the recorded
+    // framework_version against the installed maddu/version.json fails because
+    // version.json is itself managed, so after a crash the two still agree; and
+    // comparing hashes only catches an interruption that got as far as the
+    // update phase, which adds-before-updates deliberately makes the rarer case.
+    const u = await readUpgradeMarker(ctx.repoRoot);
+    if (u) {
+      return {
+        ok: false,
+        // Plain `maddu upgrade`, NOT --force. The re-run recomputes its plan
+        // from the manifest as it stands, which is exactly right, and finishes
+        // what was interrupted. --force would also overwrite the operator's own
+        // local edits, which this state gives no reason to touch.
+        message: `an upgrade to v${u.version} did not finish (started ${u.at}) — this install is half-applied; re-run \`maddu upgrade\` to complete it (no --force needed; --force would also overwrite local edits)`,
+        evidence: { upgrade_in_progress: u },
+      };
     }
     const managed = madduJson.managed || {};
     const missing = [], modified = [];
