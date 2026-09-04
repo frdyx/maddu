@@ -103,10 +103,17 @@ function run(args, input, env = {}) {
     // inherit the developer's live session — or a stale MADDU_HOOK_TEST_THROW.
     env: hermeticEnv(env),
   });
-  exits.push({ args: args.join(' '), status: r.status });
+  exits.push({ args: args.join(' '), status: r.status, err: r.stderr || '' });
   return { status: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }
 const fire = (event, input, env) => run(['hooks', 'fire', event], input, env);
+
+// Did the containment clamp a non-zero exit on its way out? `hooks fire` forces
+// its own code to 0, so `status === 0` is true by construction and no longer
+// separates "it worked" from "it failed and the floor hid it". The clamp says so
+// on stderr — the same sentence from commands/hooks.mjs and bin/maddu.mjs — so
+// the evidence did not disappear, it changed channel. Assertions below follow it.
+const clamped = (err) => /would have exited/.test(err || '');
 
 let FIXTURE = null;
 
@@ -154,13 +161,14 @@ async function main() {
     for (const stage of ['bootstrap', 'handler']) {
       const r = fire('pre-tool-use', EDIT, { MADDU_SELF_TEST: '1', MADDU_HOOK_TEST_THROW: stage });
       ok(`a throw at the ${stage} seam is contained (silent, exit 0)`,
-        r.status === 0 && verdictOf(r.out) === 'silent', `exit ${r.status} / ${verdictOf(r.out)}`);
+        r.status === 0 && !clamped(r.err) && verdictOf(r.out) === 'silent',
+        `exit ${r.status}${clamped(r.err) ? ' (clamped from non-zero)' : ''} / ${verdictOf(r.out)}`);
     }
 
     const malformed = fire('pre-tool-use', 'not json{');
     ok('malformed stdin is contained (silent, exit 0)',
-      malformed.status === 0 && verdictOf(malformed.out) === 'silent',
-      `exit ${malformed.status} / ${verdictOf(malformed.out)}`);
+      malformed.status === 0 && !clamped(malformed.err) && verdictOf(malformed.out) === 'silent',
+      `exit ${malformed.status}${clamped(malformed.err) ? ' (clamped from non-zero)' : ''} / ${verdictOf(malformed.out)}`);
 
     // ── SessionStart announces a real, well-formed session ──────────────────
     const start = fire('session-start', { session_id: 'hookcore-uuid-1', cwd: FIXTURE });
@@ -196,8 +204,28 @@ async function main() {
       reason.slice(0, 70));
 
     // ── the invariants that hold across every call made above ───────────────
-    ok('no hook invocation ever exits non-zero', exits.every((e) => e.status === 0),
-      exits.filter((e) => e.status !== 0).map((e) => `${e.args}=${e.status}`).join(', '));
+    // THE EXIT CODE STOPPED BEING THE WHOLE ANSWER. `maddu hooks fire <event>`
+    // now clamps its own exit code to 0 unconditionally — a containment the
+    // harness needs, and one that makes `status === 0` true BY CONSTRUCTION for
+    // every fire below. Read alone, this assertion could no longer fail for the
+    // reason it names. (It was not fully vacuous: `init` and `governance set
+    // strict` also land in `exits` and are not clamped, so it kept discriminating
+    // for the two calls it was never about.)
+    //
+    // The evidence was not destroyed, it moved channels. When the clamp fires it
+    // says so on stderr — `maddu: hooks fire <event> would have exited N; forced
+    // to 0 …`, the same sentence from both the command-level clamp
+    // (commands/hooks.mjs) and the bin-level floor (bin/maddu.mjs). So the
+    // invariant is unchanged in meaning and follows the evidence: no invocation
+    // exits non-zero, AND none had a non-zero exit suppressed on its way out.
+    //
+    // This still passes on the PRE-PR2 tree this lock was authored against, where
+    // no clamp existed and that sentence was never printed — verified by running
+    // it there, not assumed. The lock locks what it always locked.
+    ok('no hook invocation exits non-zero, or has a non-zero exit suppressed',
+      exits.every((e) => e.status === 0 && !clamped(e.err)),
+      exits.filter((e) => e.status !== 0 || clamped(e.err))
+        .map((e) => `${e.args}=${e.status}${clamped(e.err) ? ' (clamped from non-zero)' : ''}`).join(', '));
   } finally {
     if (FIXTURE) await rm(FIXTURE, { recursive: true, force: true });
   }

@@ -122,12 +122,17 @@ try {
   // Checking the spool is the stronger test anyway; the exit code was a proxy.
   {
     const fireBreach = run(fix, ['hooks', 'fire', 'session-start'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
+    // "never by failing the tool call" now needs the stderr channel too: the
+    // clamp forces the code to 0, so `status === 0` alone can no longer tell a
+    // clean exit from a suppressed failure. The spool remains the stronger half.
     ok('zero-credit hooks fire session-start BREACHES (recorded, and never by failing the tool call)',
-      fireBreach.status === 0 && (await spoolRows(fix)).length === 1, `exit=${fireBreach.status}`);
+      fireBreach.status === 0 && !/would have exited/.test(fireBreach.out || '')
+      && (await spoolRows(fix)).length === 1, `exit=${fireBreach.status}`);
     run(fix, ['plan', 'list']); // drain
     const fireClean = run(fix, ['hooks', 'fire', 'session-start']);
     ok('normal hooks fire session-start exits 0 clean (append credits)',
-      fireClean.status === 0 && (await spoolRows(fix)).length === 0, `exit=${fireClean.status}`);
+      fireClean.status === 0 && !/would have exited/.test(fireClean.out || '')
+      && (await spoolRows(fix)).length === 0, `exit=${fireClean.status}`);
   }
 
   // ── (D) credit-leak regression (delta-based counts) ─────────────────────

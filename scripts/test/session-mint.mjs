@@ -367,8 +367,13 @@ async function main() {
       // a child that completed the whole gate pipeline counts as a racer.
       for (const [i, rr] of [[1, raced.r1], [2, raced.r2]]) {
         const r = parseHook(rr.out);
+        // `hooks fire` clamps its own exit code to 0, so `code === 0` no longer
+        // proves the child completed the pipeline rather than failing inside it
+        // — which is the whole distinction this assertion was added for. The
+        // clamp announces itself on stderr; its absence carries the claim now.
         ok(`concurrent mint: call ${i} completed the gate (exit 0 + lane deny, not session)`,
-          rr.code === 0 && r.deny && /lane/.test(r.reason) && !SESSION_DENY_RE.test(r.reason),
+          rr.code === 0 && !/would have exited/.test(rr.err || '')
+          && r.deny && /lane/.test(r.reason) && !SESSION_DENY_RE.test(r.reason),
           `code=${rr.code} ${r.reason.slice(0, 80)}`);
       }
       const live = await activeIds(raced.repo);

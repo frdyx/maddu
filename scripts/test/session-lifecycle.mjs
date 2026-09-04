@@ -372,20 +372,36 @@ async function main() {
       cwd: repo, encoding: 'utf8', input: payload === null ? '' : JSON.stringify(payload),
       env: { ...process.env, MADDU_SESSION_ID: '', MADDU_PARENT_SESSION_ID: '', ...env },
     });
+    // `hooks fire` clamps its own exit code to 0 so a broken hook can never fail
+    // the operator's tool call. So `status === 0` became true by construction and
+    // stopped separating containment from a failure the floor hid. The clamp says
+    // so on stderr, in the same sentence from commands/hooks.mjs and
+    // bin/maddu.mjs; these assertions read both.
+    const clamped = (r) => /would have exited/.test((r && r.stderr) || '');
     // containment: every event × bootstrap/handler seam → exit 0
     for (const ev of ['session-start', 'session-end', 'pre-compact', 'pre-tool-use']) {
       for (const stage of ['bootstrap', 'handler']) {
         const r = fire(ev, { session_id: 'c-contain', cwd: repo, tool_name: 'Edit', tool_input: { file_path: 'x.js' } },
           { MADDU_SELF_TEST: '1', MADDU_HOOK_TEST_THROW: stage });
-        ok(`containment: ${ev} × ${stage} seam → exit 0`, r.status === 0, `status=${r.status} stderr=${(r.stderr || '').slice(0, 60)}`);
+        ok(`containment: ${ev} × ${stage} seam → exit 0`, r.status === 0 && !clamped(r),
+          `status=${r.status} stderr=${(r.stderr || '').slice(0, 60)}`);
       }
     }
+    // INERT means the seam did nothing, and the exit code can no longer say that:
+    // it is 0 whether the seam fired or not. The twin at harness-hook-core.mjs
+    // checks the VERDICT instead, which is the shape that still discriminates —
+    // a session-start whose core threw degrades into a notice, never the normal
+    // minted-session announcement this asserts.
+    const inert = fire('session-start', { session_id: 'c-inert', cwd: repo },
+      { MADDU_HOOK_TEST_THROW: 'bootstrap', MADDU_SELF_TEST: '' });
     ok('containment: seam inert without MADDU_SELF_TEST',
-      fire('session-start', { session_id: 'c-inert', cwd: repo }, { MADDU_HOOK_TEST_THROW: 'bootstrap', MADDU_SELF_TEST: '' }).status === 0);
+      inert.status === 0 && !clamped(inert) && /Máddu session ses_/.test(inert.stdout || ''),
+      `status=${inert.status} ${(inert.stdout || '').slice(0, 60)}`);
     // session-start registers + binds; session-end closes the BOUND session
     const claudeId = 'e2e-claude-1111';
     const st = fire('session-start', { session_id: claudeId, cwd: repo });
-    ok('e2e session-start: exit 0 + context emitted', st.status === 0 && /Máddu session ses_/.test(st.stdout));
+    ok('e2e session-start: exit 0 + context emitted',
+      st.status === 0 && !clamped(st) && /Máddu session ses_/.test(st.stdout));
     const sid = (st.stdout.match(/ses_[A-Za-z0-9_]+/) || [null])[0];
     ok('e2e session-start: sid parseable from note', !!sid, st.stdout.slice(0, 120));
     // age the binding past the 10s freshness guard
@@ -395,7 +411,8 @@ async function main() {
     map[claudeId].at = Date.now() - 60_000;
     await writeFile(mapPath, JSON.stringify(map, null, 2));
     const en = fire('session-end', { session_id: claudeId, cwd: repo });
-    ok('e2e session-end: exit 0', en.status === 0);
+    ok('e2e session-end: exit 0', en.status === 0 && !clamped(en),
+      `status=${en.status} stderr=${(en.stderr || '').slice(0, 60)}`);
     ok('e2e session-end: closed the bound session with a conformant handoff object',
       (await spineEvents(spine, repo)).some((e) => e.type === 'SESSION_CLOSED' && e.actor === sid && e.data.handoff && typeof e.data.handoff === 'object' && e.data.handoff.auto === true));
     const map2 = JSON.parse(await readFile(mapPath, 'utf8'));

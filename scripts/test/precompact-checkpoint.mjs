@@ -35,6 +35,12 @@ function fire(cwd, input) {
   });
 }
 
+// `hooks fire` clamps its own exit code to 0 so a broken hook can never fail the
+// operator's tool call. That is right, and it means `status === 0` alone stopped
+// separating "it worked" from "it failed and the floor hid it". The clamp
+// announces itself on stderr, so the exit-code assertions below read both.
+const clamped = (r) => /would have exited/.test((r && r.stderr) || '');
+
 async function tempRepo(prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix));
   await mkdir(join(root, '.maddu', 'events'), { recursive: true });
@@ -58,7 +64,8 @@ async function main() {
     await spine.append(root, { type: 'HANDOFF_SET', actor: 'ses_t', data: { body: 'resume here', by: 'ses_t' } });
 
     const r = fire(root, PAYLOAD);
-    ok('fire pre-compact exits 0', r.status === 0, `status=${r.status} stderr=${(r.stderr || '').trim()}`);
+    ok('fire pre-compact exits 0, and not by suppression',
+      r.status === 0 && !clamped(r), `status=${r.status} stderr=${(r.stderr || '').trim()}`);
 
     const events = await spine.readAll(root);
     const cp = events.find((e) => e.type === 'COMPACTION_CHECKPOINT');
@@ -86,7 +93,8 @@ async function main() {
   {
     const root = await tempRepo('maddu-pcc-garbage-');
     const r = fire(root, 'this is not json{{{');
-    ok('garbage stdin → still exit 0 (fails open)', r.status === 0, `status=${r.status}`);
+    ok('garbage stdin → still exit 0 (fails open), and not by suppression',
+      r.status === 0 && !clamped(r), `status=${r.status} stderr=${(r.stderr || '').trim()}`);
     const events = await spine.readAll(root);
     const cp = events.find((e) => e.type === 'COMPACTION_CHECKPOINT');
     ok('garbage stdin → checkpoint still written (null trigger)', !!cp && cp.data?.trigger === null);
@@ -97,7 +105,8 @@ async function main() {
   {
     const root = await tempRepo('maddu-pcc-empty-');
     const r = fire(root, '');
-    ok('empty spine + empty stdin → exit 0', r.status === 0, `status=${r.status}`);
+    ok('empty spine + empty stdin → exit 0, and not by suppression',
+      r.status === 0 && !clamped(r), `status=${r.status} stderr=${(r.stderr || '').trim()}`);
     const events = await spine.readAll(root);
     const cp = events.find((e) => e.type === 'COMPACTION_CHECKPOINT');
     ok('empty repo → checkpoint written with null anchor', !!cp && cp.data?.lastSliceStop === null);
