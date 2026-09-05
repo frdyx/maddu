@@ -398,9 +398,9 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // `.maddu/config/**` glob cannot open a phantom block. The unconditional
   // `*`-prefix drop is gone with it: a `*` line inside a block comment is
   // already consumed by the inBlock branch, and one OUTSIDE a block is a
-  // continuation of a binary expression, i.e. code. The residual lever is now
-  // reformatting expressions so continuations lead with `*`, which is editing
-  // logic — the golf this bound has always disclaimed rather than prevented.
+  // continuation of a binary expression, i.e. code — so that reformatting is
+  // NOT a lever, and this paragraph used to end by claiming it was. The open
+  // lever is the template-literal one named in the heuristic paragraph above.
   const codeLines = (src) => {
     let n = 0, inBlock = false;
     for (const raw of src.split(/\r?\n/)) {

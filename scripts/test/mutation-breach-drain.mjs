@@ -238,10 +238,14 @@ try {
   // created with flag 'wx', so exactly one process ever holds it, and the
   // lib has exactly one writer of the token — the holder, in the catch of its
   // OWN unlink, which runs after its rename attempt has returned. Past that
-  // return the holder never touches the row by its bare name again: on
+  // return the holder never CLAIMS the row by its bare name again: on
   // success it owns the row by the claim's nonce name, on failure it
-  // `continue`s. So the token is written only by the process that stood
-  // behind the gate, and only after it has stopped standing there. What the
+  // `continue`s. (It may still rename the row BACK to the bare name when a
+  // later read or append fails — a restore, not a claim, and the gate is not
+  // retaken, so the token's meaning is unaffected. The stronger "never
+  // touches" was written here first and is not true.) So the token is written
+  // only by the process that stood behind the gate, and only after it has
+  // stopped standing there. What the
   // contract does NOT cover, stated plainly: a writer OUTSIDE the lib putting
   // the word into a live gate — the same trust every file under .maddu/state
   // already extends, and the same as that writer unlinking the gate outright;

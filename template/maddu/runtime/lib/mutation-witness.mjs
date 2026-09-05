@@ -464,8 +464,10 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
       // So say so. The token is this drainer's own statement, made at the one
       // moment only it can make it, that nothing stands behind this gate any
       // more: the rename attempt has returned, and past that return we never
-      // touch the row by its bare name again — on success we own it by the
-      // claim's nonce, on failure we `continue`. reclaimStaleClaimsSync sweeps
+      // CLAIM the row by its bare name again — on success we own it by the
+      // claim's nonce, on failure we `continue`. (We may still rename it BACK
+      // to that name on a later failure, which is a restore, not a claim; the
+      // gate is not retaken.) reclaimStaleClaimsSync sweeps
       // a gate that says this regardless of owner liveness or age, because the
       // word is a stronger signal than either. Case (J) pins the contract.
       //

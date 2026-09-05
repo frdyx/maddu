@@ -129,9 +129,12 @@
 // deleting comments: mechanical, behavior-preserving, no skill required, and
 // spelled out by the refusal itself, which prints both numbers. A
 // comment-stripped re-inline squeaked under the raw bound and read DONE.
-// b64b397 moved the count to CODE lines, leaving an adversary no lever but
-// deleting logic — which claim 3 already catches. Review commentary, which is
-// what has actually moved this file, now costs no headroom at all.
+// b64b397 moved the count to CODE lines. That was read at the time as leaving
+// an adversary no lever but deleting logic; it is not true and the residual
+// section below says so. Two mechanical levers have been measured since — one
+// closed, one open by operator decision — and claim 5 is a mass heuristic
+// rather than a boundary. What the move DID buy stands: review commentary,
+// which is what has actually grown this file, now costs no headroom at all.
 //
 // So the residual passes: the forgery's code-line count stands well clear of
 // the ceiling, where against the old raw bound it had barely cleared it. The
@@ -516,8 +519,11 @@ async function main() {
     // still parsed. The classifier was hardened; the claim is narrowed to what
     // is actually established — counting code lines removes the
     // delete-the-comments lever, and each further mechanical lever has to be
-    // found and closed on its own. The known remaining one is reformatting
-    // expressions so continuation lines lead with `*`, which is editing logic.
+    // found and closed on its own. One is open and NOT closed by operator
+    // decision: a line-start `/*` inside a `void` template literal makes the
+    // parser see a string where the classifier sees an unclosed block comment,
+    // which took this forgery from 885 code lines to 49 with evaluate()
+    // returning DONE. Claim 5 is a mass heuristic, not a security boundary.
     const forgeryCode = codeLines(fHooks);
     note(`forgery hooks.mjs: ${fHooks.split('\n').length} raw lines, of which ${forgeryCode} are code`);
     ok('claim 5 residual: the ceiling is not defeated by deleting comments',
