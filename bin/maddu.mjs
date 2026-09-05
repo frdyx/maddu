@@ -157,12 +157,84 @@ async function prepareMutationWitness(ws) {
         if (!ctx) return;
         const exitCode = typeof process.exitCode === 'number' ? process.exitCode
           : (typeof code === 'number' ? code : 0);
-        const { breach } = ws.lib.evaluateWitness(ctx, { exitCode });
-        if (!breach) return;
-        const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env) ?? null;
-        const breachId = ws.lib.recordBreachSync({ stateRoot, ctx, exitCode });
-        process.stderr.write(`maddu: MUTATION_UNWITNESSED — ${ctx.verb ?? ctx.label} exited 0 with zero spine appends and no declared no-op${breachId ? ` (${breachId})` : ''}\n`);
-        process.exitCode = 1;
+        // THE EXIT-CODE FLOOR, decided here rather than by a second handler.
+        // Node runs `exit` listeners in registration order, so a clamp
+        // registered elsewhere would win or lose depending on where its line
+        // sits — an invisible dependency that a refactor could flip with no
+        // test able to name why. This handler already computes the final code,
+        // so it is where the floor belongs.
+        //
+        // WHY `hooks fire` IS EXEMPT. For that verb the exit code was doing two
+        // incompatible jobs. Claude Code reads a non-zero exit as "the hook
+        // failed your tool call" and acts on it. NOBODY reads it as "a breach
+        // occurred", because hooks run invisibly — so the breach signal was
+        // riding a channel where it is useless as a diagnostic and harmful as a
+        // control. The breach is still RECORDED: recordBreachSync above has
+        // already spooled it and the next mutating invocation drains it onto the
+        // spine. What is dropped is the signal, not the evidence.
+        //
+        // Narrow on purpose: only a `fire` with a real event. `hooks fire bogus`
+        // and a bare `hooks fire` still exit 2, because a settings-file typo is
+        // the one thing an operator MUST be told about, and that exit is their
+        // only notice of it.
+        // argv is [node, maddu.mjs, <verb>, <sub>, <event>] — the event is [4].
+        const FIRE_EVENTS = ['session-start', 'session-end', 'pre-tool-use', 'pre-compact'];
+        const fireEvent = process.argv[4];
+        const isHookFire = ctx.verb === 'hooks' && ctx.sub === 'fire'
+          && FIRE_EVENTS.includes(fireEvent);
+
+        // Record the breach FIRST and unconditionally — the floor must never
+        // suppress the evidence, only the channel it used to travel on.
+        //
+        // ASKED ABOUT THE CODE THIS RUN WILL ACTUALLY EXIT WITH, not the one the
+        // core happened to leave behind. `evaluateWitness` reports a breach only
+        // when exitCode === 0, because a command that failed owes no append. The
+        // floor below then rewrites any non-zero code to 0 — so a core that
+        // called `process.exit(7)` with zero appends and no declared no-op was
+        // evaluated at 7 (no breach, nothing recorded) and then exited 0. The run
+        // reported success, wrote nothing to the spine, and left no evidence it
+        // had happened: the floor had quietly converted a loud wrong answer into
+        // a silent unwitnessed success, which is the one outcome the mutation
+        // witness exists to make impossible.
+        //
+        // The guarantee is about what a run CLAIMS, and after the floor this run
+        // claims success. So the witness is evaluated against the post-floor
+        // code. The original code is not lost — it is named on stderr below.
+        const effectiveExitCode = isHookFire ? 0 : exitCode;
+        const { breach } = ws.lib.evaluateWitness(ctx, { exitCode: effectiveExitCode });
+        if (breach) {
+          const stateRoot = ws.receipts?.resolveStateRootSync?.(process.cwd(), process.env) ?? null;
+          const breachId = ws.lib.recordBreachSync({ stateRoot, ctx, exitCode });
+          process.stderr.write(`maddu: MUTATION_UNWITNESSED — ${ctx.verb ?? ctx.label} exited 0 with zero spine appends and no declared no-op${breachId ? ` (${breachId})` : ''}\n`);
+        }
+
+        if (isHookFire) {
+          // The floor applies to ANY non-zero code, not just a breach rewrite:
+          // a core that calls process.exit(7) itself reaches here too, and it
+          // would fail the tool call just as surely. One terse line on stderr so
+          // the run is not silent, and never a stack — a hook's stderr is read
+          // by a human debugging, not parsed by a machine.
+          //
+          // NOT EVERY CLAMP IS ANNOUNCED. `exitCode` above is read from
+          // process.exitCode, and process.exit(code) assigns that before this
+          // listener runs. A fire core that sets process.exitCode = N and then
+          // RETURNS, never calling process.exit, is clamped without a word: the
+          // commands/hooks.mjs fall-through calls process.exit(0) explicitly,
+          // its interceptor sees the literal 0 (not N), and that exit resets
+          // process.exitCode to 0 before this floor reads it. The intent N is
+          // overwritten by a path that has nothing to say about it. Every
+          // shipped arm ends in process.exit, so the path is unreachable today —
+          // but the suites that read this sentence's ABSENCE as proof that no
+          // clamp happened (harness-hook-core, session-lifecycle) rest on that
+          // staying true. Documented, not fixed: a fix belongs with a change
+          // that makes the path reachable.
+          if (exitCode !== 0) {
+            process.stderr.write(`maddu: hooks fire ${fireEvent} would have exited ${exitCode}; forced to 0 so the tool call is not failed. See \`maddu doctor\`.\n`);
+          }
+          process.exitCode = 0;
+          return;
+        }
+        if (breach) process.exitCode = 1;
       } catch {}
     });
   } catch { ws.lib = null; }
@@ -269,6 +341,24 @@ async function drainMutationBreaches(ws, raw, rest) {
   const isSyncInit = raw === 'spine' && rest[0] === 'sync' && rest[1] === 'init';
   const unattachedOnly = Array.isArray(res.errors) && res.errors.length > 0 && res.errors.every((e) => e.code === 'REPLICA_UNATTACHED');
   if (isSyncInit && unattachedOnly) return;
+  // Third pinned exception — and the one that is about containment rather than
+  // deadlock. `hooks fire <event>` runs inside a foreign harness that reads a
+  // non-zero exit as "this hook failed your tool call". The drain runs BEFORE
+  // `armCommandWitness` sets ws.ctx, so the hook-fire exit floor further down
+  // cannot reach this exit: the handler returns early on a null ctx. A single
+  // corrupt row in the breach spool therefore blocked the operator's edit
+  // without the hook core being reached at all — containment defeated one layer
+  // above the layer that implements it.
+  //
+  // The spool is RETAINED and the failure is still announced on stderr, so no
+  // evidence is lost and the next mutating invocation is still blocked; what is
+  // dropped is only this path's ability to fail somebody else's tool call.
+  const isHookFire = raw === 'hooks' && rest[0] === 'fire'
+    && ['session-start', 'session-end', 'pre-tool-use', 'pre-compact'].includes(rest[1]);
+  if (isHookFire) {
+    console.error(`maddu: mutation-breach drain failed (${res.failed} row(s): ${res.errors?.[0]?.error ?? 'unknown'}) — spool retained; hook fire proceeding so the tool call is not failed. Resolve before the next mutating command.`);
+    return;
+  }
   const detail = res.errors?.[0]?.error ?? 'unknown';
   const mode = await resolveInvocationMode(raw, rest); // shared classifier (r1 F7)
   if (mode !== 'read') {

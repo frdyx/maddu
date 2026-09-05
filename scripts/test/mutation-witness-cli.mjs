@@ -106,14 +106,33 @@ try {
   // A successful session-start fire APPENDS (register) — the containment
   // excuse must not cover it: with credits suppressed the run must BREACH,
   // proving a deleted happy-path append can never hide behind the noop.
+  //
+  // WHAT CHANGED, and why this now asserts the SPOOL and an exit of 0.
+  // This used to require `status === 1`, because a breach rewrote the exit code.
+  // For `hooks fire` that rewrite was retired deliberately: Claude Code reads a
+  // non-zero exit from a hook as "your tool call failed" and acts on it, while
+  // NOBODY reads it as "a breach occurred" — hooks run invisibly. The signal was
+  // riding a channel where it is useless as a diagnostic and harmful as a
+  // control, so the floor in bin/maddu.mjs holds `hooks fire <valid event>` at 0.
+  //
+  // The guarantee this case exists for is untouched, and is now asserted against
+  // the thing that actually carries it: the breach is still RECORDED — one spool
+  // row, drained onto the spine by the next mutating invocation. Measured before
+  // this edit: with the floor in place the run exits 0 and still spools 1 row.
+  // Checking the spool is the stronger test anyway; the exit code was a proxy.
   {
     const fireBreach = run(fix, ['hooks', 'fire', 'session-start'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
-    ok('zero-credit hooks fire session-start BREACHES (happy-path append is not excused)',
-      fireBreach.status === 1 && (await spoolRows(fix)).length === 1, `exit=${fireBreach.status}`);
+    // "never by failing the tool call" now needs the stderr channel too: the
+    // clamp forces the code to 0, so `status === 0` alone can no longer tell a
+    // clean exit from a suppressed failure. The spool remains the stronger half.
+    ok('zero-credit hooks fire session-start BREACHES (recorded, and never by failing the tool call)',
+      fireBreach.status === 0 && !/would have exited/.test(fireBreach.out || '')
+      && (await spoolRows(fix)).length === 1, `exit=${fireBreach.status}`);
     run(fix, ['plan', 'list']); // drain
     const fireClean = run(fix, ['hooks', 'fire', 'session-start']);
     ok('normal hooks fire session-start exits 0 clean (append credits)',
-      fireClean.status === 0 && (await spoolRows(fix)).length === 0, `exit=${fireClean.status}`);
+      fireClean.status === 0 && !/would have exited/.test(fireClean.out || '')
+      && (await spoolRows(fix)).length === 0, `exit=${fireClean.status}`);
   }
 
   // ── (D) credit-leak regression (delta-based counts) ─────────────────────

@@ -21,11 +21,23 @@
 // the suite could only exist after the implementation; decoupling them — which
 // is exactly what makes the suite trustworthy — broke the assumption.
 //
-// WHAT "DONE" MEANS HERE, in four claims:
+// WHAT "DONE" MEANS HERE, in five claims:
 //   1. the extracted module exists            (a real, non-empty .mjs FILE)
 //   2. commands/hooks.mjs names it            (a module specifier, not prose)
 //   3. the behavior lock still passes         (nothing Claude Code sees changed)
 //   4. and the module is LOAD-BEARING         (delete it and the lock breaks)
+//   5. and the machinery actually LEFT        (hooks.mjs is under a code-size ceiling)
+//
+// Claim 5 was added after a reviewer built the forgery claims 1-4 admit: keep
+// the whole core inline, add a `harness/sentinel.mjs`, branch on a value it
+// exports. Claims 1-3 pass, and ablating the sentinel breaks the lock with an
+// identical assertion count, so claim 4 reads the break as delegation. Claims
+// 1-4 all measure COUPLING, and coupling is forgeable; claim 5 measures MASS,
+// which that forgery cannot fake, because it has to keep the core's ~539 lines
+// of code here. It counts CODE lines for a reason the suite proved rather than
+// argued: the first version counted raw lines, and stripping comments brought
+// the forgery to 885 against a 900 ceiling. Comments were a lever only the cheat
+// could pull; counting what runs removes it.
 //
 // WHY CLAIM 4 EXISTS — the gesture defect
 // Claims 1 and 2 used to be satisfiable by a gesture, and this was reproduced
@@ -82,6 +94,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -137,15 +150,37 @@ function copyTree(src, dst) {
   }
 }
 
-// Claim 4's experiment: the same tree, minus the extracted module, judged by the
-// same lock. Returns `{ ran: false, why }` when the experiment itself could not
-// be set up — never a verdict it did not earn.
+// Claim 4's experiment: the same tree with the extracted module NEUTERED, judged
+// by the same lock. Returns `{ ran: false, why }` when the experiment itself
+// could not be set up — never a verdict it did not earn.
+//
+// CONTENT ablation, not PRESENCE ablation, and the difference is the whole
+// claim. Deleting lib/harness/ only asks "does anything break when this file
+// disappears" — which a sentinel answers just as loudly as a real core. Keep a
+// tree whose hooks.mjs still holds the entire firing machinery inline, add an
+// unused `harness/sentinel.mjs`, and load it for no reason: claims 1-3 pass,
+// deletion breaks the load, the lock goes red, and the checker reports an
+// extraction that never happened. Replacing each module with a VALID but inert
+// one instead asks the question the oracle actually means: does the locked
+// behavior depend on what these modules EXPORT? A sentinel exports nothing
+// anyone uses, so an inert stand-in changes nothing and the tree is correctly
+// refused; the real core's absent exports take the lock red.
+//
+// KNOWN LIMIT, stated rather than papered over: this measures COUPLING, and
+// coupling is forgeable. A tree whose hooks.mjs *calls* into the sentinel
+// (`sentinel.assertPresent()`) breaks under an inert stand-in too and reads DONE
+// again. Generating the stand-in from the real export names as no-ops pushes
+// that case out; a cheat comparing a VALUE survives even that. There is no fixed
+// point here — the unforgeable claim is that the dispatch is no longer IN
+// hooks.mjs, and deciding that needs a parser, not a checker. What this rules
+// out is the accident and the lazy fake, not a determined adversary.
 //
 // The lock here is NOT the injected one. A differential decided by a constant is
 // not a differential: an injected always-green runner would report the locked
-// behavior surviving the module's removal on every tree, and an injected
-// always-red one would report it broken on every tree. This run has to be real
-// or it proves nothing, so it calls defaultLockRunner directly.
+// behavior surviving on every tree, and an injected always-red one would report
+// it broken on every tree. This run has to be real or it proves nothing, so it
+// calls defaultLockRunner directly.
+const INERT_MODULE = 'export {};\n';
 export function defaultAblationRunner(root) {
   let sandbox = null;
   try {
@@ -156,10 +191,25 @@ export function defaultAblationRunner(root) {
       copyTree(src, join(sandbox, ...parts));
     }
     const target = join(sandbox, ...HARNESS);
-    rmSync(target, { recursive: true, force: true });
-    if (existsSync(target)) return { ran: false, why: 'lib/harness/ survived removal from the sandbox copy' };
+    if (!existsSync(target)) return { ran: false, why: 'lib/harness/ did not survive the sandbox copy' };
+    // RECURSIVE. A non-recursive readdir neuters only the immediate children, so
+    // a later extraction that nests the core (lib/harness/fire/fire-core.mjs)
+    // beside a top-level adapter would leave the real core intact during the
+    // experiment, the lock would stay green, and an honest tree would be
+    // reported NOT DONE. The claim says "every module under lib/harness/", so
+    // the walk has to mean it.
+    const neutered = [];
+    const walk = (dir, rel) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, e.name), r = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(abs, r);
+        else if (e.isFile() && e.name.endsWith('.mjs')) { writeFileSync(abs, INERT_MODULE); neutered.push(r); }
+      }
+    };
+    walk(target, '');
+    if (!neutered.length) return { ran: false, why: 'the sandbox copy of lib/harness/ holds no .mjs file to neuter' };
     const r = defaultLockRunner(sandbox);
-    return { ran: true, status: r.status, output: r.output };
+    return { ran: true, status: r.status, output: r.output, neutered };
   } catch (err) {
     return { ran: false, why: `the sandbox copy failed — ${err?.message || err}` };
   } finally {
@@ -247,16 +297,151 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // real runner that state cannot coexist with a green claim 3 (spawning a
   // missing script exits non-zero), so this only ever fires where the lock is
   // injected and the experiment would be meaningless.
+  // 5. and the dispatch is not still sitting in hooks.mjs.
+  //
+  // Claims 1-4 all measure COUPLING, and the funnel produced the exact forgery
+  // the limit note predicted: keep the entire core inline in hooks.mjs, add a
+  // `harness/sentinel.mjs`, and branch on a value it exports before running the
+  // inline core. Claims 1-3 pass, and ablating the sentinel breaks the lock with
+  // an identical assertion count, so claim 4 reads the break as proof of
+  // delegation. Every claim is satisfied by a tree where nothing was extracted.
+  //
+  // This claim is about MASS rather than reference, which is what that forgery
+  // cannot fake: it has to keep the firing machinery inside hooks.mjs to still
+  // work, and the extraction's entire content is that those lines left. The
+  // ceiling is set with real headroom above the delegating file rather than
+  // hugging it: a bound that a few added comments can trip is a bound that gets
+  // raised on reflex until it means nothing, and then the claim is gone.
+  //
+  // The superseded RAW-line figures that stood here (1258 before PR2, 434
+  // after, a 928-line core, "lands near 1400") are gone rather than refreshed.
+  // They described the raw-line bound this file stopped using, sat directly
+  // above the code-line paragraph that replaced it, and would have decayed
+  // again on the next edit. The live numbers are measured below and printed in
+  // the refusal.
+  //
+  // HONEST ABOUT WHAT IT IS — and round 5 forced this to be blunter than it was.
+  //
+  // Claim 5 is a MASS HEURISTIC. It is not a parse, not a proof, and NOT A
+  // SECURITY BOUNDARY. It is aimed at the accident and the lazy fake, and a
+  // deliberate adversary with `sed` defeats it. That is not a worry, it is a
+  // measurement, twice:
+  //
+  //   `/**/ code` counted as a comment. Prefixing every line took a re-inlined
+  //   tree from 885 code lines to 0. CLOSED in v1.132.0.
+  //
+  //   Two inserted lines — a `void` template literal opened, and a line-start
+  //   `/*` inside it — make the parser see an unused string while this
+  //   line-anchored classifier sees an unclosed block comment. 50 inserted
+  //   lines took the same forgery from 885 to 49, `node --check` clean, and
+  //   evaluate() returned DONE with no reasons. NOT CLOSED, by decision.
+  //
+  // The second was left open deliberately. Both levers are the same class —
+  // mechanical, behaviour-preserving, no logic edited — and the second was
+  // found within hours of the first being closed. Patching members one at a
+  // time buys a checker that looks sound and is not; the only sound version of
+  // this claim needs a real parser, which this file will not have. So the
+  // record says what the check is worth instead of implying more.
+  //
+  // What it still does, and why it stays: an accidental re-inline, a
+  // half-finished revert, and a forgery built without knowing this file exists
+  // all trip it. Everything above assumes an adversary who has read this
+  // paragraph. If claim 5 is ever cited as evidence that extraction cannot be
+  // faked, that citation is wrong.
+  // CODE lines, not raw lines, and that distinction is the claim's robustness.
+  // A raw-line ceiling was tried first and the oracle's own suite broke it
+  // within the hour: re-inline the core, delete the comments, and the forgery
+  // came in at 885 raw lines against a 900 ceiling. Comments were a lever the
+  // forger could pull and the honest tree could not, because this codebase
+  // comments heavily — every line of explanation added to hooks.mjs pushed the
+  // honest file toward a bound the cheat could duck under by deleting text that
+  // does not run.
+  //
+  // Counting only lines that DO something takes the lever away from both sides.
+  // hooks.mjs is 344 code lines today; the core is 539 on its own, so a
+  // re-inlined tree lands near 883 however it is formatted. The ceiling sits at
+  // 550: a 206-line margin over the honest file, and 62% of what the cheat needs.
+  // Comment freely — ordinary commentary cannot move this number. A comment
+  // OPENER with code behind it could, until round 5: `/**/ code` read as a
+  // comment, so a one-line sed took a re-inlined tree from 885 to 0. The
+  // classifier below now counts what REMAINS after leading closed comments.
+  //
+  // That closed one lever, not the class — see the heuristic paragraph above
+  // for the one that is still open by decision, and do not read this fix as
+  // more than it is.
+  //
+  // Correction, since the commit that made this fix got it wrong: it claimed
+  // the remaining lever was "reformatting expressions so continuation lines
+  // lead with `*`". That lever does not exist, and the same commit is why —
+  // dropping the unconditional `*`-prefix rule means a `*`-leading line outside
+  // a block is now COUNTED. Measured: `const x = 1` / `* 1;` reads 1 under the
+  // old rule and 2 under this one. A commit naming a residual it had just
+  // closed, in a file whose subject is bounds that outlive their justification.
+  //
+  // The classifier is a heuristic, not a lexer, and the header above explains
+  // why a regex must never try to lex JavaScript here. This one only ever DROPS
+  // lines, so its error direction is safe: a mis-dropped line makes the count
+  // smaller, which can never manufacture a false NOT DONE. It can only make the
+  // ceiling slightly more generous, and 206 lines of margin absorb that.
+  const HOOKS_CEILING = 550;
+  // Round 5 MAJOR 2: the previous rule dropped ANY line whose trimmed text
+  // began with `/*`, so `/**/ const x = 1;` — valid JavaScript, and a sed
+  // one-liner away — counted as a comment. Prefixing every line of a re-inlined
+  // tree took it from 883 to 0 and certified DONE over a tree where nothing was
+  // extracted. That is precisely the mechanical, behaviour-preserving lever the
+  // move from raw lines to code lines was supposed to remove; it removed one
+  // instance of it.
+  //
+  // So: a line counts as comment only when NOTHING is left after removing its
+  // leading, same-line-closed block comments. Still line-start anchored, so it
+  // never lexes string contents — the header's standing constraint, and why the
+  // `.maddu/config/**` glob cannot open a phantom block. The unconditional
+  // `*`-prefix drop is gone with it: a `*` line inside a block comment is
+  // already consumed by the inBlock branch, and one OUTSIDE a block is a
+  // continuation of a binary expression, i.e. code — so that reformatting is
+  // NOT a lever, and this paragraph used to end by claiming it was. The open
+  // lever is the template-literal one named in the heuristic paragraph above.
+  const codeLines = (src) => {
+    let n = 0, inBlock = false;
+    for (const raw of src.split(/\r?\n/)) {
+      let t = raw.trim();
+      if (inBlock) {
+        const end = t.indexOf('*/');
+        if (end < 0) continue;
+        inBlock = false;
+        t = t.slice(end + 2).trim();
+      }
+      while (t.startsWith('/*')) {
+        const end = t.indexOf('*/', 2);
+        if (end < 0) { inBlock = true; t = ''; break; }
+        t = t.slice(end + 2).trim();
+      }
+      if (!t || t.startsWith('//')) continue;
+      n++;
+    }
+    return n;
+  };
+  if (reasons.length === 0) {
+    try {
+      const lines = codeLines(readFileSync(hooksCmd, 'utf8'));
+      if (lines > HOOKS_CEILING) {
+        reasons.push(`commands/hooks.mjs holds ${lines} lines of code, over the ${HOOKS_CEILING}-line ceiling — the firing machinery this PR moves out is ~539 lines of code, so a file this size is consistent with the core still living here beside a reference to lib/harness/, which every other claim would accept`);
+      }
+    } catch (err) {
+      reasons.push(`commands/hooks.mjs could not be measured — ${err?.message || err}`);
+    }
+  }
+
   if (reasons.length === 0 && existsSync(join(root, ...LOCK))) {
     const ablated = runAblation(root);
     const here = attemptedIn(lock.output);
     const there = attemptedIn(ablated.output);
     if (!ablated.ran) {
-      reasons.push(`the removal experiment could not run, so delegation is unproven — ${ablated.why}`);
+      reasons.push(`the neutering experiment could not run, so delegation is unproven — ${ablated.why}`);
     } else if (ablated.status === 0) {
-      reasons.push('the behavior lock still passes with template/maddu/runtime/lib/harness/ removed — nothing the lock covers depends on the module, so the core was copied, not extracted');
+      reasons.push('the behavior lock still passes with every module under template/maddu/runtime/lib/harness/ replaced by an inert one — nothing the lock covers depends on what they export, so the core was copied or stubbed, not extracted');
     } else if (!here || there !== here) {
-      reasons.push(`the removal experiment is not attributable — the lock attempted ${here} assertion(s) in the repo but ${there} without lib/harness/, so its failure may be the copy rather than the missing module`);
+      reasons.push(`the neutering experiment is not attributable — the lock attempted ${here} assertion(s) in the repo but ${there} with lib/harness/ neutered, so its failure may be the copy rather than the inert modules`);
     }
   }
 
@@ -282,5 +467,9 @@ if (invokedDirectly) {
     for (const r of reasons) console.error(`  - ${r}`);
     process.exit(1);
   }
-  console.log(`PR2 fire-core extraction: done (${modules.length} module(s) in lib/harness/, hooks.mjs delegates, behavior lock green, and red without the module)`);
+  // "with the module inert", not "without the module" — the experiment stopped
+  // deleting the directory and started replacing its exports, and a banner that
+  // describes the wrong experiment is a small lie in the one place a reader
+  // looks to find out what was proven.
+  console.log(`PR2 fire-core extraction: done (${modules.length} module(s) in lib/harness/, hooks.mjs delegates, behavior lock green, and red with those modules inert)`);
 }

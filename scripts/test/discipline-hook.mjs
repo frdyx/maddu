@@ -113,8 +113,20 @@ try {
 
   // (d) always exits 0 (fail-open contract: the hook never crashes the tool)
   {
-    const { code } = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'x.js' } });
-    ok('hook exits 0 even when it denies (deny is via JSON, not exit code)', code === 0);
+    const { code, err, out } = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'x.js' } });
+    // THIS ASSERTION'S OWN PARENTHETICAL NAMES THE PRINCIPLE, so it is now
+    // measured rather than described. `hooks fire` clamps its exit code to 0
+    // unconditionally, which makes `code === 0` true by construction — the very
+    // universality the parenthetical asserted, and the reason the check stopped
+    // being able to fail. What it always meant is a conjunction of three things:
+    // the refusal is IN the document, the code is 0, and that 0 is the hook's own
+    // rather than one the floor substituted for a failure (which the clamp
+    // announces on stderr).
+    let json = null; try { json = JSON.parse(out.trim() || '{}'); } catch {}
+    const denied = !!(json && json.hookSpecificOutput && json.hookSpecificOutput.permissionDecision === 'deny');
+    ok('hook exits 0 even when it denies (deny is via JSON, not exit code)',
+      denied && code === 0 && !/would have exited/.test(err || ''),
+      `deny=${denied} code=${code} ${(err || '').split('\n')[0].slice(0, 60)}`);
   }
 
   // (e) per-session counter isolation — two concurrent sessions never cross-reset

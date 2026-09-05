@@ -372,20 +372,107 @@ async function main() {
       cwd: repo, encoding: 'utf8', input: payload === null ? '' : JSON.stringify(payload),
       env: { ...process.env, MADDU_SESSION_ID: '', MADDU_PARENT_SESSION_ID: '', ...env },
     });
-    // containment: every event × bootstrap/handler seam → exit 0
+    // `hooks fire` clamps its own exit code to 0 so a broken hook can never fail
+    // the operator's tool call. So `status === 0` became true by construction and
+    // stopped separating containment from a failure the floor hid. The clamp says
+    // so on stderr, in the same sentence from commands/hooks.mjs and
+    // bin/maddu.mjs; these assertions read both.
+    //
+    // Which half of each assertion below is live depends on whether it also
+    // reads stdout, and the two shapes are opposites:
+    //   • No stdout conjunct (session-end, pre-compact, pre-tool-use in the
+    //     loop; the e2e session-end): `status === 0` is what is
+    //     unreachable-false — both clamps guarantee it — and the clamp check is
+    //     the ONLY thing that can fail. A seam throw escaping both the arm's
+    //     catch and the command's ends as an uncaught error or a non-zero
+    //     process.exit; either route prints the sentence while the status still
+    //     reads 0.
+    //   • With a stdout conjunct (every session-start note, in the loop and
+    //     below): the clamp check can never be the one that fails. The
+    //     commands/hooks.mjs interceptor drops the buffered stdout when the
+    //     core's exit was non-zero, so a run clamped there arrives with an empty
+    //     stdout and the note regex is already false. The bin/maddu.mjs backstop
+    //     floor does not drop stdout, but it can only fire with the buffer
+    //     intact through an uncaught async error, and fire-core writes the note
+    //     and calls process.exit(0) with no suspension point between them. Kept
+    //     there to name the channel, not because it discriminates.
+    //
+    // ONE HOLE IN "THE CLAMP SAYS SO". A core that sets `process.exitCode = N`
+    // and RETURNS, instead of calling process.exit, is clamped in silence: the
+    // command's fall-through calls process.exit(0) explicitly, the interceptor
+    // sees a literal 0, and process.exit(0) resets process.exitCode before the
+    // bin/maddu.mjs floor reads it — so neither layer prints the sentence.
+    // Every shipped arm ends in process.exit, so the path is unreachable today;
+    // `!clamped(r)` is exactly as good as that staying true, and no better.
+    const clamped = (r) => /would have exited/.test((r && r.stderr) || '');
+    // containment: every event × bootstrap/handler seam → exit 0.
+    //
+    // WHICH LAYER CONTAINED IT. A seam throw has two catches waiting for it:
+    // the arm's own (fire-core.mjs, the `/* CONTAINMENT */` catch of each fire
+    // handler) and the command's (commands/hooks.mjs, around `core.fire`). Both
+    // end in exit 0 with no clamp line, so an arm that has STOPPED catching —
+    // and now leans on the layer above — was invisible to `status`, to
+    // `clamped`, and to this loop as first written. Measured 2026-09-05 by
+    // firing each event × stage twice against identical fixtures, arm intact
+    // and then arm rethrowing, and diffing exit, stdout, stderr, spine, file
+    // set and receipt row. What the framework already emits separates them for
+    // exactly three of the eight rows:
+    //   • session-start × either stage — stdout differs. The arm falls back to
+    //     its "Máddu session discipline active." note; the command's catch
+    //     writes "discipline did not start — the hook fire-core failed while
+    //     running". Read here.
+    //   • pre-tool-use × handler — the SPINE differs. The seam fires after the
+    //     discipline lib and repo root are loaded, so the arm's catch witnesses
+    //     the failure as ENFORCEMENT_ERROR (the F6 path); the command's catch
+    //     appends nothing. Counted here.
+    //   • pre-tool-use × bootstrap, session-end × both, pre-compact × both —
+    //     NOT DISTINGUISHABLE. Every channel is byte-identical: exit 0, empty
+    //     stdout, empty stderr, no spine append, the same file set, the same
+    //     receipt row. The only in-process difference is the no-op reason each
+    //     layer hands to witnessNoop, and ctx.noops is consumed by
+    //     evaluateWitness purely as a length — it is never written anywhere.
+    //     Separating those five rows would need a new emission that names the
+    //     containing layer (a stderr line, a spine event, or a receipt field);
+    //     none is proposed here. Those rows assert containment only, and the
+    //     assertion name says so rather than implying an attribution it lacks.
+    const ENF = 'ENFORCEMENT_ERROR';
     for (const ev of ['session-start', 'session-end', 'pre-compact', 'pre-tool-use']) {
       for (const stage of ['bootstrap', 'handler']) {
+        const before = await countType(spine, repo, ENF);
         const r = fire(ev, { session_id: 'c-contain', cwd: repo, tool_name: 'Edit', tool_input: { file_path: 'x.js' } },
           { MADDU_SELF_TEST: '1', MADDU_HOOK_TEST_THROW: stage });
-        ok(`containment: ${ev} × ${stage} seam → exit 0`, r.status === 0, `status=${r.status} stderr=${(r.stderr || '').slice(0, 60)}`);
+        const witnessed = (await countType(spine, repo, ENF)) - before;
+        const attributable = ev === 'session-start' || (ev === 'pre-tool-use' && stage === 'handler');
+        // The layer-naming conjunct where a channel exists; `true` where none
+        // does, so the row cannot pretend to a distinction it cannot make.
+        const byTheArm = ev === 'session-start' ? /Máddu session discipline active\./.test(r.stdout || '')
+          : attributable ? witnessed === 1
+            : true;
+        // `!clamped(r)` is the live half of the exit check — `status === 0`
+        // cannot be false on a clamped build.
+        ok(`containment: ${ev} × ${stage} seam → exit 0${attributable ? ', contained by the arm' : ' (layer not attributable)'}`,
+          r.status === 0 && !clamped(r) && byTheArm,
+          `status=${r.status} stderr=${(r.stderr || '').trim().slice(0, 60)} note=${((r.stdout || '').match(/"additionalContext":"([^"]{0,70})/) || [])[1] || '(none)'} ${ENF}+${witnessed}`);
       }
     }
+    // INERT means the seam did nothing, and the exit code can no longer say that:
+    // it is 0 whether the seam fired or not. The twin at harness-hook-core.mjs
+    // checks the VERDICT instead, which is the shape that still discriminates —
+    // a session-start whose core threw degrades into a notice, never the normal
+    // minted-session announcement this asserts.
+    const inert = fire('session-start', { session_id: 'c-inert', cwd: repo },
+      { MADDU_HOOK_TEST_THROW: 'bootstrap', MADDU_SELF_TEST: '' });
+    // Verdict-bearing shape (also `st` below): "clamp sentence on stderr AND the
+    // minted-session note on stdout" is unreachable — see the note at `clamped`.
+    // The note regex is the live conjunct; the clamp check is redundant with it.
     ok('containment: seam inert without MADDU_SELF_TEST',
-      fire('session-start', { session_id: 'c-inert', cwd: repo }, { MADDU_HOOK_TEST_THROW: 'bootstrap', MADDU_SELF_TEST: '' }).status === 0);
+      inert.status === 0 && !clamped(inert) && /Máddu session ses_/.test(inert.stdout || ''),
+      `status=${inert.status} ${(inert.stdout || '').slice(0, 60)}`);
     // session-start registers + binds; session-end closes the BOUND session
     const claudeId = 'e2e-claude-1111';
     const st = fire('session-start', { session_id: claudeId, cwd: repo });
-    ok('e2e session-start: exit 0 + context emitted', st.status === 0 && /Máddu session ses_/.test(st.stdout));
+    ok('e2e session-start: exit 0 + context emitted',
+      st.status === 0 && !clamped(st) && /Máddu session ses_/.test(st.stdout));
     const sid = (st.stdout.match(/ses_[A-Za-z0-9_]+/) || [null])[0];
     ok('e2e session-start: sid parseable from note', !!sid, st.stdout.slice(0, 120));
     // age the binding past the 10s freshness guard
@@ -395,7 +482,8 @@ async function main() {
     map[claudeId].at = Date.now() - 60_000;
     await writeFile(mapPath, JSON.stringify(map, null, 2));
     const en = fire('session-end', { session_id: claudeId, cwd: repo });
-    ok('e2e session-end: exit 0', en.status === 0);
+    ok('e2e session-end: exit 0', en.status === 0 && !clamped(en),
+      `status=${en.status} stderr=${(en.stderr || '').slice(0, 60)}`);
     ok('e2e session-end: closed the bound session with a conformant handoff object',
       (await spineEvents(spine, repo)).some((e) => e.type === 'SESSION_CLOSED' && e.actor === sid && e.data.handoff && typeof e.data.handoff === 'object' && e.data.handoff.auto === true));
     const map2 = JSON.parse(await readFile(mapPath, 'utf8'));

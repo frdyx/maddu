@@ -207,7 +207,146 @@ export default async function hooks(argv) {
       }
       process.exit(0);
     }
-    return core.fire(event);
+    // THE CALL IS CONTAINED, not just the load. The guard above is shape-only —
+    // it proves `fire` is a function, not that calling it survives. A core that
+    // loads, constructs, and then throws (or returns a promise that rejects)
+    // escaped through here as an uncaught error: a stack trace on stderr and
+    // exit 1, which is precisely the non-zero exit this whole branch exists to
+    // prevent. `await` rather than `return` is load-bearing: `return core.fire()`
+    // hands the promise back to the caller and a rejection leaves by a different
+    // route than a synchronous throw, so only awaiting catches both.
+    //
+    // Every arm inside the core ends in process.exit, so reaching the catch at
+    // all means the core failed. Declare the no-op first — `hooks` is a
+    // mutating-tier verb, so exiting 0 with no spine append and no declared
+    // excuse is a mutation-witness breach that gets rewritten back to exit 1,
+    // which would defeat the containment while appearing to implement it.
+    // stdout is a PARSED contract, so the core's output is BUFFERED and only
+    // released once the core has finished having opinions.
+    //
+    // A core that writes a verdict and then throws has not made a decision, it
+    // has crashed halfway through making one. Three options were weighed.
+    // Emitting an advisory after its output yields two JSON documents; that
+    // usually fails to parse and the tool proceeds — but only by ACCIDENT, and
+    // not reliably, since many readers stop at the first complete value and
+    // would honour a deny with trailing data. Correctness that depends on
+    // another parser's leniency is not correctness. Merely suppressing the
+    // advisory leaves the crashed core's deny standing, so a broken install
+    // silently blocks edits. Buffering discards both problems: if the catch
+    // below runs, the core failed and whatever it had started to say is dropped.
+    //
+    // DELIBERATE BEHAVIOUR CHANGE, not a side effect: a core that emits a
+    // legitimate deny and then throws during cleanup loses that refusal. That is
+    // the right way for this path to fail — every documented posture here is
+    // fail-open ("may never fail the tool call", "fails OPEN: never blocks
+    // compaction") — and the operator still learns through the breach spool and
+    // the SessionStart notice below.
+    //
+    // The flush rides an `exit` handler because every arm of the core ends in
+    // process.exit, so there is no normal return to flush after.
+    // A CRASH IS A CRASH BY WHICHEVER DOOR IT LEAVES. Discarding the buffer in
+    // the `catch` below covers a core that throws — and misses a core that
+    // writes a deny and then calls `process.exit(7)`, which never reaches the
+    // catch at all. That run flushed its deny while bin/maddu.mjs clamped the
+    // status to 0, so Claude Code saw a successful hook emitting a refusal and
+    // BLOCKED the edit: a broken install silently vetoing the operator's work on
+    // a path whose every documented posture is fail-open. Two crashes with the
+    // same meaning had opposite outcomes purely because one used `throw` and the
+    // other used `exit`.
+    //
+    // So the exit code is intercepted rather than inferred. It cannot be read
+    // back at flush time: bin/maddu.mjs registered its witness handler FIRST and
+    // has already forced `process.exitCode` to 0 by the time this one runs, and
+    // that is deliberate there. Recording the core's own intent as it leaves is
+    // the only place the distinction still exists.
+    let buffered = [];
+    let coreExit = 0;
+    const realWrite = process.stdout.write.bind(process.stdout);
+    const realExit = process.exit.bind(process);
+    const flush = () => {
+      const out = buffered; buffered = [];
+      // Non-zero means the core did not complete a decision — it stopped in the
+      // middle of one. Whatever it had begun to say is dropped, exactly as in
+      // the `catch`. The operator still learns through the breach spool and the
+      // stderr line bin/maddu.mjs writes when it applies the floor.
+      if (coreExit !== 0) return;
+      for (const chunk of out) { try { realWrite(chunk); } catch {} }
+    };
+    // AND THE FLOOR IS APPLIED HERE TOO, not only in bin/maddu.mjs. That one
+    // lives inside `prepareMutationWitness`, so it exists only when the optional
+    // `mutation-witness.mjs` loads and a tier context arms — which is to say the
+    // containment was absent in exactly the partial-install and version-skew
+    // states it exists to tolerate. A hook must not fail the operator's tool
+    // call because an unrelated library is missing. Clamping in the command that
+    // owns the containment makes the guarantee local to the code that promises
+    // it; bin/maddu.mjs keeps its floor as the backstop for anything that exits
+    // before this handler is installed.
+    process.exit = (code) => {
+      coreExit = typeof code === 'number' ? code
+        : (typeof process.exitCode === 'number' ? process.exitCode : 0);
+      if (coreExit !== 0) {
+        try { process.stderr.write(`maddu: hooks fire ${event} would have exited ${coreExit}; forced to 0 so the tool call is not failed. See \`maddu doctor\`.\n`); } catch {}
+        return realExit(0);
+      }
+      return realExit(code);
+    };
+    process.stdout.write = (chunk, ...rest) => {
+      buffered.push(chunk);
+      const cb = rest.find((a) => typeof a === 'function');
+      if (cb) cb();
+      return true;
+    };
+    process.on('exit', flush);
+    try {
+      await core.fire(event);
+    } catch (err) {
+      buffered = [];   // the core crashed — it does not get to have said anything
+      // This reason is the ONLY trace that the command, not the arm, contained
+      // the throw — and it goes nowhere. ctx.noops is read by evaluateWitness
+      // as a length; it is never written to the spine, a receipt, or stderr.
+      // From outside, this path and the arm's own catch are byte-identical for
+      // session-end, pre-compact, and a pre-tool-use that failed before its
+      // bootstrap finished (measured 2026-09-05: exit, stdout, stderr, spine,
+      // file set, receipt row — all the same). Only session-start separates
+      // them, through the notice written below, and only a pre-tool-use that
+      // failed AFTER bootstrap does, through the ENFORCEMENT_ERROR the arm's
+      // catch appends and this one does not. If a layer-naming emission is
+      // ever added, this is where it goes; none is proposed.
+      try {
+        (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-threw');
+      } catch { /* the excuse is best-effort — never why a hook fails */ }
+      // The buffer is empty, so this is now the ONLY document on stdout and is
+      // guaranteed parseable — which is what makes emitting it safe here where
+      // suppression was necessary before.
+      if (event === 'session-start') {
+        try {
+          realWrite(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'SessionStart',
+              additionalContext: `Máddu session discipline did not start — the hook fire-core failed while running (${String((err && err.message) || err).split('\n')[0].slice(0, 140)}). Run \`maddu doctor\`; run \`maddu register\` and \`maddu slice-stop\` by hand until it is fixed.`,
+            },
+          }) + '\n');
+        } catch { /* stdout gone — still exit 0 */ }
+      }
+      process.exit(0);
+    }
+    // A core that RETURNS instead of exiting. Every shipped arm ends in
+    // process.exit, so this is unreachable today — but it is reachable by a
+    // future arm that forgets, and falling through here without declaring a
+    // no-op is a mutation-witness breach that rewrites this exit 0 back to 1.
+    // The containment would then be defeated by the one path that looked safest.
+    //
+    // And that process.exit(0) is EXPLICIT, which has a cost worth naming: a
+    // core that set process.exitCode = N before returning is clamped here
+    // WITHOUT the "would have exited" line. The interceptor above receives the
+    // literal 0, not N, and process.exit(0) resets process.exitCode before the
+    // bin/maddu.mjs floor reads it. Unreachable for the same reason this block
+    // is; noted so the announcement the test suites rely on is not mistaken
+    // for a promise that covers every path.
+    try {
+      (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-returned-without-exiting');
+    } catch { /* best-effort */ }
+    process.exit(0);
   }
 
   // Shared bootstrap for the NON-fire subcommands (install/status/remove).
