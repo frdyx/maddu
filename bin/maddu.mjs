@@ -214,6 +214,20 @@ async function prepareMutationWitness(ws) {
           // would fail the tool call just as surely. One terse line on stderr so
           // the run is not silent, and never a stack — a hook's stderr is read
           // by a human debugging, not parsed by a machine.
+          //
+          // NOT EVERY CLAMP IS ANNOUNCED. `exitCode` above is read from
+          // process.exitCode, and process.exit(code) assigns that before this
+          // listener runs. A fire core that sets process.exitCode = N and then
+          // RETURNS, never calling process.exit, is clamped without a word: the
+          // commands/hooks.mjs fall-through calls process.exit(0) explicitly,
+          // its interceptor sees the literal 0 (not N), and that exit resets
+          // process.exitCode to 0 before this floor reads it. The intent N is
+          // overwritten by a path that has nothing to say about it. Every
+          // shipped arm ends in process.exit, so the path is unreachable today —
+          // but the suites that read this sentence's ABSENCE as proof that no
+          // clamp happened (harness-hook-core, session-lifecycle) rest on that
+          // staying true. Documented, not fixed: a fix belongs with a change
+          // that makes the path reachable.
           if (exitCode !== 0) {
             process.stderr.write(`maddu: hooks fire ${fireEvent} would have exited ${exitCode}; forced to 0 so the tool call is not failed. See \`maddu doctor\`.\n`);
           }

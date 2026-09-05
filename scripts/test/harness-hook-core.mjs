@@ -64,7 +64,7 @@
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,7 +113,38 @@ const fire = (event, input, env) => run(['hooks', 'fire', event], input, env);
 // separates "it worked" from "it failed and the floor hid it". The clamp says so
 // on stderr — the same sentence from commands/hooks.mjs and bin/maddu.mjs — so
 // the evidence did not disappear, it changed channel. Assertions below follow it.
+//
+// ONE HOLE IN "THE CLAMP SAYS SO". A core that sets `process.exitCode = N` and
+// RETURNS, instead of calling process.exit, is clamped in silence: the
+// command's fall-through calls process.exit(0) explicitly, the interceptor sees
+// a literal 0, and process.exit(0) resets process.exitCode before the
+// bin/maddu.mjs floor reads it — so neither layer prints the sentence. Every
+// shipped arm ends in process.exit, so the path is unreachable today; `clamped`
+// is exactly as good as that staying true, and no better.
 const clamped = (err) => /would have exited/.test(err || '');
+
+// WHICH LAYER CONTAINED IT. A handler-stage throw has two catches waiting for
+// it: the fire arm's own, and the command's, one layer up. Both exit 0, print
+// nothing, and leave the same receipt row — measured 2026-09-05 by diffing every
+// observable across an arm-intact and an arm-rethrowing fire. The one channel
+// that differs is the spine: the arm's catch witnesses the failure as an
+// ENFORCEMENT_ERROR event before it exits; the command's catch appends nothing.
+// So a handler-seam assertion that reads only exit, stdout and stderr passes
+// whether the arm still contains or has quietly stopped and left it to the
+// layer above. Counting the event, through the fixture's spine files rather
+// than a lib import (this suite stays module-blind), is what lets the handler
+// row below mean "the ARM contained it" and not merely "something did".
+async function enforcementErrors() {
+  const dir = join(FIXTURE, '.maddu', 'events');
+  let n = 0;
+  for (const f of await readdir(dir)) {
+    if (!f.endsWith('.ndjson')) continue;
+    for (const line of (await readFile(join(dir, f), 'utf8')).split('\n')) {
+      try { if (JSON.parse(line).type === 'ENFORCEMENT_ERROR') n++; } catch { /* partial or blank line */ }
+    }
+  }
+  return n;
+}
 
 let FIXTURE = null;
 
@@ -159,12 +190,36 @@ async function main() {
       verdictOf(seamOff.out) === 'nudge', verdictOf(seamOff.out));
 
     for (const stage of ['bootstrap', 'handler']) {
+      const before = await enforcementErrors();
       const r = fire('pre-tool-use', EDIT, { MADDU_SELF_TEST: '1', MADDU_HOOK_TEST_THROW: stage });
-      ok(`a throw at the ${stage} seam is contained (silent, exit 0)`,
-        r.status === 0 && !clamped(r.err) && verdictOf(r.out) === 'silent',
-        `exit ${r.status}${clamped(r.err) ? ' (clamped from non-zero)' : ''} / ${verdictOf(r.out)}`);
+      const witnessed = (await enforcementErrors()) - before;
+      // Only `handler` can be attributed to a layer: that seam fires after the
+      // discipline lib and repo root are loaded, so the arm's catch has what it
+      // needs to witness (see enforcementErrors). At `bootstrap` nothing is
+      // loaded yet, the arm witnesses nothing, and the two layers are
+      // byte-identical on every channel — that row asserts containment only and
+      // cannot say whose; separating it would need an emission that names the
+      // containing layer, and none exists. Strengthened IN PLACE, never by a
+      // new assertion: this suite's attempted count is compared between a real
+      // and an ablated run by scripts/check-fire-core-extracted.mjs.
+      const handler = stage === 'handler';
+      ok(`a throw at the ${stage} seam is contained (silent, exit 0${handler ? ', witnessed by the arm' : '; layer not attributable'})`,
+        r.status === 0 && !clamped(r.err) && verdictOf(r.out) === 'silent' && (!handler || witnessed === 1),
+        `exit ${r.status}${clamped(r.err) ? ' (clamped from non-zero)' : ''} / ${verdictOf(r.out)} / ENFORCEMENT_ERROR +${witnessed}`);
     }
 
+    // A GAP, NOT A FINDING: which layer contains this one was not part of the
+    // 2026-09-05 layer measurement, which ran the two seam stages above and not
+    // malformed stdin. Reading fire-core, the JSON.parse throw lands in the
+    // arm's catch with the discipline lib and repo root already loaded — the
+    // handler-stage shape — so it would be expected to witness
+    // ENFORCEMENT_ERROR the same way. One follow-up pair the same day, against
+    // a bare `.maddu/` fixture rather than this suite's init-ed one, saw
+    // exactly that: the event appended with the arm intact, nothing with the
+    // arm rethrowing. One pair on one fixture shape is an observation, not the
+    // full-channel diff the handler row was strengthened on, so this assertion
+    // stays containment-only and does not claim whose. Strengthen it the way
+    // the handler row was once that diff has been run against THIS fixture.
     const malformed = fire('pre-tool-use', 'not json{');
     ok('malformed stdin is contained (silent, exit 0)',
       malformed.status === 0 && !clamped(malformed.err) && verdictOf(malformed.out) === 'silent',

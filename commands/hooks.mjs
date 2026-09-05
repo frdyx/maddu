@@ -301,6 +301,17 @@ export default async function hooks(argv) {
       await core.fire(event);
     } catch (err) {
       buffered = [];   // the core crashed — it does not get to have said anything
+      // This reason is the ONLY trace that the command, not the arm, contained
+      // the throw — and it goes nowhere. ctx.noops is read by evaluateWitness
+      // as a length; it is never written to the spine, a receipt, or stderr.
+      // From outside, this path and the arm's own catch are byte-identical for
+      // session-end, pre-compact, and a pre-tool-use that failed before its
+      // bootstrap finished (measured 2026-09-05: exit, stdout, stderr, spine,
+      // file set, receipt row — all the same). Only session-start separates
+      // them, through the notice written below, and only a pre-tool-use that
+      // failed AFTER bootstrap does, through the ENFORCEMENT_ERROR the arm's
+      // catch appends and this one does not. If a layer-naming emission is
+      // ever added, this is where it goes; none is proposed.
       try {
         (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-threw');
       } catch { /* the excuse is best-effort — never why a hook fails */ }
@@ -324,6 +335,14 @@ export default async function hooks(argv) {
     // future arm that forgets, and falling through here without declaring a
     // no-op is a mutation-witness breach that rewrites this exit 0 back to 1.
     // The containment would then be defeated by the one path that looked safest.
+    //
+    // And that process.exit(0) is EXPLICIT, which has a cost worth naming: a
+    // core that set process.exitCode = N before returning is clamped here
+    // WITHOUT the "would have exited" line. The interceptor above receives the
+    // literal 0, not N, and process.exit(0) resets process.exitCode before the
+    // bin/maddu.mjs floor reads it. Unreachable for the same reason this block
+    // is; noted so the announcement the test suites rely on is not mistaken
+    // for a promise that covers every path.
     try {
       (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('hook-fire:core-returned-without-exiting');
     } catch { /* best-effort */ }
