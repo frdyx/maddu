@@ -377,12 +377,32 @@ async function main() {
     // stopped separating containment from a failure the floor hid. The clamp says
     // so on stderr, in the same sentence from commands/hooks.mjs and
     // bin/maddu.mjs; these assertions read both.
+    //
+    // Which half of each assertion below is live depends on whether it also
+    // reads stdout, and the two shapes are opposites:
+    //   • No stdout conjunct (the containment loop, session-end): `status === 0`
+    //     is what is unreachable-false — both clamps guarantee it — and the
+    //     clamp check is the ONLY thing that can fail. A seam throw escaping
+    //     both the arm's catch and the command's ends as an uncaught error or a
+    //     non-zero process.exit; either route prints the sentence while the
+    //     status still reads 0.
+    //   • With a stdout conjunct (the session-start notes): the clamp check can
+    //     never be the one that fails. The commands/hooks.mjs interceptor drops
+    //     the buffered stdout when the core's exit was non-zero, so a run
+    //     clamped there arrives with an empty stdout and the note regex is
+    //     already false. The bin/maddu.mjs backstop floor does not drop stdout,
+    //     but it can only fire with the buffer intact through an uncaught async
+    //     error, and fire-core writes the note and calls process.exit(0) with no
+    //     suspension point between them. Kept there to name the channel, not
+    //     because it discriminates.
     const clamped = (r) => /would have exited/.test((r && r.stderr) || '');
     // containment: every event × bootstrap/handler seam → exit 0
     for (const ev of ['session-start', 'session-end', 'pre-compact', 'pre-tool-use']) {
       for (const stage of ['bootstrap', 'handler']) {
         const r = fire(ev, { session_id: 'c-contain', cwd: repo, tool_name: 'Edit', tool_input: { file_path: 'x.js' } },
           { MADDU_SELF_TEST: '1', MADDU_HOOK_TEST_THROW: stage });
+        // Verdict-less shape: `!clamped(r)` is the live half here — `status === 0`
+        // cannot be false on a clamped build, and nothing on stdout is read.
         ok(`containment: ${ev} × ${stage} seam → exit 0`, r.status === 0 && !clamped(r),
           `status=${r.status} stderr=${(r.stderr || '').slice(0, 60)}`);
       }
@@ -394,6 +414,9 @@ async function main() {
     // minted-session announcement this asserts.
     const inert = fire('session-start', { session_id: 'c-inert', cwd: repo },
       { MADDU_HOOK_TEST_THROW: 'bootstrap', MADDU_SELF_TEST: '' });
+    // Verdict-bearing shape (also `st` below): "clamp sentence on stderr AND the
+    // minted-session note on stdout" is unreachable — see the note at `clamped`.
+    // The note regex is the live conjunct; the clamp check is redundant with it.
     ok('containment: seam inert without MADDU_SELF_TEST',
       inert.status === 0 && !clamped(inert) && /Máddu session ses_/.test(inert.stdout || ''),
       `status=${inert.status} ${(inert.stdout || '').slice(0, 60)}`);

@@ -371,6 +371,27 @@ async function main() {
         // proves the child completed the pipeline rather than failing inside it
         // — which is the whole distinction this assertion was added for. The
         // clamp announces itself on stderr; its absence carries the claim now.
+        //
+        // READ THE CLAMP CONJUNCT FOR WHAT IT IS. It can never be the conjunct
+        // that fails here, because the state it would catch — clamp sentence on
+        // stderr AND a parseable lane deny on stdout — is unreachable. Two facts
+        // close it, and the second is the one that is easy to miss:
+        //   1. The clamp that can fire AFTER a verdict was written is the
+        //      process.exit interceptor in commands/hooks.mjs, and its exit-time
+        //      flush drops the buffered stdout whenever the intercepted code was
+        //      non-zero. A run clamped that way reaches this reader with an
+        //      empty stdout, so `r.deny` is already false.
+        //   2. The bin/maddu.mjs backstop floor does NOT drop stdout — the flush
+        //      still runs, and with the core's own exit at 0 it writes the
+        //      buffer. That floor can only fire with the buffer intact through
+        //      an uncaught async error, and the deny write in fire-core is
+        //      followed by process.exit(0) with no suspension point between
+        //      them, so nothing can land in that gap.
+        // So the verdict is what discriminates; the clamp check is redundant
+        // with it at THIS site and is kept because it names the channel the
+        // evidence moved to. It is live at verdict-less sites (session-end,
+        // pre-compact, an allowed pre-tool-use), where stdout is empty either
+        // way — see the containment loop in session-lifecycle.mjs.
         ok(`concurrent mint: call ${i} completed the gate (exit 0 + lane deny, not session)`,
           rr.code === 0 && !/would have exited/.test(rr.err || '')
           && r.deny && /lane/.test(r.reason) && !SESSION_DENY_RE.test(r.reason),

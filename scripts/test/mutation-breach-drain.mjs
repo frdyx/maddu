@@ -13,7 +13,12 @@
 //       carries its own claimedAt); cross-host claims reclaim by age.
 //   (D) concurrency: two interleaved drainers over one spool drain every
 //       breach EXACTLY once (per-file atomic rename claims), and a breach
-//       created mid-drain is not lost.
+//       created mid-drain is not lost. A DETECTOR — it caught the in-process
+//       double-drain only under load.
+//   (H) the deterministic successor to (D): the same-process interleave is
+//       FORCED (A suspended inside its append while B examines the same
+//       breachId), bare and with a bin-shaped hasBreachId; reverting the
+//       synchronous reservation fails it on the first run.
 //   (E) credit-leak regression (Codex r1 F1): a drain append must never
 //       credit an armed command witness — the drain protocol itself makes no
 //       ALS context, so an armed ctx stays at zero credits.
@@ -135,6 +140,89 @@ try {
       seen.length + residual.length === 7,
       `drained=${seen.length} residual=${residual.length} failedA=${ra.failed} failedB=${rb.failed}`);
     await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── (H) the in-process double-drain, with the interleave FORCED ─────────
+  // (D) above is a detector: it found the same-process duplicate append 22
+  // times in 300 runs, and only under CPU starvation. That is evidence the
+  // bug existed, not a test that reverting its fix fails. This case pins the
+  // ordering (D) can only hope for, so a reverted reservation goes red on the
+  // first run rather than the three-hundredth.
+  //
+  // The ordering the reservation closes: drainer A has passed every check for
+  // a breachId and is SUSPENDED inside its append; drainer B, in the same
+  // process, examines the same breachId while A's append has not landed. Every
+  // check that sits before an await (layer 1's hasBreachId included) can only
+  // see what has already been written, so B passes too and the breach lands
+  // twice. The reservation is taken synchronously, so B is refused.
+  //
+  // Forcing it: A's appendFn signals when it has been ENTERED and then waits
+  // on a gate the test holds. B is started only after that signal and awaited
+  // to completion BEFORE the gate opens. No timer, no load — the interleave is
+  // a consequence of the awaits and is identical on every run.
+  //
+  // The shared breachId is manufactured by spooling one breach under two file
+  // names. In the wild the two drainers reached one id through a claim rename
+  // defeated under starvation; that defeat cannot be forced from outside the
+  // lib, and the reservation is keyed by id, not by file, so two rows carrying
+  // one id exercise exactly the branch the fix added. (D) keeps watching the
+  // claim path itself.
+  //
+  // Run twice. Bare (no layer 1 at all) is (D)'s shape. With a hasBreachId of
+  // the shape bin/maddu.mjs injects — a scan of what is already on the spine —
+  // is the production path: it is a check before an await, so it is the same
+  // TOCTOU, and the run proves layer 1 answered "not on the spine" every time
+  // it was asked and never stopped anything. Layer 0 is what stopped B.
+  {
+    const forcedInterleave = async (label, { withLayer1 }) => {
+      const fix = await freshFix();
+      const [id] = spoolBreach(fix, 1);
+      const row = await readFile(join(spoolDir(fix), `${id}.json`), 'utf8');
+      await writeFile(join(spoolDir(fix), `${id}-again.json`), row);
+      const spine = [];                  // appends that have LANDED — all a scan can see
+      const layer1Answers = [];
+      const hasBreachId = withLayer1
+        ? async (b) => { const a = spine.some((e) => e.data.breachId === b); layer1Answers.push(a); return a; }
+        : null;
+      let openGate; const gate = new Promise((r) => { openGate = r; });
+      let aEntered; const entered = new Promise((r) => { aEntered = r; });
+      const appendedBy = [];
+      let aLanded = false;
+      const mkAppend = (tag) => async (spec) => {
+        appendedBy.push(tag);
+        if (tag === 'A') { aEntered(); await gate; aLanded = true; }
+        spine.push(spec);
+      };
+      const opts = hasBreachId ? { hasBreachId } : {};
+      const pa = drainBreachesToSpine(fix, fix, mkAppend('A'), opts);
+      await entered;                     // A is inside its append; nothing has landed
+      const rb = await drainBreachesToSpine(fix, fix, mkAppend('B'), opts);
+      const aLandedBeforeBFinished = aLanded;
+      openGate();
+      const ra = await pa;
+      const names = await readdir(spoolDir(fix));
+      // Control first, and it must hold on a BROKEN build too: the interleave
+      // really was forced. A entered its append before B started, and B
+      // completed a whole drain of the remaining row while A's append had still
+      // not landed. Only the assertion after it discriminates.
+      ok(`${label}: rendezvous forced (A suspended in append, B drained a row meanwhile)`,
+        appendedBy[0] === 'A' && !aLandedBeforeBFinished && rb.drained + rb.failed === 1,
+        `appendedBy=${appendedBy.join('+')} aLandedBeforeB=${aLandedBeforeBFinished} B=${rb.drained}/${rb.failed}`);
+      ok(`${label}: the same breachId is appended EXACTLY once`,
+        spine.length === 1 && appendedBy.length === 1 && spine[0].data.breachId === id,
+        `appends=${spine.length} by=${appendedBy.join('+')}`);
+      ok(`${label}: both rows consumed, nothing failed, spool empty`,
+        ra.drained === 1 && rb.drained === 1 && ra.failed === 0 && rb.failed === 0 && names.length === 0,
+        `A=${ra.drained}/${ra.failed} B=${rb.drained}/${rb.failed} left=${names.join(',')}`);
+      if (withLayer1) {
+        ok(`${label}: layer 1 never said "already on spine" — it was not what stopped B`,
+          layer1Answers.length >= 1 && layer1Answers.every((a) => a === false),
+          `answers=${JSON.stringify(layer1Answers)}`);
+      }
+      await rm(fix, { recursive: true, force: true });
+    };
+    await forcedInterleave('forced interleave, bare', { withLayer1: false });
+    await forcedInterleave('forced interleave, bin-shaped hasBreachId', { withLayer1: true });
   }
 
   // ── (E) credit-leak regression: drain never credits an armed ctx ────────
