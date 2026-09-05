@@ -33,12 +33,22 @@
 // "this fixture stopped being a counterexample". Nothing about HOW the oracle
 // should tell the difference appears below.
 //
-// NOT asserted: any textual property of commands/hooks.mjs. A size threshold, a
-// line count, or a "hooks.mjs must not contain the factory" grep would all pass
-// this fixture and die the first time someone legitimately trims the file, and
-// the oracle's own header already records why a regex cannot lex JavaScript
-// here (the help-text glob `.maddu/config/**` opens a phantom block comment
-// that swallows ~5,132 bytes). A proxy is not wanted.
+// ONCE "NOT asserted", ASSERTED SINCE b64b397 — corrected in round 4, which
+// caught the drift. This paragraph used to say that no textual property of
+// commands/hooks.mjs was asserted here at all: a size threshold or a
+// "must not contain the factory" grep would pass this fixture and then die the
+// first time someone legitimately trimmed the file, and a regex cannot lex
+// JavaScript here anyway (the help-text glob `.maddu/config/**` opens a phantom
+// block comment that swallows ~5,132 bytes). A proxy was not wanted.
+//
+// b64b397 changed the shape of the bound, the suite followed it, and this
+// paragraph did not. The suite now parses the ceiling out of the verdict and
+// asserts on it three times: that the ceiling is readable from the verdict at
+// all, that added comment lines cannot flip DONE to NOT DONE, and the residual
+// below. The objection that produced the old text still stands and is still
+// honoured — a RAW-TEXT proxy is not used. The bound counts CODE lines, so
+// trimming or adding commentary moves nothing, which is precisely the failure
+// this paragraph was written to prevent.
 //
 // A PREDICATE THAT WOULD WORK, MEASURED
 // Ablate by CONTENT rather than by PRESENCE: keep the file names, replace each
@@ -110,22 +120,26 @@
 // the question is WHICH claim refused. A NOT DONE for an incidental cause is the
 // inert-fixture trap, and this project has paid for it five times.
 //
-// THE RESIDUAL IS RED, DELIBERATELY, and it is a measurement, not an opinion:
+// THE RESIDUAL WAS RED DELIBERATELY, AND b64b397 TURNED IT GREEN. Recorded
+// here rather than left to be rediscovered, because the text this replaced went
+// on announcing a red row the suite no longer has — and a suite that advertises
+// a known failure teaches its readers to skim the failure list.
 //
-//   honest commands/hooks.mjs      593 raw lines    344 code lines
-//   the forgery                   1528 raw lines    885 code lines
-//   the ceiling                    900 raw lines
+// The bound used to count RAW lines, and the cheapest lever against raw text is
+// deleting comments: mechanical, behavior-preserving, no skill required, and
+// spelled out by the refusal itself, which prints both numbers. A
+// comment-stripped re-inline squeaked under the raw bound and read DONE.
+// b64b397 moved the count to CODE lines, leaving an adversary no lever but
+// deleting logic — which claim 3 already catches. Review commentary, which is
+// what has actually moved this file, now costs no headroom at all.
 //
-// The bound is on TEXT, and the cheapest lever against text is deleting
-// comments — mechanical, behavior-preserving, no skill required, and spelled out
-// by the refusal itself, which prints both numbers. A comment-stripped re-inline
-// lands at 885 and reads DONE, 15 lines under the bound. Counting CODE lines
-// instead leaves the adversary no lever but deleting logic, which claim 3
-// already catches: the forgery would sit at 885 against a ~500 ceiling while the
-// honest file sits at 344, and review commentary — which is what actually moved
-// this file, 434 to 552 to 592 — would cost no headroom at all. That is a better
-// bound on both axes, and the red assertion stays until it is decided either
-// way, because a residual nobody can see becomes folklore.
+// So the residual passes: the forgery's code-line count stands well clear of
+// the ceiling, where against the old raw bound it had barely cleared it. The
+// live figures are deliberately NOT restated here. Hard-coding them is how this
+// block went stale — it named a 900-raw-line ceiling that had become 550 code
+// lines, and guessed at "~500" two paragraphs later. The ceiling is defined
+// once, at check-fire-core-extracted.mjs:352, and the verdict prints both
+// numbers at the moment they are measured. Read them there.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 

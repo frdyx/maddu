@@ -465,14 +465,24 @@ async function main() {
       ok('M5d: and never prints a stack trace',
         !hasStackTrace(r.err) && !hasStackTrace(r.out), firstFrame(`${r.err}\n${r.out}`));
 
-      // THE RESIDUAL, asserted rather than described. Suppressing the second
-      // document is strictly better than emitting it, but it leaves a refusal
-      // standing that was produced by a core which did not finish — the hook
-      // failing the user's tool call, which is the one thing this whole path
-      // exists to prevent. Buffering the core's stdout and discarding it when
-      // the call throws closes it; flushing on the intentional-exit path keeps
-      // a legitimate verdict. Until then this is red, and being red is how the
-      // gap stays visible instead of becoming folklore.
+      // WAS THE RESIDUAL; IS NOW A LIVE REGRESSION. This row used to be red on
+      // purpose: suppressing the second document beat emitting it, but it left
+      // a refusal standing that a core which did not finish had produced — the
+      // hook failing the user's tool call, the one thing this path exists to
+      // prevent. The comment said buffering the core's stdout and discarding it
+      // when the call throws would close the gap, and flushing on the
+      // intentional-exit path would keep a legitimate verdict.
+      //
+      // That shipped, in 849cdac — the same commit that last touched this file:
+      // commands/hooks.mjs:262 buffers, :272 drops the buffer when coreExit is
+      // non-zero, :303 clears it outright when the core crashed. The row has
+      // been green since, while the comment went on describing its own fix in
+      // the future tense and advertising a failure this suite no longer has.
+      //
+      // Corrected in round 4, which found it. A suite that announces a
+      // known-red row teaches its readers to skim the failure list, and this
+      // one has no failures to skim. If this goes red again, it is a
+      // regression in the buffering, not a documented gap.
       ok('M5d: a core that failed does not leave a refusal standing',
         verdictOf(r.out) !== 'deny', verdictOf(r.out));
     }

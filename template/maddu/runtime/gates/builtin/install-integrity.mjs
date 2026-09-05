@@ -15,9 +15,6 @@ async function sha256OfFile(p) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-// null = genuinely absent; THROWS = present but unparseable. The two need
-// different verdicts and different remedies, and collapsing them into null made
-// the gate report a truncated manifest as "missing".
 // THREE outcomes. null = genuinely absent (ENOENT). A read failure for any other
 // reason — an ACL, a sharing violation, a directory where a file belongs — is
 // NOT absence and must not be reported as "missing"; it sends the operator to
