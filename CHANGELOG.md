@@ -11,6 +11,62 @@ narrative summary.
 
 ---
 
+## [v1.132.0] · 2026-09-05 · the claim admitted everyone
+
+v1.130.0 and v1.131.0 shipped without an adversarial review round, because the
+reviewer was quota-blocked and a waiver was recorded in both. This release is
+that funnel, run retrospectively. It went six rounds, and what it found was not
+in the code those two releases changed.
+
+**The row claim was never exclusive.** `drainBreachesToSpine` claimed a spool row
+by renaming it, on the premise that rename is atomic so exactly one drainer wins.
+It is not, on this platform: two concurrent renames of one source *both* report
+success in 486 of 500 contended trials at two processes, and 499 of 500 at four.
+Exactly one destination file survives, and it is not reliably the caller's.
+Measured against a positive control — the same barrier drove `open(path,'wx')`,
+`link()` and `mkdir()` to zero collisions in 500 four-process trials each — so
+the zeros are zeros from real races rather than from racers that never met. The
+rename is now bookkeeping performed by whoever has already won an
+exclusive-create gate.
+
+**And the symptom was not the one anybody had named.** Every prior comment
+described a double append. That was the minority outcome: 12 of 500 trials,
+against 442 of 500 for a *phantom failure* — a losing drainer reading its own
+claim name, getting ENOENT because the winner moved it, failing to restore, and
+reporting `failed=1` for a row that was drained exactly once. Since `bin` treats
+a reported drain failure as grounds to abort dispatch, the operator-visible
+defect was an aborted dispatch on a false failure, not a miscounted ledger.
+
+**A story was removed from the code.** Two comments blamed those transient read
+failures on antivirus holding a just-renamed file. Across 755 pre-gate failures
+the error code was ENOENT 755 times and EPERM/EBUSY zero times; an AV hold
+yields EPERM/EBUSY. No AV-caused failure has ever been observed here. The
+explanation had been absorbing the very collision it sat beside.
+
+**Claim 5 stopped overclaiming.** The PR2 extraction oracle's code-line ceiling
+counted `/**/ code` as a comment, so prefixing every line of a re-inlined tree
+took it from 885 lines to 0 and certified DONE over a tree where nothing had been
+extracted. That lever is closed. A second one — a line-start `/*` inside a `void`
+template literal — was then measured taking the same forgery to 49, and is
+**deliberately left open**: both belong to one class, the second was found within
+hours of the first being closed, and the sound version of the claim needs a
+parser this checker will not have. So the record says what the check is worth
+instead. Claim 5 is a mass heuristic, not a security boundary, and citing it as
+evidence that extraction cannot be faked is wrong.
+
+Also: the exit floor's clamp no longer hides the breach it exists to expose, 22
+assertions hollowed out by that clamp are restored, four containment assertions
+now name *which* layer contained a throw while six are documented as unable to,
+and the double-drain regression is deterministic rather than a 22-in-300
+detector.
+
+The funnel's own lesson, recorded because it recurred in four consecutive rounds:
+the worst findings were in the previous round's fixes, twice in comments written
+hours earlier to correct other wrong comments. It terminated on a scoped
+verify-only round, not on its own.
+
+---
+
 ## [v1.131.0] · 2026-09-04 · an interrupted upgrade can finally say so
 
 v1.130.0 needed a version bump to be deliverable at all — `maddu upgrade`
