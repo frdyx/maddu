@@ -307,13 +307,18 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // delegation. Every claim is satisfied by a tree where nothing was extracted.
   //
   // This claim is about MASS rather than reference, which is what that forgery
-  // cannot fake: it has to keep the ~860 lines of firing machinery inside
-  // hooks.mjs to still work. The extraction's entire content is that those lines
-  // left. hooks.mjs was 1258 lines before PR2 and 434 after, and the core module
-  // is 928 lines on its own, so a tree that re-inlines it lands near 1400. The
+  // cannot fake: it has to keep the firing machinery inside hooks.mjs to still
+  // work, and the extraction's entire content is that those lines left. The
   // ceiling is set with real headroom above the delegating file rather than
   // hugging it: a bound that a few added comments can trip is a bound that gets
   // raised on reflex until it means nothing, and then the claim is gone.
+  //
+  // The superseded RAW-line figures that stood here (1258 before PR2, 434
+  // after, a 928-line core, "lands near 1400") are gone rather than refreshed.
+  // They described the raw-line bound this file stopped using, sat directly
+  // above the code-line paragraph that replaced it, and would have decayed
+  // again on the next edit. The live numbers are measured below and printed in
+  // the refusal.
   //
   // Honest about what it is: a size bound is not a parse, and an adversary who
   // re-inlines the core AND golfs it below the ceiling defeats it. It is aimed
@@ -333,7 +338,13 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // hooks.mjs is 344 code lines today; the core is 539 on its own, so a
   // re-inlined tree lands near 883 however it is formatted. The ceiling sits at
   // 550: a 206-line margin over the honest file, and 62% of what the cheat needs.
-  // Comment freely — it cannot move this number.
+  // Comment freely — commentary cannot move this number. What CAN move it, and
+  // did until round 5, is a comment opener with code behind it: `/**/ code` read
+  // as a comment, so a one-line sed prefixing every line took a re-inlined tree
+  // from 883 to 0 and certified DONE over a tree where nothing was extracted.
+  // The classifier below now counts what REMAINS after leading closed comments,
+  // which closes that. Stated exactly: the move from raw lines to code lines
+  // removed one instance of the mechanical-lever class, not the class.
   //
   // The classifier is a heuristic, not a lexer, and the header above explains
   // why a regex must never try to lex JavaScript here. This one only ever DROPS
@@ -341,10 +352,43 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // smaller, which can never manufacture a false NOT DONE. It can only make the
   // ceiling slightly more generous, and 206 lines of margin absorb that.
   const HOOKS_CEILING = 550;
-  const codeLines = (src) => src.split(/\r?\n/).filter((l) => {
-    const t = l.trim();
-    return t && !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
-  }).length;
+  // Round 5 MAJOR 2: the previous rule dropped ANY line whose trimmed text
+  // began with `/*`, so `/**/ const x = 1;` — valid JavaScript, and a sed
+  // one-liner away — counted as a comment. Prefixing every line of a re-inlined
+  // tree took it from 883 to 0 and certified DONE over a tree where nothing was
+  // extracted. That is precisely the mechanical, behaviour-preserving lever the
+  // move from raw lines to code lines was supposed to remove; it removed one
+  // instance of it.
+  //
+  // So: a line counts as comment only when NOTHING is left after removing its
+  // leading, same-line-closed block comments. Still line-start anchored, so it
+  // never lexes string contents — the header's standing constraint, and why the
+  // `.maddu/config/**` glob cannot open a phantom block. The unconditional
+  // `*`-prefix drop is gone with it: a `*` line inside a block comment is
+  // already consumed by the inBlock branch, and one OUTSIDE a block is a
+  // continuation of a binary expression, i.e. code. The residual lever is now
+  // reformatting expressions so continuations lead with `*`, which is editing
+  // logic — the golf this bound has always disclaimed rather than prevented.
+  const codeLines = (src) => {
+    let n = 0, inBlock = false;
+    for (const raw of src.split(/\r?\n/)) {
+      let t = raw.trim();
+      if (inBlock) {
+        const end = t.indexOf('*/');
+        if (end < 0) continue;
+        inBlock = false;
+        t = t.slice(end + 2).trim();
+      }
+      while (t.startsWith('/*')) {
+        const end = t.indexOf('*/', 2);
+        if (end < 0) { inBlock = true; t = ''; break; }
+        t = t.slice(end + 2).trim();
+      }
+      if (!t || t.startsWith('//')) continue;
+      n++;
+    }
+    return n;
+  };
   if (reasons.length === 0) {
     try {
       const lines = codeLines(readFileSync(hooksCmd, 'utf8'));

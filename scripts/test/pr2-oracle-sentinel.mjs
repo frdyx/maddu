@@ -138,8 +138,15 @@
 // live figures are deliberately NOT restated here. Hard-coding them is how this
 // block went stale — it named a 900-raw-line ceiling that had become 550 code
 // lines, and guessed at "~500" two paragraphs later. The ceiling is defined
-// once, at check-fire-core-extracted.mjs:352, and the verdict prints both
-// numbers at the moment they are measured. Read them there.
+// once, as HOOKS_CEILING in check-fire-core-extracted.mjs, and the verdict
+// prints both numbers at the moment they are measured. Read them there.
+//
+// No line number, on purpose. The correction that wrote this paragraph cited
+// ":352" — already wrong when written (it was :343), and moved again by the
+// round-5 classifier hardening. A commit whose whole thesis was that
+// hard-coding measured values into prose is what makes it decay hard-coded a
+// line number in the same breath. A symbol name survives an edit; a line
+// number is a measured value wearing a disguise.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
@@ -223,14 +230,27 @@ const COPY = [
 // reporting a gap that is at least as large as it says. Cross-checked against a
 // second, cruder rule (non-blank lines not starting `//`, `*` or `/*`) which
 // returns the identical numbers on both files.
+// Must mirror the oracle's classifier, including its round-5 hardening: a line
+// is comment only when nothing REMAINS after its leading, same-line-closed
+// block comments. The old form discarded the whole line on a leading `/*`, so
+// `/**/ code` read as a comment and a `/**/` prefix over every line drove the
+// count to 0. Line-start anchored, so string contents are never lexed.
 function codeLines(text) {
   let n = 0, inBlock = false;
-  for (const raw of String(text).split('\n')) {
-    const l = raw.trim();
-    if (!l) continue;
-    if (inBlock) { if (l.includes('*/')) inBlock = false; continue; }
-    if (l.startsWith('//')) continue;
-    if (l.startsWith('/*')) { if (!l.includes('*/')) inBlock = true; continue; }
+  for (const raw of String(text).split(/\r?\n/)) {
+    let l = raw.trim();
+    if (inBlock) {
+      const end = l.indexOf('*/');
+      if (end < 0) continue;
+      inBlock = false;
+      l = l.slice(end + 2).trim();
+    }
+    while (l.startsWith('/*')) {
+      const end = l.indexOf('*/', 2);
+      if (end < 0) { inBlock = true; l = ''; break; }
+      l = l.slice(end + 2).trim();
+    }
+    if (!l || l.startsWith('//')) continue;
     n++;
   }
   return n;
@@ -440,13 +460,18 @@ async function main() {
     const ceiling = Number((/over the (\d+)-line ceiling/.exec(ceilingReason || '') || [])[1]);
     ok('fixture: the ceiling is readable from the verdict, not guessed here',
       Number.isFinite(ceiling) && ceiling > 0, String(ceiling));
+    // Headroom is ceiling MINUS CODE LINES. It used to subtract raw lines from
+    // a code-line ceiling and print "-62 lines of headroom" on a passing run —
+    // program output contradicting the verdict printed beside it.
     note(`honest hooks.mjs: ${honestRaw} raw lines (${codeLines(honestHooks)} code) `
-      + `against a ${ceiling}-line ceiling - ${ceiling - honestRaw} lines of headroom`);
+      + `against a ${ceiling}-line code ceiling - ${ceiling - codeLines(honestHooks)} lines of headroom`);
 
-    // The bound must survive ordinary review commentary. hooks.mjs grew 434 ->
-    // 552 -> 592 across two review rounds, almost entirely in comments, so a
+    // The bound must survive ordinary review commentary: hooks.mjs has grown by
+    // hundreds of lines across review rounds, almost entirely in comments, so a
     // ceiling that a few of those can trip is one that gets raised on reflex
-    // until it means nothing. 120 lines is three rounds' worth at once.
+    // until it means nothing. 120 lines is several rounds' worth at once. (The
+    // old text named 434 -> 552 -> 592 here and was wrong by the next commit;
+    // the shape of the argument is what matters, not the figures.)
     await writeFile(join(honest, 'commands', 'hooks.mjs'), `${honestHooks}\n${
       Array.from({ length: 120 }, (_, i) => `// fixture: an ordinary review comment, line ${i + 1}`).join('\n')}\n`);
     const hv2 = evaluate(honest);
@@ -467,8 +492,16 @@ async function main() {
     // large.
     //
     // If this is red, the bound is defeated by `strip-comments` and the metric,
-    // not the number, is what needs changing: counting CODE lines leaves the
-    // adversary no lever but deleting logic, which claim 3 already catches.
+    // not the number, is what needs changing.
+    //
+    // "Counting CODE lines leaves the adversary no lever but deleting logic"
+    // stood here and was false. Round 5 found one: `/**/ code` classified as a
+    // comment, so prefixing every line drove the count to 0 while the file
+    // still parsed. The classifier was hardened; the claim is narrowed to what
+    // is actually established — counting code lines removes the
+    // delete-the-comments lever, and each further mechanical lever has to be
+    // found and closed on its own. The known remaining one is reformatting
+    // expressions so continuation lines lead with `*`, which is editing logic.
     const forgeryCode = codeLines(fHooks);
     note(`forgery hooks.mjs: ${fHooks.split('\n').length} raw lines, of which ${forgeryCode} are code`);
     ok('claim 5 residual: the ceiling is not defeated by deleting comments',

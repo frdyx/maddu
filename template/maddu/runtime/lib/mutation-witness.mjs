@@ -216,18 +216,34 @@ function claimName(base) {
 // serialised anything, across processes or within one; the claim gate in
 // drainBreachesToSpine now does that job and carries the measurements.
 //
-// What IS true, and what this layer is for. The gate excludes a second
-// claimant of the same FILE, in this process or any other. It cannot exclude a
-// second claimant of the same breachID arriving on a DIFFERENT file — two
-// spool rows carrying one id, which is what a crash between append and unlink
-// leaves behind and what case (H) of mutation-breach-drain manufactures
-// deterministically. The gate keys on a name; this layer keys on the id. That
-// was not theoretical — under CPU starvation, 22 of 300 runs of the
-// two-interleaved-drainers scenario appended the same breach twice, the same
-// row credited by drainer A and drainer B with both reporting success. In an
-// append-only ledger a breach recorded twice is a false count of how often the
-// framework caught itself unwitnessed, which is exactly the number this spool
-// exists to make truthful.
+// CORRECTED AGAIN IN ROUND 5, because that rewrite was also wrong. It claimed
+// this layer covers "two spool rows carrying one id, which is what a crash
+// between append and unlink leaves behind", and cited the 22-of-300 duplicates
+// as the observed instance. Neither survives checking:
+//
+//   The only spool writer is recordBreachSync, and it names the file by the id
+//   (`${breachId}.json`), so one id maps to one filename BY CONSTRUCTION. A
+//   crash between append and unlink leaves exactly one file — the `.draining.`
+//   claim, which reclaimStaleClaimsSync renames back, or the `.drained`
+//   marker, which is cleanup only. No shipped writer can produce two rows with
+//   one id.
+//
+//   The 22 of 300 came from case (D), which spools every row through
+//   recordBreachSync, so every file in it carries a distinct id. Those
+//   duplicates were the SAME-FILE double admission — the rename collision the
+//   gate now closes — not this shape at all. Evidence for the gate's defect was
+//   offered as evidence for this layer's job.
+//
+// What is actually true. The gate keys on the file name and the name IS the
+// breachId, so in production it already excludes a second claimant of an id in
+// any process. Moreover drainBreachesToSpine has ONE production caller
+// (bin/maddu.mjs, once per dispatch) and drains sequentially, so two in-process
+// drainers do not occur in production at all. This layer is DEFENCE IN DEPTH:
+// its only exercised path is the two-rows-one-id shape that case (H)
+// manufactures precisely to pin this layer's own behaviour. The code is cheap
+// and correct and stays — but it closes a hole no shipped writer can open, and
+// saying otherwise sends the next maintainer looking for a production race that
+// is not there.
 //
 // Why the two existing layers do not close it. Both are checks that sit BEFORE
 // an `await`, so they are time-of-check/time-of-use: A can test `hasBreachId`,
@@ -237,10 +253,12 @@ function claimName(base) {
 // between the test and the reservation there is no suspension point, so exactly
 // one drainer can ever pass.
 //
-// Bounded because a long-lived process (the bridge) drains repeatedly. Ids are
-// unique per breach and a drained row never returns, so forgetting an old id can
-// never cause a false skip — only the reappearance of a genuine duplicate, which
-// the cross-process layers already handle.
+// Bounded because the module can outlive a single drain in a long-lived
+// process, not because anything drains repeatedly — the bridge never drains,
+// and `server.js` does not import this function. Ids are unique per breach and
+// a drained row never returns, so forgetting an old id can never cause a false
+// skip — only the reappearance of a genuine duplicate, which the gate and
+// layer 1 already handle.
 const DRAIN_MEMO_MAX = 512;
 const reservedBreachIds = new Set();
 // Returns true if THIS call took the reservation, false if someone already holds
@@ -288,6 +306,14 @@ export function reclaimStaleClaimsSync(stateRoot, { now = Date.now() } = {}) {
         stale = host === hostname().replace(/-/g, '_').slice(0, 32)
           ? !pidAliveSameHost(Number(pid))
           : now - Number(at) > CLAIM_STALE_MS;
+        // Deliberately NOT special-cased on `pid === process.pid` here. Round 5
+        // MINOR 4 proposed sweeping a self-owned old gate in this function; it
+        // is the wrong place. "A live same-host owner is never swept, age is not
+        // the signal" is the invariant case (I) pins, and the only pid a test
+        // can rely on being alive is its own — so keying on process.pid here
+        // both breaks that fixture and weakens the rule for every other caller.
+        // The abandoned-self-gate case is handled where it is unambiguous, at
+        // the EEXIST branch in drainBreachesToSpine.
       } else {
         // Unreadable, torn or malformed content — including a gate caught
         // mid-write. Age alone decides, on the file's own mtime: YOUNG is
@@ -381,6 +407,25 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
         `${Date.now()}-${hostname().replace(/-/g, '_').slice(0, 32)}-${process.pid}`,
         { flag: 'wx' });
     } catch { continue; } // another drainer holds the gate, or it cannot be made
+    // KNOWN OPEN, round 5 MINOR 4. If the rename below fails AND the gate
+    // unlink then also fails, the gate is left carrying a LIVE pid — ours.
+    // Every later drain in this process takes EEXIST above and every reclaim
+    // keeps it (correctly: a live owner's gate is never swept), so the row
+    // strands for this process's lifetime — under `maddu start`, the bridge's —
+    // while the census tells the operator to "run any maddu command to drain",
+    // a remedy that cannot work. Before the gate, those two transient failures
+    // left the row drainable on the next run. This fix made that state less
+    // recoverable, and that is a real cost, not a quibble.
+    //
+    // NOT fixed here, deliberately. The natural fix — take over a gate that is
+    // ours and older than a gate can possibly be held — contradicts the
+    // invariant case (I) pins, that a live same-host owner is never swept and
+    // age is not the signal. The only pid a test can rely on being alive is its
+    // own, so the fixture uses process.pid to stand for "a live owner", and any
+    // rule keying on process.pid collides with it. Choosing between them is the
+    // suite author's call, not the implementer's; editing the assertion to fit
+    // the code is the precise move this branch exists to prevent. Requires two
+    // transient failures on one row and has not been reproduced.
     let claimOk = false;
     try { await rename(join(dir, name), join(dir, claimed)); claimOk = true; } catch {}
     // Released the moment the claim exists. `claimed` carries a unique nonce,

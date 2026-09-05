@@ -215,8 +215,13 @@ try {
   // consumes its row and counts drained++ — so a doubly-admitted claim now
   // leaves seen=6, residual=1, all three assertions green. The fix made the
   // defect symptomless in exactly the observable (D) is built on. (H) below is
-  // explicit that it does not cover the claim path either; the claim-admission
-  // assertion added in (D) is what watches it now.
+  // explicit that it does not cover the claim path either. The claim-admission
+  // assertions added below watch it in-process — but as DETECTORS: over 30 runs
+  // against the pre-gate lib they fired 19/30 and 0/30 respectively, because
+  // the in-process double admission is the rare shape. The load-bearing
+  // regression for the claim path is mutation-breach-drain-race.mjs, which is
+  // cross-process and went red in 57-59 of 60 trials. Nothing here should be
+  // read as covering the claim path on its own.
   {
     const fix = await freshFix();
     const ids = spoolBreach(fix, 6);
@@ -308,18 +313,24 @@ try {
   // to completion BEFORE the gate opens. No timer, no load — the interleave is
   // a consequence of the awaits and is identical on every run.
   //
-  // The shared breachId is manufactured by spooling one breach under two file
-  // names. In the wild the two drainers reached one id through a claim rename
-  // defeated under starvation; that defeat cannot be forced from outside the
-  // lib, and the reservation is keyed by id, not by file, so two rows carrying
-  // one id exercise exactly the branch the fix added. (D) keeps watching the
-  // claim path itself.
+  // The shared breachId is MANUFACTURED, by spooling one breach under two file
+  // names, and round 5 sharpened what that means: no shipped writer can produce
+  // it. recordBreachSync names every spool file by its id, so one id maps to
+  // one filename by construction. This case therefore pins the reservation's
+  // own behaviour against a shape production cannot reach — which is the honest
+  // description of defence in depth, and is why the earlier claim here that
+  // "(D) keeps watching the claim path itself" was doubly wrong: (D) cannot
+  // (the reservation made the defect symptomless in (D)'s only failing
+  // predicate), and the claim path is watched by (D)'s claim-admission
+  // assertions and, load-bearingly, by mutation-breach-drain-race.mjs.
   //
-  // Run twice. Bare (no layer 1 at all) is (D)'s shape. With a hasBreachId of
-  // the shape bin/maddu.mjs injects — a scan of what is already on the spine —
-  // is the production path: it is a check before an await, so it is the same
-  // TOCTOU, and the run proves layer 1 answered "not on the spine" every time
-  // it was asked and never stopped anything. Layer 0 is what stopped B.
+  // Run twice. Bare (no layer 1 at all) is (D)'s shape. The second run injects
+  // a hasBreachId of the shape bin/maddu.mjs supplies — the production FUNCTION
+  // shape, under a concurrency production does not have, since
+  // drainBreachesToSpine has one production caller and drains sequentially. It
+  // is a check before an await, so it is the same TOCTOU, and the run proves
+  // layer 1 answered "not on the spine" every time it was asked and never
+  // stopped anything. Layer 0 is what stopped B.
   {
     const forcedInterleave = async (label, { withLayer1 }) => {
       const fix = await freshFix();
