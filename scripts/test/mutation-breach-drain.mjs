@@ -11,10 +11,19 @@
 //       ONLY when its PID is proven dead; a live same-host claim is left
 //       alone regardless of age (rename preserves mtime — the claim name
 //       carries its own claimedAt); cross-host claims reclaim by age.
+//   (I) orphaned claim GATES (`<row>.claiming`, the v1.132.0 mutual
+//       exclusion): swept when the owner is provably gone (dead same-host pid,
+//       old cross-host stamp, old mtime on an unreadable owner), and kept —
+//       still blocking the row — when it is live or its owner cannot be read
+//       and the file is young. Both sides pinned; the "kept" side is proven red
+//       by a sweep-everything mutant, not by reverting the fix.
 //   (D) concurrency: two interleaved drainers over one spool drain every
-//       breach EXACTLY once (per-file atomic rename claims), and a breach
-//       created mid-drain is not lost. A DETECTOR — it caught the in-process
-//       double-drain only under load.
+//       breach EXACTLY once, and a breach created mid-drain is not lost. A
+//       DETECTOR, in-process and timing-dependent — the cross-process
+//       regression for the claim gate is mutation-breach-drain-race.mjs. Its
+//       claim-ADMISSION assertions (drained == rows consumed; every failure
+//       names a row still on the spool) watch the claim path, which append
+//       uniqueness stopped watching once the reservation landed.
 //   (H) the deterministic successor to (D): the same-process interleave is
 //       FORCED (A suspended inside its append while B examines the same
 //       breachId), bare and with a bin-shaped hasBreachId; reverting the
@@ -26,13 +35,13 @@
 //
 // Exit codes: 0 = OK, 1 = a check failed, 2 = harness error.
 
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile, rename } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile, rename, utimes } from 'node:fs/promises';
 import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 
 import {
   createWitnessContext, armCliWitness, disarmCliWitness, recordBreachSync,
-  drainBreachesToSpine, reclaimStaleClaimsSync, listBreachesSync,
+  drainBreachesToSpine, reclaimStaleClaimsSync, listBreachesSync, CLAIM_STALE_MS,
 } from '../../template/maddu/runtime/lib/mutation-witness.mjs';
 
 let passed = 0, failed = 0;
@@ -110,29 +119,114 @@ try {
     await rm(fix, { recursive: true, force: true });
   }
 
-  // ── (D) two interleaved drainers: exactly-once, nothing lost ────────────
-  // RECORD CORRECTION, made on this branch after the fact. The commit that
-  // added the synchronous reservation — "two drainers in one process could
-  // append the same breach twice" — cited THIS case's output as its evidence
-  // (seen=7 unique=6) and named a hasBreachId TOCTOU as the cause. The two do
-  // not fit together: (D) injects no hasBreachId at all, so layer 1 was never
-  // in play here and cannot be what failed. The only idempotency this case
-  // exercises is the per-file atomic rename claim, so the 22-in-300 duplicates
-  // must have come from two drainers holding one row PAST that claim. The
-  // reservation does close that too, because it keys on breachId and not on
-  // the file — the fix is right, but the stated cause is not what this case
-  // measured, and the claim-defeat mechanism itself is still unexplained.
-  // (D) stays in place as its watcher. (H) below pins the shared-id ordering
-  // deterministically and does NOT cover the claim path.
+  // ── (I) orphaned claim GATES: swept only when the owner is provably gone ─
+  // The gate is the exclusive-create marker the v1.132.0 fix put in FRONT of
+  // the rename claim, because the rename was never exclusive on this platform.
+  // It is held across one rename and released at once, so a gate that outlives
+  // its owner is debris that blocks its row from ever being claimed again: the
+  // row stays on the spool, still counted as evidence, and never drains.
+  // Sweeping is safe ONLY when the owner is provably gone — reclaiming a LIVE
+  // gate hands its row to a second drainer and reinstates the race the gate
+  // closes. So each branch is pinned from both sides. The "swept" side goes
+  // red on the pre-gate lib (nothing sweeps a gate it does not know about);
+  // the "kept" side cannot, and is proven red instead by a mutant that
+  // assumes stale where it cannot read the owner.
   {
     const fix = await freshFix();
-    spoolBreach(fix, 6);
+    const [id] = spoolBreach(fix, 1);
+    const host = hostname().replace(/-/g, '_').slice(0, 32);
+    const gate = join(spoolDir(fix), `${id}.json.claiming`);
+    const gateHeld = async () => (await readdir(spoolDir(fix))).includes(`${id}.json.claiming`);
+    const rowSpooled = async () => (await readdir(spoolDir(fix))).includes(`${id}.json`);
+    let appends = 0;
+    const count = async () => { appends++; };
+
+    // LIVE same-host owner (this pid), stamp ancient: age is not the signal.
+    // And a live gate must actually BLOCK — the drain admits nothing, appends
+    // nothing, and leaves both the row and the gate exactly where they were.
+    await writeFile(gate, `1000-${host}-${process.pid}`);
+    ok('live same-host gate is never swept (age is not the signal)',
+      reclaimStaleClaimsSync(fix) === 0 && await gateHeld());
+    const rLive = await drainBreachesToSpine(fix, fix, count);
+    ok('a live gate blocks its row: drain admits nothing, leaves row and gate',
+      rLive.drained === 0 && rLive.failed === 0 && appends === 0 && await rowSpooled() && await gateHeld(),
+      `drained=${rLive.drained} failed=${rLive.failed} appends=${appends}`);
+
+    // Owner UNREADABLE (malformed), gate young: kept. "I cannot tell" must
+    // never resolve to "assume stale".
+    await writeFile(gate, 'not-an-owner');
+    ok('unreadable owner on a YOUNG gate is not swept',
+      reclaimStaleClaimsSync(fix) === 0 && await gateHeld());
+    // Torn gate — the exclusive open landed, the body had not yet been written
+    // when the sweeper read it. Same rule.
+    await writeFile(gate, '');
+    ok('empty (torn) YOUNG gate is not swept',
+      reclaimStaleClaimsSync(fix) === 0 && await gateHeld());
+
+    // Cross-host: the only signal is the stamp the owner wrote.
+    await writeFile(gate, `${Date.now()}-otherhost-1234`);
+    ok('cross-host YOUNG gate kept', reclaimStaleClaimsSync(fix) === 0 && await gateHeld());
+    await writeFile(gate, '1000-otherhost-1234');
+    ok('cross-host OLD gate swept by its own stamp', reclaimStaleClaimsSync(fix) === 1 && !(await gateHeld()));
+
+    // Owner unreadable AND the file itself old: the documented fallback sweeps
+    // on the file's own age — the cross-host rule, applied to a gate whose
+    // owner never became legible. Mtime is forced back past the threshold.
+    await writeFile(gate, 'not-an-owner');
+    const old = new Date(Date.now() - CLAIM_STALE_MS - 60_000);
+    await utimes(gate, old, old);
+    ok('unreadable owner on an OLD gate is swept by mtime age',
+      reclaimStaleClaimsSync(fix) === 1 && !(await gateHeld()));
+
+    // DEAD same-host owner, stamp young: swept regardless of age — and the row
+    // it was blocking drains on the very next pass, exactly once.
+    const deadPid = 999999899;
+    await writeFile(gate, `${Date.now()}-${host}-${deadPid}`);
+    ok('dead same-host gate is swept regardless of age',
+      reclaimStaleClaimsSync(fix) === 1 && !(await gateHeld()) && await rowSpooled());
+    await writeFile(gate, `${Date.now()}-${host}-${deadPid}`);
+    const rDead = await drainBreachesToSpine(fix, fix, count);
+    const left = await readdir(spoolDir(fix));
+    ok('the drain sweeps a dead gate itself and drains the freed row exactly once',
+      rDead.drained === 1 && rDead.failed === 0 && appends === 1 && left.length === 0,
+      `drained=${rDead.drained} failed=${rDead.failed} appends=${appends} left=${left.join(',')}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── (D) two interleaved drainers: exactly-once, nothing lost ────────────
+  // RECORD CORRECTION, twice over. The commit that added the synchronous
+  // reservation — "two drainers in one process could append the same breach
+  // twice" — cited THIS case's output as its evidence (seen=7 unique=6) and
+  // named a hasBreachId TOCTOU as the cause. Those do not fit together: (D)
+  // injects no hasBreachId at all, so layer 1 was never in play here and
+  // cannot be what failed.
+  //
+  // The first correction then guessed that the row must have been held past
+  // "the per-file atomic rename claim", called the mechanism unexplained, and
+  // said (D) would stay as its watcher. All three of those are now wrong too.
+  // Round 4 measured it: the rename claim was never atomic on this platform —
+  // two concurrent renames of one source both succeed in ~97% of contended
+  // trials at two processes and 99.8% at four. Nothing was held PAST the
+  // claim; the claim simply admitted everyone. v1.132.0 replaced it with an
+  // exclusive-create gate.
+  //
+  // And (D) cannot watch any of it. Its only failing predicate is breachId
+  // uniqueness, the reservation keys on breachId, and a refused drainer still
+  // consumes its row and counts drained++ — so a doubly-admitted claim now
+  // leaves seen=6, residual=1, all three assertions green. The fix made the
+  // defect symptomless in exactly the observable (D) is built on. (H) below is
+  // explicit that it does not cover the claim path either; the claim-admission
+  // assertion added in (D) is what watches it now.
+  {
+    const fix = await freshFix();
+    const ids = spoolBreach(fix, 6);
+    const injected = [];
     const seen = [];
     let midDrainInjected = false;
     const mkAppend = (tag) => async (spec) => {
       // First append of drainer A injects a NEW breach mid-drain — it must
       // not be lost (it stays for the residual sweep below).
-      if (!midDrainInjected && tag === 'A') { midDrainInjected = true; spoolBreach(fix, 1); }
+      if (!midDrainInjected && tag === 'A') { midDrainInjected = true; injected.push(...spoolBreach(fix, 1)); }
       await new Promise((r) => setTimeout(r, 2)); // widen the interleave window
       seen.push(spec.data.breachId);
     };
@@ -143,15 +237,55 @@ try {
     const unique = new Set(seen);
     ok('every drained breach drained EXACTLY once across two drainers',
       unique.size === seen.length, `seen=${seen.length} unique=${unique.size}`);
-    // A transient read failure (Windows AV holding a just-renamed claim) may
-    // legitimately count as failed — the invariant is that such a row is
-    // RESTORED, never quarantined: valid rows must never become .corrupt.
+    // A transient read failure may legitimately count as failed — the
+    // invariant is that such a row is RESTORED, never quarantined: valid rows
+    // must never become .corrupt. This used to blame "Windows AV holding a
+    // just-renamed claim"; the round-4 data has no AV-shaped failure in it
+    // (755 of 755 pre-gate failures were ENOENT, none EPERM/EBUSY), so the
+    // failures this case was seeing were the claim collision, not a scanner.
     const allNames = await readdir(spoolDir(fix));
     ok('no valid row quarantined as .corrupt', allNames.every((n) => !n.endsWith('.corrupt')), allNames.join(','));
     const residual = allNames.filter((n) => n.endsWith('.json'));
     ok('every breach accounted for: drained or still spooled, none lost',
       seen.length + residual.length === 7,
       `drained=${seen.length} residual=${residual.length} failedA=${ra.failed} failedB=${rb.failed}`);
+    // ── claim ADMISSION, watched independently of append uniqueness ────────
+    // A drainer is admitted to a row when its claim succeeds; every admission
+    // ends in exactly one of drained++ or failed++. So `drained` summed over
+    // both drainers is the number of admissions that consumed a row, and it
+    // must equal the number of rows that actually left the spool — a number
+    // DERIVED here from the ids this case spooled (the six up front plus the
+    // one A injects) minus what is still on the spool after both drainers
+    // returned. Nothing runs concurrently with that subtraction, so the
+    // derivation cannot race; and it moves with the fixture, where a
+    // hard-coded 6 would not. A row admitted twice with both admissions
+    // reading it lands here as drained > consumed, whatever the reservation
+    // then does about the append.
+    //
+    // The other shape a double admission takes — and on the pre-gate lib the
+    // far more common one, 442 of 500 measured trials against 12 double
+    // appends — is the LOSER's read failing on its own claim name because the
+    // winner's rename moved the file out from under it. That drainer reports
+    // failed=1 with an ENOENT it cannot restore (the row is not where it left
+    // it; the winner drains it), and bin treats a reported failure as a
+    // reason to abort dispatch. The invariant that catches it: a failure
+    // restores its row, so every failure must name a row still on the spool.
+    // A row that was consumed AND reported failed was held by two drainers.
+    //
+    // Both are DETECTOR-grade in this in-process case: the collision needs
+    // the two claim calls to overlap on the threadpool, which this case
+    // invites but cannot force. Measured on the pre-gate lib: see the
+    // red-run record in the branch's funnel notes. The deterministic
+    // cross-process regression is mutation-breach-drain-race.mjs.
+    const allIds = [...ids, ...injected];
+    const consumed = allIds.filter((id) => !residual.includes(`${id}.json`)).length;
+    ok('claim admissions equal rows consumed: no row credited to two drainers',
+      ra.drained + rb.drained === consumed,
+      `drainedA=${ra.drained} drainedB=${rb.drained} consumed=${consumed} of ${allIds.length}`);
+    const failures = [...ra.errors, ...rb.errors];
+    ok('every reported failure names a row still on the spool (a consumed row reported failed was held twice)',
+      failures.every((e) => residual.includes(e.name)),
+      failures.length ? failures.map((e) => `${e.name}:${e.code}`).join(',') : 'no failures');
     await rm(fix, { recursive: true, force: true });
   }
 

@@ -15,8 +15,11 @@
 // prev_hash chain. So the exit handler writes one spool FILE per breach
 // (O_EXCL, unique breachId) under .maddu/state/mutation-breaches/, and the
 // NEXT dispatcher run drains the spool onto the spine through the normal
-// funnel (via:'breach-drain'), claiming each file by atomic rename so
-// concurrent dispatchers drain exactly-once in the normal path. Crash between
+// funnel (via:'breach-drain'), claiming each file under an exclusive-create
+// gate so concurrent dispatchers drain exactly-once in the normal path. That
+// gate replaced a bare rename in v1.132.0: rename is NOT exclusive on Windows
+// (measured — see drainBreachesToSpine), so the claim it granted was not one.
+// Crash between
 // append and unlink → at-least-once, deduped by breachId downstream. The
 // bridge is long-lived and appends breaches inline (via:'inline'); if THAT
 // append fails it falls back to this same spool (never rewrites the already-
@@ -40,9 +43,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
 import {
-  mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync,
+  mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
-import { readdir, readFile, rename, unlink } from 'node:fs/promises';
+import { readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { redactText } from './secret-scan.mjs';
 
@@ -206,13 +209,25 @@ function claimName(base) {
 }
 
 // ── Idempotency layer 0: the in-process reservation ─────────────────────────
-// The rename claim serialises drainers ACROSS processes and is atomic. It does
-// NOT make two drainers INSIDE one process safe, and that was not theoretical:
-// under CPU starvation, 22 of 300 runs of the two-interleaved-drainers scenario
-// appended the same breach twice — the same row credited by drainer A and
-// drainer B, with both reporting success. In an append-only ledger a breach
-// recorded twice is a false count of how often the framework caught itself
-// unwitnessed, which is exactly the number this spool exists to make truthful.
+// CORRECTED IN v1.132.0. This paragraph used to open "the rename claim
+// serialises drainers ACROSS processes and is atomic. It does NOT make two
+// drainers INSIDE one process safe" — and both halves were wrong in the same
+// direction. Rename is not exclusive on this platform at all, so it never
+// serialised anything, across processes or within one; the claim gate in
+// drainBreachesToSpine now does that job and carries the measurements.
+//
+// What IS true, and what this layer is for. The gate excludes a second
+// claimant of the same FILE, in this process or any other. It cannot exclude a
+// second claimant of the same breachID arriving on a DIFFERENT file — two
+// spool rows carrying one id, which is what a crash between append and unlink
+// leaves behind and what case (H) of mutation-breach-drain manufactures
+// deterministically. The gate keys on a name; this layer keys on the id. That
+// was not theoretical — under CPU starvation, 22 of 300 runs of the
+// two-interleaved-drainers scenario appended the same breach twice, the same
+// row credited by drainer A and drainer B with both reporting success. In an
+// append-only ledger a breach recorded twice is a false count of how often the
+// framework caught itself unwitnessed, which is exactly the number this spool
+// exists to make truthful.
 //
 // Why the two existing layers do not close it. Both are checks that sit BEFORE
 // an `await`, so they are time-of-check/time-of-use: A can test `hasBreachId`,
@@ -256,6 +271,38 @@ export function reclaimStaleClaimsSync(stateRoot, { now = Date.now() } = {}) {
   try { names = readdirSync(dir); } catch { return 0; }
   let reclaimed = 0;
   for (const name of names) {
+    // Orphaned claim GATES first. The gate is the exclusive-create marker that
+    // serialises claimants (see drainBreachesToSpine); it is held across a
+    // single rename and released immediately, so anything found here outlived
+    // its owner and is debris. It matters because an orphan blocks its row
+    // from ever being claimed again — the row itself is untouched, still on
+    // the spool, and still counted as evidence by listBreachesSync, so the
+    // failure mode is a breach that stops draining rather than one that
+    // disappears. Swept on the same rules as a stale claim.
+    if (name.endsWith('.claiming')) {
+      let stale = false;
+      const owner = /^(\d+)-([^-]*)-(\d+)$/.exec(
+        (() => { try { return readFileSync(join(dir, name), 'utf8').trim(); } catch { return ''; } })());
+      if (owner) {
+        const [, at, host, pid] = owner;
+        stale = host === hostname().replace(/-/g, '_').slice(0, 32)
+          ? !pidAliveSameHost(Number(pid))
+          : now - Number(at) > CLAIM_STALE_MS;
+      } else {
+        // Unreadable, torn or malformed content — including a gate caught
+        // mid-write. Age alone decides, on the file's own mtime: YOUNG is
+        // kept, older than CLAIM_STALE_MS is swept. Kept is the important
+        // half, because reclaiming a live gate hands its row to a second
+        // drainer and reinstates the race the gate closes; a gate is held for
+        // about a millisecond, so anything still unreadable ten minutes later
+        // is debris and leaving it would strand the row forever. If even the
+        // stat fails, keep it — an unreadable gate of unknown age is the one
+        // case where doing nothing is the only safe answer.
+        try { stale = now - statSync(join(dir, name)).mtimeMs > CLAIM_STALE_MS; } catch { stale = false; }
+      }
+      if (stale) { try { unlinkSync(join(dir, name)); reclaimed++; } catch {} }
+      continue;
+    }
     const m = CLAIM_RE.exec(name);
     if (!m) continue;
     const { base, at, host, pid } = m.groups;
@@ -311,11 +358,51 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
   const errors = [];
   for (const name of spool) {
     const claimed = claimName(name);
-    try { await rename(join(dir, name), join(dir, claimed)); } catch { continue; } // another drainer won
+    // THE RENAME IS NOT THE MUTEX, and treating it as one is what let two
+    // drainers hold one row. Measured on this platform 2026-09-05, with the
+    // production claim shape (distinct per-process destinations): two
+    // concurrent renames of one source BOTH report success in 486/500
+    // contended trials at two processes and 499/500 at four, and driving this
+    // function from separate processes double-appended the same breachId in
+    // 12/500 and 35/300 trials. "My rename returned ok" never meant "I am the
+    // only drainer holding this row" — it meant almost nothing under
+    // contention. Exactly one destination file survives, but not necessarily
+    // the caller's, and userland return order does not predict which.
+    //
+    // An exclusive create DOES mean it: open/writeFile with flag 'wx' produced
+    // exactly one winner and EEXIST for every loser in 500 four-process
+    // trials, with contention proven per trial by overlapping call intervals.
+    // (link and mkdir measured identical; 'wx' and mkdir cost ~0.6ms, link
+    // ~28ms on this volume.) So the gate below is the mutual exclusion, and
+    // the rename is bookkeeping performed by whoever has already won.
+    const gate = join(dir, `${name}.claiming`);
+    try {
+      await writeFile(gate,
+        `${Date.now()}-${hostname().replace(/-/g, '_').slice(0, 32)}-${process.pid}`,
+        { flag: 'wx' });
+    } catch { continue; } // another drainer holds the gate, or it cannot be made
+    let claimOk = false;
+    try { await rename(join(dir, name), join(dir, claimed)); claimOk = true; } catch {}
+    // Released the moment the claim exists. `claimed` carries a unique nonce,
+    // so past this point the row is ours BY NAME and reclaimStaleClaimsSync is
+    // what recovers it if we die; holding the gate any longer would only widen
+    // the window in which a crash strands a row behind a marker. A drainer
+    // that takes the gate after this and finds the source gone simply drops
+    // it, which is the `!claimOk` path.
+    try { await unlink(gate); } catch {}
+    if (!claimOk) continue; // another drainer already consumed the row
     // Read and parse are distinct failure classes: a TRANSIENT read error
-    // (Windows AV holding a just-renamed file) restores the claim so the row
-    // survives for the next drain; only a PARSE failure quarantines — a
-    // valid row must never land in .corrupt over a transient EPERM.
+    // restores the claim so the row survives for the next drain; only a PARSE
+    // failure quarantines — a valid row must never land in .corrupt over a
+    // transient EPERM. The restore path is a correct fail-safe and stays.
+    //
+    // It used to name "Windows AV holding a just-renamed file" as the cause.
+    // That was a story, not an observation, and the round-4 data rules it out:
+    // across 755 failures in the pre-gate cross-process runs, the error code
+    // was ENOENT 755 times and EPERM/EBUSY zero times. An AV hold yields
+    // EPERM/EBUSY. ENOENT on a name you yourself just renamed to means another
+    // process moved it — the claim collision this file's gate now prevents,
+    // not a scanner. No AV-caused failure has ever been observed here.
     let raw = null;
     try { raw = await readFile(join(dir, claimed), 'utf8'); } catch (err) {
       try { await rename(join(dir, claimed), join(dir, name)); } catch {}
@@ -347,8 +434,14 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
       let alreadyOnSpine = !reserved;
       // Layer 1 covers the case layer 0 cannot see: a PREVIOUS process that
       // crashed between append and unlink. Only consulted when we hold the
-      // reservation, and released again if it says the row is already recorded,
-      // so a later legitimate drain of a genuinely different row is unaffected.
+      // reservation — and NOT released when it reports the row is already
+      // recorded. That branch skips the append and falls through to the same
+      // consume path a successful drain takes, which never releases; the sole
+      // releaseBreachId call is in the catch below, for a FAILED append. Said
+      // otherwise here until round 4 caught it. Keeping the reservation is
+      // correct: the row is consumed and its id is not coming back, so holding
+      // it costs one bounded memo entry and releasing it would let a
+      // late-arriving duplicate of the same id append a second time.
       if (!alreadyOnSpine && typeof hasBreachId === 'function') {
         try { alreadyOnSpine = await hasBreachId(row.breachId); } catch {}
       }
