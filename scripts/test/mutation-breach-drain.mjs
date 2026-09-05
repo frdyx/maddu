@@ -111,6 +111,19 @@ try {
   }
 
   // ── (D) two interleaved drainers: exactly-once, nothing lost ────────────
+  // RECORD CORRECTION, made on this branch after the fact. The commit that
+  // added the synchronous reservation — "two drainers in one process could
+  // append the same breach twice" — cited THIS case's output as its evidence
+  // (seen=7 unique=6) and named a hasBreachId TOCTOU as the cause. The two do
+  // not fit together: (D) injects no hasBreachId at all, so layer 1 was never
+  // in play here and cannot be what failed. The only idempotency this case
+  // exercises is the per-file atomic rename claim, so the 22-in-300 duplicates
+  // must have come from two drainers holding one row PAST that claim. The
+  // reservation does close that too, because it keys on breachId and not on
+  // the file — the fix is right, but the stated cause is not what this case
+  // measured, and the claim-defeat mechanism itself is still unexplained.
+  // (D) stays in place as its watcher. (H) below pins the shared-id ordering
+  // deterministically and does NOT cover the claim path.
   {
     const fix = await freshFix();
     spoolBreach(fix, 6);
