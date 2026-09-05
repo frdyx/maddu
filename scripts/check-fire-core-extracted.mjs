@@ -320,11 +320,34 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // again on the next edit. The live numbers are measured below and printed in
   // the refusal.
   //
-  // Honest about what it is: a size bound is not a parse, and an adversary who
-  // re-inlines the core AND golfs it below the ceiling defeats it. It is aimed
-  // at the same targets as the rest of this file — the accident and the lazy
-  // fake — and it closes the one specific escape a reviewer demonstrated rather
-  // than claiming to close the class.
+  // HONEST ABOUT WHAT IT IS — and round 5 forced this to be blunter than it was.
+  //
+  // Claim 5 is a MASS HEURISTIC. It is not a parse, not a proof, and NOT A
+  // SECURITY BOUNDARY. It is aimed at the accident and the lazy fake, and a
+  // deliberate adversary with `sed` defeats it. That is not a worry, it is a
+  // measurement, twice:
+  //
+  //   `/**/ code` counted as a comment. Prefixing every line took a re-inlined
+  //   tree from 885 code lines to 0. CLOSED in v1.132.0.
+  //
+  //   Two inserted lines — a `void` template literal opened, and a line-start
+  //   `/*` inside it — make the parser see an unused string while this
+  //   line-anchored classifier sees an unclosed block comment. 50 inserted
+  //   lines took the same forgery from 885 to 49, `node --check` clean, and
+  //   evaluate() returned DONE with no reasons. NOT CLOSED, by decision.
+  //
+  // The second was left open deliberately. Both levers are the same class —
+  // mechanical, behaviour-preserving, no logic edited — and the second was
+  // found within hours of the first being closed. Patching members one at a
+  // time buys a checker that looks sound and is not; the only sound version of
+  // this claim needs a real parser, which this file will not have. So the
+  // record says what the check is worth instead of implying more.
+  //
+  // What it still does, and why it stays: an accidental re-inline, a
+  // half-finished revert, and a forgery built without knowing this file exists
+  // all trip it. Everything above assumes an adversary who has read this
+  // paragraph. If claim 5 is ever cited as evidence that extraction cannot be
+  // faked, that citation is wrong.
   // CODE lines, not raw lines, and that distinction is the claim's robustness.
   // A raw-line ceiling was tried first and the oracle's own suite broke it
   // within the hour: re-inline the core, delete the comments, and the forgery
@@ -338,13 +361,22 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
   // hooks.mjs is 344 code lines today; the core is 539 on its own, so a
   // re-inlined tree lands near 883 however it is formatted. The ceiling sits at
   // 550: a 206-line margin over the honest file, and 62% of what the cheat needs.
-  // Comment freely — commentary cannot move this number. What CAN move it, and
-  // did until round 5, is a comment opener with code behind it: `/**/ code` read
-  // as a comment, so a one-line sed prefixing every line took a re-inlined tree
-  // from 883 to 0 and certified DONE over a tree where nothing was extracted.
-  // The classifier below now counts what REMAINS after leading closed comments,
-  // which closes that. Stated exactly: the move from raw lines to code lines
-  // removed one instance of the mechanical-lever class, not the class.
+  // Comment freely — ordinary commentary cannot move this number. A comment
+  // OPENER with code behind it could, until round 5: `/**/ code` read as a
+  // comment, so a one-line sed took a re-inlined tree from 885 to 0. The
+  // classifier below now counts what REMAINS after leading closed comments.
+  //
+  // That closed one lever, not the class — see the heuristic paragraph above
+  // for the one that is still open by decision, and do not read this fix as
+  // more than it is.
+  //
+  // Correction, since the commit that made this fix got it wrong: it claimed
+  // the remaining lever was "reformatting expressions so continuation lines
+  // lead with `*`". That lever does not exist, and the same commit is why —
+  // dropping the unconditional `*`-prefix rule means a `*`-leading line outside
+  // a block is now COUNTED. Measured: `const x = 1` / `* 1;` reads 1 under the
+  // old rule and 2 under this one. A commit naming a residual it had just
+  // closed, in a file whose subject is bounds that outlive their justification.
   //
   // The classifier is a heuristic, not a lexer, and the header above explains
   // why a regex must never try to lex JavaScript here. This one only ever DROPS

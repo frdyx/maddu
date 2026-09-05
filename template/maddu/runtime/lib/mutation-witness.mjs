@@ -299,21 +299,42 @@ export function reclaimStaleClaimsSync(stateRoot, { now = Date.now() } = {}) {
     // disappears. Swept on the same rules as a stale claim.
     if (name.endsWith('.claiming')) {
       let stale = false;
-      const owner = /^(\d+)-([^-]*)-(\d+)$/.exec(
-        (() => { try { return readFileSync(join(dir, name), 'utf8').trim(); } catch { return ''; } })());
+      const body = (() => { try { return readFileSync(join(dir, name), 'utf8').trim(); } catch { return ''; } })();
+      // The owner's own word beats both other signals. A gate whose holder
+      // could not unlink it says `released` after its rename attempt returned,
+      // which means no drainer stands behind it — so sweeping cannot reinstate
+      // the race the gate exists to close, and neither liveness nor age is
+      // consulted. Case (J). A TORN write of the token reads as an unreadable
+      // owner and falls to the mtime rule below: kept while young, which is the
+      // safe direction.
+      if (body === 'released') {
+        try { unlinkSync(join(dir, name)); reclaimed++; } catch {}
+        continue;
+      }
+      const owner = /^(\d+)-([^-]*)-(\d+)$/.exec(body);
       if (owner) {
         const [, at, host, pid] = owner;
         stale = host === hostname().replace(/-/g, '_').slice(0, 32)
           ? !pidAliveSameHost(Number(pid))
           : now - Number(at) > CLAIM_STALE_MS;
-        // Deliberately NOT special-cased on `pid === process.pid` here. Round 5
-        // MINOR 4 proposed sweeping a self-owned old gate in this function; it
-        // is the wrong place. "A live same-host owner is never swept, age is not
-        // the signal" is the invariant case (I) pins, and the only pid a test
-        // can rely on being alive is its own — so keying on process.pid here
-        // both breaks that fixture and weakens the rule for every other caller.
-        // The abandoned-self-gate case is handled where it is unambiguous, at
-        // the EEXIST branch in drainBreachesToSpine.
+        // Deliberately NOT special-cased on `pid === process.pid`, and the
+        // reason is stronger than the one first written here. Round 5 MINOR 4
+        // proposed sweeping a self-owned old gate; that fix CANNOT REACH THE
+        // BUG. A stranded gate's owner is the process that drained and then
+        // kept running — under `maddu start`, the bridge — and the bridge never
+        // drains again, since there is one production caller, once per
+        // dispatch. The drainers actually blocked by the gate are OTHER
+        // processes, for which it is not "ours". A process.pid rule would help
+        // only a process that drains twice, which none does: it would have gone
+        // green while the described hole stayed open.
+        //
+        // It is also wrong on its own terms. Age is not a safe signal even for
+        // a self-owned gate — a GC pause or a suspended laptop can hold one far
+        // longer than "as long as a gate can possibly be held" — which is
+        // exactly why case (I) forbids it. That invariant stands untouched.
+        //
+        // What reaches the bug is the owner's own word: see the `released`
+        // marker below and case (J).
       } else {
         // Unreadable, torn or malformed content — including a gate caught
         // mid-write. Age alone decides, on the file's own mtime: YOUNG is
@@ -434,7 +455,27 @@ export async function drainBreachesToSpine(repoRoot, stateRoot, appendFn, { hasB
     // the window in which a crash strands a row behind a marker. A drainer
     // that takes the gate after this and finds the source gone simply drops
     // it, which is the `!claimOk` path.
-    try { await unlink(gate); } catch {}
+    try { await unlink(gate); } catch {
+      // The unlink failed, so the gate survives carrying OUR live pid — and a
+      // live owner's gate is never swept, correctly, so the row would strand
+      // for this process's lifetime (under `maddu start`, the bridge's) while
+      // the census told the operator to run a command that cannot free it.
+      //
+      // So say so. The token is this drainer's own statement, made at the one
+      // moment only it can make it, that nothing stands behind this gate any
+      // more: the rename attempt has returned, and past that return we never
+      // touch the row by its bare name again — on success we own it by the
+      // claim's nonce, on failure we `continue`. reclaimStaleClaimsSync sweeps
+      // a gate that says this regardless of owner liveness or age, because the
+      // word is a stronger signal than either. Case (J) pins the contract.
+      //
+      // OBLIGATIONS, from the suite author, and they are what make the
+      // construction sound: written ONLY here, in the unlink-failure catch,
+      // never before the rename returns, and from no other site. If this write
+      // fails too the strand remains — three failures on one row, documented
+      // and not closed.
+      try { await writeFile(gate, 'released'); } catch {}
+    }
     if (!claimOk) continue; // another drainer already consumed the row
     // Read and parse are distinct failure classes: a TRANSIENT read error
     // restores the claim so the row survives for the next drain; only a PARSE

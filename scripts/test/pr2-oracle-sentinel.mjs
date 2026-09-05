@@ -229,7 +229,9 @@ const COPY = [
 // so this OVER-estimates. A residual assertion that fires on an over-estimate is
 // reporting a gap that is at least as large as it says. Cross-checked against a
 // second, cruder rule (non-blank lines not starting `//`, `*` or `/*`) which
-// returns the identical numbers on both files.
+// returns the identical numbers on both honest files — and which is the
+// PRE-round-5 rule, kept below as preRound5CodeLines because the `/**/`
+// forgery is defined by disagreeing with it.
 // Must mirror the oracle's classifier, including its round-5 hardening: a line
 // is comment only when nothing REMAINS after its leading, same-line-closed
 // block comments. The old form discarded the whole line on a leading `/*`, so
@@ -254,6 +256,20 @@ function codeLines(text) {
     n++;
   }
   return n;
+}
+
+// The classifier both the oracle and the mirror above used until round 5,
+// verbatim. Not a cross-check any more: it is the rule the `/**/` forgery
+// defeats, and the fixture below asserts that it still does — if a future
+// edit to the forgery made this rule stop reading it as ~0 code lines, the
+// forgery would have stopped being the round-5 forgery, and the assertion on
+// the hardened oracle would be green for a reason that has nothing to do with
+// the hardening.
+function preRound5CodeLines(text) {
+  return String(text).split(/\r?\n/).filter((l) => {
+    const t = l.trim();
+    return t && !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+  }).length;
 }
 
 // The file closure both fixture trees are built from.
@@ -507,6 +523,57 @@ async function main() {
     ok('claim 5 residual: the ceiling is not defeated by deleting comments',
       forgeryCode > ceiling,
       `${forgeryCode} code lines against a ${ceiling}-line ceiling - a comment strip lands under it`);
+
+    // ── THE ROUND-5 FORGERY, PERFORMED: `/**/` on every line ───────────────
+    // The residual above asserts arithmetic. This one pulls the lever that
+    // defeated the code-line bound in round 5: every non-blank line of the
+    // forgery's hooks.mjs prefixed with `/**/ ` — a sed one-liner, and valid
+    // JavaScript, because `/**/` is an empty block comment. The pre-round-5
+    // classifier dropped any line whose trimmed text began with `/*`, so the
+    // prefixed file read as 0 code lines against the ceiling and claim 5
+    // certified DONE over a tree where nothing was extracted, with claims 1-4
+    // certifying alongside.
+    //
+    // Performing it is safe here where a comment STRIP was not: the prefix
+    // never enters a string. Neither source file holds a multi-line template
+    // literal or a multi-line block comment (measured when this was written),
+    // so the prefix always lands at statement or continuation position, where
+    // an empty comment is nothing. The parse premise below re-measures that on
+    // every run rather than trusting it.
+    //
+    // Three premises make the assertion mean something, in order: the prefixed
+    // file must PARSE (a forgery that does not parse proves nothing); the
+    // PRE-round-5 rule must be defeated by it (else the lever stopped pulling
+    // and this fixture rotted into a green that is not about the hardening);
+    // and the hardened mirror must see the same code it saw unprefixed. Then
+    // evaluate() must refuse it for the ceiling and ONLY the ceiling — claims
+    // 1-3 measured green over the prefixed tree, not assumed.
+    //
+    // Proven red before it was trusted: with the oracle's pre-round-5
+    // classifier restored, evaluate() returned ok=true over this tree and the
+    // two claim-5 assertions below failed; with the round-5 classifier, they
+    // pass. A check only ever seen green is the defect this branch repairs.
+    const prefixed = fHooks.split('\n').map((l) => (l.trim() ? `/**/ ${l}` : l)).join('\n');
+    const prefixedPath = join(forgery, 'commands', 'hooks.mjs');
+    await writeFile(prefixedPath, prefixed);
+    const parse = spawnSync(process.execPath, ['--check', prefixedPath], { encoding: 'utf8' });
+    ok('fixture: the /**/-prefixed forgery still parses (node --check)',
+      parse.status === 0,
+      parse.status === 0 ? `${prefixed.split('\n').length} lines` : (parse.stderr || '').trim().split('\n')[0]);
+    const preRound5 = preRound5CodeLines(prefixed);
+    ok('fixture: the pre-round-5 rule is defeated by it - the lever still pulls',
+      preRound5 <= ceiling, `${preRound5} code lines by the old rule against a ${ceiling}-line ceiling`);
+    ok('fixture: the hardened mirror sees the same code prefixed as unprefixed',
+      codeLines(prefixed) === forgeryCode, `${codeLines(prefixed)} vs ${forgeryCode}`);
+    const verdictP = evaluate(forgery);
+    note(`evaluate(/**/-prefixed forgery): ok=${verdictP.ok}, ${verdictP.reasons.length} reason(s)`);
+    for (const r of verdictP.reasons) note(`  - ${r.slice(0, 150)}`);
+    const ceilingReasonP = verdictP.reasons.find((r) => /-line ceiling/.test(r));
+    ok('claim 5: the oracle refuses the /**/-prefixed forgery',
+      verdictP.ok === false, `ok=${verdictP.ok}`);
+    ok('claim 5: and the ceiling is the ONLY reason - claims 1-3 still certify the prefixed tree',
+      verdictP.reasons.length === 1 && !!ceilingReasonP,
+      verdictP.reasons.map((r) => r.slice(0, 70)).join(' | ') || '(no reasons)');
   } finally {
     // Runs on every path out — assertion failure, harness throw (the `finally`
     // precedes main()'s catch), or success. The retries are the Windows hazard:

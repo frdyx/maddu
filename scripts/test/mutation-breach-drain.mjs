@@ -17,6 +17,10 @@
 //       still blocking the row — when it is live or its owner cannot be read
 //       and the file is young. Both sides pinned; the "kept" side is proven red
 //       by a sweep-everything mutant, not by reverting the fix.
+//   (J) a gate its owner RELEASED (body `released`): swept on the owner's own
+//       word, never on pid liveness or age. The round-5 MINOR 4 adjudication —
+//       landed RED, before the lib side exists; see the case for the ruling
+//       and the contract.
 //   (D) concurrency: two interleaved drainers over one spool drain every
 //       breach EXACTLY once, and a breach created mid-drain is not lost. A
 //       DETECTOR, in-process and timing-dependent — the cross-process
@@ -190,6 +194,82 @@ try {
     ok('the drain sweeps a dead gate itself and drains the freed row exactly once',
       rDead.drained === 1 && rDead.failed === 0 && appends === 1 && left.length === 0,
       `drained=${rDead.drained} failed=${rDead.failed} appends=${appends} left=${left.join(',')}`);
+    await rm(fix, { recursive: true, force: true });
+  }
+
+  // ── (J) a gate its owner RELEASED: swept on the owner's word, not on age ─
+  // Round 5 MINOR 4, adjudicated by the suite author. The strand: a drainer's
+  // gate unlink fails after its rename attempt returns — and the gate is dead
+  // weight the moment that attempt returns, success or failure, because a
+  // successful claim is owned BY NAME from then on. If the row later stands on
+  // the spool again (rename failed; or the claim was renamed back by a failed
+  // append or a transient read), it stands behind a gate carrying a LIVE pid.
+  // Every other drainer takes EEXIST and every reclaim keeps it, correctly.
+  // Under `maddu start` the dispatch-time drain and the bridge are ONE process
+  // (commands/start.mjs awaits server.js in-process), so that pid lives as long
+  // as the bridge, and the census remedy "run any maddu command to drain" runs
+  // in a different process that cannot get past it.
+  //
+  // The proposed fix — reclaim takes over a gate that is "ours and older than a
+  // gate can be held" — is REJECTED on the merits, not on this fixture. "Ours"
+  // is process.pid, and the process that owns the stranded gate is the bridge,
+  // which never drains again (drainBreachesToSpine has one production caller,
+  // once per dispatch); the drainers that need past it are OTHER processes,
+  // for which the gate is not ours. A same-pid rule cannot reach the scenario
+  // it was written for. It would also have made age a signal in the one place
+  // (I) forbids it: a paused process (GC, a suspended laptop) can hold a gate
+  // far longer than "a gate can possibly be held". (I) stands exactly as
+  // written, with process.pid standing for a live owner, and is untouched.
+  //
+  // What CAN reach the scenario is the owner, at the one moment it knows: when
+  // its own unlink fails, it overwrites the gate body with the literal
+  // `released`. Not a pid, not an age — the owner's own statement, written
+  // after its rename attempt concluded, that no drainer stands behind this
+  // gate. THE CONTRACT this case pins: reclaimStaleClaimsSync sweeps a gate
+  // whose body is exactly `released`, regardless of owner liveness or file age,
+  // and a drain over such a gate sweeps it and drains the freed row exactly
+  // once. Everything (I) pins is unchanged — a gate that still names a live
+  // owner, or that cannot be read and is young, is kept. The discriminator is
+  // the word, not the age: (I)'s `not-an-owner` young gate is kept two blocks
+  // up; this one is swept.
+  //
+  // CAN A LIVE DRAINER'S GATE EVER READ `released` BEFORE THAT DRAINER HAS
+  // GIVEN UP? Not by construction, and the construction is this: the gate is
+  // created with flag 'wx', so exactly one process ever holds it, and the
+  // lib has exactly one writer of the token — the holder, in the catch of its
+  // OWN unlink, which runs after its rename attempt has returned. Past that
+  // return the holder never touches the row by its bare name again: on
+  // success it owns the row by the claim's nonce name, on failure it
+  // `continue`s. So the token is written only by the process that stood
+  // behind the gate, and only after it has stopped standing there. What the
+  // contract does NOT cover, stated plainly: a writer OUTSIDE the lib putting
+  // the word into a live gate — the same trust every file under .maddu/state
+  // already extends, and the same as that writer unlinking the gate outright;
+  // and a torn write of the token, which reads as an unreadable owner and
+  // falls to (I)'s mtime rule — kept while young, the safe direction. The
+  // implementer's obligations that make the construction hold: write the
+  // token ONLY in the unlink-failure catch, never before the rename returns,
+  // and never from any other site.
+  //
+  // The owner-side write cannot be exercised here without an injection seam
+  // for the unlink, so the lib's half of the contract is pinned by inspection
+  // until a seam exists; if the overwrite itself fails the strand remains, and
+  // that residual (three failures on one row) is documented, not closed.
+  {
+    const fix = await freshFix();
+    const [id] = spoolBreach(fix, 1);
+    const gate = join(spoolDir(fix), `${id}.json.claiming`);
+    const gateHeld = async () => (await readdir(spoolDir(fix))).includes(`${id}.json.claiming`);
+    await writeFile(gate, 'released');
+    ok('a released gate is swept by reclaim - live pid or not, young or not',
+      reclaimStaleClaimsSync(fix) === 1 && !(await gateHeld()));
+    await writeFile(gate, 'released');
+    let appends = 0;
+    const r = await drainBreachesToSpine(fix, fix, async () => { appends++; });
+    const left = await readdir(spoolDir(fix));
+    ok('the drain sweeps a released gate itself and drains the freed row exactly once',
+      r.drained === 1 && r.failed === 0 && appends === 1 && left.length === 0,
+      `drained=${r.drained} failed=${r.failed} appends=${appends} left=${left.join(',')}`);
     await rm(fix, { recursive: true, force: true });
   }
 
