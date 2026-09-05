@@ -135,7 +135,7 @@
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFile, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -872,8 +872,44 @@ async function main() {
           seen.out.split('\n').filter(Boolean)[0] || '');
       }
 
+      // WHERE THE WINDOW IS, measured rather than assumed. The marker is read
+      // after Node start-up and module load; the clear comes after the framework
+      // tree is enumerated and every managed path stat'ed. Both ends scale with
+      // the machine, so the window is a FRACTION of the child's run, not a
+      // number of milliseconds: on this suite's reference runs it opened at
+      // ~40% and closed at ~90% of the time-to-print (Windows: 105→205ms of a
+      // 220ms run; Linux ext4: 60→140ms of a 150ms run). A fixed delay list
+      // (90/130/180/240/320ms) straddled the Windows window and grazed the
+      // Linux one, so on a 2-vCPU CI runner, where the whole run shifts by tens
+      // of milliseconds between cold and warm, every fixed delay missed about
+      // one run in three and the fixture row went red over a defect-free tree.
+      //
+      // So: calibrate on one unplanted run, then BRACKET-SEARCH the delay. Each
+      // attempt says which side of the window it fell on — the child took the
+      // recovery path (it saw the marker: too early) or the no-op print was
+      // already out (too late) — and the next delay bisects. When run-to-run
+      // jitter collapses the bracket, the remaining budget sweeps outward from
+      // the estimate. The budget is finite and the fixture row still FAILS when
+      // nothing lands: the search changes how the window is found, never what
+      // counts as having found it. The two ordering proofs below are verbatim.
+      const timeToPrint = async () => {
+        const dir = await install('b5-calibrate');
+        await rm(markerPath(dir), { force: true });
+        let out = '', printedAt = null;
+        const t0 = performance.now();
+        const child = spawn(process.execPath, [SRC_BIN, 'upgrade'], { cwd: dir, env: hermeticEnv() });
+        child.stdout.on('data', (c) => {
+          out += c;
+          if (printedAt === null && /Nothing to do/.test(out)) printedAt = performance.now() - t0;
+        });
+        child.stderr.on('data', (c) => { out += c; });
+        const status = await new Promise((res) => child.on('close', res));
+        return { status, printedAt, tookNoOp: /Nothing to do/.test(out) };
+      };
+
+      let seq = 0;
       const attempt = async (delayMs) => {
-        const dir = await install(`b5-race-${delayMs}`);
+        const dir = await install(`b5-race-${++seq}`);
         await rm(markerPath(dir), { force: true });
         let out = '';
         const child = spawn(process.execPath, [SRC_BIN, 'upgrade'], { cwd: dir, env: hermeticEnv() });
@@ -885,24 +921,80 @@ async function main() {
         const clearedAtPlant = /Nothing to do/.test(out);
         // The concurrent upgrade in the state it is really in: the lock held by
         // a LIVE process, the marker written, files being copied.
+        //
+        // The lock is taken the way the command takes it — exclusive create.
+        // A plain overwrite here landed, a few milliseconds a run, inside the
+        // child's OWN lock region (between its acquire and its clear), replaced
+        // the child's lock with ours, and let the child's legitimate clear
+        // delete the marker we had just planted: the "survives" row went red
+        // against a fix that was working, because the fixture had broken the
+        // protocol a real concurrent upgrade cannot break. EEXIST means the
+        // child already owns this install; the attempt planted nothing and is
+        // not a landing.
         await mkdir(join(dir, '.maddu', 'state'), { recursive: true });
-        await writeFile(join(dir, '.maddu', 'state', 'upgrade.lock'),
-          JSON.stringify({ pid: process.pid, at: new Date().toISOString() }, null, 2) + '\n');
-        await writeFile(markerPath(dir), JSON.stringify(liveMarker(), null, 2) + '\n');
+        let plantedLock = false;
+        try {
+          const fh = await open(join(dir, '.maddu', 'state', 'upgrade.lock'), 'wx');
+          await fh.writeFile(JSON.stringify({ pid: process.pid, at: new Date().toISOString() }, null, 2) + '\n');
+          await fh.close();
+          plantedLock = true;
+        } catch (err) {
+          if (!(err && err.code === 'EEXIST')) throw err;
+        }
+        if (plantedLock) await writeFile(markerPath(dir), JSON.stringify(liveMarker(), null, 2) + '\n');
         const status = await done;
         return {
-          out, status, aliveAtPlant, clearedAtPlant,
+          out, status, delayMs, aliveAtPlant, clearedAtPlant, plantedLock,
           tookNoOp: /Nothing to do/.test(out),
-          survived: await markerStands(dir),
+          survived: plantedLock && await markerStands(dir),
+          // Recorded, NOT asserted. "The print was not yet on the pipe" is a
+          // proxy for "before the clear" that lags it by a few milliseconds
+          // (the child's acquire→release, a dynamic import, the pipe itself),
+          // so a plant in that tail counts as landed while proving nothing
+          // about the clear. The child's own stderr line closes that gap — but
+          // asserting on it would pin this fixture to the fix's wording and
+          // turn the fixture row red on an UNFIXED tree for the wrong reason
+          // (there the no-op path never looks at the lock and says nothing).
+          // Left in the log for whoever closes it without buying a false green.
+          concurrentSeen: /another upgrade is running/.test(out),
         };
       };
 
+      const landedIn = (r) => r.plantedLock && r.aliveAtPlant && !r.clearedAtPlant && r.tookNoOp;
+      const cal = await timeToPrint();
+      if (!cal.tookNoOp || cal.printedAt === null) {
+        throw new Error(`R3-B5 calibration run did not take the no-op path (exit ${cal.status})`);
+      }
+      const T = cal.printedAt;
+      note(`calibration: unplanted run printed "Nothing to do" at +${T.toFixed(0)}ms`);
+
+      const BUDGET = 16;
       let landed = null, last = null;
-      for (const d of [90, 130, 180, 240, 320]) {
+      let lo = 0, hi = T, sweep = 0;
+      for (let i = 0; i < BUDGET && !landed; i++) {
+        let d;
+        if (i === 0) d = Math.round(0.65 * T);
+        else if (hi - lo > Math.max(4, 0.03 * T)) d = Math.round((lo + hi) / 2);
+        else {
+          // Bracket collapsed under jitter: the window moved between runs. Sweep
+          // outward from the estimate, ±5% of T per step, for the rest of the
+          // budget rather than re-trying the same point.
+          sweep++;
+          const step = Math.ceil(sweep / 2) * Math.max(2, 0.05 * T) * (sweep % 2 ? 1 : -1);
+          d = Math.max(0, Math.round((lo + hi) / 2 + step));
+        }
         last = await attempt(d);
-        note(`attempt +${d}ms: alive=${last.aliveAtPlant} alreadyCleared=${last.clearedAtPlant} `
-          + `noOpPath=${last.tookNoOp} markerSurvived=${last.survived}`);
-        if (last.aliveAtPlant && !last.clearedAtPlant && last.tookNoOp) { landed = last; break; }
+        const verdict = landedIn(last) ? 'LANDED'
+          : !last.plantedLock ? 'lock already held (too late)'
+          : !last.aliveAtPlant || last.clearedAtPlant ? 'too late'
+          : !last.tookNoOp ? 'too early (child saw the marker)' : 'no verdict';
+        note(`attempt ${i + 1}/${BUDGET} +${d}ms (${(100 * d / T).toFixed(0)}% of T): alive=${last.aliveAtPlant} `
+          + `alreadyCleared=${last.clearedAtPlant} lockPlanted=${last.plantedLock} noOpPath=${last.tookNoOp} `
+          + `markerSurvived=${last.survived} concurrentSeen=${last.concurrentSeen} -> ${verdict}`);
+        if (landedIn(last)) { landed = last; break; }
+        if (sweep) continue;
+        if (last.plantedLock && last.aliveAtPlant && !last.clearedAtPlant && !last.tookNoOp) lo = Math.max(lo, d);
+        else hi = Math.min(hi, d);
       }
       const a = landed || last;
       ok('R3-B5 fixture: an attempt landed inside the window - planted mid-run, before the clear',
