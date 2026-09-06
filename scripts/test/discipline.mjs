@@ -3,10 +3,14 @@
 // (decide), the governance-mode thresholds (resolveThresholds), and the Bash
 // write-classifier (classifyBashWrite). The impure gather/hook paths are covered
 // by later phases; this file needs no spine, git, or DOM.
+// Target scope exempts resolved outside writes; inside and unknown writes retain discipline enforcement.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-const { resolveThresholds, decide, classifyBashWrite, denyReason, DISCIPLINE_DEFAULTS,
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+
+const { resolveThresholds, decide, classifyBashWrite, classifyWriteTarget, denyReason, DISCIPLINE_DEFAULTS,
   nextCounter, enforcePreTool, lastOwnSliceStop, globToRegExp, filterIgnored } =
   await import('../../template/maddu/runtime/lib/discipline.mjs');
 
@@ -359,6 +363,176 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   const rt = nextCounter({ baselineInit: true, workRoot: '/w', dirtyBaseline: ['a.js', 'b.js'] },
     St({ commit: Cm({ newDirtyPaths: [], currentDirtyPaths: ['a.js'] }) }), 5000);
   ok('baseline retirement: clean path retires', JSON.stringify(rt.dirtyBaseline) === JSON.stringify(['a.js']));
+}
+
+// ── classifyWriteTarget — target-aware discipline contract ─────────────────
+{
+  const base = join(tmpdir(), 'maddu-write-target-contract');
+  const root = join(base, 'work');
+  const stateRoot = join(base, 'state');
+  const outside = join(base, 'outside');
+  const roots = [root, stateRoot];
+  // These commands are classifier input ONLY; no shell executes them. Forward
+  // slashes and quoted paths preserve Windows paths and temp dirs with spaces.
+  const quote = (p) => `"${p.replaceAll('\\', '/')}"`;
+  // The export is deliberately absent at the base commit. Optional invocation
+  // yields undefined (NOT 'unknown'), so every comparison records a failed
+  // ok() instead of aborting module loading or skipping the new rows.
+  const target = (opts) => classifyWriteTarget?.({ roots, ...opts });
+  const edit = (filePath, opts = {}) => target({ tool: 'Edit', filePath, ...opts });
+  const bash = (command, opts = {}) => target({ tool: 'Bash', command, ...opts });
+  const all = (values, expected) => values.every((value) => value === expected);
+
+  ok('target: absolute Edit outside every root', edit(join(outside, 'x.js')) === 'outside');
+  ok('target: Write inside the second root', target({ tool: 'Write', filePath: join(stateRoot, 'x.js') }) === 'inside');
+  ok('target: relative Edit without cwd uses the first root', edit('src/x.js') === 'inside');
+  ok('target: relative Edit uses an outside cwd', edit('x.js', { cwd: outside }) === 'outside');
+  // Do not use join/resolve on the INPUTS here: the classifier must collapse
+  // the literal traversal, not receive an already-normalized fixture.
+  ok('target: dot and parent traversal cross the root boundary correctly',
+    edit(`${root}${sep}..${sep}outside${sep}x.js`) === 'outside'
+    && edit(`${outside}${sep}..${sep}work${sep}x.js`) === 'inside'
+    && edit(`${root}${sep}.${sep}src${sep}..${sep}x.js`) === 'inside');
+  ok('target: sibling prefix is outside and root equality is inside',
+    edit(join(`${root}-other`, 'x.js')) === 'outside' && edit(root) === 'inside');
+  if (process.platform === 'win32') {
+    const inside = join(root, 'MixedCase', 'x.js');
+    const mixed = inside.replace(/[a-z]/gi, (c, i) => i % 2 ? c.toUpperCase() : c.toLowerCase());
+    const msys = inside.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, drive) => `/${drive.toLowerCase()}`);
+    ok('target: win32 case, separators, and MSYS spelling are equivalent',
+      all([edit(mixed), edit(inside.replaceAll('\\', '/')), edit(msys)], 'inside'));
+  }
+  ok('target: tilde expands to the home directory',
+    edit('~/x') === 'outside' && edit('~/x', { roots: [homedir()] }) === 'inside');
+  ok('target: absent paths and invalid roots are unknown',
+    all([target({ tool: 'Edit' }), edit(''), edit(join(root, 'x'), { roots: [] }),
+      edit(join(root, 'x'), { roots: null }), edit(join(root, 'x'), { roots: root })], 'unknown'));
+
+  const redirect = `echo x > ${quote(join(outside, 'f'))}`;
+  ok('target: absolute redirects, append, and heredoc outside',
+    all([bash(redirect), bash(`echo x >> ${quote(join(outside, 'f'))}`),
+      bash(`cat <<'HEREDOC' > ${quote(join(outside, 'f'))}\nx\nHEREDOC`)], 'outside'));
+  ok('target: an inside redirect wins over an outside redirect',
+    bash(`${redirect} && echo y > src/a.js`, { cwd: root }) === 'inside');
+  ok('target: relative Bash targets require cwd without cd',
+    bash('echo x > out.txt', { cwd: root }) === 'inside'
+    && bash('echo x > out.txt') === 'unknown'
+    && bash(`cd ${quote(outside)} && echo x > out.txt`, { cwd: root }) === 'unknown');
+  ok('target: variables, command substitution, globs, and braces are unknown',
+    all([bash('echo x > "$OUT"'), bash('echo x > $OUT'),
+      bash(`echo x > ${outside.replaceAll('\\', '/')}/*.log`),
+      bash('echo x > `pwd`/f'), bash('echo x > f?.log'), bash('echo x > {a,b}.log')], 'unknown'));
+  ok('target: mv scopes every source and destination',
+    bash(`mv ${quote(join(root, 'a'))} ${quote(join(outside, 'b'))}`) === 'inside'
+    && bash(`mv ${quote(join(outside, 'a'))} ${quote(join(outside, 'b'))}`) === 'outside');
+  ok('target: cp and install scope only the destination',
+    all([bash(`cp ${quote(join(root, 'a'))} ${quote(join(outside, 'b'))}`),
+      bash(`install ${quote(join(root, 'a'))} ${quote(join(outside, 'b'))}`)], 'outside')
+    && all([bash(`cp ${quote(join(outside, 'a'))} ${quote(join(root, 'b'))}`),
+      bash(`install ${quote(join(outside, 'a'))} ${quote(join(root, 'b'))}`)], 'inside'));
+  ok('target: rm scopes every non-flag operand',
+    bash(`rm -rf ${quote(join(outside, 'x'))}`) === 'outside'
+    && bash(`rm -rf ${quote(join(outside, 'x'))} ${quote(join(root, 'y'))}`) === 'inside');
+  ok('target: tee, sed, dd, and truncate extract write operands',
+    all([bash(`tee -a ${quote(join(outside, 'log'))}`),
+      bash(`sed -i 's/a/b/' ${quote(join(outside, 'f'))}`),
+      bash(`dd if=x of=${quote(join(outside, 'y'))}`),
+      bash(`truncate -s0 ${quote(join(outside, 'f'))}`)], 'outside')
+    && bash(`sed -i -e 's/a/b/' ${quote(join(root, 'f'))}`, { cwd: root }) === 'inside'
+    && bash(`sed -i --expression 's/a/b/' ${quote(join(root, 'f'))}`, { cwd: root }) === 'inside'
+    && bash(`tee -a ${quote(join(outside, 'log'))} ${quote(join(root, 'log'))}`) === 'inside');
+  ok('target: shell wrapper payload redirects are extracted',
+    all([bash(`bash -lc "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`),
+      bash(`sh -c "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`)], 'outside'));
+  ok('target: PowerShell and interpreter writes remain unknown',
+    all([bash(`Set-Content ${quote(join(outside, 'f'))} x`),
+      bash(`node -e "require('fs').writeFileSync('${join(outside, 'f').replaceAll('\\', '/')}','y')"`),
+      bash(`python -c "open('${join(outside, 'f').replaceAll('\\', '/')}', 'w').write('y')"`)], 'unknown'));
+  ok('target: null-device redirects and fd duplication yield no targets',
+    all([bash('cmd >/dev/null'), bash('make 2>&1')], 'unknown'));
+
+  // Paired behavioral rows lock the new exemption AND the preserved gate.
+  // Standalone inside/unknown regression checks already pass at the base and
+  // would violate this spec's requirement that every added row starts red.
+  const bogusRepo = resolve('/no/such/repo');
+  // A truthy invalid explicit id is rejected by the existing validator and
+  // prevents an inherited MADDU_SESSION_ID from writing a bogus-repo counter.
+  const enforce = (opts) => enforcePreTool(bogusRepo, { madduSessionId: 'invalid/session', ...opts });
+  const external = (r) => r.verdict === 'ok' && r.kind === 'external'
+    && r.mutating === false && r.action === 'allow' && r.enforcement === 'n/a';
+  const outsideWrite = await enforce({ tool: 'Write', filePath: join(outside, 'x.js') });
+  const outsideBash = await enforce({ tool: 'Bash', command: redirect });
+  const mixedWrite = await enforce({ tool: 'Bash', command: `${redirect} && rm -rf src`, cwd: bogusRepo });
+  const insideEdit = await enforce({ tool: 'Edit', filePath: 'x.js', nowMs: 0 });
+  ok('enforce target: outside Write returns the complete external allowance', external(outsideWrite), JSON.stringify(outsideWrite));
+  ok('enforce target: outside Bash returns the complete external allowance', external(outsideBash), JSON.stringify(outsideBash));
+  ok('enforce target: outside Bash allowed while a mixed repo write stays gated',
+    external(outsideBash) && mixedWrite.kind === 'write' && mixedWrite.mutating === true
+    && mixedWrite.action === 'gate' && mixedWrite.verdict === 'block', JSON.stringify(mixedWrite));
+  ok('enforce target: outside Write allowed while Edit x.js keeps its session block',
+    external(outsideWrite) && insideEdit.verdict === 'block' && insideEdit.blocker === 'session'
+    && insideEdit.kind === 'edit' && insideEdit.mutating === true && insideEdit.action === 'gate', JSON.stringify(insideEdit));
+
+  ok('target: MultiEdit and NotebookEdit obey the same root scope',
+    all(['MultiEdit', 'NotebookEdit'].map((tool) => target({ tool, filePath: join(root, 'x') })), 'inside')
+    && all(['MultiEdit', 'NotebookEdit'].map((tool) => target({ tool, filePath: join(outside, 'x') })), 'outside'));
+  ok('target: unresolved companions stay unknown unless an inside target wins',
+    bash(`${redirect} && echo y > "$OUT"`, { cwd: root }) === 'unknown'
+    && bash('echo x > "$OUT" && echo y > src/a.js', { cwd: root }) === 'inside');
+  const scoped = [];
+  for (const filePath of [join(root, 'x'), join(bogusRepo, 'x')]) {
+    scoped.push(await enforce({ tool: 'Write', filePath, workRoot: root }));
+  }
+  const cwdOutside = await enforce({ tool: 'Edit', filePath: 'x.js', workRoot: root, cwd: outside });
+  ok('enforce target: both governed roots gate and an outside cwd exempts relative Edit',
+    external(cwdOutside) && scoped.every((r) => r.kind === 'edit' && r.mutating === true && r.verdict === 'block'));
+  const unknown = [];
+  for (const opts of [{ tool: 'Edit' }, { tool: 'Bash', command: 'echo x > "$OUT"' }]) unknown.push(await enforce(opts));
+  const otherKinds = [];
+  for (const opts of [
+    { tool: 'Read' }, { tool: 'Bash', command: 'git status' },
+    { tool: 'Bash', command: 'npm run build' }, { tool: 'Bash', command: 'maddu hooks uninstall' },
+  ]) otherKinds.push(await enforce({ filePath: join(outside, 'x'), ...opts }));
+  ok('enforce target: external exemption preserves unknown gates and other shape kinds',
+    external(outsideWrite) && unknown.every((r) => r.mutating === true && r.action === 'gate' && r.verdict === 'block')
+    && otherKinds.map((r) => r.kind).join(',') === 'read,remedy,ambiguous,self-disable');
+
+  // Accepted contract holes: an extracted outside redirect cannot account for
+  // a separate opaque write, even when both occur in the same shell segment.
+  const opaqueNode = `node -e "require('fs').writeFileSync('src/x','y')" > ${quote(join(outside, 'log'))}`;
+  ok('target hole: node inline write with outside stdout remains unknown',
+    bash(opaqueNode, { cwd: root }) === 'unknown');
+  ok('target hole: Set-Content beside an outside redirect remains unknown',
+    bash(`Set-Content src/x y ; echo x > ${quote(join(outside, 'f'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: sudo rm beside an outside redirect remains unknown',
+    bash(`sudo rm -rf ${quote(join(root, 'x'))} && echo x > ${quote(join(outside, 'f'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: perl in-place write beside an outside redirect remains unknown',
+    bash(`perl -i -pe s/a/b/ src/x && echo x > ${quote(join(outside, 'f'))}`, { cwd: root }) === 'unknown');
+
+  // Compare otherwise identical contexts. The base already gates the opaque
+  // write, so the paired outside-only allowance makes this new row start red.
+  const redirectOnly = await enforce({
+    tool: 'Bash', command: `echo x > ${quote(join(outside, 'log'))}`, cwd: root, workRoot: root,
+  });
+  const opaqueDecision = await enforce({ tool: 'Bash', command: opaqueNode, cwd: root, workRoot: root });
+  ok('enforce target hole: outside redirect allows while opaque node write stays gated',
+    external(redirectOnly) && opaqueDecision.kind !== 'external' && opaqueDecision.kind === 'write'
+    && opaqueDecision.mutating === true && opaqueDecision.action === 'gate'
+    && opaqueDecision.verdict === 'block',
+    `redirect=${redirectOnly.kind} opaque=${opaqueDecision.kind} verdict=${opaqueDecision.verdict}`);
+
+  // A target-directory option supplies the destination independently of the
+  // last operand. Copying FROM the root still does not write its source.
+  ok('target hole: cp -t inside root writes inside',
+    bash(`cp -t ${quote(root)} ${quote(join(outside, 'src'))}`, { cwd: root }) === 'inside');
+  ok('target hole: cp -t outside root writes outside despite inside source',
+    bash(`cp -t ${quote(outside)} ${quote(join(root, 'a'))}`, { cwd: root }) === 'outside');
+  ok('target hole: cp --target-directory inside root writes inside',
+    bash(`cp --target-directory=${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'inside');
+  ok('target hole: mv -t inside root writes inside',
+    bash(`mv -t ${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'inside');
+  ok('target hole: install -t inside root writes inside',
+    bash(`install -t ${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'inside');
 }
 
 console.log('');

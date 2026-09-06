@@ -5,6 +5,7 @@
 //   • mutating Edit with no governing session → permissionDecision:'deny'
 //   • read-only tool                          → no output (allow)
 //   • Bash remedy (slice-stop / git commit)   → no output (never gated)
+// Resolved outside writes are allowed silently without claims, spine events, or counter changes; inside/unknown writes remain gated.
 //
 // Hermetic: a fresh temp dir with an empty `.maddu/` marker makes the CLI
 // resolve its state root THERE (never the framework template), and no
@@ -12,9 +13,9 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -47,6 +48,224 @@ let repo;
 try {
   repo = await mkdtemp(join(tmpdir(), 'maddu-disc-'));
   await mkdir(join(repo, '.maddu'), { recursive: true }); // marker → CLI resolves state root here
+
+  // Target-aware gate: the second temp dir is a sibling, never under repo.
+  // The hook only receives these command strings; it does not execute writes.
+  {
+    const outside = await mkdtemp(join(tmpdir(), 'maddu-disc-outside-'));
+    try {
+      const filePath = join(outside, 'scratch file.txt');
+      const quote = (p) => `"${p.replaceAll('\\', '/')}"`;
+      const allowed = (r) => r.code === 0 && r.out === '' && !/would have exited/.test(r.err || '');
+      const denied = (r) => {
+        let json = null; try { json = JSON.parse(r.out); } catch {}
+        return r.code === 0 && json?.hookSpecificOutput?.hookEventName === 'PreToolUse'
+          && json?.hookSpecificOutput?.permissionDecision === 'deny';
+      };
+      // Include directories and file bytes: checking claims.json alone misses
+      // append-only LANE_CLAIMED events, session mints, and counter writes.
+      const tree = async (dir) => {
+        const rows = [];
+        const walk = async (at, prefix = '') => {
+          const entries = await readdir(at, { withFileTypes: true });
+          entries.sort((a, b) => a.name.localeCompare(b.name));
+          for (const entry of entries) {
+            const name = `${prefix}${entry.name}`;
+            if (entry.isDirectory()) {
+              rows.push([`${name}/`]);
+              await walk(join(at, entry.name), `${name}/`);
+            } else rows.push([name, (await readFile(join(at, entry.name))).toString('base64')]);
+          }
+        };
+        await walk(dir);
+        return JSON.stringify(rows);
+      };
+      // Receipts include workspace, so compare two fresh incarnations at the
+      // SAME absolute path. Only ts/ms may be normalized; workspace stays exact.
+      const readControl = async (dir) => {
+        const absolute = resolve(dir);
+        const knownRepo = absolute === resolve(repo) && dirname(absolute) === resolve(tmpdir());
+        const knownSessionRepo = absolute === resolve(join(outside, 'session-repo'))
+          && dirname(absolute) === resolve(outside);
+        if (!knownRepo && !knownSessionRepo) throw new Error('read control escaped its owned fixture');
+        const fresh = await tree(absolute);
+        if (fresh !== JSON.stringify([['.maddu/']])) throw new Error('read control requires a fresh empty repo');
+        const result = await fire(absolute, { tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: absolute });
+        const footprint = await tree(absolute);
+        // The absolute deletion target was checked above; it is an owned temp
+        // fixture, and the child has exited. Recreate precisely its fresh state.
+        await rm(absolute, { recursive: true, force: true });
+        await mkdir(join(absolute, '.maddu'), { recursive: true });
+        if (await tree(absolute) !== fresh) throw new Error('read control did not restore the fresh fixture');
+        return { result, footprint };
+      };
+      const compareFootprints = (writeSnapshot, readSnapshot) => {
+        try {
+          const normalize = (snapshot) => JSON.stringify(JSON.parse(snapshot).map((row) => {
+            if (row[0] !== '.maddu/state/invocation-receipts.ndjson') return row;
+            const lines = Buffer.from(row[1], 'base64').toString('utf8').split('\n').map((line) => {
+              if (line === '') return line; // preserve blank lines and the final newline
+              const receipt = JSON.parse(line);
+              if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw new Error('invalid invocation receipt');
+              delete receipt.ts;
+              delete receipt.ms;
+              return JSON.stringify(receipt);
+            });
+            return [row[0], Buffer.from(lines.join('\n')).toString('base64')];
+          }));
+          return { equal: normalize(writeSnapshot) === normalize(readSnapshot), error: '' };
+        } catch (e) { return { equal: false, error: String(e?.message || e) }; }
+      };
+      // These prohibitions are independent of the read footprint: even a read
+      // regression must not authorize claims, events, registration, or counters.
+      const noGovernanceTrace = (snapshot) => {
+        const files = new Map(JSON.parse(snapshot).filter((row) => row.length === 2));
+        const forbidden = [...files.keys()].filter((name) =>
+          (name.startsWith('events/') && Buffer.from(files.get(name), 'base64').toString('utf8').trim() !== '')
+          || name.startsWith('sessions/')
+          || (name.startsWith('state/discipline/') && name !== 'state/discipline/sessions.json')
+          || name === 'state/session.active.json' || name === 'state/counters.json');
+        let noClaims = true, noBindings = true;
+        if (files.has('lanes/claims.json')) {
+          try {
+            const claims = JSON.parse(Buffer.from(files.get('lanes/claims.json'), 'base64').toString('utf8'));
+            noClaims = Array.isArray(claims.claims) && claims.claims.length === 0;
+          } catch { noClaims = false; }
+        }
+        if (files.has('state/discipline/sessions.json')) {
+          try {
+            const bindings = JSON.parse(Buffer.from(files.get('state/discipline/sessions.json'), 'base64').toString('utf8'));
+            noBindings = !!bindings && typeof bindings === 'object' && !Array.isArray(bindings) && Object.keys(bindings).length === 0;
+          } catch { noBindings = false; }
+        }
+        return { absent: noClaims && noBindings && forbidden.length === 0, noClaims, noBindings, forbidden };
+      };
+      const before = await tree(join(repo, '.maddu'));
+      const outsideReadControl = await readControl(repo);
+      const outsideWrite = await fire(repo, { tool_name: 'Write', tool_input: { file_path: filePath }, cwd: repo });
+      ok('hook target: outside absolute Write allows with no stdout and exit 0',
+        allowed(outsideWrite), `code=${outsideWrite.code} stdout=${JSON.stringify(outsideWrite.out)}`);
+      const afterWrite = await tree(join(repo, '.maddu'));
+      const outsideTrace = noGovernanceTrace(afterWrite);
+      const outsideFootprints = compareFootprints(await tree(repo), outsideReadControl.footprint);
+      // The base denial can match the read footprint. Require the external
+      // allowance too, while retaining the unconditional governance prohibitions.
+      ok('hook target: outside Write allows without lane claims or spine events',
+        outsideTrace.absent && outsideFootprints.equal && allowed(outsideReadControl.result) && allowed(outsideWrite),
+        `noGovernance=${outsideTrace.absent} footprintEqual=${outsideFootprints.equal} allow=${allowed(outsideWrite)} ${outsideFootprints.error}`);
+
+      const redirect = `echo x > ${quote(filePath)}`;
+      const outsideBash = await fire(repo, { tool_name: 'Bash', tool_input: { command: redirect }, cwd: repo });
+      ok('hook target: outside absolute Bash redirect allows with no stdout and exit 0',
+        allowed(outsideBash), `code=${outsideBash.code} stdout=${JSON.stringify(outsideBash.out)}`);
+      const mixed = await fire(repo, {
+        tool_name: 'Bash', tool_input: { command: `${redirect} && echo y > src/a.js` }, cwd: repo,
+      });
+      ok('hook target: outside Bash allows while a mixed repo redirect denies',
+        allowed(outsideBash) && denied(mixed), `mixed=${mixed.out.trim()}`);
+      const inside = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'x.js' } });
+      ok('hook target: outside Write allows while relative Edit without cwd still denies',
+        allowed(outsideWrite) && denied(inside), `inside=${inside.out.trim()}`);
+
+      // Child cwd remains repo in fire(); only PAYLOAD cwd changes. Falling
+      // back to child cwd would gate these outside relative targets.
+      const relativeEdit = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: 'scratch.txt' }, cwd: outside });
+      const relativeBash = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'echo x > scratch.txt' }, cwd: outside });
+      const missingCwd = await fire(repo, { tool_name: 'Bash', tool_input: { command: 'echo x > scratch.txt' } });
+      ok('hook target: payload cwd exempts relative outside writes while missing cwd stays gated',
+        allowed(relativeEdit) && allowed(relativeBash) && denied(missingCwd));
+
+      // A real Claude id makes the old path mint a session BEFORE it gates.
+      // Compare its footprint with the same anonymous read control, and reject
+      // session/counter/claim/event writes even if a read ever starts making them.
+      const sessionRepo = join(outside, 'session-repo');
+      await mkdir(join(sessionRepo, '.maddu'), { recursive: true });
+      const sessionBefore = await tree(join(sessionRepo, '.maddu'));
+      const sessionReadControl = await readControl(sessionRepo);
+      const sessionWrite = await fire(sessionRepo, {
+        session_id: 'claude-outside-write-target', cwd: sessionRepo,
+        tool_name: 'Write', tool_input: { file_path: filePath },
+      });
+      const sessionAfter = await tree(join(sessionRepo, '.maddu'));
+      const sessionTrace = noGovernanceTrace(sessionAfter);
+      const sessionFootprints = compareFootprints(await tree(sessionRepo), sessionReadControl.footprint);
+      ok('hook target: identified outside Write creates no session, lane, event, or counter',
+        sessionTrace.absent && sessionFootprints.equal && allowed(sessionReadControl.result) && allowed(sessionWrite),
+        `noGovernance=${sessionTrace.absent} footprintEqual=${sessionFootprints.equal} allow=${allowed(sessionWrite)} forbidden=${sessionTrace.forbidden.join(',')} ${sessionFootprints.error}`);
+
+      // Seed a counter under relaxed governance so the unfixed external call
+      // is allowed with a nudge and really increments it (a denied edit never
+      // bumps, which would make a no-bump-only test vacuous).
+      const counterRepo = join(outside, 'counter-repo');
+      await mkdir(join(counterRepo, '.maddu', 'config'), { recursive: true });
+      await writeFile(join(counterRepo, '.maddu', 'config', 'governance.json'), JSON.stringify({ mode: 'relaxed' }));
+      const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
+      const sid = 'ses_outside_counter';
+      await disc.writeCounter(counterRepo, sid, { editsSinceSlice: 4, goalplanAgeEdits: 2 });
+      const counterBefore = await tree(join(counterRepo, '.maddu'));
+      const result = await disc.enforcePreTool(counterRepo, {
+        tool: 'Write', filePath, cwd: counterRepo, madduSessionId: sid, nowMs: 0,
+      });
+      const counterAfter = await disc.readCounter(counterRepo, sid);
+      const counterTreeAfter = await tree(join(counterRepo, '.maddu'));
+      ok('hook target: external allowance leaves a seeded session counter byte-for-byte unchanged',
+        result.verdict === 'ok' && result.kind === 'external' && result.mutating === false
+        && result.action === 'allow' && result.enforcement === 'n/a'
+        && counterAfter.editsSinceSlice === 4 && counterAfter.goalplanAgeEdits === 2
+        && counterTreeAfter === counterBefore,
+        `kind=${result.kind} edits=${counterAfter.editsSinceSlice} goalEdits=${counterAfter.goalplanAgeEdits}`);
+
+      // Accepted containment hole: a real outside link can address a governed
+      // directory. Leave leaf x absent to exercise resolution of a new file
+      // through its existing parent, not just realpath of an existing file.
+      const { symlinkSync, lstatSync, realpathSync, unlinkSync } = await import('node:fs');
+      const link = join(outside, 'link-into-root');
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+      let linkCreated = false, linkError = '';
+      try {
+        symlinkSync(repo, link, linkType);
+        linkCreated = true;
+        if (!lstatSync(link).isSymbolicLink() || realpathSync(link) !== realpathSync(repo)) {
+          throw new Error('outside link does not resolve to the governed root');
+        }
+      } catch (e) {
+        linkError = String(e?.stack || e);
+      }
+      try {
+        const linkedPath = join(link, 'x');
+        const linkedCommand = `echo x > ${quote(linkedPath)}`;
+        let editScope, editResult, editError = linkError;
+        let bashScope, bashResult, bashError = linkError;
+        // Setup or classifier errors become failed ok() rows with diagnostics;
+        // neither missing link privileges nor a missing export skips a row.
+        if (!linkError) {
+          try {
+            editScope = disc.classifyWriteTarget?.({ tool: 'Edit', filePath: linkedPath, cwd: repo, roots: [repo] });
+            editResult = await fire(repo, { tool_name: 'Edit', tool_input: { file_path: linkedPath }, cwd: repo });
+          } catch (e) { editError = String(e?.stack || e); }
+          try {
+            bashScope = disc.classifyWriteTarget?.({ tool: 'Bash', command: linkedCommand, cwd: repo, roots: [repo] });
+            bashResult = await fire(repo, { tool_name: 'Bash', tool_input: { command: linkedCommand }, cwd: repo });
+          } catch (e) { bashError = String(e?.stack || e); }
+        }
+        ok('hook target hole: outside directory link classifies Edit inside and denies',
+          !editError && editScope === 'inside' && denied(editResult),
+          editError || `link=${linkType} scope=${editScope} code=${editResult?.code}`);
+        ok('hook target hole: outside directory link classifies Bash redirect inside and denies',
+          !bashError && bashScope === 'inside' && denied(bashResult),
+          bashError || `link=${linkType} scope=${bashScope} code=${bashResult?.code}`);
+      } finally {
+        // Remove only the link before the enclosing temp-tree cleanup; never
+        // traverse it or recursively remove the governed directory it targets.
+        if (linkCreated) unlinkSync(link);
+      }
+    } finally {
+      // Validate the absolute cleanup target stays in the temp parent that
+      // created it before recursively removing this fixture and its children.
+      if (dirname(resolve(outside)) !== resolve(tmpdir())) throw new Error('outside fixture escaped temp parent');
+      await rm(outside, { recursive: true, force: true });
+    }
+  }
 
   // (a) mutating Edit, no session governs → deny with a remedy reason.
   // ANONYMOUS payload (no session_id) as of the B1/B2 fix: a claude-id-carrying
