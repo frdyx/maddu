@@ -210,6 +210,17 @@ governance tier, **allows, nudges, or denies** the edit.
   never gated, so the command that fixes a block is always allowed (no deadlock).
   Write detection ignores tokens inside quoted arguments, so a commit trailer or a
   slice-stop message that merely *mentions* `>` is not mistaken for a redirect.
+- **Gated by target, not just by shape (v1.133.0).** A write is only this repo's
+  business when it lands **inside** a governed root (the work root or the repo root).
+  A `Write` to a scratchpad outside the repo, a heredoc into a temp dir, or
+  `> /abs/elsewhere` is classified *external*: allowed, not counted toward the
+  slice-stop clock, not witnessed, and no lane is auto-claimed for it. The narrowing
+  is deliberately conservative — it only ever applies when **every** extractable
+  target provably resolves outside every root. Any inside target wins (`mv` counts
+  its source, since a moved file is deleted); a `$VAR`, a glob, a relative path after
+  `cd`, an interpreter payload (`node -e`), or a PowerShell verb cannot be resolved
+  and is gated exactly as before. Before v1.133.0 the gate never read the target at
+  all, and the remedy it named had nothing to do with the file being written.
 - **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
   uncommitted pileup. The deny names the first stale ritual and its exact remedy.
 - **The deny names its own trigger and its own session (v1.128.0).** The

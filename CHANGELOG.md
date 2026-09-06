@@ -11,6 +11,44 @@ narrative summary.
 
 ---
 
+## [v1.133.0] · 2026-09-06 · the gate never looked at the file
+
+The PreToolUse discipline gate decided from the *shape* of a tool call — the
+tool's name, or a pattern in the command string — and never from where the
+write was going. `enforcePreTool` received the file path and did not read it.
+So a `Write` to a scratchpad outside the repo, a heredoc into a temp directory,
+and `> /abs/elsewhere` were all denied exactly like a repo edit, and the remedy
+each deny named (`slice-stop`, `lane claim`) had nothing to do with the file
+being written. During the v1.132.0 funnel this obstructed six verification
+subjects; while this release's spec was being written it blocked a heredoc
+into the session scratchpad, and then the compound that carried the
+slice-stop meant to clear it — a write cannot ride in beside a remedy token,
+which is the right rule applied to the wrong file.
+
+**Gated by target, not just by shape.** A new pure classifier,
+`classifyWriteTarget`, resolves every target a recognized write shape names —
+redirect, `tee`, `sed -i`, `mv`/`cp`/`install`/`rm`/`dd`/`truncate`, a redirect
+inside `bash -c`, and the edit tools' `file_path` — against the governed roots
+(the work root and the repo root). A write whose every target provably lands
+outside them is *external*: allowed, not counted toward the slice-stop clock,
+not witnessed, and no lane is auto-claimed for it. Everything else is gated as
+before. The narrowing is conservative on purpose, because a parser gap in one
+direction costs a spurious block and in the other direction is a bypass:
+any inside target wins; `mv` counts its source, since a moved file is deleted;
+`-t DIR` / `--target-directory` names the destination; a `$VAR`, a glob, a
+relative path after `cd`, or a write shape the extractor cannot name (an
+interpreter payload, a PowerShell verb, `sudo rm`, `perl -i`) makes the whole
+command *unknown* — even when it sits beside a perfectly resolvable outside
+redirect, so `node -e "<write into src/>" > /tmp/log` is not waved through on
+the strength of its log file. Containment is checked through `realpath` as
+well as lexically, so a symlink or junction planted outside that points back
+into a root is inside. The assertions for all of this were authored by a
+non-implementer from a written contract, in a worktree at the branch base
+where the implementation did not exist, and were red there before the
+implementation was written; three of the concerns that author raised about the
+contract were real holes in the first implementation (the same-segment bypass,
+the target-directory option, the link), and are pinned by rows of their own.
+
 ## [v1.132.0] · 2026-09-05 · the claim admitted everyone
 
 v1.130.0 and v1.131.0 shipped without an adversarial review round, because the

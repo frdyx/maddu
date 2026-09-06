@@ -709,6 +709,12 @@ export function createHookFireCore(deps) {
       const kind = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'edit'
         : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
       if (kind === 'read' || kind === 'remedy') process.exit(0);
+      // A write whose every target provably lands OUTSIDE the governed roots is
+      // not this repo's business: nothing to gate, count, witness, or auto-claim
+      // a lane for. Decided here so the outside write leaves no trace in the
+      // repo. Absent on an older installed lib → no narrowing (gated as before).
+      if ((kind === 'edit' || kind === 'write') && typeof disc?.classifyWriteTarget === 'function'
+        && disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] }) === 'outside') process.exit(0);
 
       // CENTRALIZED acting-sid resolution (v1.111.0), LIVENESS-AWARE since
       // B1/B2: validated ONCE, then every consumer — auto-claim, enforcement,
@@ -789,7 +795,7 @@ export function createHookFireCore(deps) {
       if (disc && disc.enforcePreTool) {
         decision = await disc.enforcePreTool(repoRoot, {
           madduSessionId: sid, claudeSessionId, tool, filePath, command,
-          nowMs: Date.now(), laneJustClaimed, workRoot,
+          nowMs: Date.now(), laneJustClaimed, workRoot, cwd: payload.cwd,
         });
       }
       // Adopt the decision's counter key only when it is shape-safe (a sid
