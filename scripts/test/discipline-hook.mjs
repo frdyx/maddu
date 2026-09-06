@@ -292,14 +292,13 @@ try {
         uninstall.kind === 'self-disable' || uninstall.kind === 'write',
         `expected=self-disable/write actual=${uninstall.kind} action=${uninstall.action}`);
 
-      // Copying this actual file to an existing directory writes dst/x too.
-      // On Windows a junction is the privilege-free directory-link equivalent;
-      // on POSIX use the exact file-symlink reproduction from finding 9.
+      // Round-3 F15: this must be a FILE symlink on every platform. A Windows
+      // directory junction made the claimed copy impossible. Setup failure is
+      // reported separately from a classifier mismatch, never substituted.
       await writeFile(join(outside, 'src', 'x'), 'source\n');
-      const linkType = process.platform === 'win32' ? 'junction' : 'file';
+      const linkType = 'file';
       const linkTarget = join(governed, 'x');
-      if (linkType === 'junction') await mkdir(linkTarget);
-      else await writeFile(linkTarget, 'governed\n');
+      await writeFile(linkTarget, 'governed\n');
       let setupError = '';
       try {
         symlinkSync(linkTarget, childLink, linkType);
@@ -307,7 +306,7 @@ try {
         if (!lstatSync(childLink).isSymbolicLink() || realpathSync(childLink) !== realpathSync(linkTarget)) {
           throw new Error('destination child link does not resolve into the governed root');
         }
-      } catch (e) { setupError = String(e?.stack || e); }
+      } catch (e) { setupError = `FIXTURE ERROR: ${String(e?.stack || e)}`; }
       let scope, result, error = setupError;
       if (!error) {
         try {
@@ -318,13 +317,50 @@ try {
       }
       let decision;
       try { decision = JSON.parse(result?.out || '{}').hookSpecificOutput?.permissionDecision; } catch {}
-      ok('round1 F9: cp into an existing outside directory follows its linked child and denies',
-        !error && scope === 'inside' && result?.code === 0 && decision === 'deny'
+      ok('round1 F9: cp into an outside directory with a linked file is unknown and denies',
+        !error && scope === 'unknown' && result?.code === 0 && decision === 'deny'
           && !/would have exited/.test(result?.err || ''),
-        error || `link=${linkType} expected=inside actual=${scope} code=${result?.code} decision=${decision}`);
+        error || `link=${linkType} expected=unknown actual=${scope} code=${result?.code} decision=${decision}`);
     } finally {
       if (linkCreated) unlinkSync(childLink);
       if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round1 hook fixture escaped its parent');
+      await rm(fixture, { recursive: true, force: true });
+    }
+  }
+
+  // Round-3 F13: the hook process stays at P while stdin names attached W in
+  // MSYS drive spelling. The pointer is the real attachment marker consumed
+  // by resolveRoots; no live worktree or git metadata needs to be modified.
+  if (process.platform === 'win32') {
+    const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
+    const { resolveRoots } = await import('../../template/maddu/runtime/lib/paths.mjs');
+    const fixtureParent = resolve(process.cwd());
+    const fixture = await mkdtemp(join(fixtureParent, '.hook-r3-'));
+    try {
+      const state = join(fixture, 'state');
+      const work = join(fixture, 'attached-work');
+      await mkdir(join(state, '.maddu'), { recursive: true });
+      await mkdir(work);
+      await writeFile(join(work, '.maddu-state-root'), `${state}\n`);
+      const attached = await resolveRoots(work, {});
+      if (attached?.stateRoot !== state || attached.workRoot !== work || !attached.redirected) {
+        throw new Error('F13 fixture is not attached to its state repository');
+      }
+      const cwd = work.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, drive) => `/${drive.toLowerCase()}`);
+      if (cwd === work.replaceAll('\\', '/')) throw new Error('F13 requires a drive-letter work root');
+      const command = 'echo x > x';
+      const scope = disc.classifyWriteTarget({ tool: 'Bash', command, cwd, roots: [work, state] });
+      const result = await fire(state, { tool_name: 'Bash', tool_input: { command }, cwd });
+      let output;
+      try { output = JSON.parse(result.out).hookSpecificOutput; } catch {}
+      ok('round3 F13: MSYS payload cwd keeps the attached write inside and the hook denies',
+        scope === 'inside' && result.code === 0 && output?.hookEventName === 'PreToolUse'
+        && output.permissionDecision === 'deny'
+        && /no active Máddu session/.test(output.permissionDecisionReason || '')
+        && !/would have exited/.test(result.err),
+        `expected=inside/deny actual=${scope}/${output?.permissionDecision || 'silent'} code=${result.code}`);
+    } finally {
+      if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round3 hook fixture escaped its parent');
       await rm(fixture, { recursive: true, force: true });
     }
   }
