@@ -971,6 +971,8 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { w
 }
 
 // ── evaluateDiscipline — the wrapper the hooks call. FAILS OPEN. ─────────────
+// Read-only with respect to the COUNTER (enforcePreTool is the entry that
+// persists it); its gather path can still initialise an absent spine.
 // Resolves session + governance, gathers state, applies decide(). laneJustClaimed
 // lets the PreToolUse caller (which auto-claims first) skip a stale "no lane".
 export async function evaluateDiscipline(repoRoot, opts = {}) {

@@ -31,31 +31,36 @@
 //       cat, head, tail, grep, wc, cut, tr, ls, date, pwd, true — with the
 //       options listed for each;
 //   (b) tee, whose operands are opened for writing exactly like a redirect;
-//   (c) a heredoc with a QUOTED delimiter feeding cat into a redirect, whose
-//       body is data by construction and which ends at the first line equal
-//       to its delimiter.
+//   (c) a heredoc with a QUOTED delimiter feeding cat into a redirect: the
+//       header line alone is admitted, and a body, if there is one, is data
+//       by construction and must end at the first line equal to the
+//       delimiter with nothing non-blank after it.
 // Every other verb — every command whose effect is a filesystem OPERATION
-// rather than an open-for-write — is unknown, however its operands resolve.
-// A leading VAR=value assignment is unknown (PATH= or TMPDIR= changes what
-// runs). Every token of an admitted segment has to be plain: no expansion,
-// substitution, grouping, comment, escape or glob anywhere in it.
+// rather than an open-for-write — is not admitted, however its operands
+// resolve. Nor is a leading VAR=value assignment (PATH= or TMPDIR= changes
+// what runs), a token that is not plain (expansion, substitution, grouping,
+// comment, escape, glob), or a `.`/`..` component in a Bash target (a shell
+// utility may create an intermediate before traversing back out). A command
+// with a segment that is not admitted is never outside: it is inside when
+// another segment names an inside location, otherwise unknown.
 //
 // This is a classifier that reads the filesystem (lstat / readlink / stat /
 // realpath, all read-only) to decide containment; its answer depends on the
 // filesystem, the platform and the home directory. Containment considers
 // both the REFERENT of a path and its directory ENTRY (the parent resolved
 // through links, plus the final name) — either inside makes the verdict
-// inside — and follows relative link contents component by component. A path
-// with a `.` or `..` component, an MSYS mount the classifier cannot map
-// (`/tmp/x` under Git Bash), a file with more than one hard link, a
+// inside — and follows relative link contents component by component.
+// Inside always wins; short of inside, an MSYS mount the classifier cannot
+// map (`/tmp/x` under Git Bash), a file with more than one hard link, a
 // descriptor alias (`/dev/stdout`, `/proc/self/fd/N` — they name the fd of
 // the process that opens them, which is not this one), or any metadata or
-// realpath failure is unknown, never outside. One assumption is not checked
-// because it cannot be from here: the hooked shell's INHERITED stdout and
-// stderr are the harness's pipes, not repo files — `tee`'s copy to stdout is
-// therefore not a location. The claim this file makes is bounded by the list
-// above; a gap inside that list is a defect, and a form outside it is gated
-// as it was before v1.133.0.
+// realpath failure other than a path simply not existing yet is unknown,
+// never outside. One assumption is not checked because it cannot be from
+// here: the hooked shell's INHERITED stdout and stderr are the harness's
+// pipes, not repo files — `tee`'s copy to stdout is therefore not a
+// location. The claim this file makes is bounded by the list above; a gap
+// inside that list is a defect, and a form outside it is gated as it was
+// before v1.133.0.
 
 import { join, resolve, isAbsolute, basename, dirname, parse } from 'node:path';
 import { homedir } from 'node:os';
@@ -356,7 +361,9 @@ function segmentTargets(seg) {
 }
 
 // { tool, filePath, command, cwd, roots } → 'inside' | 'outside' | 'unknown'.
-// Any inside target wins across every segment; then any doubt is unknown.
+// Once the command tokenizes, any inside target wins across every admitted
+// segment; then any doubt is unknown. A command that does not tokenize at
+// all (a comment, a subshell, an escape) is unknown without looking further.
 export function classifyWriteTarget(opts = {}) {
   const { tool, filePath, command, cwd } = opts;
   if (!Array.isArray(opts.roots)) return 'unknown';
@@ -387,6 +394,9 @@ export function classifyWriteTarget(opts = {}) {
     if (typeof filePath !== 'string' || !filePath) return 'unknown';
     const p = placeable(expandTilde(filePath));
     if (p === null) return 'unknown';
+    // A `..` here is resolved component-wise through links by realResolve —
+    // the edit tools normalise the parent they create lexically, so no
+    // intermediate inside a root is created on the way out.
     const abs = isAbsolute(p) ? p : lexJoin(base || roots[0], p);
     return scopeOf(abs, roots) || 'unknown';
   }

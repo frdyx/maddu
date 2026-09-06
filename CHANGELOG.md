@@ -51,24 +51,29 @@ a producer that writes solely through a redirect (`echo`, `printf`, `cat`,
 `head`, `tail`, `grep`, `wc`, `cut`, `tr`, `ls`, `date`, `pwd`, `true`, with
 the options listed for each), or `tee`, whose operands are opened for writing
 exactly like a redirect, or a heredoc with a quoted delimiter feeding `cat`
-into a redirect, whose body is data by construction and which ends at the
-first line equal to its delimiter — with every token plain enough to resolve
-without a shell, and every location the classifier can name resolving outside
-every root. Every other verb — every command whose effect is a filesystem
-operation rather than an open-for-write — is unknown, however its operands
-resolve; so is a leading `VAR=value`, a `$VAR`, a glob, a subshell, a
-here-string, an escape, a comment, a `cd`, an unknown option, or an executor.
+into a redirect (the header alone, or a body that is data by construction and
+ends at the first line equal to the delimiter) — with every token plain enough
+to resolve without a shell, and every location the classifier can name
+resolving outside every root. Every other verb — every command whose effect is
+a filesystem operation rather than an open-for-write — is not admitted,
+however its operands resolve; nor is a leading `VAR=value`, a `$VAR`, a glob,
+a subshell, a here-string, an escape, a comment, a `cd`, an unknown option, or
+an executor. A command with an unadmitted segment is never external: it is
+inside when another segment names an inside location, otherwise unknown.
 
 Containment considers both the referent of a path and its directory entry,
 follows symlinks and junctions component by component (a link's own relative
-contents included), treats a target that contains a root as inside, and
-answers unknown for a `.`/`..` component, a file with more than one hard
-link, an MSYS mount it cannot map (`/tmp/x` under Git Bash), a descriptor
-alias (`/dev/stdout`, `/proc/self/fd/N` — they name the fd of the process that
-opens them, and the hook is not the process that will run the command), or any
-metadata or realpath failure. One assumption is stated rather than checked,
-because it cannot be checked from the hook: the hooked shell's inherited
-stdout and stderr are the harness's pipes, not repo files. Options are matched on what the command would receive
+contents included), and treats a target that contains a root as inside. Inside
+always wins; short of that, a `.`/`..` component in a Bash target (an edit
+tool's path is resolved component-wise through links instead, since the edit
+tools normalise the parent they create), a file with more than one hard link, an MSYS
+mount it cannot map (`/tmp/x` under Git Bash), a descriptor alias
+(`/dev/stdout`, `/proc/self/fd/N` — they name the fd of the process that opens
+them, and the hook is not the process that will run the command), or any
+metadata or realpath failure other than a path not existing yet is unknown.
+One assumption is stated rather than checked, because it cannot be checked
+from the hook: the hooked shell's inherited stdout and stderr are the
+harness's pipes, not repo files. Options are matched on what the command would receive
 (`"-t"` is `-t`); `>&word` with a non-numeric word is a redirect to that
 file; the existing prefix of every path is canonicalised, so an 8.3 short name
 or a case variant of the root is the root; nothing is trimmed, and on POSIX a

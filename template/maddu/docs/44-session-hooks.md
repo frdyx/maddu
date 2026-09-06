@@ -226,15 +226,17 @@ governance tier, **allows, nudges, or denies** the edit.
   likewise). Every other verb (`cp`, `mv`, `rm`, `mkdir`, `sed`, `node`, `npm`,
   `git`, `bash -c`, `sudo`, `find`, PowerShell, …) and anything the allowlist does
   not understand — a leading `VAR=value`, a `$VAR`, a glob, a subshell, a
-  here-string, an escape, a comment, a `cd`, an unknown option — makes the whole
-  command *unknown* and it is gated exactly as before, even beside a resolvable
-  outside redirect. Containment considers both a path's referent and its
-  directory entry, follows symlinks and junctions component by component, treats
-  a target containing a root as inside, and answers unknown for `.`/`..`
-  components, hard-linked files, MSYS mounts it cannot map, descriptor aliases
-  (`/dev/stdout`, `/proc/self/fd/N`), or any filesystem error; a root the hook
-  could not resolve makes the verdict unknown. One assumption is stated, not
-  checked: the hooked shell's inherited stdout/stderr are the harness's pipes. Before
+  here-string, an escape, a comment, a `cd`, an unknown option — keeps the
+  command from being external: it is *inside* when another segment names an
+  inside location, otherwise *unknown*, and either way gated exactly as before,
+  even beside a resolvable outside redirect. Containment considers both a path's
+  referent and its directory entry, follows symlinks and junctions component by
+  component, and treats a target containing a root as inside; short of inside,
+  `.`/`..` components in a Bash target, hard-linked files, MSYS mounts it cannot map, descriptor
+  aliases (`/dev/stdout`, `/proc/self/fd/N`), or any filesystem error other than
+  a path not existing yet are unknown; a root the hook could not resolve makes
+  the verdict unknown. One assumption is stated, not checked: the hooked shell's
+  inherited stdout/stderr are the harness's pipes. Before
   v1.133.0 the gate never read the target at all, and the remedy it named had
   nothing to do with the file being written.
 - **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
