@@ -11,6 +11,82 @@ narrative summary.
 
 ---
 
+## [v1.133.0] · 2026-09-06 · the gate never looked at the file
+
+The PreToolUse discipline gate decided from the *shape* of a tool call — the
+tool's name, or a pattern in the command string — and never from where the
+write was going. `enforcePreTool` received the file path and did not read it.
+So a `Write` to a scratchpad outside the repo, a heredoc into a temp directory,
+and `> /abs/elsewhere` were all denied exactly like a repo edit, and the remedy
+each deny named (`slice-stop`, `lane claim`) had nothing to do with the file
+being written. During the v1.132.0 funnel this obstructed six verification
+subjects; while this release's spec was being written it blocked a heredoc
+into the session scratchpad, and then the compound that carried the
+slice-stop meant to clear it — a write cannot ride in beside a remedy token,
+which is the right rule applied to the wrong file.
+
+**Gated by target, not just by shape.** A new classifier, `classifyWriteTarget`
+(`runtime/lib/write-target.mjs`), decides whether a write lands *inside* a
+governed root (the work root or the repo root), *outside* every root, or
+cannot be told (*unknown*). Outside is *external*: allowed, not counted toward
+the slice-stop clock, not witnessed, no lane auto-claimed — the same footprint
+in `.maddu/` a read-only `ls` leaves. Inside and unknown are gated exactly as
+before.
+
+**It is an allowlist, and a short one.** Three adversarial rounds each found
+their worst defects in the previous round's version of this scope. The first
+version walked the command for the writes it knew about and called the rest
+harmless; round 1 found nine ways to hide a repo write beside an outside
+redirect (`cp src /repo/x > /tmp/log`, `npm run build > /tmp/log`, `$(rm
+/repo/x)`, `>|`, `cp -t/repo`, a `sed` script with a `w` flag, a stray quote
+in a heredoc body, `(cd /repo; …)`, a link the lexical check did not follow).
+The second admitted a list of writer verbs with enumerated options; round 3
+showed those verbs carry semantics an argument list does not name — `rm -rf`
+of a directory that *contains* the root, `mv` of an ancestor, a `sed` backup
+suffix, `mkdir -p` creating an intermediate before a `..`, `rm` of an inside
+link whose referent is outside, `sort`'s temp files under `TMPDIR`. So what
+is admitted is only what the obstruction actually needed: a Bash command is
+external only when every segment (split on `&&`, `||`, `;`, `|`, newline) is
+a producer that writes solely through a redirect (`echo`, `printf`, `cat`,
+`head`, `tail`, `grep`, `wc`, `cut`, `tr`, `ls`, `date`, `pwd`, `true`, with
+the options listed for each), or `tee`, whose operands are opened for writing
+exactly like a redirect, or a heredoc with a quoted delimiter feeding `cat`
+into a redirect (the header alone, or a body that is data by construction and
+ends at the first line equal to the delimiter) — with every token plain enough
+to resolve without a shell, and every location the classifier can name
+resolving outside every root. Every other verb — every command whose effect is
+a filesystem operation rather than an open-for-write — is not admitted,
+however its operands resolve; nor is a leading `VAR=value`, a `$VAR`, a glob,
+a subshell, a here-string, an escape, a comment, a `cd`, an unknown option, or
+an executor. A command with an unadmitted segment is never external: it is
+inside when another segment names an inside location, otherwise unknown.
+
+Containment considers both the referent of a path and its directory entry,
+follows symlinks and junctions component by component (a link's own relative
+contents included), and treats a target that contains a root as inside. Inside
+always wins; short of that, a `.`/`..` component in a Bash target (an edit
+tool's path is resolved component-wise through links instead, since the edit
+tools normalise the parent they create), a file with more than one hard link, an MSYS
+mount it cannot map (`/tmp/x` under Git Bash), a descriptor alias
+(`/dev/stdout`, `/proc/self/fd/N` — they name the fd of the process that opens
+them, and the hook is not the process that will run the command), or any
+metadata or realpath failure other than a path not existing yet is unknown.
+One assumption is stated rather than checked, because it cannot be checked
+from the hook: the hooked shell's inherited stdout and stderr are the
+harness's pipes, not repo files. Options are matched on what the command would receive
+(`"-t"` is `-t`); `>&word` with a non-numeric word is a redirect to that
+file; the existing prefix of every path is canonicalised, so an 8.3 short name
+or a case variant of the root is the root; nothing is trimmed, and on POSIX a
+backslash is a filename character. A root the hook could not resolve makes the
+verdict unknown. The claim is bounded by the list above: a gap inside that
+list is a defect, and a form outside it is gated as it was before.
+
+The assertions were authored by a non-implementer from a written contract, in
+a worktree at the branch base where the implementation did not exist, and
+were red there; each round's reproductions were then added as rows, red
+against the implementation that round reviewed, before the fix that answers
+them.
+
 ## [v1.132.0] · 2026-09-05 · the claim admitted everyone
 
 v1.130.0 and v1.131.0 shipped without an adversarial review round, because the

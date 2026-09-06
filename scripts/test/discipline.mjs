@@ -3,10 +3,15 @@
 // (decide), the governance-mode thresholds (resolveThresholds), and the Bash
 // write-classifier (classifyBashWrite). The impure gather/hook paths are covered
 // by later phases; this file needs no spine, git, or DOM.
+// Target scope exempts resolved outside writes; inside and unknown writes retain discipline enforcement.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-const { resolveThresholds, decide, classifyBashWrite, denyReason, DISCIPLINE_DEFAULTS,
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+
+const { resolveThresholds, decide, classifyBashWrite, classifyWriteTarget, denyReason, DISCIPLINE_DEFAULTS,
   nextCounter, enforcePreTool, lastOwnSliceStop, globToRegExp, filterIgnored } =
   await import('../../template/maddu/runtime/lib/discipline.mjs');
 
@@ -359,6 +364,695 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   const rt = nextCounter({ baselineInit: true, workRoot: '/w', dirtyBaseline: ['a.js', 'b.js'] },
     St({ commit: Cm({ newDirtyPaths: [], currentDirtyPaths: ['a.js'] }) }), 5000);
   ok('baseline retirement: clean path retires', JSON.stringify(rt.dirtyBaseline) === JSON.stringify(['a.js']));
+}
+
+// ── classifyWriteTarget — target-aware discipline contract ─────────────────
+{
+  const base = join(tmpdir(), 'maddu-write-target-contract');
+  const root = join(base, 'work');
+  const stateRoot = join(base, 'state');
+  const outside = join(base, 'outside');
+  const roots = [root, stateRoot];
+  // These commands are classifier input ONLY; no shell executes them. Forward
+  // slashes and quoted paths preserve Windows paths and temp dirs with spaces.
+  const quote = (p) => `"${p.replaceAll('\\', '/')}"`;
+  // The export is deliberately absent at the base commit. Optional invocation
+  // yields undefined (NOT 'unknown'), so every comparison records a failed
+  // ok() instead of aborting module loading or skipping the new rows.
+  const target = (opts) => classifyWriteTarget?.({ roots, ...opts });
+  const edit = (filePath, opts = {}) => target({ tool: 'Edit', filePath, ...opts });
+  const bash = (command, opts = {}) => target({ tool: 'Bash', command, ...opts });
+  const all = (values, expected) => values.every((value) => value === expected);
+
+  ok('target: absolute Edit outside every root', edit(join(outside, 'x.js')) === 'outside');
+  ok('target: Write inside the second root', target({ tool: 'Write', filePath: join(stateRoot, 'x.js') }) === 'inside');
+  ok('target: relative Edit without cwd uses the first root', edit('src/x.js') === 'inside');
+  ok('target: relative Edit uses an outside cwd', edit('x.js', { cwd: outside }) === 'outside');
+  // Do not use join/resolve on the INPUTS here: the classifier must collapse
+  // the literal traversal, not receive an already-normalized fixture.
+  ok('target: dot and parent traversal cross the root boundary correctly',
+    edit(`${root}${sep}..${sep}outside${sep}x.js`) === 'outside'
+    && edit(`${outside}${sep}..${sep}work${sep}x.js`) === 'inside'
+    && edit(`${root}${sep}.${sep}src${sep}..${sep}x.js`) === 'inside');
+  ok('target: sibling prefix is outside and root equality is inside',
+    edit(join(`${root}-other`, 'x.js')) === 'outside' && edit(root) === 'inside');
+  if (process.platform === 'win32') {
+    const inside = join(root, 'MixedCase', 'x.js');
+    const mixed = inside.replace(/[a-z]/gi, (c, i) => i % 2 ? c.toUpperCase() : c.toLowerCase());
+    const msys = inside.replaceAll('\\', '/').replace(/^([a-z]):/i, (_, drive) => `/${drive.toLowerCase()}`);
+    ok('target: win32 case, separators, and MSYS spelling are equivalent',
+      all([edit(mixed), edit(inside.replaceAll('\\', '/')), edit(msys)], 'inside'));
+  }
+  ok('target: tilde expands to the home directory',
+    edit('~/x') === 'outside' && edit('~/x', { roots: [homedir()] }) === 'inside');
+  ok('target: absent paths and invalid roots are unknown',
+    all([target({ tool: 'Edit' }), edit(''), edit(join(root, 'x'), { roots: [] }),
+      edit(join(root, 'x'), { roots: null }), edit(join(root, 'x'), { roots: root })], 'unknown'));
+
+  const redirect = `echo x > ${quote(join(outside, 'f'))}`;
+  ok('target: absolute redirects, append, and heredoc outside',
+    all([bash(redirect), bash(`echo x >> ${quote(join(outside, 'f'))}`),
+      bash(`cat <<'HEREDOC' > ${quote(join(outside, 'f'))}\nx\nHEREDOC`)], 'outside'));
+  ok('target: an inside redirect wins over an outside redirect',
+    bash(`${redirect} && echo y > src/a.js`, { cwd: root }) === 'inside');
+  ok('target: relative Bash targets require cwd without cd',
+    bash('echo x > out.txt', { cwd: root }) === 'inside'
+    && bash('echo x > out.txt') === 'unknown'
+    && bash(`cd ${quote(outside)} && echo x > out.txt`, { cwd: root }) === 'unknown');
+  ok('target: variables, command substitution, globs, and braces are unknown',
+    all([bash('echo x > "$OUT"'), bash('echo x > $OUT'),
+      bash(`echo x > ${outside.replaceAll('\\', '/')}/*.log`),
+      bash('echo x > `pwd`/f'), bash('echo x > f?.log'), bash('echo x > {a,b}.log')], 'unknown'));
+  // Round 3 removes every writer except tee, regardless of operand location.
+  ok('target: mv is unknown for inside and outside operands',
+    bash(`mv ${quote(join(root, 'a'))} ${quote(join(outside, 'b'))}`) === 'unknown'
+    && bash(`mv ${quote(join(outside, 'a'))} ${quote(join(outside, 'b'))}`) === 'unknown');
+  ok('target: cp and install are unknown for either destination',
+    all([bash(`cp ${quote(join(root, 'a'))} ${quote(join(outside, 'b'))}`),
+      bash(`install ${quote(join(root, 'a'))} ${quote(join(outside, 'b'))}`)], 'unknown')
+    && all([bash(`cp ${quote(join(outside, 'a'))} ${quote(join(root, 'b'))}`),
+      bash(`install ${quote(join(outside, 'a'))} ${quote(join(root, 'b'))}`)], 'unknown'));
+  ok('target: rm is unknown for outside and mixed operands',
+    bash(`rm -rf ${quote(join(outside, 'x'))}`) === 'unknown'
+    && bash(`rm -rf ${quote(join(outside, 'x'))} ${quote(join(root, 'y'))}`) === 'unknown');
+  ok('target: tee retains its scope while sed, dd, and truncate are unknown',
+    bash(`tee -a ${quote(join(outside, 'log'))}`) === 'outside'
+    && all([bash(`sed -i 's/a/b/' ${quote(join(outside, 'f'))}`),
+      bash(`dd if=x of=${quote(join(outside, 'y'))}`),
+      bash(`truncate -s0 ${quote(join(outside, 'f'))}`)], 'unknown')
+    && bash(`sed -i -e 's/a/b/' ${quote(join(root, 'f'))}`, { cwd: root }) === 'unknown'
+    && bash(`sed -i --expression 's/a/b/' ${quote(join(root, 'f'))}`, { cwd: root }) === 'unknown'
+    && bash(`tee -a ${quote(join(outside, 'log'))} ${quote(join(root, 'log'))}`) === 'inside');
+  ok('target: shell wrapper payload redirects remain unknown',
+    all([bash(`bash -lc "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`),
+      bash(`sh -c "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`)], 'unknown'));
+  ok('target: PowerShell and interpreter writes remain unknown',
+    all([bash(`Set-Content ${quote(join(outside, 'f'))} x`),
+      bash(`node -e "require('fs').writeFileSync('${join(outside, 'f').replaceAll('\\', '/')}','y')"`),
+      bash(`python -c "open('${join(outside, 'f').replaceAll('\\', '/')}', 'w').write('y')"`)], 'unknown'));
+  ok('target: null-device redirects and fd duplication yield no targets',
+    all([bash('cmd >/dev/null'), bash('make 2>&1')], 'unknown'));
+
+  // Paired behavioral rows lock the new exemption AND the preserved gate.
+  // Standalone inside/unknown regression checks already pass at the base and
+  // would violate this spec's requirement that every added row starts red.
+  const bogusRepo = resolve('/no/such/repo');
+  // A truthy invalid explicit id is rejected by the existing validator and
+  // prevents an inherited MADDU_SESSION_ID from writing a bogus-repo counter.
+  const enforce = (opts, repoRoot = bogusRepo) => enforcePreTool(repoRoot, { madduSessionId: 'invalid/session', ...opts });
+  // Gated calls need a writable state root on every platform. Reserve the
+  // bogus root for external allowances that must return before filesystem I/O.
+  const withRepo = async (run) => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'maddu-enforce-target-'));
+    try {
+      await mkdir(join(repoRoot, '.maddu'));
+      return await run(repoRoot);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  };
+  const external = (r) => r.verdict === 'ok' && r.kind === 'external'
+    && r.mutating === false && r.action === 'allow' && r.enforcement === 'n/a';
+  const outsideWrite = await enforce({ tool: 'Write', filePath: join(outside, 'x.js') });
+  const outsideBash = await enforce({ tool: 'Bash', command: redirect });
+  const [mixedWrite, insideEdit] = await withRepo(async (repoRoot) => [
+    await enforce({ tool: 'Bash', command: `${redirect} && rm -rf src`, cwd: repoRoot }, repoRoot),
+    await enforce({ tool: 'Edit', filePath: 'x.js', nowMs: 0 }, repoRoot),
+  ]);
+  ok('enforce target: outside Write returns the complete external allowance', external(outsideWrite), JSON.stringify(outsideWrite));
+  ok('enforce target: outside Bash returns the complete external allowance', external(outsideBash), JSON.stringify(outsideBash));
+  ok('enforce target: outside Bash allowed while a mixed repo write stays gated',
+    external(outsideBash) && mixedWrite.kind === 'write' && mixedWrite.mutating === true
+    && mixedWrite.action === 'gate' && mixedWrite.verdict === 'block', JSON.stringify(mixedWrite));
+  ok('enforce target: outside Write allowed while Edit x.js keeps its session block',
+    external(outsideWrite) && insideEdit.verdict === 'block' && insideEdit.blocker === 'session'
+    && insideEdit.kind === 'edit' && insideEdit.mutating === true && insideEdit.action === 'gate', JSON.stringify(insideEdit));
+
+  ok('target: MultiEdit and NotebookEdit obey the same root scope',
+    all(['MultiEdit', 'NotebookEdit'].map((tool) => target({ tool, filePath: join(root, 'x') })), 'inside')
+    && all(['MultiEdit', 'NotebookEdit'].map((tool) => target({ tool, filePath: join(outside, 'x') })), 'outside'));
+  ok('target: unresolved companions stay unknown unless an inside target wins',
+    bash(`${redirect} && echo y > "$OUT"`, { cwd: root }) === 'unknown'
+    && bash('echo x > "$OUT" && echo y > src/a.js', { cwd: root }) === 'inside');
+  const scoped = await withRepo(async (repoRoot) => {
+    const decisions = [];
+    for (const filePath of [join(root, 'x'), join(repoRoot, 'x')]) {
+      decisions.push(await enforce({ tool: 'Write', filePath, workRoot: root }, repoRoot));
+    }
+    return decisions;
+  });
+  const cwdOutside = await enforce({ tool: 'Edit', filePath: 'x.js', workRoot: root, cwd: outside });
+  ok('enforce target: both governed roots gate and an outside cwd exempts relative Edit',
+    external(cwdOutside) && scoped.every((r) => r.kind === 'edit' && r.mutating === true && r.verdict === 'block'));
+  const [unknown, otherKinds] = await withRepo(async (repoRoot) => {
+    const unknown = [];
+    for (const opts of [{ tool: 'Edit' }, { tool: 'Bash', command: 'echo x > "$OUT"' }]) unknown.push(await enforce(opts, repoRoot));
+    const otherKinds = [];
+    for (const opts of [
+      { tool: 'Read' }, { tool: 'Bash', command: 'git status' },
+      { tool: 'Bash', command: 'npm run build' }, { tool: 'Bash', command: 'maddu hooks uninstall' },
+    ]) otherKinds.push(await enforce({ filePath: join(outside, 'x'), ...opts }, repoRoot));
+    return [unknown, otherKinds];
+  });
+  ok('enforce target: external exemption preserves unknown gates and other shape kinds',
+    external(outsideWrite) && unknown.every((r) => r.mutating === true && r.action === 'gate' && r.verdict === 'block')
+    && otherKinds.map((r) => r.kind).join(',') === 'read,remedy,ambiguous,self-disable');
+
+  // Accepted contract holes: an extracted outside redirect cannot account for
+  // a separate opaque write, even when both occur in the same shell segment.
+  const opaqueNode = `node -e "require('fs').writeFileSync('src/x','y')" > ${quote(join(outside, 'log'))}`;
+  ok('target hole: node inline write with outside stdout remains unknown',
+    bash(opaqueNode, { cwd: root }) === 'unknown');
+  ok('target hole: Set-Content beside an outside redirect remains unknown',
+    bash(`Set-Content src/x y ; echo x > ${quote(join(outside, 'f'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: sudo rm beside an outside redirect remains unknown',
+    bash(`sudo rm -rf ${quote(join(root, 'x'))} && echo x > ${quote(join(outside, 'f'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: perl in-place write beside an outside redirect remains unknown',
+    bash(`perl -i -pe s/a/b/ src/x && echo x > ${quote(join(outside, 'f'))}`, { cwd: root }) === 'unknown');
+
+  // Compare otherwise identical contexts. The base already gates the opaque
+  // write, so the paired outside-only allowance makes this new row start red.
+  const redirectOnly = await enforce({
+    tool: 'Bash', command: `echo x > ${quote(join(outside, 'log'))}`, cwd: root, workRoot: root,
+  });
+  const opaqueDecision = await withRepo((repoRoot) =>
+    enforce({ tool: 'Bash', command: opaqueNode, cwd: root, workRoot: root }, repoRoot));
+  ok('enforce target hole: outside redirect allows while opaque node write stays gated',
+    external(redirectOnly) && opaqueDecision.kind !== 'external' && opaqueDecision.kind === 'write'
+    && opaqueDecision.mutating === true && opaqueDecision.action === 'gate'
+    && opaqueDecision.verdict === 'block',
+    `redirect=${redirectOnly.kind} opaque=${opaqueDecision.kind} verdict=${opaqueDecision.verdict}`);
+
+  // Target-directory options do not re-admit a removed verb.
+  ok('target hole: cp -t inside root is unknown',
+    bash(`cp -t ${quote(root)} ${quote(join(outside, 'src'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: cp -t outside root with inside source is unknown',
+    bash(`cp -t ${quote(outside)} ${quote(join(root, 'a'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: cp --target-directory inside root is unknown',
+    bash(`cp --target-directory=${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: mv -t inside root is unknown',
+    bash(`mv -t ${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'unknown');
+  ok('target hole: install -t inside root is unknown',
+    bash(`install -t ${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'unknown');
+}
+
+// Round-1 adversarial reproductions (findings 1-11). Commands are classifier
+// input only, never executed. Each case has its own verdict assertion; none
+// borrows an unrelated failure to make the row red against 2ebbafd.
+{
+  const { existsSync, lstatSync, readlinkSync, realpathSync, symlinkSync, unlinkSync } = await import('node:fs');
+  const { writeFile } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  const fixtureParent = resolve(process.cwd());
+  const fixture = await mkdtemp(join(fixtureParent, '.disc-r1-'));
+  const root = join(fixture, 'work');
+  const outside = join(fixture, 'outside');
+  const slash = (p) => p.replaceAll('\\', '/');
+  const quote = (p) => `"${slash(p)}"`;
+  const links = [];
+  const check = (name, expected, opts) => {
+    let actual, error = '';
+    try { actual = classifyWriteTarget?.({ roots: [root], cwd: root, ...opts }); }
+    catch (e) { error = String(e?.stack || e); }
+    ok(`round1 ${name}`, !error && actual === expected,
+      error || `expected=${expected} actual=${actual}`);
+  };
+  // Link setup must fail loudly. Use junctions on Windows and file/directory
+  // symlinks on POSIX; neither platform may silently skip a link reproduction.
+  const linkTo = (target, link, type) => {
+    symlinkSync(target, link, type);
+    links.push(link);
+    if (!lstatSync(link).isSymbolicLink() || !readlinkSync(link)) {
+      throw new Error(`round1 link fixture is not a readable link: ${link}`);
+    }
+  };
+  try {
+    await mkdir(join(root, '~'), { recursive: true });
+    await mkdir(outside);
+    await writeFile(join(outside, 'source'), 'source\n');
+    const src = quote(join(outside, 'source'));
+    const inside = quote(join(root, 'x'));
+    const log = quote(join(outside, 'log'));
+    const out = quote(join(outside, 'x'));
+    const bash = (name, command, expected = 'unknown', opts = {}) =>
+      check(name, expected, { tool: 'Bash', command, ...opts });
+
+    // Finding 1 also names install and trailing append/stderr variants.
+    for (const verb of ['cp', 'install']) {
+      for (const redirect of ['>', '>>', '2>']) {
+        bash(`F1: ${verb} inside destination with ${redirect} outside log is unknown`,
+          `${verb} ${src} ${inside} ${redirect} ${log}`, 'unknown');
+      }
+    }
+
+    for (const [name, command] of [
+      ['npm run build', `npm run build > ${log}`],
+      ['npx generator', `npx generator > ${log}`],
+      ['find -delete', `find ${quote(root)} -delete > ${log}`],
+      ['printf piped to xargs rm', `printf '%s\\n' ${inside} | xargs rm > ${log}`],
+      ['git checkout', `git checkout -- . > ${log}`],
+      ['git clean', `git clean -fd > ${log}`],
+      ['maddu hooks uninstall', `maddu hooks uninstall > ${log}`],
+    ]) bash(`F2: ${name} with outside stdout is unknown`, command);
+
+    for (const [name, command] of [
+      ['quoted command substitution', `echo "$(rm ${inside})" > ${log}`],
+      ['process substitution', `cat <(rm ${inside}) > ${log}`],
+      ['subshell', `(rm ${inside}) > ${log}`],
+      ['here-string executor', `bash <<< 'echo x > ${inside}' > ${log}`],
+      ['nested bash -c', `bash -c 'bash -c "echo x > ${slash(join(root, 'x'))}"' > ${log}`],
+      ['bash script.sh', `bash script.sh > ${log}`],
+    ]) bash(`F3: ${name} with outside stdout is unknown`, command);
+
+    bash('F4: mixed quoted and unquoted target is unknown',
+      `echo x > ${slash(root).slice(0, -2)}"rk"/x`);
+    bash('F4: escaped target character is unknown',
+      `echo x > ${slash(root).slice(0, -1)}\\k/x`);
+    bash('F4: bracket glob target is unknown', `rm ${slash(root).slice(0, -1)}[k]/x`);
+    bash('F4: quoted tilde stays relative to cwd', "echo x > '~/x'", 'inside');
+
+    bash('F5: clobber redirect retains its inside target',
+      `echo x >| ${inside}; echo y > ${log}`, 'inside');
+
+    // The quoted heredoc is admitted only as the whole special form. The
+    // terminator ends its data: trailing commands/comments cannot hide in it.
+    bash('F6: heredoc quote cannot hide commands after the terminator',
+      `cat <<'EOF' > ${log}\n'\nEOF\necho x > ${inside}\n#'`);
+    bash('F6: comment quote cannot hide the next line',
+      `echo x > ${log};#'\necho x > ${inside}\n#'`);
+
+    for (const [name, command] of [
+      ['parenthesized cd', `(cd ${quote(root)}; echo x > x)`],
+      ['parenthesized pushd', `(pushd ${quote(root)}; echo x > x)`],
+      ['semicolon-adjacent cd', `true;cd ${quote(root)};echo x > x`],
+    ]) bash(`F7: ${name} is unknown`, command, 'unknown', { cwd: outside });
+
+    // Round 3 rejects these verbs even with formerly admitted options/scripts.
+    bash('F8: attached cp -tDIR is unknown', `cp -t${slash(root)} ${src}`);
+    bash('F8: sed -i -f external script is unknown',
+      `sed -i -f ${quote(join(outside, 'script.sed'))} ${inside} > ${log}`);
+    bash('F8: sed attached -e with an inside operand is unknown',
+      `sed -i -es/a/b/ ${inside} > ${log}`, 'unknown');
+    bash('F8: install -d with mixed directories is unknown',
+      `install -d ${quote(join(root, 'new'))} ${quote(join(outside, 'new'))}`, 'unknown');
+    bash('F8: rm -- with a dash-prefixed inside operand is unknown', `rm -- -inside ${out}`, 'unknown');
+    bash('F8: mv -- with a dash-prefixed inside source is unknown', `mv -- -inside ${out}`, 'unknown');
+    bash('F8: sed script with a w command is unknown',
+      `sed -i 's/a/b/w ${slash(join(root, 'log'))}' ${out}`);
+
+    const dangling = join(outside, 'dangling');
+    const missingTarget = join(root, 'new-target');
+    linkTo(missingTarget, dangling, process.platform === 'win32' ? 'junction' : 'file');
+    if (existsSync(missingTarget) || existsSync(dangling)) throw new Error('F9 fixture must remain dangling');
+    check('F9: dangling link into the root is inside', 'inside', { tool: 'Write', filePath: dangling });
+
+    await mkdir(join(root, 'sub'));
+    const directoryLink = join(outside, 'link');
+    linkTo(join(root, 'sub'), directoryLink, process.platform === 'win32' ? 'junction' : 'dir');
+    if (realpathSync(directoryLink) !== realpathSync(join(root, 'sub'))) {
+      throw new Error('F9 directory link does not resolve to root/sub');
+    }
+    // Do not join/resolve the input: link/.. must survive until the classifier
+    // walks the link, then applies the parent component.
+    check('F9: link/../new follows the link before parent traversal', 'inside',
+      { tool: 'Write', filePath: `${directoryLink}${sep}..${sep}new` });
+
+    // A real cyclic link makes canonicalization fail without monkeypatching
+    // implementation internals or relying on OS-specific permission denial.
+    const cycle = join(outside, 'cycle');
+    linkTo(cycle, cycle, process.platform === 'win32' ? 'junction' : 'dir');
+    let realpathFailed = false;
+    try { realpathSync.native(cycle); } catch { realpathFailed = true; }
+    if (!realpathFailed) throw new Error('F9 cyclic-link fixture must fail realpath');
+    check('F9: realpath failure cannot retain an outside verdict', 'unknown',
+      { tool: 'Write', filePath: cycle });
+    // F9's cp-to-a-linked-child reproduction is an end-to-end row in
+    // discipline-hook.mjs; round 3 now requires unknown for the removed cp verb.
+
+    bash('F10: /dev/shm is governed on POSIX and an unknown MSYS mount on win32',
+      `echo x > /dev/shm/repo/x; echo y > ${log}`,
+      process.platform === 'win32' ? 'unknown' : 'inside', { roots: ['/dev/shm/repo'] });
+
+    check('F11: null work root cannot be discarded beside a state root', 'unknown',
+      { tool: 'Write', filePath: join(root, 'x'), roots: [null, join(fixture, 'state')] });
+    check('F11: null root wins even beside a matching valid root', 'unknown',
+      { tool: 'Write', filePath: join(root, 'x'), roots: [null, root] });
+    check('F11: relative roots are unknown', 'unknown',
+      { tool: 'Write', filePath: join(root, 'x'), roots: ['relative-root'] });
+    if (process.platform === 'win32') {
+      const msysRoot = slash(root).replace(/^([a-z]):/i, (_, drive) => `/${drive.toLowerCase()}`);
+      if (msysRoot === slash(root)) throw new Error('F11 MSYS fixture requires a drive-letter root');
+      check('F11: MSYS root matches a drive-letter Edit target', 'inside',
+        { tool: 'Edit', filePath: slash(join(root, 'x')), roots: [msysRoot] });
+    }
+  } finally {
+    // Unlink individually before recursive cleanup so no governed target can
+    // be traversed. A cleanup failure is a harness error, never a silent pass.
+    for (const link of links.reverse()) unlinkSync(link);
+    if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round1 fixture escaped its parent');
+    await rm(fixture, { recursive: true, force: true });
+  }
+}
+
+// Round-2 reproductions. Bash strings are classifier input, never executed.
+// Keep the related fd/heredoc controls in their regression rows so each new
+// row exposes its own finding even when a control already passes.
+{
+  const { dirname } = await import('node:path');
+  const fixtureParent = resolve(tmpdir());
+  const fixture = await mkdtemp(join(fixtureParent, 'maddu-disc-r2-'));
+  const slash = (p) => p.replaceAll('\\', '/');
+  const root = slash(join(fixture, 'governed-long-root'));
+  const outside = slash(join(fixture, 'outside'));
+  const quote = (p) => `"${p}"`;
+  const check = (name, cases, setupError = '') => {
+    const results = cases.map(({ expected, ...opts }) => {
+      let actual, error = setupError;
+      if (!error) {
+        try { actual = classifyWriteTarget({ roots: [root], cwd: root, ...opts }); }
+        catch (e) { error = String(e?.stack || e); }
+      }
+      return { expected, actual, error };
+    });
+    ok(`round2 ${name}`, results.every((r) => !r.error && r.actual === r.expected),
+      results.map((r) => r.error || `expected=${r.expected} actual=${r.actual}`).join('; '));
+  };
+  const bashCase = (command, expected) => ({ tool: 'Bash', command, expected });
+  try {
+    await mkdir(join(root, '.maddu'), { recursive: true });
+    await mkdir(outside);
+    const inside = quote(`${root}/x`);
+    const log = quote(`${outside}/log`);
+    const src = quote(`${outside}/src`);
+    const file = quote(`${outside}/f`);
+
+    check('F1: uniq with an inside output operand is unknown', [
+      bashCase(`uniq ${quote(`${outside}/in`)} ${quote(`${root}/out`)}`, 'unknown'),
+    ]);
+    check('F2: cp double-quoted -t with an inside destination is unknown', [
+      bashCase(`cp "-t" ${quote(root)} ${src}`, 'unknown'),
+    ]);
+    check('F2: cp single-quoted -t with an inside destination is unknown', [
+      bashCase(`cp '-t' ${quote(root)} ${src}`, 'unknown'),
+    ]);
+    check('F3: head valued-option substitution is unknown', [
+      bashCase(`head -n "$(rm '${root}/x')" ${file} > ${log}`, 'unknown'),
+    ]);
+    check('F3: truncate valued-option substitution is unknown', [
+      bashCase(`truncate -s "$(rm '${root}/x')" ${file}`, 'unknown'),
+    ]);
+    check('F4: >&word retains an inside target with outside-file and fd controls', [
+      bashCase(`echo x >&${inside}; echo y > ${log}`, 'inside'),
+      bashCase(`echo x >&${quote(`${outside}/a`)}`, 'outside'),
+      bashCase('echo x >&2', 'unknown'),
+    ]);
+    check('F5: early heredoc delimiter is unknown with a well-formed control', [
+      bashCase(`cat <<'EOF' > ${log}\nEOF\necho x > ${inside}\nEOF`, 'unknown'),
+      bashCase(`cat <<'EOF' > ${log}\nbody\nEOF`, 'outside'),
+    ]);
+
+    if (process.platform === 'win32') {
+      const { execFileSync } = await import('node:child_process');
+      const { realpathSync } = await import('node:fs');
+      let shortRoot, setupError = '';
+      try {
+        shortRoot = slash(execFileSync('cmd', ['/c', `for %I in ("${root}") do @echo %~sI`], {
+          encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 10000,
+        }).trim());
+        if (!shortRoot || /[\r\n]/.test(shortRoot) || !/~\d/.test(shortRoot)
+          || shortRoot.toLowerCase() === root.toLowerCase()
+          || realpathSync.native(shortRoot).toLowerCase() !== realpathSync.native(root).toLowerCase()) {
+          throw new Error(`8.3 root spelling unavailable or invalid: ${JSON.stringify(shortRoot)}`);
+        }
+      } catch (e) { setupError = `8.3 fixture failed: ${String(e?.stack || e)}`; }
+      // Failed short-name setup is reported by BOTH rows; it is never a skip
+      // or a fallback to testing the ordinary long spelling.
+      check('F6: win32 8.3 root spelling keeps Edit inside', [
+        { tool: 'Edit', filePath: `${shortRoot}/x`, expected: 'inside' },
+      ], setupError);
+      check('F6: win32 8.3 root spelling keeps Bash inside', [
+        bashCase(`echo x > ${quote(`${shortRoot}/x`)}`, 'inside'),
+      ], setupError);
+    }
+  } finally {
+    if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round2 fixture escaped temp parent');
+    await rm(fixture, { recursive: true, force: true });
+  }
+}
+
+// Round-3 review, first copy, findings 1-12; F13 lives in discipline-hook.
+// Commands remain DATA: no shell runs any of these destructive reproductions.
+// Every fixture is owned by this worktree and removed, with links unlinked first.
+// Platform-only rows are explicit; a failed link setup is NOT proof of a red
+// implementation assertion and is labelled FIXTURE ERROR in the run report.
+{
+  const fs = await import('node:fs');
+  const { dirname, relative } = await import('node:path');
+  const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
+  const fixtureParent = resolve(process.cwd());
+  const fixture = await mkdtemp(join(fixtureParent, '.disc-r3-'));
+  const base = join(fixture, 'probes');
+  const root = join(base, 'work');
+  const outside = join(base, 'outside');
+  const slash = (p) => p.replaceAll('\\', '/');
+  const quote = (p) => `"${slash(p)}"`;
+  const links = [];
+  const linkTo = (target, link, type = 'file') => {
+    fs.symlinkSync(target, link, type);
+    links.push(link);
+    if (!fs.lstatSync(link).isSymbolicLink() || !fs.readlinkSync(link)) {
+      throw new Error(`not a readable symlink: ${link}`);
+    }
+  };
+  const setup = (run) => {
+    try { run(); return ''; }
+    catch (e) { return `FIXTURE ERROR: ${e.code || ''} ${e.message}`; }
+  };
+  const check = (name, expected, opts, fixtureError = '') => {
+    let actual, error = fixtureError;
+    if (!error) {
+      try { actual = classifyWriteTarget({ roots: [root], cwd: root, ...opts }); }
+      catch (e) { error = `CLASSIFIER ERROR: ${e.stack || e}`; }
+    }
+    ok(`round3 ${name}`, !error && actual === expected,
+      error || `expected=${expected} actual=${actual}`);
+  };
+  const bash = (name, command, expected = 'unknown', opts = {}, error = '') =>
+    check(name, expected, { tool: 'Bash', command, ...opts }, error);
+  try {
+    fs.mkdirSync(join(root, '.maddu'), { recursive: true });
+    fs.mkdirSync(outside);
+    fs.writeFileSync(join(root, 'x'), 'governed\n');
+    fs.writeFileSync(join(outside, 'src'), 'source\n');
+    fs.writeFileSync(join(outside, 'file'), 'outside\n');
+    fs.writeFileSync(join(outside, 'f'), 'a\n');
+    fs.writeFileSync(join(outside, 'big'), 'b\na\n');
+    const src = quote(join(outside, 'src'));
+    const out = quote(join(outside, 'f'));
+    const log = quote(join(outside, 'log'));
+    const victim = `'${slash(join(root, 'x'))}'`;
+
+    // F1: B is a REAL directory containing R; the move destination is its sibling.
+    bash('F1: rm of a directory containing the root is unknown', `rm -rf ${quote(base)}`);
+    bash('F1: mv of a directory containing the root is unknown',
+      `mv ${quote(base)} ${quote(join(fixture, 'moved'))}`);
+    const copySource = join(outside, 'copy', 'src');
+    const copyDest = join(outside, 'copy', 'dst');
+    fs.mkdirSync(join(copySource, 'sub'), { recursive: true });
+    fs.mkdirSync(join(copyDest, 'src', 'sub'), { recursive: true });
+    fs.writeFileSync(join(copySource, 'sub', 'x'), 'copy source\n');
+    const copyError = setup(() => {
+      const child = join(copyDest, 'src', 'sub', 'x');
+      linkTo(join(root, 'x'), child);
+      if (fs.realpathSync(child) !== fs.realpathSync(join(root, 'x')) || !fs.statSync(child).isFile()) {
+        throw new Error('F1 deep destination must resolve to the governed FILE');
+      }
+    });
+    bash('F1: recursive cp through a deep destination file symlink is unknown',
+      `cp -r ${quote(copySource)} ${quote(copyDest)}`, 'unknown', {}, copyError);
+
+    // F2: each unchecked execution-bearing token from the review has its own row.
+    for (const [name, command] of [
+      ['leading assignment substitution', `X="$(rm ${victim})" echo x > ${log}`],
+      ['cp source substitution', `cp "$(rm ${victim})" ${quote(join(outside, 'new'))}`],
+      ['cp -T source substitution', `cp -T "$(rm ${victim})" ${quote(join(outside, 'new'))}`],
+      ['install source substitution', `install "$(rm ${victim})" ${quote(join(outside, 'new'))}`],
+      ['dd bs substitution', `dd if=${src} of=${out} bs="$(rm ${victim})"`],
+      ['sed attached -i substitution', `sed -i"$(rm ${victim})" 's/a/b/' ${out}`],
+      ['sed concatenated script substitution', `sed -i 's|a|'"$(rm ${victim})"'|g' ${out}`],
+      ['overwritten cp -t substitution', `cp -t "$(rm ${victim})" -t ${quote(outside)} ${src}`],
+    ]) bash(`F2: ${name} is unknown`, command);
+
+    // F3: keep the exact final FILE symlink, never a directory-junction surrogate.
+    const entry = join(root, 'link');
+    const entryError = setup(() => {
+      linkTo(join(outside, 'file'), entry);
+      if (fs.realpathSync(entry) !== fs.realpathSync(join(outside, 'file')) || !fs.statSync(entry).isFile()) {
+        throw new Error('F3 inside entry must refer to the outside FILE');
+      }
+    });
+    for (const [verb, command] of [
+      ['rm', `rm ${quote(entry)}`],
+      ['mv', `mv ${quote(entry)} ${quote(join(outside, 'moved'))}`],
+      ['sed', `sed -i 's/a/b/' ${quote(entry)}`],
+      ['install', `install ${src} ${quote(entry)}`],
+    ]) bash(`F3: ${verb} of an inside symlink to outside is unknown`, command, 'unknown', {}, entryError);
+    // Removing those verbs must not hide the directory-entry rule for admitted writes.
+    check('F3: Write keeps the inside directory entry of an outside referent', 'inside',
+      { tool: 'Write', filePath: entry }, entryError);
+    bash('F3: tee keeps the inside directory entry of an outside referent',
+      `tee ${quote(entry)}`, 'inside', {}, entryError);
+
+    bash('F4: sed backup into the root is unknown', "sed -i'../work/*' 's/a/b/' f", 'unknown', { cwd: outside });
+    bash('F5: TMPDIR inside with sort output outside is unknown', `TMPDIR=${quote(root)} sort ${quote(join(outside, 'big'))} > ${log}`);
+    for (const verb of ['mkdir -p', 'install -d']) {
+      // Preserve the literal components; new is absent before the hypothetical command.
+      if (fs.existsSync(join(root, 'new'))) throw new Error('F6 new must not exist');
+      bash(`F6: ${verb} with intermediate inside creation is unknown`, `${verb} ${quote(`${root}/new/../../outside`)}`);
+    }
+
+    // F7: nlink and identity checks prove this is a hard link, not two equal files.
+    const hard = join(outside, 'hard');
+    const hardError = setup(() => {
+      // Separate inode: later symlink cases must not inherit this nlink doubt.
+      const hardTarget = join(root, 'hard-x');
+      fs.writeFileSync(hardTarget, 'hard-linked governed file\n');
+      fs.linkSync(hardTarget, hard);
+      const a = fs.statSync(hardTarget), b = fs.statSync(hard);
+      if (a.nlink <= 1 || b.nlink <= 1 || a.dev !== b.dev || a.ino !== b.ino) {
+        throw new Error('F7 hard links must share identity and have nlink > 1');
+      }
+    });
+    check('F7: Write through an outside hard link is unknown', 'unknown', { tool: 'Write', filePath: hard }, hardError);
+    bash('F7: redirect through an outside hard link is unknown', `echo x > ${quote(hard)}`, 'unknown', {}, hardError);
+    for (const descriptor of ['stderr', 'stdout']) {
+      const command = `tee /dev/${descriptor} ${log}`;
+      // These aliases name the opener's fd, not a path the hook can resolve.
+      bash(`F7: /dev/${descriptor} is an unresolvable descriptor alias`, command, 'unknown');
+    }
+    const fdAliases = ['/proc/self/fd/1', '/dev/fd/2'].map((path) => ({
+      path, actual: classifyWriteTarget({ tool: 'Bash', command: `echo x > ${path}`, cwd: root, roots: [root] }),
+    }));
+    ok('round3 F7: /proc/self/fd/1 and /dev/fd/2 redirects are unknown',
+      fdAliases.every(({ actual }) => actual === 'unknown'),
+      fdAliases.map(({ path, actual }) => `${path}: expected=unknown actual=${actual}`).join('; '));
+    bash('F7: /dev/tty is an ordinary path, not a sink', `tee /dev/tty ${log}`,
+      process.platform === 'win32' ? 'unknown' : 'inside',
+      process.platform === 'win32' ? {} : { roots: ['/dev'] });
+
+    // F8: do not resolve() the relative link contents before creating the link.
+    const relativeLink = join(outside, 'link');
+    const relativeError = setup(() => {
+      fs.mkdirSync(join(root, 'sub'));
+      linkTo(join(root, 'sub'), join(outside, 'hop'), process.platform === 'win32' ? 'junction' : 'dir');
+      linkTo('hop/../x', relativeLink);
+      if (fs.readlinkSync(relativeLink).replaceAll('\\', '/') !== 'hop/../x'
+        || fs.readFileSync(relativeLink, 'utf8') !== fs.readFileSync(join(root, 'x'), 'utf8')) {
+        throw new Error('F8 relative link must follow hop before .. and reach R/x');
+      }
+    });
+    check('F8: relative symlink follows hop before parent traversal', 'inside',
+      { tool: 'Write', filePath: relativeLink }, relativeError);
+
+    bash('F9: >&-inside is a filename redirect, not an fd close', `echo x >&-inside; echo y > ${log}`, 'inside');
+    for (const verb of ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      bash(`F10: inherited ${verb} is not a verb`, `${verb} > ${log}`);
+    }
+
+    if (process.platform !== 'win32') {
+      const literal = `${root}/a\\..\\..\\outside`;
+      fs.writeFileSync(literal, 'literal backslashes\n');
+      check('F11: POSIX backslashes are literal filename characters', 'inside', { tool: 'Write', filePath: literal });
+      const spacedRoot = join(base, 'work ');
+      fs.mkdirSync(spacedRoot);
+      fs.writeFileSync(join(spacedRoot, 'x'), 'trailing space in root\n');
+      check('F11: a trailing space in the root is preserved', 'inside',
+        { tool: 'Write', filePath: join(spacedRoot, 'x'), roots: [spacedRoot] });
+      // A trimmed outside alias and an untrimmed inside alias are distinct files.
+      const spacedFile = join(outside, 'spaced ');
+      const spacedError = setup(() => {
+        fs.writeFileSync(join(outside, 'spaced'), 'outside\n');
+        linkTo(join(root, 'sub', 'spaced'), spacedFile);
+        fs.writeFileSync(join(root, 'sub', 'spaced'), 'inside\n');
+      });
+      check('F11: a trailing space in filePath is preserved', 'inside',
+        { tool: 'Write', filePath: spacedFile }, spacedError);
+    } else {
+      console.log('  [NOT RUN] round3 F11: 3 POSIX literal-filename rows require a POSIX filesystem');
+    }
+    if (process.platform === 'win32') {
+      const mountTarget = `/tmp/${slash(relative(tmpdir(), root))}/x`;
+      bash('F12: /tmp mount spelling cannot establish outside on win32', `echo x > ${quote(mountTarget)}`);
+      bash('F12: /usr mount spelling cannot establish outside on win32', `echo x > /usr/maddu-review3/x`);
+    }
+
+    // Narrowed boundaries not isolated by the original review reproductions.
+    bash('contract: even a plain leading assignment is unknown', `X=plain echo x > ${log}`);
+    bash('contract: a quoted > in a producer argument is not plain', `echo 'a>b' > ${log}`);
+    for (const component of ['.', '..']) {
+      bash(`contract: a Bash target with ${component} component is unknown`,
+        `echo x > ${quote(`${outside}/${component}/outside-file`)}`);
+    }
+    // These verbs had no standalone all-outside coverage in the earlier rows.
+    for (const [verb, command] of [
+      ['rmdir', `rmdir ${quote(join(outside, 'empty'))}`],
+      ['mkdir', `mkdir -p ${quote(join(outside, 'new-dir'))}`],
+      ['touch', `touch ${out}`],
+      ['uniq', `uniq ${src} ${out}`],
+      ['sort', `sort ${src} > ${log}`],
+    ]) bash(`contract: ${verb} with all outside operands is unknown`, command);
+
+    // Preservation: the newly unknown Bash write must reach the SAME ritual
+    // decision as an ordinary inside write, and bump only its own session.
+    // Relaxed mode yields a gated nudge, so a permitted write really increments.
+    const counterRoot = join(fixture, 'counter-repo');
+    fs.mkdirSync(join(counterRoot, '.maddu', 'config'), { recursive: true });
+    fs.writeFileSync(join(counterRoot, '.maddu', 'config', 'governance.json'), JSON.stringify({ mode: 'relaxed' }));
+    const sid = 'ses_round3_counter', otherSid = 'ses_round3_other';
+    const seed = { editsSinceSlice: 4, goalplanAgeEdits: 2 };
+    await disc.writeCounter(counterRoot, sid, seed);
+    await disc.writeCounter(counterRoot, otherSid, { editsSinceSlice: 9, goalplanAgeEdits: 7 });
+    const otherBefore = await disc.readCounter(counterRoot, otherSid);
+    const control = await disc.enforcePreTool(counterRoot, {
+      tool: 'Bash', command: 'echo x > x', cwd: counterRoot, madduSessionId: sid, nowMs: 0,
+    });
+    await disc.writeCounter(counterRoot, sid, seed);
+    const unknownCommand = `cp ${src} ${quote(join(outside, 'counter-copy'))}`;
+    const scope = classifyWriteTarget({ tool: 'Bash', command: unknownCommand, roots: [counterRoot], cwd: counterRoot });
+    const result = await disc.enforcePreTool(counterRoot, {
+      tool: 'Bash', command: unknownCommand, cwd: counterRoot, madduSessionId: sid, nowMs: 0,
+    });
+    const after = await disc.readCounter(counterRoot, sid);
+    const otherAfter = await disc.readCounter(counterRoot, otherSid);
+    ok('round3 preservation: unknown Bash retains the gated verdict and bumps only its session counter',
+      scope === 'unknown' && control.verdict === 'nudge' && result.verdict === control.verdict
+      && result.blocker === control.blocker && result.kind === 'write' && result.action === 'gate'
+      && result.mutating === true && result.enforcement === control.enforcement
+      && result.sid === sid && result.counterKey === sid
+      && after.editsSinceSlice === 5 && after.goalplanAgeEdits === 3
+      && JSON.stringify(otherAfter) === JSON.stringify(otherBefore),
+      `scope=${scope} expected=nudge/gate actual=${result.verdict}/${result.action} kind=${result.kind} edits=${after.editsSinceSlice} goalEdits=${after.goalplanAgeEdits}`);
+
+    // Outside Write stays ok; ordinary inside Write retains the pre-change
+    // decide() result. A hard-link alias to the inside file is unknown and must
+    // receive that same result too. The alias exposes the faulty early return
+    // without needing file-symlink privileges for this preservation row.
+    const evalOpts = { tool: 'Write', cwd: root, madduSessionId: 'invalid/session', nowMs: 0 };
+    const thresholds = resolveThresholds('standard');
+    const state = await disc.gatherRitualState(root, null, 0, { editsSinceSlice: 0, dirtyBaseline: [] }, { workRoot: root });
+    const before = decide({ thresholds, state, counter: { editsSinceSlice: 0, dirtyBaseline: [] }, toolCtx: { isMutating: true } });
+    const outsideEval = await disc.evaluateDiscipline(root, { ...evalOpts, filePath: join(outside, 'file') });
+    const insideEval = await disc.evaluateDiscipline(root, { ...evalOpts, filePath: join(root, 'hard-x') });
+    const aliasEval = hardError ? null : await disc.evaluateDiscipline(root, { ...evalOpts, filePath: hard });
+    ok('round3 preservation: evaluateDiscipline allows outside Write and preserves inside and alias Write verdicts',
+      !hardError && outsideEval.verdict === 'ok' && before.verdict === 'block' && before.blocker === 'session'
+      && JSON.stringify(insideEval) === JSON.stringify(before) && JSON.stringify(aliasEval) === JSON.stringify(before),
+      hardError || `outside=${outsideEval.verdict} expectedInside=${before.verdict}/${before.blocker} inside=${insideEval.verdict}/${insideEval.blocker} alias=${aliasEval?.verdict}/${aliasEval?.blocker}`);
+  } finally {
+    for (const link of links.reverse()) fs.unlinkSync(link);
+    if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round3 fixture escaped its parent');
+    await rm(fixture, { recursive: true, force: true });
+  }
 }
 
 console.log('');

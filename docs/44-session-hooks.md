@@ -202,7 +202,8 @@ session, declare a plan, slice-stop, or commit. The `PreToolUse` gate does: befo
 every **mutating** tool call it evaluates the session's rituals and, per the
 governance tier, **allows, nudges, or denies** the edit.
 
-- **What's gated.** The edit tools (`Edit`/`Write`/`MultiEdit`/`NotebookEdit`) always,
+- **What's gated.** The edit tools (`Edit`/`Write`/`MultiEdit`/`NotebookEdit`) whenever
+  the file is inside the repo (see the target rule below),
   and `Bash` **only when the command is a recognized write** (`>`/`>>` redirects,
   `sed -i`, `tee`, `mv`/`cp`/`rm`/`dd`/`truncate`, PowerShell `Set-Content`/`Out-File`/…).
   Reads (`ls`, `cat`) and the **remedy commands** — `maddu register`/`lane claim`/
@@ -210,6 +211,34 @@ governance tier, **allows, nudges, or denies** the edit.
   never gated, so the command that fixes a block is always allowed (no deadlock).
   Write detection ignores tokens inside quoted arguments, so a commit trailer or a
   slice-stop message that merely *mentions* `>` is not mistaken for a redirect.
+- **Gated by target, not just by shape (v1.133.0).** A write is only this repo's
+  business when it lands **inside** a governed root (the work root or the repo root).
+  A `Write` to a scratchpad outside the repo, a quoted-delimiter heredoc into a temp
+  dir, or `echo … > /abs/elsewhere` is classified *external*: allowed, not counted
+  toward the slice-stop clock, not witnessed, and no lane is auto-claimed for it —
+  it leaves the same footprint in `.maddu/` as a read-only `ls` does.
+  The rule is a **short allowlist**: a Bash command is external only when every
+  segment (split on `&&`, `||`, `;`, `|`, newline) is a producer writing solely
+  through a redirect (`echo`, `printf`, `cat`, `head`, `tail`, `grep`, `wc`, `cut`,
+  `tr`, `ls`, `date`, `pwd`, `true`, with listed options), or `tee`, or a
+  quoted-delimiter heredoc into `cat` — with plain tokens, and every location the
+  classifier can name resolving outside every root (an edit tool's `file_path`
+  likewise). Every other verb (`cp`, `mv`, `rm`, `mkdir`, `sed`, `node`, `npm`,
+  `git`, `bash -c`, `sudo`, `find`, PowerShell, …) and anything the allowlist does
+  not understand — a leading `VAR=value`, a `$VAR`, a glob, a subshell, a
+  here-string, an escape, a comment, a `cd`, an unknown option — keeps the
+  command from being external: it is *inside* when another segment names an
+  inside location, otherwise *unknown*, and either way gated exactly as before,
+  even beside a resolvable outside redirect. Containment considers both a path's
+  referent and its directory entry, follows symlinks and junctions component by
+  component, and treats a target containing a root as inside; short of inside,
+  `.`/`..` components in a Bash target, hard-linked files, MSYS mounts it cannot map, descriptor
+  aliases (`/dev/stdout`, `/proc/self/fd/N`), or any filesystem error other than
+  a path not existing yet are unknown; a root the hook could not resolve makes
+  the verdict unknown. One assumption is stated, not checked: the hooked shell's
+  inherited stdout/stderr are the harness's pipes. Before
+  v1.133.0 the gate never read the target at all, and the remedy it named had
+  nothing to do with the file being written.
 - **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
   uncommitted pileup. The deny names the first stale ritual and its exact remedy.
 - **The deny names its own trigger and its own session (v1.128.0).** The

@@ -4,9 +4,14 @@
 // or uncommitted work piling up).
 //
 // SCOPE HONESTY: this governs the *Claude tool surface* (Edit/Write/MultiEdit/
-// NotebookEdit + recognized Bash writes), NOT the whole filesystem. Another
-// runtime, an MCP server, or an unrecognized generator can still write; the
-// after-the-fact git/slice-stop guards catch the resulting mess.
+// NotebookEdit + recognized Bash writes) writing INTO the governed roots (the
+// work root and the repo root), NOT the whole filesystem. Another runtime, an
+// MCP server, or an unrecognized generator can still write; the after-the-fact
+// git/slice-stop guards catch the resulting mess. A write of one of the few
+// forms write-target.mjs admits, whose every named location resolves OUTSIDE
+// the roots (a scratchpad, a temp dir), is not this repo's business and is not
+// gated (classifyWriteTarget); everything it does not admit or cannot place is
+// gated as if it were inside.
 //
 // TWO LAYERS:
 //   • decide(...)          — PURE. synthetic-state in, verdict out. fully tested.
@@ -22,6 +27,7 @@ import { readFile, writeFile, mkdir, rename, stat, rm } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
 import { gitRun } from './git-exec.mjs';
 import { withAppendLock } from './append-lock.mjs';
+import { classifyWriteTarget } from './write-target.mjs';
 
 // ── Enforcement + thresholds, keyed by governance mode ──────────────────────
 // enforcement: 'block' (strict — deny at the first threshold), 'graduated'
@@ -179,6 +185,13 @@ export function classifyBashWrite(command) {
   // 5. read (default) — preserves the historic "unknown → allow" behavior.
   return 'read';
 }
+
+// ── The write-TARGET scope lives in write-target.mjs ─────────────────────────
+// classifyBashWrite answers what SHAPE a tool call has; classifyWriteTarget
+// answers WHERE it writes (inside | outside | unknown). Re-exported here so the
+// gate's one import stays one import; see that file for the allowlist.
+export { classifyWriteTarget };
+
 
 // Enforcement rank for weakening comparisons (audit P2): a lower rank = weaker,
 // so ANY decrease (incl. block→graduated) is a "weakening" that needs a reason /
@@ -958,6 +971,8 @@ export async function gatherRitualState(repoRoot, sessionId, nowMs, counter, { w
 }
 
 // ── evaluateDiscipline — the wrapper the hooks call. FAILS OPEN. ─────────────
+// Read-only with respect to the COUNTER (enforcePreTool is the entry that
+// persists it); its gather path can still initialise an absent spine.
 // Resolves session + governance, gathers state, applies decide(). laneJustClaimed
 // lets the PreToolUse caller (which auto-claims first) skip a stale "no lane".
 export async function evaluateDiscipline(repoRoot, opts = {}) {
@@ -984,6 +999,9 @@ export async function evaluateDiscipline(repoRoot, opts = {}) {
       isMutating = kind === 'write';
     }
     if (!isMutating) return ok();
+    // … and does it write INTO a governed root? A write that provably lands
+    // outside every root is not this repo's business.
+    if (classifyWriteTarget({ tool, filePath, command, cwd: opts.cwd, roots: [opts.workRoot, repoRoot] }) === 'outside') return ok();
 
     const counter = sessionId ? await readCounter(repoRoot, sessionId) : { editsSinceSlice: 0, dirtyBaseline: [] };
     // undefined = repository-scoped caller (observe the repo we were given);
@@ -1153,6 +1171,14 @@ export async function enforcePreTool(repoRoot, opts = {}) {
     } else kind = 'read';
     if (kind === 'read' || kind === 'remedy')
       return { ...ok(), sid, counterKey, mutating: false, enforcement: 'n/a', kind, action: 'allow' };
+    // Shape says write — but INTO what? An admitted form whose every named
+    // location resolves outside every governed root is 'external': allowed,
+    // uncounted, unwitnessed, and decided here, before any governance or git
+    // read. Only edit/write carry a file target; self-disable and ambiguous
+    // are about the command, not a file.
+    if ((kind === 'edit' || kind === 'write')
+      && classifyWriteTarget({ tool, filePath, command, cwd: opts.cwd, roots: [opts.workRoot, repoRoot] }) === 'outside')
+      return { ...ok(), sid, counterKey, mutating: false, enforcement: 'n/a', kind: 'external', action: 'allow' };
 
     const gov = await import('./governance.mjs');
     const cfg = await gov.readEffectiveGovernance(repoRoot);
