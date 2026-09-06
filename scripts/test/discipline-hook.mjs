@@ -267,6 +267,68 @@ try {
     }
   }
 
+  // Round-1 findings 2 and 9. Keep new state and link fixtures inside this
+  // worktree; the outside directory is outside the fixture's governed root.
+  {
+    const { symlinkSync, lstatSync, realpathSync, unlinkSync } = await import('node:fs');
+    const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
+    const fixtureParent = resolve(process.cwd());
+    const fixture = await mkdtemp(join(fixtureParent, '.hook-r1-'));
+    const governed = join(fixture, 'work');
+    const outside = join(fixture, 'outside');
+    const quote = (p) => `"${p.replaceAll('\\', '/')}"`;
+    const childLink = join(outside, 'dst', 'x');
+    let linkCreated = false;
+    try {
+      await mkdir(join(governed, '.maddu'), { recursive: true });
+      await mkdir(join(outside, 'src'), { recursive: true });
+      await mkdir(join(outside, 'dst'));
+
+      const uninstall = await disc.enforcePreTool(governed, {
+        tool: 'Bash', command: `maddu hooks uninstall > ${quote(join(outside, 'log'))}`,
+        cwd: governed, workRoot: governed, madduSessionId: 'invalid/session', nowMs: 0,
+      });
+      ok('round1 F2: enforcePreTool uninstall with outside stdout keeps self-disable/write kind',
+        uninstall.kind === 'self-disable' || uninstall.kind === 'write',
+        `expected=self-disable/write actual=${uninstall.kind} action=${uninstall.action}`);
+
+      // Copying this actual file to an existing directory writes dst/x too.
+      // On Windows a junction is the privilege-free directory-link equivalent;
+      // on POSIX use the exact file-symlink reproduction from finding 9.
+      await writeFile(join(outside, 'src', 'x'), 'source\n');
+      const linkType = process.platform === 'win32' ? 'junction' : 'file';
+      const linkTarget = join(governed, 'x');
+      if (linkType === 'junction') await mkdir(linkTarget);
+      else await writeFile(linkTarget, 'governed\n');
+      let setupError = '';
+      try {
+        symlinkSync(linkTarget, childLink, linkType);
+        linkCreated = true;
+        if (!lstatSync(childLink).isSymbolicLink() || realpathSync(childLink) !== realpathSync(linkTarget)) {
+          throw new Error('destination child link does not resolve into the governed root');
+        }
+      } catch (e) { setupError = String(e?.stack || e); }
+      let scope, result, error = setupError;
+      if (!error) {
+        try {
+          const command = `cp ${quote(join(outside, 'src', 'x'))} ${quote(join(outside, 'dst'))}`;
+          scope = disc.classifyWriteTarget?.({ tool: 'Bash', command, cwd: governed, roots: [governed] });
+          result = await fire(governed, { tool_name: 'Bash', tool_input: { command }, cwd: governed });
+        } catch (e) { error = String(e?.stack || e); }
+      }
+      let decision;
+      try { decision = JSON.parse(result?.out || '{}').hookSpecificOutput?.permissionDecision; } catch {}
+      ok('round1 F9: cp into an existing outside directory follows its linked child and denies',
+        !error && scope === 'inside' && result?.code === 0 && decision === 'deny'
+          && !/would have exited/.test(result?.err || ''),
+        error || `link=${linkType} expected=inside actual=${scope} code=${result?.code} decision=${decision}`);
+    } finally {
+      if (linkCreated) unlinkSync(childLink);
+      if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round1 hook fixture escaped its parent');
+      await rm(fixture, { recursive: true, force: true });
+    }
+  }
+
   // (a) mutating Edit, no session governs → deny with a remedy reason.
   // ANONYMOUS payload (no session_id) as of the B1/B2 fix: a claude-id-carrying
   // unbound caller now self-heals via the PreToolUse mint (see

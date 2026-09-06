@@ -442,9 +442,9 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
     && bash(`sed -i -e 's/a/b/' ${quote(join(root, 'f'))}`, { cwd: root }) === 'inside'
     && bash(`sed -i --expression 's/a/b/' ${quote(join(root, 'f'))}`, { cwd: root }) === 'inside'
     && bash(`tee -a ${quote(join(outside, 'log'))} ${quote(join(root, 'log'))}`) === 'inside');
-  ok('target: shell wrapper payload redirects are extracted',
+  ok('target: shell wrapper payload redirects remain unknown',
     all([bash(`bash -lc "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`),
-      bash(`sh -c "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`)], 'outside'));
+      bash(`sh -c "echo x > '${join(outside, 'f').replaceAll('\\', '/')}'"`)], 'unknown'));
   ok('target: PowerShell and interpreter writes remain unknown',
     all([bash(`Set-Content ${quote(join(outside, 'f'))} x`),
       bash(`node -e "require('fs').writeFileSync('${join(outside, 'f').replaceAll('\\', '/')}','y')"`),
@@ -554,6 +554,165 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
     bash(`mv -t ${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'inside');
   ok('target hole: install -t inside root writes inside',
     bash(`install -t ${quote(root)} ${quote(join(outside, 'a'))}`, { cwd: root }) === 'inside');
+}
+
+// Round-1 adversarial reproductions (findings 1-11). Commands are classifier
+// input only, never executed. Each case has its own verdict assertion; none
+// borrows an unrelated failure to make the row red against 2ebbafd.
+{
+  const { existsSync, lstatSync, readlinkSync, realpathSync, symlinkSync, unlinkSync } = await import('node:fs');
+  const { writeFile } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  const fixtureParent = resolve(process.cwd());
+  const fixture = await mkdtemp(join(fixtureParent, '.disc-r1-'));
+  const root = join(fixture, 'work');
+  const outside = join(fixture, 'outside');
+  const slash = (p) => p.replaceAll('\\', '/');
+  const quote = (p) => `"${slash(p)}"`;
+  const links = [];
+  const check = (name, expected, opts) => {
+    let actual, error = '';
+    try { actual = classifyWriteTarget?.({ roots: [root], cwd: root, ...opts }); }
+    catch (e) { error = String(e?.stack || e); }
+    ok(`round1 ${name}`, !error && actual === expected,
+      error || `expected=${expected} actual=${actual}`);
+  };
+  // Link setup must fail loudly. Use junctions on Windows and file/directory
+  // symlinks on POSIX; neither platform may silently skip a link reproduction.
+  const linkTo = (target, link, type) => {
+    symlinkSync(target, link, type);
+    links.push(link);
+    if (!lstatSync(link).isSymbolicLink() || !readlinkSync(link)) {
+      throw new Error(`round1 link fixture is not a readable link: ${link}`);
+    }
+  };
+  try {
+    await mkdir(join(root, '~'), { recursive: true });
+    await mkdir(outside);
+    await writeFile(join(outside, 'source'), 'source\n');
+    const src = quote(join(outside, 'source'));
+    const inside = quote(join(root, 'x'));
+    const log = quote(join(outside, 'log'));
+    const out = quote(join(outside, 'x'));
+    const bash = (name, command, expected = 'unknown', opts = {}) =>
+      check(name, expected, { tool: 'Bash', command, ...opts });
+
+    // Finding 1 also names install and trailing append/stderr variants.
+    for (const verb of ['cp', 'install']) {
+      for (const redirect of ['>', '>>', '2>']) {
+        bash(`F1: ${verb} inside destination survives ${redirect} outside log`,
+          `${verb} ${src} ${inside} ${redirect} ${log}`, 'inside');
+      }
+    }
+
+    for (const [name, command] of [
+      ['npm run build', `npm run build > ${log}`],
+      ['npx generator', `npx generator > ${log}`],
+      ['find -delete', `find ${quote(root)} -delete > ${log}`],
+      ['printf piped to xargs rm', `printf '%s\\n' ${inside} | xargs rm > ${log}`],
+      ['git checkout', `git checkout -- . > ${log}`],
+      ['git clean', `git clean -fd > ${log}`],
+      ['maddu hooks uninstall', `maddu hooks uninstall > ${log}`],
+    ]) bash(`F2: ${name} with outside stdout is unknown`, command);
+
+    for (const [name, command] of [
+      ['quoted command substitution', `echo "$(rm ${inside})" > ${log}`],
+      ['process substitution', `cat <(rm ${inside}) > ${log}`],
+      ['subshell', `(rm ${inside}) > ${log}`],
+      ['here-string executor', `bash <<< 'echo x > ${inside}' > ${log}`],
+      ['nested bash -c', `bash -c 'bash -c "echo x > ${slash(join(root, 'x'))}"' > ${log}`],
+      ['bash script.sh', `bash script.sh > ${log}`],
+    ]) bash(`F3: ${name} with outside stdout is unknown`, command);
+
+    bash('F4: mixed quoted and unquoted target is unknown',
+      `echo x > ${slash(root).slice(0, -2)}"rk"/x`);
+    bash('F4: escaped target character is unknown',
+      `echo x > ${slash(root).slice(0, -1)}\\k/x`);
+    bash('F4: bracket glob target is unknown', `rm ${slash(root).slice(0, -1)}[k]/x`);
+    bash('F4: quoted tilde stays relative to cwd', "echo x > '~/x'", 'inside');
+
+    bash('F5: clobber redirect retains its inside target',
+      `echo x >| ${inside}; echo y > ${log}`, 'inside');
+
+    // The quoted heredoc is admitted only as the whole special form. The
+    // terminator ends its data: trailing commands/comments cannot hide in it.
+    bash('F6: heredoc quote cannot hide commands after the terminator',
+      `cat <<'EOF' > ${log}\n'\nEOF\necho x > ${inside}\n#'`);
+    bash('F6: comment quote cannot hide the next line',
+      `echo x > ${log};#'\necho x > ${inside}\n#'`);
+
+    for (const [name, command] of [
+      ['parenthesized cd', `(cd ${quote(root)}; echo x > x)`],
+      ['parenthesized pushd', `(pushd ${quote(root)}; echo x > x)`],
+      ['semicolon-adjacent cd', `true;cd ${quote(root)};echo x > x`],
+    ]) bash(`F7: ${name} is unknown`, command, 'unknown', { cwd: outside });
+
+    // Only the spelled-out -t DIR form is admitted by the new contract;
+    // attached -tDIR is unknown. An external sed script cannot be checked for
+    // w/W, whereas a literal attached -e expression can be inspected.
+    bash('F8: attached cp -tDIR is unknown', `cp -t${slash(root)} ${src}`);
+    bash('F8: sed -i -f external script is unknown',
+      `sed -i -f ${quote(join(outside, 'script.sed'))} ${inside} > ${log}`);
+    bash('F8: sed attached -e retains its inside operand',
+      `sed -i -es/a/b/ ${inside} > ${log}`, 'inside');
+    bash('F8: install -d scopes every directory',
+      `install -d ${quote(join(root, 'new'))} ${quote(join(outside, 'new'))}`, 'inside');
+    bash('F8: rm -- retains a dash-prefixed inside operand', `rm -- -inside ${out}`, 'inside');
+    bash('F8: mv -- retains a dash-prefixed inside source', `mv -- -inside ${out}`, 'inside');
+    bash('F8: sed script with a w command is unknown',
+      `sed -i 's/a/b/w ${slash(join(root, 'log'))}' ${out}`);
+
+    const dangling = join(outside, 'dangling');
+    const missingTarget = join(root, 'new-target');
+    linkTo(missingTarget, dangling, process.platform === 'win32' ? 'junction' : 'file');
+    if (existsSync(missingTarget) || existsSync(dangling)) throw new Error('F9 fixture must remain dangling');
+    check('F9: dangling link into the root is inside', 'inside', { tool: 'Write', filePath: dangling });
+
+    await mkdir(join(root, 'sub'));
+    const directoryLink = join(outside, 'link');
+    linkTo(join(root, 'sub'), directoryLink, process.platform === 'win32' ? 'junction' : 'dir');
+    if (realpathSync(directoryLink) !== realpathSync(join(root, 'sub'))) {
+      throw new Error('F9 directory link does not resolve to root/sub');
+    }
+    // Do not join/resolve the input: link/.. must survive until the classifier
+    // walks the link, then applies the parent component.
+    check('F9: link/../new follows the link before parent traversal', 'inside',
+      { tool: 'Write', filePath: `${directoryLink}${sep}..${sep}new` });
+
+    // A real cyclic link makes canonicalization fail without monkeypatching
+    // implementation internals or relying on OS-specific permission denial.
+    const cycle = join(outside, 'cycle');
+    linkTo(cycle, cycle, process.platform === 'win32' ? 'junction' : 'dir');
+    let realpathFailed = false;
+    try { realpathSync.native(cycle); } catch { realpathFailed = true; }
+    if (!realpathFailed) throw new Error('F9 cyclic-link fixture must fail realpath');
+    check('F9: realpath failure cannot retain an outside verdict', 'unknown',
+      { tool: 'Write', filePath: cycle });
+    // F9's cp-to-a-linked-child reproduction is an end-to-end row in
+    // discipline-hook.mjs, including the classifier's exact inside verdict.
+
+    bash('F10: /dev/shm is an ordinary governed path',
+      `echo x > /dev/shm/repo/x; echo y > ${log}`, 'inside', { roots: ['/dev/shm/repo'] });
+
+    check('F11: null work root cannot be discarded beside a state root', 'unknown',
+      { tool: 'Write', filePath: join(root, 'x'), roots: [null, join(fixture, 'state')] });
+    check('F11: null root wins even beside a matching valid root', 'unknown',
+      { tool: 'Write', filePath: join(root, 'x'), roots: [null, root] });
+    check('F11: relative roots are unknown', 'unknown',
+      { tool: 'Write', filePath: join(root, 'x'), roots: ['relative-root'] });
+    if (process.platform === 'win32') {
+      const msysRoot = slash(root).replace(/^([a-z]):/i, (_, drive) => `/${drive.toLowerCase()}`);
+      if (msysRoot === slash(root)) throw new Error('F11 MSYS fixture requires a drive-letter root');
+      check('F11: MSYS root matches a drive-letter Edit target', 'inside',
+        { tool: 'Edit', filePath: slash(join(root, 'x')), roots: [msysRoot] });
+    }
+  } finally {
+    // Unlink individually before recursive cleanup so no governed target can
+    // be traversed. A cleanup failure is a harness error, never a silent pass.
+    for (const link of links.reverse()) unlinkSync(link);
+    if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round1 fixture escaped its parent');
+    await rm(fixture, { recursive: true, force: true });
+  }
 }
 
 console.log('');
