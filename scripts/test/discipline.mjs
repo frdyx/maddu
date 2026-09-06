@@ -7,6 +7,7 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 
@@ -457,13 +458,26 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   const bogusRepo = resolve('/no/such/repo');
   // A truthy invalid explicit id is rejected by the existing validator and
   // prevents an inherited MADDU_SESSION_ID from writing a bogus-repo counter.
-  const enforce = (opts) => enforcePreTool(bogusRepo, { madduSessionId: 'invalid/session', ...opts });
+  const enforce = (opts, repoRoot = bogusRepo) => enforcePreTool(repoRoot, { madduSessionId: 'invalid/session', ...opts });
+  // Gated calls need a writable state root on every platform. Reserve the
+  // bogus root for external allowances that must return before filesystem I/O.
+  const withRepo = async (run) => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'maddu-enforce-target-'));
+    try {
+      await mkdir(join(repoRoot, '.maddu'));
+      return await run(repoRoot);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  };
   const external = (r) => r.verdict === 'ok' && r.kind === 'external'
     && r.mutating === false && r.action === 'allow' && r.enforcement === 'n/a';
   const outsideWrite = await enforce({ tool: 'Write', filePath: join(outside, 'x.js') });
   const outsideBash = await enforce({ tool: 'Bash', command: redirect });
-  const mixedWrite = await enforce({ tool: 'Bash', command: `${redirect} && rm -rf src`, cwd: bogusRepo });
-  const insideEdit = await enforce({ tool: 'Edit', filePath: 'x.js', nowMs: 0 });
+  const [mixedWrite, insideEdit] = await withRepo(async (repoRoot) => [
+    await enforce({ tool: 'Bash', command: `${redirect} && rm -rf src`, cwd: repoRoot }, repoRoot),
+    await enforce({ tool: 'Edit', filePath: 'x.js', nowMs: 0 }, repoRoot),
+  ]);
   ok('enforce target: outside Write returns the complete external allowance', external(outsideWrite), JSON.stringify(outsideWrite));
   ok('enforce target: outside Bash returns the complete external allowance', external(outsideBash), JSON.stringify(outsideBash));
   ok('enforce target: outside Bash allowed while a mixed repo write stays gated',
@@ -479,20 +493,26 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   ok('target: unresolved companions stay unknown unless an inside target wins',
     bash(`${redirect} && echo y > "$OUT"`, { cwd: root }) === 'unknown'
     && bash('echo x > "$OUT" && echo y > src/a.js', { cwd: root }) === 'inside');
-  const scoped = [];
-  for (const filePath of [join(root, 'x'), join(bogusRepo, 'x')]) {
-    scoped.push(await enforce({ tool: 'Write', filePath, workRoot: root }));
-  }
+  const scoped = await withRepo(async (repoRoot) => {
+    const decisions = [];
+    for (const filePath of [join(root, 'x'), join(repoRoot, 'x')]) {
+      decisions.push(await enforce({ tool: 'Write', filePath, workRoot: root }, repoRoot));
+    }
+    return decisions;
+  });
   const cwdOutside = await enforce({ tool: 'Edit', filePath: 'x.js', workRoot: root, cwd: outside });
   ok('enforce target: both governed roots gate and an outside cwd exempts relative Edit',
     external(cwdOutside) && scoped.every((r) => r.kind === 'edit' && r.mutating === true && r.verdict === 'block'));
-  const unknown = [];
-  for (const opts of [{ tool: 'Edit' }, { tool: 'Bash', command: 'echo x > "$OUT"' }]) unknown.push(await enforce(opts));
-  const otherKinds = [];
-  for (const opts of [
-    { tool: 'Read' }, { tool: 'Bash', command: 'git status' },
-    { tool: 'Bash', command: 'npm run build' }, { tool: 'Bash', command: 'maddu hooks uninstall' },
-  ]) otherKinds.push(await enforce({ filePath: join(outside, 'x'), ...opts }));
+  const [unknown, otherKinds] = await withRepo(async (repoRoot) => {
+    const unknown = [];
+    for (const opts of [{ tool: 'Edit' }, { tool: 'Bash', command: 'echo x > "$OUT"' }]) unknown.push(await enforce(opts, repoRoot));
+    const otherKinds = [];
+    for (const opts of [
+      { tool: 'Read' }, { tool: 'Bash', command: 'git status' },
+      { tool: 'Bash', command: 'npm run build' }, { tool: 'Bash', command: 'maddu hooks uninstall' },
+    ]) otherKinds.push(await enforce({ filePath: join(outside, 'x'), ...opts }, repoRoot));
+    return [unknown, otherKinds];
+  });
   ok('enforce target: external exemption preserves unknown gates and other shape kinds',
     external(outsideWrite) && unknown.every((r) => r.mutating === true && r.action === 'gate' && r.verdict === 'block')
     && otherKinds.map((r) => r.kind).join(',') === 'read,remedy,ambiguous,self-disable');
@@ -514,7 +534,8 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   const redirectOnly = await enforce({
     tool: 'Bash', command: `echo x > ${quote(join(outside, 'log'))}`, cwd: root, workRoot: root,
   });
-  const opaqueDecision = await enforce({ tool: 'Bash', command: opaqueNode, cwd: root, workRoot: root });
+  const opaqueDecision = await withRepo((repoRoot) =>
+    enforce({ tool: 'Bash', command: opaqueNode, cwd: root, workRoot: root }, repoRoot));
   ok('enforce target hole: outside redirect allows while opaque node write stays gated',
     external(redirectOnly) && opaqueDecision.kind !== 'external' && opaqueDecision.kind === 'write'
     && opaqueDecision.mutating === true && opaqueDecision.action === 'gate'
