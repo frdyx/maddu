@@ -715,6 +715,92 @@ ok('enforcePreTool: non-mutating tool → ok, mutating:false',
   }
 }
 
+// Round-2 reproductions. Bash strings are classifier input, never executed.
+// Keep the related fd/heredoc controls in their regression rows so each new
+// row exposes its own finding even when a control already passes.
+{
+  const { dirname } = await import('node:path');
+  const fixtureParent = resolve(tmpdir());
+  const fixture = await mkdtemp(join(fixtureParent, 'maddu-disc-r2-'));
+  const slash = (p) => p.replaceAll('\\', '/');
+  const root = slash(join(fixture, 'governed-long-root'));
+  const outside = slash(join(fixture, 'outside'));
+  const quote = (p) => `"${p}"`;
+  const check = (name, cases, setupError = '') => {
+    const results = cases.map(({ expected, ...opts }) => {
+      let actual, error = setupError;
+      if (!error) {
+        try { actual = classifyWriteTarget({ roots: [root], cwd: root, ...opts }); }
+        catch (e) { error = String(e?.stack || e); }
+      }
+      return { expected, actual, error };
+    });
+    ok(`round2 ${name}`, results.every((r) => !r.error && r.actual === r.expected),
+      results.map((r) => r.error || `expected=${r.expected} actual=${r.actual}`).join('; '));
+  };
+  const bashCase = (command, expected) => ({ tool: 'Bash', command, expected });
+  try {
+    await mkdir(join(root, '.maddu'), { recursive: true });
+    await mkdir(outside);
+    const inside = quote(`${root}/x`);
+    const log = quote(`${outside}/log`);
+    const src = quote(`${outside}/src`);
+    const file = quote(`${outside}/f`);
+
+    check('F1: uniq second operand is an inside output file', [
+      bashCase(`uniq ${quote(`${outside}/in`)} ${quote(`${root}/out`)}`, 'inside'),
+    ]);
+    check('F2: cp double-quoted -t names an inside destination', [
+      bashCase(`cp "-t" ${quote(root)} ${src}`, 'inside'),
+    ]);
+    check('F2: cp single-quoted -t names an inside destination', [
+      bashCase(`cp '-t' ${quote(root)} ${src}`, 'inside'),
+    ]);
+    check('F3: head valued-option substitution is unknown', [
+      bashCase(`head -n "$(rm '${root}/x')" ${file} > ${log}`, 'unknown'),
+    ]);
+    check('F3: truncate valued-option substitution is unknown', [
+      bashCase(`truncate -s "$(rm '${root}/x')" ${file}`, 'unknown'),
+    ]);
+    check('F4: >&word retains an inside target with outside-file and fd controls', [
+      bashCase(`echo x >&${inside}; echo y > ${log}`, 'inside'),
+      bashCase(`echo x >&${quote(`${outside}/a`)}`, 'outside'),
+      bashCase('echo x >&2', 'unknown'),
+    ]);
+    check('F5: early heredoc delimiter is unknown with a well-formed control', [
+      bashCase(`cat <<'EOF' > ${log}\nEOF\necho x > ${inside}\nEOF`, 'unknown'),
+      bashCase(`cat <<'EOF' > ${log}\nbody\nEOF`, 'outside'),
+    ]);
+
+    if (process.platform === 'win32') {
+      const { execFileSync } = await import('node:child_process');
+      const { realpathSync } = await import('node:fs');
+      let shortRoot, setupError = '';
+      try {
+        shortRoot = slash(execFileSync('cmd', ['/c', `for %I in ("${root}") do @echo %~sI`], {
+          encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 10000,
+        }).trim());
+        if (!shortRoot || /[\r\n]/.test(shortRoot) || !/~\d/.test(shortRoot)
+          || shortRoot.toLowerCase() === root.toLowerCase()
+          || realpathSync.native(shortRoot).toLowerCase() !== realpathSync.native(root).toLowerCase()) {
+          throw new Error(`8.3 root spelling unavailable or invalid: ${JSON.stringify(shortRoot)}`);
+        }
+      } catch (e) { setupError = `8.3 fixture failed: ${String(e?.stack || e)}`; }
+      // Failed short-name setup is reported by BOTH rows; it is never a skip
+      // or a fallback to testing the ordinary long spelling.
+      check('F6: win32 8.3 root spelling keeps Edit inside', [
+        { tool: 'Edit', filePath: `${shortRoot}/x`, expected: 'inside' },
+      ], setupError);
+      check('F6: win32 8.3 root spelling keeps Bash inside', [
+        bashCase(`echo x > ${quote(`${shortRoot}/x`)}`, 'inside'),
+      ], setupError);
+    }
+  } finally {
+    if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round2 fixture escaped temp parent');
+    await rm(fixture, { recursive: true, force: true });
+  }
+}
+
 console.log('');
 console.log(`discipline: ${passed} pass - ${failed} fail`);
 if (failed > 0) process.exit(1);
