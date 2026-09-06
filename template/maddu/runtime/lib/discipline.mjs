@@ -7,10 +7,11 @@
 // NotebookEdit + recognized Bash writes) writing INTO the governed roots (the
 // work root and the repo root), NOT the whole filesystem. Another runtime, an
 // MCP server, or an unrecognized generator can still write; the after-the-fact
-// git/slice-stop guards catch the resulting mess. A write whose every target
-// provably resolves OUTSIDE the roots (a scratchpad, a temp dir) is not this
-// repo's business and is not gated (classifyWriteTarget); a target that cannot
-// be resolved is gated as if it were inside.
+// git/slice-stop guards catch the resulting mess. A write of one of the few
+// forms write-target.mjs admits, whose every named location resolves OUTSIDE
+// the roots (a scratchpad, a temp dir), is not this repo's business and is not
+// gated (classifyWriteTarget); everything it does not admit or cannot place is
+// gated as if it were inside.
 //
 // TWO LAYERS:
 //   • decide(...)          — PURE. synthetic-state in, verdict out. fully tested.
@@ -1168,10 +1169,11 @@ export async function enforcePreTool(repoRoot, opts = {}) {
     } else kind = 'read';
     if (kind === 'read' || kind === 'remedy')
       return { ...ok(), sid, counterKey, mutating: false, enforcement: 'n/a', kind, action: 'allow' };
-    // Shape says write — but INTO what? A target that provably resolves outside
-    // every governed root is 'external': allowed, uncounted, unwitnessed, and
-    // decided here, before any governance or git read. Only edit/write carry a
-    // file target; self-disable and ambiguous are about the command, not a file.
+    // Shape says write — but INTO what? An admitted form whose every named
+    // location resolves outside every governed root is 'external': allowed,
+    // uncounted, unwitnessed, and decided here, before any governance or git
+    // read. Only edit/write carry a file target; self-disable and ambiguous
+    // are about the command, not a file.
     if ((kind === 'edit' || kind === 'write')
       && classifyWriteTarget({ tool, filePath, command, cwd: opts.cwd, roots: [opts.workRoot, repoRoot] }) === 'outside')
       return { ...ok(), sid, counterKey, mutating: false, enforcement: 'n/a', kind: 'external', action: 'allow' };

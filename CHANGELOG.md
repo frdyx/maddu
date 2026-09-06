@@ -33,45 +33,54 @@ the slice-stop clock, not witnessed, no lane auto-claimed — the same footprint
 in `.maddu/` a read-only `ls` leaves. Inside and unknown are gated exactly as
 before.
 
-**It is an allowlist, not a parser.** The first implementation walked the
-command for the writes it knew about and called the rest harmless; the
-adversarial round found nine ways to hide a repo write beside an outside
-redirect — `cp src /repo/x > /tmp/log`, `npm run build > /tmp/log`, `$(rm
+**It is an allowlist, and a short one.** Three adversarial rounds each found
+their worst defects in the previous round's version of this scope. The first
+version walked the command for the writes it knew about and called the rest
+harmless; round 1 found nine ways to hide a repo write beside an outside
+redirect (`cp src /repo/x > /tmp/log`, `npm run build > /tmp/log`, `$(rm
 /repo/x)`, `>|`, `cp -t/repo`, a `sed` script with a `w` flag, a stray quote
-inside a heredoc body, `(cd /repo; …)`, a link the lexical check did not
-follow. A blocklist over shell text cannot be made sound, and every gap in it
-is a bypass, the one direction this contract forbids. So the shape was
-inverted: a Bash command is external only when every segment (split on `&&`,
-`||`, `;`, `|`, newline) is one of a short list of commands that execute
-nothing — producers such as `echo`/`printf`/`cat`/`grep` writing through a
-redirect, or `tee`/`cp`/`mv`/`install`/`rm`/`mkdir`/`touch`/`dd`/`truncate`
-and `sed -i` restricted to `s///` substitutions — with only the options the
-list names and tokens plain enough to resolve without a shell, and every
-target it can write resolves outside every root. One form beyond that grammar
-is admitted because it is the case that obstructed real work: a heredoc with a
-quoted delimiter feeding `cat` into a redirect, whose body is data by
-construction and which must end at its terminator line. Anything else — a
-`$VAR`, a glob, a subshell, a here-string, an executor (`node`, `npm`, `git`,
-`bash -c`, `sudo`, `find`, `perl`, a PowerShell verb), an unknown option, a
-`cd`, an escape, a comment — makes the whole command unknown even when it sits
-beside a resolvable outside redirect. Any inside target wins; `mv` counts its
-source, since a moved file is deleted; `-t DIR` names the destination; a
-destination that is an existing directory is checked as `dest/<basename>` too;
-containment follows symlinks and junctions component by component, so a link
-planted outside that points into a root is inside, and a root the hook could
-not resolve makes the verdict unknown. Options are matched on what the command
-would receive (`"-t"` is `-t`), a valued option's value has to be a plain
-token too, `>&word` with a non-numeric word is a redirect to that file,
-`uniq`'s second operand is an output file, a heredoc ends at the *first* line
-equal to its delimiter, and the existing prefix of every path is canonicalised
-(an 8.3 short name or a case variant of the root is the root). A gap in the
-allowlist costs one spurious block; nothing in it can widen what is allowed
-without naming the command it allows.
+in a heredoc body, `(cd /repo; …)`, a link the lexical check did not follow).
+The second admitted a list of writer verbs with enumerated options; round 3
+showed those verbs carry semantics an argument list does not name — `rm -rf`
+of a directory that *contains* the root, `mv` of an ancestor, a `sed` backup
+suffix, `mkdir -p` creating an intermediate before a `..`, `rm` of an inside
+link whose referent is outside, `sort`'s temp files under `TMPDIR`. So what
+is admitted is only what the obstruction actually needed: a Bash command is
+external only when every segment (split on `&&`, `||`, `;`, `|`, newline) is
+a producer that writes solely through a redirect (`echo`, `printf`, `cat`,
+`head`, `tail`, `grep`, `wc`, `cut`, `tr`, `ls`, `date`, `pwd`, `true`, with
+the options listed for each), or `tee`, whose operands are opened for writing
+exactly like a redirect, or a heredoc with a quoted delimiter feeding `cat`
+into a redirect, whose body is data by construction and which ends at the
+first line equal to its delimiter — with every token plain enough to resolve
+without a shell, and every location the classifier can name resolving outside
+every root. Every other verb — every command whose effect is a filesystem
+operation rather than an open-for-write — is unknown, however its operands
+resolve; so is a leading `VAR=value`, a `$VAR`, a glob, a subshell, a
+here-string, an escape, a comment, a `cd`, an unknown option, or an executor.
+
+Containment considers both the referent of a path and its directory entry,
+follows symlinks and junctions component by component (a link's own relative
+contents included), treats a target that contains a root as inside, and
+answers unknown for a `.`/`..` component, a file with more than one hard
+link, an MSYS mount it cannot map (`/tmp/x` under Git Bash), a descriptor
+alias (`/dev/stdout`, `/proc/self/fd/N` — they name the fd of the process that
+opens them, and the hook is not the process that will run the command), or any
+metadata or realpath failure. One assumption is stated rather than checked,
+because it cannot be checked from the hook: the hooked shell's inherited
+stdout and stderr are the harness's pipes, not repo files. Options are matched on what the command would receive
+(`"-t"` is `-t`); `>&word` with a non-numeric word is a redirect to that
+file; the existing prefix of every path is canonicalised, so an 8.3 short name
+or a case variant of the root is the root; nothing is trimmed, and on POSIX a
+backslash is a filename character. A root the hook could not resolve makes the
+verdict unknown. The claim is bounded by the list above: a gap inside that
+list is a defect, and a form outside it is gated as it was before.
 
 The assertions were authored by a non-implementer from a written contract, in
 a worktree at the branch base where the implementation did not exist, and
-were red there; the reviewer's reproductions were then added as rows, red
-against the first implementation, before the allowlist replaced it.
+were red there; each round's reproductions were then added as rows, red
+against the implementation that round reviewed, before the fix that answers
+them.
 
 ## [v1.132.0] · 2026-09-05 · the claim admitted everyone
 

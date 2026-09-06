@@ -132,7 +132,18 @@ export function createHookFireCore(deps) {
       const r = resolve(String(p));
       return process.platform === 'win32' ? r.toLowerCase() : r;
     };
-    for (const cwd of [payloadCwd, process.cwd()]) {
+    // A Git Bash caller reports its cwd in MSYS spelling (`/c/Users/x`); the
+    // native resolver would not find a worktree under that spelling and the
+    // hook would silently observe the primary checkout instead — and then
+    // hand the write-target scope roots that do not contain the worktree
+    // the edit lands in. Fold the drive form first; any other POSIX-absolute
+    // spelling on Windows is a mount this process cannot map and is skipped.
+    const fold = (p) => {
+      if (process.platform !== 'win32' || typeof p !== 'string' || p[0] !== '/') return p;
+      const m = /^\/([a-zA-Z])(?:\/|$)/.exec(p);
+      return m ? `${m[1].toUpperCase()}:/${p.slice(m[0].length)}` : null;
+    };
+    for (const cwd of [fold(payloadCwd), process.cwd()]) {
       if (typeof cwd !== 'string' || !cwd) continue;
       // Per-candidate containment: a throwing payload-cwd resolution must not
       // abort the process.cwd() attempt.
@@ -709,12 +720,13 @@ export function createHookFireCore(deps) {
       const kind = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'edit'
         : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
       if (kind === 'read' || kind === 'remedy') process.exit(0);
-      // A write the allowlist fully understands, whose every target lands
-      // OUTSIDE the governed roots, is not this repo's business: nothing to
-      // gate, count, witness, or auto-claim a lane for. Decided here so it
-      // leaves no session, lane, event or counter behind — the same footprint
-      // a read-only Bash leaves (the CLI's invocation receipt included).
-      // Absent on an older installed lib → no narrowing (gated as before).
+      // A write of one of the few forms the write-target scope admits, whose
+      // every named location resolves OUTSIDE the governed roots, is not this
+      // repo's business: nothing to gate, count, witness, or auto-claim a
+      // lane for. Decided here so it leaves no session, lane, event or
+      // counter behind — the same footprint a read-only Bash leaves (the
+      // CLI's invocation receipt included). Absent on an older installed
+      // lib → no narrowing (gated as before).
       if ((kind === 'edit' || kind === 'write') && typeof disc?.classifyWriteTarget === 'function'
         && disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] }) === 'outside') process.exit(0);
 
