@@ -20,14 +20,13 @@
 // FAIL-OPEN LAW: every impure path is wrapped so any error yields verdict 'ok'
 // (allow). Only an explicit, deterministic verdict 'block' ever denies a tool.
 
-import { join, resolve, isAbsolute, basename } from 'node:path';
-import { homedir } from 'node:os';
-import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, stat, rm } from 'node:fs/promises';
 import { pathsFor } from './paths.mjs';
 import { gitRun } from './git-exec.mjs';
 import { withAppendLock } from './append-lock.mjs';
+import { classifyWriteTarget } from './write-target.mjs';
 
 // ── Enforcement + thresholds, keyed by governance mode ──────────────────────
 // enforcement: 'block' (strict — deny at the first threshold), 'graduated'
@@ -186,245 +185,12 @@ export function classifyBashWrite(command) {
   return 'read';
 }
 
-// ── The write-TARGET scope ───────────────────────────────────────────────────
-// classifyBashWrite answers what SHAPE a command has; this answers WHERE it
-// writes. Until v1.133.0 the gate stopped at the shape: `filePath` reached
-// enforcePreTool and was never read, so a Write into a scratchpad outside the
-// repo, a heredoc into a temp dir, or `> /abs/elsewhere` were denied exactly
-// like a repo edit — and the remedy they were told to run had nothing to do
-// with the file they were writing.
-//   'inside'  — at least one target lands in a governed root → gate as before.
-//   'outside' — every extractable target resolved, and all of them land outside
-//               every root → not this repo's business: allowed, uncounted,
-//               unwitnessed, no auto-claim.
-//   'unknown' — no target could be extracted, or one could not be resolved (a
-//               `$VAR`, a glob, a relative path after `cd`, an interpreter
-//               payload, a PowerShell verb — even when those sit BESIDE a
-//               resolvable outside target) → gate as before. Containment is
-//               checked through realpath as well as lexically, so a link
-//               planted outside that points into a root is inside.
-// UNKNOWN IS THE ANSWER ON EVERY DOUBT. This function only ever NARROWS what is
-// gated, so its failure mode has to be "gated as before", never "waved through":
-// a parser gap here costs one spurious block, the same gap in the other
-// direction would be a bypass. Extra targets never weaken the verdict (any
-// inside wins; any unresolvable with none inside is unknown), which is why a
-// heredoc BODY that happens to contain `> foo` is harmless: it can only add
-// targets. `mv` treats EVERY operand as a target because a moved source is
-// deleted — moving a repo file out is a repo write.
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const UNRESOLVABLE_RE = /[$`*?{}]/;
-const NO_TARGET_RE = /^(?:\/dev\/|nul$)/i;
-const CD_RE = /(?:^|\s)(?:cd|pushd|Set-Location)\b/;
+// ── The write-TARGET scope lives in write-target.mjs ─────────────────────────
+// classifyBashWrite answers what SHAPE a tool call has; classifyWriteTarget
+// answers WHERE it writes (inside | outside | unknown). Re-exported here so the
+// gate's one import stays one import; see that file for the allowlist.
+export { classifyWriteTarget };
 
-// A target path as the shell would see it: matched quotes stripped, `~`
-// expanded, and the MSYS drive form (`/c/Users/x`, what Git Bash prints on
-// Windows) folded to `C:/Users/x` so it resolves to the same place.
-function normalizeTargetPath(p) {
-  let s = String(p == null ? '' : p).trim();
-  if (!s) return null;
-  if (s.length >= 2 && ((s[0] === '"' && s.endsWith('"')) || (s[0] === "'" && s.endsWith("'")))) s = s.slice(1, -1);
-  if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) s = homedir() + s.slice(1);
-  if (process.platform === 'win32') {
-    const m = /^\/([a-zA-Z])(?:\/|$)/.exec(s);
-    if (m) s = `${m[1].toUpperCase()}:/${s.slice(m[0].length)}`;
-  }
-  return s;
-}
-function canonPath(p) {
-  const r = resolve(p).replace(/[\\/]+$/, '');
-  return process.platform === 'win32' ? r.replace(/\\/g, '/').toLowerCase() : r;
-}
-// Boundary-aware containment: `C:/repo-other/x` is NOT under `C:/repo`.
-function under(abs, root) {
-  const a = canonPath(abs), r = canonPath(root);
-  return a === r || a.startsWith(`${r}/`);
-}
-// Resolve the deepest EXISTING ancestor through realpath and re-append the
-// rest, so a symlink or junction planted outside the repo that points back
-// into it reads as the place it actually writes. The only filesystem access in
-// this classifier, and it is read-only; any failure keeps the lexical answer.
-function realBase(abs) {
-  let dir = abs;
-  const rest = [];
-  while (!existsSync(dir)) {
-    const up = resolve(dir, '..');
-    if (up === dir) return abs;
-    rest.unshift(basename(dir));
-    dir = up;
-  }
-  try { return join(realpathSync.native(dir), ...rest); } catch { return abs; }
-}
-function isUnderAny(abs, roots) {
-  if (roots.some((root) => under(abs, root))) return true;
-  const real = realBase(abs);
-  return roots.some((root) => under(real, realBase(root)));
-}
-
-// Split a command into segments of tokens the way a shell would coarsely see
-// it: whitespace separates tokens, matched quotes keep a token whole (the
-// quotes stay on so the caller can strip them), `>`/`>>` are always their own
-// token (`echo hi>f` → hi, >, f), and `&&` / `||` / `;` / `|` / `&` / newline
-// end a segment.
-function segmentCommand(cmd) {
-  const segments = [[]];
-  let tok = '', q = null;
-  const flush = () => { if (tok) segments[segments.length - 1].push(tok); tok = ''; };
-  const s = String(cmd);
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (q) { tok += c; if (c === q) q = null; continue; }
-    if (c === '"' || c === "'") { q = c; tok += c; continue; }
-    if (c === '\\' && i + 1 < s.length) { tok += c + s[++i]; continue; }
-    if (c === '>') {
-      flush();
-      const op = s[i + 1] === '>' ? '>>' : '>';
-      i += op.length - 1;
-      segments[segments.length - 1].push(op);
-      continue;
-    }
-    if (c === '&' || c === '|' || c === ';' || c === '\n') { flush(); segments.push([]); continue; }
-    if (/\s/.test(c)) { flush(); continue; }
-    tok += c;
-  }
-  flush();
-  return segments.filter((seg) => seg.length);
-}
-
-const isFlag = (t) => t.startsWith('-');
-const operands = (toks) => toks.filter((t) => !isFlag(t));
-
-// `cp -t DIR src…` / `--target-directory=DIR`: the destination is the option's
-// value, not the last operand. Returns { dest, ops } with the option consumed.
-function targetDirectory(rest) {
-  let dest = null;
-  const ops = [];
-  for (let i = 0; i < rest.length; i++) {
-    const t = rest[i];
-    if (t === '-t' || t === '--target-directory') { dest = rest[++i] ?? null; continue; }
-    const m = /^--target-directory=(.+)$/.exec(t);
-    if (m) { dest = m[1]; continue; }
-    if (!isFlag(t)) ops.push(t);
-  }
-  return { dest, ops };
-}
-
-// Extract every write target a recognized shape names. Returns
-// { targets, opaque }: `targets` are tokens (still quoted where they were
-// quoted); `opaque` is true when some segment has a WRITE shape but named no
-// target the extractor can see (an interpreter payload, a PowerShell verb,
-// `sudo rm`, `perl -i`). That segment writes SOMEWHERE, and "somewhere" beside
-// an outside redirect must not read as outside — the caller turns opaque into
-// 'unknown'. Without this, `node -e "<write into src/>" > /tmp/log` would be
-// waved through on the strength of its log file.
-function bashWriteTargets(cmd, depth = 0) {
-  const targets = [];
-  let opaque = false;
-  for (const seg of segmentCommand(cmd)) {
-    const before = targets.length;
-    // Redirects, wherever they sit in the segment.
-    for (let i = 0; i < seg.length; i++) {
-      if (seg[i] !== '>' && seg[i] !== '>>') continue;
-      const t = seg[i + 1];
-      if (!t || t === '>' || t === '>>' || t.startsWith('&')) continue;
-      targets.push(t);
-    }
-    // Skip leading env assignments (`FOO=1 cmd …`) to find the verb.
-    let v = 0;
-    while (v < seg.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(seg[v])) v++;
-    const verb = seg[v];
-    const rest = verb ? seg.slice(v + 1).filter((t) => t !== '>' && t !== '>>') : [];
-    switch (verb) {
-      case 'tee': targets.push(...operands(rest)); break;
-      case 'sed': {
-        if (!rest.some((t) => /^-[A-Za-z]*i/.test(t) || t.startsWith('--in-place'))) break;
-        const hasExpr = rest.some((t) => t === '-e' || t.startsWith('--expression'));
-        const ops = [];
-        for (let i = 0; i < rest.length; i++) {
-          const t = rest[i];
-          if (t === '-e' || t === '-f' || t === '--expression' || t === '--file') { i++; continue; }
-          if (isFlag(t)) continue;
-          ops.push(t);
-        }
-        targets.push(...(hasExpr ? ops : ops.slice(1)));
-        break;
-      }
-      case 'rm': targets.push(...operands(rest)); break;
-      case 'mv': { const { dest, ops } = targetDirectory(rest); targets.push(...ops); if (dest) targets.push(dest); break; }
-      case 'cp': case 'install': {
-        const { dest, ops } = targetDirectory(rest);
-        if (dest) targets.push(dest);
-        else if (ops.length) targets.push(ops[ops.length - 1]);
-        break;
-      }
-      case 'dd': for (const t of rest) { const m = /^of=(.+)$/.exec(t); if (m) targets.push(m[1]); } break;
-      case 'truncate': {
-        for (let i = 0; i < rest.length; i++) {
-          const t = rest[i];
-          if (t === '-s' || t === '--size') { i++; continue; }
-          if (!isFlag(t)) targets.push(t);
-        }
-        break;
-      }
-      case 'sh': case 'bash': case 'dash': case 'ksh': case 'zsh': {
-        // `bash -lc "…"` runs its payload as code: look inside it, once.
-        if (depth > 0 || !rest.some((t) => /^-[A-Za-z]*c/.test(t))) break;
-        const payload = rest.find((t) => !isFlag(t));
-        if (payload) {
-          const inner = bashWriteTargets(normalizeTargetPath(payload) || '', depth + 1);
-          targets.push(...inner.targets);
-          if (inner.opaque) opaque = true;
-        }
-        break;
-      }
-      default: break; // an unrecognized verb names no target here …
-    }
-    // … so if what remains of this segment once its redirects are taken out is
-    // STILL write-shaped, it writes somewhere we cannot see — a redirect in the
-    // same segment must not vouch for it (`node -e "<write>" > /tmp/log`). A
-    // recognized verb's shape is accounted for by the extraction above.
-    if (!EXTRACTED_VERBS.has(verb)) {
-      const rest2 = seg.filter((t, i) => t !== '>' && t !== '>>' && !(i > 0 && (seg[i - 1] === '>' || seg[i - 1] === '>>')));
-      if (classifyBashWrite(rest2.join(' ')) === 'write') opaque = true;
-    }
-  }
-  return { targets, opaque };
-}
-const EXTRACTED_VERBS = new Set(['tee', 'sed', 'rm', 'mv', 'cp', 'install', 'dd', 'truncate', 'sh', 'bash', 'dash', 'ksh', 'zsh']);
-
-// { tool, filePath, command, cwd, roots } → 'inside' | 'outside' | 'unknown'.
-export function classifyWriteTarget(opts = {}) {
-  const { tool, filePath, command, cwd } = opts;
-  const roots = Array.isArray(opts.roots) ? opts.roots.filter((r) => typeof r === 'string' && r.trim()) : [];
-  if (!roots.length) return 'unknown';
-  const base = (typeof cwd === 'string' && cwd.trim()) ? normalizeTargetPath(cwd) : null;
-  const scopeOf = (abs) => (isUnderAny(abs, roots) ? 'inside' : 'outside');
-
-  if (EDIT_TOOLS.has(tool)) {
-    const p = normalizeTargetPath(filePath);
-    if (!p || UNRESOLVABLE_RE.test(p)) return 'unknown';
-    return scopeOf(isAbsolute(p) ? p : resolve(base || roots[0], p));
-  }
-  if (tool !== 'Bash') return 'unknown';
-  const cmd = String(command == null ? '' : command);
-  const { targets, opaque } = bashWriteTargets(cmd);
-  if (!targets.length) return 'unknown';
-  // A relative target is only resolvable against a KNOWN cwd that the command
-  // itself does not change.
-  const relOk = !!base && !CD_RE.test(cmd);
-  let unresolvable = opaque;
-  for (const raw of targets) {
-    const p = normalizeTargetPath(raw);
-    if (!p || NO_TARGET_RE.test(p)) continue;               // /dev/null and friends: no file
-    if (UNRESOLVABLE_RE.test(p)) { unresolvable = true; continue; }
-    if (isAbsolute(p)) { if (scopeOf(p) === 'inside') return 'inside'; continue; }
-    if (!relOk) { unresolvable = true; continue; }
-    if (scopeOf(resolve(base, p)) === 'inside') return 'inside';
-  }
-  if (unresolvable) return 'unknown';
-  // Every target was either a no-file sink or resolved outside; if NONE was a
-  // real path (all sinks), there is nothing to say.
-  return targets.some((raw) => { const p = normalizeTargetPath(raw); return p && !NO_TARGET_RE.test(p); }) ? 'outside' : 'unknown';
-}
 
 // Enforcement rank for weakening comparisons (audit P2): a lower rank = weaker,
 // so ANY decrease (incl. block→graduated) is a "weakening" that needs a reason /

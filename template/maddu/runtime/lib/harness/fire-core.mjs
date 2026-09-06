@@ -709,10 +709,12 @@ export function createHookFireCore(deps) {
       const kind = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'edit'
         : (tool === 'Bash' && disc?.classifyBashWrite ? disc.classifyBashWrite(command) : 'read');
       if (kind === 'read' || kind === 'remedy') process.exit(0);
-      // A write whose every target provably lands OUTSIDE the governed roots is
-      // not this repo's business: nothing to gate, count, witness, or auto-claim
-      // a lane for. Decided here so the outside write leaves no trace in the
-      // repo. Absent on an older installed lib → no narrowing (gated as before).
+      // A write the allowlist fully understands, whose every target lands
+      // OUTSIDE the governed roots, is not this repo's business: nothing to
+      // gate, count, witness, or auto-claim a lane for. Decided here so it
+      // leaves no session, lane, event or counter behind — the same footprint
+      // a read-only Bash leaves (the CLI's invocation receipt included).
+      // Absent on an older installed lib → no narrowing (gated as before).
       if ((kind === 'edit' || kind === 'write') && typeof disc?.classifyWriteTarget === 'function'
         && disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] }) === 'outside') process.exit(0);
 

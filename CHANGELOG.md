@@ -25,29 +25,48 @@ into the session scratchpad, and then the compound that carried the
 slice-stop meant to clear it — a write cannot ride in beside a remedy token,
 which is the right rule applied to the wrong file.
 
-**Gated by target, not just by shape.** A new pure classifier,
-`classifyWriteTarget`, resolves every target a recognized write shape names —
-redirect, `tee`, `sed -i`, `mv`/`cp`/`install`/`rm`/`dd`/`truncate`, a redirect
-inside `bash -c`, and the edit tools' `file_path` — against the governed roots
-(the work root and the repo root). A write whose every target provably lands
-outside them is *external*: allowed, not counted toward the slice-stop clock,
-not witnessed, and no lane is auto-claimed for it. Everything else is gated as
-before. The narrowing is conservative on purpose, because a parser gap in one
-direction costs a spurious block and in the other direction is a bypass:
-any inside target wins; `mv` counts its source, since a moved file is deleted;
-`-t DIR` / `--target-directory` names the destination; a `$VAR`, a glob, a
-relative path after `cd`, or a write shape the extractor cannot name (an
-interpreter payload, a PowerShell verb, `sudo rm`, `perl -i`) makes the whole
-command *unknown* — even when it sits beside a perfectly resolvable outside
-redirect, so `node -e "<write into src/>" > /tmp/log` is not waved through on
-the strength of its log file. Containment is checked through `realpath` as
-well as lexically, so a symlink or junction planted outside that points back
-into a root is inside. The assertions for all of this were authored by a
-non-implementer from a written contract, in a worktree at the branch base
-where the implementation did not exist, and were red there before the
-implementation was written; three of the concerns that author raised about the
-contract were real holes in the first implementation (the same-segment bypass,
-the target-directory option, the link), and are pinned by rows of their own.
+**Gated by target, not just by shape.** A new classifier, `classifyWriteTarget`
+(`runtime/lib/write-target.mjs`), decides whether a write lands *inside* a
+governed root (the work root or the repo root), *outside* every root, or
+cannot be told (*unknown*). Outside is *external*: allowed, not counted toward
+the slice-stop clock, not witnessed, no lane auto-claimed — the same footprint
+in `.maddu/` a read-only `ls` leaves. Inside and unknown are gated exactly as
+before.
+
+**It is an allowlist, not a parser.** The first implementation walked the
+command for the writes it knew about and called the rest harmless; the
+adversarial round found nine ways to hide a repo write beside an outside
+redirect — `cp src /repo/x > /tmp/log`, `npm run build > /tmp/log`, `$(rm
+/repo/x)`, `>|`, `cp -t/repo`, a `sed` script with a `w` flag, a stray quote
+inside a heredoc body, `(cd /repo; …)`, a link the lexical check did not
+follow. A blocklist over shell text cannot be made sound, and every gap in it
+is a bypass, the one direction this contract forbids. So the shape was
+inverted: a Bash command is external only when every segment (split on `&&`,
+`||`, `;`, `|`, newline) is one of a short list of commands that execute
+nothing — producers such as `echo`/`printf`/`cat`/`grep` writing through a
+redirect, or `tee`/`cp`/`mv`/`install`/`rm`/`mkdir`/`touch`/`dd`/`truncate`
+and `sed -i` restricted to `s///` substitutions — with only the options the
+list names and tokens plain enough to resolve without a shell, and every
+target it can write resolves outside every root. One form beyond that grammar
+is admitted because it is the case that obstructed real work: a heredoc with a
+quoted delimiter feeding `cat` into a redirect, whose body is data by
+construction and which must end at its terminator line. Anything else — a
+`$VAR`, a glob, a subshell, a here-string, an executor (`node`, `npm`, `git`,
+`bash -c`, `sudo`, `find`, `perl`, a PowerShell verb), an unknown option, a
+`cd`, an escape, a comment — makes the whole command unknown even when it sits
+beside a resolvable outside redirect. Any inside target wins; `mv` counts its
+source, since a moved file is deleted; `-t DIR` names the destination; a
+destination that is an existing directory is checked as `dest/<basename>` too;
+containment follows symlinks and junctions component by component, so a link
+planted outside that points into a root is inside, and a root the hook could
+not resolve makes the verdict unknown. A gap in the allowlist costs one
+spurious block; nothing in it can widen what is allowed without naming the
+command it allows.
+
+The assertions were authored by a non-implementer from a written contract, in
+a worktree at the branch base where the implementation did not exist, and
+were red there; the reviewer's reproductions were then added as rows, red
+against the first implementation, before the allowlist replaced it.
 
 ## [v1.132.0] · 2026-09-05 · the claim admitted everyone
 
