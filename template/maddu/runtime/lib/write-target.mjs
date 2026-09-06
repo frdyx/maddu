@@ -36,7 +36,7 @@
 
 import { join, resolve, isAbsolute, basename, dirname, parse } from 'node:path';
 import { homedir } from 'node:os';
-import { lstatSync, readlinkSync, statSync } from 'node:fs';
+import { lstatSync, readlinkSync, statSync, realpathSync } from 'node:fs';
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // Producers: write only through a redirect; their operands are read or
@@ -51,7 +51,6 @@ const PRODUCER_VERBS = {
   tail:   { flags: ['-q', '-v'], valued: ['-n', '-c'] },
   grep:   { flags: ['-i', '-n', '-v', '-r', '-R', '-E', '-F', '-l', '-c', '-o', '-w', '-x', '-h', '-H', '-s', '-q', '-a', '-in', '-ni', '-rn', '-nr', '-il', '-li'], valued: ['-e', '-A', '-B', '-C', '-m'] },
   sort:   { flags: ['-r', '-n', '-u', '-f', '-b'], valued: ['-k', '-t'] },
-  uniq:   { flags: ['-c', '-d', '-u', '-i'], valued: [] },
   wc:     { flags: ['-l', '-c', '-w', '-m'], valued: [] },
   cut:    { flags: [], valued: ['-d', '-f', '-c', '-b'] },
   tr:     { flags: ['-d', '-s', '-c'], valued: [] },
@@ -88,6 +87,8 @@ const WRITER_VERBS = {
   truncate: { flags: ['-c', '-o'], valued: ['-s', '--size', '-r', '--reference'], targets: 'all' },
   dd:       { flags: [], valued: [], targets: 'dd' },
   sed:      { flags: ['-i', '--in-place', '-E', '-r', '-n', '-s', '-z'], valued: [], targets: 'sed' },
+  // uniq is a writer, not a producer: its SECOND operand is an output file.
+  uniq:     { flags: ['-c', '-d', '-u', '-i'], valued: [], targets: 'second' },
 };
 for (const spec of Object.values(WRITER_VERBS)) { spec.flags = new Set(spec.flags); spec.valued = new Set(spec.valued); }
 const DEST_VERBS = new Set(['cp', 'mv', 'install']);
@@ -111,10 +112,15 @@ function admittedHeredoc(cmd) {
   if (!head) return null;
   const tag = head[2] || head[6], target = head[3] || head[4];
   if (lines.length === 1) return target;
-  let last = lines.length - 1;
-  while (last > 0 && lines[last].trim() === '') last--;
-  if (last === 0) return target;
-  return lines[last].replace(/^\t+/, '') === tag ? target : null;
+  // The FIRST line equal to the delimiter ends the body; anything non-blank
+  // after it is a command, not data.
+  const dash = /<<-/.test(lines[0]);
+  let end = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if ((dash ? lines[i].replace(/^\t+/, '') : lines[i]) === tag) { end = i; break; }
+  }
+  if (end === -1) return lines.slice(1).every((l) => l.trim() === '') ? target : null; // no terminator: body only
+  return lines.slice(end + 1).every((l) => l.trim() === '') ? target : null;
 }
 
 function normalizeDriveForm(s) {
@@ -145,9 +151,10 @@ function plainPath(tok) {
     quoted = true;
   } else if (/["']/.test(s)) return null;                       // `/re"po"/x` — mixed
   if (!s || SHELL_SPECIAL_RE.test(s)) return null;
-  // `~` expands only unquoted and only leading; quoted it is a literal
-  // character (`'~/x'` is the file `~/x` under the cwd).
-  if (!quoted && s.includes('~')) {
+  // `~` expands only unquoted and only LEADING; quoted, or anywhere else in
+  // the word (`MA26AB~1`, an 8.3 short name), it is a literal character.
+  // A leading `~user` form is not resolved here → unknown.
+  if (!quoted && s[0] === '~') {
     if (!(s === '~' || s.startsWith('~/') || s.startsWith('~\\'))) return null;
     s = expandTilde(s);
   }
@@ -179,7 +186,7 @@ function realResolve(abs, depth = 0) {
       const next = join(cur, comp);
       let st = null;
       try { st = lstatSync(next); } catch { st = null; }
-      if (!st) return resolve(cur, ...parts.slice(i));        // rest does not exist: lexical
+      if (!st) return resolve(canonExisting(cur), ...parts.slice(i)); // rest does not exist: lexical
       if (st.isSymbolicLink()) {
         const link = readlinkSync(next);
         const target = realResolve(isAbsolute(link) ? link : resolve(cur, link), depth + 1);
@@ -189,8 +196,14 @@ function realResolve(abs, depth = 0) {
       }
       cur = next;
     }
-    return cur;
+    return canonExisting(cur);
   } catch { return null; }
+}
+// The one spelling of an EXISTING path: on Windows an 8.3 short name
+// (`MADDU-~1`), a case variant, or a trailing-dot alias names the same
+// directory as the root and would otherwise fail the string comparison.
+function canonExisting(p) {
+  try { return realpathSync.native(p); } catch { return p; }
 }
 // 'inside' | 'outside' | null (unresolvable). `roots` are already real. The
 // path is ALWAYS walked, never compared lexically first: `C:/repo/sub/../x`
@@ -239,10 +252,15 @@ function segmentAllowlisted(cmd) {
       if (s[i + 1] === '|') i++;
       let j = i + 1;
       while (s[j] === ' ' || s[j] === '\t') j++;
-      if (s[j] === '&') {                                                     // >&N — duplication
-        j++;
-        while (/\d/.test(s[j] || '')) j++;
-        i = j - 1;
+      if (s[j] === '&') {
+        // `>&N` / `>&-` duplicate or close an fd: no file. `>&word` with any
+        // other word is a redirect of stdout AND stderr to that file.
+        let k = j + 1;
+        while (/\d/.test(s[k] || '')) k++;
+        const dup = (k > j + 1 || s[j + 1] === '-') && (k >= s.length || /[\s;&|>\n]/.test(s[k]) || s[j + 1] === '-');
+        if (dup) { i = (s[j + 1] === '-') ? j + 1 : k - 1; continue; }
+        segments[segments.length - 1].push('>');
+        i = j;                                                                // the word after `&` is the target
         continue;
       }
       segments[segments.length - 1].push('>');
@@ -258,7 +276,14 @@ function segmentAllowlisted(cmd) {
 
 // Does `t` carry a valued short option with its value attached (`-s0`)?
 function attachedValued(spec, t) {
-  return /^-[A-Za-z]./.test(t) && spec.valued.has(t.slice(0, 2));
+  return /^-[A-Za-z]./.test(t) && spec.valued.has(t.slice(0, 2)) && plainPath(t.slice(2)) !== null;
+}
+// A token that the shell would hand to the command as an option, whatever
+// quoting it wore: `"-t"` is `-t` to cp. Such a token is only ever accepted
+// through the option tables, never as an operand.
+function looksLikeOption(t) {
+  const p = plainPath(t);
+  return t.startsWith('-') || (p !== null && p.startsWith('-'));
 }
 
 // One allowlisted segment → its target tokens, or null (not understood).
@@ -282,11 +307,12 @@ function segmentTargets(seg) {
   const producer = PRODUCER_VERBS[verb];
   if (producer) {
     for (let i = 0; i < rest.length; i++) {
-      const t = rest[i];
-      if (t === '--') { for (const o of rest.slice(i + 1)) if (plainPath(o) === null) return null; break; }
-      if (t.startsWith('-') && t !== '-') {
+      const raw = rest[i];
+      if (raw === '--') { for (const o of rest.slice(i + 1)) if (plainPath(o) === null) return null; break; }
+      const t = looksLikeOption(raw) ? (plainPath(raw) ?? raw) : raw;
+      if (looksLikeOption(t) && t !== '-') {
         if (producer.flags.has(t)) continue;
-        if (producer.valued.has(t)) { i++; continue; }
+        if (producer.valued.has(t)) { if (plainPath(rest[++i]) === null) return null; continue; } // the value is checked too
         if (attachedValued(producer, t)) continue;
         return null;                                                          // an option the list does not know
       }
@@ -301,9 +327,11 @@ function segmentTargets(seg) {
   const ops = [];
   let dest = null, sedScripts = [], dashD = false, fileDest = false;
   for (let i = 0; i < rest.length; i++) {
-    const t = rest[i];
-    if (t === '--') { ops.push(...rest.slice(i + 1)); break; }
-    if (t.startsWith('-') && t !== '-') {
+    const raw = rest[i];
+    if (raw === '--') { ops.push(...rest.slice(i + 1)); break; }
+    // Options are matched on what the command would receive: `"-t"` is `-t`.
+    const t = looksLikeOption(raw) ? (plainPath(raw) ?? raw) : raw;
+    if (looksLikeOption(t) && t !== '-') {
       if (verb === 'sed' && (t === '-e' || t === '--expression')) { sedScripts.push(rest[++i]); continue; }
       if (verb === 'sed' && /^--expression=/.test(t)) { sedScripts.push(t.slice(13)); continue; }
       if (verb === 'sed' && /^-e./.test(t)) { sedScripts.push(t.slice(2)); continue; }  // -es/a/b/ attached
@@ -312,9 +340,9 @@ function segmentTargets(seg) {
       if (DEST_VERBS.has(verb) && /^--target-directory=/.test(t)) { dest = t.slice(19); continue; }
       if (verb === 'dd') return null;                                         // dd takes no dash options
       if (spec.flags.has(t)) { if (t === '-d' && verb === 'install') dashD = true; if (t === '-T') fileDest = true; continue; }
-      if (spec.valued.has(t)) { i++; continue; }
+      if (spec.valued.has(t)) { if (plainPath(rest[++i]) === null) return null; continue; } // the value is checked too
       if (attachedValued(spec, t)) continue;
-      if (/^--[a-z-]+=/.test(t) && spec.valued.has(t.split('=')[0])) continue;
+      if (/^--[a-z-]+=/.test(t) && spec.valued.has(t.split('=')[0]) && plainPath(t.slice(t.indexOf('=') + 1)) !== null) continue;
       return null;                                                            // an option the list does not know
     }
     ops.push(t);
@@ -322,6 +350,11 @@ function segmentTargets(seg) {
   if (dest === undefined) return null;                                        // `-t` with nothing after it
   switch (spec.targets) {
     case 'all': targets.push(...ops.map((tok) => ({ tok, kind: 'file' }))); break;
+    case 'second': {
+      if (ops.length > 2 || (ops[0] !== undefined && plainPath(ops[0]) === null)) return null;
+      if (ops.length === 2) targets.push({ tok: ops[1], kind: 'file' });
+      break;
+    }
     case 'all-and-dest':
     case 'dest': {
       if (verb === 'install' && dashD) { targets.push(...ops.map((tok) => ({ tok, kind: 'file' }))); break; }

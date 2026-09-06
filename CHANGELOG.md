@@ -59,9 +59,14 @@ source, since a moved file is deleted; `-t DIR` names the destination; a
 destination that is an existing directory is checked as `dest/<basename>` too;
 containment follows symlinks and junctions component by component, so a link
 planted outside that points into a root is inside, and a root the hook could
-not resolve makes the verdict unknown. A gap in the allowlist costs one
-spurious block; nothing in it can widen what is allowed without naming the
-command it allows.
+not resolve makes the verdict unknown. Options are matched on what the command
+would receive (`"-t"` is `-t`), a valued option's value has to be a plain
+token too, `>&word` with a non-numeric word is a redirect to that file,
+`uniq`'s second operand is an output file, a heredoc ends at the *first* line
+equal to its delimiter, and the existing prefix of every path is canonicalised
+(an 8.3 short name or a case variant of the root is the root). A gap in the
+allowlist costs one spurious block; nothing in it can widen what is allowed
+without naming the command it allows.
 
 The assertions were authored by a non-implementer from a written contract, in
 a worktree at the branch base where the implementation did not exist, and
