@@ -77,13 +77,11 @@ function paragraphs(text) {
   return out;
 }
 
-// ONE predicate for the tree-wide scan and the per-file rows alike. Keeping
-// them on different logic is exactly how the wrapped claim slipped past one
-// while the other still reported clean. `ownsPhantom` already normalizes
-// wrapping and exempts per sentence, so a whole-file call is correct — and an
-// extra whole-FILE citation test here would be a bug, re-arming the very
-// document-wide exemption the sentence rule exists to prevent.
-const hasOwnershipClaim = (text) => ownsPhantom(text);
+// NOTE: there is deliberately no second "does this file claim ownership"
+// helper. `ownsPhantom` already normalizes wrapping and exempts per sentence,
+// so every caller passes it whole text directly. An alias here was a place for
+// a divergent implementation to grow back — which is exactly how the wrapped
+// claim once slipped past the per-file rows while the tree scan reported clean.
 
 try {
   const css = (await read('template/maddu/cockpit/cockpit.css')).replace(/\r\n/g, '\n');
@@ -124,8 +122,8 @@ try {
   for (const file of tokenSites) {
     const text = await read(file);
     ok(`1 ${file}: name cockpit.css as the real token source, without the phantom`,
-      /\bcockpit\.css\b/.test(text) && !hasOwnershipClaim(text),
-      `cockpit.css mentioned=${/\bcockpit\.css\b/.test(text)}; phantom claim=${hasOwnershipClaim(text)}`);
+      /\bcockpit\.css\b/.test(text) && !ownsPhantom(text),
+      `cockpit.css mentioned=${/\bcockpit\.css\b/.test(text)}; phantom claim=${ownsPhantom(text)}`);
   }
 
   for (const tree of DOC_TREES) {
