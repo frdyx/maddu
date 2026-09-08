@@ -186,6 +186,7 @@ export const EVENT_DISPOSITIONS = {
   WS_IDENTITY_ANCHORED: { disp: 'dormant', reason: "fires once per sync workspace — the first S2-aware writer publishes the in-band identity anchor; absent in flat mode (pure derivation) and after the anchor exists" },
   WS_IDENTITY_RESOLVED: { disp: 'dormant', reason: "fires only in the operator's anchor-conflict ceremony (spine identity resolve) — absent unless two offline first-writers raced the bootstrap" },
   DISCIPLINE_SKIPPED: { disp: 'dormant', reason: "fires only when a discipline bypass is witnessed (enforcement off / self-disable / hook uninstalled) — absent in a healthy disciplined run" },
+  DISCIPLINE_DENIED: { disp: 'dormant', reason: "fires only when the discipline gate BLOCKS a mutating tool call — absent in a run where the rituals were kept, and its sibling DISCIPLINE_SKIPPED covers the checks that never ran" },
   MUTATION_UNWITNESSED: { disp: 'dormant', reason: "fires only when a mutating seam exits successfully with zero spine appends and no declared no-op (the mutation-witness guard's breach witness) — absent in a healthy witnessed run" },
   ENFORCEMENT_ERROR: { disp: 'dormant', reason: "fires only when the enforcement path throws and falls open — absent unless there's an enforcement bug" },
   GOVERNANCE_OVERRIDE_CHANGED: { disp: 'dormant', reason: "fires only when a governance behavior-override key is changed/cleared (e.g. the discipline off-switch)" },

@@ -12,10 +12,12 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { append } from '../../template/maddu/runtime/lib/spine.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRAMEWORK_ROOT = join(__dirname, '..', '..');
 const BIN = join(FRAMEWORK_ROOT, 'bin', 'maddu.mjs');
+const SESSION_ID = 'ses_reviewtest';
 
 let failed = 0, passed = 0;
 function ok(name, cond, extra = '') {
@@ -25,7 +27,7 @@ function ok(name, cond, extra = '') {
 
 function runCli(args, opts = {}) {
   return new Promise((resolve) => {
-    const ch = spawn(process.execPath, [BIN, ...args], { cwd: opts.cwd, env: { ...process.env, MADDU_SESSION_ID: 'ses_reviewtest', ...(opts.env || {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const ch = spawn(process.execPath, [BIN, ...args], { cwd: opts.cwd, env: { ...process.env, MADDU_SESSION_ID: SESSION_ID, ...(opts.env || {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     ch.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
     ch.stderr.on('data', (b) => { stderr += b.toString('utf8'); });
@@ -55,6 +57,14 @@ async function makeRepo() {
   await writeFile(join(tmp, '.maddu', 'lanes', 'catalog.json'), JSON.stringify({ schemaVersion: 1, lanes: [] }) + '\n');
   await writeFile(join(tmp, '.maddu', 'lanes', 'claims.json'), JSON.stringify({ schemaVersion: 1, claims: [] }) + '\n');
   await writeFile(join(tmp, '.maddu', 'config', 'triggers.json'), JSON.stringify({ allowed: ['slice-stop:auto-review'] }) + '\n');
+  // v1.134.0: register the session this fixture ACTS as. It exported a
+  // synthetic MADDU_SESSION_ID no spine had ever heard of - the exact shape
+  // the ambient-id policy now refuses - and only got away with it because an
+  // empty spine reads as 'unverified'. The first slice-stop then wrote events,
+  // the replay became complete, and the id was correctly dropped MID-scenario.
+  // This suite tests auto-review firing and its cooldown, not session policy,
+  // so the scaffolding is made legitimate rather than the policy made lenient.
+  await append(tmp, { type: 'SESSION_REGISTERED', actor: SESSION_ID, data: { role: 'implementer', label: 'auto-review fixture' } });
   return tmp;
 }
 

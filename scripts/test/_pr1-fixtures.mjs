@@ -12,17 +12,19 @@ import { cp, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from '
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hermeticEnv } from './_hermetic-env.mjs';
 
 export const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
 export const sourceBin = join(sourceRoot, 'bin', 'maddu.mjs');
 export const segment = (root) => join(root, '.maddu', 'events', '000000000001.ndjson');
 export const activePath = (root) => join(root, '.maddu', 'state', 'session.active.json');
 
+// The repo already owns this scrub (_hermetic-env.mjs) and the census ratchets
+// on it; a private re-implementation here would drift from the canonical SCRUB
+// list the moment a new MADDU_* var is added. NODE_OPTIONS is dropped on top
+// because an inherited loader/flag can change how a spawned CLI behaves.
 export function childEnv(overrides = {}) {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (/^MADDU_/i.test(key) || /^__MADDU_TEST_/i.test(key) || key === 'NODE_OPTIONS') delete env[key];
-  }
+  const { NODE_OPTIONS, ...env } = hermeticEnv();
   return { ...env, ...overrides };
 }
 

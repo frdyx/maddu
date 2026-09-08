@@ -29,9 +29,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const KNOWN = new Set([
   'advise-spawn.mjs', 'agents-register.mjs', 'auto-handoff.mjs', 'auto-review.mjs',
   'autonomy-cli.mjs', 'blueprint-distill.mjs', 'ci-command.mjs', 'cost-provenance.mjs',
-  'discipline-honesty-guard.mjs', 'discipline-hook.mjs', 'event-schema-expect-flags.mjs',
+  'discipline-honesty-guard.mjs', 'event-schema-expect-flags.mjs',
   'hooks-guardrails-e2e.mjs', 'lane-release-idempotent.mjs', 'learn-e2e.mjs',
-  'learn-fallback.mjs', 'learn-spawn.mjs', 'mutation-witness-cli.mjs',
+  'learn-fallback.mjs', 'learn-spawn.mjs',
   'reversible-briefings.mjs', 'session-lifecycle.mjs', 'skill-injection.mjs',
   'slice-scope-gitdiff.mjs', 'spine-anchor-assess.mjs', 'spine-anchor.mjs',
   'stress-harness.mjs', 'token-wrapper-emission.mjs', 'upgrade-matrix.mjs',
