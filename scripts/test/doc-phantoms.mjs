@@ -46,14 +46,24 @@ async function filesUnder(dir) {
 const ownsPhantom = (text) => {
   const s = String(text);
   if (/maddu\/cockpit\/tokens\.css/.test(s)) return true;
-  const norm = s.replace(/\s+/g, ' ');
-  for (const sentence of norm.split(/(?<=[.;])\s+/)) {
-    if (!/tokens\.css/i.test(sentence)) continue;
-    if (/claude\.ai\/design|\bClaude Design\b/i.test(sentence)) continue; // external, not ours
-    if (/\bcockpit(?:['’]s)?\b[\s\S]*?tokens\.css/i.test(sentence)) return true;
-    if (/tokens\.css[\s\S]*?\bowned by Máddu\b/i.test(sentence)) return true;
-  }
-  return false;
+  // Collapse wrapping first — a claim split across lines is still a claim — then
+  // MASK each `tokens.css` that belongs to an external Claude reference.
+  //
+  // Masking the OCCURRENCE is the point. Two coarser exemptions were tried and
+  // both failed review. Per-SENTENCE is defeated three ways: a citation
+  // trailing the claim ("… live in tokens.css, following Claude Design"), an
+  // abbreviation's period splitting mid-claim ("i.e. tokens.css"), and JSON
+  // string arrays where `",` is no sentence break at all. Per-DOCUMENT is worse
+  // — it waves through a real claim standing beside a legitimate citation.
+  // Removing the offending occurrence leaves every other one visible, and needs
+  // no notion of a sentence, so punctuation cannot defeat it.
+  const masked = s.replace(/\s+/g, ' ')
+    .replace(/(?:claude\.ai\/design|Claude Design)[\s\S]{0,60}?tokens\.css/gi, '«external-citation»');
+  // Ownership prose must sit near a SURVIVING occurrence. The bounded window is
+  // what stops the word "cockpit" in one paragraph binding to a `tokens.css`
+  // far below it in the same file.
+  return /\bcockpit(?:['’]s)?\b[\s\S]{0,80}?tokens\.css/i.test(masked)
+    || /tokens\.css[\s\S]{0,80}?\bowned by Máddu\b/i.test(masked);
 };
 
 // Blank-line separated blocks, comment markers and indentation collapsed onto
@@ -240,6 +250,32 @@ try {
   ok('F2 CONTROL: an external Claude citation does not exempt an actual ownership claim',
     ownershipExamples.every(({ parts }) => ownsPhantom(
       `See Claude Design (claude.ai/design · tokens.css). ${parts.join(' ')}`)));
+  // Round 3: classify ownership prose and legitimate external references.
+  const trailingClaudeCitation = "The cockpit's tokens live in tokens.css, following Claude Design.";
+  ok('F3 A: cockpit ownership with a trailing Claude citation is detected',
+    ownsPhantom(trailingClaudeCitation), trailingClaudeCitation);
+
+  const ownershipWithAbbreviation = "The cockpit's canonical tokens live in a stylesheet, i.e. tokens.css.";
+  ok('F3 B: cockpit ownership containing i.e. is detected',
+    ownsPhantom(ownershipWithAbbreviation), ownershipWithAbbreviation);
+
+  // Match rules.json's worker.rules array of string arrays, including indented
+  // continuation lines. Pass serialized file text, as the per-file row does.
+  const rulesJsonOwnership = JSON.stringify({
+    worker: {
+      rules: [[
+        'See Claude Design (claude.ai/design · tokens.css).',
+        "The cockpit's canonical design tokens live in",
+        '   `tokens.css`.',
+      ]],
+    },
+  }, null, 2);
+  ok('F3 C: rules.json-shaped text with an external citation and wrapped cockpit ownership is detected',
+    ownsPhantom(rulesJsonOwnership), JSON.stringify(rulesJsonOwnership));
+
+  const externalClaudeExamples = 'See Claude Design, e.g. its cockpit examples in tokens.css.';
+  ok('F3 D CONTROL: the external Claude cockpit examples reference is not a Maddu ownership claim',
+    !ownsPhantom(externalClaudeExamples), externalClaudeExamples);
 } catch (err) {
   ok('PR3a doc-phantoms harness', false, err.stack || err.message);
 }
