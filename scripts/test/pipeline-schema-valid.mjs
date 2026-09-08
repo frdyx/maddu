@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PR2 contract 4.1–4.7. Pipeline receipts, directory selection, seeds, docs.
 import assert from 'node:assert/strict';
-import { mkdir, writeFile, readFile, readdir, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, readdir, unlink, symlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { install, cleanupFixtures, events, sourceRoot } from './_pr1-fixtures.mjs';
 import { repoFixture, sourceFixture, fixtureCli, nodeFixture, readChildJson, gateRun, normalize, sameSet } from './_pr2-fixtures.mjs';
@@ -10,7 +10,7 @@ import { EVENT_TYPES } from '../../template/maddu/runtime/lib/spine.mjs';
 import { EVENT_SCHEMA, EVENT_CONTRACT_VERSION, EVENT_ENVELOPE, ENVELOPE_REQUIRED } from '../../template/maddu/runtime/lib/event-schema.mjs';
 import { renderEventSchemaJson } from '../../template/maddu/runtime/lib/generate.mjs';
 
-let passed = 0, failed = 0;
+let passed = 0, failed = 0, skipped = 0;
 async function row(id, detail, test) {
   try { await test(); passed++; console.log(`[PASS] ${id} - ${detail}`); }
   catch (err) { failed++; console.log(`[FAIL] ${id} - ${detail}: ${err.message.replace(/\s+/g, ' ').trim()}`); }
@@ -174,9 +174,57 @@ try {
     const text = normalize(await readFile(join(sourceRoot, 'template/maddu/agent-files/MADDU.md'), 'utf8'));
     assert.ok(!text.includes('Three default pipelines ship'), 'MADDU.md still says Three default pipelines ship');
   });
+
+  // ── Round-1 review findings F2 and F4 ────────────────────────────────────
+  // Both are about links, so both need a filesystem that can make one. Windows
+  // without Developer Mode cannot; these rows then report SKIPPED and are
+  // counted separately — a skip is not a pass. They run for real in WSL and CI.
+  {
+    const linkRoot = await repoFixture('maddu-pr2-pipeline-links-');
+    let linkable = true;
+    try {
+      await writeFile(join(linkRoot, 'probe-target'), 'x\n');
+      await symlink(join(linkRoot, 'probe-target'), join(linkRoot, 'probe-link'));
+    } catch { linkable = false; }
+
+    if (!linkable) {
+      skipped += 2;
+      console.log('[SKIP] R1-F2-symlinked-config - this filesystem cannot create symlinks (Developer Mode off)');
+      console.log('[SKIP] R1-F4-dangling-config-link - this filesystem cannot create symlinks (Developer Mode off)');
+    } else {
+      // F2: Dirent.isFile() is FALSE for a symlink, so a directory holding only
+      // symlinked configs read as empty — which the new empty-is-a-finding rule
+      // then turned into a FAILURE for a configuration `pipeline run` reads fine.
+      await row('R1-F2-symlinked-config', 'a symlinked pipeline JSON is validated, not counted as an empty directory', async () => {
+        const src = await sourceFixture('maddu-pr2-pipeline-symlink-');
+        const localDir = join(src, '.maddu/config/pipelines');
+        await mkdir(localDir, { recursive: true });
+        const target = join(src, 'shared-pipeline.json');
+        await writeFile(target, JSON.stringify(config('linked')) + '\n');
+        await symlink(target, join(localDir, 'linked.json'));
+        const { gate } = runGate(src);
+        assert.equal(gate.ok, true, gate.message);
+        assert.ok(!/holds no pipeline JSON/i.test(gate.message), gate.message);
+      });
+      // F4: stat FOLLOWS links, so a config directory whose target vanished
+      // raised ENOENT and was reported as absence — a green skip over a broken
+      // local configuration.
+      await row('R1-F4-dangling-config-link', 'a config directory symlink whose target is gone is non-green, not absent', async () => {
+        const consumerRoot = await repoFixture('maddu-pr2-pipeline-dangling-');
+        const gone = join(consumerRoot, 'gone-pipelines');
+        await mkdir(join(consumerRoot, '.maddu/config'), { recursive: true });
+        await mkdir(gone, { recursive: true });
+        await symlink(gone, join(consumerRoot, '.maddu/config/pipelines'), 'junction');
+        await rm(gone, { recursive: true, force: true });
+        const { gate } = runGate(consumerRoot);
+        assertBad(gate);
+        assert.ok(!/skipped|absent/i.test(gate.message), gate.message);
+      });
+    }
+  }
 } catch (err) {
   failed++; console.log(`[FAIL] harness - ${err.stack || err.message}`);
 } finally { await cleanupFixtures(); }
 
-console.log(`pipeline-schema-valid: ${passed} passed, ${failed} failed`);
+console.log(`pipeline-schema-valid: ${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`);
 process.exitCode = failed ? 1 : 0;

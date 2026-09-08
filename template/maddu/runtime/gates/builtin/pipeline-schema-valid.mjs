@@ -10,7 +10,7 @@
 // parse, lacks a name, lacks stages, or has stages that aren't an
 // array of `{name}` objects.
 
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
@@ -23,9 +23,42 @@ async function dirState(p) {
     const st = await stat(p);
     return st.isDirectory() ? { state: 'present' } : { state: 'unreadable', code: 'ENOTDIR' };
   } catch (err) {
-    if (err?.code === 'ENOENT') return { state: 'absent' };
+    if (err?.code === 'ENOENT') {
+      // stat FOLLOWS links, so a symlink whose target is gone also raises
+      // ENOENT. The entry is still configured — reporting that as absence
+      // would hand back a green skip (or silently fall through to the
+      // templates) over a broken local configuration. lstat separates
+      // 'nothing is there' from 'something is there and does not resolve'.
+      try {
+        await lstat(p);
+        return { state: 'unreadable', code: 'ELOOP_TARGET_MISSING' };
+      } catch { return { state: 'absent' }; }
+    }
     return { state: 'unreadable', code: err?.code || 'EUNKNOWN' };
   }
+}
+
+// Which entries are pipeline files? Dirent.isFile() is FALSE for a symlink,
+// so classifying by dirent alone would ignore a symlinked pipeline that the
+// runner itself reads happily — and, now that an empty directory is a
+// finding, would turn a directory of symlinked configs into a failure.
+// Ask the filesystem about the target instead, and say so when it cannot
+// be reached rather than quietly dropping it.
+async function classifyEntries(dir, entries) {
+  const files = [];
+  const unreachable = [];
+  for (const e of entries) {
+    if (!e.name.endsWith('.json')) continue;
+    if (e.isFile()) { files.push(e.name); continue; }
+    if (e.isDirectory()) continue; // a directory named *.json is not a config
+    try {
+      const st = await stat(join(dir, e.name));
+      if (st.isFile()) files.push(e.name);
+    } catch (err) {
+      unreachable.push(`${e.name}: ${err?.code || err?.message}`);
+    }
+  }
+  return { files, unreachable };
 }
 
 function validate(name, cfg) {
@@ -105,7 +138,14 @@ export default {
         evidence: { dir, code: err?.code || null },
       };
     }
-    const files = entries.filter((e) => e.isFile() && e.name.endsWith('.json'));
+    const { files, unreachable } = await classifyEntries(dir, entries);
+    if (unreachable.length) {
+      return {
+        ok: false,
+        message: `${unreachable.length} pipeline file(s) in ${origin} could not be read`,
+        evidence: { dir, unreachable },
+      };
+    }
     if (files.length === 0) {
       // A directory that exists and holds nothing is a seeding that did not
       // finish, not a repo that opted out. Opting out looks like absence.
@@ -116,17 +156,17 @@ export default {
       };
     }
     const problems = [];
-    for (const e of files) {
-      const name = e.name.replace(/\.json$/, '');
+    for (const fileName of files) {
+      const name = fileName.replace(/\.json$/, '');
       let cfg;
       try {
-        cfg = JSON.parse(await readFile(join(dir, e.name), 'utf8'));
+        cfg = JSON.parse(await readFile(join(dir, fileName), 'utf8'));
       } catch (err) {
-        problems.push(`${e.name}: parse error — ${err.message}`);
+        problems.push(`${fileName}: parse error — ${err.message}`);
         continue;
       }
       const errs = validate(name, cfg);
-      if (errs.length) problems.push(`${e.name}: ${errs.join('; ')}`);
+      if (errs.length) problems.push(`${fileName}: ${errs.join('; ')}`);
     }
     if (problems.length === 0) {
       return { ok: true, message: `${files.length} pipeline(s) in ${origin}, all schemas valid` };

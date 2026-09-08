@@ -8,15 +8,17 @@
 // three signals, and three gates held no test at all and reported the source
 // repo as a broken install (audit 2026-09-07, finding B1).
 //
-// One predicate, one place. Callers reach it through their normal resolver:
-// commands via `_libroot.loadLib('layout.mjs')`, gates via
-// `gate-libroot.loadGateLib(ctx.repoRoot, 'layout.mjs')`.
+// One predicate, one place. Callers reach it through the resolver that finds
+// the lib beside the CODE doing the asking — gates via
+// `gate-libroot.loadGateLib(ctx.repoRoot, 'layout.mjs')`, doctor via its own
+// CLI-relative `resolveRuntimeLib`. A cwd-relative resolver is wrong here: the
+// question is about a repo that need not be the current directory.
 //
 // The signals are STRUCTURAL and all three are required, so a consumer repo
 // that happens to be named "maddu" is not mistaken for the framework:
 //   - package.json `name === "maddu"`
-//   - a `template/maddu/` tree — only the source layout has one
-//   - a `commands/` CLI handler directory at the root
+//   - a `template/maddu/` DIRECTORY — only the source layout has one
+//   - a `commands/` CLI handler DIRECTORY at the root
 // Absence of any signal, or an unreadable/invalid package.json, means "not
 // the framework source" — the direction that keeps a genuinely broken
 // consumer install FAILING rather than skipping.
@@ -24,15 +26,21 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-async function exists(p) { try { await stat(p); return true; } catch { return false; } }
+// isDirectory, not merely exists: a consumer repo that happens to be named
+// "maddu" and to have FILES at those two paths would otherwise be classified
+// as the framework source, and every gate that skips on this predicate would
+// stop checking it.
+async function isDir(p) {
+  try { return (await stat(p)).isDirectory(); } catch { return false; }
+}
 
 export async function isFrameworkSourceRepo(repoRoot) {
   try {
     const pkg = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'));
     if (pkg.name !== 'maddu') return false;
   } catch { return false; }
-  if (!(await exists(join(repoRoot, 'template', 'maddu')))) return false;
-  if (!(await exists(join(repoRoot, 'commands')))) return false;
+  if (!(await isDir(join(repoRoot, 'template', 'maddu')))) return false;
+  if (!(await isDir(join(repoRoot, 'commands')))) return false;
   return true;
 }
 

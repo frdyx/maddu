@@ -25,7 +25,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot, findStateRoot } from './_resolve.mjs';
 import { exists, readMadduJson, frameworkVersion } from './_manifest.mjs';
-import { loadLibOptional } from './_libroot.mjs';
 
 const ANSI = {
   pass: '\x1b[32m',
@@ -64,8 +63,17 @@ function tag(level) {
 // (runtime/lib/layout.mjs); doctor and three gates used to keep private
 // copies of it, which is how three of them ended up with no copy at all
 // and reported the source repo as a broken install.
+// Resolved through resolveRuntimeLib, NOT _libroot: _libroot resolves against
+// process.cwd() and the framework's template/, so an INSTALLED CLI invoked
+// from a directory that is not itself an install (checking another repo)
+// would find neither and silently answer 'not the framework source' — which
+// would report a source checkout's intentionally absent maddu.json as FAIL.
+// resolveRuntimeLib looks beside the CLI, which is where the lib actually is,
+// and is what every other runtime-lib load in this file already uses.
 async function isFrameworkSourceRepo(repoRoot) {
-  const layout = await loadLibOptional('layout.mjs');
+  const p = await resolveRuntimeLib('layout.mjs');
+  if (!p) return false;
+  const layout = await import(pathToFileURL(p).href);
   if (!layout?.isFrameworkSourceRepo) return false;
   return layout.isFrameworkSourceRepo(repoRoot);
 }
