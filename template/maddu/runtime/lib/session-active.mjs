@@ -189,7 +189,18 @@ async function classifyVerified(repoRoot, detailed) {
     if (ev.type === 'SESSION_REGISTERED') return { kind: 'active', record };
     if (ev.type === 'SESSION_AUTO_REGISTERED') return { kind: 'active', record };
   }
-  // No registration found — a pointer to a session that never existed here.
+  // No registration found. Round 3: that is only EVIDENCE when the replay could
+  // account for itself. Under replica-mode accounting (parseErrors === null) an
+  // unreadable segment or partition is silently omitted, so a live pointer whose
+  // registration sits in the omitted half was being called stale on the strength
+  // of its own absence — the same mistake classifySessionId makes no more.
+  //
+  // Fixing it HERE, in the one snapshot that already saw the events, is what
+  // keeps it safe: an earlier attempt re-asked a second replay whether a 'stale'
+  // verdict was real, and a closure visible in the first snapshot could be
+  // missing from the second, resurrecting a closed session. One read, one
+  // verdict. Positive closure evidence above still wins outright.
+  if (parseErrors === null) return { kind: 'unverified', record };
   return { kind: 'stale', sessionId: record.sessionId };
 }
 

@@ -885,10 +885,13 @@ export async function findUncoveredLosingStamp(repoRoot, authority, anchors, res
 // `buildEv` receives the merge-first nomination and returns the ws-less
 // anchor event (id/ts minted by the caller — this module has no id
 // generator).
-export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
+export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv, { maxWaitMs = Infinity } = {}) {
   if (!isValidReplicaId(replicaId)) return { unresolvable: `invalid replicaId "${replicaId}"` };
   const dir = partitionDir(repoRoot, replicaId);
   await mkdir(dir, { recursive: true });
+  // The bound travels here too: identity bootstrap takes this lock on the way
+  // to a first append in an anchorless partitioned workspace, so a caller that
+  // asked to be bounded would otherwise still wait forever on this one.
   return withAppendLock(join(dir, '.append.lock'), async () => {
     let scan;
     try { scan = await scanWsAuthorityEvents(repoRoot); }
@@ -937,7 +940,7 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     const seg = await currentSegmentInDir(dir);
     await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
     return { published: ev, ws: wsFromLine(mf.text) };
-  });
+  }, { maxWaitMs });
 }
 
 // Append a WS_IDENTITY_RESOLVED ceremony event ATOMICALLY: fresh scan,

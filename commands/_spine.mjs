@@ -237,16 +237,13 @@ async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null
     try {
       const res = await cacheLib.readActiveSessionVerified(root);
       if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
-      // Round 2: the FALLBACK inherited the same bug F2 fixed in the classifier.
-      // readActiveSessionVerified still reads absence as 'stale' when accounting
-      // is unavailable, so a live cache session whose registration sits in an
-      // unreadable partition was discarded here after the ambient id had already
-      // been dropped — leaving nobody at all. Re-ask the tolerant classifier: a
-      // 'stale' verdict it cannot confirm is not a death certificate.
-      if (res && res.kind === 'stale' && res.sessionId && typeof lib.classifySessionId === 'function') {
-        const recheck = await lib.classifySessionId(root, res.sessionId);
-        if (recheck === 'live' || recheck === 'unverified') return res.sessionId;
-      }
+      // Round 2 found that this fallback inherited the same bug F2 fixed in the
+      // classifier; round 3 found that re-asking a SECOND replay to confirm a
+      // 'stale' verdict races — a closure visible to the first read can be
+      // missing from the second, resurrecting a closed session. The tolerance
+      // now lives in classifyVerified itself, which decides from the one
+      // snapshot that already saw the events, so an omitted-partition pointer
+      // arrives here as 'unverified' and is accepted by the line above.
     } catch {}
     return null;
   };

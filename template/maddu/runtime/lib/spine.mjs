@@ -725,7 +725,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
         type: EVENT_TYPES.WS_IDENTITY_ANCHORED,
         actor, lane: null,
         data: { v: 1, spineIdentity, genesis },
-      }));
+      }), { maxWaitMs });
       if (pub.conflict) {
         const err = new Error(`spine append: conflicting workspace-identity anchors (${pub.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
         err.code = 'WS_IDENTITY_CONFLICT';
