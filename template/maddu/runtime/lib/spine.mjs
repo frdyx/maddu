@@ -719,6 +719,11 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
         err.code = 'WS_IDENTITY_UNRESOLVABLE';
         throw err;
       }
+      // The bound travels into the anchor publish too: identity bootstrap takes
+      // that partition's lock on the way to a first append in an anchorless
+      // workspace, so a caller that asked to be bounded would otherwise still
+      // wait forever there. (Noted here rather than in spine-append-core.mjs,
+      // which is on the monolith ratchet and may not grow.)
       const anchorTs = new Date().toISOString();
       const pub = await publishWsAnchorOnce(repoRoot, wGate.id, ({ spineIdentity, genesis }) => ({
         v: 1, id: genId(anchorTs), ts: anchorTs,
@@ -801,7 +806,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // idempotency + inline append in one critical section (r2-F4).
   if (type === EVENT_TYPES.WS_IDENTITY_RESOLVED) {
     for (let i = 0; i < 3; i++) {
-      const out = await appendWsResolutionOnce(repoRoot, ev);
+      const out = await appendWsResolutionOnce(repoRoot, ev, { maxWaitMs });
       if (out.retry) continue;
       if (out.invalid) {
         const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — ${out.invalid}`);

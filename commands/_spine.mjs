@@ -236,7 +236,14 @@ async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null
       ? sessionActive : lib;
     try {
       const res = await cacheLib.readActiveSessionVerified(root);
-      if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
+      // Round 4: the cache may name the very id we just condemned. We hold
+      // POSITIVE closure evidence for it from this invocation's classification;
+      // a second read that merely fails to see the closure is less informed,
+      // not more, and must never overturn it. Without this the candidate walks
+      // back in through the fallback meant to replace it.
+      const sameAsRejected = (id) => id === candidate;
+      if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record
+        && !sameAsRejected(res.record.sessionId)) return res.record.sessionId;
       // Round 2 found that this fallback inherited the same bug F2 fixed in the
       // classifier; round 3 found that re-asking a SECOND replay to confirm a
       // 'stale' verdict races — a closure visible to the first read can be

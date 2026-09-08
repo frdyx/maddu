@@ -889,9 +889,6 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv, { maxWai
   if (!isValidReplicaId(replicaId)) return { unresolvable: `invalid replicaId "${replicaId}"` };
   const dir = partitionDir(repoRoot, replicaId);
   await mkdir(dir, { recursive: true });
-  // The bound travels here too: identity bootstrap takes this lock on the way
-  // to a first append in an anchorless partitioned workspace, so a caller that
-  // asked to be bounded would otherwise still wait forever on this one.
   return withAppendLock(join(dir, '.append.lock'), async () => {
     let scan;
     try { scan = await scanWsAuthorityEvents(repoRoot); }
@@ -996,7 +993,7 @@ async function appendLineLocked(dir, ev, site) {
   return ev;
 }
 
-export async function appendWsResolutionOnce(repoRoot, ev) {
+export async function appendWsResolutionOnce(repoRoot, ev, { maxWaitMs = Infinity } = {}) {
   const w = await resolveWriteReplica(repoRoot);
   if (w.pending) return { retry: true };
   if (w.unattached) return { invalid: 'this checkout has sync partitions but no replica identity — run `maddu spine sync init` first' };
@@ -1041,7 +1038,7 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
     // an append-only spine.
     ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };
     return { ev: await appendLineLocked(dir, ev, 'appendWsResolutionOnce') };
-  });
+  }, { maxWaitMs });
 }
 
 // Cutover-extension check for callers ALREADY HOLDING the active funnel lock

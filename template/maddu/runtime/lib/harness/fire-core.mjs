@@ -80,7 +80,12 @@ export function createHookFireCore(deps) {
         if (c?.skipLatch?.[latchKey]) return; // already witnessed this episode
       }
       const { spine } = await loadSpineLib();
-      await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data });
+      // Bounded for the same reason as the denial witness: a strict self-disable
+      // deny AWAITS this witness before it is emitted, so an append lock held by
+      // a live process would withhold that deny too. A witness is worth waiting
+      // a moment for; it is never worth withholding a block.
+      await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data },
+        { maxWaitMs: DENY_WITNESS_MAX_WAIT_MS });
       // Set the latch ONLY after a successful append (an append failure retries).
       // Routed through the LOCKED mutator (v1.111.0) so a parallel gate's RMW
       // can't be clobbered; a witness-created counter carries no baselineInit
