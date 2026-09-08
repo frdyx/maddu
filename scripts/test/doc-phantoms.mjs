@@ -62,6 +62,14 @@ const ownsPhantom = (text) => {
   // Ownership prose must sit near a SURVIVING occurrence. The bounded window is
   // what stops the word "cockpit" in one paragraph binding to a `tokens.css`
   // far below it in the same file.
+  //
+  // KNOWN RESIDUAL: no row exercises the 80-character bound. Widening it to
+  // unbounded leaves every row green, because the failure it prevents is a
+  // FALSE POSITIVE at distance and no shipped file currently exhibits one — the
+  // per-file rows read whole files, so the bound is the only thing standing
+  // between "this file says cockpit somewhere" and "this file says tokens.css
+  // somewhere". Keep it, and if a row is ever added for it, assert a distant
+  // pair is NOT a claim rather than testing the number.
   return /\bcockpit(?:['’]s)?\b[\s\S]{0,80}?tokens\.css/i.test(masked)
     || /tokens\.css[\s\S]{0,80}?\bowned by Máddu\b/i.test(masked);
 };
