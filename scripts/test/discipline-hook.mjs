@@ -13,11 +13,16 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, appendFile, rename, unlink } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { childEnv, cleanupFixtures, events, marker, segment, tmp } from './_pr1-fixtures.mjs';
+import { append, EVENT_TYPES } from '../../template/maddu/runtime/lib/spine.mjs';
+import { EVENT_SCHEMA } from '../../template/maddu/runtime/lib/event-schema.mjs';
+import schemaGate from '../../template/maddu/runtime/gates/builtin/event-schema-complete.mjs';
+import * as discipline from '../../template/maddu/runtime/lib/discipline.mjs';
 
 const BIN = fileURLToPath(new URL('../../bin/maddu.mjs', import.meta.url));
 
@@ -28,11 +33,9 @@ function ok(name, cond, extra = '') {
 }
 
 // Fire the hook with `payload` on stdin, cwd=repo, MADDU_SESSION_ID stripped.
-function fire(repo, payload) {
+function fire(repo, payload, overrides = {}) {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env };
-    delete env.MADDU_SESSION_ID;
-    delete env.MADDU_STATE_ROOT;
+    const env = childEnv(overrides);
     const child = spawn(process.execPath, [BIN, 'hooks', 'fire', 'pre-tool-use'], { cwd: repo, env });
     let out = '', err = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -44,15 +47,150 @@ function fire(repo, payload) {
   });
 }
 
+// PR1 pins the existing blocker/remedy text independently of denyReason().
+// The additional context's wording is not specified, so match its meaning on
+// one line, then require all remaining lines to equal the inside denial.
+const SESSION_REASON = 'no active Máddu session governs this work';
+const SESSION_REMEDY = 'recover WITHOUT restarting: find your Claude session_id in .maddu/state/discipline/sessions.json (the key whose madduId is yours), then re-fire the hook with it — `echo \'{"session_id":"<uuid>","cwd":"<repo>"}\' | maddu hooks fire session-start` — which mints a fresh session AND binds it. A plain `maddu register` cannot heal this: it never sees the Claude session_id, which arrives only on hook stdin. If no Máddu session exists at all, `maddu register` is enough.';
+const SID = 'ses_20260101000000_d15c00';
+const CONTEXT = /(?:target|path).*?(?:could not|cannot|couldn't|unable to).*?inside.*?outside.*?repo/i;
+function outputOf(r) {
+  try { return JSON.parse(r.out).hookSpecificOutput; } catch { return null; }
+}
+function expectedDeny(reason, remedy) {
+  return `Máddu blocked this edit: ${reason}.\nRun:  ${remedy}\nThen retry. (Máddu enforces its own record — see \`maddu doctor\`.)`;
+}
+async function ladderFixture(rung) {
+  const root = await marker('maddu-pr1-deny-');
+  await mkdir(join(root, '.maddu', 'config'));
+  await writeFile(join(root, '.maddu', 'config', 'governance.json'), JSON.stringify({ mode: 'strict' }));
+  // No trigger allowlist: auto-claim cannot satisfy the rung being tested.
+  if (rung !== 'session') await append(root, { type: 'SESSION_REGISTERED', actor: SID, data: { role: 'implementer' } });
+  if (!['session', 'lane'].includes(rung)) await append(root, { type: 'LANE_CLAIMED', actor: SID, lane: 'pr1', data: { scope: 'PR1' } });
+  if (['slice-stop', 'commit'].includes(rung)) await append(root, {
+    type: 'GOAL_DECLARED', actor: SID, data: { objective: 'PR1 gate fixture', constraints: [], success: [] },
+  });
+  if (rung === 'slice-stop') await discipline.writeCounter(root, SID, { editsSinceSlice: 6, dirtyBaseline: [] });
+  if (rung === 'commit') {
+    // An empty disposable git repo suffices: no staging, commits or branches.
+    const git = spawnSync('git', ['init', '--quiet'], { cwd: root, env: childEnv(), encoding: 'utf8' });
+    if (git.error || git.status !== 0) throw new Error(`git fixture failed: ${git.error || git.stderr}`);
+    await writeFile(join(root, 'x.js'), 'PR1 untracked work\n');
+    await writeFile(join(root, '.maddu', 'config', 'discipline.json'), JSON.stringify({ uncommitted: { warnFiles: 1, blockFiles: 1 } }));
+    await discipline.writeCounter(root, SID, { baselineInit: true, workRoot: root, editsSinceSlice: 0, dirtyBaseline: [] });
+  }
+  return root;
+}
+
+async function pr1Denials() {
+  const rungs = [
+    ['session', SESSION_REASON, SESSION_REMEDY],
+    ['lane', 'editing without a claimed lane (hard rule #8)', 'maddu lane claim <lane>'],
+    ['goal/plan', 'no active goal or open plan governs this work', 'maddu goal set "<objective>" --success "<cmd>::<cond>"  OR  maddu plan new "<title>" --phases "..."'],
+    ['slice-stop', 'slice-stop overdue (6 edits since the last one)', `maddu slice-stop --session ${SID} "SLICE STOP: ..."`],
+    ['commit', 'uncommitted work piling up (1 files)', 'git add -A && git commit'],
+  ];
+  for (const [index, [blocker, reason, remedy]] of rungs.entries()) {
+    for (const scope of ['inside', 'unknown']) {
+      const root = await ladderFixture(blocker);
+      const env = blocker === 'session' ? {} : { MADDU_SESSION_ID: SID };
+      const payload = { tool_name: 'Bash', tool_input: { command: 'echo x > x.js' }, ...(scope === 'inside' ? { cwd: root } : {}) };
+      const classified = discipline.classifyWriteTarget({ tool: 'Bash', command: payload.tool_input.command, cwd: payload.cwd, roots: [root] });
+      if (classified !== scope) throw new Error(`target fixture: expected ${scope}, got ${classified}`);
+      // Prime only the counter normalization (not the hook/witness). Confirm
+      // the intended first rung before measuring the real child invocation.
+      const primed = await discipline.enforcePreTool(root, {
+        tool: 'Bash', command: payload.tool_input.command, cwd: payload.cwd, workRoot: root,
+        madduSessionId: blocker === 'session' ? null : SID, nowMs: Date.now(),
+      });
+      if (primed.verdict !== 'block' || primed.blocker !== blocker) {
+        throw new Error(`ladder fixture expected ${blocker}, got ${JSON.stringify(primed)}`);
+      }
+      const counterPath = join(root, '.maddu', 'state', 'discipline', 'v2', `sid.${Buffer.from(SID).toString('hex')}.json`);
+      const counterBefore = blocker === 'slice-stop' ? await readFile(counterPath) : null;
+      const before = (await events(root, 'DISCIPLINE_DENIED')).length;
+      const r = await fire(root, payload, env);
+      const hso = outputOf(r);
+      const text = hso?.permissionDecisionReason || '';
+      const lines = text.split(/\r?\n/);
+      const context = lines.filter((line) => CONTEXT.test(line));
+      const body = lines.filter((line) => !CONTEXT.test(line)).join('\n');
+      const code = `D${index + 1}-${scope}`;
+      ok(`PR1 ${code}: ${blocker} blocker and remedy survive with ${scope === 'unknown' ? 'exactly one context line' : 'no context line (negative control)'}`,
+        r.code === 0 && hso?.hookEventName === 'PreToolUse' && hso.permissionDecision === 'deny'
+        && body === expectedDeny(reason, remedy) && text.includes(reason) && text.includes(`Run:  ${remedy}`)
+        && context.length === (scope === 'unknown' ? 1 : 0) && !/would have exited/.test(r.err),
+        `exit=${r.code} contextLines=${context.length} reason=${JSON.stringify(text)}`);
+      const added = (await events(root, 'DISCIPLINE_DENIED')).slice(before);
+      const data = added[0]?.data;
+      ok(`PR1 ${code}-event: exactly one DISCIPLINE_DENIED with tool, blocker, kind and targetScope`,
+        r.code === 0 && hso?.permissionDecision === 'deny' && added.length === 1
+        && data.tool === 'Bash' && data.blocker === blocker && data.kind === 'write' && data.targetScope === scope,
+        `delta=${added.length} data=${JSON.stringify(data)}`);
+      if (counterBefore) {
+        const counterAfter = await readFile(counterPath);
+        ok(`PR1 ${code}-counter: denial append leaves the seeded counter byte-unchanged`,
+          added.length === 1 && counterBefore.equals(counterAfter),
+          `denyDelta=${added.length} counterSame=${counterBefore.equals(counterAfter)}`);
+      }
+    }
+  }
+  {
+    const root = await ladderFixture('session');
+    const before = (await events(root, 'DISCIPLINE_DENIED')).length;
+    const skippedBefore = (await events(root, 'DISCIPLINE_SKIPPED')).length;
+    const r = await fire(root, { tool_name: 'Bash', tool_input: { command: 'maddu hooks uninstall' }, cwd: root });
+    const added = (await events(root, 'DISCIPLINE_DENIED')).slice(before);
+    const skippedDelta = (await events(root, 'DISCIPLINE_SKIPPED')).length - skippedBefore;
+    const d = added[0]?.data;
+    ok('PR1 D6: self-disable counts DISCIPLINE_DENIED separately from legitimate DISCIPLINE_SKIPPED',
+      r.code === 0 && outputOf(r)?.permissionDecision === 'deny' && added.length === 1
+      && d.tool === 'Bash' && d.blocker === 'self-disable' && d.kind === 'self-disable' && d.targetScope === 'unknown'
+      && skippedDelta === 1, `denyDelta=${added.length} skippedDelta=${skippedDelta} data=${JSON.stringify(d)}`);
+  }
+  {
+    const root = await ladderFixture('session');
+    await append(root, { type: 'GOAL_DECLARED', actor: null, data: { objective: 'readable projection' } });
+    // A valid but unterminated tail leaves reads possible and makes chained
+    // append refuse deterministically. Permission bits are not portable.
+    await appendFile(segment(root), '{"pr1":"unterminated tail"}');
+    let refusal = null;
+    try { await append(root, { type: 'GOAL_DECLARED', actor: null, data: { objective: 'append probe must fail' } }); }
+    catch (e) { refusal = e; }
+    if (!refusal || !/torn|unterminated/i.test(refusal.message)) throw new Error(`append-failure fixture not established: ${refusal?.message}`);
+    const beforeBytes = await readFile(segment(root));
+    const r = await fire(root, { tool_name: 'Edit', tool_input: { file_path: 'x.js' }, cwd: root });
+    const hso = outputOf(r);
+    ok('PR1 D7: append failure preserves deny JSON, blocker, remedy and exit code (negative control)',
+      r.code === 0 && hso?.hookEventName === 'PreToolUse' && hso.permissionDecision === 'deny'
+      && hso.permissionDecisionReason === expectedDeny(SESSION_REASON, SESSION_REMEDY)
+      && beforeBytes.equals(await readFile(segment(root))) && !/would have exited/.test(r.err),
+      `exit=${r.code} decision=${hso?.permissionDecision} appendProbe=${refusal.message}`);
+    // With no append instrumentation, a failed attempt leaves no countable
+    // event. This tests containment; successful-delta rows above test cardinality.
+  }
+  {
+    const root = await marker('maddu-pr1-denied-schema-');
+    const gate = await schemaGate.run({ repoRoot: root });
+    const entry = EVENT_SCHEMA.DISCIPLINE_DENIED;
+    const fields = ['tool', 'blocker', 'kind', 'targetScope'];
+    ok('PR1 D8: DISCIPLINE_DENIED is registered, schematized and event-schema-complete passes',
+      EVENT_TYPES.DISCIPLINE_DENIED === 'DISCIPLINE_DENIED' && !!entry?.summary
+      && fields.every((key) => /^string(?:\|null)?\??$/.test(entry?.data?.[key] || '')) && gate.ok === true,
+      `type=${EVENT_TYPES.DISCIPLINE_DENIED} schema=${JSON.stringify(entry?.data)} gate=${gate.ok}: ${gate.message}`);
+  }
+}
+
 let repo;
 try {
-  repo = await mkdtemp(join(tmpdir(), 'maddu-disc-'));
+  await pr1Denials();
+  repo = await tmp('maddu-disc-', tmpdir());
   await mkdir(join(repo, '.maddu'), { recursive: true }); // marker → CLI resolves state root here
 
   // Target-aware gate: the second temp dir is a sibling, never under repo.
   // The hook only receives these command strings; it does not execute writes.
   {
-    const outside = await mkdtemp(join(tmpdir(), 'maddu-disc-outside-'));
+    const outside = await tmp('maddu-disc-outside-', tmpdir());
     try {
       const filePath = join(outside, 'scratch file.txt');
       const quote = (p) => `"${p.replaceAll('\\', '/')}"`;
@@ -92,9 +230,12 @@ try {
         if (fresh !== JSON.stringify([['.maddu/']])) throw new Error('read control requires a fresh empty repo');
         const result = await fire(absolute, { tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: absolute });
         const footprint = await tree(absolute);
-        // The absolute deletion target was checked above; it is an owned temp
-        // fixture, and the child has exited. Recreate precisely its fresh state.
-        await rm(absolute, { recursive: true, force: true });
+        // Preserve the read incarnation without deletion, then recreate the
+        // SAME absolute path. Both move endpoints are confined to its parent.
+        const archive = await tmp('pr1-read-control-', dirname(absolute));
+        const saved = join(archive, 'fixture');
+        if (dirname(archive) !== dirname(absolute) || dirname(saved) !== archive) throw new Error('read archive escaped fixture parent');
+        await rename(absolute, saved);
         await mkdir(join(absolute, '.maddu'), { recursive: true });
         if (await tree(absolute) !== fresh) throw new Error('read control did not restore the fresh fixture');
         return { result, footprint };
@@ -260,10 +401,8 @@ try {
         if (linkCreated) unlinkSync(link);
       }
     } finally {
-      // Validate the absolute cleanup target stays in the temp parent that
-      // created it before recursively removing this fixture and its children.
+      // Retain this owned fixture; recursive deletion is forbidden for PR1.
       if (dirname(resolve(outside)) !== resolve(tmpdir())) throw new Error('outside fixture escaped temp parent');
-      await rm(outside, { recursive: true, force: true });
     }
   }
 
@@ -272,8 +411,8 @@ try {
   {
     const { symlinkSync, lstatSync, realpathSync, unlinkSync } = await import('node:fs');
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
-    const fixtureParent = resolve(process.cwd());
-    const fixture = await mkdtemp(join(fixtureParent, '.hook-r1-'));
+    const fixtureParent = resolve(tmpdir());
+    const fixture = await tmp('.hook-r1-', fixtureParent);
     const governed = join(fixture, 'work');
     const outside = join(fixture, 'outside');
     const quote = (p) => `"${p.replaceAll('\\', '/')}"`;
@@ -324,7 +463,7 @@ try {
     } finally {
       if (linkCreated) unlinkSync(childLink);
       if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round1 hook fixture escaped its parent');
-      await rm(fixture, { recursive: true, force: true });
+      // Fixture roots are tracked; cleanupFixtures() removes them at the end.
     }
   }
 
@@ -334,8 +473,8 @@ try {
   if (process.platform === 'win32') {
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
     const { resolveRoots } = await import('../../template/maddu/runtime/lib/paths.mjs');
-    const fixtureParent = resolve(process.cwd());
-    const fixture = await mkdtemp(join(fixtureParent, '.hook-r3-'));
+    const fixtureParent = resolve(tmpdir());
+    const fixture = await tmp('.hook-r3-', fixtureParent);
     try {
       const state = join(fixture, 'state');
       const work = join(fixture, 'attached-work');
@@ -361,7 +500,7 @@ try {
         `expected=inside/deny actual=${scope}/${output?.permissionDecision || 'silent'} code=${result.code}`);
     } finally {
       if (dirname(resolve(fixture)) !== fixtureParent) throw new Error('round3 hook fixture escaped its parent');
-      await rm(fixture, { recursive: true, force: true });
+      // Fixture roots are tracked; cleanupFixtures() removes them at the end.
     }
   }
 
@@ -461,7 +600,7 @@ try {
   // read-modify-write would drop one (the load-bearing Codex round-2 finding).
   {
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
-    const repo2 = await mkdtemp(join(tmpdir(), 'maddu-bind-'));
+    const repo2 = await tmp('maddu-bind-', tmpdir());
     try {
       await mkdir(join(repo2, '.maddu'), { recursive: true });
       await disc.bindClaudeSession(repo2, 'claude-pre', 'ses_PRE');
@@ -473,34 +612,34 @@ try {
       const b = await disc.resolveMadduSession(repo2, 'claude-B');
       const pre = await disc.resolveMadduSession(repo2, 'claude-pre');
       ok('concurrent binds never lose an entry', a === 'ses_A' && b === 'ses_B' && pre === 'ses_PRE', `A=${a} B=${b} pre=${pre}`);
-    } finally { try { await rm(repo2, { recursive: true, force: true }); } catch {} }
+    } finally { /* Fixture root is tracked; cleanupFixtures() removes it. */ }
   }
 
   // (e3) first-ever bind in a fresh repo (no discipline/ dir yet) succeeds — the
   // lock's O_EXCL create would ENOENT without the mkdir-before-lock (Codex round-2).
   {
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
-    const repo3 = await mkdtemp(join(tmpdir(), 'maddu-bind0-'));
+    const repo3 = await tmp('maddu-bind0-', tmpdir());
     try {
       await mkdir(join(repo3, '.maddu'), { recursive: true });
       const okBind = await disc.bindClaudeSession(repo3, 'claude-fresh', 'ses_FRESH');
       const got = await disc.resolveMadduSession(repo3, 'claude-fresh');
       ok('first bind in a fresh repo creates the dir + persists', okBind === true && got === 'ses_FRESH', `okBind=${okBind} got=${got}`);
-    } finally { try { await rm(repo3, { recursive: true, force: true }); } catch {} }
+    } finally { /* Fixture root is tracked; cleanupFixtures() removes it. */ }
   }
 
   // (e4) a rebind of the SAME claude id overwrites its own mapping (a restarted
   // session re-binding to its new Máddu id must replace the stale one, not dup).
   {
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
-    const repo4 = await mkdtemp(join(tmpdir(), 'maddu-rebind-'));
+    const repo4 = await tmp('maddu-rebind-', tmpdir());
     try {
       await mkdir(join(repo4, '.maddu'), { recursive: true });
       await disc.bindClaudeSession(repo4, 'claude-X', 'ses_OLD');
       await disc.bindClaudeSession(repo4, 'claude-X', 'ses_NEW');
       const got = await disc.resolveMadduSession(repo4, 'claude-X');
       ok('rebind overwrites the same claude id', got === 'ses_NEW', `got=${got}`);
-    } finally { try { await rm(repo4, { recursive: true, force: true }); } catch {} }
+    } finally { /* Fixture root is tracked; cleanupFixtures() removes it. */ }
   }
 
   // (e5) a corrupt sessions.json is NEVER clobbered — bind returns false and the
@@ -510,7 +649,7 @@ try {
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
     const { pathsFor } = await import('../../template/maddu/runtime/lib/paths.mjs');
     const { writeFile, readFile } = await import('node:fs/promises');
-    const repo5 = await mkdtemp(join(tmpdir(), 'maddu-corrupt-'));
+    const repo5 = await tmp('maddu-corrupt-', tmpdir());
     try {
       await mkdir(join(repo5, '.maddu'), { recursive: true });
       // A real bind creates sessions.json at the canonical path; then corrupt it.
@@ -529,7 +668,7 @@ try {
       const okArr = await disc.bindClaudeSession(repo5, 'claude-Z', 'ses_Z');
       const afterArr = await readFile(mapPath, 'utf8');
       ok('wrong-shape map (array) → bind returns false, file untouched', okArr === false && afterArr === wrongShape, `okArr=${okArr}`);
-    } finally { try { await rm(repo5, { recursive: true, force: true }); } catch {} }
+    } finally { /* Fixture root is tracked; cleanupFixtures() removes it. */ }
   }
 
   // (e6) END-TO-END concurrent SessionStart: two starts with distinct Claude ids
@@ -538,12 +677,11 @@ try {
   // Claude ids to one session (Codex). Drives the real `hooks fire session-start`.
   {
     const disc = await import('../../template/maddu/runtime/lib/discipline.mjs');
-    const repo6 = await mkdtemp(join(tmpdir(), 'maddu-start-'));
+    const repo6 = await tmp('maddu-start-', tmpdir());
     try {
       await mkdir(join(repo6, '.maddu'), { recursive: true });
       const start = (claudeId) => new Promise((resolve, reject) => {
-        const env = { ...process.env };
-        delete env.MADDU_SESSION_ID; delete env.MADDU_STATE_ROOT;
+        const env = childEnv();
         const child = spawn(process.execPath, [BIN, 'hooks', 'fire', 'session-start'], { cwd: repo6, env });
         let out = '';
         child.stdout.on('data', (d) => { out += d; });
@@ -556,17 +694,50 @@ try {
       const s1 = await disc.resolveMadduSession(repo6, 'claude-1');
       const s2 = await disc.resolveMadduSession(repo6, 'claude-2');
       ok('concurrent SessionStarts bind to distinct sessions', !!s1 && !!s2 && s1 !== s2, `s1=${s1} s2=${s2}`);
-    } finally { try { await rm(repo6, { recursive: true, force: true }); } catch {} }
+    } finally { /* Fixture root is tracked; cleanupFixtures() removes it. */ }
   }
 } catch (e) {
   console.error('discipline-hook harness error:', e && e.message);
   process.exit(2);
 } finally {
-  if (repo) { try { await rm(repo, { recursive: true, force: true }); } catch {} }
+  await cleanupFixtures();
+}
+// Round 1 F1: a HELD append lock must not swallow the deny.
+//
+// The denial witness appends before the deny is written, and spine.append takes
+// the append lock with maxWaitMs: Infinity. A lock held by a LIVE pid - a
+// suspended process, or a holder on another host that cannot be reclaimed -
+// therefore made the hook wait forever, and the caller received NO deny at all.
+// A try/catch cannot see that failure: nothing throws, it simply never returns.
+// The block is the contract; the record is best-effort.
+{
+  const root = await ladderFixture('session');
+  const lockPath = join(root, '.maddu', 'events', '.append.lock');
+  await mkdir(dirname(lockPath), { recursive: true });
+  // A LIVE holder on this host: our own pid, alive by construction, so the
+  // dead-holder steal path cannot reclaim it and a waiter really must wait.
+  await writeFile(lockPath, JSON.stringify({
+    ownerId: 'pr1-f1-probe', pid: process.pid, host: hostname(), startedAt: new Date().toISOString(),
+  }));
+  const before = (await events(root, 'DISCIPLINE_DENIED')).length;
+  const started = Date.now();
+  const r = await fire(root, { tool_name: 'Bash', tool_input: { command: 'echo hi > note.txt' }, cwd: root });
+  const elapsed = Date.now() - started;
+  const json = outputOf(r);
+  const after = (await events(root, 'DISCIPLINE_DENIED')).length;
+  ok('PR1 F1: a held append lock cannot withhold the deny (bounded, still denies)',
+    r.code === 0 && json?.permissionDecision === 'deny'
+    && /no active Máddu session/.test(json?.permissionDecisionReason || '')
+    && elapsed < 20000 && after === before,
+    `exit=${r.code} decision=${json?.permissionDecision} elapsedMs=${elapsed} deniedDelta=${after - before}`);
+  try { await unlink(lockPath); } catch {}
+  // This block runs AFTER the suite-wide cleanup above, so it tidies its own
+  // fixture (round 2) rather than leaving one tree behind per run.
+  await cleanupFixtures();
 }
 
+
 console.log('');
-console.log(`discipline-hook: ${passed} pass - ${failed} fail`);
+console.log(`discipline-hook: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
-console.log('discipline-hook OK');
 process.exit(0);

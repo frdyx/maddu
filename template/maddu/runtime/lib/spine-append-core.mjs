@@ -885,7 +885,7 @@ export async function findUncoveredLosingStamp(repoRoot, authority, anchors, res
 // `buildEv` receives the merge-first nomination and returns the ws-less
 // anchor event (id/ts minted by the caller — this module has no id
 // generator).
-export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
+export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv, { maxWaitMs = Infinity } = {}) {
   if (!isValidReplicaId(replicaId)) return { unresolvable: `invalid replicaId "${replicaId}"` };
   const dir = partitionDir(repoRoot, replicaId);
   await mkdir(dir, { recursive: true });
@@ -937,7 +937,7 @@ export async function publishWsAnchorOnce(repoRoot, replicaId, buildEv) {
     const seg = await currentSegmentInDir(dir);
     await appendFile(join(dir, seg), line + '\n', { flag: 'a' });
     return { published: ev, ws: wsFromLine(mf.text) };
-  });
+  }, { maxWaitMs });
 }
 
 // Append a WS_IDENTITY_RESOLVED ceremony event ATOMICALLY: fresh scan,
@@ -993,7 +993,7 @@ async function appendLineLocked(dir, ev, site) {
   return ev;
 }
 
-export async function appendWsResolutionOnce(repoRoot, ev) {
+export async function appendWsResolutionOnce(repoRoot, ev, { maxWaitMs = Infinity } = {}) {
   const w = await resolveWriteReplica(repoRoot);
   if (w.pending) return { retry: true };
   if (w.unattached) return { invalid: 'this checkout has sync partitions but no replica identity — run `maddu spine sync init` first' };
@@ -1038,7 +1038,7 @@ export async function appendWsResolutionOnce(repoRoot, ev) {
     // an append-only spine.
     ev.data = { ...ev.data, cutover: await collectPartitionHeadsLocked(repoRoot) };
     return { ev: await appendLineLocked(dir, ev, 'appendWsResolutionOnce') };
-  });
+  }, { maxWaitMs });
 }
 
 // Cutover-extension check for callers ALREADY HOLDING the active funnel lock

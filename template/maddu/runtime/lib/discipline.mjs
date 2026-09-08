@@ -348,7 +348,13 @@ function mk(verdict, blocker, reason, remedy) { return { verdict, blocker, reaso
 
 // Render a decision into the PreToolUse deny reason (one blocker + its remedy).
 export function denyReason(decision) {
-  return `Máddu blocked this edit: ${decision.reason}.\nRun:  ${decision.remedy}\nThen retry. (Máddu enforces its own record — see \`maddu doctor\`.)`;
+  // The context line is ADDITIVE. An unknown scope is not a blocker and has
+  // no remedy of its own, so it must never displace the rung that actually
+  // stopped the write, or the command that clears it.
+  const scopeNote = decision.targetScope === 'unknown'
+    ? '\n(This write\'s target could not be placed inside or outside the repo, so it was gated as if it were inside.)'
+    : '';
+  return `Máddu blocked this edit: ${decision.reason}.\nRun:  ${decision.remedy}${scopeNote}\nThen retry. (Máddu enforces its own record — see \`maddu doctor\`.)`;
 }
 
 // ── Impure config read ──────────────────────────────────────────────────────

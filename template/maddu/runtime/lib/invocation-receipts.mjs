@@ -113,11 +113,16 @@ export function resolveStateRootSync(startDir = process.cwd(), env = process.env
 // concurrent-rotation race (current file vanishing mid-rotation) that cannot
 // be triggered from outside the seam (Codex diff-review round 2: the prior
 // race test never actually entered the rotation branch).
-export function recordInvocationSync({
-  stateRoot, verb, sub = null, exitCode = 0, durationMs = 0,
-  sessionId = null, env = process.env, rotateBytes = ROTATE_BYTES, now = null,
-  _testBeforeRename = null,
-} = {}) {
+export function recordInvocationSync(opts = {}) {
+  const {
+    stateRoot, verb, sub = null, exitCode = 0, durationMs = 0,
+    sessionId = null, env = process.env, rotateBytes = ROTATE_BYTES, now = null,
+    _testBeforeRename = null,
+  } = opts;
+  // PRESENCE of the key, not its truthiness, says whether attribution was
+  // already settled: `sessionId: null` is an ANSWER ("nobody attributable"),
+  // absence is a question. Callers that omit it keep the derivation below.
+  const attributionResolved = Object.hasOwn(opts, 'sessionId');
   try {
     if (!stateRoot || !verb) return false;
     const dir = join(stateRoot, '.maddu', 'state');
@@ -129,8 +134,16 @@ export function recordInvocationSync({
     // mislabeling attribution. The <=128 grammar bound also makes the per-line
     // disk ceiling hold BY CONSTRUCTION, not only by the .slice cap below
     // (Codex round 3 concern, now enforced at the source).
+    // audit C2: a caller that passed sessionId already decided who acted —
+    // asynchronously, BEFORE dispatch, where the spine can actually be replayed
+    // — and that decision is authoritative INCLUDING null. Re-deriving here
+    // resurrected exactly the dead env id the resolver had just dropped, which
+    // is how a closed session kept owning receipts after the actor policy was
+    // fixed everywhere else. Null means "nobody attributable", not "look again".
     let sid = null;
-    if (isRefId(sessionId)) sid = sessionId;
+    if (attributionResolved) {
+      sid = isRefId(sessionId) ? sessionId : null;
+    } else if (isRefId(sessionId)) sid = sessionId;
     else if (env && isRefId(env.MADDU_SESSION_ID)) sid = env.MADDU_SESSION_ID;
     else {
       try {

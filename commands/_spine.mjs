@@ -166,6 +166,139 @@ export async function explicitSessionFlag(flags) {
   return null;
 }
 
+// ── Ambient acting-id policy (audit C2) ─────────────────────────────────────
+// A grammar-valid MADDU_SESSION_ID is a CANDIDATE, not an answer. It is
+// classified against the spine and, when it is provably not live, DROPPED with
+// one line on stderr and attribution falls back to the verified active-session
+// cache. Absent and malformed ids are untouched by this: they fall through
+// exactly as before (silently, to null), because the plan changes what a DEAD
+// id does, not what a missing one does.
+//
+// Fail-open at every seam — an older installed runtime without the classifier,
+// an unresolvable root, a throwing replay — all keep the candidate. Dropping
+// attribution because we could not check is the wrong direction.
+const _ambientDecisions = new Map();
+let _ambientWarned = false;
+
+async function loadSessionActiveLib() {
+  let dir;
+  try { dir = await resolveLibDir(); } catch { return null; }
+  const file = join(dir, 'session-active.mjs');
+  try { await stat(file); } catch { return null; }
+  try { return await import(pathToFileURL(file).href); } catch { return null; }
+}
+
+// Decide what a grammar-valid ambient candidate resolves to. Memoized per
+// process: several commands call this more than once per invocation and the
+// classification replays the spine.
+// `repoRoot`/`sessionActive` are the caller's when it has them — resolveSessionId
+// is handed both and must not reach around its own injection points to the real
+// filesystem (that made the resolver untestable and ignored the root it was
+// given). Only the parameterless callers fall back to loading them here. The
+// memo is keyed by root so two roots in one process cannot share an answer.
+async function resolveAmbientRoot(repoRoot) {
+  if (repoRoot) return repoRoot;
+  try {
+    const dir = await resolveLibDir();
+    const paths = await import(pathToFileURL(join(dir, 'paths.mjs')).href);
+    return await resolveRepoRoot(paths);
+  } catch { return null; }
+}
+
+async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null) {
+  // Round 1 F5: resolve the root BEFORE keying the memo. Keying on the caller's
+  // ARGUMENT meant a parameterless call (receipt arming, the witness context)
+  // keyed on '' while resolveSessionId keyed on the real path — two decisions
+  // for one repo, so a single invocation could act as C while its receipt and
+  // its breach row both named B.
+  const root = await resolveAmbientRoot(repoRoot);
+  if (!root) return candidate; // cannot place the repo → keep the candidate
+  const memoKey = `${root}::${candidate}`;
+  if (_ambientDecisions.has(memoKey)) return _ambientDecisions.get(memoKey);
+  const decide = async () => {
+    const lib = (sessionActive && typeof sessionActive.classifySessionId === 'function')
+      ? sessionActive : await loadSessionActiveLib();
+    // A lib without the classifier is a pre-v1.134 runtime (or a caller's stub
+    // that does not implement it): keep the candidate, exactly as before.
+    if (!lib || typeof lib.classifySessionId !== 'function') return candidate;
+    let state;
+    try { state = await lib.classifySessionId(root, candidate); } catch { return candidate; }
+    if (state !== 'not-live') return candidate; // live, or cannot verify
+    if (!_ambientWarned) {
+      _ambientWarned = true;
+      process.stderr.write(`[maddu] MADDU_SESSION_ID ${candidate} is not a live session here — dropped; attributing to the active session instead
+`);
+    }
+    // The fallback cache read belongs to the CALLER's lib when it has one:
+    // the classifier may have come from disk, but whose active session we fall
+    // back to is the caller's question.
+    const cacheLib = (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function')
+      ? sessionActive : lib;
+    try {
+      const res = await cacheLib.readActiveSessionVerified(root);
+      // Round 4: the cache may name the very id we just condemned. We hold
+      // POSITIVE closure evidence for it from this invocation's classification;
+      // a second read that merely fails to see the closure is less informed,
+      // not more, and must never overturn it. Without this the candidate walks
+      // back in through the fallback meant to replace it.
+      const sameAsRejected = (id) => id === candidate;
+      if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record
+        && !sameAsRejected(res.record.sessionId)) return res.record.sessionId;
+      // Round 2 found that this fallback inherited the same bug F2 fixed in the
+      // classifier; round 3 found that re-asking a SECOND replay to confirm a
+      // 'stale' verdict races — a closure visible to the first read can be
+      // missing from the second, resurrecting a closed session. The tolerance
+      // now lives in classifyVerified itself, which decides from the one
+      // snapshot that already saw the events, so an omitted-partition pointer
+      // arrives here as 'unverified' and is accepted by the line above.
+    } catch {}
+    return null;
+  };
+  const p = decide();
+  _ambientDecisions.set(memoKey, p);
+  return p;
+}
+
+// Resolve attribution for an invocation RECEIPT (audit C2). Same ambient
+// policy as everywhere else, run async BEFORE dispatch so the exit handler —
+// which is synchronous and cannot replay anything — has an answer handed to
+// it. The result is authoritative including null: a dropped dead id must not
+// come back when the writer looks at the environment again.
+export async function resolveReceiptSid(repoRoot = null) {
+  const env = process.env.MADDU_SESSION_ID;
+  const g = await loadIdGrammar();
+  if (env) {
+    // Round 2: with no grammar available we cannot tell a good id from a
+    // malformed one, so we have no ANSWER — returning the raw env made a
+    // malformed value authoritative and suppressed the writer's own cache
+    // fallback on exactly the version-skew installs this branch exists for.
+    if (!g) return undefined;
+    // A malformed ambient id is not a candidate; fall through to the cache
+    // exactly as the writer used to.
+    if (g.isRefId(env)) return decideAmbientSid(env, repoRoot);
+  }
+  // Round 1 F4: UNDEFINED means "resolution was unavailable"; null means
+  // "resolved to nobody". The caller must be able to tell them apart, or a
+  // missing runtime lib becomes an authoritative null that suppresses the
+  // writer's own env/cache derivation — attribution lost precisely where this
+  // resolver could not run.
+  const lib = await loadSessionActiveLib();
+  if (!lib || typeof lib.readActiveSessionVerified !== 'function') return undefined;
+  const root = await resolveAmbientRoot(repoRoot);
+  if (!root) return undefined;
+  try {
+    const res = await lib.readActiveSessionVerified(root);
+    if (!res) return null;
+    if ((res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
+    // Pre-v1.111 libs return a RAW record rather than the discriminated union;
+    // ignoring that shape lost the cache id on older installs (round 1 F4).
+    if (!res.kind && typeof res.sessionId === 'string' && !res.stale) {
+      return (g && !g.isRefId(res.sessionId)) ? null : res.sessionId;
+    }
+  } catch { return undefined; }
+  return null;
+}
+
 // CP3 (PR-B): resolve the AMBIENT acting-session id from the environment,
 // grammar-gated, for the many command sites that stamped an event actor from a
 // raw `process.env.MADDU_SESSION_ID || null`. A malformed MADDU_SESSION_ID is
@@ -177,8 +310,9 @@ export async function envActingSid() {
   const v = process.env.MADDU_SESSION_ID;
   if (!v) return null;
   const g = await loadIdGrammar();
-  if (g) return g.isRefId(v) ? v : null;
-  return v; // pre-PR-B lib: today's behavior (raw env)
+  if (!g) return v; // pre-PR-B lib: today's behavior (raw env)
+  if (!g.isRefId(v)) return null; // malformed: ambient, silent, unchanged
+  return decideAmbientSid(v);
 }
 
 // CP5 (PR-B): resolve a parent session id for a registration. Grammar + an
@@ -238,8 +372,17 @@ export async function resolveSessionId(repoRoot, flags, sessionActive) {
   // explicit request → treated as absent (fall through), never thrown.
   const env = process.env.MADDU_SESSION_ID;
   if (env) {
-    if (g) { if (g.isRefId(env)) return env; }
-    else if (env.length > 0) return env;
+    // Same three-state policy as envActingSid: a grammar-valid candidate must
+    // also be LIVE before it outranks the verified cache below (audit C2).
+    if (g) {
+      if (g.isRefId(env)) {
+        // Round 2: the decision is AUTHORITATIVE, null included. `if (decided)`
+        // threw a memoized null away and ran the cache step again, so a session
+        // registered by another process between arming and resolution gave one
+        // invocation two identities (receipt null, command C).
+        return decideAmbientSid(env, repoRoot, sessionActive);
+      }
+    } else if (env.length > 0) return env;
   }
   if (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function') {
     const res = await sessionActive.readActiveSessionVerified(repoRoot);

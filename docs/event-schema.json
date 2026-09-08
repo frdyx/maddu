@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.20.0",
+  "x-contractVersion": "1.21.0",
   "type": "object",
   "required": [
     "v",
@@ -193,6 +193,7 @@
         "WS_IDENTITY_ANCHORED",
         "WS_IDENTITY_RESOLVED",
         "DISCIPLINE_SKIPPED",
+        "DISCIPLINE_DENIED",
         "MUTATION_UNWITNESSED",
         "ENFORCEMENT_ERROR",
         "VERIFICATION_STARTED",
@@ -5762,6 +5763,50 @@
       "if": {
         "properties": {
           "type": {
+            "const": "DISCIPLINE_DENIED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A mutating tool call was BLOCKED by the discipline gate — DISCIPLINE_SKIPPED's opposite number: that one witnesses a check that did not run, this one witnesses a check that bit. `blocker` is the ritual rung that stopped it (session, lane, goal/plan, slice-stop, commit) and `targetScope` records whether the write's target could be placed inside the repo, outside it, or not at all. Appended before the deny is written and inside its own try/catch, so an unwritable spine costs the record but never the block.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "blocker": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "targetScope": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
             "const": "MUTATION_UNWITNESSED"
           }
         }
@@ -6090,6 +6135,15 @@
               },
               "subject": {
                 "type": "object"
+              },
+              "argv": {
+                "type": "array"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "number"
               }
             }
           }

@@ -105,6 +105,15 @@ async function bindings(repo) {
   try { return JSON.parse(await readFile(bindingsPath(repo), 'utf8')); } catch { return {}; }
 }
 
+// v1.134.0: these two count SESSION LIFECYCLE appends, not every append. The
+// invariant they exist for is named in the comments above — no register/close
+// STORM from a mint that cannot bind — and that is what is asserted. A blocked
+// edit now also appends one DISCIPLINE_DENIED per decision (the witness that
+// the gate bit), which is bounded by tool calls rather than unbounded per
+// repair-attempt, and suppressing it precisely where the session state is
+// broken would blind the record exactly where it is most needed.
+const LIFECYCLE = new Set(['SESSION_REGISTERED', 'SESSION_AUTO_REGISTERED', 'SESSION_CLOSED', 'SESSION_AUTO_CLOSED']);
+const lifecycleOf = (events) => events.filter((e) => LIFECYCLE.has(e.type));
 async function spineEvents(repo) {
   const dir = join(repo, '.maddu', 'events');
   let files = [];
@@ -415,12 +424,12 @@ async function main() {
     const repo = await freshRepo('maddu-mint-corrupt-'); repos.push(repo);
     await mkdir(dirname(bindingsPath(repo)), { recursive: true });
     await writeFile(bindingsPath(repo), '{not json');
-    const before = (await spineEvents(repo)).length;
+    const before = lifecycleOf(await spineEvents(repo)).length;
     const res1 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-H'));
     const res2 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-H'));
     const after = await spineEvents(repo);
-    ok('corrupt map: ZERO spine appends across two edits (no register/close storm)',
-      after.length === before, `before=${before} after=${after.length} types=${JSON.stringify(after.map((e) => e.type))}`);
+    ok('corrupt map: ZERO session lifecycle appends across two edits (no register/close storm)',
+      lifecycleOf(after).length === before, `before=${before} after=${lifecycleOf(after).length} types=${JSON.stringify(after.map((e) => e.type))}`);
     const d1 = parseHook(res1.out), d2 = parseHook(res2.out);
     ok('corrupt map: the session deny stands (legacy remedy leads to the repair)',
       d1.deny && SESSION_DENY_RE.test(d1.reason) && d2.deny && SESSION_DENY_RE.test(d2.reason), d1.reason.slice(0, 80));
@@ -444,12 +453,12 @@ async function main() {
     if (win) await chmod(bindingsPath(repo), 0o444);
     else await chmod(dir, 0o555);
     try {
-      const before = (await spineEvents(repo)).length;
+      const before = lifecycleOf(await spineEvents(repo)).length;
       const res1 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-J'));
       const res2 = await fire(repo, 'pre-tool-use', EDIT(repo, 'claude-J'));
       const after = await spineEvents(repo);
-      ok(`unwritable map (${win ? 'read-only file' : 'read-only dir'}): ZERO spine appends across two edits`,
-        after.length === before, `before=${before} after=${after.length} types=${JSON.stringify(after.map((e) => e.type))}`);
+      ok(`unwritable map (${win ? 'read-only file' : 'read-only dir'}): ZERO session lifecycle appends across two edits`,
+        lifecycleOf(after).length === before, `before=${before} after=${lifecycleOf(after).length} types=${JSON.stringify(after.map((e) => e.type))}`);
       const d1 = parseHook(res1.out), d2 = parseHook(res2.out);
       ok('unwritable map: the session deny stands', d1.deny && SESSION_DENY_RE.test(d1.reason) && d2.deny && SESSION_DENY_RE.test(d2.reason), d1.reason.slice(0, 80));
       // Codex r7: a failed bind must not LEAK its temp file — otherwise the

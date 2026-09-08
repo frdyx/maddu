@@ -242,9 +242,10 @@ async function prepareMutationWitness(ws) {
 
 // Read-shape matching (plan-review r4 F1): a _tiers.mjs `readShapes` entry is
 // a string (single leading token; '(bare)' = no token-shaped first arg) or
-// { tokens: [...], requiredFlags: [...] } — leading tokens must equal
-// `tokens` exactly AND every required flag must be present. Anything
-// unmatched on a mutating verb is mutating (mutation wins).
+// { tokens: [...], requiredFlags: [...] } — leading tokens are matched as a
+// PREFIX (trailing sub-tokens do not defeat the match) AND every required
+// flag must be present. Anything unmatched on a mutating verb is mutating
+// (mutation wins).
 function matchesReadShape(shape, rest) {
   const first = typeof rest[0] === 'string' && !rest[0].startsWith('-') ? rest[0] : null;
   if (typeof shape === 'string') {
@@ -283,11 +284,26 @@ async function armCommandWitness(ws, raw, rest) {
     const isRead = mode === 'read';
     // Grammar-gated session attribution (sid-surface-census: raw session-env
     // reads must be inline-gated; a malformed inherited id is dropped to null).
+    // Grammar alone let a CLOSED id own every breach row this guard wrote
+    // (audit C2). The witness names an ACTOR, so it takes the same three-state
+    // ambient policy as the command actors it sits beside; fail-open to the
+    // old grammar-only read if the resolver cannot be loaded.
     const isRefId = (v) => typeof v === 'string' && /^[\w.-]{1,128}$/.test(v);
+    let witnessSid = isRefId(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null;
+    try {
+      const { resolveReceiptSid } = await import(pathToFileURL(join(repoRoot, 'commands', '_spine.mjs')).href);
+      if (typeof resolveReceiptSid === 'function') {
+        const answer = await resolveReceiptSid();
+        // Same distinction as the receipt path: keep the grammar-gated env
+        // reading when resolution was unavailable, rather than blanking the
+        // witness actor (round 1 F4).
+        if (answer !== undefined) witnessSid = answer;
+      }
+    } catch {}
     const ctx = ws.lib.createWitnessContext(`cli:${raw}${subRaw ? ' ' + subRaw : ''}`, {
       mode: isRead ? 'read' : 'mutating',
       surface: 'cli', verb: raw, sub: subRaw,
-      sessionId: isRefId(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null,
+      sessionId: witnessSid,
     });
     ws.lib.armCliWitness(ctx);
     ws.ctx = ctx;
@@ -400,6 +416,22 @@ async function armInvocationReceipt(raw, rest) {
     const subRaw = COMMANDS.includes(raw) && Array.isArray(rest) && typeof rest[0] === 'string' ? rest[0] : null;
     const sub = subRaw && /^[a-z][a-z0-9-]{0,31}$/i.test(subRaw) ? subRaw.toLowerCase() : null;
     const t0 = Date.now();
+    // Attribution is decided HERE — async, before the command runs — because
+    // the exit handler below is synchronous and cannot replay the spine to ask
+    // whether an ambient id is still alive. Fail-open to unresolved (the old
+    // env/cache derivation) only when the resolver itself is unavailable.
+    let resolvedSid = null, attributionResolved = false;
+    try {
+      const { resolveReceiptSid } = await import(pathToFileURL(join(repoRoot, 'commands', '_spine.mjs')).href);
+      if (typeof resolveReceiptSid === 'function') {
+        const answer = await resolveReceiptSid();
+        // Round 1 F4: undefined means the resolver could not run — NOT that
+        // nobody was acting. Treating it as an answer passed an authoritative
+        // null downstream and suppressed the writer's own env/cache
+        // derivation, losing attribution exactly where this path failed.
+        if (answer !== undefined) { resolvedSid = answer; attributionResolved = true; }
+      }
+    } catch {}
     process.on('exit', (code) => {
       try {
         const stateRoot = lib.resolveStateRootSync(process.cwd(), process.env);
@@ -412,6 +444,10 @@ async function armInvocationReceipt(raw, rest) {
           exitCode: typeof process.exitCode === 'number' ? process.exitCode
             : (typeof code === 'number' ? code : 0),
           durationMs: Date.now() - t0,
+          // Hand over an answer only when we actually have one: omitting the
+          // key lets the writer keep its own derivation on the fail-open path,
+          // rather than recording an authoritative null we never determined.
+          ...(attributionResolved ? { sessionId: resolvedSid } : {}),
         });
       } catch {}
     });

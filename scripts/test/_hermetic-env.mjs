@@ -44,6 +44,11 @@ const SCRUB = Object.freeze([
   'MADDU_REPLAY_TEST_CLEANUP_FAIL',
   'MADDU_TEST_MINT_HOLD_MS',
   'MADDU_TEST_ADDPHASE_RACE',
+  // The mutation-witness zero-credit seam. Same class as the rest of this
+  // group and it was simply missing: an ambient value makes every mutating
+  // fixture command breach, which reads as a witness defect rather than as
+  // inherited state.
+  '__MADDU_TEST_ZERO_CREDIT__',
   // The SessionStart hook appends `export MADDU_SESSION_ID=...` to
   // CLAUDE_ENV_FILE when set — an inherited value lets a fixture's
   // session-start fire WRITE INTO the developer's live env file, pinning a

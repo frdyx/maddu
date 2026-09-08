@@ -53,6 +53,10 @@ export function createHookFireCore(deps) {
   // healthy eval clears the latch (discipline.enforcePreTool); a self-disable ATTEMPT
   // is NEVER latched (each is a distinct incident). The latch is set ONLY after a
   // successful append, so an append failure retries next time (F6).
+  // How long the denial witness may hold up the deny it describes. The record
+  // is worth waiting a moment for; it is never worth withholding the block.
+  const DENY_WITNESS_MAX_WAIT_MS = 2000;
+
   async function witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterKey }) {
     try {
       const enf = decision.enforcement, kind = decision.kind, action = decision.action;
@@ -76,7 +80,12 @@ export function createHookFireCore(deps) {
         if (c?.skipLatch?.[latchKey]) return; // already witnessed this episode
       }
       const { spine } = await loadSpineLib();
-      await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data });
+      // Bounded for the same reason as the denial witness: a strict self-disable
+      // deny AWAITS this witness before it is emitted, so an append lock held by
+      // a live process would withhold that deny too. A witness is worth waiting
+      // a moment for; it is never worth withholding a block.
+      await spine.append(repoRoot, { type: spine.EVENT_TYPES[type], actor: data.sessionId, data },
+        { maxWaitMs: DENY_WITNESS_MAX_WAIT_MS });
       // Set the latch ONLY after a successful append (an append failure retries).
       // Routed through the LOCKED mutator (v1.111.0) so a parallel gate's RMW
       // can't be clobbered; a witness-created counter carries no baselineInit
@@ -727,8 +736,18 @@ export function createHookFireCore(deps) {
       // counter behind — the same footprint a read-only Bash leaves (the
       // CLI's invocation receipt included). Absent on an older installed
       // lib → no narrowing (gated as before).
-      if ((kind === 'edit' || kind === 'write') && typeof disc?.classifyWriteTarget === 'function'
-        && disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] }) === 'outside') process.exit(0);
+      // Classified ONCE and kept: 'outside' leaves immediately, but 'unknown'
+      // has to travel with the decision. A target we could not place is gated
+      // as if it were inside (correct), and the person on the other end then
+      // read a blocker about a file the gate could not even locate. The scope
+      // is not the blocker - it is context the message owes them.
+      const targetScope = typeof disc?.classifyWriteTarget === 'function'
+        ? disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] })
+        : null;
+      // Only a plain edit/write earns the outside exemption. A self-disable or
+      // an ambiguous command is gated wherever it points — its scope is
+      // recorded for the witness, never used to wave it through.
+      if ((kind === 'edit' || kind === 'write') && targetScope === 'outside') process.exit(0);
 
       // CENTRALIZED acting-sid resolution (v1.111.0), LIVENESS-AWARE since
       // B1/B2: validated ONCE, then every consumer — auto-claim, enforcement,
@@ -823,6 +842,36 @@ export function createHookFireCore(deps) {
       await witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterKey });
 
       if (decision.verdict === 'block') {
+        // The message speaks about a WRITE's target, so only a write carries
+        // the scope into it; the event below records the scope either way.
+        decision.targetScope = (kind === 'edit' || kind === 'write') ? targetScope : null;
+        // One record per blocked decision, in its own try/catch and BEFORE the
+        // deny is written. The deny is the contract with the caller and must
+        // survive an unwritable spine, so an append failure changes nothing
+        // the caller sees - not the blocker, not the remedy, not the exit
+        // code. It also touches no counter: being denied is not an edit.
+        // Round 1 F1 / round 2: BOUNDED, and bounded at the right place. The
+        // append lock defaults to maxWaitMs: Infinity, so a lock held by a live
+        // process made the hook wait forever and the deny was never written at
+        // all — a try/catch only covers rejection, and a hang throws nothing.
+        //
+        // The first fix raced the whole append against a timer, which round 2
+        // showed trades a hang for something worse: Promise.race cancels
+        // nothing, so exiting on the timer could abandon an append MID-WRITE
+        // and leave a torn tail that refuses every later append. The bound
+        // belongs on acquiring the lock — the only unbounded part. Now the
+        // append either gets the lock and completes, or gives up before
+        // writing a byte, and the deny goes out either way.
+        try {
+          const { spine } = await loadSpineLib();
+          if (spine?.EVENT_TYPES?.DISCIPLINE_DENIED) {
+            await spine.append(repoRoot, {
+              type: spine.EVENT_TYPES.DISCIPLINE_DENIED,
+              actor: sid || null,
+              data: { tool: tool || null, blocker: decision.blocker || null, kind: kind || null, targetScope: targetScope || null },
+            }, { maxWaitMs: DENY_WITNESS_MAX_WAIT_MS });
+          }
+        } catch {}
         process.stdout.write(JSON.stringify({
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',

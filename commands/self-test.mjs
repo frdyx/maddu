@@ -69,7 +69,23 @@ export default async function selfTest(argv) {
   const isList = argv.includes('--list');
   if (recordVerification && spine && spine.append && !isList && argsValid) {
     let captured = null;
-    const stActor = (spine.isRefId && spine.isRefId(process.env.MADDU_SESSION_ID)) ? process.env.MADDU_SESSION_ID : null;
+    // The verification receipt names an ACTOR, so the grammar is not enough:
+    // a closed or never-registered ambient id would sign off a self-test run it
+    // had nothing to do with (audit C2). Same three-state policy as the command
+    // actors, fail-open to the old grammar-only read if the resolver is absent.
+    let stActor = (spine.isRefId && spine.isRefId(process.env.MADDU_SESSION_ID)) ? process.env.MADDU_SESSION_ID : null;
+    try {
+      const { resolveReceiptSid } = await import('./_spine.mjs');
+      // Round 1 F3: resolve against frameworkRoot — the spine this receipt is
+      // written TO. Resolving from process.cwd() meant running the framework's
+      // CLI from another repo classified the id against THAT repo's spine, so a
+      // legitimate live session was dropped and the receipt could name a
+      // session never registered in its own destination.
+      if (typeof resolveReceiptSid === 'function') {
+        const resolved = await resolveReceiptSid(frameworkRoot);
+        if (resolved !== undefined) stActor = resolved;
+      }
+    } catch {}
     const out = await recordVerification(frameworkRoot, { spine, actor: stActor, lane: process.env.MADDU_LANE || null }, {
       kind: 'self-test', profile,
       run: async () => runner.runSelfTestCli(argv, { frameworkRoot, onResult: (r) => { captured = r; } }),
@@ -81,6 +97,12 @@ export default async function selfTest(argv) {
       derive: () => captured ? {
         complete: captured.complete !== false,
         result: captured.ok === true ? 'pass' : 'fail',
+        // Same provenance as the report files: the receipt is the tamper-
+        // detecting half of the pair, so it must be able to say which
+        // invocation it is a receipt FOR.
+        argv: Array.isArray(captured.argv) ? captured.argv : null,
+        cwd: typeof captured.cwd === 'string' ? captured.cwd : null,
+        pid: Number.isInteger(captured.pid) ? captured.pid : null,
         counts: captured.counts
           ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total, taskSkipped: captured.counts.taskSkipped || 0 }
           : null,

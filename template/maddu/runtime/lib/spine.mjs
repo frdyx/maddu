@@ -324,6 +324,7 @@ export const EVENT_TYPES = {
   // the hook-handler seam (discipline.mjs stays spine-less). data:
   //   { reason, tool, sessionId, enforcement, blocked? }
   DISCIPLINE_SKIPPED:         'DISCIPLINE_SKIPPED',
+  DISCIPLINE_DENIED:          'DISCIPLINE_DENIED',
   MUTATION_UNWITNESSED:       'MUTATION_UNWITNESSED',
   // audit P2 — the discipline enforcement path threw and fell open. Recording the
   // failure keeps a silent fail-open from hiding a persistent enforcement bug.
@@ -611,7 +612,12 @@ async function lastEventLine(paths) {
   return null;
 }
 
-export async function append(repoRoot, { type, actor = null, lane = null, data = {}, triggered_by = null }) {
+// `maxWaitMs` bounds how long the APPEND LOCK is waited for, not the write.
+// Default Infinity — every existing caller is unchanged. A caller that must
+// stay responsive (the PreToolUse denial witness) passes a bound so a lock
+// held by a live process makes the append GIVE UP BEFORE IT STARTS WRITING,
+// rather than being abandoned part-way through one.
+export async function append(repoRoot, { type, actor = null, lane = null, data = {}, triggered_by = null }, { maxWaitMs = Infinity } = {}) {
   if (!EVENT_TYPES[type]) {
     throw new Error(`unknown event type: ${type}`);
   }
@@ -713,13 +719,18 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
         err.code = 'WS_IDENTITY_UNRESOLVABLE';
         throw err;
       }
+      // The bound travels into the anchor publish too: identity bootstrap takes
+      // that partition's lock on the way to a first append in an anchorless
+      // workspace, so a caller that asked to be bounded would otherwise still
+      // wait forever there. (Noted here rather than in spine-append-core.mjs,
+      // which is on the monolith ratchet and may not grow.)
       const anchorTs = new Date().toISOString();
       const pub = await publishWsAnchorOnce(repoRoot, wGate.id, ({ spineIdentity, genesis }) => ({
         v: 1, id: genId(anchorTs), ts: anchorTs,
         type: EVENT_TYPES.WS_IDENTITY_ANCHORED,
         actor, lane: null,
         data: { v: 1, spineIdentity, genesis },
-      }));
+      }), { maxWaitMs });
       if (pub.conflict) {
         const err = new Error(`spine append: conflicting workspace-identity anchors (${pub.conflict.join(', ')}) — run \`maddu spine identity resolve --keep <ws_...>\``);
         err.code = 'WS_IDENTITY_CONFLICT';
@@ -795,7 +806,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   // idempotency + inline append in one critical section (r2-F4).
   if (type === EVENT_TYPES.WS_IDENTITY_RESOLVED) {
     for (let i = 0; i < 3; i++) {
-      const out = await appendWsResolutionOnce(repoRoot, ev);
+      const out = await appendWsResolutionOnce(repoRoot, ev, { maxWaitMs });
       if (out.retry) continue;
       if (out.invalid) {
         const err = new Error(`spine append: WS_IDENTITY_RESOLVED refused — ${out.invalid}`);
@@ -836,7 +847,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);
     if (w.id) {
-      try { return credit(await appendPartitioned(repoRoot, w.id, ev)); }
+      try { return credit(await appendPartitioned(repoRoot, w.id, ev, { maxWaitMs })); }
       catch (err) { await restampOrRethrow(err); continue; }
     }
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
@@ -863,8 +874,8 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     // backstop for a rename that slips between currentSegment and appendFile (a
     // migration renaming a segment out from under us — never in pure default mode).
     try {
-      const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
-      if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev));
+      const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs });
+      if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev, { maxWaitMs }));
       if (outcome.unattached) {
         const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
         err.code = 'REPLICA_UNATTACHED';

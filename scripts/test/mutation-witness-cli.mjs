@@ -16,10 +16,12 @@
 // Exit codes: 0 = OK, 1 = a check failed, 2 = harness error.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, unlink } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv, cleanupFixtures, install, tmp } from './_pr1-fixtures.mjs';
+import { append } from '../../template/maddu/runtime/lib/spine.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -34,9 +36,10 @@ function ok(name, cond, extra = '') {
 function run(fix, args, env = {}) {
   const r = spawnSync('node', [SOURCE_BIN, ...args], {
     cwd: fix, encoding: 'utf8', timeout: 60000,
-    env: { ...process.env, ...env },
+    env: childEnv(env),
   });
-  return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  if (r.error) throw r.error;
+  return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), stderr: r.stderr || '' };
 }
 const spoolDir = (fix) => join(fix, '.maddu', 'state', 'mutation-breaches');
 async function spoolRows(fix) {
@@ -49,7 +52,60 @@ async function spineEvents(fix, type) {
 }
 
 try {
-  const fix = await mkdtemp(join(tmpdir(), 'mw-cli-'));
+  // PR1: each shape gets a fresh install and an EMPTY spool before dispatch.
+  // A dirty spool would credit its drain and hide a misclassified read.
+  const readShapes = [
+    ['session', 'tree'], ['session', 'active'], ['skill', 'candidates'],
+    ['skill', 'candidates', 'list'], ['lane', 'suggest'],
+  ];
+  for (const [index, args] of readShapes.entries()) {
+    const root = await install();
+    if (args.join(' ') === 'session active') {
+      const start = run(root, ['session', 'start', 'PR1 active read']);
+      if (start.status !== 0) throw new Error(`session-active fixture failed: ${start.out}`);
+    }
+    const beforeSpool = await spoolRows(root);
+    const before = (await spineEvents(root, 'MUTATION_UNWITNESSED')).length;
+    const result = run(root, args);
+    const afterSpool = await spoolRows(root);
+    const delta = (await spineEvents(root, 'MUTATION_UNWITNESSED')).length - before;
+    ok(`PR1 MW${index + 1}: ${args.join(' ')} is read-only from an empty spool`,
+      beforeSpool.length === 0 && result.status === 0 && afterSpool.length === 0 && delta === 0,
+      `beforeSpool=${beforeSpool.length} exit=${result.status} afterSpool=${afterSpool.length} breachDelta=${delta}`);
+  }
+  for (const [index, flag] of ['--adopt', '--prune'].entries()) {
+    const root = await install();
+    const lane = 'pr1-witness-lane';
+    const catalogPath = join(root, '.maddu', 'lanes', 'catalog.json');
+    const catalog = JSON.parse(await readFile(catalogPath, 'utf8'));
+    if (flag === '--adopt') {
+      for (let n = 0; n < 3; n++) {
+        await append(root, { type: 'LANE_CLAIMED', actor: null, lane, data: { scope: 'PR1 observed claim' } });
+      }
+    } else {
+      catalog.lanes.push({ id: lane, scope: 'PR1 never claimed' });
+      await writeFile(catalogPath, JSON.stringify(catalog) + '\n');
+    }
+    const beforeSpool = await spoolRows(root);
+    const before = (await spineEvents(root, 'MUTATION_UNWITNESSED')).length;
+    const mutationType = flag === '--adopt' ? 'LANE_ADDED' : 'LANE_REMOVED';
+    const mutationBefore = (await spineEvents(root, mutationType)).length;
+    const result = run(root, ['lane', 'suggest', flag, lane], { __MADDU_TEST_ZERO_CREDIT__: '1' });
+    const afterSpool = await spoolRows(root);
+    const signals = result.stderr.split(/\r?\n/).filter((line) => line.includes('MUTATION_UNWITNESSED'));
+    const mutationDelta = (await spineEvents(root, mutationType)).length - mutationBefore;
+    const beforeDrain = (await spineEvents(root, 'MUTATION_UNWITNESSED')).length;
+    const drain = run(root, ['plan', 'list']);
+    const drainDelta = (await spineEvents(root, 'MUTATION_UNWITNESSED')).length - beforeDrain;
+    ok(`PR1 MW${index + 6}: lane suggest ${flag} stays mutating (negative control)`,
+      beforeSpool.length === 0 && result.status === 1 && afterSpool.length === 1
+      && signals.length === 1 && /MUTATION_UNWITNESSED — lane exited 0 with zero spine appends/.test(signals[0])
+      && mutationDelta === 1 && beforeDrain === before && drain.status === 0 && drainDelta === 1
+      && (await spoolRows(root)).length === 0,
+      `beforeSpool=${beforeSpool.length} exit=${result.status} spool=${afterSpool.length} signals=${signals.length} mutationDelta=${mutationDelta} drainDelta=${drainDelta}`);
+  }
+
+  const fix = await tmp('mw-cli-');
   const init = run(fix, ['init']);
   ok('fresh init exits 0 with an empty spool (raw genesis writes witnessed)',
     init.status === 0 && (await spoolRows(fix)).length === 0, `exit=${init.status}`);
@@ -189,17 +245,18 @@ try {
     .replace(/import \{ witnessSpineAppend \} from '\.\/mutation-witness\.mjs';\r?\n/, '')
     .replace(/const credit = \(out\) => \{ witnessSpineAppend\(\); return out; \};/, 'const credit = (out) => out;');
   if (spineSrc.includes('mutation-witness')) throw new Error('pre-S1 spine rewrite failed — fixture spine still references the witness lib');
-  const { writeFile } = await import('node:fs/promises');
   await writeFile(spinePath, spineSrc);
   const inert = run(fix, ['goal', 'set', '--objective', 'inert-run'], { __MADDU_TEST_ZERO_CREDIT__: '1' });
   ok('new bin against a pre-S1 runtime tree: verb runs normally, guard inert',
     inert.status === 0 && (await spoolRows(fix)).length === 0 && !/MUTATION_UNWITNESSED/.test(inert.out),
     `exit=${inert.status}`);
 
-  await rm(fix, { recursive: true, force: true });
+  // Fixture roots are tracked; cleanupFixtures() removes them at the end.
+  await cleanupFixtures();
   console.log(`\nmutation-witness-cli: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 } catch (err) {
   console.error('harness error:', err?.stack || err);
+  await cleanupFixtures();
   process.exit(2);
 }

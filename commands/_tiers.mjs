@@ -40,7 +40,8 @@
 // read mode: counted, never breached). An entry is either a string (single
 // leading token; the sentinel '(bare)' = no token-shaped first arg) or
 // `{ tokens: [...], requiredFlags: [...] }` — the invocation's leading
-// tokens must equal `tokens` exactly AND every listed flag must be present.
+// tokens are matched as a PREFIX — a declared ['candidates'] also admits
+// `candidates list` — AND every listed flag must be present.
 // ANYTHING UNMATCHED IS MUTATING (mutation-wins precedence). The
 // command-tier-discipline census verifies every declared shape token appears
 // in the verb's source (stale claim = FAIL) and scans its arm with the
@@ -114,8 +115,14 @@ export default {
   runtime:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show'] },
   schedule:     { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'show', 'parse'] },
   search:       { tier: 'read-only', autoTrigger: 'allowed',   surface: 'agent',     layer: 'core' },
-  session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list'] },
-  skill:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show'] },
+  // `tree` and `active` READ the session graph and the active pointer. They
+  // were mutating-by-verb, so every invocation breached the witness on the
+  // way out (audit C1) — the guard was recording a violation for a command
+  // that correctly wrote nothing. `close`/`start` stay mutating.
+  session:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['list', 'tree', 'active'] },
+  // `candidates` scans for skill candidates and prints them; the shape match
+  // is a PREFIX test, so this covers `candidates list` too (audit C1).
+  skill:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'agent',     layer: 'core', readShapes: ['list', 'show', 'candidates'] },
   slice:        { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['show'] },
   'slice-stop': { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core' },
   sources:      { tier: 'mutating',  autoTrigger: 'forbidden', surface: 'operator',  layer: 'core', readShapes: ['(bare)', 'status'] },

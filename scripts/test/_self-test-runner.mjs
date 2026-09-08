@@ -271,11 +271,19 @@ export async function runSelfTest(options = {}) {
   // literally "failed".
   const failOnSkip = options.failOnSkip === true;
   const ok = counts.fail === 0 && !(failOnSkip && counts.taskSkipped > 0);
+  // WHO ran this, from WHERE, as WHAT process. A report that says only "quick
+  // profile, 181 passed" cannot be told apart from another machine's run, a
+  // narrowed run, or a run someone pasted in — the recency readouts trust these
+  // files, so they have to carry their own provenance.
+  const inv = options.invocation && typeof options.invocation === 'object' ? options.invocation : null;
   const report = {
     schemaVersion: 1,
     ts: new Date().toISOString(),
     profile: plan.profile,
     durationMs,
+    argv: Array.isArray(inv?.argv) ? inv.argv : process.argv.slice(3),
+    cwd: typeof inv?.cwd === 'string' ? inv.cwd : process.cwd(),
+    pid: Number.isInteger(inv?.pid) ? inv.pid : process.pid,
     counts,
     results,
   };
@@ -286,6 +294,7 @@ export async function runSelfTest(options = {}) {
     ok,
     exitCode: ok ? 0 : 1,
     profile: plan.profile,
+    argv: report.argv, cwd: report.cwd, pid: report.pid,
     // audit P3 — a run narrowed by --only/--skip is not a full profile and must
     // not qualify as recency (carried on the VERIFICATION_RAN receipt). audit P4
     // extends this: a run with ANY skipped task is likewise not a complete
@@ -350,7 +359,13 @@ export async function runSelfTestCli(argv, options = {}) {
       console.log(parsed.json ? listJson(plan) : listText(plan));
       return 0;
     }
-    const result = await runSelfTest({ ...parsed, frameworkRoot: options.frameworkRoot });
+    // Provenance travels from the CLI seam, where the real invocation is
+    // known: argv here is already the args AFTER the verb, which is what a
+    // reader needs to reproduce the run.
+    const result = await runSelfTest({
+      ...parsed, frameworkRoot: options.frameworkRoot,
+      invocation: { argv: [...argv], cwd: process.cwd(), pid: process.pid },
+    });
     if (typeof options.onResult === 'function') { try { options.onResult(result); } catch {} }
     console.log(parsed.json ? resultJson(result) : resultText(result));
     return result.exitCode;

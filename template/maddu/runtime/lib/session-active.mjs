@@ -189,8 +189,66 @@ async function classifyVerified(repoRoot, detailed) {
     if (ev.type === 'SESSION_REGISTERED') return { kind: 'active', record };
     if (ev.type === 'SESSION_AUTO_REGISTERED') return { kind: 'active', record };
   }
-  // No registration found — a pointer to a session that never existed here.
+  // No registration found. Round 3: that is only EVIDENCE when the replay could
+  // account for itself. Under replica-mode accounting (parseErrors === null) an
+  // unreadable segment or partition is silently omitted, so a live pointer whose
+  // registration sits in the omitted half was being called stale on the strength
+  // of its own absence — the same mistake classifySessionId makes no more.
+  //
+  // Fixing it HERE, in the one snapshot that already saw the events, is what
+  // keeps it safe: an earlier attempt re-asked a second replay whether a 'stale'
+  // verdict was real, and a closure visible in the first snapshot could be
+  // missing from the second, resurrecting a closed session. One read, one
+  // verdict. Positive closure evidence above still wins outright.
+  if (parseErrors === null) return { kind: 'unverified', record };
   return { kind: 'stale', sessionId: record.sessionId };
+}
+
+// Three-state classification of an AMBIENT candidate id (audit C2).
+//
+// A grammar-valid MADDU_SESSION_ID is only a CANDIDATE. Before v1.134.0 the
+// grammar WAS the whole check, so a registered-then-closed id — or one that
+// never existed in this repo — owned every event it touched: the record named
+// a session that was not doing the work. Liveness is the missing half.
+//
+// Deliberately the SAME parse-accounting policy as classifyVerified above, and
+// for the same reason: a replay that could not be read completely must never
+// condemn an id. Confident absence needs a COMPLETE replay; anything less is
+// 'unverified' and the caller keeps the candidate.
+//
+//   'live'       → a registration for this id, no later close → usable
+//   'not-live'   → closed, or absent from a complete replay → drop it
+//   'unverified' → spine unreadable or a partial replay → keep the candidate
+//
+// Assumes the id already passed the grammar gate; a malformed id is the
+// caller's business and never reaches here.
+export async function classifySessionId(repoRoot, sessionId) {
+  let events, parseErrors;
+  try { ({ events, parseErrors } = await readAllStrict(repoRoot)); }
+  catch { return 'unverified'; }
+  // parseErrors === null is replica mode (accounting unavailable) — tolerant,
+  // exactly as classifyVerified treats it. Only a POSITIVE count is doubt.
+  if (typeof parseErrors === 'number' && parseErrors > 0) return 'unverified';
+  // An EMPTY replay is not evidence of absence — it is the absence of a spine.
+  // Every real repo carries a genesis event, so zero events means we are not
+  // looking at one (a bad root, a repo that never ran init), and condemning an
+  // id on that basis would drop attribution everywhere the root is wrong.
+  if (!Array.isArray(events) || events.length === 0) return 'unverified';
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (!ev || ev.actor !== sessionId) continue;
+    if (ev.type === 'SESSION_CLOSED' || ev.type === 'SESSION_AUTO_CLOSED') return 'not-live';
+    if (ev.type === 'SESSION_REGISTERED' || ev.type === 'SESSION_AUTO_REGISTERED') return 'live';
+  }
+  // No lifecycle event for this id. Round 1 F2: that is only EVIDENCE when the
+  // replay could account for itself. With parseErrors === null (replica mode)
+  // the reader discards accounting and can silently omit an unreadable segment
+  // or partition — so a live session whose registration lives in the omitted
+  // half would be condemned by its own absence. POSITIVE evidence above is
+  // still trusted under replica mode; absence is not.
+  if (parseErrors === null) return 'unverified';
+  // Complete replay, no lifecycle event for this id: it never registered here.
+  return 'not-live';
 }
 
 // Verified read — DISCRIMINATED union, never a raw record whose own
