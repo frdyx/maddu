@@ -19,12 +19,20 @@ const ok = (name, cond, extra = '') => {
   else { failed++; console.log(`  [FAIL] ${name}${extra ? ` - ${extra}` : ''}`); }
 };
 
+// Historical RECORDS are out of scope; docs that INSTRUCT are in it. CHANGELOG.md
+// was already excluded on that reasoning, and docs/audit/ holds the same kind of
+// thing: FIXED-IN.json exists to state precisely which phantom was removed, so
+// it necessarily quotes the phantom. Scanning it would mean a defect could never
+// be described in the ledger that records fixing it — caught when the v1.136.0
+// ledger row tripped these very rows.
+const RECORD_NOT_INSTRUCTION = (dir, name) => name === 'CHANGELOG.md' || dir.startsWith('docs/audit');
+
 async function filesUnder(dir) {
   const files = [];
   for (const entry of await readdir(join(REPO_ROOT, dir), { withFileTypes: true })) {
     const file = `${dir}/${entry.name}`;
     if (entry.isDirectory()) files.push(...await filesUnder(file));
-    else if (entry.isFile() && entry.name !== 'CHANGELOG.md') files.push(file);
+    else if (entry.isFile() && !RECORD_NOT_INSTRUCTION(dir, entry.name)) files.push(file);
   }
   return files.sort();
 }
