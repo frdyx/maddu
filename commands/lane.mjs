@@ -222,6 +222,14 @@ export default async function lane(argv) {
       } catch (e) { console.error(`prune refused: ${e.message}`); process.exit(3); }
       return;
     }
+    // `lane suggest` WITHOUT --adopt/--prune only renders a report. The verb
+    // is mutating (adopt/prune append), so without a declared excuse this
+    // read exited 0 with zero appends and breached the witness on every run
+    // (audit C1). A readShape cannot express it: shapes match on leading
+    // tokens and flags PRESENT, never on flags ABSENT, and `suggest` is the
+    // same leading token in all three forms.
+    const { loadLibOptional: loadMwLib } = await import('./_libroot.mjs');
+    (await loadMwLib('mutation-witness.mjs'))?.witnessNoop?.('read-only-report:lane-suggest');
     const report = await obs.laneReport(repoRoot);
     if (flags.json) { process.stdout.write(JSON.stringify(report, null, 2) + '\n'); return; }
     console.log(`\x1b[1mLANE CATALOG vs OBSERVED CLAIMS\x1b[0m  \x1b[2m(lifetime, native only; suggestions = claim counts only)\x1b[0m`);

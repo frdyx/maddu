@@ -193,6 +193,41 @@ async function classifyVerified(repoRoot, detailed) {
   return { kind: 'stale', sessionId: record.sessionId };
 }
 
+// Three-state classification of an AMBIENT candidate id (audit C2).
+//
+// A grammar-valid MADDU_SESSION_ID is only a CANDIDATE. Before v1.134.0 the
+// grammar WAS the whole check, so a registered-then-closed id — or one that
+// never existed in this repo — owned every event it touched: the record named
+// a session that was not doing the work. Liveness is the missing half.
+//
+// Deliberately the SAME parse-accounting policy as classifyVerified above, and
+// for the same reason: a replay that could not be read completely must never
+// condemn an id. Confident absence needs a COMPLETE replay; anything less is
+// 'unverified' and the caller keeps the candidate.
+//
+//   'live'       → a registration for this id, no later close → usable
+//   'not-live'   → closed, or absent from a complete replay → drop it
+//   'unverified' → spine unreadable or a partial replay → keep the candidate
+//
+// Assumes the id already passed the grammar gate; a malformed id is the
+// caller's business and never reaches here.
+export async function classifySessionId(repoRoot, sessionId) {
+  let events, parseErrors;
+  try { ({ events, parseErrors } = await readAllStrict(repoRoot)); }
+  catch { return 'unverified'; }
+  // parseErrors === null is replica mode (accounting unavailable) — tolerant,
+  // exactly as classifyVerified treats it. Only a POSITIVE count is doubt.
+  if (typeof parseErrors === 'number' && parseErrors > 0) return 'unverified';
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (!ev || ev.actor !== sessionId) continue;
+    if (ev.type === 'SESSION_CLOSED' || ev.type === 'SESSION_AUTO_CLOSED') return 'not-live';
+    if (ev.type === 'SESSION_REGISTERED' || ev.type === 'SESSION_AUTO_REGISTERED') return 'live';
+  }
+  // Complete replay, no lifecycle event for this id: it never registered here.
+  return 'not-live';
+}
+
 // Verified read — DISCRIMINATED union, never a raw record whose own
 // properties act as sentinels:
 //   null                              → no pointer
