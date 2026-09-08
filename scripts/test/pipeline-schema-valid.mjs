@@ -17,8 +17,11 @@ async function row(id, detail, test) {
 }
 const DEFAULTS = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
 const config = (name) => ({ name, stages: [{ name: 'plan' }, { name: 'verify' }] });
-function runGate(root, fault = null) {
-  const result = gateRun(root, 'pipeline-schema-valid', { runtimeRoot: root, fault });
+// runtimeRoot defaults to the fixture itself (source-shaped fixtures carry
+// their own template/ tree); a bare consumer fixture has none, so it loads
+// the gate from this checkout instead.
+function runGate(root, fault = null, runtimeRoot = root) {
+  const result = gateRun(root, 'pipeline-schema-valid', { runtimeRoot, fault });
   const gate = result.runs.find((r) => r.gateId === 'pipeline-schema-valid');
   assert.ok(gate, 'pipeline-schema-valid never ran');
   return { gate, hits: result.hits };
@@ -216,7 +219,7 @@ try {
         await mkdir(gone, { recursive: true });
         await symlink(gone, join(consumerRoot, '.maddu/config/pipelines'), 'junction');
         await rm(gone, { recursive: true, force: true });
-        const { gate } = runGate(consumerRoot);
+        const { gate } = runGate(consumerRoot, null, sourceRoot);
         assertBad(gate);
         assert.ok(!/skipped|absent/i.test(gate.message), gate.message);
       });
