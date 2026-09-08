@@ -237,6 +237,16 @@ async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null
     try {
       const res = await cacheLib.readActiveSessionVerified(root);
       if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
+      // Round 2: the FALLBACK inherited the same bug F2 fixed in the classifier.
+      // readActiveSessionVerified still reads absence as 'stale' when accounting
+      // is unavailable, so a live cache session whose registration sits in an
+      // unreadable partition was discarded here after the ambient id had already
+      // been dropped — leaving nobody at all. Re-ask the tolerant classifier: a
+      // 'stale' verdict it cannot confirm is not a death certificate.
+      if (res && res.kind === 'stale' && res.sessionId && typeof lib.classifySessionId === 'function') {
+        const recheck = await lib.classifySessionId(root, res.sessionId);
+        if (recheck === 'live' || recheck === 'unverified') return res.sessionId;
+      }
     } catch {}
     return null;
   };
@@ -254,7 +264,11 @@ export async function resolveReceiptSid(repoRoot = null) {
   const env = process.env.MADDU_SESSION_ID;
   const g = await loadIdGrammar();
   if (env) {
-    if (!g) return env; // pre-PR-B lib: today's behavior
+    // Round 2: with no grammar available we cannot tell a good id from a
+    // malformed one, so we have no ANSWER — returning the raw env made a
+    // malformed value authoritative and suppressed the writer's own cache
+    // fallback on exactly the version-skew installs this branch exists for.
+    if (!g) return undefined;
     // A malformed ambient id is not a candidate; fall through to the cache
     // exactly as the writer used to.
     if (g.isRefId(env)) return decideAmbientSid(env, repoRoot);
@@ -358,8 +372,11 @@ export async function resolveSessionId(repoRoot, flags, sessionActive) {
     // also be LIVE before it outranks the verified cache below (audit C2).
     if (g) {
       if (g.isRefId(env)) {
-        const decided = await decideAmbientSid(env, repoRoot, sessionActive);
-        if (decided) return decided;
+        // Round 2: the decision is AUTHORITATIVE, null included. `if (decided)`
+        // threw a memoized null away and ran the cache step again, so a session
+        // registered by another process between arming and resolution gave one
+        // invocation two identities (receipt null, command C).
+        return decideAmbientSid(env, repoRoot, sessionActive);
       }
     } else if (env.length > 0) return env;
   }

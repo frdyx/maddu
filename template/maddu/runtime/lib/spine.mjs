@@ -612,7 +612,12 @@ async function lastEventLine(paths) {
   return null;
 }
 
-export async function append(repoRoot, { type, actor = null, lane = null, data = {}, triggered_by = null }) {
+// `maxWaitMs` bounds how long the APPEND LOCK is waited for, not the write.
+// Default Infinity — every existing caller is unchanged. A caller that must
+// stay responsive (the PreToolUse denial witness) passes a bound so a lock
+// held by a live process makes the append GIVE UP BEFORE IT STARTS WRITING,
+// rather than being abandoned part-way through one.
+export async function append(repoRoot, { type, actor = null, lane = null, data = {}, triggered_by = null }, { maxWaitMs = Infinity } = {}) {
   if (!EVENT_TYPES[type]) {
     throw new Error(`unknown event type: ${type}`);
   }
@@ -837,7 +842,7 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
   for (let attempt = 0; ; attempt++) {
     const w = await resolveWriteReplica(repoRoot);
     if (w.id) {
-      try { return credit(await appendPartitioned(repoRoot, w.id, ev)); }
+      try { return credit(await appendPartitioned(repoRoot, w.id, ev, { maxWaitMs })); }
       catch (err) { await restampOrRethrow(err); continue; }
     }
     if (w.pending) throw new Error(STALL_MSG);           // a genuine stall (outer wait elapsed)
@@ -864,8 +869,8 @@ export async function append(repoRoot, { type, actor = null, lane = null, data =
     // backstop for a rename that slips between currentSegment and appendFile (a
     // migration renaming a segment out from under us — never in pure default mode).
     try {
-      const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs: Infinity });
-      if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev));
+      const outcome = await appendFlatChained(repoRoot, paths.events, ev, { maxWaitMs });
+      if (outcome.reroute) return credit(await appendPartitioned(repoRoot, outcome.reroute, ev, { maxWaitMs }));
       if (outcome.unattached) {
         const err = new Error('spine append: this checkout has sync partitions but no replica identity — run `maddu spine sync init` first');
         err.code = 'REPLICA_UNATTACHED';

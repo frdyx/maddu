@@ -731,6 +731,9 @@ try {
     && elapsed < 20000 && after === before,
     `exit=${r.code} decision=${json?.permissionDecision} elapsedMs=${elapsed} deniedDelta=${after - before}`);
   try { await unlink(lockPath); } catch {}
+  // This block runs AFTER the suite-wide cleanup above, so it tidies its own
+  // fixture (round 2) rather than leaving one tree behind per run.
+  await cleanupFixtures();
 }
 
 

@@ -845,27 +845,26 @@ export function createHookFireCore(deps) {
         // survive an unwritable spine, so an append failure changes nothing
         // the caller sees - not the blocker, not the remedy, not the exit
         // code. It also touches no counter: being denied is not an edit.
-        // Round 1 F1: BOUNDED. spine.append takes the append lock with
-        // maxWaitMs: Infinity, so a lock held by a suspended process or an
-        // unreclaimable foreign-host holder made the hook wait forever and the
-        // deny was never written at all. A try/catch only covers rejection; a
-        // hang is the worse failure, because the caller's write proceeds while
-        // the gate is still thinking. The record is best-effort by design, so
-        // the deny wins the race: an append still in flight is abandoned at
-        // process exit, exactly like an append that throws.
+        // Round 1 F1 / round 2: BOUNDED, and bounded at the right place. The
+        // append lock defaults to maxWaitMs: Infinity, so a lock held by a live
+        // process made the hook wait forever and the deny was never written at
+        // all — a try/catch only covers rejection, and a hang throws nothing.
+        //
+        // The first fix raced the whole append against a timer, which round 2
+        // showed trades a hang for something worse: Promise.race cancels
+        // nothing, so exiting on the timer could abandon an append MID-WRITE
+        // and leave a torn tail that refuses every later append. The bound
+        // belongs on acquiring the lock — the only unbounded part. Now the
+        // append either gets the lock and completes, or gives up before
+        // writing a byte, and the deny goes out either way.
         try {
           const { spine } = await loadSpineLib();
           if (spine?.EVENT_TYPES?.DISCIPLINE_DENIED) {
-            const appended = spine.append(repoRoot, {
+            await spine.append(repoRoot, {
               type: spine.EVENT_TYPES.DISCIPLINE_DENIED,
               actor: sid || null,
               data: { tool: tool || null, blocker: decision.blocker || null, kind: kind || null, targetScope: targetScope || null },
-            });
-            appended.catch(() => {}); // the race below may leave it unhandled
-            await Promise.race([appended, new Promise((r) => {
-              const t = setTimeout(r, DENY_WITNESS_MAX_WAIT_MS);
-              if (typeof t.unref === 'function') t.unref();
-            })]);
+            }, { maxWaitMs: DENY_WITNESS_MAX_WAIT_MS });
           }
         } catch {}
         process.stdout.write(JSON.stringify({

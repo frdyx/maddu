@@ -241,6 +241,23 @@ governance tier, **allows, nudges, or denies** the edit.
   nothing to do with the file being written.
 - **Ordered blockers.** session → lane → governing goal/plan → slice-stop freshness →
   uncommitted pileup. The deny names the first stale ritual and its exact remedy.
+- **An unplaceable target is context, never the blocker (v1.134.0).** The gate
+  classifies where a write lands: `outside` the governed roots is waved through,
+  `inside` is gated, and `unknown` — a target it could place neither way — is
+  gated as if it were inside. That last case used to be invisible, so the
+  message named a ritual for a file the gate could not locate. The deny now
+  ADDS one line saying the target could not be placed; it never replaces the
+  blocker or the remedy, because an unplaceable target is not a rung of the
+  ladder and has no remedy of its own. Only a plain edit/write earns the
+  `outside` exemption — a self-disable or an ambiguous command is gated
+  wherever it points, and its scope is recorded but kept out of the message.
+- **A block leaves a record (v1.134.0).** Each blocked decision appends one
+  `DISCIPLINE_DENIED` carrying `{tool, blocker, kind, targetScope}` —
+  `DISCIPLINE_SKIPPED`'s opposite number: that one witnesses a check that did
+  not run, this one a check that bit. It is appended inside its own try/catch
+  BEFORE the deny is written, so an unwritable spine costs the record and never
+  the block: the blocker, the remedy and the exit code are unchanged. It
+  touches no counter — being denied is not an edit.
 - **The deny names its own trigger and its own session (v1.128.0).** The
   slice-stop gate fires on the edit count **or** the slice age, and the message
   says which — both, when both tripped. And because the gate reads exactly one
