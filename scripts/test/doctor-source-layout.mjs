@@ -3,7 +3,7 @@
 // 3.3 is structural, not distinguishable by observable behaviour alone, and
 // is written as an explicit census row at the end rather than faked as one.
 import assert from 'node:assert/strict';
-import { mkdir, cp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, cp, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cleanupFixtures, sourceRoot, tmp } from './_pr1-fixtures.mjs';
 import { sourceFixture, repoFixture, fixtureCli, gateRun, plain } from './_pr2-fixtures.mjs';
@@ -85,13 +85,16 @@ try {
   // which does print warn rows, and its own broken-consumer control.
   const runCi = (root, args, bin) => {
     const r = fixtureCli(root, ['ci', ...args], {}, bin);
-    return { text: plain(r.stdout + r.stderr), status: r.status };
+    return { out: plain(r.stdout), text: plain(r.stdout + r.stderr), status: r.status };
   };
+  // Parse STDOUT alone. Reading the combined streams would let any diagnostic
+  // on stderr turn a valid payload into a SyntaxError, and the row would then
+  // report a parse failure as though ci had said nothing at all.
   const ciJson = (root, bin) => {
-    const { text, status } = runCi(root, ['--json'], bin);
-    const start = text.indexOf('{');
-    assert.ok(start >= 0, `ci --json produced no object; exit=${status} ${text.slice(0, 200)}`);
-    return JSON.parse(text.slice(text.indexOf('{')));
+    const { out, status } = runCi(root, ['--json'], bin);
+    const start = out.indexOf('{');
+    assert.ok(start >= 0, `ci --json produced no object on stdout; exit=${status} ${out.slice(0, 200)}`);
+    return JSON.parse(out.slice(start));
   };
   const sourceBinPath = join(source, 'bin/maddu.mjs');
   const sourceCi = ciJson(source, sourceBinPath);
@@ -131,16 +134,25 @@ try {
   // happens to be named "maddu" with FILES at those paths was classified as the
   // framework source, and every gate that skips on this predicate stopped
   // checking it. Reported by the round-1 review, reproduced here.
-  await row('R1-F3-files-are-not-directories', 'a repo with files at commands/ and template/maddu is not source layout', async () => {
-    const impostor = await repoFixture('maddu-pr2-impostor-');
-    await writeFile(join(impostor, 'package.json'), '{"name":"maddu","version":"0.0.0"}\n');
-    await mkdir(join(impostor, 'template'), { recursive: true });
-    await writeFile(join(impostor, 'template', 'maddu'), 'not a directory\n');
-    await writeFile(join(impostor, 'commands'), 'not a directory\n');
-    const r = result(impostor, 'install-integrity');
-    assert.equal(r.ok, false, `classified as framework source: ${r.message}`);
-    assert.ok(!sourceMessage(r.message), r.message);
-  });
+  // ONE fixture per signal. With both paths wrong, reverting either directory
+  // check alone still passes, because the other one rejects the fixture on its
+  // own — so the row would not notice half the defect coming back.
+  for (const asFile of ['template/maddu', 'commands']) {
+    await row(`R1-F3-file-at-${asFile}`, `a file at ${asFile} does not satisfy the source-layout signal`, async () => {
+      const impostor = await repoFixture('maddu-pr2-impostor-');
+      await writeFile(join(impostor, 'package.json'), '{"name":"maddu","version":"0.0.0"}\n');
+      await mkdir(join(impostor, 'template'), { recursive: true });
+      // Every other signal is genuinely present, so only the one under test can
+      // be what rejects this fixture.
+      for (const path of ['template/maddu', 'commands']) {
+        if (path === asFile) await writeFile(join(impostor, path), 'not a directory\n');
+        else await mkdir(join(impostor, path), { recursive: true });
+      }
+      const r = result(impostor, 'install-integrity');
+      assert.equal(r.ok, false, `classified as framework source: ${r.message}`);
+      assert.ok(!sourceMessage(r.message), r.message);
+    });
+  }
 
   // R1-F1 — doctor must resolve layout.mjs beside the CLI, not relative to the
   // current directory. An INSTALLED CLI checking a repo that is not the cwd
@@ -155,8 +167,11 @@ try {
     await cp(join(sourceRoot, 'template', 'maddu', 'runtime'), join(cliRoot, 'runtime'), { recursive: true });
     await cp(join(sourceRoot, 'package.json'), join(cliRoot, 'package.json'));
     await cp(join(sourceRoot, 'version.json'), join(cliRoot, 'version.json'));
-    // No template/ under cliRoot and no maddu/ under the target: the only place
-    // layout.mjs can be found is beside the CLI.
+    // Remove the TARGET's own copy of the lib too. Without this the row also
+    // passes for a resolver that reads the CURRENT directory's template/ tree —
+    // which is exactly what must be ruled out, since the repo under examination
+    // need not be the one the CLI happens to be standing in.
+    await rm(join(source, 'template', 'maddu', 'runtime', 'lib', 'layout.mjs'), { force: true });
     const r = fixtureCli(source, ['doctor'], {}, join(cliRoot, 'bin', 'maddu.mjs'));
     const out = plain(r.stdout + r.stderr);
     const marker = out.split('\n').find((l) => l.includes('install marker') || /maddu\.json/.test(l));

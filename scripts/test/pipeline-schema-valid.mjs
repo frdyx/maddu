@@ -184,17 +184,34 @@ try {
   // counted separately — a skip is not a pass. They run for real in WSL and CI.
   {
     const linkRoot = await repoFixture('maddu-pr2-pipeline-links-');
-    let linkable = true;
-    try {
-      await writeFile(join(linkRoot, 'probe-target'), 'x\n');
-      await symlink(join(linkRoot, 'probe-target'), join(linkRoot, 'probe-link'));
-    } catch { linkable = false; }
+    // ONLY a permission/support error means "this filesystem cannot make links".
+    // Catching everything would let a disk-full or I/O failure during setup be
+    // reported as a Developer-Mode skip — a broken run wearing a green face,
+    // which is the exact shape of failure these rows exist to prevent.
+    const UNSUPPORTED = new Set(['EPERM', 'EACCES', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'UNKNOWN']);
+    const probe = async (make) => {
+      try { await make(); return true; }
+      catch (err) {
+        if (UNSUPPORTED.has(err?.code)) return false;
+        throw err; // a real setup failure, and it must be seen as one
+      }
+    };
+    await writeFile(join(linkRoot, 'probe-target'), 'x\n');
+    await mkdir(join(linkRoot, 'probe-dir'), { recursive: true });
+    // Two capabilities, probed separately: F2 needs a FILE symlink, F4 needs a
+    // directory link (a junction on Windows). One does not imply the other.
+    const fileLinks = await probe(() => symlink(join(linkRoot, 'probe-target'), join(linkRoot, 'probe-link')));
+    const dirLinks = await probe(() => symlink(join(linkRoot, 'probe-dir'), join(linkRoot, 'probe-dir-link'), 'junction'));
 
-    if (!linkable) {
-      skipped += 2;
-      console.log('[SKIP] R1-F2-symlinked-config - this filesystem cannot create symlinks (Developer Mode off)');
-      console.log('[SKIP] R1-F4-dangling-config-link - this filesystem cannot create symlinks (Developer Mode off)');
-    } else {
+    if (!fileLinks) {
+      skipped += 1;
+      console.log('[SKIP] R1-F2-symlinked-config - this filesystem cannot create file symlinks');
+    }
+    if (!dirLinks) {
+      skipped += 1;
+      console.log('[SKIP] R1-F4-dangling-config-link - this filesystem cannot create directory links');
+    }
+    if (fileLinks) {
       // F2: Dirent.isFile() is FALSE for a symlink, so a directory holding only
       // symlinked configs read as empty — which the new empty-is-a-finding rule
       // then turned into a FAILURE for a configuration `pipeline run` reads fine.
@@ -209,6 +226,8 @@ try {
         assert.equal(gate.ok, true, gate.message);
         assert.ok(!/holds no pipeline JSON/i.test(gate.message), gate.message);
       });
+    }
+    if (dirLinks) {
       // F4: stat FOLLOWS links, so a config directory whose target vanished
       // raised ENOENT and was reported as absence — a green skip over a broken
       // local configuration.
