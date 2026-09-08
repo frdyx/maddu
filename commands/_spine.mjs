@@ -191,17 +191,28 @@ async function loadSessionActiveLib() {
 // Decide what a grammar-valid ambient candidate resolves to. Memoized per
 // process: several commands call this more than once per invocation and the
 // classification replays the spine.
-async function decideAmbientSid(candidate) {
-  if (_ambientDecisions.has(candidate)) return _ambientDecisions.get(candidate);
+// `repoRoot`/`sessionActive` are the caller's when it has them — resolveSessionId
+// is handed both and must not reach around its own injection points to the real
+// filesystem (that made the resolver untestable and ignored the root it was
+// given). Only the parameterless callers fall back to loading them here. The
+// memo is keyed by root so two roots in one process cannot share an answer.
+async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null) {
+  const memoKey = `${repoRoot ?? ''} ${candidate}`;
+  if (_ambientDecisions.has(memoKey)) return _ambientDecisions.get(memoKey);
   const decide = async () => {
-    const lib = await loadSessionActiveLib();
-    if (!lib || typeof lib.classifySessionId !== 'function') return candidate; // pre-v1.134 lib
-    let root;
-    try {
-      const dir = await resolveLibDir();
-      const paths = await import(pathToFileURL(join(dir, 'paths.mjs')).href);
-      root = await resolveRepoRoot(paths);
-    } catch { return candidate; }
+    const lib = (sessionActive && typeof sessionActive.classifySessionId === 'function')
+      ? sessionActive : await loadSessionActiveLib();
+    // A lib without the classifier is a pre-v1.134 runtime (or a caller's stub
+    // that does not implement it): keep the candidate, exactly as before.
+    if (!lib || typeof lib.classifySessionId !== 'function') return candidate;
+    let root = repoRoot;
+    if (!root) {
+      try {
+        const dir = await resolveLibDir();
+        const paths = await import(pathToFileURL(join(dir, 'paths.mjs')).href);
+        root = await resolveRepoRoot(paths);
+      } catch { return candidate; }
+    }
     let state;
     try { state = await lib.classifySessionId(root, candidate); } catch { return candidate; }
     if (state !== 'not-live') return candidate; // live, or cannot verify
@@ -210,14 +221,19 @@ async function decideAmbientSid(candidate) {
       process.stderr.write(`[maddu] MADDU_SESSION_ID ${candidate} is not a live session here — dropped; attributing to the active session instead
 `);
     }
+    // The fallback cache read belongs to the CALLER's lib when it has one:
+    // the classifier may have come from disk, but whose active session we fall
+    // back to is the caller's question.
+    const cacheLib = (sessionActive && typeof sessionActive.readActiveSessionVerified === 'function')
+      ? sessionActive : lib;
     try {
-      const res = await lib.readActiveSessionVerified(root);
+      const res = await cacheLib.readActiveSessionVerified(root);
       if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
     } catch {}
     return null;
   };
   const p = decide();
-  _ambientDecisions.set(candidate, p);
+  _ambientDecisions.set(memoKey, p);
   return p;
 }
 
@@ -324,7 +340,7 @@ export async function resolveSessionId(repoRoot, flags, sessionActive) {
     // also be LIVE before it outranks the verified cache below (audit C2).
     if (g) {
       if (g.isRefId(env)) {
-        const decided = await decideAmbientSid(env);
+        const decided = await decideAmbientSid(env, repoRoot, sessionActive);
         if (decided) return decided;
       }
     } else if (env.length > 0) return env;

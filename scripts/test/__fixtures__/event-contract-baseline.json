@@ -1,6 +1,6 @@
 {
-  "version": "1.20.0",
-  "fingerprint": "3a94a308",
+  "version": "1.21.0",
+  "fingerprint": "ba204ab3",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -341,6 +341,15 @@
           "ledgerPath": "string|null",
           "markers": "number",
           "noTrigger": "number"
+        }
+      },
+      "DISCIPLINE_DENIED": {
+        "frozen": false,
+        "data": {
+          "blocker": "string|null",
+          "kind": "string|null",
+          "targetScope": "string|null",
+          "tool": "string|null"
         }
       },
       "DISCIPLINE_SKIPPED": {
@@ -1688,6 +1697,7 @@
         "data": {
           "acceptanceId": "string?",
           "allMet": "boolean?",
+          "argv": "array?",
           "command": "string?",
           "commandSha256": "string?",
           "complete": "boolean",
@@ -1695,6 +1705,7 @@
           "conditionPlanDigest": "string?",
           "conditions": "array?",
           "counts": "object|null",
+          "cwd": "string?",
           "declEventId": "string|null?",
           "declSource": "string?",
           "duration_ms": "number|null?",
@@ -1709,6 +1720,7 @@
           "outcome_class": "string|null?",
           "pendingCount": "number?",
           "phase": "string|null?",
+          "pid": "number?",
           "planDigest": "string?",
           "planTaskCount": "number?",
           "profile": "string|null",

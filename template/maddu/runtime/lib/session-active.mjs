@@ -218,6 +218,11 @@ export async function classifySessionId(repoRoot, sessionId) {
   // parseErrors === null is replica mode (accounting unavailable) — tolerant,
   // exactly as classifyVerified treats it. Only a POSITIVE count is doubt.
   if (typeof parseErrors === 'number' && parseErrors > 0) return 'unverified';
+  // An EMPTY replay is not evidence of absence — it is the absence of a spine.
+  // Every real repo carries a genesis event, so zero events means we are not
+  // looking at one (a bad root, a repo that never ran init), and condemning an
+  // id on that basis would drop attribution everywhere the root is wrong.
+  if (!Array.isArray(events) || events.length === 0) return 'unverified';
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
     if (!ev || ev.actor !== sessionId) continue;

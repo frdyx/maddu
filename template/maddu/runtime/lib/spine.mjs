@@ -324,6 +324,7 @@ export const EVENT_TYPES = {
   // the hook-handler seam (discipline.mjs stays spine-less). data:
   //   { reason, tool, sessionId, enforcement, blocked? }
   DISCIPLINE_SKIPPED:         'DISCIPLINE_SKIPPED',
+  DISCIPLINE_DENIED:          'DISCIPLINE_DENIED',
   MUTATION_UNWITNESSED:       'MUTATION_UNWITNESSED',
   // audit P2 — the discipline enforcement path threw and fell open. Recording the
   // failure keeps a silent fail-open from hiding a persistent enforcement bug.

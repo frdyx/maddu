@@ -727,8 +727,18 @@ export function createHookFireCore(deps) {
       // counter behind — the same footprint a read-only Bash leaves (the
       // CLI's invocation receipt included). Absent on an older installed
       // lib → no narrowing (gated as before).
-      if ((kind === 'edit' || kind === 'write') && typeof disc?.classifyWriteTarget === 'function'
-        && disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] }) === 'outside') process.exit(0);
+      // Classified ONCE and kept: 'outside' leaves immediately, but 'unknown'
+      // has to travel with the decision. A target we could not place is gated
+      // as if it were inside (correct), and the person on the other end then
+      // read a blocker about a file the gate could not even locate. The scope
+      // is not the blocker - it is context the message owes them.
+      const targetScope = typeof disc?.classifyWriteTarget === 'function'
+        ? disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] })
+        : null;
+      // Only a plain edit/write earns the outside exemption. A self-disable or
+      // an ambiguous command is gated wherever it points — its scope is
+      // recorded for the witness, never used to wave it through.
+      if ((kind === 'edit' || kind === 'write') && targetScope === 'outside') process.exit(0);
 
       // CENTRALIZED acting-sid resolution (v1.111.0), LIVENESS-AWARE since
       // B1/B2: validated ONCE, then every consumer — auto-claim, enforcement,
@@ -823,6 +833,24 @@ export function createHookFireCore(deps) {
       await witnessDiscipline(repoRoot, disc, { decision, tool, sid, counterKey });
 
       if (decision.verdict === 'block') {
+        // The message speaks about a WRITE's target, so only a write carries
+        // the scope into it; the event below records the scope either way.
+        decision.targetScope = (kind === 'edit' || kind === 'write') ? targetScope : null;
+        // One record per blocked decision, in its own try/catch and BEFORE the
+        // deny is written. The deny is the contract with the caller and must
+        // survive an unwritable spine, so an append failure changes nothing
+        // the caller sees - not the blocker, not the remedy, not the exit
+        // code. It also touches no counter: being denied is not an edit.
+        try {
+          const { spine } = await loadSpineLib();
+          if (spine?.EVENT_TYPES?.DISCIPLINE_DENIED) {
+            await spine.append(repoRoot, {
+              type: spine.EVENT_TYPES.DISCIPLINE_DENIED,
+              actor: sid || null,
+              data: { tool: tool || null, blocker: decision.blocker || null, kind: kind || null, targetScope: targetScope || null },
+            });
+          }
+        } catch {}
         process.stdout.write(JSON.stringify({
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',

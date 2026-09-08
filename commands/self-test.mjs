@@ -89,6 +89,12 @@ export default async function selfTest(argv) {
       derive: () => captured ? {
         complete: captured.complete !== false,
         result: captured.ok === true ? 'pass' : 'fail',
+        // Same provenance as the report files: the receipt is the tamper-
+        // detecting half of the pair, so it must be able to say which
+        // invocation it is a receipt FOR.
+        argv: Array.isArray(captured.argv) ? captured.argv : null,
+        cwd: typeof captured.cwd === 'string' ? captured.cwd : null,
+        pid: Number.isInteger(captured.pid) ? captured.pid : null,
         counts: captured.counts
           ? { pass: captured.counts.pass, fail: captured.counts.fail, total: captured.counts.total, taskSkipped: captured.counts.taskSkipped || 0 }
           : null,
