@@ -29,11 +29,61 @@ async function filesUnder(dir) {
   return files.sort();
 }
 
-// Claim-shaped greps, not a bare tokens.css ban. External Claude citations
-// have neither the Máddu cockpit path nor same-line cockpit ownership prose.
-const ownsPhantom = (line) => /maddu\/cockpit\/tokens\.css/.test(line)
-  || /\bcockpit(?:['’]s)?[^\n]*\btokens\.css\b/i.test(line)
-  || /\btokens\.css\b[^\n]*\bowned by Máddu\b/i.test(line);
+// Claim-shaped, not a bare tokens.css ban.
+// True when the text claims Máddu owns a `tokens.css`. Three things this has
+// to get right, each learned from a row below:
+//
+//  1. SOFT WRAPPING. The old form anchored on `[^\n]*`, so a claim split across
+//     two physical lines escaped entirely (funnel r1 F2). Whitespace is
+//     normalized first, so wrapping cannot hide a claim.
+//  2. EXTERNAL CITATIONS. cockpit.css really does cite the Claude design
+//     system's own tokens.css, in a sentence that also says "cockpit". Matching
+//     on the normalized text alone would flag it and no fix could ever go green.
+//  3. THE EXEMPTION IS PER SENTENCE, NEVER PER DOCUMENT. "See Claude Design
+//     (claude.ai/design · tokens.css). The cockpit's tokens live in
+//     `tokens.css`." must STILL be caught — a real claim standing next to a
+//     legitimate citation is the case a whole-text exemption would wave through.
+const ownsPhantom = (text) => {
+  const s = String(text);
+  if (/maddu\/cockpit\/tokens\.css/.test(s)) return true;
+  const norm = s.replace(/\s+/g, ' ');
+  for (const sentence of norm.split(/(?<=[.;])\s+/)) {
+    if (!/tokens\.css/i.test(sentence)) continue;
+    if (/claude\.ai\/design|\bClaude Design\b/i.test(sentence)) continue; // external, not ours
+    if (/\bcockpit(?:['’]s)?\b[\s\S]*?tokens\.css/i.test(sentence)) return true;
+    if (/tokens\.css[\s\S]*?\bowned by Máddu\b/i.test(sentence)) return true;
+  }
+  return false;
+};
+
+// Blank-line separated blocks, comment markers and indentation collapsed onto
+// one line, carrying the first line number so a claim can still be located.
+function paragraphs(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let buf = [];
+  let start = 0;
+  const flush = () => {
+    if (buf.length) out.push({ line: start + 1, text: buf.join(' ').replace(/\s+/g, ' ').trim() });
+    buf = [];
+  };
+  lines.forEach((raw, i) => {
+    const stripped = raw.replace(/^\s*(?:\/\*+|\*+\/?|\/\/|#+|-|\d+\.)\s?/, '').trim();
+    if (!stripped) { flush(); return; }
+    if (!buf.length) start = i;
+    buf.push(stripped);
+  });
+  flush();
+  return out;
+}
+
+// ONE predicate for the tree-wide scan and the per-file rows alike. Keeping
+// them on different logic is exactly how the wrapped claim slipped past one
+// while the other still reported clean. `ownsPhantom` already normalizes
+// wrapping and exempts per sentence, so a whole-file call is correct — and an
+// extra whole-FILE citation test here would be a bug, re-arming the very
+// document-wide exemption the sentence rule exists to prevent.
+const hasOwnershipClaim = (text) => ownsPhantom(text);
 
 try {
   const css = (await read('template/maddu/cockpit/cockpit.css')).replace(/\r\n/g, '\n');
@@ -49,10 +99,16 @@ try {
   const claims = [];
   for (const dir of ['docs', 'template']) {
     for (const file of await filesUnder(dir)) {
-      const lines = (await read(file)).split(/\r?\n/);
-      lines.forEach((line, i) => {
+      const body = await read(file);
+      body.split(/\r?\n/).forEach((line, i) => {
         if (ownsPhantom(line)) claims.push(`${file}:${i + 1}`);
       });
+      for (const p of paragraphs(body)) {
+        if (ownsPhantom(p.text)) {
+          const at = `${file}:${p.line}`;
+          if (!claims.includes(at)) claims.push(at);
+        }
+      }
     }
   }
   ok('1 docs/** and template/** contain no Máddu-owned tokens.css claims',
@@ -68,8 +124,8 @@ try {
   for (const file of tokenSites) {
     const text = await read(file);
     ok(`1 ${file}: name cockpit.css as the real token source, without the phantom`,
-      /\bcockpit\.css\b/.test(text) && !text.split(/\r?\n/).some(ownsPhantom),
-      `cockpit.css mentioned=${/\bcockpit\.css\b/.test(text)}; phantom claim=${text.split(/\r?\n/).some(ownsPhantom)}`);
+      /\bcockpit\.css\b/.test(text) && !hasOwnershipClaim(text),
+      `cockpit.css mentioned=${/\bcockpit\.css\b/.test(text)}; phantom claim=${hasOwnershipClaim(text)}`);
   }
 
   for (const tree of DOC_TREES) {
@@ -137,6 +193,55 @@ try {
   ok('4 README published schema version equals x-contractVersion',
     versions.length > 0 && versions.every((value) => value === version),
     `README=${versions.join(', ') || 'missing'}; schema=${version}`);
+
+  // F2: exercise the existing predicate with complete prose, without changing
+  // it or the physical-line scans above. Wrapping must not hide ownership.
+  const ownershipExamples = [
+    { label: 'cockpit ownership', parts: [
+      "The cockpit's canonical design tokens live in", '`tokens.css`.',
+    ] },
+    { label: 'Máddu ownership', parts: [
+      'The `tokens.css` stylesheet is', 'owned by Máddu.',
+    ] },
+  ];
+  for (const { label, parts } of ownershipExamples) {
+    const singleLine = parts.join(' ');
+    ok(`F2 CONTROL: single-line ${label} is detected`, ownsPhantom(singleLine), singleLine);
+    for (const [ending, separator] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+      const wrapped = parts.join(separator);
+      ok(`F2 ${label} is detected across ${ending} soft wrapping`, ownsPhantom(wrapped),
+        JSON.stringify(wrapped));
+    }
+  }
+
+  // Pin the whole real paragraph, including "cockpit" on the preceding line.
+  // The old citation fragment alone cannot catch the normalization hazard.
+  const claudeComment = [
+    '   * The cockpit is the dark-noir face of the shared "Máddu navy-noir"',
+    '   * design system (claude.ai/design · tokens.css). Its hand-built --m-*',
+    '   * palette is the source of truth for the DARK theme; here we expose the',
+    '   * canonical --s-* names as aliases onto it, so design-system component',
+    '   * classes (.callout, .chip, .kpi, .btn variants, table.data, .progress,',
+    '   * .spinner, .skeleton …) drop into the cockpit and theme correctly to the',
+    "   * console's dark palette — no second palette, no drift. Components read",
+    '   * --s-* semantic tokens only; never a hard-coded hex, radius, or font. */',
+  ].join('\n');
+  const claudeParagraph = claudeComment.replace(/^[ \t]*\* ?/gm, '').replace(/ \*\/$/, '');
+  ok('F2 CONTROL: the full wrapped external Claude paragraph remains verbatim and permitted',
+    css.includes(claudeComment) && !ownsPhantom(claudeParagraph),
+    `paragraph present=${css.includes(claudeComment)}; phantom claim=${ownsPhantom(claudeParagraph)}`);
+  // Normalize only this input fixture: a future paragraph-aware predicate must
+  // accept it too. This currently exposes the false positive; it is not a fix.
+  const joinedClaudeParagraph = claudeParagraph.replace(/\s+/g, ' ').trim();
+  ok('F2 CONTROL: the joined external Claude paragraph remains permitted',
+    css.includes(claudeComment) && !ownsPhantom(joinedClaudeParagraph),
+    `paragraph present=${css.includes(claudeComment)}; phantom claim=${ownsPhantom(joinedClaudeParagraph)}`);
+  const joinedRadiiCitation = externalCitations[0].replace(/\s+/g, ' ').trim();
+  ok('F2 CONTROL: the joined external Claude radii citation remains permitted',
+    css.includes(externalCitations[0]) && !ownsPhantom(joinedRadiiCitation), joinedRadiiCitation);
+  ok('F2 CONTROL: an external Claude citation does not exempt an actual ownership claim',
+    ownershipExamples.every(({ parts }) => ownsPhantom(
+      `See Claude Design (claude.ai/design · tokens.css). ${parts.join(' ')}`)));
 } catch (err) {
   ok('PR3a doc-phantoms harness', false, err.stack || err.message);
 }
