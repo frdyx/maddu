@@ -319,7 +319,11 @@ async function cmdEnvAllow(repoRoot, args, flags, spineLib) {
 }
 
 export default async function trustCmd(argv) {
-  if (!argv.length || argv[0] === '--help' || argv[0] === '-h') { printTrustHelp(); return; }
+  // --help ANYWHERE, not just first (funnel r1 F1): the dispatcher routes here
+  // whenever the flag appears anywhere in argv and forwards argv unchanged, so
+  // an argv[0]-only check let `trust pin <pkg> --version x --help` fall through
+  // to the pin case and perform the write the user was only asking about.
+  if (!argv.length || argv.includes('--help') || argv.includes('-h')) { printTrustHelp(); return; }
   const verb = argv[0];
   const rest = argv.slice(1);
   const { positional: args, flags } = parseFlags(rest);

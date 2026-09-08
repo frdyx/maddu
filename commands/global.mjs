@@ -147,6 +147,12 @@ async function policy(sub, rest, lib) {
 }
 
 export default async function globalCmd(argv) {
+  // --help before anything else (funnel r1 F1). The dispatcher routes here on a
+  // help flag ANYWHERE in argv and forwards argv unchanged; without this guard
+  // `global policy add --tool bash --decision deny --help` performed the
+  // MACHINE-SCOPE policy write instead of describing it. Exit 0 — help was
+  // asked for and given; the exit-2 below is for a genuinely malformed call.
+  if (argv.includes('--help') || argv.includes('-h')) { printHelp(); return; }
   const verb = argv[0];
   const sub = argv[1];
   const rest = argv.slice(2);
