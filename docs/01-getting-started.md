@@ -163,13 +163,12 @@ Once you've done one manual slice, the v1.1.x autonomy primitives let you drive 
 
 **Single slice, confident:**
 
-```bash
-$ maddu blast "add a /healthz endpoint"
-# or inside Claude Code / Codex:
+```text
+# inside Claude Code / Codex:
 /maddu-blast add a /healthz endpoint
 ```
 
-`blast` chains register → suggest lane → claim → run → slice-stop. Picks the first available lane if `suggest` returns empty. Doesn't ask permission.
+`/maddu-blast` chains register → suggest lane → claim → run → slice-stop. Picks the first available lane if `suggest` returns empty. Doesn't ask permission.
 
 **Persistent until done:**
 

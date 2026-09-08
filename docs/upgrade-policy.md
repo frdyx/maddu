@@ -8,7 +8,7 @@
 
 - `maddu/runtime/server.js`
 - `maddu/cockpit/index.html`
-- `maddu/cockpit/tokens.css`
+- `maddu/cockpit/cockpit.css`
 - `maddu/runtime/oauth/**`
 - `.maddu/harness/**`
 - `.maddu/wiki/**` (framework-default pages only — see below)

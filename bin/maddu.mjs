@@ -94,6 +94,10 @@ Commands:
   fleet          Read-only single-machine fleet view: per-repo version/currency/liveness + version delta vs fleet latest. [--json] (v1.76.0)
   ci             Headless LLM-free gate rail for CI: run | pin. Exit 1 only on pinned required gates (churn-proof). [--json --strict] (v1.87.0)
   autonomy       Earned autonomy: per-lane Wilson trust score over the verified record → recommend-only tier guidance. [--lane <id>] [--json] [--no-emit] (v1.92.0)
+  experience     Read-only experience ledger: the spine as normalized steps grouped into session trajectories. Writes nothing. [--json] (v1.94.0)
+  evolve         Recommend-only evolution planner over the experience ledger; nothing is ever applied automatically. Subcommands: adopt. (v1.94.0)
+  model          SLM-factory governance: validates + hash-pins host-repo model manifests; Máddu governs the factory, never runs it. (v1.95.0)
+  export         Read-side spine → OpenTelemetry (OTLP/JSON) log export. maddu export --otel [--since <eventId>] (v1.96.0)
 
 Flags:
   --version      Print framework version.
@@ -490,7 +494,13 @@ async function main() {
   // (they render usage text). The canonical dispatch below is the single
   // guarded site — command-tier-discipline asserts this arity.
   if (rest.includes('--help') || rest.includes('-h')) {
-    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install', 'task', 'review', 'self-test', 'agents']);
+    // Every module that ships its own help handler must be listed here, or the
+    // dispatcher falls through to the generic guide and that handler is
+    // unreachable from the CLI (audit 2026-09-07, finding E). `trust` was the
+    // sharpest case: commands/trust.mjs told the user to run `maddu trust
+    // --help`, which printed the generic guide instead of trust's own usage.
+    const VERBS_WITH_OWN_HELP = new Set(['start', 'stop', 'workspace', 'plan', 'lane', 'install', 'task', 'review', 'self-test', 'agents',
+      'bridges', 'global', 'hooks', 'insights', 'plugin', 'trust']);
     if (VERBS_WITH_OWN_HELP.has(raw)) {
       const mod = await import(pathToFileURL(join(repoRoot, 'commands', `${raw}.mjs`)).href); // census-pinned --help site 1
       await mod.default(rest);

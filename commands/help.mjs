@@ -25,6 +25,9 @@ const ROSTER = [
       { name: '/maddu-doctor',  line: 'Run hard-rule gates and surface findings.',      under: 'doctor' },
       { name: '/maddu-suggest <task>', line: 'Recommend a slash command + lane for a vague task.', under: 'suggest' },
       { name: '/maddu-audit',   line: 'Framework-coherence self-audit (dead events, drift, orphans).', under: 'audit' },
+      { name: '/maddu-architecture', line: 'Declared architecture contract vs the real import graph → drift + diagram.', under: 'architecture' },
+      { name: '/maddu-debt',    line: 'Ledger of deliberate-shortcut markers; flags the ones with no upgrade trigger.', under: 'debt' },
+      { name: '/maddu-insights', line: "What's actually utilized vs merely defined, across registered workspaces.", under: 'insights' },
     ],
   },
   {
@@ -32,6 +35,10 @@ const ROSTER = [
     title: 'Autopilot (end-to-end)',
     items: [
       { name: '/maddu-autopilot <task>', line: 'Register → claim → plan-exec-verify-fix → slice-stop.', under: 'register, suggest, lane claim, pipeline run, slice-stop' },
+      { name: '/maddu-blast <task>',     line: 'Chained autonomous run; standard tier required.',      under: 'register, lane claim, loop, slice-stop' },
+      { name: '/maddu-ralph <task>',     line: 'Persist-until-done loop: iterate then verify, until green or stuck.', under: 'loop ralph' },
+      { name: '/maddu-plan-loop <plan-id>', line: "Walk a plan's phases, re-running verify between them.", under: 'loop plan' },
+      { name: '/maddu-coordinate <plan-id>', line: 'Drive a multi-phase plan via the runtime-agnostic coordinator.', under: 'coordinator' },
     ],
   },
   {
@@ -40,6 +47,9 @@ const ROSTER = [
     items: [
       { name: '/maddu-plan <topic>',         line: 'Run the plan stage only; write a plan artifact.', under: 'goal, phase, brief' },
       { name: '/maddu-review [<slice-id>]',  line: 'Post-stop review of the current or named slice.',  under: 'review' },
+      { name: '/maddu-orient',               line: 'Session-start briefing: goal progress, counters, timeline, handoff.', under: 'orient' },
+      { name: '/maddu-handoff [<text>]',     line: 'Set or show the curated "▶ RESUME HERE" cross-session handoff.', under: 'handoff set, handoff show' },
+      { name: '/maddu-blueprint',            line: 'Export a portable, variable-driven blueprint of how a project was built.', under: 'blueprint' },
     ],
   },
   {
@@ -64,6 +74,8 @@ const ROSTER = [
     items: [
       { name: '/maddu-skill <verb> <args>', line: 'List, search, create, apply, delete skills.',  under: 'skill' },
       { name: '/maddu-note <text>',         line: 'One-liner into the operator inbox.',          under: 'mailbox send' },
+      { name: '/maddu-skills-review',       line: 'List detector-found skill candidates; materialize or reject.', under: 'skill' },
+      { name: '/maddu-learn',               line: 'Mine past sessions for failed→succeeded pairs; distil corrections.', under: 'learn' },
     ],
   },
   {
@@ -77,9 +89,13 @@ const ROSTER = [
   },
   {
     topic: 'admin',
-    title: 'Cancel',
+    title: 'Admin & governance',
     items: [
       { name: '/maddu-cancel', line: 'Stop the current slice cleanly (heartbeat-close + slice-stop).', under: 'session close, slice-stop' },
+      { name: '/maddu-governance [<tier>]', line: 'Switch or show the governance tier; hard rules immutable regardless.', under: 'governance' },
+      { name: '/maddu-log',     line: 'Audited receipt log; filter by --since / --lane / --op.',       under: 'log' },
+      { name: '/maddu-plugin [<verb>]', line: 'List / inspect / enable / disable capabilities outside the core.', under: 'plugin' },
+      { name: '/maddu-mcp [<verb>]',    line: 'List, install, or inspect MCP server templates.',        under: 'mcp' },
     ],
   },
   {
