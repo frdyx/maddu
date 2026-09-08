@@ -188,11 +188,16 @@ try {
     // Catching everything would let a disk-full or I/O failure during setup be
     // reported as a Developer-Mode skip — a broken run wearing a green face,
     // which is the exact shape of failure these rows exist to prevent.
+    // UNKNOWN is in the set because that is what Windows actually raises for an
+    // unprivileged symlink in some configurations — but it does not, on its own,
+    // ESTABLISH a capability limit. So the skip line carries the code that
+    // caused it rather than asserting a cause: a reader can tell EPERM (a known
+    // privilege limit) from UNKNOWN (a skip we could not explain).
     const UNSUPPORTED = new Set(['EPERM', 'EACCES', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'UNKNOWN']);
     const probe = async (make) => {
-      try { await make(); return true; }
+      try { await make(); return { able: true }; }
       catch (err) {
-        if (UNSUPPORTED.has(err?.code)) return false;
+        if (UNSUPPORTED.has(err?.code)) return { able: false, code: err.code };
         throw err; // a real setup failure, and it must be seen as one
       }
     };
@@ -203,15 +208,15 @@ try {
     const fileLinks = await probe(() => symlink(join(linkRoot, 'probe-target'), join(linkRoot, 'probe-link')));
     const dirLinks = await probe(() => symlink(join(linkRoot, 'probe-dir'), join(linkRoot, 'probe-dir-link'), 'junction'));
 
-    if (!fileLinks) {
+    if (!fileLinks.able) {
       skipped += 1;
-      console.log('[SKIP] R1-F2-symlinked-config - this filesystem cannot create file symlinks');
+      console.log(`[SKIP] R1-F2-symlinked-config - file symlink creation returned ${fileLinks.code}`);
     }
-    if (!dirLinks) {
+    if (!dirLinks.able) {
       skipped += 1;
-      console.log('[SKIP] R1-F4-dangling-config-link - this filesystem cannot create directory links');
+      console.log(`[SKIP] R1-F4-dangling-config-link - directory link creation returned ${dirLinks.code}`);
     }
-    if (fileLinks) {
+    if (fileLinks.able) {
       // F2: Dirent.isFile() is FALSE for a symlink, so a directory holding only
       // symlinked configs read as empty — which the new empty-is-a-finding rule
       // then turned into a FAILURE for a configuration `pipeline run` reads fine.
@@ -227,7 +232,7 @@ try {
         assert.ok(!/holds no pipeline JSON/i.test(gate.message), gate.message);
       });
     }
-    if (dirLinks) {
+    if (dirLinks.able) {
       // F4: stat FOLLOWS links, so a config directory whose target vanished
       // raised ENOENT and was reported as absence — a green skip over a broken
       // local configuration.

@@ -160,18 +160,24 @@ try {
   // framework source", and reported a source checkout's intentionally absent
   // maddu.json as FAIL. Assembled as an installed-shape CLI so the resolution
   // difference is exercised for real, not asserted structurally.
-  await row('R1-F1-cli-relative-lib', 'an installed-shape CLI still recognises a source checkout it is not standing in', async () => {
+  await row('R1-F1-cli-relative-lib', 'doctor reads its layout predicate from beside the CLI, not from the repo under examination', async () => {
     const cliRoot = await tmp('maddu-pr2-installed-cli-');
     await cp(join(sourceRoot, 'bin'), join(cliRoot, 'bin'), { recursive: true });
     await cp(join(sourceRoot, 'commands'), join(cliRoot, 'commands'), { recursive: true });
     await cp(join(sourceRoot, 'template', 'maddu', 'runtime'), join(cliRoot, 'runtime'), { recursive: true });
     await cp(join(sourceRoot, 'package.json'), join(cliRoot, 'package.json'));
     await cp(join(sourceRoot, 'version.json'), join(cliRoot, 'version.json'));
-    // Remove the TARGET's own copy of the lib too. Without this the row also
-    // passes for a resolver that reads the CURRENT directory's template/ tree —
-    // which is exactly what must be ruled out, since the repo under examination
-    // need not be the one the CLI happens to be standing in.
-    await rm(join(source, 'template', 'maddu', 'runtime', 'lib', 'layout.mjs'), { force: true });
+    // A DECOY, not a deletion. Deleting the target's own copy only rules out a
+    // resolver that reads the current directory and nothing else: with no
+    // competing file, a cwd-FIRST resolver that falls back to the CLI picks the
+    // same helper and passes anyway. A decoy that answers "not the framework
+    // source" discriminates by ORDER — only a resolver that looks beside the
+    // CLI first gets the right answer.
+    await writeFile(
+      join(source, 'template', 'maddu', 'runtime', 'lib', 'layout.mjs'),
+      'export async function isFrameworkSourceRepo() { return false; }\n'
+      + 'export function sourceLayoutSkip(what) { return `decoy ${what}`; }\n',
+    );
     const r = fixtureCli(source, ['doctor'], {}, join(cliRoot, 'bin', 'maddu.mjs'));
     const out = plain(r.stdout + r.stderr);
     const marker = out.split('\n').find((l) => l.includes('install marker') || /maddu\.json/.test(l));
