@@ -11,6 +11,76 @@ narrative summary.
 
 ---
 
+## [v1.134.0] · 2026-09-08 · the record named the wrong actor, and reads confessed to breaches
+
+Three defects from the 2026-09-07 audit register, all in the same place: what
+the record says about *who acted* and *what was refused*.
+
+**Reads stopped confessing.** `session tree`, `session active` and `skill
+candidates` are read-only invocations of otherwise-mutating verbs. The
+mutation-witness guard breaches any mutating seam that exits 0 with zero spine
+appends and no declared no-op — so every one of those commands appended a
+`MUTATION_UNWITNESSED` breach on a run where the correct behaviour was to write
+nothing. They are declared read shapes now. `lane suggest` could not be: shapes
+match on leading tokens and flags *present*, never on flags *absent*, and
+`suggest` is the same token in all three forms — so its report branch declares
+a `witnessNoop` instead, while `--adopt` and `--prune` stay mutating. The
+matcher's own comment claimed leading tokens "must equal `tokens` exactly"; it
+is a prefix test, and the `candidates` shape depends on that, so the comment now
+says what the code does.
+
+**A session id is a candidate, not an answer.** A grammar-valid
+`MADDU_SESSION_ID` used to be accepted outright, so a closed or
+never-registered id owned every event, breach row, verification receipt and
+invocation receipt it touched — the actor named in the record was not the one
+doing the work. `classifySessionId` now decides:
+
+| state | meaning | result |
+|---|---|---|
+| live | a registration, no later close | used |
+| not-live | closed, or absent from a complete replay | dropped, one line on stderr, attribution falls back to the verified active-session cache |
+| unverified | unreadable spine, partial replay, or replica-mode accounting | the candidate is kept |
+
+The `unverified` state carries the weight. A replay that cannot account for
+itself must never condemn an id, or a partial read strips attribution from a
+live session — and an *empty* replay counts as unverified too, because every
+real repo carries a genesis event, so zero events means you are not looking at
+a spine. Absent and malformed ids are unchanged: this changes what a dead id
+does, not what a missing one does.
+
+Receipts needed more than the policy. Attribution is resolved asynchronously
+*before* dispatch and handed to the exit writer, which is synchronous and
+cannot replay anything. The writer keyed its answer off truthiness, so the null
+the resolver had just decided fell through to a re-read of the environment,
+resurrecting the dead id one line after it was dropped. Presence of the key now
+decides: `sessionId: null` is an answer, an absent key is a question.
+
+**A block leaves a record.** Each blocked decision appends one
+`DISCIPLINE_DENIED` carrying `{tool, blocker, kind, targetScope}` —
+`DISCIPLINE_SKIPPED`'s opposite number: that one witnesses a check that did not
+run, this one a check that bit. And when the gate cannot place a write's target
+inside or outside the repo, the deny now says so in one added line, without
+displacing the blocker or the remedy — an unplaceable target is context, not a
+rung of the ladder, and has no remedy of its own.
+
+The witness must never cost the block. The append happens inside its own
+try/catch before the deny is written, and `spine.append` takes an optional
+`maxWaitMs` (default `Infinity`, so no existing caller changes) that bounds
+**lock acquisition**: it either takes the lock and completes, or gives up
+before writing a byte. The first attempt at this raced the whole append against
+a timer, which trades a hang for something worse — `Promise.race` cancels
+nothing, so exiting on the timer could abandon a write part-way and leave a
+torn tail that refuses every later append.
+
+**Self-test says which run it was.** Reports and the `VERIFICATION_RAN` receipt
+carry `argv`, `cwd` and `pid`. "quick profile, 227 passed" could not be told
+apart from another machine's run, or a narrowed one, and the recency readouts
+trust these files.
+
+Event contract 1.21.0 (additive: one new type, three new receipt fields).
+
+---
+
 ## [v1.133.0] · 2026-09-06 · the gate never looked at the file
 
 The PreToolUse discipline gate decided from the *shape* of a tool call — the
