@@ -11,6 +11,63 @@ narrative summary.
 
 ---
 
+## [v1.136.0] · 2026-09-08 · say what ships
+
+Shipped documentation and the CLI help surface described a product that does not
+exist. Closes register findings A3, D1–D4 and E1–E5.
+
+### The phantoms
+
+- **`tokens.css` does not exist.** Six shipped files told the reader Máddu owns one —
+  four naming the path `maddu/cockpit/tokens.css`, two naming it bare in the agent
+  brief. The cockpit's tokens are the `--m-*` custom properties declared inside
+  `cockpit.css`. The two mentions in `cockpit.css` itself are deliberately kept: they
+  cite the external Claude design system, which really does publish a `tokens.css`.
+- **`maddu blast` is not a verb.** `docs/01-getting-started.md` instructed it; `blast`
+  exists only as the slash command. `CHANGELOG.md` keeps its historical mention.
+- **`/bridge/project` is not a route.** `docs/04` and `docs/05` documented it as an
+  endpoint; the server registers `/bridge/project-cockpit`.
+- **The README contradicted its own schema** — 193 typed event types and a v1.8.0
+  contract, against the 195 and 1.21.0 `docs/event-schema.json` actually carries. The
+  rows now compare both against the schema read at run time, so they cannot drift
+  silently again.
+
+### The help surface
+
+- **Four dispatchable verbs appeared in no listing** — `evolve`, `experience`,
+  `export`, `model`.
+- **Six modules shipped a `--help` handler the dispatcher could not reach** —
+  `bridges`, `global`, `hooks`, `insights`, `plugin`, `trust`. `trust` was the sharpest:
+  its own error path told the user to run `maddu trust --help`, which printed the
+  generic guide.
+- **The roster was missing 16 of the 40 slash commands that ship**, while calling itself
+  the authoritative roster. Three entries added here first advertised syntax the verb
+  rejects — `/maddu-governance <tier>` among them — and were corrected.
+- `docs/03-cli-reference.md` named six bespoke-help verbs; there were ten, now sixteen.
+
+### Found by review, fixed here
+
+Making those six handlers reachable turned a help request into a mutation. The
+dispatcher detects `--help` anywhere in argv and forwards argv unchanged, and two of the
+six did not guard: `maddu trust pin <pkg> --version 1.0.0 --help` performed the pin and
+appended a spine event, and `maddu global policy add … --help` wrote machine-scope
+policy. Both now return early. `scripts/test/help-no-mutation.mjs` derives the verb set
+from the dispatcher, so the next verb added without a guard fails rather than ships.
+
+### Verification
+
+Rows authored red-first by Codex from a written contract, never shown the fix.
+`doc-phantoms` 3 pass / 19 fail at base → **36 / 0**; `help-surface` 1 / 5 → **6 / 0**;
+`help-no-mutation` 56 / 6 → **62 / 0 / 1 skip**. Eleven mutations reintroduced the
+defects one at a time; all eleven were caught.
+
+Clause 3 is deliberately narrow. A general "every documented bridge endpoint is
+registered" check was attempted three times and deferred: `server.js:260` is
+`url.pathname.startsWith('/bridge/')`, a dispatch guard matching every bridge path, so a
+shape-only oracle classifies the phantom as registered and goes green at base.
+Separating handler registration from dispatch and auth guards is its own work.
+
+---
 ## [v1.135.0] · 2026-09-08 · checks that check something
 
 Four defects from the 2026-09-07 audit register (A1, A2, B1, B2), all the same

@@ -44,8 +44,9 @@
       ],
       [
         "**Three-layer brand boundary.** Framework shell brand / app brand /",
-        "   content brand never mix. The cockpit's `tokens.css` is owned by Máddu and",
-        "   must not be referenced from app or content code."
+        "   content brand never mix. The cockpit's design tokens (the `--m-*`",
+        "   custom properties in `cockpit.css`) are owned by Máddu and must not",
+        "   be referenced from app or content code."
       ],
       [
         "**Lane ownership.** No two agents may hold the same lane concurrently. Use",

@@ -36,7 +36,8 @@ id that no longer exists.
   project-defined surface for a gate to scan, so the rule is enforced by the
   absence of relay code, not by a runtime check.
 - **Rule 7 (three-layer brand boundary).** Framework shell brand lives only in
-  `maddu/cockpit/tokens.css`. App brand and content brand are **project-owned**
+  the `--m-*` custom properties in `maddu/cockpit/cockpit.css`. App brand and
+  content brand are **project-owned**
   and have no fixed framework path — so a doctor gate cannot mechanically know
   where to look without project-specific configuration. The boundary is enforced
   by construction (the framework never writes app/content brand; the cockpit

@@ -52,7 +52,7 @@ Five read-only routes for the operator on the hook — the person who may not re
 
 - **`#oversight`** — what a skill was **fed vs withheld**, with a plain-language *why* per item; on-goal drift; record-intact. Reads `GET /bridge/oversight`; mirror of `maddu spine oversight`.
 - **`#digest`** — "while you were away": what changed since you last looked (slices landed, gates failing, goal state). Reads `GET /bridge/digest`; mirror of `maddu orient --digest`.
-- **`#project`** — a single project's state, focused, for the one-repo operator. Reads `GET /bridge/project`.
+- **`#project`** — a single project's state, focused, for the one-repo operator. Reads `GET /bridge/project-cockpit`.
 - **`#decisions`** — the decision/approval ledger, each row's `sha` tied to the tamper chain (a decision you can prove wasn't back-dated). Reads `GET /bridge/decisions`.
 - **`#portfolio`** — the cross-workspace wall: every registered workspace at once and **which need a human**. Reads `GET /bridge/_all/portfolio` (fans out over all workspaces).
 

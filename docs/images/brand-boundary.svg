@@ -37,7 +37,7 @@
   <g transform="translate(220,100)">
     <rect class="ring-1" width="1040" height="320" rx="10" filter="url(#glow-lime)"/>
     <text x="20" y="28" class="cond-b" fill="#D0FF00" font-size="12" letter-spacing="0.10em">◈ FRAMEWORK SHELL BRAND (Máddu)</text>
-    <text x="20" y="46" class="mono" fill="#6a7079" font-size="10">template/maddu/cockpit/tokens.css · brand-mark.svg · IBM Plex · cockpit aesthetic</text>
+    <text x="20" y="46" class="mono" fill="#6a7079" font-size="10">template/maddu/cockpit/cockpit.css · brand-mark.svg · IBM Plex · cockpit aesthetic</text>
 
     <!-- Middle ring: app brand -->
     <g transform="translate(80,80)">

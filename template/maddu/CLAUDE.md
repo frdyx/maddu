@@ -140,8 +140,9 @@ rule is about the **Máddu framework layer**):
    `~/.config/maddu/auth/` (Linux/macOS) or `%APPDATA%\maddu\auth\` (Windows).
    `maddu export` scrubs them; `maddu import` refuses to overwrite them.
 7. **Three-layer brand boundary.** Framework shell brand / app brand /
-   content brand never mix. The cockpit's `tokens.css` is owned by Máddu and
-   must not be referenced from app or content code.
+   content brand never mix. The cockpit's design tokens (the `--m-*`
+   custom properties in `cockpit.css`) are owned by Máddu and must not
+   be referenced from app or content code.
 8. **Lane ownership.** No two agents may hold the same lane concurrently. Use
    the mailbox bus (`.maddu/lanes/<lane>/mailbox.ndjson`) for cross-lane
    handoffs, not shared mutation.
