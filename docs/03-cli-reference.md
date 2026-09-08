@@ -827,6 +827,30 @@ $ maddu lane claim --lane <id> --session <sid> --force [--reason "..."]
 $ maddu slice-stop --triggered-by plan:<plan-id> --summary "..."
 ```
 
+**A `$MADDU_SESSION_ID` is a candidate, not an answer (v1.134.0).** Passing the
+grammar is no longer enough to act as a session: the id is classified against
+the spine first.
+
+| state | meaning | result |
+|---|---|---|
+| live | a registration for it, no later close | used |
+| not-live | closed, or absent from a COMPLETE replay | dropped, one line on stderr, attribution falls back to the verified active-session cache |
+| unverified | the spine could not be read, or the replay had parse errors | the candidate is KEPT |
+
+An id that fails the grammar is unchanged: it falls through silently, as before.
+So does an absent one. This changes what a DEAD id does, not what a missing one
+does — a closed or never-registered id used to own every event, breach row and
+receipt it touched.
+
+The `unverified` state is deliberate: a replay that could not be read completely
+must never condemn an id, or a partial read would strip attribution from a live
+session. An EMPTY replay counts as unverified too — every real repo carries a
+genesis event, so zero events means you are not looking at a spine.
+
+If the fallback finds no live session either, the command has no session and
+says so, rather than proceeding under a name that is not doing the work.
+
+
 Full coverage: [28-default-tools.md](28-default-tools.md),
 [29-mcp-templates.md](29-mcp-templates.md),
 [30-governance-tiers.md](30-governance-tiers.md),

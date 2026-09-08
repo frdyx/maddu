@@ -13,8 +13,8 @@
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
-import { mkdtemp, mkdir, readdir, readFile, writeFile, appendFile, rename } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, appendFile, rename, unlink } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -702,6 +702,37 @@ try {
 } finally {
   await cleanupFixtures();
 }
+// Round 1 F1: a HELD append lock must not swallow the deny.
+//
+// The denial witness appends before the deny is written, and spine.append takes
+// the append lock with maxWaitMs: Infinity. A lock held by a LIVE pid - a
+// suspended process, or a holder on another host that cannot be reclaimed -
+// therefore made the hook wait forever, and the caller received NO deny at all.
+// A try/catch cannot see that failure: nothing throws, it simply never returns.
+// The block is the contract; the record is best-effort.
+{
+  const root = await ladderFixture('session');
+  const lockPath = join(root, '.maddu', 'events', '.append.lock');
+  await mkdir(dirname(lockPath), { recursive: true });
+  // A LIVE holder on this host: our own pid, alive by construction, so the
+  // dead-holder steal path cannot reclaim it and a waiter really must wait.
+  await writeFile(lockPath, JSON.stringify({
+    ownerId: 'pr1-f1-probe', pid: process.pid, host: hostname(), startedAt: new Date().toISOString(),
+  }));
+  const before = (await events(root, 'DISCIPLINE_DENIED')).length;
+  const started = Date.now();
+  const r = await fire(root, { tool_name: 'Bash', tool_input: { command: 'echo hi > note.txt' }, cwd: root });
+  const elapsed = Date.now() - started;
+  const json = outputOf(r);
+  const after = (await events(root, 'DISCIPLINE_DENIED')).length;
+  ok('PR1 F1: a held append lock cannot withhold the deny (bounded, still denies)',
+    r.code === 0 && json?.permissionDecision === 'deny'
+    && /no active Máddu session/.test(json?.permissionDecisionReason || '')
+    && elapsed < 20000 && after === before,
+    `exit=${r.code} decision=${json?.permissionDecision} elapsedMs=${elapsed} deniedDelta=${after - before}`);
+  try { await unlink(lockPath); } catch {}
+}
+
 
 console.log('');
 console.log(`discipline-hook: ${passed} passed, ${failed} failed`);

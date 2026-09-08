@@ -196,8 +196,24 @@ async function loadSessionActiveLib() {
 // filesystem (that made the resolver untestable and ignored the root it was
 // given). Only the parameterless callers fall back to loading them here. The
 // memo is keyed by root so two roots in one process cannot share an answer.
+async function resolveAmbientRoot(repoRoot) {
+  if (repoRoot) return repoRoot;
+  try {
+    const dir = await resolveLibDir();
+    const paths = await import(pathToFileURL(join(dir, 'paths.mjs')).href);
+    return await resolveRepoRoot(paths);
+  } catch { return null; }
+}
+
 async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null) {
-  const memoKey = `${repoRoot ?? ''} ${candidate}`;
+  // Round 1 F5: resolve the root BEFORE keying the memo. Keying on the caller's
+  // ARGUMENT meant a parameterless call (receipt arming, the witness context)
+  // keyed on '' while resolveSessionId keyed on the real path — two decisions
+  // for one repo, so a single invocation could act as C while its receipt and
+  // its breach row both named B.
+  const root = await resolveAmbientRoot(repoRoot);
+  if (!root) return candidate; // cannot place the repo → keep the candidate
+  const memoKey = `${root}::${candidate}`;
   if (_ambientDecisions.has(memoKey)) return _ambientDecisions.get(memoKey);
   const decide = async () => {
     const lib = (sessionActive && typeof sessionActive.classifySessionId === 'function')
@@ -205,14 +221,6 @@ async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null
     // A lib without the classifier is a pre-v1.134 runtime (or a caller's stub
     // that does not implement it): keep the candidate, exactly as before.
     if (!lib || typeof lib.classifySessionId !== 'function') return candidate;
-    let root = repoRoot;
-    if (!root) {
-      try {
-        const dir = await resolveLibDir();
-        const paths = await import(pathToFileURL(join(dir, 'paths.mjs')).href);
-        root = await resolveRepoRoot(paths);
-      } catch { return candidate; }
-    }
     let state;
     try { state = await lib.classifySessionId(root, candidate); } catch { return candidate; }
     if (state !== 'not-live') return candidate; // live, or cannot verify
@@ -242,24 +250,34 @@ async function decideAmbientSid(candidate, repoRoot = null, sessionActive = null
 // which is synchronous and cannot replay anything — has an answer handed to
 // it. The result is authoritative including null: a dropped dead id must not
 // come back when the writer looks at the environment again.
-export async function resolveReceiptSid() {
+export async function resolveReceiptSid(repoRoot = null) {
   const env = process.env.MADDU_SESSION_ID;
   const g = await loadIdGrammar();
   if (env) {
     if (!g) return env; // pre-PR-B lib: today's behavior
     // A malformed ambient id is not a candidate; fall through to the cache
     // exactly as the writer used to.
-    if (g.isRefId(env)) return decideAmbientSid(env);
+    if (g.isRefId(env)) return decideAmbientSid(env, repoRoot);
   }
+  // Round 1 F4: UNDEFINED means "resolution was unavailable"; null means
+  // "resolved to nobody". The caller must be able to tell them apart, or a
+  // missing runtime lib becomes an authoritative null that suppresses the
+  // writer's own env/cache derivation — attribution lost precisely where this
+  // resolver could not run.
   const lib = await loadSessionActiveLib();
-  if (!lib || typeof lib.readActiveSessionVerified !== 'function') return null;
+  if (!lib || typeof lib.readActiveSessionVerified !== 'function') return undefined;
+  const root = await resolveAmbientRoot(repoRoot);
+  if (!root) return undefined;
   try {
-    const dir = await resolveLibDir();
-    const paths = await import(pathToFileURL(join(dir, 'paths.mjs')).href);
-    const root = await resolveRepoRoot(paths);
     const res = await lib.readActiveSessionVerified(root);
-    if (res && (res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
-  } catch {}
+    if (!res) return null;
+    if ((res.kind === 'active' || res.kind === 'unverified') && res.record) return res.record.sessionId;
+    // Pre-v1.111 libs return a RAW record rather than the discriminated union;
+    // ignoring that shape lost the cache id on older installs (round 1 F4).
+    if (!res.kind && typeof res.sessionId === 'string' && !res.stale) {
+      return (g && !g.isRefId(res.sessionId)) ? null : res.sessionId;
+    }
+  } catch { return undefined; }
   return null;
 }
 

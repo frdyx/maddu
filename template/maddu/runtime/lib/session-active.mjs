@@ -229,6 +229,13 @@ export async function classifySessionId(repoRoot, sessionId) {
     if (ev.type === 'SESSION_CLOSED' || ev.type === 'SESSION_AUTO_CLOSED') return 'not-live';
     if (ev.type === 'SESSION_REGISTERED' || ev.type === 'SESSION_AUTO_REGISTERED') return 'live';
   }
+  // No lifecycle event for this id. Round 1 F2: that is only EVIDENCE when the
+  // replay could account for itself. With parseErrors === null (replica mode)
+  // the reader discards accounting and can silently omit an unreadable segment
+  // or partition — so a live session whose registration lives in the omitted
+  // half would be condemned by its own absence. POSITIVE evidence above is
+  // still trusted under replica mode; absence is not.
+  if (parseErrors === null) return 'unverified';
   // Complete replay, no lifecycle event for this id: it never registered here.
   return 'not-live';
 }

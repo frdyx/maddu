@@ -292,7 +292,13 @@ async function armCommandWitness(ws, raw, rest) {
     let witnessSid = isRefId(process.env.MADDU_SESSION_ID) ? process.env.MADDU_SESSION_ID : null;
     try {
       const { resolveReceiptSid } = await import(pathToFileURL(join(repoRoot, 'commands', '_spine.mjs')).href);
-      if (typeof resolveReceiptSid === 'function') witnessSid = await resolveReceiptSid();
+      if (typeof resolveReceiptSid === 'function') {
+        const answer = await resolveReceiptSid();
+        // Same distinction as the receipt path: keep the grammar-gated env
+        // reading when resolution was unavailable, rather than blanking the
+        // witness actor (round 1 F4).
+        if (answer !== undefined) witnessSid = answer;
+      }
     } catch {}
     const ctx = ws.lib.createWitnessContext(`cli:${raw}${subRaw ? ' ' + subRaw : ''}`, {
       mode: isRead ? 'read' : 'mutating',
@@ -418,8 +424,12 @@ async function armInvocationReceipt(raw, rest) {
     try {
       const { resolveReceiptSid } = await import(pathToFileURL(join(repoRoot, 'commands', '_spine.mjs')).href);
       if (typeof resolveReceiptSid === 'function') {
-        resolvedSid = await resolveReceiptSid();
-        attributionResolved = true;
+        const answer = await resolveReceiptSid();
+        // Round 1 F4: undefined means the resolver could not run — NOT that
+        // nobody was acting. Treating it as an answer passed an authoritative
+        // null downstream and suppressed the writer's own env/cache
+        // derivation, losing attribution exactly where this path failed.
+        if (answer !== undefined) { resolvedSid = answer; attributionResolved = true; }
       }
     } catch {}
     process.on('exit', (code) => {

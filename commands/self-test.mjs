@@ -76,7 +76,15 @@ export default async function selfTest(argv) {
     let stActor = (spine.isRefId && spine.isRefId(process.env.MADDU_SESSION_ID)) ? process.env.MADDU_SESSION_ID : null;
     try {
       const { resolveReceiptSid } = await import('./_spine.mjs');
-      if (typeof resolveReceiptSid === 'function') stActor = await resolveReceiptSid();
+      // Round 1 F3: resolve against frameworkRoot — the spine this receipt is
+      // written TO. Resolving from process.cwd() meant running the framework's
+      // CLI from another repo classified the id against THAT repo's spine, so a
+      // legitimate live session was dropped and the receipt could name a
+      // session never registered in its own destination.
+      if (typeof resolveReceiptSid === 'function') {
+        const resolved = await resolveReceiptSid(frameworkRoot);
+        if (resolved !== undefined) stActor = resolved;
+      }
     } catch {}
     const out = await recordVerification(frameworkRoot, { spine, actor: stActor, lane: process.env.MADDU_LANE || null }, {
       kind: 'self-test', profile,
