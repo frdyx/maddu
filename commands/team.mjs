@@ -27,7 +27,7 @@
 // existing rule-8-no-duplicate-claims gate).
 
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 
 async function openTeam(flags) {
   const members = Number(flags.members || flags.n || 0);
@@ -49,7 +49,7 @@ async function openTeam(flags) {
     process.exit(2);
   }
 
-  const { paths, spine, projections } = await loadSpineLib();
+  const { paths, spine, projections, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   // Refuse if any requested lane is currently held (rule #8).
@@ -61,23 +61,26 @@ async function openTeam(flags) {
     process.exit(1);
   }
 
+  // A1: --session was accepted and ignored. One resolution for the whole
+  // open, so the team and every lane it allocates name the same session.
+  const actor = await resolveSessionId(repoRoot, flags, sessionActive);
   const teamId = spine.makeId('team');
   const label = flags.label || `team-${members}`;
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.TEAM_OPENED,
-    actor: await envActingSid(),
+    actor,
     data: {
       teamId,
       label,
       members,
       lanes: lanes.slice(),
-      parentSessionId: await envActingSid(),
+      parentSessionId: actor,
     },
   });
   for (const lane of lanes) {
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.TEAM_LANE_ALLOCATED,
-      actor: await envActingSid(),
+      actor,
       data: { teamId, lane },
     });
   }
@@ -85,7 +88,7 @@ async function openTeam(flags) {
   if (process.stdout.isTTY) {
     console.log(`  members: ${members}`);
     console.log(`  lanes:   ${lanes.join(', ')}`);
-    console.log(`  parent:  ${process.env.MADDU_SESSION_ID || '(none)'}`);
+    console.log(`  parent:  ${actor || '(none)'}`);
   }
 }
 
@@ -105,7 +108,7 @@ async function spawnTeam(flags) {
   const dup = lanes.find((l, i) => lanes.indexOf(l) !== i);
   if (dup) { console.error(`maddu team spawn: lanes must be disjoint; "${dup}" appears twice`); process.exit(2); }
 
-  const { paths, spine, projections, runtimes } = await loadSpineLib();
+  const { paths, spine, projections, runtimes, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   // Runtime must exist — fail fast with an actionable error.
@@ -119,7 +122,7 @@ async function spawnTeam(flags) {
   const held = (proj.claims || []).filter((c) => lanes.includes(c.lane)).map((c) => c.lane);
   if (held.length) { console.error(`maddu team spawn: lane(s) already claimed — ${held.join(', ')}`); process.exit(1); }
 
-  const parent = await envActingSid();
+  const parent = await resolveSessionId(repoRoot, flags, sessionActive);
   const teamId = spine.makeId('team');
   const label = flags.label || `team-spawn-${lanes.length}`;
   await spine.append(repoRoot, {
@@ -195,7 +198,7 @@ async function closeTeam(flags) {
     console.error('maddu team close: --team-id <id> required');
     process.exit(2);
   }
-  const { paths, spine, projections } = await loadSpineLib();
+  const { paths, spine, projections, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
   const proj = await projections.project(repoRoot);
   const t = (proj.teams || []).find((x) => x.id === teamId);
@@ -210,7 +213,7 @@ async function closeTeam(flags) {
   const stillIn = t.members.filter((m) => !m.leftAt);
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.TEAM_CLOSED,
-    actor: await envActingSid(),
+    actor: await resolveSessionId(repoRoot, flags, sessionActive),
     data: { teamId, openMembers: stillIn.map((m) => m.sessionId) },
   });
   console.log(`team ${teamId} closed`);

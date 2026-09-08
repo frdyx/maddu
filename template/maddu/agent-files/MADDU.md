@@ -101,8 +101,11 @@ two close matches, ask **one** clarifying question — not three.
 work, the default is `maddu pipeline run <name> "<goal>"` — not an ad-hoc
 autopilot. Pipelines walk the canonical flow (orient → plan → coordinate
 → slice → test → review → land → account) and populate the feature
-surfaces. Three default pipelines ship: `ship-a-feature` (the default,
-for end-to-end feature work), `fix-a-bug` (something broken), and
+surfaces. The runner is a bookkeeper — it records the stage trail and
+leaves each stage's work to you. Four default pipelines ship:
+`ship-a-feature` (the default, for end-to-end feature work), `fix-a-bug`
+(something broken), `plan-exec-verify-fix` (the end-to-end work shape:
+plan → exec → verify → fix), and
 `plan-and-delegate` (fan-out across disjoint lanes — its coordinate
 stage spawns a tracked Máddu worker per phase via `coordinator
 --runtime <name>`, so the fan-out is visible to Máddu; requires a

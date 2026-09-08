@@ -53,6 +53,28 @@ async function listMjs(dir) {
     .sort();
 }
 
+// The ids the builtin gate DEFINITIONS export, before any operator override is
+// resolved (audit 2026-09-07, finding A2). Two things this is not:
+//   - not a regex over the file. `commands/audit.mjs` used to take the first
+//     `id: '...'` it saw, which in can-read-old-state.mjs is fixture data
+//     (`{ id: 'ses_x' }`), so the traceability set carried a session id and
+//     lacked the gate. A defect in test data became a defect in the report.
+//   - not discoverGates() filtered to builtins. Discovery dedupes by id with
+//     the operator copy winning, so an overridden builtin would vanish from
+//     the set and its rule reference would read as dangling.
+// `dir` is a parameter so a regression fixture can put a gate beside the
+// loader under test instead of writing into the shipped builtin directory.
+export async function loadBuiltinGateIds(dir = BUILTIN_DIR) {
+  const ids = new Set();
+  for (const f of await listMjs(dir)) {
+    const g = await loadGate(f);
+    // A gate that failed to load reports its PATH as `id`; it has no exported
+    // identity, so it contributes nothing rather than a phantom one.
+    if (g && !g.__loadError && typeof g.id === 'string') ids.add(g.id);
+  }
+  return ids;
+}
+
 export async function discoverGates(repoRoot) {
   const builtinFiles = await listMjs(BUILTIN_DIR);
   const operatorFiles = await listMjs(join(repoRoot, '.maddu', 'gates'));

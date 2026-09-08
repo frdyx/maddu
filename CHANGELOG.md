@@ -11,6 +11,72 @@ narrative summary.
 
 ---
 
+## [v1.135.0] · 2026-09-08 · checks that check something
+
+Four defects from the 2026-09-07 audit register (A1, A2, B1, B2), all the same
+shape: a check that ran, reported, and established nothing. No event-contract
+change — `status` was already typed `string`, so `'ok'` → `'recorded'` is a
+value, and `PIPELINE_HALTED` stays registered.
+
+**The flag guard was reading prose.** A verb inherited every flag read anywhere
+in a helper *file* it imported, and keys were harvested out of comments and
+usage text. `--session` was accepted and silently ignored by 34 verbs,
+`--parent` by 47, and `sources --force` was allowlisted out of the very comment
+saying the flag is deliberately not honored. Three mechanisms now count as a
+read: the verb's own parsed-flag reads found **in code**, its own raw-argv
+membership reads, and the reads of a helper **function** the verb hands its own
+`flags` object to — per function, not per file, since `_spine.mjs` holds
+separate session and parent readers. `--session` belongs to 15 verbs,
+`--parent` to `register` and `session`; `advise`, `team` and `pipeline` now
+resolve the flag instead of reading the ambient session.
+
+Two things the rewrite turned up. `maddu loop status --loop <id>` was being
+REJECTED for a flag `loop.mjs` genuinely reads — the old scanner could only see
+raw-argv reads in verbs that skip `parseFlags`. And the classifier first treated
+a template literal as opaque, which dropped `flags['source-url']` in
+`skill.mjs`: `${...}` is code inside a string.
+
+**A gate reported a session id as its own name.** `presentGateIds` took the
+first `id: '...'` in each gate file as text, and in `can-read-old-state.mjs`
+that match is fixture data (`{ id: 'ses_x' }`) — so the traceability set carried
+a session id and lacked the gate. A defect in test data had become a defect in
+the report. `loadBuiltinGateIds(dir)` asks the loader instead, before
+operator-override dedupe. On a runtime without the export, audit reports an
+empty set — a visible skip — rather than falling back to the regex.
+
+**The framework source repo was reported as a broken install.** Three gates
+described the absence of consumer artifacts in the repo that IS the framework:
+`agent-file-current` FAIL, `install-integrity` FAIL, `skills-starter-pack-installed`
+WARN. Meanwhile `doctor` returned before running a single gate in source layout,
+so the one checkout where Máddu is developed was the one place doctor could not
+see its own gate rail. One predicate now, in `runtime/lib/layout.mjs`, with one
+skip message; `doctor` and `project-test-recent` drop their private copies. The
+skip depends on LAYOUT alone — the starter-pack gate no longer answers
+differently depending on whether a local `.maddu/skills/` happens to exist.
+
+**Pipelines recorded outcomes nobody observed.** `pipeline run` is a bookkeeper
+by design and does not execute stages, yet it wrote `status: 'ok'` on every
+stage exit. New emissions say `'recorded'`. `pipeline-schema-valid` was pinned
+as required and validated nothing in this checkout, because its existence helper
+collapsed every stat failure into absence. Three states now — absent, present,
+unreadable — with local config winning when present, the shipped templates
+validated on definite absence in the source repo, and an empty or unreadable
+directory non-green, because opting out looks like absence, not emptiness.
+`plan-exec-verify-fix.json` ships as a template like the other three.
+
+Four shipped files claimed each pipeline stage is "a literal `maddu` invocation"
+and that three pipelines ship — concepts, charter, the worker brief and the
+agent brief. All four now describe the bookkeeper and count to four.
+
+**Not pinned, deliberately.** `install-integrity` stays out of `ci.json`: CI runs
+`maddu ci` in this source checkout, so pinning it would mean pinning a gate that
+takes the new skip on every run — the same vacuous green this release removes
+from `pipeline-schema-valid`.
+
+Rows were authored red-first by Codex from a written contract, never shown the
+implementation: 59 red at base, 141 green now (1 skipped where the filesystem
+cannot create a file symlink).
+
 ## [v1.134.0] · 2026-09-08 · the record named the wrong actor, and reads confessed to breaches
 
 Three defects from the 2026-09-07 audit register, all in the same place: what

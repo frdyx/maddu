@@ -11,7 +11,6 @@
   "verbs": {
     "advise": [
       "no-auth-check",
-      "parent",
       "prompt",
       "session",
       "stub-only",
@@ -31,7 +30,6 @@
       "dry-run",
       "id",
       "lane",
-      "parent",
       "reason",
       "session",
       "summary",
@@ -52,27 +50,21 @@
       "confirm",
       "label",
       "minutes",
-      "parent",
-      "session",
       "value",
       "value-file"
     ],
     "autonomy": [
       "json",
       "lane",
-      "no-emit",
-      "parent",
-      "session"
+      "no-emit"
     ],
     "blueprint": [
       "distill",
       "full",
       "json",
       "no-auth-check",
-      "parent",
       "repo",
       "runtime",
-      "session",
       "since",
       "slug",
       "timeout-sec"
@@ -83,8 +75,6 @@
       "dry-run",
       "for-agent",
       "json",
-      "parent",
-      "session",
       "tags",
       "triggers"
     ],
@@ -93,29 +83,21 @@
       "by",
       "lane",
       "mode",
-      "parent",
-      "session",
       "title"
     ],
     "ci": [
       "json",
-      "parent",
-      "session",
       "strict"
     ],
     "coordinator": [
       "dry-run",
       "iter-cap",
-      "parent",
       "runtime",
-      "session",
       "synthetic-cmd"
     ],
     "cost": [
       "by",
       "json",
-      "parent",
-      "session",
       "unreported-count",
       "usd"
     ],
@@ -134,14 +116,10 @@
       "after",
       "bridge",
       "limit",
-      "parent",
-      "session",
       "type"
     ],
     "evolve": [
       "json",
-      "parent",
-      "session",
       "to"
     ],
     "experience": [
@@ -159,10 +137,8 @@
       "header",
       "interval",
       "otel",
-      "parent",
       "pretty",
       "service",
-      "session",
       "since"
     ],
     "fleet": [
@@ -173,10 +149,7 @@
       "only",
       "plan"
     ],
-    "focus": [
-      "parent",
-      "session"
-    ],
+    "focus": [],
     "global": [
       "action",
       "by",
@@ -199,23 +172,17 @@
       "note",
       "objective",
       "oracle",
-      "parent",
-      "session",
       "success"
     ],
     "governance": [
       "approve",
       "force",
-      "parent",
-      "reason",
-      "session"
+      "reason"
     ],
     "handoff": [
       "body",
       "json",
-      "parent",
-      "plain",
-      "session"
+      "plain"
     ],
     "help": [
       "format",
@@ -224,17 +191,13 @@
     "hooks": [
       "dry-run",
       "no-guardrails",
-      "parent",
       "retire-inert-write-twins",
-      "session",
       "statusline"
     ],
     "import": [
       "by",
       "file",
-      "kind",
-      "parent",
-      "session"
+      "kind"
     ],
     "init": [
       "force"
@@ -252,7 +215,6 @@
       "integration-ref",
       "json",
       "lane",
-      "parent",
       "prune",
       "reason",
       "recover",
@@ -265,11 +227,9 @@
       "from-claude-memory",
       "json",
       "no-auth-check",
-      "parent",
       "recent-days",
       "root",
       "runtime",
-      "session",
       "since",
       "slug",
       "spine",
@@ -281,9 +241,7 @@
       "json",
       "lane",
       "op",
-      "parent",
       "rebuild",
-      "session",
       "since",
       "window"
     ],
@@ -293,18 +251,16 @@
       "impl",
       "iterate",
       "lane",
+      "loop",
       "max-iter",
       "oracle",
-      "parent",
       "plan",
-      "session",
       "verify"
     ],
     "mailbox": [
       "body",
       "from",
       "id",
-      "parent",
       "session",
       "subject",
       "summary",
@@ -321,8 +277,6 @@
       "lanes",
       "name",
       "notes",
-      "parent",
-      "session",
       "skip-provenance",
       "transport",
       "url"
@@ -334,11 +288,9 @@
       "kind",
       "lane",
       "limit",
-      "parent",
       "prior",
       "reason",
       "rebuild",
-      "session",
       "tags",
       "text",
       "trust"
@@ -348,7 +300,6 @@
       "force-list",
       "json",
       "model",
-      "parent",
       "reason",
       "reverted-to",
       "session",
@@ -359,21 +310,16 @@
       "curate-budget",
       "digest",
       "json",
-      "no-verify",
-      "parent",
-      "session"
+      "no-verify"
     ],
     "phase": [
       "name",
       "notes",
-      "parent",
-      "session",
       "tier"
     ],
     "pipeline": [
       "goal",
       "json",
-      "parent",
       "session"
     ],
     "plan": [
@@ -382,12 +328,10 @@
       "intent",
       "name",
       "note",
-      "parent",
       "phase",
       "phases",
       "plan",
       "reason",
-      "session",
       "summary"
     ],
     "plugin": [
@@ -397,14 +341,11 @@
     "register": [
       "label",
       "parent",
-      "role",
-      "session"
+      "role"
     ],
     "review": [
       "limit",
-      "parent",
       "reviewer",
-      "session",
       "slice"
     ],
     "runtime": [
@@ -421,7 +362,6 @@
       "mcp",
       "name",
       "notes",
-      "parent",
       "protocol",
       "session",
       "streaming",
@@ -435,15 +375,11 @@
       "cron",
       "disabled",
       "natural",
-      "parent",
-      "session",
       "title"
     ],
     "search": [
       "kinds",
       "limit",
-      "parent",
-      "session",
       "sort"
     ],
     "self-test": [
@@ -473,7 +409,6 @@
     "skill": [
       "body",
       "by",
-      "parent",
       "reason",
       "session",
       "source-url",
@@ -486,7 +421,6 @@
     "slice": [
       "max-files",
       "max-growth-pct",
-      "parent",
       "paths",
       "reason",
       "session",
@@ -499,7 +433,6 @@
       "learnings",
       "next",
       "no-git-diff",
-      "parent",
       "paths",
       "reason",
       "session",
@@ -509,20 +442,14 @@
       "triggered-by"
     ],
     "sources": [
-      "force",
-      "parent",
-      "reason",
-      "session"
+      "reason"
     ],
     "spine": [
       "assess",
-      "command",
       "event",
       "json",
       "keep",
-      "parent",
       "replay",
-      "runner-arg",
       "seq",
       "session",
       "status",
@@ -534,9 +461,7 @@
       "port"
     ],
     "status": [
-      "line",
-      "parent",
-      "session"
+      "line"
     ],
     "stop": [],
     "suggest": [
@@ -554,9 +479,7 @@
       "id",
       "lane",
       "owner",
-      "parent",
       "remove-blocker",
-      "session",
       "status",
       "tags",
       "title"
@@ -567,7 +490,6 @@
       "lanes",
       "members",
       "n",
-      "parent",
       "runtime",
       "session",
       "t",
@@ -580,8 +502,6 @@
       "hash",
       "json",
       "lane",
-      "parent",
-      "session",
       "version"
     ],
     "upgrade": [
@@ -591,15 +511,12 @@
     "usage": [
       "dry-run",
       "from",
-      "parent",
       "session",
       "since"
     ],
     "wiki": [
       "force",
-      "json",
-      "parent",
-      "session"
+      "json"
     ],
     "worker": [
       "args",
@@ -609,10 +526,8 @@
       "focus",
       "id",
       "lane",
-      "parent",
       "pid",
       "reason",
-      "runner-arg",
       "session"
     ],
     "workspace": [

@@ -30,7 +30,7 @@ import { mkdir, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 import { exists } from './_libroot.mjs';
 
 
@@ -135,7 +135,7 @@ export default async function advise(argv) {
   const noAuthCheck = flags['no-auth-check'] === true || flags['no-auth-check'] === 'true';
   const stubOnly = flags['stub-only'] === true || flags['stub-only'] === 'true';
 
-  const { paths, spine, auth, runtimes } = await loadSpineLib();
+  const { paths, spine, auth, runtimes, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
 
   const descriptor = runtimes && typeof runtimes.readRuntime === 'function'
@@ -153,7 +153,9 @@ export default async function advise(argv) {
   }
 
   const advisorId = spine.makeId('adv');
-  const parentSessionId = await envActingSid();
+  // A1: --session was accepted and ignored here, so an advisor run was
+  // always parented to the ambient session even when the caller named one.
+  const parentSessionId = await resolveSessionId(repoRoot, flags, sessionActive);
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.ADVISOR_INVOKED,
     actor: parentSessionId,

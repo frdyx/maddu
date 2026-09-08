@@ -28,7 +28,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseFlags } from './_args.mjs';
-import { loadSpineLib, resolveRepoRoot, envActingSid } from './_spine.mjs';
+import { loadSpineLib, resolveRepoRoot, resolveSessionId } from './_spine.mjs';
 import { exists } from './_libroot.mjs';
 
 const CONFIG_DIR = '.maddu/config/pipelines';
@@ -82,8 +82,11 @@ async function listPipelines(flags) {
 }
 
 async function runPipeline(name, goalText, flags) {
-  const { paths, spine } = await loadSpineLib();
+  const { paths, spine, sessionActive } = await loadSpineLib();
   const repoRoot = await resolveRepoRoot(paths);
+  // A1: --session was accepted and ignored here. Resolve ONCE, so every
+  // event of this run is attributed to the same session the caller named.
+  const actor = await resolveSessionId(repoRoot, flags, sessionActive);
   const cfg = await loadPipeline(repoRoot, name);
   if (!Array.isArray(cfg.stages) || cfg.stages.length === 0) {
     throw new Error(`pipeline "${name}" has no stages`);
@@ -92,7 +95,7 @@ async function runPipeline(name, goalText, flags) {
   const pipelineRunId = spine.makeId('pipe');
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.PIPELINE_STARTED,
-    actor: await envActingSid(),
+    actor,
     data: { pipelineRunId, name, goal: goalText || null },
   });
   console.log(pipelineRunId);
@@ -110,20 +113,23 @@ async function runPipeline(name, goalText, flags) {
   for (const stage of cfg.stages) {
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PIPELINE_STAGE_ENTERED,
-      actor: await envActingSid(),
+      actor,
       data: { pipelineRunId, stage: stage.name, intent: stage.intent || null },
     });
     if (process.stdout.isTTY) console.log(`  → ${stage.name}: ${stage.intent || ''}`);
     await spine.append(repoRoot, {
       type: spine.EVENT_TYPES.PIPELINE_STAGE_EXITED,
-      actor: await envActingSid(),
-      data: { pipelineRunId, stage: stage.name, status: 'ok' },
+      actor,
+      // B2: the runner does not execute stages (it is a bookkeeper by
+      // design), so 'ok' was a verdict it never observed. 'recorded' says
+      // what actually happened: the stage was entered and left in the trail.
+      data: { pipelineRunId, stage: stage.name, status: 'recorded' },
     });
   }
 
   await spine.append(repoRoot, {
     type: spine.EVENT_TYPES.PIPELINE_COMPLETED,
-    actor: await envActingSid(),
+    actor,
     data: { pipelineRunId, name },
   });
   if (process.stdout.isTTY) console.log(`  ✓ pipeline ${name} completed`);
@@ -154,6 +160,9 @@ export default async function pipeline(argv) {
     try {
       await runPipeline(name, goal, flags);
     } catch (err) {
+      // A malformed EXPLICIT --session is a usage error, not a pipeline
+      // failure: let the dispatcher render it message-only at exit 2.
+      if (err && err.code === 'INVALID_EXPLICIT_ID') throw err;
       console.error(`maddu pipeline run: ${err.message}`);
       process.exit(1);
     }

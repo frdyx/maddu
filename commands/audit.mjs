@@ -329,18 +329,21 @@ const RULE_GATES = {
   '9 trigger-gauntlet':   { gates: ['command-tier-discipline'] },
 };
 
+// A2 (audit 2026-09-07): this used to read each gate file as TEXT and take the
+// first `id: '...'` it found. In can-read-old-state.mjs that match is fixture
+// data — `sessions: [{ id: 'ses_x' }]` — so the traceability set contained a
+// session id and not the gate, and any rule that came to reference that gate
+// would have reported a dangling ref for a gate that is right there. Ask the
+// loader for the ids the definitions actually export instead.
 async function presentGateIds() {
-  const dir = join(frameworkRoot(), 'template', 'maddu', 'runtime', 'gates', 'builtin');
-  const ids = new Set();
-  let files = [];
-  try { files = (await readdir(dir)).filter((f) => f.endsWith('.mjs')); } catch { return ids; }
-  for (const f of files) {
-    let src = '';
-    try { src = await readFile(join(dir, f), 'utf8'); } catch { continue; }
-    const m = src.match(/id:\s*'([^']+)'/);
-    if (m) ids.add(m[1]);
+  const gatesLib = await loadGatesLib();
+  if (!gatesLib || typeof gatesLib.loadBuiltinGateIds !== 'function') {
+    // Pre-A2 runtime: report nothing rather than fall back to the regex. The
+    // caller renders an empty set as a visible skip, which is the honest
+    // answer — a wrong id set is worse than no id set.
+    return new Set();
   }
-  return ids;
+  try { return await gatesLib.loadBuiltinGateIds(); } catch { return new Set(); }
 }
 
 async function checkRuleGateTraceability() {

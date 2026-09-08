@@ -5,6 +5,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,16 @@ export default {
   severity: 'warn',
   description: 'The 8 v1.1.0 starter skills are present in .maddu/skills/.',
   run: async (ctx) => {
+    // B1 (audit 2026-09-07): the starter skill pack is written by `maddu init` into a consumer
+    // install. The framework source repo was never installed into anything, so
+    // its absence here is not a finding — and the check must not depend on
+    // whatever local state happens to exist. Layout decides, nothing else.
+    {
+      const layout = await loadGateLib(ctx.repoRoot, 'layout.mjs');
+      if (layout?.isFrameworkSourceRepo && await layout.isFrameworkSourceRepo(ctx.repoRoot)) {
+        return { ok: true, message: layout.sourceLayoutSkip('the starter skill pack') };
+      }
+    }
     const dir = join(ctx.repoRoot, '.maddu', 'skills');
     if (!(await exists(dir))) return { ok: true, message: 'no .maddu/skills/ dir (skipped — pre-v1.1.0)' };
     let entries;
