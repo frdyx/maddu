@@ -15,7 +15,7 @@ import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  OPEN_VERBS, extractPreciseReads, extractBroadTokens,
+  OPEN_VERBS, extractPreciseReads, extractArgvReads,
   deriveFlagAllowlists, renderAllowlistArtifact,
 } from './_flag-scan.mjs';
 import { extractFlagKeys, checkUnknownFlags, levenshtein } from '../../commands/_flag-guard.mjs';
@@ -89,8 +89,15 @@ try {
     t.has('session') && !t.has('session-id'), `got: ${[...t].join(',')}`);
 }
 {
-  const t = extractBroadTokens(`if (argv.includes('--force-active')) {} // usage: [--port N]`);
-  ok('broad harvest (hand-rolled verbs only) collects --tokens', t.has('force-active') && t.has('port'));
+  // Successor to the broad `--token` harvest this PR deletes. The harvest
+  // could not tell a read from a mention, so it allowlisted `sources
+  // --force` out of the very comment saying the flag is not honored.
+  // Raw-argv reads are now recognised by SHAPE, and prose is just prose.
+  const t = extractArgvReads(`if (argv.includes('--force-active')) {} // usage: [--port N]`);
+  ok('argv membership read is collected', t.has('force-active'));
+  ok('a flag named only in a comment is not', !t.has('port'), `got: ${[...t].join(',')}`);
+  const u = extractArgvReads(`const s = 'run with --phantom to enable';`);
+  ok('a flag named only in a prose string is not', !u.has('phantom'), `got: ${[...u].join(',')}`);
 }
 
 // ── Derivation vs the committed artifact (staleness) ────────────────────────

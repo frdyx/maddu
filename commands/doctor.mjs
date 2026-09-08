@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseFlags } from './_args.mjs';
 import { findRepoRoot, findStateRoot } from './_resolve.mjs';
 import { exists, readMadduJson, frameworkVersion } from './_manifest.mjs';
+import { loadLibOptional } from './_libroot.mjs';
 
 const ANSI = {
   pass: '\x1b[32m',
@@ -59,20 +60,14 @@ function tag(level) {
 // frdyx/maddu or the npm-extracted package), as opposed to a consumer
 // install produced by `maddu init`? The framework source has no
 // `maddu.json` install marker by design — it IS the framework, it was
-// never installed into anything. Detect it structurally so the
-// missing-marker check can be informational here without weakening the
-// real FAIL for a genuinely broken consumer install. Signals (all three):
-//   - package.json `name === "maddu"`
-//   - a `template/maddu/` source tree (only the source layout has this)
-//   - a `commands/` CLI handler dir at the root
+// never installed into anything. The structural test lives in ONE place
+// (runtime/lib/layout.mjs); doctor and three gates used to keep private
+// copies of it, which is how three of them ended up with no copy at all
+// and reported the source repo as a broken install.
 async function isFrameworkSourceRepo(repoRoot) {
-  try {
-    const pkg = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'));
-    if (pkg.name !== 'maddu') return false;
-  } catch { return false; }
-  if (!(await exists(join(repoRoot, 'template', 'maddu')))) return false;
-  if (!(await exists(join(repoRoot, 'commands')))) return false;
-  return true;
+  const layout = await loadLibOptional('layout.mjs');
+  if (!layout?.isFrameworkSourceRepo) return false;
+  return layout.isFrameworkSourceRepo(repoRoot);
 }
 
 // v1.1.0 Phase 3 — print the current governance mode as a banner so
@@ -262,7 +257,11 @@ async function runRepoChecks(repoRoot, label, gateOpts = {}) {
           }
         }
       }
-      if (!gateOpts.onlyId && !gateOpts.severity) return checks;
+      // B1: doctor used to RETURN here unless a specific gate was asked for,
+      // so in the framework source repo it never ran a single gate — the one
+      // place the framework is developed was the one place doctor could not
+      // see its own gate rail. Continue to the gate run; the consumer-install
+      // shape checks below still don't apply here (see `sourceGateOnly`).
       sourceGateOnly = true;
     } else {
       checks.push({ level: 'FAIL', label: `${tagLabel}maddu.json`, detail: `missing at ${repoRoot}` });

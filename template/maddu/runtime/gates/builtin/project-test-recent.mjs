@@ -7,10 +7,11 @@
 // this gate green having verified nothing. Skips the Maddu framework source
 // checkout (self-test-recent owns that).
 
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readVerifiedEvents } from '../../lib/verify.mjs';
 import { recencyGateVerdict } from '../../lib/verification-recency.mjs';
+import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
 const profileOk = (p) => p === 'quick' || p === 'full';
@@ -19,23 +20,16 @@ async function exists(path) {
   try { await stat(path); return true; } catch { return false; }
 }
 
-async function isFrameworkSourceRepo(root) {
-  try {
-    const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-    if (pkg.name !== 'maddu') return false;
-  } catch { return false; }
-  if (!(await exists(join(root, 'template', 'maddu')))) return false;
-  if (!(await exists(join(root, 'commands')))) return false;
-  return true;
-}
-
 export default {
   id: 'project-test-recent',
   label: 'project test recent',
   severity: 'warn',
   description: 'Adaptive project test ran recently with a green quick/full profile, proven by a verified spine receipt (not a hand-writable last-run file).',
   run: async (ctx) => {
-    if (await isFrameworkSourceRepo(ctx.repoRoot)) {
+    // One shared layout predicate (lib/layout.mjs); this gate used to carry
+    // a byte-for-byte copy of it, as did commands/doctor.mjs.
+    const layout = await loadGateLib(ctx.repoRoot, 'layout.mjs');
+    if (layout?.isFrameworkSourceRepo && await layout.isFrameworkSourceRepo(ctx.repoRoot)) {
       return { ok: true, message: 'framework source repo - use self-test-recent instead (skipped)' };
     }
     const { events, integrity } = await readVerifiedEvents(ctx.repoRoot);

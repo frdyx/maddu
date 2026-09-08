@@ -156,11 +156,13 @@ rule is about the **Máddu framework layer**):
 For any non-trivial "ship / build / fix / team" work, the default is a
 pipeline — `maddu pipeline run <name> "<goal>"` — not an ad-hoc one-off.
 Pipelines walk the one canonical flow (orient → plan → coordinate → slice
-→ test → review → land → account) and each stage is a literal `maddu`
-invocation against the substrate above. Three default pipelines ship:
-`ship-a-feature` (the default, for end-to-end feature work), `fix-a-bug`
-(something broken), and `plan-and-delegate` (fan-out across disjoint
-lanes). Reserve ad-hoc `/maddu-autopilot` (no pipeline) for genuinely
+→ test → review → land → account). The runner is a BOOKKEEPER: it records
+which stage was entered, in order, and leaves each stage's work to you —
+it invokes nothing itself. Four default pipelines ship: `ship-a-feature`
+(the default, for end-to-end feature work), `fix-a-bug` (something
+broken), `plan-and-delegate` (fan-out across disjoint lanes), and
+`plan-exec-verify-fix` (the end-to-end work shape). Reserve ad-hoc
+`/maddu-autopilot` (no pipeline) for genuinely
 one-off changes. The operator surface stays slash commands + natural
 language — there are no verbose CLI flags to memorize. See the full agent
 brief in [`agent-files/MADDU.md`](agent-files/MADDU.md) §"Intent routing"

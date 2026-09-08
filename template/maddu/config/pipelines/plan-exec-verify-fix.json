@@ -1,0 +1,22 @@
+{
+  "name": "plan-exec-verify-fix",
+  "description": "End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.",
+  "stages": [
+    {
+      "name": "plan",
+      "intent": "Outline the work. Declare goal + phase via `maddu goal`/`maddu phase` if not set. Identify the lane."
+    },
+    {
+      "name": "exec",
+      "intent": "Claim the lane. Implement the change. Heartbeat at each meaningful step."
+    },
+    {
+      "name": "verify",
+      "intent": "Run `maddu doctor` + the project test suite. Surface any FAIL rows."
+    },
+    {
+      "name": "fix",
+      "intent": "Address failures. Repeat exec\u2192verify until clean. Slice-stop with summary."
+    }
+  ]
+}

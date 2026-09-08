@@ -2,6 +2,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
@@ -71,6 +72,16 @@ export default {
   severity: 'critical',
   description: 'Every framework-managed file present and hash-matched.',
   run: async (ctx) => {
+    // B1 (audit 2026-09-07): the maddu.json install manifest is written by `maddu init` into a consumer
+    // install. The framework source repo was never installed into anything, so
+    // its absence here is not a finding — and the check must not depend on
+    // whatever local state happens to exist. Layout decides, nothing else.
+    {
+      const layout = await loadGateLib(ctx.repoRoot, 'layout.mjs');
+      if (layout?.isFrameworkSourceRepo && await layout.isFrameworkSourceRepo(ctx.repoRoot)) {
+        return { ok: true, message: layout.sourceLayoutSkip('the maddu.json install manifest') };
+      }
+    }
     // THE MARKER IS READ FIRST, before maddu.json is parsed. A crashed upgrade
     // could leave the manifest truncated (the write is atomic now, but an older
     // install can still carry one), and parsing first meant this gate answered

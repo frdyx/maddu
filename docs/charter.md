@@ -97,20 +97,22 @@ maddu pipeline run ship-a-feature "<goal>"
   → orient → plan → coordinate → slice → test → review → land → account
 ```
 
-Each stage is a literal `maddu` invocation, so walking the pipeline exercises and
-populates the feature surfaces (Plans, Reviews, Pipelines, Loops, Cost). Ad-hoc
+The runner is a bookkeeper: it records which stage was entered, in order, and
+leaves each stage's work to the agent. Walking the pipeline therefore exercises
+and populates the feature surfaces (Plans, Reviews, Pipelines, Loops, Cost). Ad-hoc
 `/maddu-autopilot` (no pipeline) is reserved for genuinely one-off changes.
 
 **Rule of thumb the agent brief states:** *prefer a pipeline.* For any
 non-trivial feature or fix, the default is `maddu pipeline run <name> "<goal>"`.
 
-Three default pipelines ship:
+Four default pipelines ship:
 
 | Pipeline | When | 
 |---|---|
 | `ship-a-feature` *(default)* | ship/build a feature, do something end-to-end |
 | `fix-a-bug` | fix a bug, something broken |
 | `plan-and-delegate` | team of N, fan out, parallelize across lanes |
+| `plan-exec-verify-fix` | the end-to-end work shape: plan → exec → verify → fix |
 
 Zero learning curve is preserved: the operator surface stays slash commands +
 natural language. The agent maps a phrase to the right pipeline (or to an ad-hoc

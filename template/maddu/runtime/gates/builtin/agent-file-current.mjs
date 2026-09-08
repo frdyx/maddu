@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { loadGateLib } from '../../lib/gate-libroot.mjs';
 
 const MARKER_BEGIN = '<!-- BEGIN MADDU v1 -->';
 const MARKER_END = '<!-- END MADDU v1 -->';
@@ -53,6 +54,16 @@ export default {
   severity: 'safety',
   description: 'MADDU.md, CLAUDE.md, AGENTS.md sections match canonical templates shipped by Máddu.',
   run: async (ctx) => {
+    // B1 (audit 2026-09-07): the synced agent-file set is written by `maddu init` into a consumer
+    // install. The framework source repo was never installed into anything, so
+    // its absence here is not a finding — and the check must not depend on
+    // whatever local state happens to exist. Layout decides, nothing else.
+    {
+      const layout = await loadGateLib(ctx.repoRoot, 'layout.mjs');
+      if (layout?.isFrameworkSourceRepo && await layout.isFrameworkSourceRepo(ctx.repoRoot)) {
+        return { ok: true, message: layout.sourceLayoutSkip('the synced agent-file set') };
+      }
+    }
     const root = ctx.repoRoot;
     // Locate canonical templates. Consumer-side they live under
     // <root>/maddu/agent-files/; framework-source-side under
