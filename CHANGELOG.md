@@ -11,6 +11,74 @@ narrative summary.
 
 ---
 
+## [v1.137.0] · 2026-09-09 · declarations with no observer
+
+Code that nothing could reach, and style rules nothing could match. Closes
+register findings B1–B4 and C1–C3.
+
+### Exports nobody could observe
+
+173 named exports had no reader outside the module that declared them.
+
+- **157 were used only by their own file**, so the binding is live and only the
+  `export` keyword was wrong. Those keywords are gone; every caller is untouched.
+- **16 were used by nothing at all**, including a second `ENFORCEMENT_RANK` in
+  `discipline.mjs` that the original census could not see: it asked whether any
+  *other file* contained the word, and `governance.mjs` declares a symbol with the
+  same name, so the two vouched for each other. A reference resolver that works per
+  module finds it; a corpus-wide word match never can.
+- Three `export {}` husks, left where every name in a list turned out to be
+  unreferenced, are removed.
+
+### Tone signals that never reached the screen
+
+Three signals rendered nothing, and none of them looked broken in the source —
+each was a class landing where no rule could match it.
+
+- **The conductor's next-command tone was dead in both directions.** Every
+  `.conductor-next.tone-*` rule names the parent box, but the markup put the tone on
+  the child `.next-command`, which is `display: contents` and therefore has no box at
+  all. The tone border and the tone glyph colour were both inert for every reason
+  code. The tone now lands on `.conductor-next`.
+- **`.pill` is rendered in four tones and only two were styled.** `pill tone-ok`
+  ("enabled YES" across the comms panels) and `pill tone-accent` (lane ids) painted
+  nothing. Both now read the same semantic tokens as the `.next-command-pill` family.
+- **`.rail-mark-glyph` and `.panel-grid`** are referenced by nothing and are gone.
+  `.is-ghost` stays — it is live through the shipped `DESIGN-SYSTEM.md`, and a control
+  row pins that so an over-broad sweep cannot take it.
+
+### What the rows assert
+
+Two new suites, authored by Codex from a written contract and never shown a fix:
+
+- `scripts/test/export-liveness.mjs` derives every named export from `git ls-files`
+  and resolves references **per module**, so same-spelled declarations are never
+  evidence for one another. It lexes rather than greps — comments, regex bodies and
+  quoted prose cannot manufacture an export, which matters because several suites
+  build fixture modules as source text held in strings. A name reached only by
+  computed access (`typeof mod[fn] === 'function'` over an array of name strings, as
+  `commands/lane.mjs` and four cockpit rows do) counts as referenced.
+- `scripts/test/cockpit-style-liveness.mjs` asserts what a stylesheet cannot assert
+  about itself: that every class it defines is reachable from shipped markup, goldens
+  or docs, and that every compound modifier family lands on the element its selectors
+  name. The second is established **by rendering**, not by grepping.
+
+### Three inherited premises did not survive
+
+The plan called for merging three "duplicate" helpers. Reading them refuted two:
+
+- **`globToRegExp` is two different glob dialects, not one function twice.**
+  `architecture.mjs` escapes `?` to a literal and compiles `**/` unanchored;
+  `discipline.mjs` compiles `?` to `[^/]` and anchors `**/` to a segment, and they
+  disagree on backslash normalisation and on `null`-vs-throw for bad input. Both are
+  pinned by their own passing rows. Unification is dropped, not deferred.
+- **`ENFORCEMENT_RANK` is a deletion, not a merge** (above).
+- **`sha256Hex` is a real duplicate that should stay duplicated.** The third copy is a
+  *local* const in `spine-anchor-assess.mjs`; importing the implementation there would
+  make those rows assert `f(x) === f(x)`. Coupling the supply-chain auditor to the
+  anchoring subsystem for a three-line `createHash` wrapper is a net loss, so
+  `trust.sha256Hex` simply stops being exported.
+
 ## [v1.136.0] · 2026-09-08 · say what ships
 
 Shipped documentation and the CLI help surface described a product that does not
