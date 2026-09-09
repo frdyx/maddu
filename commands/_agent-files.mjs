@@ -21,8 +21,8 @@ import { readFile, writeFile, stat, mkdir, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export const MARKER_BEGIN = '<!-- BEGIN MADDU v1 -->';
-export const MARKER_END = '<!-- END MADDU v1 -->';
+const MARKER_BEGIN = '<!-- BEGIN MADDU v1 -->';
+const MARKER_END = '<!-- END MADDU v1 -->';
 
 async function exists(p) {
   try { await stat(p); return true; } catch { return false; }
@@ -87,7 +87,7 @@ async function syncOne(targetPath, finalText) {
 // If the operator has a custom MADDU.md they should rename it; the
 // upgrade path treats divergence as 'merge' (overwrite). This mirrors
 // frameworkOwnedFiles behavior for managed files.
-export async function syncMaddu(repoRoot, canonicalText) {
+async function syncMaddu(repoRoot, canonicalText) {
   const target = join(repoRoot, 'MADDU.md');
   return syncOne(target, canonicalText);
 }
@@ -96,7 +96,7 @@ export async function syncMaddu(repoRoot, canonicalText) {
 //   - File missing → create with just the Máddu wrapped section.
 //   - File exists, markers present → replace between markers.
 //   - File exists, no markers → prepend wrapped section + blank line.
-export async function syncMarkerFile(repoRoot, filename, sectionBody) {
+async function syncMarkerFile(repoRoot, filename, sectionBody) {
   const target = join(repoRoot, filename);
   const wrapped = wrapWithMarkers(sectionBody);
 

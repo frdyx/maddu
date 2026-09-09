@@ -33,12 +33,12 @@ import { markSessionStaleIfStill, closeSessionIfActive } from './session-lifecyc
 import { reapOrphanClaims } from './lane-ownership.mjs';
 import { pathsFor } from './paths.mjs';
 
-export const DEFAULT_STALE_MS = 30 * 60 * 1000;        // 30 min
-export const DEFAULT_AUTO_CLOSE_MS = 4 * 60 * 60 * 1000; // 4 hr
+const DEFAULT_STALE_MS = 30 * 60 * 1000;        // 30 min
+const DEFAULT_AUTO_CLOSE_MS = 4 * 60 * 60 * 1000; // 4 hr
 
 async function exists(p) { try { await stat(p); return true; } catch { return false; } }
 
-export async function readJanitorConfig(repoRoot) {
+async function readJanitorConfig(repoRoot) {
   const p = join(pathsFor(repoRoot).state, '..', 'config', 'janitor.json');
   if (!(await exists(p))) {
     return { staleAfterMs: DEFAULT_STALE_MS, autoCloseAfterMs: DEFAULT_AUTO_CLOSE_MS };
@@ -61,7 +61,7 @@ export async function readJanitorConfig(repoRoot) {
 // closed per the projection's janitor slot).
 //
 // Returns { stale[], closed[] }. The caller emits events.
-export function evaluateSessions(projection, now, cfg) {
+function evaluateSessions(projection, now, cfg) {
   const active = (projection.activeSessions || []).filter((s) => s.status === 'active');
   const alreadyStale = new Set((projection.janitor && projection.janitor.staleSessions) || []);
   const stale = [];

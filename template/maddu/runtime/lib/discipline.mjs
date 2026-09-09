@@ -193,11 +193,6 @@ export function classifyBashWrite(command) {
 export { classifyWriteTarget };
 
 
-// Enforcement rank for weakening comparisons (audit P2): a lower rank = weaker,
-// so ANY decrease (incl. block→graduated) is a "weakening" that needs a reason /
-// approval. Shared by commands/governance.mjs.
-export const ENFORCEMENT_RANK = { off: 0, nudge: 1, graduated: 2, block: 3 };
-
 // Pure policy: the classifier's `kind` + effective `enforcement` (+ whether a
 // self-disable carries an explicit --approve for the governance off-switch) →
 // ONE action the caller acts on. `enforcement:'off'` is orthogonal (handled +
@@ -363,7 +358,7 @@ export function denyReason(decision) {
 // gatherRitualState maps to the unknown-observation path (commit pressure
 // fails OPEN — a broken operator config must never silently count more
 // files). The invalid content is never echoed.
-export async function readDisciplineConfig(repoRoot, mode) {
+async function readDisciplineConfig(repoRoot, mode) {
   let overrides = {};
   let configInvalid = false;
   try {
@@ -795,12 +790,6 @@ export async function resolveMadduSession(repoRoot, claudeId) {
   return refIdOk(mid) ? mid : null;
 }
 
-// Binding with its timestamp — { madduId, boundAt } | null. Lock-free
-// (advisory consumers); the END path re-reads INSIDE its binding
-// transaction via resolveClaudeBindingIn.
-export async function resolveClaudeBinding(repoRoot, claudeId) {
-  return resolveClaudeBindingIn(repoRoot, claudeId);
-}
 export async function resolveClaudeBindingIn(repoRoot, claudeId) {
   if (!claudeIdOk(claudeId)) return null;
   const map = await readJson(sessionsMapPath(repoRoot), {});

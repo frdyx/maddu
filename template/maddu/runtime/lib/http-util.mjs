@@ -34,7 +34,7 @@ export function sendJson(res, status, obj) {
 // A browser CANNOT forge the Host hostname — a page served from evil.com always
 // sends `Host: evil.com`, never `Host: 127.0.0.1` — so requiring a loopback Host
 // (and Origin, when present) defeats DNS rebinding with stdlib header parsing.
-export const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
 export function hostnameOf(hostHeader) {
   if (!hostHeader) return null;

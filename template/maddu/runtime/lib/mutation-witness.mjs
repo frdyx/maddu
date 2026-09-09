@@ -49,7 +49,7 @@ import { readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { redactText } from './secret-scan.mjs';
 
-export const BREACH_DIR = 'mutation-breaches';               // under .maddu/state/
+const BREACH_DIR = 'mutation-breaches';               // under .maddu/state/
 export const CLAIM_STALE_MS = 10 * 60 * 1000;                // cross-host / unverifiable claims only
 const CAP = 128;                                             // per string field; one spool file stays ~1KB
 
@@ -160,7 +160,7 @@ export function evaluateWitness(ctx, { exitCode = 0 } = {}) {
 function breachDir(stateRoot) { return join(stateRoot, '.maddu', 'state', BREACH_DIR); }
 
 let seq = 0;
-export function newBreachId() {
+function newBreachId() {
   return `br_${Date.now()}-${process.pid}-${++seq}-${randomBytes(4).toString('hex')}`;
 }
 

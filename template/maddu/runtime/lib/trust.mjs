@@ -26,7 +26,7 @@ const TRUST_CONFIG_REL = ['config', 'trust.json'];
 const TRUST_CACHE_REL  = ['state', 'trust-cache.json'];
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
-export const DEFAULT_TRUST_CONFIG = {
+const DEFAULT_TRUST_CONFIG = {
   schemaVersion: 1,
   pinnedPackages: [],
   audit: {
@@ -67,7 +67,7 @@ export async function readTrustConfig(repoRoot) {
   }
 }
 
-export async function writeTrustConfig(repoRoot, cfg) {
+async function writeTrustConfig(repoRoot, cfg) {
   const p = trustConfigPath(repoRoot);
   await mkdir(dirname(p), { recursive: true });
   const clean = {
@@ -176,7 +176,7 @@ export async function getInstalledVersions(repoRoot) {
 
 // Fetch `npm view <pkg> time --json` with a 6h cache. Returns
 // `{ created, modified, '<version>': iso }` or null on failure.
-export async function fetchTimeData(repoRoot, name, { now = Date.now(), cache, fresh = false } = {}) {
+async function fetchTimeData(repoRoot, name, { now = Date.now(), cache, fresh = false } = {}) {
   cache = cache || (await readCache(repoRoot));
   const entry = cache.entries[name];
   if (!fresh && entry && (now - entry.fetchedAt) < CACHE_TTL_MS) {
@@ -571,6 +571,6 @@ export function renderReportMarkdown(repoRoot, audit, extras = {}) {
   return lines.join('\n') + '\n';
 }
 
-export function sha256Hex(buf) {
+function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex');
 }

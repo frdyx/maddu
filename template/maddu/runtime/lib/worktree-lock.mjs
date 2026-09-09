@@ -50,7 +50,7 @@ const HOST_HASH = createHash('sha256').update(HOST).digest('hex').slice(0, 12);
 
 const POLL_MS = 25;
 const WAIT_LOG_EVERY = Math.max(1, Math.round(1000 / POLL_MS)); // ~1s
-export const WORKTREE_LOCK_WAIT_MS = defaultWaitMs();
+const WORKTREE_LOCK_WAIT_MS = defaultWaitMs();
 
 // Finite by construction (unlike append-lock's Infinity default): a wedged
 // worktree op must degrade to a structured skip, never hang a janitor sweep or
@@ -212,17 +212,3 @@ export async function releaseWorktreeLock(lockPath, ownerId) {
   try { await rm(releasedPath, { recursive: true, force: true }); } catch { /* harmless debris */ }
 }
 
-// Convenience: run `fn` while holding the lock. Returns
-//   { acquired: true, value }   — fn ran (its result in `value`); lock released
-//   { acquired: false, reason } — the lock was busy; fn did NOT run
-// A callback exception propagates (the lock is still released first).
-export async function withWorktreeLock(lockPath, fn, opts = {}) {
-  const lock = await acquireWorktreeLock(lockPath, opts);
-  if (!lock.acquired) return lock;
-  try {
-    const value = await fn(lock);
-    return { acquired: true, value };
-  } finally {
-    await lock.release();
-  }
-}

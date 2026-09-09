@@ -47,8 +47,8 @@ import {
   reduceHarnessCapabilities,
 } from './harness-capabilities.mjs';
 
-export const PROJECTION_LOCK_WAIT_MS = 3000;
-export const PROJECTION_FILE = 'harness-capabilities.json';
+const PROJECTION_LOCK_WAIT_MS = 3000;
+const PROJECTION_FILE = 'harness-capabilities.json';
 
 // A harness config is scanned for the Máddu stanza marker, not parsed. The
 // WHOLE file is scanned in fixed-size chunks with a marker-length overlap —

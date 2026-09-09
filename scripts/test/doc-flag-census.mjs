@@ -38,7 +38,7 @@ const KNOWN = new Set([
 // the worker brief spans five lines), then every line mentioning `maddu
 // <verb>` contributes its --keys. Placeholder tokens (--<flag>, --…) are
 // skipped — they instruct a SHAPE, not a key.
-export function extractDocInvocations(text) {
+function extractDocInvocations(text) {
   const merged = [];
   let acc = null;
   for (const line of text.split('\n')) {

@@ -27,7 +27,7 @@ function mono(text, extra = '') {
 }
 
 // Humanize the bridge-computed ageMs at display time. Exported for the fixture.
-export function humanAge(ms) {
+function humanAge(ms) {
   if (typeof ms !== 'number' || ms < 0) return '';
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s ago`;

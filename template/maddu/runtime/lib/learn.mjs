@@ -209,7 +209,7 @@ function classifyPair(failure, success) {
 
 // For each failure, greedily match the NEAREST later success of the same tool
 // that classifies as a real correction.
-export function pairFailures(calls) {
+function pairFailures(calls) {
   const pairs = [];
   const used = new Set();
   for (let i = 0; i < calls.length; i++) {
@@ -249,7 +249,7 @@ function candidateId(slug, category, failure, success) {
 }
 
 // Mine one parsed file into candidates.
-export function candidatesFromCalls(slug, sessionUuid, calls) {
+function candidatesFromCalls(slug, sessionUuid, calls) {
   const pairs = pairFailures(calls);
   return pairs.map((p) => ({
     id: candidateId(slug, p.category, p.failure, p.success),
@@ -301,12 +301,12 @@ export async function mineTranscripts(opts = {}) {
 // these are facts ABOUT the product being built, written into the product's own
 // brief. They are NOT Máddu hard rules and must never be framed as such
 // (scope-boundary rule).
-export const LEARN_MARKER_BEGIN = '<!-- BEGIN MADDU LEARN v1 -->';
-export const LEARN_MARKER_END = '<!-- END MADDU LEARN v1 -->';
+const LEARN_MARKER_BEGIN = '<!-- BEGIN MADDU LEARN v1 -->';
+const LEARN_MARKER_END = '<!-- END MADDU LEARN v1 -->';
 
 // Render the agent-file block from the full set of agent-file corrections.
 // `corrections` is an array of { text, category }.
-export function renderAgentBlock(corrections) {
+function renderAgentBlock(corrections) {
   const lines = [];
   lines.push(LEARN_MARKER_BEGIN);
   lines.push('## Learned corrections (project facts)');

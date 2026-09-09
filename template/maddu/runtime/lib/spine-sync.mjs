@@ -912,5 +912,3 @@ export async function syncGit(repoRoot, opts = {}) {
 
   return { ok: true, replicaId, committed, pulled, pushed, hasUpstream, uncommittedMeta, import: report, steps };
 }
-
-export { GITIGNORE_BEGIN, GITIGNORE_END, GITATTR_BEGIN };

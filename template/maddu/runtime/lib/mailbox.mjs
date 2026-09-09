@@ -150,4 +150,3 @@ export async function totalUnread(repoRoot) {
   return n;
 }
 
-export const MSG_KINDS = MSG_TYPES;

@@ -38,7 +38,7 @@ export const SUGGEST_MIN_CLAIMS = 3;
 
 // Ephemeral claim ids that must never become catalog suggestions:
 // worktree/auto-generated ids (auto/<x>, auto-<x>) and purely numeric ids.
-export function isEphemeralLaneId(id) {
+function isEphemeralLaneId(id) {
   const s = String(id || '');
   return /^auto[/-]/i.test(s) || /^\d+$/.test(s);
 }

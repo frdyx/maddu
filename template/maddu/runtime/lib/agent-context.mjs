@@ -15,8 +15,8 @@
 // matcher (returns at most MAX_SKILLS) and the rendered output (truncates
 // each body to MAX_BYTES_PER_SKILL). The `skill-injection-bounded` gate
 // verifies these constants are honored on every orientation read.
-export const MAX_INJECTED_SKILLS = 3;
-export const MAX_INJECTED_BYTES_PER_SKILL = 8192; // 8 KB per skill
+const MAX_INJECTED_SKILLS = 3;
+const MAX_INJECTED_BYTES_PER_SKILL = 8192; // 8 KB per skill
 
 // Pure matcher. Given a list of skills (each with `triggers: [str]?` and
 // `tags: [str]?` in their parsed frontmatter) and a context object with

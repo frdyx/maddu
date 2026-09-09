@@ -28,8 +28,8 @@ import { homedir } from 'node:os';
 // Distinct from the repo-root worker-brief markers (`BEGIN MADDU v1`) so a
 // global file can carry the install stanza independently and we can detect it
 // precisely.
-export const INSTALL_MARKER_BEGIN = '<!-- BEGIN MADDU INSTALL v1 -->';
-export const INSTALL_MARKER_END = '<!-- END MADDU INSTALL v1 -->';
+const INSTALL_MARKER_BEGIN = '<!-- BEGIN MADDU INSTALL v1 -->';
+const INSTALL_MARKER_END = '<!-- END MADDU INSTALL v1 -->';
 
 // The known-agent table. Extensible — add a row and everything else (detect,
 // register, unregister, help) picks it up. `dir` is relative to the home
@@ -56,7 +56,7 @@ function normalize(text) {
 }
 
 // Resolve an agent's config DIRECTORY (env override → homedir + convention).
-export function resolveAgentDir(agent) {
+function resolveAgentDir(agent) {
   if (agent.dirEnv && process.env[agent.dirEnv]) {
     return resolve(process.env[agent.dirEnv]);
   }

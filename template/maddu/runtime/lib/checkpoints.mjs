@@ -182,7 +182,3 @@ export async function removeCheckpoint(repoRoot, id, by = null) {
   return { removed: true };
 }
 
-export async function checkpointsForLane(repoRoot, lane) {
-  const all = await listCheckpoints(repoRoot);
-  return all.filter((c) => c.lane === lane);
-}

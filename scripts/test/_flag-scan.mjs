@@ -43,7 +43,7 @@ export const OPEN_VERBS = Object.freeze(['format', 'git', 'install', 'lint', 'te
 
 // Keys every verb accepts implicitly. `help`/`h` short-circuit in the
 // dispatcher before any verb's own parsing runs.
-export const UNIVERSAL_KEYS = Object.freeze(['help', 'h']);
+const UNIVERSAL_KEYS = Object.freeze(['help', 'h']);
 
 // Verbs that hand raw argv to a parser living OUTSIDE commands/, so neither
 // the verb's own text nor a helper import reveals what it accepts. Curated
@@ -51,7 +51,7 @@ export const UNIVERSAL_KEYS = Object.freeze(['help', 'h']);
 // text, which is how prose became executable surface in the first place. The
 // delegate is scanned with the same argv-membership patterns, so the parser
 // that really decides remains the single source of truth.
-export const DELEGATED_PARSERS = Object.freeze({
+const DELEGATED_PARSERS = Object.freeze({
   'self-test': join('scripts', 'test', '_self-test-runner.mjs'),
 });
 

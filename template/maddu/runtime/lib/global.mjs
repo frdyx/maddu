@@ -20,7 +20,7 @@ import { parseNatural, validateCron } from './schedule.mjs';
 import { makeId } from './spine.mjs';
 import { redactLeaves } from './secret-scan.mjs';
 
-export function globalDir() {
+function globalDir() {
   return join(configDir(), 'global');
 }
 

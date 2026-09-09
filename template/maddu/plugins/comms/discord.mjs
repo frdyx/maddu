@@ -39,7 +39,7 @@ const DEFAULT_STATE = {
   lastSentAt: null
 };
 
-export async function readState(repoRoot) {
+async function readState(repoRoot) {
   try {
     const doc = JSON.parse(await readFile(stateFile(repoRoot), 'utf8'));
     return { ...DEFAULT_STATE, ...doc, counts: { ...DEFAULT_STATE.counts, ...(doc.counts || {}) } };
@@ -58,7 +58,7 @@ export async function setToken(repoRoot, value, by = null) {
   return await addKey(repoRoot, { provider: PROVIDER, value, label: `bot-${value.slice(0, 8)}` }, by);
 }
 
-export async function tokenStatus() {
+async function tokenStatus() {
   const keys = await listKeys(PROVIDER);
   return { configured: keys.length > 0, tail: keys[0]?.tail || null };
 }

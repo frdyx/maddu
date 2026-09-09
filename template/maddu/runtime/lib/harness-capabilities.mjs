@@ -43,10 +43,10 @@ export const HARNESS_CAPABILITIES_VERSION = '1.0.0';
 // The date the surface map below was reviewed. Sourced from the adopted
 // strategy record docs/research/deep-research-strategy-adopted-2026-08-12.md
 // §"Track A verified surface map", which itself says: re-verify per adapter PR.
-export const HARNESS_VERIFIED_DATE = '2026-08-12';
+const HARNESS_VERIFIED_DATE = '2026-08-12';
 
-export const BLOCKING_KINDS = ['block', 'observe'];
-export const TRANSPORT_KINDS = ['stdin-json', 'argv', 'unknown'];
+const BLOCKING_KINDS = ['block', 'observe'];
+const TRANSPORT_KINDS = ['stdin-json', 'argv', 'unknown'];
 export const CONFIG_STATUSES = ['absent', 'present-no-stanza', 'stanza-present', 'unreadable'];
 export const OBSERVED_STATUSES = ['verified', 'assumed', 'not-installed'];
 export const DRIFT_REASONS = [

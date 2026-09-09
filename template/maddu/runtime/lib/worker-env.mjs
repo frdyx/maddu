@@ -20,7 +20,7 @@ import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathsFor } from './paths.mjs';
 
-export const DEFAULT_WORKER_ENV_CONFIG = {
+const DEFAULT_WORKER_ENV_CONFIG = {
   schemaVersion: 1,
   default_allow: [
     'PATH', 'HOME', 'USER', 'USERPROFILE', 'TEMP', 'TMP',
@@ -67,7 +67,7 @@ export async function readWorkerEnvConfig(repoRoot) {
   }
 }
 
-export async function writeWorkerEnvConfig(repoRoot, cfg) {
+async function writeWorkerEnvConfig(repoRoot, cfg) {
   const p = configPath(repoRoot);
   await mkdir(dirname(p), { recursive: true });
   const clean = {
@@ -82,7 +82,7 @@ export async function writeWorkerEnvConfig(repoRoot, cfg) {
 
 // Glob-ish pattern: matches if pattern equals var, or pattern is `PFX_*`
 // and var starts with `PFX_`.
-export function patternMatches(pattern, varName) {
+function patternMatches(pattern, varName) {
   if (!pattern || !varName) return false;
   if (pattern === varName) return true;
   if (pattern.endsWith('_*')) {

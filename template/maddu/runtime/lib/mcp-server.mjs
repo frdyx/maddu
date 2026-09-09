@@ -24,7 +24,7 @@ import { buildRecallPacket } from './recall.mjs';
 import { listWiki, readPage } from './wiki.mjs';
 import { project } from './projections.mjs';
 
-export const MCP_PROTOCOL_VERSION = '2024-11-05';
+const MCP_PROTOCOL_VERSION = '2024-11-05';
 
 const TOOLS = [
   {
@@ -174,7 +174,7 @@ function invalidParams(msg) {
 
 // Handle one parsed JSON-RPC message. Returns the response object, or null
 // for notifications (no id → nothing goes back on the wire).
-export async function handleMessage(repoRoot, msg, { serverVersion = '0.0.0' } = {}) {
+async function handleMessage(repoRoot, msg, { serverVersion = '0.0.0' } = {}) {
   // Invalid-request law (Codex r1 minor 14): valid JSON that is not a valid
   // JSON-RPC request — null, numbers, arrays, {} — must answer -32600 with
   // id null (per spec), never throw and never be silently swallowed as a

@@ -53,10 +53,10 @@ import { envActingSid } from './id-grammar.mjs';
 
 const pExecFile = promisify(execFile);
 
-export const PAYLOAD_VERSION = 1;
+const PAYLOAD_VERSION = 1;
 const SEQ_DIR_RE = /^\d{6}$/;
 
-export function anchorsDir(repoRoot) { return join(repoRoot, '.maddu', 'anchors'); }
+function anchorsDir(repoRoot) { return join(repoRoot, '.maddu', 'anchors'); }
 // The funnel lock lives under state/ (UNTRACKED), never inside the tracked
 // anchors dir — a committed lockfile would hang every other host forever (the
 // lock protocol never steals a foreign-host lock).
@@ -101,7 +101,7 @@ export function normalizeOrigin(url) {
 
 // IO: { project, origin } — project from maddu.json name (null if absent),
 // origin from `git remote get-url origin` normalized (null if no git/remote).
-export async function repoIdentity(repoRoot) {
+async function repoIdentity(repoRoot) {
   let project = null;
   try {
     const raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8');
@@ -129,7 +129,7 @@ async function gitHead(repoRoot) {
 // MADDU_OTS_BIN is a TEST seam (like MADDU_CI_PROFILE): a stub binary cannot
 // forge trust — it only changes what subprocess runs, and every event records
 // outcomes, not claims. Operators use the real client on PATH.
-export function resolveOtsBin() {
+function resolveOtsBin() {
   const env = process.env.MADDU_OTS_BIN;
   return env && env.trim() ? env.trim() : 'ots';
 }
@@ -143,7 +143,7 @@ function execOts(otsBin, args, opts) {
     : pExecFile(otsBin, args, opts);
 }
 
-export const OTS_INSTALL_HINT = [
+const OTS_INSTALL_HINT = [
   'The stock OpenTimestamps client is a declared ambient tool (like git).',
   'Install:  pip install opentimestamps-client   (Python 3.8+)',
   'Windows:  python-bitcoinlib needs an OpenSSL DLL findable as "ssl":',
@@ -151,7 +151,7 @@ export const OTS_INSTALL_HINT = [
   '          (the EC_* symbols it loads live in libcrypto, not libssl).',
 ].join('\n');
 
-export async function otsPresence(otsBin = resolveOtsBin()) {
+async function otsPresence(otsBin = resolveOtsBin()) {
   try {
     const { stdout, stderr } = await execOts(otsBin, ['--version'], { timeout: 15000, shell: false });
     const version = String(stdout || stderr || '').trim().split('\n')[0] || 'unknown';
@@ -166,7 +166,7 @@ export async function otsPresence(otsBin = resolveOtsBin()) {
 // witness.calendars[]: optional https URLs handed to `ots stamp` as explicit
 // calendars. Validated hard — a bad entry refuses (an anchor quietly stamped
 // against a typo'd calendar is worse than an error). Absent → stock defaults.
-export async function witnessCalendars(repoRoot) {
+async function witnessCalendars(repoRoot) {
   let cfg = null;
   try {
     const raw = await readFile(join(repoRoot, 'maddu.json'), 'utf8');
@@ -275,7 +275,7 @@ async function listFlatSegments(repoRoot) {
 // receipt — or an explicit event id, and (b) the chain head (last stored
 // line). Works on RAW stored lines because the digest/position must bind to
 // the exact bytes on disk, not a re-serialization.
-export async function findReceipt(repoRoot, { eventId = null } = {}) {
+async function findReceipt(repoRoot, { eventId = null } = {}) {
   const segs = await listFlatSegments(repoRoot);
   let found = null;
   let lastLine = null;
@@ -299,7 +299,7 @@ export async function findReceipt(repoRoot, { eventId = null } = {}) {
 
 // ── payload ──────────────────────────────────────────────────────────────
 
-export function buildPayload({ repoIdentity: identity, receipt, chainHead, subjectSha, prevAnchorSha256, seq }) {
+function buildPayload({ repoIdentity: identity, receipt, chainHead, subjectSha, prevAnchorSha256, seq }) {
   return {
     v: PAYLOAD_VERSION,
     repo_identity: { project: identity?.project ?? null, origin: identity?.origin ?? null },
@@ -315,7 +315,7 @@ export function buildPayload({ repoIdentity: identity, receipt, chainHead, subje
 
 // ── on-disk anchors ──────────────────────────────────────────────────────
 
-export async function listAnchors(repoRoot) {
+async function listAnchors(repoRoot) {
   const dir = anchorsDir(repoRoot);
   let entries;
   try { entries = await readdir(dir, { withFileTypes: true }); } catch { return { anchors: [], invalidDirs: [] }; }
@@ -374,7 +374,7 @@ function parseCalendars(text) {
 // this feature would silently leave anchors untracked — so the stamp path
 // surgically inserts the re-include INSIDE Máddu's own block (only when the
 // block exists and lacks it). Returns what happened so the caller can print it.
-export async function ensureAnchorsGitignore(repoRoot) {
+async function ensureAnchorsGitignore(repoRoot) {
   const p = join(repoRoot, '.gitignore');
   let raw;
   try { raw = await readFile(p, 'utf8'); } catch { return { state: 'no-gitignore' }; }
@@ -991,7 +991,6 @@ export async function verifyAnchors(repoRoot) {
 // requirement ("missing per-level evidence = schema-invalid"). The PR 6a
 // ceremony producer must refuse to append an event this rejects; consumers
 // label every ASSURANCE_ASSESSED non-authoritative regardless.
-export const ASSURANCE_LEVELS = ['actor-reported', 'replayed', 'anchored', 'presence-attested'];
 export function validateAssuranceEvidence(level, evidence) {
   const need = {
     'actor-reported': [],

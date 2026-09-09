@@ -31,7 +31,7 @@ export function slugsFor(absPath) {
   return strict === loose ? [strict] : [strict, loose];
 }
 
-export async function claudeMemoryDirFor(repoRoot, { home = homedir() } = {}) {
+async function claudeMemoryDirFor(repoRoot, { home = homedir() } = {}) {
   for (const slug of slugsFor(repoRoot)) {
     const dir = join(home, '.claude', 'projects', slug, 'memory');
     try { if ((await stat(dir)).isDirectory()) return dir; } catch {}

@@ -130,7 +130,7 @@ const ABLATION_COPY = [
 
 // Run the behavior lock in `root`. Injected so the discrimination test can
 // supply a verdict without spawning anything.
-export function defaultLockRunner(root) {
+function defaultLockRunner(root) {
   const lock = join(root, ...LOCK);
   const r = spawnSync(process.execPath, [lock], { cwd: root, encoding: 'utf8' });
   return { status: r.status, output: `${r.stdout || ''}${r.stderr || ''}` };

@@ -49,8 +49,6 @@ import { createHash } from 'node:crypto';
 import { isHardCatch } from './outcome.mjs';
 import { hedgesCompletion } from './reflect.mjs';
 
-export const RUNGS = ['observe', 'established', 'relaxation-candidate'];
-
 export const DEFAULT_THRESHOLDS = Object.freeze({
   z: 1.96,               // Wilson confidence parameter
   minN: 5,               // below this the record is too thin to grade

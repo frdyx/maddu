@@ -30,7 +30,7 @@ export function configDir() {
   return join(xdg, 'maddu');
 }
 
-export function registryPath() {
+function registryPath() {
   return join(configDir(), 'bridges-registry.json');
 }
 
@@ -60,7 +60,7 @@ export async function readRegistry() {
   }
 }
 
-export async function writeRegistry(reg) {
+async function writeRegistry(reg) {
   await ensureDir();
   const f = registryPath();
   await writeFile(f, JSON.stringify(reg, null, 2) + '\n');
@@ -114,5 +114,3 @@ export async function pruneOrphans() {
   }
   return removed;
 }
-
-export { SCHEMA_VERSION };

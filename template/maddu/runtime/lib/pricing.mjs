@@ -26,8 +26,8 @@ import { join } from 'node:path';
 
 // Authority = lowercase hostname, byte-exact match. Model = byte-exact match
 // on the emitted model string. Lookup is exact (authority, model) or nothing.
-export const AUTHORITY_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
-export const MANIFEST_VERSION_RE = /^\d{4}-\d{2}-\d{2}\.\d+$/;
+const AUTHORITY_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
+const MANIFEST_VERSION_RE = /^\d{4}-\d{2}-\d{2}\.\d+$/;
 
 // Published Anthropic API list prices as of the manifest date. Deliberately
 // small: the mechanism is exact-match-or-unpriced, and "unpriced" is the

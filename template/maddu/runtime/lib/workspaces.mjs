@@ -53,7 +53,7 @@ function emptyRegistry() {
   return { schemaVersion: SCHEMA_VERSION, workspaces: [], active: null };
 }
 
-export function workspaceRole(role) {
+function workspaceRole(role) {
   if (role === undefined || role === null || role === '') return 'project';
   return String(role).trim().toLowerCase();
 }
@@ -146,15 +146,6 @@ export async function activateWorkspace(id) {
   return reg;
 }
 
-export async function setLabel(id, label) {
-  const reg = await readRegistry();
-  const w = reg.workspaces.find((x) => x.id === id);
-  if (!w) throw new Error(`unknown workspace: ${id}`);
-  w.label = label;
-  await writeRegistry(reg);
-  return w;
-}
-
 export async function setRole(id, role) {
   const reg = await readRegistry();
   const w = reg.workspaces.find((x) => x.id === id);
@@ -164,15 +155,3 @@ export async function setRole(id, role) {
   return w;
 }
 
-// Resolve { workspaceId → repoRoot } map for bridge boot.
-// If the registry is empty/missing, the caller is expected to fall back to
-// legacy cwd walk-up and synthesize `{ default: <repoRoot> }`.
-export async function resolveWorkspaceMap() {
-  const reg = await readRegistry();
-  const map = new Map();
-  for (const w of reg.workspaces) map.set(w.id, w.path);
-  return { map, active: reg.active, registry: reg };
-}
-
-export { SCHEMA_VERSION };
-export { WORKSPACE_ROLES };

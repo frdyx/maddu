@@ -26,8 +26,8 @@ import { redactText } from './secret-scan.mjs';
 import { EVENT_CONTRACT_VERSION } from './event-schema.mjs';
 import { EXPERIENCE_SCHEMA_VERSION } from './experience.mjs';
 
-export const ATDP_FORMAT_VERSION = 1;
-export const REDACTION_PROFILE = 'maddu-secret-scan-v1 (refuse-on-hit + redactText defense-in-depth)';
+const ATDP_FORMAT_VERSION = 1;
+const REDACTION_PROFILE = 'maddu-secret-scan-v1 (refuse-on-hit + redactText defense-in-depth)';
 
 // The exporter's scoped secret gate: one changed-output check per SELECTED
 // event, reporting ev.id — never a partial result.

@@ -28,7 +28,7 @@ import { redactText } from './secret-scan.mjs';
 // Pull the operator's real prompt turns from one transcript (skip tool-results,
 // injected system reminders, and command-wrapper noise). Returns ordered
 // { text, ts, line } for genuine user instructions.
-export async function extractPrompts(filePath) {
+async function extractPrompts(filePath) {
   const prompts = [];
   const rl = createInterface({ input: createReadStream(filePath, { encoding: 'utf8' }), crlfDelay: Infinity });
   let line = 0;
@@ -190,17 +190,6 @@ export async function gatherActions({ root = transcriptsRoot(), slug = null, sin
   };
 }
 
-// The arc as a per-session timeline: each session's opening operator prompt is
-// what that work-chunk was about. Returns [{ session, ts, opening }].
-export function buildTimeline(prompts) {
-  const seen = new Map();
-  for (const p of prompts) {
-    if (!p.session) continue;
-    if (!seen.has(p.session)) seen.set(p.session, { session: p.session, ts: p.ts, opening: p.text });
-  }
-  return [...seen.values()].sort((a, b) => (a.ts ? Date.parse(a.ts) : 0) - (b.ts ? Date.parse(b.ts) : 0));
-}
-
 // ── The actual product (ground truth from the real repo) ────────────────────
 // The transcript tells you what the agent DID; the repo tells you what actually
 // EXISTS now. When the operator has the product repo on disk, scan it so the
@@ -310,7 +299,7 @@ export async function gatherProduct(root) {
 
 // "The rebuild is done when…" — generic core + criteria derived from the real
 // product's scripts and schemas.
-export function deriveAcceptance(products, variables) {
+function deriveAcceptance(products, variables) {
   const c = [];
   if (variables?.length) c.push('the intake schema validates — all required inputs collected and typed');
   const scripts = new Set();
@@ -329,7 +318,7 @@ export function deriveAcceptance(products, variables) {
 }
 
 // Files the implementing agent must read first (from the real repos).
-export function deriveReadingList(products) {
+function deriveReadingList(products) {
   const rank = (f) => (/package\.json$/.test(f) ? 0 : /\.schema\.json$/.test(f) ? 1 : /(HANDOFF|PLAN|ARCHITECTURE|RUNBOOK)\.md$/i.test(f) ? 2 : /profiles?\//i.test(f) ? 3 : /(orchestrator|pipeline|index|main|generate|extract|research)\./.test(f) ? 4 : 5);
   return products.map((p) => ({
     repo: p.pkg?.name || p.root.split(/[\\/]/).pop(),
@@ -339,7 +328,7 @@ export function deriveReadingList(products) {
 
 // What the rebuild must PRODUCE — mirrors the source's contract/profile/stage
 // shape so the generalized system is structurally equivalent.
-export function deriveOutputContract(products) {
+function deriveOutputContract(products) {
   const dossier = products.flatMap((p) => p.keyFiles || []).find((f) => /dossier.*\.schema\.json$/i.test(f))
     || products.flatMap((p) => p.keyFiles || []).find((f) => /\.schema\.json$/i.test(f));
   return [
@@ -353,7 +342,7 @@ export function deriveOutputContract(products) {
 }
 
 // Real-data / legal guardrails — only when the build shows crawling/PII signals.
-export function deriveGuardrails(actions, genesis) {
+function deriveGuardrails(actions, genesis) {
   const hay = `${genesis || ''} ${(actions.sources || []).map((s) => s.k).join(' ')}`.toLowerCase();
   if (!/(scrap|crawl|robots|gdpr|google business|places api|contact|email|competitor|\bpii\b|listing)/.test(hay)) return null;
   return [
@@ -366,22 +355,6 @@ export function deriveGuardrails(actions, genesis) {
 }
 
 // ── Optional spine enrichment (when the project has a .maddu/) ───────────────
-
-export function gatherSpine(events, proj) {
-  const out = { goal: null, phases: [], sliceStops: [], corrections: [] };
-  if (proj?.goal) out.goal = { objective: proj.goal.objective || null, constraints: proj.goal.constraints || [] };
-  out.sliceStops = (events || [])
-    .filter((e) => e.type === 'SLICE_STOP')
-    .map((e) => ({ ts: e.ts, summary: e.data?.summary || null, targets: e.data?.targets || [], learnings: e.data?.learnings || [], next: e.data?.next || [] }));
-  // Plan phases (in declaration order).
-  for (const e of (events || [])) {
-    if (e.type === 'PLAN_CREATED') out.phases.push({ planId: e.data?.planId, title: e.data?.title, phases: (e.data?.phases || []).map((p) => p.name || p) });
-  }
-  out.corrections = (events || [])
-    .filter((e) => e.type === 'LEARN_CORRECTION_WRITTEN' && e.data?.fact?.text)
-    .map((e) => e.data.fact.text);
-  return out;
-}
 
 // ── Problems & fixes (the crux — reuse learn's failure→success pairing) ─────
 

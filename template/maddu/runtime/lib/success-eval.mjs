@@ -148,10 +148,6 @@ export async function readSuccessCache(repoRoot) {
   }
 }
 
-export function successCachePath(repoRoot) {
-  return cachePath(repoRoot);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // audit P3 — verification, not actor-witness.
 //
@@ -163,7 +159,7 @@ export function successCachePath(repoRoot) {
 // (objective/setAt must match the current spine goal), and integrity-gated.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SUCCESS_RECEIPT_TTL_MS = 24 * 60 * 60 * 1000; // orient re-evals each fresh session
+const SUCCESS_RECEIPT_TTL_MS = 24 * 60 * 60 * 1000; // orient re-evals each fresh session
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 // Shared staleness classifier — returns null (fresh) or a reason string. Rejects
@@ -192,7 +188,7 @@ export function latestSuccessReceipt(events) {
 // never completed (crash / append-failure). "After" is by LIST POSITION (append
 // order), not timestamp, so a STARTED sharing the receipt's millisecond still
 // counts. The prior receipt's "met" is then stale.
-export function hasNewerSuccessDangling(events, receipt) {
+function hasNewerSuccessDangling(events, receipt) {
   const list = Array.isArray(events) ? events : [];
   if (!receipt) return false;
   const receiptIdx = list.indexOf(receipt);

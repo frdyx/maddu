@@ -43,7 +43,7 @@ export const TOKEN_HEADER = 'x-maddu-bridge-token';
 function tokensDir() {
   return join(configDir(), 'bridge-tokens');
 }
-export function capabilityPath(port) {
+function capabilityPath(port) {
   return join(tokensDir(), `${Number(port)}.json`);
 }
 
