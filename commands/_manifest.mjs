@@ -20,7 +20,7 @@ import { platform } from 'node:os';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const FRAMEWORK_ROOT = join(__dirname, '..');
 export const TEMPLATE_ROOT = join(FRAMEWORK_ROOT, 'template');
-export const TEMPLATE_MADDU = join(TEMPLATE_ROOT, 'maddu');
+const TEMPLATE_MADDU = join(TEMPLATE_ROOT, 'maddu');
 
 // Layout detection (v0.17.1).
 //
@@ -44,7 +44,7 @@ export const TEMPLATE_MADDU = join(TEMPLATE_ROOT, 'maddu');
 // meaningless and historically silently broken (init would crash mid-way;
 // upgrade would no-op every file). v0.17.1 refuses these calls early with
 // a clear actionable error.
-export async function detectFrameworkLayout() {
+async function detectFrameworkLayout() {
   if (await exists(TEMPLATE_MADDU)) return 'source';
   if (await exists(join(FRAMEWORK_ROOT, 'runtime'))) return 'installed';
   return 'unknown';
@@ -91,7 +91,7 @@ export async function absent(p) {
   catch (err) { return err && (err.code === 'ENOENT' || err.code === 'ENOTDIR'); }
 }
 
-export async function readJson(p) {
+async function readJson(p) {
   return JSON.parse(await readFile(p, 'utf8'));
 }
 

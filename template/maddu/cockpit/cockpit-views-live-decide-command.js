@@ -72,12 +72,15 @@ export function renderConductor(ctx) {
       const r = await fetch(ctx.scopedUrl('conductor', '/bridge/conductor'), { cache: 'no-store' });
       view = await r.json();
     } catch {
+      nextHost.className = 'conductor-next tone-neutral';
       nextHost.replaceChildren(placeholder('Offline', 'Bridge not reachable.'));
       return;
     }
     dataLoaded = true;
 
-    // Next Command
+    // Next Command. The tone goes on the HOST, not on the strip inside it —
+    // see nextCommandTone.
+    nextHost.className = `conductor-next tone-${nextCommandTone(view.nextCommand)}`;
     nextHost.replaceChildren(renderNextCommand(view.nextCommand));
 
     // KPI strip
@@ -142,10 +145,17 @@ export function renderConductor(ctx) {
   return root;
 }
 
+// Which tone the next-command carries. It is applied to `.conductor-next`, the
+// element every `.conductor-next.tone-*` rule in the stylesheet names — the
+// bordered box AND the ancestor the glyph-colour rules match through.
+// `.next-command` is `display: contents`, so it has no box of its own: a tone
+// class there matched no rule and painted nothing.
+const nextCommandTone = (nc) => (nc ? REASON_CODE_TONE[nc.reasonCode] || 'accent' : 'neutral');
+
 function renderNextCommand(nc) {
   if (!nc) return placeholder('No signal', 'Bridge returned no next-command.');
-  const tone = REASON_CODE_TONE[nc.reasonCode] || 'accent';
-  const wrap = el('div', { class: `next-command tone-${tone}` });
+  const tone = nextCommandTone(nc);
+  const wrap = el('div', { class: 'next-command' });
   wrap.appendChild(el('span', { class: 'next-command-glyph' }, '▸'));
   const body = el('div', { class: 'next-command-body' });
   body.appendChild(el('div', { class: 'next-command-text' }, nc.text || ''));

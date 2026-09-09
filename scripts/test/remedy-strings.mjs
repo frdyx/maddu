@@ -83,7 +83,7 @@ function flagsOf(rest) {
 // The pure core: source text in, findings out. The controls below run against
 // synthetic text through this same path, so a scan that has stopped detecting
 // cannot report the repo clean.
-export function scanText(text, where = '<text>') {
+function scanText(text, where = '<text>') {
   const findings = [];
   text.split(/\r?\n/).forEach((line, i) => {
     for (const m of line.matchAll(CMD_RE)) {

@@ -16,7 +16,7 @@
 import { append, EVENT_TYPES } from './spine.mjs';
 
 // Build the "▶ RESUME HERE" body from a SLICE_STOP event's data.
-export function buildHandoffBody(ev) {
+function buildHandoffBody(ev) {
   const d = ev.data || {};
   const lines = [`▶ RESUME HERE  (auto · slice ${ev.id})`];
   lines.push(`Last: ${(d.summary || '—').replace(/\s+/g, ' ').trim()}`);

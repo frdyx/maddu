@@ -13,14 +13,6 @@ import { pathsFor } from './paths.mjs';
 import { readAll, append } from './spine.mjs';
 import { redactLeaves } from './secret-scan.mjs';
 
-// v1.9.0 adds 'correction' — a durable lesson distilled by `maddu learn` from a
-// failed→succeeded tool-call pair (Headroom-style). Unlike the SLICE_STOP-derived
-// kinds, corrections originate from LEARN_CORRECTION_WRITTEN spine events and are
-// replayed on rebuild (see rebuildMemory) so they survive a memory rebuild.
-// v1.90.0 adds 'vendor' — a fact imported from a vendor tool's own memory
-// (VENDOR_MEMORY_IMPORTED events, import-only; see vendor-memory.mjs).
-export const FACT_KINDS = ['rule', 'constraint', 'discovery', 'followup', 'touched', 'gate', 'summary', 'correction', 'vendor'];
-
 function memoryPath(repoRoot) {
   return join(pathsFor(repoRoot).state, 'memory.ndjson');
 }
@@ -50,7 +42,7 @@ function tagsFor(ev, text) {
 }
 
 // Given a SLICE_STOP event, return an ordered array of fact records.
-export function extractFromSliceStop(ev) {
+function extractFromSliceStop(ev) {
   if (ev.type !== 'SLICE_STOP') return [];
   const facts = [];
   const d = ev.data || {};
@@ -128,7 +120,7 @@ async function ensureMemoryFile(repoRoot) {
   return p;
 }
 
-export async function appendFacts(repoRoot, facts) {
+async function appendFacts(repoRoot, facts) {
   if (!facts.length) return 0;
   const p = await ensureMemoryFile(repoRoot);
   // Write-boundary redaction: memory facts are transcript/repo-derived and can
@@ -250,8 +242,6 @@ export async function supersede(repoRoot, { priorId, fact, reason = null }) {
 // wins. Trust is event-sourced — it survives rebuildMemory — and is NEVER
 // inferred from a fact's kind, actor, or hash-chain membership.
 
-export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
-
 // Canonical consumed-content serialization (Codex r1 blocker 2 + r2 blocker
 // 1): approval must bind to EVERYTHING agent context consumes or selection
 // keys on — text, kind, tags, lane, sourceEvent — not text alone, or a
@@ -267,7 +257,7 @@ export const TRUST_STATES = ['asserted', 'approved', 'revoked'];
 const FACT_KEYS = new Set(['v', 'id', 'ts', 'kind', 'text', 'tags', 'source', 'supersedes']);
 const strOrNull = (x) => x === undefined || x === null || typeof x === 'string';
 
-export function isWellFormedFact(f) {
+function isWellFormedFact(f) {
   if (!f || typeof f !== 'object' || Array.isArray(f)) return false;
   // STRICT top-level keys (Codex r4 blocker 2): unknown properties are
   // rejected — an extra `payload` field would ride spreads past a hash that
@@ -297,7 +287,7 @@ export function isWellFormedFact(f) {
   return true;
 }
 
-export function canonicalFactContent(fact) {
+function canonicalFactContent(fact) {
   // WHOLE-FACT deterministic serialization (Codex r5 blocker 1 ended the
   // field-enumeration whack-a-mole: supersedes/candidate/v were consumed but
   // unhashed). Fixed literal key order; source keys sorted; undefined
@@ -364,7 +354,7 @@ export function trustStates(events) {
 // two appends) — leaving a retired-on-the-spine fact "current" and
 // injectable. The spine wins (hard rule 2), so the injection-safety join
 // retires from events too.
-export function supersededByEvents(events) {
+function supersededByEvents(events) {
   const out = new Set();
   for (const ev of events) {
     if (ev.type === 'MEMORY_FACT_SUPERSEDED' && ev.data?.supersedes) out.add(ev.data.supersedes);

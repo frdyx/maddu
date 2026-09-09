@@ -389,12 +389,6 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
   padding: 18px 18px 22px;
   border-bottom: 1px solid var(--m-line-soft);
 }
-.rail-mark-glyph {
-  font-family: var(--m-font-mono);
-  color: var(--m-brand);                /* burnt orange ghost accent — brand anchor */
-  font-size: 18px;
-  text-shadow: var(--m-glow-brand);     /* subtle orange bloom on the glyph only */
-}
 .rail-mark-svg {
   display: block;
   width: 22px;
@@ -895,12 +889,6 @@ button.is-ghost:hover, .m-btn.is-ghost:hover {
 /* v0.18 — backbone view layout. Reuses existing tokens; no new color
    palette introduced. Two-column grid on wide screens, single column
    on narrow. */
-.view .panel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-  gap: var(--m-space-5);
-  margin-top: var(--m-space-4);
-}
 .view .panel-row {
   border-top: 1px solid var(--m-line);
   padding: 10px 0;
@@ -2774,8 +2762,14 @@ input[type="radio"] {
 .team-lane-policy { font-size: 10px; }
 .team-lane-contention { font-size: 12px; color: var(--m-fg-0); }
 
-.pill.tone-fg-3 { background: transparent; border: 1px solid var(--m-bg-3); color: var(--m-fg-3); }
-.pill.tone-warn { background: rgba(255, 184, 0, 0.08); border: 1px solid rgba(255, 184, 0, 0.36); color: var(--m-warn); }
+/* `.pill` is rendered in four tones — fg-3, warn, ok and accent — but only the
+   first two were ever styled, so `pill tone-ok` ("enabled YES") and
+   `pill tone-accent` (lane ids) painted nothing at all. The ok/accent pair
+   reads the same semantic tokens as the .next-command-pill family. */
+.pill.tone-fg-3  { background: transparent; border: 1px solid var(--m-bg-3); color: var(--m-fg-3); }
+.pill.tone-warn  { background: rgba(255, 184, 0, 0.08); border: 1px solid rgba(255, 184, 0, 0.36); color: var(--m-warn); }
+.pill.tone-ok    { background: var(--m-ok-bg); border: 1px solid var(--m-ok-border); color: var(--m-ok); }
+.pill.tone-accent { background: var(--m-accent-glow-bg); border: 1px solid var(--m-accent-dim); color: var(--m-accent); }
 
 /* ─── Team sync (#12c phase 6) — replicas × contentions panel on Teams ── */
 .team-sync { display: flex; flex-direction: column; gap: 12px; }

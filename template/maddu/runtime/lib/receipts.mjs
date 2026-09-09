@@ -71,7 +71,7 @@ function summarize(ev) {
   return t.toLowerCase().replace(/_/g, ' ');
 }
 
-export async function projectReceipts(repoRoot) {
+async function projectReceipts(repoRoot) {
   const all = await readAll(repoRoot);
   const receipts = [];
   for (const ev of all) {

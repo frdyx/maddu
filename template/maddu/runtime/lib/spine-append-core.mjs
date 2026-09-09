@@ -34,7 +34,7 @@ export function hashLine(line) {
   return createHash('sha256').update(String(line).replace(/\r$/, ''), 'utf8').digest('hex');
 }
 
-export function configReplicaPath(repoRoot) {
+function configReplicaPath(repoRoot) {
   return join(repoRoot, '.maddu', 'config', 'replica.json');
 }
 

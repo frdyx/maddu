@@ -49,7 +49,7 @@ export const REPLAY_TIMEOUT_MS_DEFAULT = 600000; // fixed per command (10 min)
 const KILL_SETTLE_MS = 10000;   // universal settlement deadline, from KILL INITIATION
 const TASKKILL_TIMEOUT_MS = 5000; // bound on the taskkill invocation itself
 
-export const REPLAY_SCOPE_LINE =
+const REPLAY_SCOPE_LINE =
   'clean-checkout replay: --no-local isolates git object copying only — host env, credentials, caches, services, and absolute-path writes are NOT isolated.';
 
 // Every error detail this module returns is PRINTED (human + --json stdout)
@@ -73,7 +73,7 @@ export function replayTimeoutMs() {
 // resolve, and an annotated-tag object id peels through `<sha>^{commit}` to a
 // DIFFERENT object than subject_sha would record — both break exact-SHA
 // discipline, so the object itself must exist and be a commit.
-export async function resolveSubjectSha(workRoot, sha) {
+async function resolveSubjectSha(workRoot, sha) {
   if (typeof sha !== 'string' || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
     return { ok: false, reason: 'sha-invalid', detail: '--replay requires a full lowercase hex commit id (40 hex in sha1 repos, 64 in sha256 repos) — abbreviations, refs, and uppercase are refused' };
   }
@@ -106,7 +106,7 @@ export async function resolveSubjectSha(workRoot, sha) {
 
 // ── clone + cleanup ──────────────────────────────────────────────────────
 
-export async function cloneAtSha(workRoot, sha) {
+async function cloneAtSha(workRoot, sha) {
   let dir = null;
   try {
     dir = await mkdtemp(join(tmpdir(), 'maddu-replay-'));
@@ -148,7 +148,7 @@ async function chmodTree(dir) {
 // it forces cleanup to REPORT failure (without deleting) so the fail-closed
 // reaction is provable. Direction-safe — it can only make a run FAIL harder,
 // never pass.
-export async function cleanupClone(dir) {
+async function cleanupClone(dir) {
   if (!dir) return true;
   if (process.env.MADDU_REPLAY_TEST_CLEANUP_FAIL === '1') return false;
   try {
@@ -165,7 +165,7 @@ export async function cleanupClone(dir) {
 
 // ── declared config (read FROM THE CLONE, fail-closed) ───────────────────
 
-export async function readReplayConfig(cloneDir, sha) {
+async function readReplayConfig(cloneDir, sha) {
   // Read from the GIT OBJECT STORE, never the checked-out filesystem: on a
   // case-insensitive FS a differently-cased tree entry would resolve, and
   // under core.symlinks=false (Windows default) a committed SYMLINK

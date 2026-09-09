@@ -18,7 +18,7 @@ import { homedir, platform } from 'node:os';
 import { createHash } from 'node:crypto';
 import { append, EVENT_TYPES } from './spine.mjs';
 
-export function authDir() {
+function authDir() {
   if (platform() === 'win32') {
     const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
     return join(appData, 'maddu', 'auth');
@@ -161,7 +161,7 @@ export async function markRateLimited(repoRoot, provider, keyId, untilIso, by = 
 
 // Pick the next usable key. Logs an AUTH_KEY_ROTATED event when we switch
 // away from the previously-marked-active key (tracked via lastUsedAt).
-export async function pickActive(repoRoot, provider, by = null) {
+async function pickActive(repoRoot, provider, by = null) {
   const doc = await readProviderFile(provider);
   if (doc.keys.length === 0) return null;
   const now = Date.now();

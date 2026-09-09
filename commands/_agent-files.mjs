@@ -21,8 +21,8 @@ import { readFile, writeFile, stat, mkdir, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export const MARKER_BEGIN = '<!-- BEGIN MADDU v1 -->';
-export const MARKER_END = '<!-- END MADDU v1 -->';
+const MARKER_BEGIN = '<!-- BEGIN MADDU v1 -->';
+const MARKER_END = '<!-- END MADDU v1 -->';
 
 async function exists(p) {
   try { await stat(p); return true; } catch { return false; }

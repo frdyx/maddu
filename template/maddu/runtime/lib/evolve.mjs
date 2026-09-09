@@ -41,7 +41,6 @@ import { mineToolPairs, mineGateArcs } from './learn-spine.mjs';
 export const MIN_OCCURRENCES = 3;
 export const MIN_SCOPES = 2;
 
-export const CATEGORIES = ['memory', 'skill', 'agent-file', 'gate', 'workflow', 'tool-pattern', 'no-op'];
 // NOTE: no v1 detector emits category 'agent-file' — the agent-file
 // DESTINATION is reached via `evolve adopt --to agent-file` on a
 // correction-class (memory) rec; the category stays declared for the

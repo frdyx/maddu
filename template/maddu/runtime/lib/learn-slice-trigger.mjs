@@ -62,7 +62,7 @@ import { spineCandidates } from './learn-spine.mjs';
 export const DETECT_DEADLINE_MS = 1500;
 export const MAX_LINES = 500;
 export const MAX_LINE_BYTES = 64 * 1024;
-export const MAX_TOTAL_BYTES = 256 * 1024;
+const MAX_TOTAL_BYTES = 256 * 1024;
 
 // Bounded raw-line collection: newest shards backwards, newest lines first,
 // EVERY scanned line — oversize included — counting toward BOTH caps (Codex

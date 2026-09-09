@@ -36,7 +36,7 @@ import { isImportedEvent, listSpineShards } from './insights.mjs';
 
 export const FUNNEL_STAGES = ['installed', 'healthy', 'session', 'claimed', 'slice', 'repeating'];
 
-export const REPEATING_MIN_SLICES = 3;
+const REPEATING_MIN_SLICES = 3;
 
 // ONE next action per stage — the single most useful thing to do next, not a
 // menu. Hooks are the proven activation lever (the ritual-active repos in the

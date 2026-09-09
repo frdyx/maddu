@@ -10,7 +10,7 @@
 // on the event envelope — feeding it the batch string would miss every key.
 
 // Known inject-time refusal reason codes (commands/brief.mjs) → operator copy.
-export const REASON_COPY = Object.freeze({
+const REASON_COPY = Object.freeze({
   'unacknowledged-external-refs': 'blocked — points off-box to an unreviewed link',
   'untrusted-provenance': 'blocked — from a source you hadn’t trusted',
 });

@@ -40,7 +40,7 @@ import { readReceiptStats } from './invocation-receipts.mjs';
 // Native emitters omit the field entirely, so absence = native — verified
 // across the 2026-07-16 fleet (snyggare: 53,668 stamped import rows, 0
 // unstamped).
-export const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript', 'import-submit']);
+const IMPORTED_DATA_SOURCES = new Set(['claude-code-transcript', 'import-submit']);
 
 export function isImportedEvent(e) {
   return !!(e && e.data && typeof e.data.source === 'string' && IMPORTED_DATA_SOURCES.has(e.data.source));
@@ -223,7 +223,7 @@ export async function workspaceRole(workspace) {
 
 // ── Aggregate + classify ────────────────────────────────────────────────────
 
-export function classify(presence, n) {
+function classify(presence, n) {
   if (presence === 0) return 'dead';
   if (n > 0 && presence >= Math.ceil(n / 2)) return 'load-bearing';
   if (presence === 1) return 'single-project';
@@ -327,7 +327,7 @@ export function buildMatrix(projects, definedSet, pluginOwners = new Map()) {
 //   dead              — never fired, no excuse on file
 // The `insights-partition` self-test asserts the buckets are disjoint and sum
 // to definedTotal, so the taxonomy can never silently leak types again.
-export function partitionDefined(rows, definedSet) {
+function partitionDefined(rows, definedSet) {
   const buckets = { fired: [], 'imported-only': [], 'dormant-by-design': [], 'plugin-owned': [], dead: [] };
   for (const r of rows) {
     if (!definedSet.has(r.type)) continue; // undeclared drift is reported apart

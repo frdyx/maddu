@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
 
-export const PROFILES = new Set(['smoke', 'quick', 'full']);
+const PROFILES = new Set(['smoke', 'quick', 'full']);
 export const SOURCE_ONLY_MESSAGE = 'maddu self-test is only available in the Maddu framework source checkout; use `maddu test` for project tests.';
 
 const QUICK_EXCLUDED = new Set(['run-all.mjs', 'stress-harness.mjs', 'upgrade-matrix.mjs', 'cockpit-playwright.mjs']);
@@ -42,7 +42,7 @@ export function classifyExit(code, skippable) {
   return 'fail';
 }
 
-export class SelfTestConfigError extends Error {
+class SelfTestConfigError extends Error {
   constructor(message) {
     super(message);
     this.name = 'SelfTestConfigError';
@@ -307,7 +307,7 @@ export async function runSelfTest(options = {}) {
   };
 }
 
-export function listText(plan) {
+function listText(plan) {
   const lines = [`Maddu self-test (${plan.profile})`, ''];
   for (const task of plan.tasks) lines.push(`  ${task.id.padEnd(28)} ${task.command}`);
   lines.push('', `${plan.tasks.length} test(s) selected`);
@@ -322,7 +322,7 @@ export function listJson(plan) {
   }, null, 2);
 }
 
-export function resultText(result) {
+function resultText(result) {
   const lines = [`Maddu self-test (${result.profile})`, ''];
   for (const r of result.results) {
     const tag = r.status === 'pass' ? 'PASS' : r.status === 'skip' ? 'SKIP' : 'FAIL';

@@ -19,13 +19,13 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { gitRun } from './git-exec.mjs';
 
-export const SOURCE_EXTS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py'];
+const SOURCE_EXTS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py'];
 export const FAIL_ON = new Set(['none', 'new', 'any']);
 // Structural-mass defaults: a file over this many lines is a "monolith". The
 // import graph can't see file mass (a 9000-line file is one node), so this is a
 // separate dimension. 1500 cleanly separates genuine monoliths from large-but-
 // reasonable modules in this repo; override via contract options.mass.maxLines.
-export const MASS_MAX_LINES = 1500;
+const MASS_MAX_LINES = 1500;
 
 const SKIP_DIRS = new Set([
   '.git', 'node_modules', '.maddu', 'dist', 'build', 'out', 'coverage',
@@ -34,7 +34,7 @@ const SKIP_DIRS = new Set([
 ]);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
-export class ArchitectureConfigError extends Error {
+class ArchitectureConfigError extends Error {
   constructor(message) { super(message); this.name = 'ArchitectureConfigError'; this.exitCode = 2; }
 }
 
@@ -174,13 +174,13 @@ export async function scanFiles(repoRoot, ignore = []) {
 }
 
 // ── module assignment (most-specific glob wins) ──────────────────────────────
-export function buildModuleMatchers(contract) {
+function buildModuleMatchers(contract) {
   return contract.modules.map((m) => ({
     name: m.name,
     matchers: (m.paths || []).map((p) => ({ re: globToRegExp(p), spec: globSpecificity(p) })),
   }));
 }
-export function assignModule(relPath, matchers) {
+function assignModule(relPath, matchers) {
   let best = null;
   let bestSpec = -1;
   for (const m of matchers) {
@@ -234,7 +234,7 @@ function tryResolve(target, fileSet) {
   return null;
 }
 
-export function resolveImport(fromFileRel, imp, fileSet) {
+function resolveImport(fromFileRel, imp, fileSet) {
   const spec = imp.spec;
   if (imp.kind === 'js') {
     if (!spec.startsWith('.')) return null; // package/external — ignored in MVP

@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-export const PROJECT_TEST_PROFILES = new Set(['smoke', 'quick', 'full']);
+const PROJECT_TEST_PROFILES = new Set(['smoke', 'quick', 'full']);
 
 const ADAPTIVE_FLAGS = new Set([
   'profile',
@@ -146,7 +146,7 @@ function requiredValue(argv, index, flag) {
   return value;
 }
 
-export function hasLegacyRunnerConflict(argv) {
+function hasLegacyRunnerConflict(argv) {
   return isAdaptiveProjectTestArgs(argv) && argv.some((arg) => {
     if (!arg.startsWith('--')) return false;
     const name = arg.slice(2).split('=')[0];

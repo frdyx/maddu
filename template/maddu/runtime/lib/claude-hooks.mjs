@@ -29,7 +29,7 @@ import { mkdir, readFile, writeFile, rename, stat } from 'node:fs/promises';
 // resolveHookBin picks the right one at install time.
 export const HOOK_BIN = 'node maddu/bin/maddu.mjs';
 export const HOOK_BIN_SOURCE = 'node bin/maddu.mjs';
-export const MADDU_SENTINEL = 'hooks fire';
+const MADDU_SENTINEL = 'hooks fire';
 
 // IO: which entrypoint exists in THIS repo. Consumer layout wins; the source
 // layout is the fallback only when the consumer path is absent and the source

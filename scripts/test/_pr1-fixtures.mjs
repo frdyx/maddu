@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { hermeticEnv } from './_hermetic-env.mjs';
 
 export const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
-export const sourceBin = join(sourceRoot, 'bin', 'maddu.mjs');
+const sourceBin = join(sourceRoot, 'bin', 'maddu.mjs');
 export const segment = (root) => join(root, '.maddu', 'events', '000000000001.ndjson');
 export const activePath = (root) => join(root, '.maddu', 'state', 'session.active.json');
 
@@ -76,7 +76,7 @@ export async function jsonFile(path) {
   catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
 
-export async function ndjson(path) {
+async function ndjson(path) {
   let raw;
   try { raw = await readFile(path, 'utf8'); }
   catch (e) { if (e.code === 'ENOENT') return []; throw e; }

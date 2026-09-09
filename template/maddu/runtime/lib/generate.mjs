@@ -178,7 +178,7 @@ export function renderEventSchemaMarkdown(schema, version, envelope) {
 
 const RULES_REGISTRY = 'template/maddu/agent-files/rules.json';
 
-export const GENERATORS = [
+const GENERATORS = [
   {
     id: 'hard-rules-claude',
     target: 'template/maddu/CLAUDE.md',

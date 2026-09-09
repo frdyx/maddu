@@ -24,9 +24,9 @@ async function exists(p) { try { await stat(p); return true; } catch { return fa
 
 // Bundled plugins sit at `<install>/maddu/plugins` and `template/maddu/plugins`
 // in dev — both are `../../plugins` relative to this lib (runtime/lib/).
-export function bundledPluginsDir() { return join(__dirname, '..', '..', 'plugins'); }
-export function userPluginsDir(repoRoot) { return join(repoRoot, '.maddu', 'plugins'); }
-export function enableStatePath(repoRoot) { return join(repoRoot, '.maddu', 'config', 'plugins.json'); }
+function bundledPluginsDir() { return join(__dirname, '..', '..', 'plugins'); }
+function userPluginsDir(repoRoot) { return join(repoRoot, '.maddu', 'plugins'); }
+function enableStatePath(repoRoot) { return join(repoRoot, '.maddu', 'config', 'plugins.json'); }
 
 // ── Enable-state (files-only) ───────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ export async function writeEnableState(repoRoot, state) {
 
 const REQUIRED = ['name', 'version', 'description'];
 
-export async function readManifest(pluginDir) {
+async function readManifest(pluginDir) {
   const p = join(pluginDir, 'plugin.json');
   let m;
   try { m = JSON.parse(await readFile(p, 'utf8')); }
@@ -123,7 +123,7 @@ export async function getPlugin(repoRoot, name) {
 
 // Union of event types declared by plugins. `enabledOnly` (default true) limits
 // to currently-enabled plugins — what audit/insights treat as live.
-export async function pluginEventTypes(repoRoot, { enabledOnly = true } = {}) {
+async function pluginEventTypes(repoRoot, { enabledOnly = true } = {}) {
   const plugins = await discoverPlugins(repoRoot);
   const owner = new Map(); // type -> plugin name
   for (const p of plugins) {

@@ -58,7 +58,7 @@ const DEFAULT_STATE = {
   lastError: null
 };
 
-export async function readState(repoRoot) {
+async function readState(repoRoot) {
   try {
     const raw = await readFile(stateFile(repoRoot), 'utf8');
     const doc = JSON.parse(raw);
@@ -80,7 +80,7 @@ export async function setToken(repoRoot, value, by = null) {
   return await addKey(repoRoot, { provider: PROVIDER, value, label: `bot-${value.split(':')[0]}` }, by);
 }
 
-export async function tokenStatus() {
+async function tokenStatus() {
   const keys = await listKeys(PROVIDER);
   return { configured: keys.length > 0, tail: keys[0]?.tail || null, count: keys.length };
 }

@@ -21,7 +21,7 @@ import { redactLeaves } from './secret-scan.mjs';
 // Hash is over the JSON.stringify of the object with `provenance` field
 // stripped, keys sorted. Same algorithm used by the framework template
 // authoring step (the bake-hashes script).
-export function computeTemplateProvenance(obj) {
+function computeTemplateProvenance(obj) {
   const clone = JSON.parse(JSON.stringify(obj));
   delete clone.provenance;
   delete clone.__source;

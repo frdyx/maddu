@@ -85,7 +85,7 @@ export function laneWorktreePath(stateRoot, id) {
 
 // The repo-relative form recorded on WORKTREE_ATTACHED.pathRepoRel — always
 // forward-slashed so the spine record is platform-neutral.
-export function laneWorktreeRepoRel(id) {
+function laneWorktreeRepoRel(id) {
   assertLaneSlug(id);
   return `.maddu/worktrees/${id}`;
 }

@@ -54,15 +54,15 @@ export const DEFAULT_TRIGGERS = [
   'janitor:worktrees',
 ];
 
-export const DEFAULT_JANITOR_CONFIG = { staleAfterMs: 1800000, autoCloseAfterMs: 14400000 };
+const DEFAULT_JANITOR_CONFIG = { staleAfterMs: 1800000, autoCloseAfterMs: 14400000 };
 
-export const DEFAULT_TRUST_CONFIG = {
+const DEFAULT_TRUST_CONFIG = {
   schemaVersion: 1,
   pinnedPackages: [],
   audit: { freshness_warn_days: 30, freshness_block_days: 7 },
 };
 
-export const DEFAULT_WORKER_ENV_CONFIG = {
+const DEFAULT_WORKER_ENV_CONFIG = {
   schemaVersion: 1,
   default_allow: [
     'PATH', 'HOME', 'USER', 'USERPROFILE', 'TEMP', 'TMP',
@@ -82,11 +82,11 @@ export const DEFAULT_WORKER_ENV_CONFIG = {
   per_lane: {},
 };
 
-export const DEFAULT_GOVERNANCE_CONFIG = { mode: 'standard', overrides: {} };
+const DEFAULT_GOVERNANCE_CONFIG = { mode: 'standard', overrides: {} };
 
 // Inline fallback for `plan-exec-verify-fix` when the template source .json is
 // absent (older checkouts). The other three pipelines come from the template.
-export const PLAN_EXEC_VERIFY_FIX = {
+const PLAN_EXEC_VERIFY_FIX = {
   name: 'plan-exec-verify-fix',
   description: 'End-to-end work shape: plan the change, execute it, verify with doctor + tests, fix what failed.',
   stages: [
@@ -97,7 +97,7 @@ export const PLAN_EXEC_VERIFY_FIX = {
   ],
 };
 
-export const DEFAULT_PIPELINES = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
+const DEFAULT_PIPELINES = ['ship-a-feature', 'fix-a-bug', 'plan-and-delegate', 'plan-exec-verify-fix'];
 
 // ── The seeding (the single source of behavior) ────────────────────────────
 

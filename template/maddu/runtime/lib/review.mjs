@@ -13,7 +13,7 @@ import { redactText } from './secret-scan.mjs';
 
 const VALID_VERDICTS = new Set(['CLEAN', 'P1', 'P2', 'P3', 'INFO']);
 
-export function parseReview(text) {
+function parseReview(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return normalize({ verdict: 'INFO', findings: [], body: '' });
 
@@ -69,7 +69,7 @@ function normalize(o) {
   return { verdict: safe, findings, body: typeof o.body === 'string' ? o.body : '' };
 }
 
-export async function writeReviewArchive(repoRoot, sliceEventId, { verdict, findings, body, reviewerRuntime, reviewedAt }) {
+async function writeReviewArchive(repoRoot, sliceEventId, { verdict, findings, body, reviewerRuntime, reviewedAt }) {
   const dir = path.join(repoRoot, '.maddu', 'reviews');
   await fs.mkdir(dir, { recursive: true });
   const yaml = [
@@ -102,7 +102,7 @@ function formatFinding(f, n) {
 }
 
 // Map verdict → follow-up severity (default policy).
-export const VERDICT_TO_FOLLOWUP = {
+const VERDICT_TO_FOLLOWUP = {
   CLEAN: null,
   P1:    'P1',
   P2:    'P2',
@@ -110,7 +110,7 @@ export const VERDICT_TO_FOLLOWUP = {
   INFO:  null,
 };
 
-export async function readReviewPolicy(repoRoot) {
+async function readReviewPolicy(repoRoot) {
   try {
     return JSON.parse(await fs.readFile(path.join(repoRoot, '.maddu', 'config', 'review-policy.json'), 'utf8'));
   } catch {

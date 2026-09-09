@@ -84,7 +84,7 @@ const SUPPORTED_TIER_POLICY = 'worktree';
 // the default is named here and resolved BEFORE the lock is taken: resolving it
 // inside would turn a defaulting decision into a throw with a STARTED already
 // on the spine.
-export const DEFAULT_OBSERVE_TIMEOUT_MS = 600000; // 10 minutes
+const DEFAULT_OBSERVE_TIMEOUT_MS = 600000; // 10 minutes
 
 // Stored in place of the command when the canonical redactor is unusable. The
 // raw text is NEVER the fallback: the persisted field is operator-authored and

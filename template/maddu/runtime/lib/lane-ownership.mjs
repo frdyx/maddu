@@ -111,7 +111,7 @@ async function withOwnershipLock(repoRoot, { closeLock, maxWaitMs = CLAIMS_LOCK_
 // each, both modes) THEN claims — a §3.3a multi-append critical section.
 // { status:'claimed'|'already-claimed'|'unregistered'|'session-closed'|
 //   'spine-corrupt'|'partial'|'lock', ... }
-export async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = Date.now(), append = appendEvent }) {
+async function claimLaneIn(repoRoot, { sid, lane, focus = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
   const { events, syncMode, view, activeIds } = snap;
@@ -165,7 +165,7 @@ export async function claimLane(repoRoot, opts) {
 // clean — e.g. a live worktree on the lane).
 // { status:'forced'|'unregistered'|'session-closed'|'spine-corrupt'|'partial'|
 //   'refused'|'lock', ... }
-export async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reason = null, forceGroup, priorHint = null, preflight, nowMs = Date.now(), append = appendEvent }) {
+async function forceClaimLaneIn(repoRoot, { sid, lane, focus = null, reason = null, forceGroup, priorHint = null, preflight, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
   const { events, syncMode, view } = snap;
@@ -246,7 +246,7 @@ export async function forceClaimLane(repoRoot, opts) {
 // { status:'released'|'no-owners'|'owned-by-others'|'needs-disposition'|
 //   'no-worktree'|'worktree-not-holder'|'worktree-failed'|'worktree-read-failed'|
 //   'worktree-only'|'spine-corrupt'|'partial'|'lock', ... }
-export async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowMs = Date.now(), append = appendEvent }) {
+async function releaseLaneIn(repoRoot, { sid, lane, worktree = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', event: null };
   const { events, syncMode, activeIds } = snap;
@@ -374,7 +374,7 @@ export async function releaseLane(repoRoot, opts) {
 // supplies a session-scoped fallback lane. Emits TRIGGER_FIRED + LANE_CLAIMED
 // (plus any inactive-owner cleanup releases) under the §3.3a contract.
 // { claimed:true, lane, event } | { claimed:false, reason }
-export async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus = null, triggerId, forPath = null, nowMs = Date.now(), append = appendEvent }) {
+async function autoClaimLaneIn(repoRoot, { sid, lane, fallbackLane, focus = null, triggerId, forPath = null, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { claimed: false, reason: 'spine-corrupt' };
   const { events, syncMode, view, activeIds } = snap;
@@ -445,7 +445,7 @@ export async function autoClaimLane(repoRoot, opts) {
 // the default delete-by-lane and sync delete-that-owner paths). A failed append
 // stops the loop and leaves the rest for the next round.
 // { status:'ok'|'spine-corrupt'|'lock', released:[{lane,sessionId}], corrupt }
-export async function reapOrphanClaimsIn(repoRoot, { firedAt, nowMs = Date.now(), append = appendEvent }) {
+async function reapOrphanClaimsIn(repoRoot, { firedAt, nowMs = Date.now(), append = appendEvent }) {
   const snap = await ownershipSnapshotIn(repoRoot, nowMs);
   if (snap.gate === 'corrupt') return { status: 'spine-corrupt', released: [], corrupt: 0 };
   const { events, syncMode, activeIds } = snap;

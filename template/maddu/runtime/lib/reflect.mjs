@@ -19,8 +19,8 @@
 import { pairVerifications } from './verification-recency.mjs';
 
 export const BEHAVIOR = 'unverified-completion-claim';
-export const DEFAULT_THRESHOLD = 3;
-export const DEFAULT_RECENT_DAYS = 30;
+const DEFAULT_THRESHOLD = 3;
+const DEFAULT_RECENT_DAYS = 30;
 
 // A FIXED, maddu-authored template — v1 never renders untrusted summary bytes as
 // a durable instruction. In v1 this is only DISPLAYED, never written.

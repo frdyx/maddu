@@ -69,7 +69,7 @@ function focusSignals(recentEvents) {
 }
 
 // The pilot's CURRENT attention text = the most recent focus-bearing signal.
-export function currentFocusText(recentEvents) {
+function currentFocusText(recentEvents) {
   const sigs = focusSignals(recentEvents);
   return sigs.length ? sigs[sigs.length - 1] : '';
 }

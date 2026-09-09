@@ -42,7 +42,7 @@ export const GOAL_TIER_POLICY = 'worktree';
 
 // The declaration schema version carried in the identity preimage (the shipped
 // 2b convention, `scripts/test/acceptance-record.mjs`).
-export const GOAL_DECL_SCHEMA_VERSION = '1';
+const GOAL_DECL_SCHEMA_VERSION = '1';
 
 // A map MISS in the derivation means "no acceptance observation exists for this
 // id at all". `deriveProofs` deliberately does not synthesize an entry for it
@@ -51,7 +51,7 @@ export const GOAL_DECL_SCHEMA_VERSION = '1';
 // otherwise one surface prints a null state and the next prints "unproven" for
 // the same condition. The sentence is the derivation's own map-miss vocabulary
 // (acceptance-derive.mjs header), not a second wording invented here.
-export const NEVER_OBSERVED_REASON = 'this command has never been observed to exit nonzero';
+const NEVER_OBSERVED_REASON = 'this command has never been observed to exit nonzero';
 
 // Rendered beside EVERY proof readout. `ACCEPTANCE_HONEST_LIMITS` is exported
 // from the acceptance library so no surface can quietly narrow the limits; a
@@ -104,7 +104,7 @@ export async function readMaxProofAge(workRoot) {
 // currently-active goal. THERE IS NO GOAL_ABANDONED EVENT — abandonment is a
 // GOAL_COMPLETED carrying `outcome:'abandoned'`, so this fold names
 // GOAL_COMPLETED only.
-export function foldGoalFromEvents(events) {
+function foldGoalFromEvents(events) {
   if (!Array.isArray(events)) return null;
   let goal = null;
   for (const ev of events) {
