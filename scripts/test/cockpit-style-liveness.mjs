@@ -96,7 +96,7 @@ function literalPatterns(text) {
     while (i < text.length && text[i] !== quote) {
       if (text[i] === '\\') { value += text[i + 1] || ''; i += 2; continue; }
       if (quote === '`' && text.startsWith('${', i)) {
-        value += '*'; i += 2; let depth = 1, innerQuote = '';
+        value += '*'; i += 2; const innerStart = i; let depth = 1, innerQuote = '';
         while (i < text.length && depth) {
           const c = text[i++];
           if (c === '\\') { i++; continue; }
@@ -105,6 +105,15 @@ function literalPatterns(text) {
           else if (c === '{') depth++;
           else if (c === '}') depth--;
         }
+        // A template interpolation is CODE, and code holds strings — markup is
+        // routinely built as `${cond ? '<span class="x">…</span>' : ''}`.
+        // Treating the whole `${…}` as an opaque wildcard loses those classes,
+        // and once the raw-text scan was removed this was the ONLY path to
+        // them: wrapping existing inspector markup in an interpolation produced
+        // byte-identical output while making inspector-title look dead. Recurse
+        // into the expression, which keeps comments excluded because this same
+        // function skips them.
+        patterns.push(...literalPatterns(text.slice(innerStart, depth ? i : i - 1)));
       } else value += text[i++];
     }
     i++;

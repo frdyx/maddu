@@ -11,25 +11,37 @@
 // Computed namespace access retains every name STRING in that importing file.
 //
 // KNOWN LIMITS — found by adversarial review of this file, recorded rather than
-// papered over. All four make the oracle MISS a dead export; none can make it
-// call a live one dead. That direction is the safe one when the action is
-// deletion: the cost is litter that survives, not a caller that breaks. Do not
-// "fix" one by loosening it into the other direction.
+// papered over.
 //
-//   1. A computed dispatch path — import(join(root, 'commands', `${verb}.mjs`))
-//      — is not turned into candidate modules; only literal `.mjs` filenames
-//      are. A module reached ONLY that way has its exports judged with no
-//      importer in view. In this tree the CLI dispatcher reads solely
-//      `mod.default`, which is not a named binding, so nothing is at risk
-//      today; a future dispatcher reading named exports would be.
-//   2. Namespace bindings are keyed by spelling per FILE, not per scope. Two
-//      functions in one file each declaring `const ns` for different modules
-//      merge their targets, so a name used through one can revive the other's.
-//   3. The lexer treats `/` after a control-condition `)` as division, so
-//      `if (true) /'/;` starts a string that swallows the rest of the file and
-//      hides every export after it.
-//   4. Array-pattern exports (`export const [x] = …`) are not extracted;
-//      identifiers and object patterns are.
+// An earlier draft of this block claimed all four limits can only make the
+// oracle MISS a dead export, never condemn a live one. That was false, and the
+// review said so: limits 1 and 3 below can both hide a real CONSUMER, which
+// makes a live export look dead. Do not restore the reassuring version — a
+// false guarantee in a shipped file is worse than the limit it describes.
+//
+// The practical consequence: THIS ROW'S OUTPUT IS A CANDIDATE LIST, NOT AN
+// INSTRUCTION. Removals derived from it get reviewed before they are applied.
+// That is not theoretical caution — it is how the deletion of a documented
+// `enqueue` was caught before it shipped.
+//
+//   1. CAN CONDEMN A LIVE EXPORT. A computed dispatch path —
+//      import(join(root, 'commands', `${verb}.mjs`)) — is not turned into
+//      candidate modules; only literal `.mjs` filenames are. A module reached
+//      ONLY that way has its exports judged with no importer in view. In this
+//      tree the CLI dispatcher reads solely `mod.default`, which is not a named
+//      binding, so nothing is at risk today; a dispatcher that read named
+//      exports would be.
+//   2. Misses only. Namespace bindings are keyed by spelling per FILE, not per
+//      scope. Two functions in one file each declaring `const ns` for different
+//      modules merge their targets, so a name used through one can revive the
+//      other's.
+//   3. CAN CONDEMN A LIVE EXPORT. The lexer treats `/` after a control-condition
+//      `)` as division, so `if (true) /'/;` starts a string that swallows the
+//      rest of the file. That hides every export declared after it — and also
+//      every CONSUMER READ after it, so `import * as ns` followed by the trap
+//      and then `ns.actualApi()` reports `actualApi` unreferenced.
+//   4. Misses only. Array-pattern exports (`export const [x] = …`) are not
+//      extracted; identifiers and object patterns are.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
@@ -410,8 +422,23 @@ function analyze(files) {
 async function main() {
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
     .split('\0').filter((f) => f && !f.split('/').includes('node_modules')).sort();
+  // A RECORD IS NOT EVIDENCE, IN EITHER DIRECTION.
+  //
+  // docs/audit/** and CHANGELOG.md describe what was fixed, and they quote the
+  // code they describe. A ledger row containing a fenced
+  // `import { retiredApi } from '../../retired.mjs'` is a historical example,
+  // not a consumer — but the resolver reads it as a named import and marks that
+  // export referenced forever. Excluding records from the doc-observer pass
+  // alone was not enough: they must leave the corpus entirely, or the exclusion
+  // is bypassed through the very analysis it was meant to bound.
+  //
+  // Same rule, same reason, as the v1.136.0 doc-phantoms exclusion: a record
+  // that QUOTES a defect is not a doc that INSTRUCTS it.
+  const isRecord = (f) => f.startsWith('docs/audit/') || f === 'CHANGELOG.md';
+
   const files = new Map();
   for (const file of tracked) {
+    if (isRecord(file)) continue;
     const text = await readFile(join(ROOT, file), 'utf8');
     // A tracked JS file can contain a literal NUL inside a string. It still
     // belongs to the mandatory corpus; only non-JS binary artefacts are skipped.
@@ -436,9 +463,8 @@ async function main() {
   // deliberate -- a false "documented" leaves an unnecessary export, while a
   // false "undocumented" breaks a published example.
   //
-  // docs/audit/** and CHANGELOG.md are excluded for the reason established in
-  // v1.136.0: a record that QUOTES a defect is not a doc that INSTRUCTS it.
-  const shippedDoc = (f) => /\.md$/.test(f) && !f.startsWith('docs/audit/') && f !== 'CHANGELOG.md';
+  // Records already left the corpus above, so this only has to select docs.
+  const shippedDoc = (f) => /\.md$/.test(f);
   const documented = new Map();
   for (const [file, text] of files) {
     if (!shippedDoc(file)) continue;

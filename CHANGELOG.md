@@ -105,8 +105,11 @@ same rule across. So a documented API could be deleted with every row green.
   deliberate misplacement and requires it to be caught.
 
 Four export-oracle limits and one style-oracle limit are recorded in the row-file headers
-rather than fixed. Every one makes the oracle **miss** dead code; none can make it condemn live
-code, which is the only safe direction when the action is deletion.
+rather than fixed. A first draft of that note claimed none of them could condemn live code; a
+second review showed that was false — a computed dispatch path and a lexer edge can each hide a
+real *consumer*, which makes a live export look dead. The note now says so. **This row's output
+is a candidate list, not an instruction**: removals derived from it are reviewed before they are
+applied, which is exactly how the `enqueue` deletion was caught.
 
 ## [v1.136.0] · 2026-09-08 · say what ships
 
