@@ -6,6 +6,17 @@
 // `maddu brief --drain`. The agent decides whether to act; draining
 // emits PENDING_ACTION_DRAINED with an outcome.
 
+export async function enqueue(spine, repoRoot, { kind, payload = {}, triggered_by = null } = {}) {
+  // Use the injected spine's canonical id factory (preserves act_<ts14>_<hex6>).
+  const actionId = spine.makeId('act');
+  await spine.append(repoRoot, {
+    type: spine.EVENT_TYPES.PENDING_ACTION_ENQUEUED,
+    data: { actionId, kind, payload },
+    triggered_by,
+  });
+  return actionId;
+}
+
 export async function drain(spine, projections, repoRoot, { limit = 50 } = {}) {
   const proj = await projections.project(repoRoot);
   const open = (proj.pendingActions || []).filter((a) => !a.drained).slice(0, limit);

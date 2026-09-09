@@ -10,6 +10,27 @@
 // indirect paths deliberately retain every candidate (conservative liveness).
 // Computed namespace access retains every name STRING in that importing file.
 //
+// KNOWN LIMITS — found by adversarial review of this file, recorded rather than
+// papered over. All four make the oracle MISS a dead export; none can make it
+// call a live one dead. That direction is the safe one when the action is
+// deletion: the cost is litter that survives, not a caller that breaks. Do not
+// "fix" one by loosening it into the other direction.
+//
+//   1. A computed dispatch path — import(join(root, 'commands', `${verb}.mjs`))
+//      — is not turned into candidate modules; only literal `.mjs` filenames
+//      are. A module reached ONLY that way has its exports judged with no
+//      importer in view. In this tree the CLI dispatcher reads solely
+//      `mod.default`, which is not a named binding, so nothing is at risk
+//      today; a future dispatcher reading named exports would be.
+//   2. Namespace bindings are keyed by spelling per FILE, not per scope. Two
+//      functions in one file each declaring `const ns` for different modules
+//      merge their targets, so a name used through one can revive the other's.
+//   3. The lexer treats `/` after a control-condition `)` as division, so
+//      `if (true) /'/;` starts a string that swallows the rest of the file and
+//      hides every export after it.
+//   4. Array-pattern exports (`export const [x] = …`) are not extracted;
+//      identifiers and object patterns are.
+//
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { execFileSync } from 'node:child_process';
@@ -398,6 +419,38 @@ async function main() {
   }
   const result = analyze(files);
   if (!result.size) throw new Error('git corpus has no JavaScript modules');
+
+  // A SHIPPED DOC IS AN OBSERVER TOO.
+  //
+  // Modules are the only thing `analyze` can resolve, so without this a
+  // documented API can be deleted with every row green. docs/20-governance.md
+  // tells the reader to `import { enqueue } from '.../pending-actions.mjs'`,
+  // and docs/skills/agent-file-merge-skill.md says _agent-files.mjs "exposes"
+  // syncMaddu and syncMarkerFile. Removing those exports does not merely leave
+  // litter -- it makes a shipped instruction false.
+  //
+  // This is the same rule the stylesheet clause already applies to CSS classes,
+  // and it is what keeps `.is-ghost` alive; it simply had never been carried
+  // across to exports. Matching is by bare name and therefore generous: a
+  // symbol named anywhere in the prose keeps its keyword. That direction is
+  // deliberate -- a false "documented" leaves an unnecessary export, while a
+  // false "undocumented" breaks a published example.
+  //
+  // docs/audit/** and CHANGELOG.md are excluded for the reason established in
+  // v1.136.0: a record that QUOTES a defect is not a doc that INSTRUCTS it.
+  const shippedDoc = (f) => /\.md$/.test(f) && !f.startsWith('docs/audit/') && f !== 'CHANGELOG.md';
+  const documented = new Map();
+  for (const [file, text] of files) {
+    if (!shippedDoc(file)) continue;
+    for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) if (!documented.has(m[0])) documented.set(m[0], file);
+  }
+  for (const bindings of result.values()) {
+    for (const b of bindings.values()) {
+      if (b.references.length || !documented.has(b.name)) continue;
+      b.references.push({ file: documented.get(b.name), kind: 'shipped doc' });
+    }
+  }
+
   const dead = [...result.values()].flatMap((bindings) => [...bindings.values()]).filter((b) => !b.references.length);
   ok('1a every named export has an external reference', dead.length === 0, `${dead.length} unreferenced exports in ${result.size} modules`);
   for (const b of dead) console.log(`    ${b.file}:${b.line} ${b.name}`);
@@ -455,6 +508,18 @@ async function main() {
       && !live(computed, 'a.mjs') && live(computed, 'b.mjs') && live(computed, 'b.mjs', 'renamed')
       && live(reexport, 'a.mjs') && live(reexport, 'b.mjs') && !live(reexport, 'a.mjs', 'second')
       && forms === ['asyncFn', 'Example', 'first', 'second', 'mutable', 'visible', 'afterRegex'].sort().join(','));
+
+  // 1e — the doc-observer rule needs a control of its own, because a rule with
+  // no control is exactly what let a documented API be deleted while every row
+  // stayed green. Pinned against the real tree: `enqueue` has no importer in any
+  // module, and docs/20-governance.md tells the reader to import and call it.
+  // If the shipped-doc rule is removed, its only reference disappears and this
+  // control fails -- which is the whole point of it.
+  const documentedOnly = result.get('template/maddu/runtime/lib/pending-actions.mjs')?.get('enqueue');
+  const docRefs = (documentedOnly?.references || []).filter((r) => r.kind === 'shipped doc');
+  ok('1e CONTROL: a binding whose only observer is a shipped doc is reported REFERENCED',
+    docRefs.length > 0 && (documentedOnly?.references || []).every((r) => r.kind === 'shipped doc'),
+    docRefs.length ? `enqueue <- ${docRefs[0].file}` : 'no shipped-doc reference found');
 
   console.log(`\nexport-liveness: ${passed} pass - ${failed} fail`);
   if (failed) { console.error('export-liveness FAILED'); process.exit(1); }

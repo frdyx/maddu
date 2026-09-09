@@ -87,7 +87,7 @@ async function syncOne(targetPath, finalText) {
 // If the operator has a custom MADDU.md they should rename it; the
 // upgrade path treats divergence as 'merge' (overwrite). This mirrors
 // frameworkOwnedFiles behavior for managed files.
-async function syncMaddu(repoRoot, canonicalText) {
+export async function syncMaddu(repoRoot, canonicalText) {
   const target = join(repoRoot, 'MADDU.md');
   return syncOne(target, canonicalText);
 }
@@ -96,7 +96,7 @@ async function syncMaddu(repoRoot, canonicalText) {
 //   - File missing → create with just the Máddu wrapped section.
 //   - File exists, markers present → replace between markers.
 //   - File exists, no markers → prepend wrapped section + blank line.
-async function syncMarkerFile(repoRoot, filename, sectionBody) {
+export async function syncMarkerFile(repoRoot, filename, sectionBody) {
   const target = join(repoRoot, filename);
   const wrapped = wrapWithMarkers(sectionBody);
 

@@ -79,6 +79,35 @@ The plan called for merging three "duplicate" helpers. Reading them refuted two:
   anchoring subsystem for a three-line `createHash` wrapper is a net loss, so
   `trust.sha256Hex` simply stops being exported.
 
+### What the review caught that the rows could not
+
+An adversarial read of the diff found a **shipped break that four green CI checks and a
+green release gate had both passed**: deleting `enqueue` from `pending-actions.mjs` falsified
+`docs/20-governance.md`, which tells the reader to `import { enqueue }` and call it.
+
+The cause was an asymmetry in the contract itself. The stylesheet clause counts a shipped doc
+as a reference — that is what keeps `.is-ghost` alive — and the export clause never carried the
+same rule across. So a documented API could be deleted with every row green.
+
+- `export-liveness` now counts a shipped doc as an observer, excluding `docs/audit/**` and
+  `CHANGELOG.md` under the record-vs-instruction rule established in v1.136.0. A **new control
+  1e** pins it against real evidence, because a rule with no control is exactly what let this
+  through.
+- Sweeping all 173 removals for the same class found 8 named in shipped docs. The deciding
+  question is not whether a doc *mentions* a symbol but whether removing the export makes the
+  doc **false**: `enqueue`, `syncMaddu` and `syncMarkerFile` are restored; `SOURCE_EXTS`,
+  `fetchTimeData` and `evaluateCommandTrigger` only describe internals, which stays true of a
+  module-local; `ndjson` and `classify` were a file extension and an English verb.
+- `cockpit-style-liveness` no longer lets a commented-out `// class="…"` vouch for a rule
+  nothing renders — JS class evidence must come from lexed string values.
+- **Control 3c was not a control.** It checked only that the real family reported no failure,
+  which a detector reporting nothing also satisfies. It now drives the real detector over a
+  deliberate misplacement and requires it to be caught.
+
+Four export-oracle limits and one style-oracle limit are recorded in the row-file headers
+rather than fixed. Every one makes the oracle **miss** dead code; none can make it condemn live
+code, which is the only safe direction when the action is deletion.
+
 ## [v1.136.0] · 2026-09-08 · say what ships
 
 Shipped documentation and the CLI help surface described a product that does not

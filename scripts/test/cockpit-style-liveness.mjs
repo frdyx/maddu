@@ -5,6 +5,15 @@
 // seam as cockpit-views-live, cockpit-views-inspect and cockpit-comms.
 // No CSS/renderer changes, browser dependency, golden updates or bridge writes.
 //
+// KNOWN LIMIT — found by adversarial review, recorded rather than papered over.
+// A selector is reduced to its CLASS PAIR, so every other constraint in it is
+// dropped: `button.pill.tone-ok` and `.pill.tone-ok` are indistinguishable
+// here, and a rule whose element, attribute or ancestor constraint can never
+// match the rendered node still counts as reachable. Closing this needs a real
+// selector matcher over the harness DOM, which is its own piece of work. The
+// gap makes clause 3 MISS an unreachable rule; it cannot make it condemn a
+// reachable one.
+//
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
 import { execFileSync } from 'node:child_process';
@@ -117,7 +126,15 @@ function classReferences(names, artefacts) {
   const references = new Map([...names].map((name) => [name, []]));
   for (const { file, text, kind } of artefacts) {
     const patterns = kind === 'js' ? literalPatterns(text) : [];
-    const htmlTokens = new Set([...text.matchAll(/\bclass\s*=\s*["']([^"']*)["']/g)].flatMap((m) => m[1].split(/\s+/)));
+    // For a JS artefact the class evidence must come from LEXED STRING VALUES
+    // (literalPatterns), never from a raw scan of the file. Scanning the raw
+    // text lets a commented-out `// class="foo"` vouch for a rule that nothing
+    // renders -- a dead class stays "referenced" by a line the browser never
+    // sees. Goldens and docs are markup through and through, so they keep the
+    // raw scan.
+    const htmlTokens = kind === 'js'
+      ? new Set()
+      : new Set([...text.matchAll(/\bclass\s*=\s*["']([^"']*)["']/g)].flatMap((m) => m[1].split(/\s+/)));
     for (const name of names) {
       const mentioned = kind === 'doc'
         ? new RegExp('(?:^|[^\\w-])' + escapeRE(name) + '(?![\\w-])').test(text)
@@ -288,10 +305,31 @@ async function main() {
   }
   const control = css.families.get('t-');
   const controlNodes = nodes.filter(({ node }) => classesOf(node).some((c) => c.startsWith('t-')));
-  ok('3c CONTROL: event-type t-* family is correctly placed in rendered event rows',
-    !!control && control.pairs.length > 1 && controlNodes.length > 1
+  // 3c asserts the detector FIRES, not merely that it stayed quiet.
+  //
+  // Checking only "the real t-* family reported no failure" is satisfied by a
+  // detector that reports nothing at all: disable the loops in modifierFailures
+  // and the failure arrays are empty, so this control passes while 3a and 3b
+  // have quietly stopped meaning anything. So the same real detector is driven
+  // over a synthetic family carrying a deliberate misplacement, and the control
+  // requires that misplacement to be REPORTED.
+  const synthFamily = new Map([['zz-', { prefix: 'zz-', pairs: [{ base: 'zzbase', modifier: 'zz-tone', line: 1 }] }]]);
+  const placed = mkNode('div'); placed.setAttribute('class', 'zzbase zz-tone');
+  const wellFormed = modifierFailures(synthFamily, [['synthetic', placed]]);
+
+  const strayRoot = mkNode('div'); strayRoot.setAttribute('class', 'zzbase');
+  const stray = mkNode('span'); stray.setAttribute('class', 'zz-tone');
+  strayRoot.appendChild(stray);
+  const broken = modifierFailures(synthFamily, [['synthetic', strayRoot]]);
+
+  const detectorFires = broken.misplaced.some((m) => m.modifier === 'zz-tone')
+    && broken.missing.some((m) => m.base === 'zzbase')
+    && wellFormed.misplaced.length === 0 && wellFormed.missing.length === 0;
+
+  ok('3c CONTROL: the detector reports a deliberate misplacement, and the real t-* family is clean',
+    detectorFires && !!control && control.pairs.length > 1 && controlNodes.length > 1
       && !missing.some((m) => m.prefix === 't-') && !misplaced.some((m) => m.prefix === 't-'),
-    `${controlNodes.length} rendered event modifiers`);
+    `${controlNodes.length} rendered event modifiers; synthetic misplacement ${detectorFires ? 'caught' : 'NOT caught'}`);
 
   console.log(`\ncockpit-style-liveness: ${passed} pass - ${failed} fail`);
   if (failed) { console.error('cockpit-style-liveness FAILED'); process.exit(1); }
