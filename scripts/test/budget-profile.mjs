@@ -124,18 +124,23 @@ try {
   await mkdir(join(root, '.maddu/state'), { recursive: true });
   const lastRun = join(root, '.maddu/state/self-test-last-run.json');
 
+  // funnel r1 #4 — every 1e row pins BOTH the check level and the exact
+  // `latency <STATE>:` clause. A renderer that drops the state name, or folds
+  // UNSUPPORTED into PASS, passed the earlier wording; it cannot pass this.
+  const stateClause = (state) => new RegExp(`(?:^|[·;(] ?)latency ${state}:`);
+
   await writeFile(lastRun, JSON.stringify({ profile: 'smoke', durationMs: 5000 }));
   const smoke = auditBudget(root);
-  ok('1e smoke report names smoke and visibly says it is not budgeted',
-    /\bsmoke\b/.test(smoke.detail)
+  ok('1e smoke report is WARN with a named latency UNSUPPORTED clause that names smoke',
+    smoke.level === 'WARN' && stateClause('UNSUPPORTED').test(smoke.detail) && /\bsmoke\b/.test(smoke.detail)
       && /not budgeted|unbudgeted|unsupported|no .*baseline|no .*budget|not .*supported/i.test(smoke.detail),
     `level=${smoke.level}; detail=${smoke.detail}`);
 
   // This is a genuinely absent fixture file, not a report with null duration.
   try { await unlink(lastRun); } catch (err) { if (err.code !== 'ENOENT') throw err; }
   const noRun = auditBudget(root);
-  ok('1e absent report renders an explicit no-recorded-run latency clause',
-    /self-test|latency/i.test(noRun.detail)
+  ok('1e absent report is PASS with a named latency SKIP clause saying no run is recorded',
+    noRun.level === 'PASS' && stateClause('SKIP').test(noRun.detail)
       && /no (?:recorded|.*\brun)|not (?:yet )?recorded|missing .*duration/i.test(noRun.detail),
     `level=${noRun.level}; detail=${noRun.detail}`);
 
@@ -145,9 +150,31 @@ try {
   if (!positiveFinite(quickBaseline)) throw new Error('no usable quick baseline for the within-budget audit probe');
   await writeFile(lastRun, JSON.stringify({ profile: 'quick', durationMs: quickBaseline / 2 }));
   const quick = auditBudget(root);
-  ok('1e within-budget report renders the quick profile by name',
-    quick.level === 'PASS' && /\bquick\b/.test(quick.detail) && /within(?:[ -]budget|\b)/i.test(quick.detail),
+  ok('1e within-budget report is PASS with a named latency OK clause naming quick',
+    quick.level === 'PASS' && stateClause('OK').test(quick.detail) && /\bquick\b/.test(quick.detail)
+      && /within(?:[ -]budget|\b)/i.test(quick.detail),
     `level=${quick.level}; detail=${quick.detail}`);
+
+  const quickTol = shipped.selfTest?.profiles?.quick?.tolerancePct ?? 50;
+  await writeFile(lastRun, JSON.stringify({ profile: 'quick', durationMs: Math.ceil(quickBaseline * (1 + quickTol / 100)) + 1000 }));
+  const over = auditBudget(root);
+  ok('1e over-budget report is WARN with a named latency WARN clause naming quick',
+    over.level === 'WARN' && stateClause('WARN').test(over.detail) && /\bquick\b/.test(over.detail),
+    `level=${over.level}; detail=${over.detail}`);
+
+  // funnel r1 #6 (pre-existing) — a count-side WARN (a waiver-carried category)
+  // used to swallow the latency clause. Drive the real audit with a fixture
+  // manifest whose gates cap sits one under the real count plus one waiver, and
+  // require the latency OK clause to survive beside the count warning.
+  const carried = structuredClone(shipped);
+  carried.categories.gates.cap = counts.gates - 1;
+  carried.waivers = [{ category: 'gates', reason: 'budget-profile fixture: count-WARN must not hide latency', added: '2026-09-13' }];
+  await writeFile(join(root, 'docs/audit/governance-budget.json'), JSON.stringify(carried, null, 2));
+  await writeFile(lastRun, JSON.stringify({ profile: 'quick', durationMs: quickBaseline / 2 }));
+  const countWarn = auditBudget(root);
+  ok('1e a waiver-carried count WARN still renders the latency OK clause',
+    countWarn.level === 'WARN' && /carried by 1 waiver/.test(countWarn.detail) && stateClause('OK').test(countWarn.detail),
+    `level=${countWarn.level}; detail=${countWarn.detail}`);
 } catch (err) {
   ok('PR4 budget harness', false, err.stack || err.message);
 } finally {

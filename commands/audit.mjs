@@ -597,9 +597,14 @@ async function checkGovernanceBudget() {
   // WARN: over the profile's ceiling. UNSUPPORTED: a run happened that the
   // budget cannot judge — that is a gap in the manifest or the report, and it
   // is surfaced as WARN rather than hidden inside a PASS.
-  if (latency.level === 'WARN' || latency.level === 'UNSUPPORTED') warns.push(latencyClause);
+  const latencyWarns = latency.level === 'WARN' || latency.level === 'UNSUPPORTED';
+  if (latencyWarns) warns.push(latencyClause);
   if (warns.length) {
-    return { level: 'WARN', label: 'governance budget', detail: `${warns.join('; ')} (${summary})` };
+    // A count-side WARN (a waiver-carried category) used to swallow the latency
+    // clause entirely (funnel r1 #6, pre-existing) — an OK or SKIP latency still
+    // rides along here so the clause really is rendered on every path.
+    const tail = latencyWarns ? '' : ` · ${latencyClause}`;
+    return { level: 'WARN', label: 'governance budget', detail: `${warns.join('; ')} (${summary})${tail}` };
   }
   return { level: 'PASS', label: 'governance budget', detail: `${summary} · ${latencyClause}` };
 }

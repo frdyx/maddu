@@ -73,7 +73,10 @@ export function budgetVerdict({ counts, manifest } = {}) {
 //                   (smoke, a profile added later, or a report that predates
 //                   profile recording). The budget cannot judge it and says so;
 //                   this is NOT a skip, because a run DID happen.
-export const LATENCY_LEVELS = Object.freeze({ OK: 'OK', WARN: 'WARN', SKIP: 'SKIP', UNSUPPORTED: 'UNSUPPORTED' });
+// Module-local on purpose: nothing outside reads the table (callers compare the
+// string on the verdict), and an unread export is exactly what the v1.137.0
+// export-liveness row rejects — it caught this constant in the round-1 funnel.
+const LATENCY_LEVELS = Object.freeze({ OK: 'OK', WARN: 'WARN', SKIP: 'SKIP', UNSUPPORTED: 'UNSUPPORTED' });
 
 export function supportedLatencyProfiles(selfTest) {
   const profiles = selfTest && typeof selfTest.profiles === 'object' && selfTest.profiles ? selfTest.profiles : {};

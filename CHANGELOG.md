@@ -19,8 +19,9 @@ and F2 (cluster F, "budget and CI coverage").
 ### The latency budget judged every run against a quick-era number
 
 `docs/audit/governance-budget.json` carried one self-test baseline, 115 s, set in
-v1.93.0 for a 113-task suite. The quick profile is now 237 tasks and the full
-profile 240, and the audit read only `durationMs` from the last-run report — never
+v1.93.0 for a 113-task suite. Before this release the quick profile had grown to
+237 tasks and the full profile to 240 (239 / 242 with the two row files added
+here), and the audit read only `durationMs` from the last-run report — never
 the `profile` the report already records. Every full run was judged
 508 % over a quick baseline, so `maddu audit` WARNed on every run and the signal
 meant nothing.
@@ -86,6 +87,27 @@ smoke run with a duration is judged against the flat baseline and prints "within
 … baseline", only the no-file case is silent — and the smoke row was written
 against the contracted wording (profile named, not budgeted) instead. The
 inference that the heavy suites are heavy did not survive either (see above).
+
+### What the review caught
+
+Round 1 of the diff funnel was NOT CLEAN: one major, four minor, two
+pre-existing. The major was the previous release's oracle doing its job — the
+new `LATENCY_LEVELS` table was exported with no external reader, and the
+v1.137.0 `export-liveness` row (quick profile, required CI) went red on it. It
+is module-local now. The minors were all in the rows and the record: 2b treated
+a `;` inside a quoted string as a shell boundary, so an `echo "…; node
+scripts/test/stress-harness.mjs"` counted as running the suite; 2c read
+`fetch-tags: true` out of an inline comment; the 1e rows accepted a renderer
+that dropped every state name and folded UNSUPPORTED into PASS; and the task
+counts quoted above were the base's, not the branch's. Each row defect now has
+a negative control driven through the real inspector (2f, 2g), each control was
+shown to fail with its mechanism removed, and the 1e rows pin both the check
+level and the exact `latency <STATE>:` clause, with an over-budget WARN case
+added. The two pre-existing findings were fixed rather than recorded: a
+waiver-carried count WARN silently dropped the latency clause (now it rides
+along, and a row drives the real audit with a fixture manifest to prove it), and
+the `heavy-suites-recent` prose omitted that the matrix receipt must also be
+within 30 days and that a stress run must have passed.
 
 ---
 

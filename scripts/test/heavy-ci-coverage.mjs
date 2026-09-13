@@ -45,7 +45,11 @@ function runCommands(lines) {
     const value = match[1].trim();
     const script = /^[|>][-+]?\s*(?:#.*)?$/.test(value) ? bodyAt(lines, i) : [value];
     commands.push(...script.filter(meaningful).map((line) => line.trim()
-      .replace(/^(['"])(.*)\1$/, '$2').replace(/\s+#.*$/, '')));
+      .replace(/^(['"])(.*)\1$/, '$2').replace(/\s+#.*$/, '')
+      // funnel r1 #2: text inside shell quotes is an argument, never a command,
+      // so `echo "x; node scripts/test/stress-harness.mjs"` must not count. Blank
+      // the quoted spans before the command-start regexes see the line.
+      .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""')));
   }
   return commands;
 }
@@ -67,7 +71,10 @@ function checkoutHasTags(lines) {
     if (!step.some((line) => /^\s*(?:-\s*)?uses:\s*['"]?actions\/checkout@[^\s'"]+/.test(line))) return false;
     const withIndex = step.findIndex((line) => /^\s*with:/.test(line));
     if (withIndex < 0) return false;
-    const withText = [step[withIndex], ...bodyAt(step, withIndex)].filter(meaningful).join('\n');
+    // funnel r1 #3: an inline comment is not a setting — `fetch-depth: 1 # fetch-tags: true`
+    // must not satisfy this row. Strip trailing comments before matching values.
+    const withText = [step[withIndex], ...bodyAt(step, withIndex)].filter(meaningful)
+      .map((line) => line.replace(/\s+#.*$/, '')).join('\n');
     return /(?:^|[\s{,])fetch-depth:\s*['"]?0['"]?(?=\s|[,}]|$)/m.test(withText)
       || /(?:^|[\s{,])fetch-tags:\s*['"]?true['"]?(?=\s|[,}]|$)/m.test(withText);
   });
@@ -146,6 +153,33 @@ try {
   ok('2c scheduled matrix checkout fetches tags required by scenarioFromTag calls',
     tags.length > 0 && withTags.length > 0,
     `matrix tags=${tags.join(',') || '(no literal tag calls: vacuous)'}; eligible checkouts=${withTags.map((workflow) => workflow.name).join(',') || '(none)'}`);
+
+  // funnel r1 #2/#3 — negative controls driven through the REAL inspector: a
+  // workflow whose only "evidence" is an echoed string and an inline comment
+  // must satisfy neither 2b nor 2c. Without these, both rows could be passed by
+  // a workflow that runs nothing and fetches no tags.
+  const decoy = inspectWorkflow('decoy.yml', [
+    'on:',
+    '  schedule:',
+    "    - cron: '0 4 * * 1'",
+    'jobs:',
+    '  heavy:',
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+    '      - uses: actions/checkout@v4',
+    '        with:',
+    '          fetch-depth: 1 # fetch-tags: true',
+    '      - run: echo "ignored; node scripts/test/stress-harness.mjs --all"',
+    "      - run: echo 'node scripts/test/upgrade-matrix.mjs'",
+    '      - run: |',
+    '          echo "node scripts/test/stress-harness.mjs && node scripts/test/upgrade-matrix.mjs"',
+    '',
+  ].join('\n'));
+  ok('2f [control] a heavy-suite command inside a quoted/echoed string is not evidence of running it',
+    decoy.crons.length === 1 && !decoy.jobs.some((job) => job.stress || job.matrix),
+    `decoy commands=${JSON.stringify(decoy.jobs.flatMap((job) => job.commands))}`);
+  ok('2g [control] an inline comment is not a checkout fetch-tags/fetch-depth setting',
+    decoy.jobs.length === 1 && !decoy.jobs[0].tags, `decoy tags=${decoy.jobs[0]?.tags}`);
 
   const pr = workflows.find((workflow) => workflow.name === 'maddu-ci.yml');
   ok('2d [control] maddu-ci.yml retains quick --fail-on-skip on pull_request',
