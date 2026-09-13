@@ -71,5 +71,13 @@ export const SCRUBBED_VARS = SCRUB;
 export function hermeticEnv(overrides = {}) {
   const env = { ...process.env };
   for (const k of SCRUB) delete env[k];
+  // funnel r1 (v1.139.0, pre-existing): Windows environment names are
+  // case-insensitive, so a lowercase `maddu_state_root` survived the exact-key
+  // scrub above and became readable as MADDU_STATE_ROOT in the child — a
+  // fixture could then act on a REAL repository. Scrub every case variant.
+  if (process.platform === 'win32') {
+    const scrubUpper = new Set([...SCRUB].map((k) => k.toUpperCase()));
+    for (const k of Object.keys(env)) if (scrubUpper.has(k.toUpperCase())) delete env[k];
+  }
   return { ...env, ...overrides };
 }

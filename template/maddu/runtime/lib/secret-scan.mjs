@@ -288,8 +288,3 @@ export function redactLeaves(value) {
 export function hasAllowSecret(argv) {
   return Array.isArray(argv) && argv.includes('--allow-secret');
 }
-
-export function stripAllowSecret(argv) {
-  if (!Array.isArray(argv)) return [];
-  return argv.filter((a) => a !== '--allow-secret');
-}

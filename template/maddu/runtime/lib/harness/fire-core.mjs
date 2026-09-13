@@ -608,6 +608,12 @@ export function createHookFireCore(deps) {
     // registration) declare an excuse — deleting the happy-path append would
     // now breach, exactly as it should.
     if (!sidOut) await hookFireNoop('hook-fire:session-start-containment-or-unregistered');
+    // v1.139.0 (funnel r1, pre-existing): this path exits before the CLI
+    // dispatcher can see a return value, so publish the session this hook run
+    // acted as — the CLI's exit-time receipt reads it (bin/maddu.mjs
+    // noteMintedSession fallback). A lib never imports bin; a process-global
+    // is the one channel that survives process.exit().
+    if (sidOut) globalThis.__madduActingSessionId = sidOut;
     try {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note },

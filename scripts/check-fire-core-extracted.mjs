@@ -460,7 +460,13 @@ export function evaluate(root, runLock = defaultLockRunner, runAblation = defaul
 const invokedDirectly = process.argv[1]
   && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
 
-if (invokedDirectly) {
+if (invokedDirectly && (process.argv.includes('--help') || process.argv.includes('-h'))) {
+  // v1.139.0 (audit register E4): --help used to run the extraction check.
+  console.log(`Usage: node scripts/check-fire-core-extracted.mjs [--help]
+  Asserts that the PreToolUse fire-core extraction (Track A PR2) HAPPENED: module exists,
+  commands/hooks.mjs names it, the behaviour lock passes, and the module is load-bearing.
+  Exit 0 = done, 1 = not done. Auto-discovery-exempt (not under scripts/test/).`);
+} else if (invokedDirectly) {
   const { ok, reasons, modules } = evaluate(ROOT);
   if (!ok) {
     console.error('PR2 fire-core extraction: NOT DONE');

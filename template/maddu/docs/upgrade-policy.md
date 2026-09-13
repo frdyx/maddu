@@ -9,7 +9,7 @@
 - `maddu/runtime/server.js`
 - `maddu/cockpit/index.html`
 - `maddu/cockpit/cockpit.css`
-- `maddu/runtime/oauth/**`
+- `maddu/runtime/lib/**` (including `auth.mjs`, the device-local key store — the keys themselves live outside the repo, see [hard-rules.md](hard-rules.md) rule 6)
 - `.maddu/harness/**`
 - `.maddu/wiki/**` (framework-default pages only — see below)
 - `.maddu/briefs/**` (framework-default briefs only — see below)

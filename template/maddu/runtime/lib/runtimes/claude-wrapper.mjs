@@ -35,91 +35,106 @@ import {
   workerIdFromEnv,
   sessionIdFromEnv,
 } from './_wrapper-common.mjs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const RUNTIME = 'claude-code';
-const repoRoot = repoRootFromEnv();
-const workerId = workerIdFromEnv();
-const sessionId = sessionIdFromEnv();
+// v1.139.0 (audit register E5): this file is a PROGRAM, spawned by
+// lib/runtimes.mjs as `node <wrapper> <binary> [args]`. It used to read
+// process.argv and exit(2) at module top level, so IMPORTING it as a module
+// terminated the importer. The body now runs only when this file is the
+// entry script; an import is inert. The program`s own failure modes (missing
+// binary → exit 2, spawn error → exit 2) are unchanged.
+const invokedDirectly = !!process.argv[1]
+  && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
+if (invokedDirectly) main();
 
-const [, , binary, ...args] = process.argv;
-if (!binary) {
-  process.stderr.write('claude-wrapper: missing CLI binary argument\n');
-  process.exit(2);
-}
+function main() {
 
-let child;
-try {
-  child = spawn(binary, args, { stdio: ['inherit', 'pipe', 'inherit'], shell: false });
-} catch (err) {
-  process.stderr.write(`claude-wrapper: failed to spawn ${binary}: ${err.message}\n`);
-  process.exit(2);
-}
+  const RUNTIME = 'claude-code';
+  const repoRoot = repoRootFromEnv();
+  const workerId = workerIdFromEnv();
+  const sessionId = sessionIdFromEnv();
 
-// Parse usage out of each NDJSON line; tee the raw chunk through.
-let currentModel = null;
+  const [, , binary, ...args] = process.argv;
+  if (!binary) {
+    process.stderr.write('claude-wrapper: missing CLI binary argument\n');
+    process.exit(2);
+  }
 
-async function handleLine(line) {
-  if (!line.trim() || line[0] !== '{') return;
-  let obj;
-  try { obj = JSON.parse(line); } catch { return; }
-  // Anthropic stream-json shape evolves; handle both top-level
-  // `{ type: 'message', message: {...} }` envelopes and the embedded
-  // assistant-message shape.
-  const msg = obj.message || obj;
-  if (msg && typeof msg.model === 'string') currentModel = msg.model;
-  const usage = msg && msg.usage;
-  if (!usage || typeof usage !== 'object') return;
+  let child;
   try {
-    await appendTokenUsage(repoRoot, {
-      runtime: RUNTIME,
-      sessionId,
-      model: currentModel || msg.model || 'claude-unknown',
-      // S4: pricingModel is the parser-PROVEN model only — never the
-      // '-unknown' display fallback (funnel r1-F2).
-      pricingModel: currentModel || undefined,
-      inputTokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined,
-      outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
-      cacheRead: typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : undefined,
-      cacheCreation: typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : undefined,
-    });
+    child = spawn(binary, args, { stdio: ['inherit', 'pipe', 'inherit'], shell: false });
   } catch (err) {
-    await logWrapperError(repoRoot, workerId, `appendTokenUsage failed: ${err.message}`);
+    process.stderr.write(`claude-wrapper: failed to spawn ${binary}: ${err.message}\n`);
+    process.exit(2);
   }
+
+  // Parse usage out of each NDJSON line; tee the raw chunk through.
+  let currentModel = null;
+
+  async function handleLine(line) {
+    if (!line.trim() || line[0] !== '{') return;
+    let obj;
+    try { obj = JSON.parse(line); } catch { return; }
+    // Anthropic stream-json shape evolves; handle both top-level
+    // `{ type: 'message', message: {...} }` envelopes and the embedded
+    // assistant-message shape.
+    const msg = obj.message || obj;
+    if (msg && typeof msg.model === 'string') currentModel = msg.model;
+    const usage = msg && msg.usage;
+    if (!usage || typeof usage !== 'object') return;
+    try {
+      await appendTokenUsage(repoRoot, {
+        runtime: RUNTIME,
+        sessionId,
+        model: currentModel || msg.model || 'claude-unknown',
+        // S4: pricingModel is the parser-PROVEN model only — never the
+        // '-unknown' display fallback (funnel r1-F2).
+        pricingModel: currentModel || undefined,
+        inputTokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined,
+        outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
+        cacheRead: typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : undefined,
+        cacheCreation: typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : undefined,
+      });
+    } catch (err) {
+      await logWrapperError(repoRoot, workerId, `appendTokenUsage failed: ${err.message}`);
+    }
+  }
+
+  // Track in-flight appends so exit can await them: `close` fires as soon as
+  // the child dies, and a bare process.exit() there kills pending spine writes
+  // — a race Windows teardown timing masked and Linux CI exposed (count=0).
+  const pending = new Set();
+  // Emissions are SERIALIZED on a promise chain: a stream that reports usage
+  // more than once must land its spine rows in STREAM ORDER. Un-chained,
+  // concurrent appends race the append funnel and can land out of order under
+  // load (observed as ledger-order flakes on slow CI runners). The chain never
+  // blocks the tee (stdout passthrough stays synchronous), and `pending` keeps
+  // its exit-await semantics.
+  let emitTail = Promise.resolve();
+  const splitter = lineSplitter((line) => {
+    emitTail = emitTail.then(() => handleLine(line)).catch(() => {});
+    const p = emitTail;
+    pending.add(p);
+    p.finally(() => pending.delete(p));
+  });
+
+  child.stdout.on('data', (chunk) => {
+    // Tee untouched. Operator never sees a behavior change.
+    process.stdout.write(chunk);
+    try { splitter(chunk); } catch (err) {
+      logWrapperError(repoRoot, workerId, `splitter threw: ${err.message}`).catch(() => {});
+    }
+  });
+
+  child.on('error', (err) => {
+    process.stderr.write(`claude-wrapper: child error: ${err.message}\n`);
+    process.exit(2);
+  });
+
+  child.on('close', async (code) => {
+    // Let pending spine appends land before the process dies with the child.
+    await Promise.allSettled([...pending]);
+    process.exit(code ?? 0);
+  });
 }
-
-// Track in-flight appends so exit can await them: `close` fires as soon as
-// the child dies, and a bare process.exit() there kills pending spine writes
-// — a race Windows teardown timing masked and Linux CI exposed (count=0).
-const pending = new Set();
-// Emissions are SERIALIZED on a promise chain: a stream that reports usage
-// more than once must land its spine rows in STREAM ORDER. Un-chained,
-// concurrent appends race the append funnel and can land out of order under
-// load (observed as ledger-order flakes on slow CI runners). The chain never
-// blocks the tee (stdout passthrough stays synchronous), and `pending` keeps
-// its exit-await semantics.
-let emitTail = Promise.resolve();
-const splitter = lineSplitter((line) => {
-  emitTail = emitTail.then(() => handleLine(line)).catch(() => {});
-  const p = emitTail;
-  pending.add(p);
-  p.finally(() => pending.delete(p));
-});
-
-child.stdout.on('data', (chunk) => {
-  // Tee untouched. Operator never sees a behavior change.
-  process.stdout.write(chunk);
-  try { splitter(chunk); } catch (err) {
-    logWrapperError(repoRoot, workerId, `splitter threw: ${err.message}`).catch(() => {});
-  }
-});
-
-child.on('error', (err) => {
-  process.stderr.write(`claude-wrapper: child error: ${err.message}\n`);
-  process.exit(2);
-});
-
-child.on('close', async (code) => {
-  // Let pending spine appends land before the process dies with the child.
-  await Promise.allSettled([...pending]);
-  process.exit(code ?? 0);
-});

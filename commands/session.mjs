@@ -201,7 +201,10 @@ export default async function session(argv) {
       console.log(`  focus:  ${flags.focus || '—'}`);
       if (sessionActive) console.log(`  (active session cached — heartbeat / close default to this)`);
     }
-    return;
+    // v1.139.0 (funnel r1, pre-existing): the dispatcher attributes this
+    // invocation's receipt to a session minted by the command — same contract
+    // as `maddu register`. Returning nothing left the receipt on the previous id.
+    return { sessionId, created: true };
   }
 
   // `session start "<label>"` — shorthand wrapper around register with
@@ -229,7 +232,7 @@ export default async function session(argv) {
       if (sessionActive) console.log(`  (active session cached — 'maddu session heartbeat' / 'close' default to this)`);
       else console.log(`  (session-active helper missing on this install — run 'maddu upgrade' to enable the cache)`);
     }
-    return;
+    return { sessionId, created: true }; // v1.139.0: receipt attribution, as for `register`
   }
 
   if (sub === 'heartbeat') {
