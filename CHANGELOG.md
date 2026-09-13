@@ -97,6 +97,30 @@ from the tree at row time), `script-import-safety.mjs` (19 rows, 15 red at
 base). No contract premise was refuted this time; the contract's stale mention
 of a "row 1e" inherited from the previous prompt was the only question.
 
+### What the review caught
+
+Round 1 of the diff funnel was NOT CLEAN: seven minor findings in the docs
+and the rows, and two pre-existing majors. The majors mattered most. The C2
+fix had covered `maddu register` only: `session register`, `session start`
+and the SessionStart hook mint sessions too, and their receipts still named
+the previous session. The two `session` verbs now return the same
+`{ sessionId, created: true }`, and the hook — which exits before the
+dispatcher can see a return value — publishes the session it acted as on a
+process-global that the exit-time receipt reads. Four rows (1e–1h, authored by
+the implementer after the reviewer named the paths) pin them and were each
+shown to fail with the fix removed. The second major was in the test harness:
+Windows environment names are case-insensitive, so a lowercase
+`maddu_state_root` survived the fixture scrub and would have let a fixture
+child act on a real repository; the scrub is case-insensitive on win32 now.
+The minors were documentation written from comments rather than handlers
+(the Orientation route fetches the projection for its sessions tree; the
+trust endpoint returns arrays, not counts; `wiki/rebuild` overwrites hand
+edits; two seams act whenever set and are documented as such; five variable
+descriptions over-promised), two gate versions recalled instead of derived
+(now taken from git tags), and two row predicates that matched substrings
+(now whole tokens, with prefix-collision controls) plus a write oracle that
+watched two files (now the whole fixture tree).
+
 ---
 
 ## [v1.138.0] · 2026-09-13 · a budget that names its profile, and CI that runs what it lacks

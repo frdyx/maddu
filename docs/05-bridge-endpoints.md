@@ -429,7 +429,7 @@ Every route below is registered by an exact-path guard in `maddu/runtime/server.
 
 ### Agent context
 
-- `GET /bridge/agent-context` — the turn-start orientation as JSON for agents: the same data `maddu brief --for-agent` prints (goal, phase, active session, last slice, counters, open follow-ups, handoff). The cockpit's Orientation route reads `GET /bridge/orientation` instead; this one is for agents and their runtimes, which the `MADDU.md` brief points here.
+- `GET /bridge/agent-context` — a terse turn-start context for agents: `{ lastEventId, goal, phase, activeSession, activeSessions, openFollowups, laneClaims, recentSliceStops (last 5), sessionsTreeSummary, janitor }`; `?text=1` renders it as plain text. It is the JSON half of what `maddu brief --for-agent` prints — the CLI can add skill and recall content the HTTP form does not carry. The cockpit's Orientation route reads `GET /bridge/orientation` and `GET /bridge/projection` instead; this one is for agents and their runtimes, which the `MADDU.md` brief points here.
 - `GET /bridge/handoff` — the curated "▶ RESUME HERE" handoff note fused with live goal, focus and fleet context at display time.
 - `GET /bridge/goal` — the active goal as declared (objective, constraints, success conditions). Success conditions are **not** evaluated here — running operator verify commands on an HTTP GET would be unsafe; that lives in `maddu orient`.
 - `GET /bridge/governance` — `{ mode, overrides, source }`: the configured governance tier, its per-rule overrides and where the config was read from (v1.1.0).
@@ -444,13 +444,13 @@ Every route below is registered by an exact-path guard in `maddu/runtime/server.
 - `GET /bridge/loops` — ralph / plan loops, one row per `LOOP_STARTED` hydrated from its own start event (an orphaned halt never conjures a phantom loop) (v1.1.0).
 - `GET /bridge/learning?q=&kind=&lane=&limit=` — memory-fact search behind the Learning route: `q` full-text, `kind` and `lane` filters, `limit` default 500.
 - `GET /bridge/plugins` — plugins discovered for this workspace (`name, enabled, trusted, source, error, description`); the cockpit gates plugin-owned panels on `enabled`.
-- `GET /bridge/tools` — the unified Tools view: the default tools, active MCP servers and their health, and recent `TOOL_INVOKED` / `TOOL_COMPLETED` / `TOOL_REFUSED` events.
+- `GET /bridge/tools` — `{ defaults, mcp, health, recent }`: the five default tools (`git`, `test`, `format`, `lint`, `install`), **every** registered MCP server (disabled ones included — the `enabled` flag is on each row), the last MCP health snapshot, and the 20 most recent `TOOL_INVOKED` / `TOOL_COMPLETED` / `TOOL_REFUSED` events, newest first.
 - `GET /bridge/events/recent?limit=N` — `{ events, total }`: the N most recent events (default 200, max 5000) with no cursor, for charts and sparklines; the cursor-driven feed is under *Events* above.
 
 ### Trust
 
-- `GET /bridge/trust` and `GET /bridge/trust/snapshot` — the same handler: refusal counts, worker-env policy summary, MCP provenance distribution and skill provenance distribution.
-- `POST /bridge/trust/audit` — trigger a fresh supply-chain audit (`maddu trust audit`) from the cockpit. Token-gated like every POST.
+- `GET /bridge/trust` and `GET /bridge/trust/snapshot` — the same handler: the trust config (pins), the last `TRUST_AUDIT_RAN` event, the 20 most recent `TRUST_VIOLATION_DETECTED` and `SECRET_DETECTED_IN_ARGV` events and the 10 most recent `WORKER_ENV_FILTERED` events (arrays, newest first — not counts), the worker-env policy summary, MCP provenance counts (`verified` / `mismatch`) and the skill provenance distribution.
+- `POST /bridge/trust/audit` — run the supply-chain audit (`maddu trust audit`) from the cockpit. Body `{ fresh?, cve? }`: without `fresh: true` a cached result within the audit's freshness window is served; a real audit (not a refusal) appends `TRUST_AUDIT_RAN` exactly as the CLI does. Token-gated like every POST.
 
 ### Enforcer
 
@@ -460,7 +460,7 @@ Every route below is registered by an exact-path guard in `maddu/runtime/server.
 ### Recall and wiki
 
 - `GET /bridge/recall?q=…` — inspect what a bounded recall packet **would** inject for a query; `recall.mjs` is the single eligibility seam and this route never emits an event — inspection is not injection.
-- `GET /bridge/wiki` — the per-lane slice-stop wiki index; `GET /bridge/wiki/page?page=<name>` — one page as `{ page, body }` (400 without `page`, 404 when absent); `POST /bridge/wiki/rebuild` — rebuild the framework-default pages from the spine (the CLI `maddu wiki sync` is the non-destructive backfill; see `maddu wiki`).
+- `GET /bridge/wiki` — the per-lane slice-stop wiki index; `GET /bridge/wiki/page?page=<name>` — one page as `{ page, body }` (400 without `page`, 404 when absent); `POST /bridge/wiki/rebuild` — re-render every derived page (`lane-*.md` and `general.md`) from the spine's slice-stops, **overwriting hand edits to those pages**; returns `{ ok, pagesWritten }`. Use `maddu wiki sync` for the non-destructive backfill (see `maddu wiki`).
 
 ## Auth and CORS
 

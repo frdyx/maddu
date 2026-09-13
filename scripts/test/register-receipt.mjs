@@ -74,6 +74,53 @@ try {
   ok('1d [control] live env-pinned register reuses and attributes the same id',
     reused === second && reuseReceipt.sessionId === second,
     `env=${second}; stdout=${reused}; observed receipt.sessionId=${JSON.stringify(reuseReceipt.sessionId)}`);
+
+  // ── funnel r1 (v1.139.0), pre-existing major: the OTHER session-minting
+  // paths. Rows 1e-1g were authored by the implementer after the reviewer named
+  // them (the contract covered `register` only); round 2 reviews them.
+  const startRoot = await sourceFixture('maddu-pr5-session-start-');
+  const started = minted(cli(startRoot, ['session', 'start', 'pr5-start-label']));
+  const startReceipt = await lastReceipt(startRoot, 'session', 1);
+  ok('1e session start receipt carries the id it minted', startReceipt.sessionId === started,
+    `minted=${started}; observed receipt.sessionId=${JSON.stringify(startReceipt.sessionId)}`);
+
+  const regRoot = await sourceFixture('maddu-pr5-session-register-');
+  const registered = minted(cli(regRoot, ['session', 'register', '--role', 'implementer', '--label', 'pr5', '--focus', 'pr5']));
+  const regReceipt = await lastReceipt(regRoot, 'session', 1);
+  ok('1f session register receipt carries the id it minted', regReceipt.sessionId === registered,
+    `minted=${registered}; observed receipt.sessionId=${JSON.stringify(regReceipt.sessionId)}`);
+
+  // The SessionStart hook exits before the dispatcher sees a return value; it
+  // publishes the session it acted as, and the receipt must carry that id.
+  const hookRoot = await sourceFixture('maddu-pr5-hook-start-');
+  const hookEnv = childEnv(fixtureEnv(hookRoot));
+  for (const key of Object.keys(hookEnv)) if (/^MADDU_SESSION_ID$/i.test(key)) delete hookEnv[key];
+  const hook = spawnSync(process.execPath, [join(hookRoot, 'bin/maddu.mjs'), 'hooks', 'fire', 'session-start'], {
+    cwd: hookRoot, env: hookEnv, encoding: 'utf8', timeout: 60000, windowsHide: true,
+    input: JSON.stringify({ session_id: 'pr5-hook-uuid-1', cwd: hookRoot }),
+  });
+  if (hook.error || hook.status !== 0) throw new Error(`hooks fire session-start: exit=${hook.status} ${hook.error?.message || ''} ${hook.stderr}`);
+  let hookJson = null;
+  try { hookJson = JSON.parse(hook.stdout); } catch {}
+  const announced = (hookJson?.hookSpecificOutput?.additionalContext || '').match(/\bses_\d{14}_[0-9a-f]{6}\b/)?.[0] || null;
+  const hookReceipt = await lastReceipt(hookRoot, 'hooks', 1);
+  ok('1g SessionStart hook receipt carries the session it registered', !!announced && hookReceipt.sessionId === announced,
+    `announced=${announced}; observed receipt.sessionId=${JSON.stringify(hookReceipt.sessionId)}`);
+
+  // funnel r1, pre-existing major: on Windows a lowercase `maddu_state_root`
+  // survived the exact-key scrub and reached the child as MADDU_STATE_ROOT.
+  if (process.platform === 'win32') {
+    const decoy = join(hookRoot, 'decoy-state-root');
+    process.env.maddu_state_root = decoy;
+    let scrubbed;
+    try { scrubbed = childEnv(fixtureEnv(hookRoot)); } finally { delete process.env.maddu_state_root; }
+    const leaked = Object.keys(scrubbed).filter((k) => k.toUpperCase() === 'MADDU_STATE_ROOT' && scrubbed[k] === decoy);
+    ok('1h [win32] a lowercase maddu_state_root is scrubbed from a fixture child env', leaked.length === 0,
+      `leaked keys=${leaked.join(',') || 'none'}`);
+  } else {
+    skipped++;
+    console.log('  [SKIP] 1h [win32] a lowercase maddu_state_root is scrubbed from a fixture child env - not Windows (env names are case-sensitive here)');
+  }
 } catch (err) {
   ok('PR5 register-receipt harness', false, err.stack || err.message);
 } finally {

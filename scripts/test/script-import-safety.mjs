@@ -63,28 +63,47 @@ function run(root, args) {
   });
 }
 
+// funnel r1 #7 — the write oracle is the WHOLE owned fixture, not two named
+// files: a quiet write to a generated doc, a screenshot, or a temp dir under
+// the fixture is a side effect too. Snapshot = every file's size + mtime +
+// (for the two artifacts a script legitimately owns) bytes.
+async function walk(dir, rel = '') {
+  const out = [];
+  let entries = [];
+  try { entries = await readdir(dir, { withFileTypes: true }); } catch (err) { if (err.code === 'ENOENT') return out; throw err; }
+  for (const entry of entries) {
+    const path = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) { if (entry.name !== 'node_modules') out.push(...await walk(join(dir, entry.name), path)); }
+    else if (entry.isFile()) out.push(path);
+  }
+  return out;
+}
+
 async function snapshot(root) {
-  return Promise.all(WATCH.map(async (path) => {
-    try {
-      return { path, bytes: await readFile(join(root, path)), mtime: (await stat(join(root, path), { bigint: true })).mtimeNs };
-    } catch (err) {
-      if (err.code !== 'ENOENT') throw err;
-      return { path, absent: true };
-    }
-  }));
+  const files = await walk(root);
+  const map = new Map();
+  for (const path of files) {
+    const st = await stat(join(root, path), { bigint: true });
+    const rec = { size: st.size, mtime: st.mtimeNs };
+    if (WATCH.includes(path)) rec.bytes = await readFile(join(root, path));
+    map.set(path, rec);
+  }
+  return map;
 }
 
 function changed(before, after) {
-  return before.flatMap((old, i) => {
-    const next = after[i];
-    const reasons = [];
-    if (old.absent !== next.absent) reasons.push('existence');
-    else if (!old.absent) {
-      if (!old.bytes.equals(next.bytes)) reasons.push('bytes');
-      if (old.mtime !== next.mtime) reasons.push('mtime');
-    }
-    return reasons.length ? [`${old.path} (${reasons.join('+')})`] : [];
-  });
+  const reasons = [];
+  for (const [path, old] of before) {
+    const next = after.get(path);
+    if (!next) { reasons.push(`${path} (removed)`); continue; }
+    const why = [];
+    if (old.bytes && next.bytes && !old.bytes.equals(next.bytes)) why.push('bytes');
+    if (old.size !== next.size) why.push('size');
+    if (old.mtime !== next.mtime) why.push('mtime');
+    if (why.length) reasons.push(`${path} (${why.join('+')})`);
+  }
+  for (const path of after.keys()) if (!before.has(path)) reasons.push(`${path} (created)`);
+  return reasons;
 }
 
 function detail(r) {
@@ -108,7 +127,13 @@ try {
   }
   await mkdir(join(root, 'fixture-tmp'), { recursive: true });
 
-  const original = await snapshot(ROOT);
+  // The two artifacts a generator legitimately owns are read from the REAL
+  // checkout (bytes) so the fixture can be seeded with valid-but-stale data;
+  // the fixture itself is then watched as a whole tree (snapshot/changed).
+  const original = await Promise.all(WATCH.map(async (path) => {
+    try { return { path, bytes: await readFile(join(ROOT, path)) }; }
+    catch (err) { if (err.code !== 'ENOENT') throw err; return { path, absent: true }; }
+  }));
   if (original.some((file) => file.absent)) throw new Error('a required watched source artifact is absent');
   async function seedArtifacts() {
     // Valid but stale DATA, not modified executable code. This makes an
@@ -169,7 +194,13 @@ try {
   ok('6c _wrapper-common.mjs [control] remains a cleanly importable library',
     successful(common) && common.stderr === '' && common.stdout.trim() === RETURNED, detail(common));
 
-  const realChanges = changed(original, await snapshot(ROOT));
+  const realChanges = [];
+  for (const file of original) {
+    let now = null;
+    try { now = await readFile(join(ROOT, file.path)); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    if (!now) realChanges.push(`${file.path} (removed)`);
+    else if (!now.equals(file.bytes)) realChanges.push(`${file.path} (bytes)`);
+  }
   if (realChanges.length) throw new Error(`real checkout artifacts changed: ${realChanges.join(', ')}`);
 } catch (err) {
   ok('PR5 script-import-safety harness', false, err.stack || err.message);

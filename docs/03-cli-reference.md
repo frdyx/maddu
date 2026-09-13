@@ -1173,13 +1173,16 @@ your own slash commands.
 
 ## Environment variables and `MADDU_*` identifiers (v1.139.0 reference)
 
-Every `MADDU_*` name the CLI, the commands or the shipped runtime reads or exports, in one
-place. Until v1.139.0 most of these appeared in no document (audit register D4); the
-`residual-closure` self-test row now derives the set from the code at row time and fails when
-a name is missing here. Three kinds are listed, because the identifier grammar does not tell
-them apart: **operator/agent environment variables** you may set, **test seams** that only act
-under `MADDU_SELF_TEST=1` or in a fixture, and **non-environment identifiers** (error codes and
-constants) that share the prefix but are never read from the environment.
+Every `MADDU_*` identifier that `bin/`, `commands/` or the shipped runtime reads, sets or
+declares. Until v1.139.0 most of these appeared in no document (audit register D4); the
+`residual-closure` self-test row derives the identifier set from the code at row time and
+fails when a name appears in **no shipped document** — this section aims to be that one place,
+and a name documented only elsewhere (for example `MADDU_STRICT_FLAGS` above, or
+`MADDU_SESSION_ID` in [44-session-hooks.md](44-session-hooks.md)) still satisfies the row.
+Four kinds are listed, because the identifier grammar does not tell them apart:
+**operator/agent environment variables** you may set, **environment Máddu sets on spawned
+workers**, **test seams**, and **non-environment identifiers** (error codes and constants)
+that share the prefix but are never read from the environment.
 
 ### Operator and agent environment
 
@@ -1188,36 +1191,44 @@ constants) that share the prefix but are never read from the environment.
 | `MADDU_SESSION_ID` | every verb | the acting session; grammar-gated, liveness-checked against the spine (a dead id is dropped, never trusted). See [44-session-hooks.md](44-session-hooks.md). |
 | `MADDU_STATE_ROOT` | `commands/_resolve.mjs`, receipts | override the `.maddu` state root instead of walking up from cwd; a misconfigured value is a hard doctor finding. |
 | `MADDU_STRICT_FLAGS` | `bin/maddu.mjs` | `0` downgrades unknown-flag errors to warnings during a migration (see above). |
-| `MADDU_LANE` | `orient`, `self-test` receipts | the lane a verification receipt is attributed to when no claim resolves one. |
-| `MADDU_LANE_ID` | MCP env injection (`lib/mcp.mjs`) | the slot name Máddu fills with the claimed lane id when it spawns an MCP server. |
+| `MADDU_LANE` | `orient`, `self-test` receipts | the lane stamped on a verification receipt and on `orient`'s readout; read directly from the environment (no claim lookup happens first). |
+| `MADDU_LANE_ID` | MCP descriptors (`lib/mcp.mjs`) | the slot name an MCP registration declares for a lane id. Descriptor metadata today: `maddu mcp test` spawns the server without injecting it, and `visibleFor()` notes the spawn-time wiring as future work. |
 | `MADDU_CI_PROFILE` | `maddu ci` | redirect WHERE the pinned required-gate profile is read from — a CI/test seam, documented here because CI recipes may set it. |
 | `MADDU_LOCK_BODYLESS_GRACE_MS` | `lib/append-lock.mjs`, `lib/acceptance-observe.mjs` | RAISE-ONLY: lengthen the append-lock's bodyless-grace reclaim on saturated runners (the CI workflow sets 20000). Values below the default are ignored. |
 | `MADDU_WRAPPER_APPEND_WAIT_MS` | runtime wrappers | RAISE-ONLY: lengthen the token-usage wrapper's bounded funnel wait (the CI workflow sets 15000). |
 | `MADDU_WORKTREE_LOCK_WAIT_MS` | `lib/worktree-lock.mjs` | how long a worktree attach/detach waits for the publish lock before refusing. |
-| `MADDU_WORKTREE_RECOVER_COOLDOWN_MS` | `lib/worktrees.mjs` | minimum spacing between two `--recover` passes on the same lane. |
-| `MADDU_PRICING_AUTHORITY` | wrappers, `event-schema.mjs` | the pricing authority declared on the runtime descriptor, forwarded to the worker so a `TOKEN_USAGE_REPORTED` row names where its price came from. |
+| `MADDU_WORKTREE_RECOVER_COOLDOWN_MS` | `lib/worktrees.mjs` | minimum spacing between two runs of the workspace-wide `janitor:worktrees` recovery trigger (the auto-fired sweep), checked inside the global lock. A manual `lane worktree --recover` is not rate-limited by it. |
+| `MADDU_PRICING_AUTHORITY` | `lib/runtimes.mjs` spawn → wrappers | the pricing authority declared on the runtime descriptor. The spawn path sets it on the worker (an inherited value is discarded) and the wrapper stamps it on each `TOKEN_USAGE_REPORTED` row so the price's provenance is on the record. |
 
 ### Set BY Máddu on spawned workers (read them, do not set them)
 
 | Variable | Set by | Meaning |
 |---|---|---|
-| `MADDU_WORKER_ID` | `lib/runtimes.mjs` spawn | the worker's id; wrappers attribute token usage and error logs to it. |
+| `MADDU_WORKER_ID` | `lib/runtimes.mjs` spawn | the worker's id; wrappers name it in their error log (`TOKEN_USAGE_REPORTED` rows are attributed by session, not worker). |
 | `MADDU_BRIDGE_URL` | `lib/runtimes.mjs` spawn | the bridge the worker may call (`http://127.0.0.1:4177` by default). |
 | `MADDU_RUNTIME` | `lib/runtimes.mjs` spawn | the runtime descriptor name the worker was spawned under. |
 | `MADDU_TASK` | `lib/runtimes.mjs` spawn | the task text, passed as env instead of interpolated into argv. |
+| `MADDU_REPO_ROOT` | `lib/runtimes.mjs` spawn, `lib/review.mjs` | the repo root a worker or reviewer subprocess acts on; wrappers append token usage to that spine (falls back to cwd). |
+| `MADDU_SLICE_EVENT_ID` | `lib/review.mjs` | the slice-stop event a spawned reviewer is reviewing. |
 | `MADDU_MODEL_HINT` | `lib/runtimes.mjs` spawn | the resolved model preference for this spawn's stage (see [25-model-routing.md](25-model-routing.md)). |
+| `MADDU_PARENT_SESSION_ID` | `register`, `session register` | ambient parent for a child registration; malformed or unknown → dropped with a note (see [44-session-hooks.md](44-session-hooks.md)). |
+| `MADDU_COORDINATOR_PLAN_ID`, `MADDU_COORDINATOR_PHASE`, `MADDU_COORDINATOR_ID` | `lib/coordinator.mjs` spawn | set on each phase worker the coordinator spawns: the plan, the phase name and the coordinator run id, so a worker can record which phase it is executing (see [33-loops-and-coordinator.md](33-loops-and-coordinator.md)). |
+| `MADDU_PORT` | `lib/bridge-bootstrap.mjs` | the port the bridge binds when `--port` is not given (validated; falls back to 4177). |
 
-### Test seams (inert outside `MADDU_SELF_TEST=1` or a fixture)
+### Test seams
 
-| Variable | Read by | Effect |
-|---|---|---|
-| `MADDU_SELF_TEST` | several | `1` marks a self-test process; every other seam below checks it first. |
-| `MADDU_HOOK_TEST_THROW` | `lib/harness/fire-core.mjs` | `bootstrap` or `handler`: throw at that stage to prove the hook fails open. |
-| `MADDU_TEST_MINT_HOLD_MS` | `lib/harness/fire-core.mjs` | hold the recovery mint for N ms to widen a race window. |
-| `MADDU_TEST_ADDPHASE_RACE` | `lib/plans.mjs` | `1`: inject the add-phase race the plan rows pin. |
-| `MADDU_TEST_LEARN_DETECTOR` | `slice-stop`, `session close` | `throw` or `slow`: make the learn detector misbehave under test. |
-| `MADDU_REPLAY_TEST_CLEANUP_FAIL` | `lib/verify-replay.mjs` | `1`: make replay cleanup report failure. |
-| `MADDU_ASSESS_TEST_STDIN` | `maddu spine anchor --assess` | `1`: accept piped stdin as the assessment input under test. |
+Four of these act only under `MADDU_SELF_TEST=1`; the last two act whenever set, and are
+safe to leave documented because neither can make a run pass that would otherwise fail.
+
+| Variable | Read by | Effect | Gated by `MADDU_SELF_TEST=1`? |
+|---|---|---|---|
+| `MADDU_SELF_TEST` | several | `1` marks a self-test process; the gated seams below check it first. | — |
+| `MADDU_HOOK_TEST_THROW` | `lib/harness/fire-core.mjs` | `bootstrap` or `handler`: throw at that stage to prove the hook fails open. | yes |
+| `MADDU_TEST_MINT_HOLD_MS` | `lib/harness/fire-core.mjs` | hold the recovery mint for N ms to widen a race window. | yes |
+| `MADDU_TEST_ADDPHASE_RACE` | `lib/plans.mjs` | `1`: inject the add-phase race the plan rows pin. | yes |
+| `MADDU_TEST_LEARN_DETECTOR` | `slice-stop`, `session close` | `throw` or `slow`: make the learn detector misbehave under test. | yes |
+| `MADDU_REPLAY_TEST_CLEANUP_FAIL` | `lib/verify-replay.mjs` | `1`: replay cleanup reports failure without deleting — direction-safe, it can only make a replay FAIL harder. | **no** — acts whenever set |
+| `MADDU_ASSESS_TEST_STDIN` | `maddu spine anchor --assess` | `1`: accept piped stdin for the operator-interactive assessment ceremony instead of refusing a non-TTY. | **no** — acts whenever set; the ceremony is a self-attestation either way |
 
 ### Non-environment identifiers that share the prefix
 

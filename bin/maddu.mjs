@@ -408,6 +408,15 @@ function noteMintedSession(result) {
   const id = result.sessionId;
   if (typeof id === 'string' && /^[\w.-]{1,128}$/.test(id)) mintedSessionId = id;
 }
+// The session this invocation ACTED AS, when the command itself established
+// it: a minted id captured from the dispatch result, or — for paths that exit
+// before returning (the SessionStart hook in lib/harness/fire-core.mjs) — the
+// id the lib published on a process-global. Grammar-gated either way.
+function actingSessionId() {
+  if (mintedSessionId) return mintedSessionId;
+  const g = globalThis.__madduActingSessionId;
+  return (typeof g === 'string' && /^[\w.-]{1,128}$/.test(g)) ? g : null;
+}
 
 async function armInvocationReceipt(raw, rest) {
   try {
@@ -466,7 +475,7 @@ async function armInvocationReceipt(raw, rest) {
           // A session MINTED by this very invocation (register / session
           // register) outranks the pre-dispatch answer, which was frozen
           // before the session existed (v1.139.0, register C2).
-          ...(mintedSessionId ? { sessionId: mintedSessionId }
+          ...(actingSessionId() ? { sessionId: actingSessionId() }
             : attributionResolved ? { sessionId: resolvedSid } : {}),
         });
       } catch {}

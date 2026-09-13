@@ -101,7 +101,10 @@ try {
   const codeFiles = (await Promise.all(['bin', 'commands', 'template/maddu/runtime'].map((dir) => files(dir)))).flat();
   // Whole identifiers, not the substring MADDU_* inside __MADDU_*__ globals
   // or the differently named __MADDU_TEST_ZERO_CREDIT__ environment seam.
-  const envNames = (text) => [...text.matchAll(/\bMADDU_[A-Z0-9_]+\b/g)].map((m) => m[0]);
+  // A stem ending in `_` (a comment's `MADDU_COORDINATOR_*` family glob) is
+  // not an identifier the code reads; the family's real members are censused
+  // on their own. Surfaced when the doc side moved to whole-token matching.
+  const envNames = (text) => [...text.matchAll(/\bMADDU_[A-Z0-9_]+\b/g)].map((m) => m[0]).filter((n) => !n.endsWith('_'));
   const codeEnv = sorted((await Promise.all(codeFiles.map(read))).flatMap(envNames));
   if (!codeEnv.length) throw new Error('empty environment census');
   const sharedDocs = (await Promise.all([
@@ -122,7 +125,13 @@ try {
       `cockpit literals=${cockpitPaths.size}; missing=${unfetched.join(', ') || 'none'}`);
 
     const endpoints = await read(`${tree}/05-bridge-endpoints.md`);
-    const missingRoutes = exactRoutes.filter((path) => !endpoints.includes(path));
+    // funnel r1 #6: a documented path is a whole token, never a substring —
+    // `/bridge/trust/snapshot` must not vouch for `/bridge/trust`.
+    const documentedRoutes = new Set([...endpoints.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0]));
+    const missingRoutes = exactRoutes.filter((path) => !documentedRoutes.has(path));
+    ok(`2b ${tree} [control] a route documented only as a longer path's prefix is still missing`,
+      !new Set([...'/bridge/trust/snapshot'.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0])).has('/bridge/trust'),
+      'token set built from a snapshot-only doc does not contain /bridge/trust');
     ok(`2b ${tree} documents every exact server route`, missingRoutes.length === 0,
       `exact routes=${exactRoutes.length}; missing (${missingRoutes.length})=${missingRoutes.join(', ') || 'none'}`);
 
@@ -169,7 +178,13 @@ try {
     // The contract's census is textual: a name counts when its literal
     // appears anywhere in shipped docs (including documented family members).
     const documentedEnv = docText + '\n' + sharedDocs;
-    const missingEnv = codeEnv.filter((name) => !documentedEnv.includes(name));
+    // funnel r1 #6: identifier boundaries on the doc side too — `MADDU_LANE_ID`
+    // in a doc must not vouch for `MADDU_LANE` (the code census already bounds).
+    const documentedNames = new Set(documentedEnv.match(/\bMADDU_[A-Z0-9_]+\b/g) || []);
+    const missingEnv = codeEnv.filter((name) => !documentedNames.has(name));
+    ok(`2e ${tree} [control] a name documented only as a longer identifier's prefix is still missing`,
+      !new Set('see MADDU_LANE_ID'.match(/\bMADDU_[A-Z0-9_]+\b/g) || []).has('MADDU_LANE'),
+      'token set built from a LANE_ID-only doc does not contain MADDU_LANE');
     ok(`2e ${tree} shipped docs name every MADDU_* identifier in code directories`, missingEnv.length === 0,
       `derived names=${codeEnv.length}; missing (${missingEnv.length})=${missingEnv.join(', ') || 'none'}`);
     const endpointPaths = new Set([...endpoints.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0]));
