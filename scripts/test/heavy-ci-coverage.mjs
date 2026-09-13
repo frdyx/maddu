@@ -37,6 +37,45 @@ function bodyAt(lines, index) {
   return lines.slice(index + 1, end);
 }
 
+// funnel r1 #2 / r2 #1–#3 — a shell line is read the way a shell reads it, not
+// with regexes over raw text. `shellSegments` splits a command line into simple
+// commands at UNQUOTED `;`, `&&`, `||`, `|`, drops an UNQUOTED `#` comment, and
+// decodes quotes so `node "scripts/test/stress-harness.mjs"` is the same command
+// as the bare form while `echo "x; node scripts/test/stress-harness.mjs # t"` is
+// one `echo` with one argument. Blanking quoted spans (the round-1 fix) got the
+// echo case right and everything else wrong: a quoted `"--only"` vanished, so a
+// partial run passed as full, and a quoted script path was rejected.
+function shellSegments(line) {
+  const segments = [];
+  let tokens = [];
+  let token = '';
+  let inToken = false;
+  let quote = null;
+  const endToken = () => { if (inToken) tokens.push(token); token = ''; inToken = false; };
+  const endSegment = () => { endToken(); if (tokens.length) segments.push(tokens); tokens = []; };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === quote) { quote = null; continue; }
+      if (quote === '"' && c === '\\' && i + 1 < line.length) { token += line[++i]; continue; }
+      token += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; inToken = true; continue; }
+    if (c === '\\' && i + 1 < line.length) { token += line[++i]; inToken = true; continue; }
+    if (c === '#' && !inToken) break;                       // unquoted comment: rest is not a command
+    if (c === ';' || c === '|' || c === '&') {              // unquoted separator (; | || & &&)
+      endSegment();
+      while (i + 1 < line.length && /[|&]/.test(line[i + 1])) i++;
+      continue;
+    }
+    if (/\s/.test(c)) { endToken(); continue; }
+    token += c; inToken = true;
+  }
+  endSegment();
+  return segments;
+}
+
 function runCommands(lines) {
   const commands = [];
   for (let i = 0; i < lines.length; i++) {
@@ -44,22 +83,42 @@ function runCommands(lines) {
     if (!match) continue;
     const value = match[1].trim();
     const script = /^[|>][-+]?\s*(?:#.*)?$/.test(value) ? bodyAt(lines, i) : [value];
-    commands.push(...script.filter(meaningful).map((line) => line.trim()
-      .replace(/^(['"])(.*)\1$/, '$2').replace(/\s+#.*$/, '')
-      // funnel r1 #2: text inside shell quotes is an argument, never a command,
-      // so `echo "x; node scripts/test/stress-harness.mjs"` must not count. Blank
-      // the quoted spans before the command-start regexes see the line.
-      .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""')));
+    for (const raw of script.filter(meaningful)) {
+      // A YAML plain/quoted scalar: unwrap ONE outer quote pair (the YAML layer)
+      // before the shell layer sees it.
+      const line = raw.trim().replace(/^(['"])(.*)\1$/, '$2');
+      commands.push({ line, segments: shellSegments(line) });
+    }
   }
   return commands;
 }
 
-const commandStart = '(?:^|&&|\\|\\||;)\\s*';
-const directStress = new RegExp(`${commandStart}node\\s+(?:\\./)?scripts/test/stress-harness\\.mjs(?:\\s|$)`);
-const directMatrix = new RegExp(`${commandStart}node\\s+(?:\\./)?scripts/test/upgrade-matrix\\.mjs(?:\\s|$)`);
-const selfTestCommand = new RegExp(`${commandStart}(?:node\\s+(?:\\./)?bin/maddu\\.mjs|(?:npx\\s+)?maddu|\\./maddu/run)\\s+self-test\\b`);
-const fullCommand = (line) => selfTestCommand.test(line) && /--profile(?:\s+|=)full\b/.test(line)
-  && !/--(?:only|skip)\b/.test(line);
+const scriptPath = (name) => new RegExp(`^(?:\\./)?scripts/test/${name}\\.mjs$`);
+const hasPartialFlag = (tokens, ...flags) => tokens.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
+const directSuite = (tokens, name) => tokens[0] === 'node' && !!tokens[1] && scriptPath(name).test(tokens[1])
+  && !hasPartialFlag(tokens, '--scenario');
+const selfTestTokens = (tokens) => (tokens[0] === 'node' && /^(?:\.\/)?bin\/maddu\.mjs$/.test(tokens[1] || '') && tokens[2] === 'self-test')
+  || ((tokens[0] === 'maddu' || tokens[0] === './maddu/run') && tokens[1] === 'self-test')
+  || (tokens[0] === 'npx' && tokens[1] === 'maddu' && tokens[2] === 'self-test');
+const profileOf = (tokens) => {
+  const i = tokens.indexOf('--profile');
+  if (i >= 0) return tokens[i + 1] || null;
+  const eq = tokens.find((t) => t.startsWith('--profile='));
+  return eq ? eq.slice('--profile='.length) : null;
+};
+const fullCommand = (tokens) => selfTestTokens(tokens) && profileOf(tokens) === 'full'
+  && !hasPartialFlag(tokens, '--only', '--skip');
+
+function stripYamlComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) { if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i).replace(/\s+$/, '');
+  }
+  return line;
+}
 
 function checkoutHasTags(lines) {
   // Each `- ...` at step indentation starts a new step, whether its first
@@ -71,10 +130,12 @@ function checkoutHasTags(lines) {
     if (!step.some((line) => /^\s*(?:-\s*)?uses:\s*['"]?actions\/checkout@[^\s'"]+/.test(line))) return false;
     const withIndex = step.findIndex((line) => /^\s*with:/.test(line));
     if (withIndex < 0) return false;
-    // funnel r1 #3: an inline comment is not a setting — `fetch-depth: 1 # fetch-tags: true`
-    // must not satisfy this row. Strip trailing comments before matching values.
+    // funnel r1 #3 / r2 #2: an inline comment is not a setting — `fetch-depth: 1
+    // # fetch-tags: true` must not satisfy this row — but a `#` inside a quoted
+    // scalar (`path: "checkout #1"`) is a value, not a comment. Strip only an
+    // UNQUOTED `#` that YAML would treat as a comment (preceded by whitespace).
     const withText = [step[withIndex], ...bodyAt(step, withIndex)].filter(meaningful)
-      .map((line) => line.replace(/\s+#.*$/, '')).join('\n');
+      .map(stripYamlComment).join('\n');
     return /(?:^|[\s{,])fetch-depth:\s*['"]?0['"]?(?=\s|[,}]|$)/m.test(withText)
       || /(?:^|[\s{,])fetch-tags:\s*['"]?true['"]?(?=\s|[,}]|$)/m.test(withText);
   });
@@ -90,12 +151,13 @@ function inspectWorkflow(name, text) {
   const jobIndent = jobHeaders.length ? Math.min(...jobHeaders.map((i) => indent(jobsBody[i]))) : -1;
   const jobs = jobHeaders.filter((i) => indent(jobsBody[i]) === jobIndent).map((i) => {
     const body = bodyAt(jobsBody, i);
-    const commands = runCommands(body);
-    const full = commands.some(fullCommand);
+    const runs = runCommands(body);
+    const segments = runs.flatMap((run) => run.segments);
+    const full = segments.some(fullCommand);
     return {
-      name: jobsBody[i].trim().replace(/:.*/, ''), commands, full,
-      stress: full || commands.some((line) => directStress.test(line) && !/--scenario\b/.test(line)),
-      matrix: full || commands.some((line) => directMatrix.test(line) && !/--scenario\b/.test(line)),
+      name: jobsBody[i].trim().replace(/:.*/, ''), commands: runs.map((run) => run.line), segments, full,
+      stress: full || segments.some((tokens) => directSuite(tokens, 'stress-harness')),
+      matrix: full || segments.some((tokens) => directSuite(tokens, 'upgrade-matrix')),
       tags: checkoutHasTags(body),
     };
   });
@@ -181,10 +243,44 @@ try {
   ok('2g [control] an inline comment is not a checkout fetch-tags/fetch-depth setting',
     decoy.jobs.length === 1 && !decoy.jobs[0].tags, `decoy tags=${decoy.jobs[0]?.tags}`);
 
+  // funnel r2 #1–#3 — the lexer must read quotes the way a shell does, in BOTH
+  // directions: a quoted script path or a quoted `#` inside a YAML value is
+  // legitimate (positive controls), while a quoted `--only` or an echoed
+  // command with a trailing `# comment` inside the quotes is not (negative).
+  const lexer = inspectWorkflow('lexer.yml', [
+    'on:',
+    '  schedule:',
+    "    - cron: '0 4 * * 1'",
+    'jobs:',
+    '  quoted-paths:',
+    '    steps:',
+    '      - uses: actions/checkout@v4',
+    '        with: { path: "checkout #1", fetch-depth: 0, fetch-tags: true }',
+    '      - run: node "scripts/test/stress-harness.mjs" # trailing comment',
+    "      - run: node './scripts/test/upgrade-matrix.mjs'",
+    '  quoted-partial:',
+    '    steps:',
+    '      - uses: actions/checkout@v4',
+    '        with:',
+    '          fetch-depth: 0',
+    '      - run: node bin/maddu.mjs self-test --profile full "--only" governance-budget',
+    '      - run: echo "x; node scripts/test/stress-harness.mjs # text"',
+    '      - run: node scripts/test/upgrade-matrix.mjs "--scenario" fresh-install',
+    '',
+  ].join('\n'));
+  const quotedPaths = lexer.jobs.find((job) => job.name === 'quoted-paths');
+  const quotedPartial = lexer.jobs.find((job) => job.name === 'quoted-partial');
+  ok('2h [control] quoted script paths and a quoted # inside a with: value are recognised',
+    !!quotedPaths && quotedPaths.stress && quotedPaths.matrix && quotedPaths.tags,
+    `stress=${quotedPaths?.stress} matrix=${quotedPaths?.matrix} tags=${quotedPaths?.tags}`);
+  ok('2i [control] a quoted --only/--scenario or an echoed command with an inner # is not coverage',
+    !!quotedPartial && !quotedPartial.full && !quotedPartial.stress && !quotedPartial.matrix,
+    `full=${quotedPartial?.full} stress=${quotedPartial?.stress} matrix=${quotedPartial?.matrix} segments=${JSON.stringify(quotedPartial?.segments)}`);
+
   const pr = workflows.find((workflow) => workflow.name === 'maddu-ci.yml');
   ok('2d [control] maddu-ci.yml retains quick --fail-on-skip on pull_request',
-    !!pr?.pullRequest && pr.jobs.some((job) => job.commands.some((line) => selfTestCommand.test(line)
-      && /\bself-test\s+--profile\s+quick\s+--fail-on-skip\b/.test(line))),
+    !!pr?.pullRequest && pr.jobs.some((job) => job.segments.some((tokens) => selfTestTokens(tokens)
+      && profileOf(tokens) === 'quick' && tokens.includes('--fail-on-skip'))),
     `pull_request=${pr?.pullRequest ?? false}; quick command=${pr?.jobs.flatMap((job) => job.commands).find((line) => /self-test/.test(line)) || '(none)'}`);
 
   // Read-only local evidence. ENOENT, a git error, and an empty successful

@@ -109,6 +109,23 @@ along, and a row drives the real audit with a fixture manifest to prove it), and
 the `heavy-suites-recent` prose omitted that the matrix receipt must also be
 within 30 days and that a stress run must have passed.
 
+Round 2 was NOT CLEAN with three minors, and the reviewer said plainly — as
+the prompt asked it to — that two of the three landed inside the round-1 fixes;
+the third was an independent defect in the original row that predates round 1.
+All three were one class: shell lexing by regex over raw text. Blanking quoted
+spans got the echo case right and everything else wrong — a quoted `"--only"`
+vanished, so a partial run passed as full coverage; `node
+"scripts/test/stress-harness.mjs"` was rejected as not a suite; and stripping
+YAML comments before masking re-exposed an echoed command with a `#` inside its
+quotes. The row now reads a `run:` line the way a shell does (a small tokenizer:
+simple commands split at unquoted separators, an unquoted `#` ends the line,
+quotes decoded) and strips YAML comments only outside quoted scalars, with a
+positive control (quoted paths and a quoted `#` in a `with:` value are
+recognised) and a negative one (a quoted `--only`/`--scenario` or an echoed
+command is not coverage). The funnel stopped at round 2 under the standing
+rule — terminal items fixed, findings inside the previous round's fixes — rather
+than run a third round over its own patches.
+
 ---
 
 ## [v1.137.0] · 2026-09-09 · declarations with no observer
