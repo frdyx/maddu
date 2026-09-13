@@ -31,7 +31,7 @@ const manifest = {
     'audit-checks': { cap: 17, note: 'a' },
   },
   waivers: [],
-  selfTest: { baselineMs: 36000, tolerancePct: 50 },
+  selfTest: { profiles: { quick: { baselineMs: 36000, tolerancePct: 50 }, full: { baselineMs: 120000, tolerancePct: 50 } } },
 };
 
 // ── waivers + effective cap ──
@@ -60,13 +60,14 @@ ok('over even the waiver-raised ceiling → FAIL', overEvenWaived.level === 'FAI
 ok('summarize renders count/cap', summarizeBudget(under) === 'audit-checks 15/17 · gates 66/70 · verbs 66/70', summarizeBudget(under));
 ok('summarize marks waivers', summarizeBudget(carried).includes('gates 71/70+1w'), summarizeBudget(carried));
 
-// ── latencyVerdict ──
-ok('within tolerance → OK', latencyVerdict({ durationMs: 32000, selfTest: manifest.selfTest }).level === 'OK');
-ok('over tolerance → WARN', latencyVerdict({ durationMs: 60000, selfTest: manifest.selfTest }).level === 'WARN');
-ok('no baseline → SKIP', latencyVerdict({ durationMs: 60000, selfTest: {} }).level === 'SKIP');
-ok('no duration → SKIP', latencyVerdict({ durationMs: null, selfTest: manifest.selfTest }).level === 'SKIP');
-ok('default tolerance is 50%', latencyVerdict({ durationMs: 53000, selfTest: { baselineMs: 36000 } }).level === 'OK'
-  && latencyVerdict({ durationMs: 55000, selfTest: { baselineMs: 36000 } }).level === 'WARN');
+// ── latencyVerdict (per profile since v1.138.0; the profile rows proper live
+// in scripts/test/budget-profile.mjs — these pin the legacy OK/WARN/SKIP arithmetic) ──
+ok('within tolerance → OK', latencyVerdict({ durationMs: 32000, profile: 'quick', selfTest: manifest.selfTest }).level === 'OK');
+ok('over tolerance → WARN', latencyVerdict({ durationMs: 60000, profile: 'quick', selfTest: manifest.selfTest }).level === 'WARN');
+ok('no baseline for the profile → UNSUPPORTED (not SKIP)', latencyVerdict({ durationMs: 60000, profile: 'quick', selfTest: {} }).level === 'UNSUPPORTED');
+ok('no duration → SKIP', latencyVerdict({ durationMs: null, profile: 'quick', selfTest: manifest.selfTest }).level === 'SKIP');
+ok('default tolerance is 50%', latencyVerdict({ durationMs: 53000, profile: 'quick', selfTest: { profiles: { quick: { baselineMs: 36000 } } } }).level === 'OK'
+  && latencyVerdict({ durationMs: 55000, profile: 'quick', selfTest: { profiles: { quick: { baselineMs: 36000 } } } }).level === 'WARN');
 
 // ── the SHIPPED manifest must be green against real ground-truth counts ──
 // (introducing the cap must not trip it — caps carry deliberate headroom).

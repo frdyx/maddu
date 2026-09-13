@@ -1,0 +1,46 @@
+# Dogfood, scheduled: the two heavy suites the pull-request rail never runs.
+#
+# `maddu-ci.yml` runs the QUICK self-test profile on every push and PR. The quick
+# profile excludes exactly four tasks (QUICK_EXCLUDED in
+# scripts/test/_self-test-runner.mjs): run-all (a meta-runner), cockpit-playwright
+# (its own cockpit-e2e job), and the two heavy suites — stress-harness and
+# upgrade-matrix. Until v1.138.0 nothing ran those two anywhere but an operator's
+# machine (audit register F2). This workflow runs them weekly, and on demand.
+#
+# Why a schedule and not a required gate: the `heavy-suites-recent` gate is
+# warn-severity by design (heavy-suite drift is a nag, not a release blocker),
+# and `maddu ci pin` structurally refuses warn-severity gates — so the coverage
+# has to come from CI actually running the suites, not from pinning a gate.
+#
+# Both steps are raw fixtures: exit 0 = passed, nonzero = a real failure. There
+# is no skip code here — both suites are always applicable on a git checkout.
+name: maddu heavy suites
+
+on:
+  schedule:
+    # Mondays 04:00 UTC — a weekly bound on how stale heavy coverage of `main`
+    # can get, independent of whether anyone opened a PR that week.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+jobs:
+  heavy-suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The upgrade matrix checks out TAGGED prior versions (v0.16.0, v0.17.1,
+          # v0.18.0 — see scenarioFromTag in scripts/test/upgrade-matrix.mjs) via
+          # `git worktree add`. The default shallow, tagless checkout would fail
+          # every tag scenario; fetch the full history and the tags.
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm ci
+        run: npm ci
+      - name: stress harness (17 concurrency / malformed-event / large-spine scenarios)
+        run: node scripts/test/stress-harness.mjs
+      - name: upgrade-path matrix (fresh install + three tagged prior versions)
+        run: node scripts/test/upgrade-matrix.mjs

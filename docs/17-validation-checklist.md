@@ -123,6 +123,14 @@ Enable it before the panel and endpoints exist:
 
 ## 10 · Sign-off
 
+- [ ] **A local full self-test run precedes tagging.** The pull-request rail runs only
+  the quick profile; the stress harness and the upgrade-path matrix run in CI on a
+  weekly schedule (`.github/workflows/maddu-heavy.yml`), not on the commit being
+  tagged. So the release cut itself carries the full run: on the merge commit, run
+  `maddu self-test --profile full` on Linux (WSL is fine) and tag only when it exits 0
+  on the bare command — never read the verdict through a pipe or a background-task
+  notification. A killed run is not a green run.
+
 When every box above is checked, the framework is ready to tag `v1.0.0`:
 
 ```bash

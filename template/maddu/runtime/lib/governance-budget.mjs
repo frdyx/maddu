@@ -60,35 +60,68 @@ export function budgetVerdict({ counts, manifest } = {}) {
   return { level, rows, over, warn };
 }
 
-// Relative self-test latency. WARN (never FAIL — latency is advisory) when the
-// last recorded duration exceeds baselineMs * (1 + tolerancePct/100). SKIP when
-// either number is missing/unusable so a fresh or consumer checkout degrades to
-// silence rather than a false alarm.
-export function latencyVerdict({ durationMs, selfTest } = {}) {
-  const baseline = Number(selfTest?.baselineMs);
-  const tol = Number.isFinite(selfTest?.tolerancePct) ? selfTest.tolerancePct : 50;
-  if (!Number.isFinite(baseline) || baseline <= 0) {
-    return { level: 'SKIP', message: 'no self-test baseline configured' };
+// Relative self-test latency, PER PROFILE (v1.138.0, register F1). The manifest
+// carries `selfTest.profiles.<profile> = { baselineMs, tolerancePct }`; a quick
+// run is judged against the quick baseline and a full run against the full one
+// — one number for both judged every full run as 500% over a quick baseline.
+//
+// Four levels, each its own visible state (never folded into another):
+//   OK / WARN     — a supported profile with a recorded duration, judged.
+//                   WARN, never FAIL: latency is advisory.
+//   SKIP          — a supported profile but no recorded duration (fresh checkout).
+//   UNSUPPORTED   — the report's profile has no baseline in the manifest
+//                   (smoke, a profile added later, or a report that predates
+//                   profile recording). The budget cannot judge it and says so;
+//                   this is NOT a skip, because a run DID happen.
+export const LATENCY_LEVELS = Object.freeze({ OK: 'OK', WARN: 'WARN', SKIP: 'SKIP', UNSUPPORTED: 'UNSUPPORTED' });
+
+export function supportedLatencyProfiles(selfTest) {
+  const profiles = selfTest && typeof selfTest.profiles === 'object' && selfTest.profiles ? selfTest.profiles : {};
+  return Object.keys(profiles)
+    .filter((p) => Number.isFinite(Number(profiles[p]?.baselineMs)) && Number(profiles[p].baselineMs) > 0)
+    .sort();
+}
+
+export function latencyVerdict({ durationMs, profile, selfTest } = {}) {
+  const supported = supportedLatencyProfiles(selfTest);
+  const name = typeof profile === 'string' && profile ? profile : null;
+  const spec = name && supported.includes(name) ? selfTest.profiles[name] : null;
+  if (!spec) {
+    const have = supported.length ? supported.join(', ') : 'none';
+    return {
+      level: LATENCY_LEVELS.UNSUPPORTED,
+      profile: name,
+      supported,
+      message: name
+        ? `profile "${name}" has no latency baseline (budgeted profiles: ${have}) — the recorded run cannot be judged`
+        : `the recorded self-test run names no profile (budgeted profiles: ${have}) — it cannot be judged`,
+    };
   }
+  const baseline = Number(spec.baselineMs);
+  const tol = Number.isFinite(spec.tolerancePct) ? spec.tolerancePct : 50;
   if (!Number.isFinite(durationMs) || durationMs <= 0) {
-    return { level: 'SKIP', message: 'no recorded self-test duration' };
+    return { level: LATENCY_LEVELS.SKIP, profile: name, supported, message: `no recorded ${name} self-test duration` };
   }
   const ceiling = baseline * (1 + tol / 100);
   const ratio = durationMs / baseline;
   const secs = (ms) => Math.round(ms / 1000);
   if (durationMs > ceiling) {
     return {
-      level: 'WARN',
+      level: LATENCY_LEVELS.WARN,
+      profile: name,
+      supported,
       ratio,
       ceiling,
-      message: `self-test ${secs(durationMs)}s is ${Math.round((ratio - 1) * 100)}% over the ${secs(baseline)}s baseline (> ${tol}% tol) — raise the baseline only for a real growth`,
+      message: `${name} self-test ${secs(durationMs)}s is ${Math.round((ratio - 1) * 100)}% over the ${secs(baseline)}s ${name} baseline (> ${tol}% tol) — raise the baseline only for a real growth`,
     };
   }
   return {
-    level: 'OK',
+    level: LATENCY_LEVELS.OK,
+    profile: name,
+    supported,
     ratio,
     ceiling,
-    message: `self-test ${secs(durationMs)}s within ${tol}% of ${secs(baseline)}s baseline`,
+    message: `${name} self-test ${secs(durationMs)}s within ${tol}% of the ${secs(baseline)}s ${name} baseline`,
   };
 }
 

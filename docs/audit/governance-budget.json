@@ -17,8 +17,10 @@
   },
   "waivers": [],
   "selfTest": {
-    "baselineMs": 115000,
-    "tolerancePct": 50,
-    "note": "relative self-test latency ceiling. WARN (never FAIL) when the last recorded quick/full run in .maddu/state/self-test-last-run.json exceeds baselineMs * (1 + tolerancePct/100). Raise the baseline deliberately when the suite legitimately grows. Raised 36000→48000 then →115000 across v1.93.0 (roadmap #12a phases 1-5). Attribution (measured, not laundered): (a) `maddu ci` grew 5.4s→8.7s from the #12 surface additions (2 new event types, 3 new runtime libs, more source for the architecture gates) and the ci-command self-test invokes `maddu ci` 7× sequentially, so that +3.3s amplifies to ~+23s; (b) the two git-spawning integration tests worktree-attach + worktree-detach add ~11s; (c) the suite runs sequentially so per-test costs sum. The dominant driver is ci-command's 7× ci pattern — a candidate to parallelize or thin in a future pass."
+    "profiles": {
+      "quick": { "baselineMs": 600000, "tolerancePct": 50 },
+      "full": { "baselineMs": 720000, "tolerancePct": 50 }
+    },
+    "note": "relative self-test latency ceiling, PER PROFILE (v1.138.0, audit register F1). The last recorded run in .maddu/state/self-test-last-run.json is judged against the baseline for ITS profile: WARN (never FAIL) when durationMs exceeds baselineMs * (1 + tolerancePct/100). A run whose profile has no entry here (smoke, or a report that predates profile recording) is reported UNSUPPORTED — visible, never folded into PASS — and a checkout with no recorded run reports SKIP by name. Raise a baseline deliberately when the suite legitimately grows, and say why here. History: 36000→48000→115000 across v1.93.0 (roadmap #12a; 113 tasks; the dominant driver was ci-command invoking `maddu ci` 7× sequentially). One flat number then sat unchanged while the quick profile grew to ~234 tasks and the full profile to 240, so `maddu audit` WARNed on every run (a 700s full run judged 508% over a 115s quick-era baseline). Re-baselined 2026-09-13 from measured runs on the reference Windows 11 workstation (the larger platform wins, both noted): quick 521–713s over nine runs 2026-09-06..09-08 (median ≈570s) → 600000; full 667–702s over four runs 2026-09-06..09-09 → 720000. GitHub ubuntu-latest runs the quick profile in ≈444s (three runs 2026-09-09) and WSL Ubuntu 22.04 on the same workstation in 363s (2026-09-13, 233 pass · 0 fail · 4 dep-skips). The two heavy suites alone measure 18s + 9s on WSL Ubuntu 22.04 (2026-09-13); the earlier full-profile OOM kills were the whole profile under memory pressure, not these suites."
   }
 }

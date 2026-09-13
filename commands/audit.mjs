@@ -561,31 +561,47 @@ async function checkGovernanceBudget() {
 
   const verdict = lib.budgetVerdict({ counts, manifest });
 
-  // Latency half: the last recorded self-test duration (source-only; absent on a
-  // consumer or fresh checkout → SKIP, never a false alarm).
+  // Latency half: the last recorded self-test run, judged against the baseline
+  // for ITS profile (v1.138.0, register F1). Every latency state is rendered —
+  // OK, WARN, SKIP (no run recorded) and UNSUPPORTED (a run the manifest has no
+  // baseline for) each name themselves in the detail. Before this, SKIP printed
+  // nothing and was indistinguishable from "within budget" (register CR 12).
   let durationMs = null;
+  let profile = null;
+  let lastRunPresent = false;
   const lastRunPath = join(frameworkRoot(), '.maddu', 'state', 'self-test-last-run.json');
   if (await exists(lastRunPath)) {
-    try { const doc = JSON.parse(await readFile(lastRunPath, 'utf8')); durationMs = Number(doc?.durationMs) || null; } catch {}
+    lastRunPresent = true;
+    try {
+      const doc = JSON.parse(await readFile(lastRunPath, 'utf8'));
+      durationMs = Number(doc?.durationMs) || null;
+      profile = typeof doc?.profile === 'string' ? doc.profile : null;
+    } catch {}
   }
-  const latency = lib.latencyVerdict({ durationMs, selfTest: manifest.selfTest });
+  const latency = lastRunPresent
+    ? lib.latencyVerdict({ durationMs, profile, selfTest: manifest.selfTest })
+    : { level: 'SKIP', message: `no self-test run recorded (budgeted profiles: ${lib.supportedLatencyProfiles(manifest.selfTest).join(', ') || 'none'})` };
+  const latencyClause = `latency ${latency.level}: ${latency.message}`;
 
   const summary = lib.summarizeBudget(verdict);
   if (verdict.level === 'FAIL') {
     const detail = verdict.over
       .map((r) => `${r.category} ${r.count} over cap ${r.cap}${r.waivers ? `+${r.waivers}w` : ''} — retire/merge one or add a waiver`)
       .join('; ');
-    return { level: 'FAIL', label: 'governance budget', detail: `${detail} (${summary})` };
+    return { level: 'FAIL', label: 'governance budget', detail: `${detail} (${summary}) · ${latencyClause}` };
   }
   const warns = [];
   if (verdict.level === 'WARN') {
     warns.push(verdict.warn.map((r) => `${r.category} carried by ${r.waivers} waiver(s) (${r.count}/${r.cap})`).join('; '));
   }
-  if (latency.level === 'WARN') warns.push(latency.message);
+  // WARN: over the profile's ceiling. UNSUPPORTED: a run happened that the
+  // budget cannot judge — that is a gap in the manifest or the report, and it
+  // is surfaced as WARN rather than hidden inside a PASS.
+  if (latency.level === 'WARN' || latency.level === 'UNSUPPORTED') warns.push(latencyClause);
   if (warns.length) {
     return { level: 'WARN', label: 'governance budget', detail: `${warns.join('; ')} (${summary})` };
   }
-  return { level: 'PASS', label: 'governance budget', detail: `${summary}${latency.level === 'OK' ? ` · ${latency.message}` : ''}` };
+  return { level: 'PASS', label: 'governance budget', detail: `${summary} · ${latencyClause}` };
 }
 
 const SUBCOMMANDS = new Set(['events', 'commands', 'cockpit', 'slash', 'docs', 'charter', 'defaults', 'brief', 'traceability', 'invariants', 'architecture', 'mass', 'capability-docs', 'generated', 'budget', 'positioning', 'acceptance']);

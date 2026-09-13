@@ -11,6 +11,84 @@ narrative summary.
 
 ---
 
+## [v1.138.0] · 2026-09-13 · a budget that names its profile, and CI that runs what it lacks
+
+The last release of the 2026-09-07 audit remediation. Closes register findings F1
+and F2 (cluster F, "budget and CI coverage").
+
+### The latency budget judged every run against a quick-era number
+
+`docs/audit/governance-budget.json` carried one self-test baseline, 115 s, set in
+v1.93.0 for a 113-task suite. The quick profile is now 237 tasks and the full
+profile 240, and the audit read only `durationMs` from the last-run report — never
+the `profile` the report already records. Every full run was judged
+508 % over a quick baseline, so `maddu audit` WARNed on every run and the signal
+meant nothing.
+
+- **Per-profile baselines.** `selfTest.profiles.<profile> = { baselineMs,
+  tolerancePct }`; `latencyVerdict` takes the report's profile and selects its own
+  baseline. Re-baselined from measured runs on the reference Windows workstation
+  (quick 521–713 s over nine runs, full 667–702 s over four; the larger platform
+  wins) with the Linux numbers noted beside them (GitHub ubuntu quick ≈444 s, WSL
+  quick 363 s): quick 600 s, full 720 s, tolerance 50 %.
+- **Every latency state is visible.** Before, a `SKIP` printed nothing and a
+  fresh checkout's "no run recorded" was indistinguishable from "within budget".
+  The check now always carries a `latency <STATE>: …` clause: `OK`, `WARN`,
+  `SKIP` (no run recorded) and a new `UNSUPPORTED` — a run DID happen but its
+  profile (smoke, or a report that predates profile recording) has no baseline,
+  which is a gap in the manifest or the report and is surfaced as WARN rather
+  than folded into a PASS.
+
+### The two suites nothing ran
+
+The pull-request rail runs the quick profile, which excludes exactly four tasks:
+the meta-runner, the browser smoke (its own job), and the two heavy suites —
+`stress-harness` and `upgrade-matrix`. Nothing ran those two anywhere but an
+operator's machine, `heavy-suites-recent` is warn-severity and therefore can
+never be a required gate, and the docs described a `npm run test:full` CI step
+that no workflow executed.
+
+- **`.github/workflows/maddu-heavy.yml`** runs both suites on `ubuntu-latest`
+  weekly (Mondays 04:00 UTC) and on `workflow_dispatch`, with `fetch-depth: 0` +
+  `fetch-tags: true` because the matrix checks out tagged prior versions
+  (`v0.16.0`, `v0.17.1`, `v0.18.0`) via `git worktree add` — a default shallow,
+  tagless checkout fails every tag scenario. Alone, the suites take 18 s + 9 s on
+  Linux; the OOM kills recorded in the v1.137.0 ledger row were the whole full
+  profile under memory pressure, not these two.
+- **Docs say what runs.** `docs/26` "Running both in CI" describes the real
+  split (quick per PR, heavy weekly, full at the release cut); `docs/17` §10
+  sign-off now states that a local full self-test run precedes tagging;
+  `docs/46` states that warn-severity gates are never pinnable and why that
+  makes a schedule the only way to get heavy coverage; and the
+  `heavy-suites-recent` prose in `docs/26` and `docs/20` no longer claims the
+  gate "reads the last-run files" — it has read verified spine receipts since
+  audit P3, with the last-run file only a fresh-install-vs-missing-receipts
+  tiebreaker.
+
+### What the rows assert
+
+Two new row files, authored red-first by Codex from a written contract, never
+shown the implementation: `scripts/test/budget-profile.mjs` (per-profile
+selection through the real `latencyVerdict`; `UNSUPPORTED` distinct from `SKIP`;
+the REAL `maddu audit budget` rendering each state by name against a controlled
+last-run file) and `scripts/test/heavy-ci-coverage.mjs` (a workflow with
+`on.schedule` that runs both heavy scripts and fetches tags — the required tags
+derived from `upgrade-matrix.mjs` at row time; the docs clauses on both the
+source tree and the generated twin). Controls pin that PR CI still runs the quick
+profile with `--fail-on-skip` and that the manifest rewrite leaves the count half
+green. The legacy latency rows in `governance-budget.mjs` were moved to the new
+signature.
+
+### Premises that did not survive
+
+The contract's P4 claimed a smoke run was "silent" today; Codex refuted it — a
+smoke run with a duration is judged against the flat baseline and prints "within
+… baseline", only the no-file case is silent — and the smoke row was written
+against the contracted wording (profile named, not budgeted) instead. The
+inference that the heavy suites are heavy did not survive either (see above).
+
+---
+
 ## [v1.137.0] · 2026-09-09 · declarations with no observer
 
 Code that nothing could reach, and style rules nothing could match. Closes
