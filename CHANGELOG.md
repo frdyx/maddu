@@ -11,6 +11,94 @@ narrative summary.
 
 ---
 
+## [v1.139.0] · 2026-09-13 · what the verify round left open
+
+The 2026-09-13 verify-only round over the audit register classified 12 of its
+20 findings closed, 5 partially closed, 2 never claimed and 1 resolved by
+decision. This release closes the seven that were not, and corrects the two
+release notes that had over-claimed.
+
+### The receipt that named the wrong session (C2, a regression)
+
+Since v1.134.0 the CLI decides receipt attribution *before* the command runs,
+so the resolver can replay the spine asynchronously. The dispatcher then
+discarded the command's return value. For `maddu register` — which mints a
+session and returns `{ sessionId, created: true }` — the invocation receipt
+therefore carried the previous active id, or null: the one command whose
+whole point is a new identity was the one command whose receipt never named
+it. Before v1.134.0 the exit handler re-read the cache, so this was a
+regression, not an old gap. The dispatcher now keeps the result, and a
+grammar-valid id from a `created: true` result outranks the pre-dispatch
+answer at exit. `scripts/test/register-receipt.mjs` runs the real CLI in a
+copied source fixture with `MADDU_SESSION_ID` stripped and asserts the
+receipt carries the minted id, twice in a row.
+
+### Docs that named what does not exist, and missed what does (D3, D4)
+
+- The cockpit-tour said the Orientation route reads `/bridge/agent-context`;
+  no cockpit file fetches it. The section now names only what the cockpit
+  fetches, and a row derives that set from the cockpit sources.
+- 23 exact bridge routes were registered and absent from the endpoint
+  reference. They are catalogued, each description checked against its
+  handler; a row derives the exact-route set from `server.js` and fails when
+  one is missing.
+- Four stale references fixed with the truth derived from the tree:
+  acceptance proofs are v1.121.0 (not v1.120.0), structural mass is v1.23.0
+  (not v1.26.0), the upgrade policy named a `maddu/runtime/oauth/**` path that
+  never existed, and a link label named a `docs/cost.md` that does not exist.
+- Eight builtin gates appeared in no document; they are in the governance gate
+  table, with the release that introduced each derived from this changelog.
+- 25 `MADDU_*` identifiers were read in code and named in no document. A
+  reference section in the CLI doc lists every one and says which kind it is:
+  operator environment, environment Máddu sets on spawned workers, test seams
+  inert outside `MADDU_SELF_TEST=1`, and the error codes and constants that
+  merely share the prefix.
+
+### Dead code the oracle could not see, and a rule declared three times (E1, E3)
+
+`stripAllowSecret` and `summarizeCounts` had no reference anywhere, not even
+in their own files; `export-liveness` retains them by design on ambiguous
+dynamic-import paths, so their removal is pinned by a direct row. The
+config-directory rule (`%APPDATA%\maddu` or `$XDG_CONFIG_HOME/maddu`) was
+declared byte-for-byte in `bridges-registry.mjs`, `workspaces.mjs` and
+`auth.mjs`; it lives once in `config-dir.mjs` now, the three import it, and
+a row requires exactly one `XDG_CONFIG_HOME` read under `lib/`.
+
+### Scripts that acted on import, wrappers that killed their importer (E4, E5)
+
+Four utility scripts did their work at module top level — importing
+`refresh-event-contract-baseline.mjs` rewrote a fixture, importing
+`generate-flag-allowlists.mjs` rewrote the allowlist, `--help` took a
+screenshot or regenerated the tree. Every script under `scripts/` now answers
+`--help` before any side effect and runs only when it is the entry script;
+`capture-cockpit-shot.mjs` imports playwright lazily after the help check.
+`exp-census.mjs`, a one-off phase-0 census with no reference, is deleted. The
+four runtime wrappers under `lib/runtimes/` are programs spawned as
+`node <wrapper> <binary>`; they read `process.argv` and exited 2 at top level,
+so importing one terminated the importer. Their bodies run behind a
+direct-invocation guard now — import is inert, the program's own exit-2
+failure modes are unchanged. `scripts/test/script-import-safety.mjs` spawns
+each script and wrapper both ways and watches the two artifact files for any
+write.
+
+### Two errata
+
+The v1.137.0 entry said it closed "B1–B4 and C1–C3" — those were that PR's
+contract clause ids, not register ids (it closed E1–E3). The v1.136.0 entry
+claimed E1–E5, which shipped in v1.137.0 and here. Both entries now carry a
+dated erratum rather than a rewrite: the changelog is a record.
+
+### What the rows assert
+
+Three row files authored red-first by Codex from a written contract, never
+shown the implementation: `register-receipt.mjs` (4 rows, 2 red at base),
+`residual-closure.mjs` (27 rows, 11 red at base, every expected set derived
+from the tree at row time), `script-import-safety.mjs` (19 rows, 15 red at
+base). No contract premise was refuted this time; the contract's stale mention
+of a "row 1e" inherited from the previous prompt was the only question.
+
+---
+
 ## [v1.138.0] · 2026-09-13 · a budget that names its profile, and CI that runs what it lacks
 
 The last release of the 2026-09-07 audit remediation. Closes register findings F1
