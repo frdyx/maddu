@@ -94,7 +94,7 @@ export function latencyVerdict({ durationMs, profile, selfTest } = {}) {
       supported,
       message: name
         ? `profile "${name}" has no latency baseline (budgeted profiles: ${have}) — the recorded run cannot be judged`
-        : `the recorded self-test run names no profile (budgeted profiles: ${have}) — it cannot be judged`,
+        : `the recorded self-test run has no profile recorded (unknown profile; budgeted profiles: ${have}) — it cannot be judged`,
     };
   }
   const baseline = Number(spec.baselineMs);

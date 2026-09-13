@@ -135,7 +135,7 @@ Severity: **warn** (never pinnable, as above). The upgrade-matrix half of the me
 ## Running both in CI
 
 The source repo's CI is split by cost, and the docs describe the split that actually
-runs (audit register F2 — until v1.138.0 this section described a `npm run test:full`
+runs (audit register F2 — until v1.138.0 this section described a full-profile npm
 step that no workflow executed):
 
 - **Every push and pull request** — `.github/workflows/maddu-ci.yml` runs
@@ -153,7 +153,7 @@ step that no workflow executed):
   scheduled job bounds how stale heavy coverage of `main` can get; it does not
   replace the full run on the commit being tagged.
 
-Why a schedule rather than a required gate: `heavy-suites-recent` is warn-severity,
+Why a schedule rather than a required gate: `heavy-suites-recent` reads verified spine receipts and is warn-severity,
 and `maddu ci pin` refuses warn-severity gates — so nothing can make "the heavy suites
 ran recently" a required check. CI has to run the suites itself.
 
