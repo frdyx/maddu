@@ -12,28 +12,21 @@
 // The spine records only metadata events (AUTH_KEY_ADDED, …_REMOVED,
 // …_ROTATED, …_RATE_LIMITED). Key VALUES are never appended to the spine.
 
-import { mkdir, readFile, readdir, writeFile, chmod, stat, unlink } from 'node:fs/promises';
+import { readFile, readdir, writeFile, chmod, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { platform } from 'node:os';
 import { createHash } from 'node:crypto';
 import { append, EVENT_TYPES } from './spine.mjs';
+import { configDir, ensureConfigDir } from './config-dir.mjs';
 
+// v1.139.0 (register E3): the config-dir rule lives in config-dir.mjs; this
+// module only appends its `auth` segment.
 function authDir() {
-  if (platform() === 'win32') {
-    const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
-    return join(appData, 'maddu', 'auth');
-  }
-  const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return join(xdg, 'maddu', 'auth');
+  return join(configDir(), 'auth');
 }
 
 async function ensureDir() {
-  const d = authDir();
-  await mkdir(d, { recursive: true });
-  if (platform() !== 'win32') {
-    try { await chmod(d, 0o700); } catch {}
-  }
-  return d;
+  return ensureConfigDir('auth');
 }
 
 function providerFile(provider) {

@@ -884,11 +884,3 @@ export async function readVerifiedEvents(repoRoot, { maxEvents = Infinity, allow
   };
 }
 
-// One-line summary of result.counts for doctor output.
-export function summarizeCounts(counts) {
-  if (counts.FAIL === 0 && counts.WARN === 0) return '0 fails · 0 warns';
-  const parts = [];
-  if (counts.FAIL) parts.push(`${counts.FAIL} fail${counts.FAIL === 1 ? '' : 's'}`);
-  if (counts.WARN) parts.push(`${counts.WARN} warn${counts.WARN === 1 ? '' : 's'}`);
-  return parts.join(' · ');
-}

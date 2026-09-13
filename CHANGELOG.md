@@ -133,6 +133,14 @@ than run a third round over its own patches.
 Code that nothing could reach, and style rules nothing could match. Closes
 register findings B1–B4 and C1–C3.
 
+> **Erratum (2026-09-13, v1.139.0).** "B1–B4 and C1–C3" above are this
+> release's *contract clause* ids, not register ids. Against the 2026-09-07
+> register this release closed **E1, E2 and E3** (dead exports, dead CSS,
+> duplicated primitives). The verify-only round over the register found the
+> closure partial: two unused exports survived the oracle's conservative
+> retention, and the config-dir duplication had no recorded decision — both
+> closed in v1.139.0.
+
 ### Exports nobody could observe
 
 173 named exports had no reader outside the module that declared them.
@@ -232,6 +240,15 @@ applied, which is exactly how the `enqueue` deletion was caught.
 
 Shipped documentation and the CLI help surface described a product that does not
 exist. Closes register findings A3, D1–D4 and E1–E5.
+
+> **Erratum (2026-09-13, v1.139.0).** This release closed **A3, D1 and D2**
+> and only part of **D3 and D4**; E1–E3 shipped in v1.137.0 and E4–E5 in
+> v1.139.0. The verify-only round over the register found D3 (the Orientation
+> panel's documented endpoint; 23 exact bridge routes absent from the endpoint
+> reference) and D4 (four version/path references, eight gate ids and the
+> `MADDU_*` environment variables absent from every doc) still open after
+> this entry claimed them — closed in v1.139.0 with rows that derive the
+> expected sets from the tree.
 
 ### The phantoms
 

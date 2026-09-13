@@ -485,7 +485,7 @@ oracle itself):** `tracked-source-drift` watches the machinery that
 decides what a result *means*. It says nothing about whether the check
 itself has ever rejected anything — which is the other half of this
 scenario: write (or relax) a test that passes unconditionally, then
-truthfully report green. **Acceptance proofs** (v1.120.0,
+truthfully report green. **Acceptance proofs** (v1.121.0,
 [56-acceptance-proof.md](56-acceptance-proof.md)) address exactly that
 half and nothing more. An operator declares, on the goal, a command plus
 an **oracle** set and an **implementation** set (`maddu goal set

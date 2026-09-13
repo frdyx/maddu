@@ -235,7 +235,7 @@ $ maddu architecture mass --baseline   # record today's monoliths as the shrink-
   [--repo <dir>] [--fail-on none|new|any] [--json] [--force]
 ```
 
-`scan` records an `ARCHITECTURE_SCANNED` event with a `driftScore`. The `architecture-drift` gate (run by `doctor`/`audit`) and the `scan` exit code honor `options.failOn`: `none` warns + ratchets (default), `new` fails only on violations not in the baseline, `any` fails on all. Adoption: `init → edit → scan → baseline → failOn:"new"`. *(v1.18.0)* — `mass` adds a structural-mass dimension (monolith + duplicate-file detection) with its own shrink-only baseline, enforced by the `architecture-mass` gate; see [40-architecture-drift.md](40-architecture-drift.md) §"Structural mass". *(v1.26.0)*
+`scan` records an `ARCHITECTURE_SCANNED` event with a `driftScore`. The `architecture-drift` gate (run by `doctor`/`audit`) and the `scan` exit code honor `options.failOn`: `none` warns + ratchets (default), `new` fails only on violations not in the baseline, `any` fails on all. Adoption: `init → edit → scan → baseline → failOn:"new"`. *(v1.18.0)* — `mass` adds a structural-mass dimension (monolith + duplicate-file detection) with its own shrink-only baseline, enforced by the `architecture-mass` gate; see [40-architecture-drift.md](40-architecture-drift.md) §"Structural mass". *(v1.23.0)*
 
 ## `maddu focus`
 

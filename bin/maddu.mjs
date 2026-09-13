@@ -397,6 +397,18 @@ async function drainMutationBreaches(ws, raw, rest) {
 // happens in a process 'exit' handler because commands call process.exit()
 // directly; state-root resolution also runs at exit so `maddu init` (no
 // .maddu at entry, one at exit) is recorded too.
+// v1.139.0 (register C2): a verb that MINTS a session returns
+// { sessionId, created: true }. The receipt for that invocation must name the
+// minted session - the pre-dispatch resolver froze its answer before the
+// session existed. Only a grammar-valid id from a created:true result is
+// accepted; anything else leaves the pre-dispatch answer in force.
+let mintedSessionId = null;
+function noteMintedSession(result) {
+  if (!result || typeof result !== 'object' || result.created !== true) return;
+  const id = result.sessionId;
+  if (typeof id === 'string' && /^[\w.-]{1,128}$/.test(id)) mintedSessionId = id;
+}
+
 async function armInvocationReceipt(raw, rest) {
   try {
     let lib = null;
@@ -451,7 +463,11 @@ async function armInvocationReceipt(raw, rest) {
           // Hand over an answer only when we actually have one: omitting the
           // key lets the writer keep its own derivation on the fail-open path,
           // rather than recording an authoritative null we never determined.
-          ...(attributionResolved ? { sessionId: resolvedSid } : {}),
+          // A session MINTED by this very invocation (register / session
+          // register) outranks the pre-dispatch answer, which was frozen
+          // before the session existed (v1.139.0, register C2).
+          ...(mintedSessionId ? { sessionId: mintedSessionId }
+            : attributionResolved ? { sessionId: resolvedSid } : {}),
         });
       } catch {}
     });
@@ -564,11 +580,18 @@ async function main() {
 
   const commandPath = join(repoRoot, 'commands', `${raw}.mjs`);
   const mod = await import(pathToFileURL(commandPath).href);
+  // v1.139.0 (register C2, verify-round regression note): the command's return
+  // value is KEPT. A verb that mints a session (`register`, `session register`)
+  // returns { sessionId, created: true }; the exit-time receipt for that very
+  // invocation must carry the minted id, not the pre-dispatch answer (which
+  // was frozen before the session existed — the previous active id, or null).
+  let result;
   if (witnessState.ctx && witnessState.lib) {
-    await witnessState.lib.runWithWitness(witnessState.ctx, () => mod.default(rest)); // the ONE guarded dispatch site
+    result = await witnessState.lib.runWithWitness(witnessState.ctx, () => mod.default(rest)); // the ONE guarded dispatch site
   } else {
-    await mod.default(rest); // guard inert (older install / lib unloadable)
+    result = await mod.default(rest); // guard inert (older install / lib unloadable)
   }
+  noteMintedSession(result);
 }
 
 main().catch((err) => {
