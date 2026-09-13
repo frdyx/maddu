@@ -99,11 +99,11 @@ Each scenario writes a JSON report to `.maddu/state/stress-reports/stress-report
 
 ### The `heavy-suites-recent` gate (stress half)
 
-Severity: **warn**. Since v1.88.0 one merged gate covers BOTH heavy suites (the retired `stress-harness-recent` + `upgrade-matrix-recent` pair — a named 2→1 governance-budget retirement). The stress half reads `.maddu/state/stress-last-run.json` and flags coverage drift older than 30 days. Skipped on fresh installs that haven't run the harness yet. Output examples:
+Severity: **warn** — and therefore **never pinnable**: `maddu ci pin` structurally refuses warn-severity gates, so this gate can nag in the cockpit and in `maddu doctor` but can never be a required CI check (see [46-ci.md](46-ci.md)). Since v1.88.0 one merged gate covers BOTH heavy suites (the retired `stress-harness-recent` + `upgrade-matrix-recent` pair — a named 2→1 governance-budget retirement). The stress half is proven by **verified spine receipts** — a `VERIFICATION_STARTED` / `VERIFICATION_RAN` pair with `kind: stress` that the harness appends from its own in-process result — and requires a complete, passing run within the last 30 days (a failed run, a `--scenario` partial run, or a started-but-never-receipted run is not current). The hand-writable `.maddu/state/stress-last-run.json` is not the evidence; it is consulted only to tell a fresh install (no file, no receipts → skipped) from a checkout whose receipts have gone missing. Output examples:
 
-- `last stress run 4h ago — 15 scenarios in 7547ms`
-- `last stress run 42d ago (> 30d)`
-- `no stress runs recorded yet (skipped)`
+- `stress: last suite run 4h ago (verified spine receipt) — 17 pass · 0 fail`
+- `stress: no verified spine receipt yet (a legacy last-run.json is present but is not trusted for recency) — run the suite`
+- `stress: no runs yet (skipped)`
 
 ## Upgrade-path matrix
 
@@ -127,22 +127,37 @@ Each scenario writes `.maddu/state/upgrade-matrix-reports/upgrade-matrix.<scenar
 
 ### The `heavy-suites-recent` gate (upgrade-matrix half)
 
-Severity: **warn**. The upgrade-matrix half of the merged gate reads `.maddu/state/upgrade-matrix-last-run.json`. Flags:
+Severity: **warn** (never pinnable, as above). The upgrade-matrix half of the merged gate is proven the same way — verified spine receipts with `kind: upgrade-matrix`, appended by the matrix from its own in-process result; `.maddu/state/upgrade-matrix-last-run.json` is only the fresh-install-vs-missing-receipts tiebreaker. Like the stress half it requires a complete, passing run within the last 30 days (a `--scenario` run is partial and never qualifies). Flags:
 
 - Last run had failures.
 - Last run predates the current `maddu.json` install (which would mean the matrix hasn't covered the version the operator is running today).
 
 ## Running both in CI
 
-```yaml
-- name: quick self-test
-  run: npm test
+The source repo's CI is split by cost, and the docs describe the split that actually
+runs (audit register F2 — until v1.138.0 this section described a full-profile npm
+step that no workflow executed):
 
-- name: full self-test
-  run: npm run test:full
-```
+- **Every push and pull request** — `.github/workflows/maddu-ci.yml` runs
+  `maddu self-test --profile quick --fail-on-skip`, plus the real-browser cockpit
+  smoke in its own job. The quick profile excludes exactly the two heavy suites (and
+  the meta-runner and the browser smoke, which have their own coverage).
+- **Weekly, and on demand** — `.github/workflows/maddu-heavy.yml` runs
+  `scripts/test/stress-harness.mjs` and `scripts/test/upgrade-matrix.mjs` on
+  `ubuntu-latest` (cron Mondays 04:00 UTC, plus `workflow_dispatch`). Its checkout
+  fetches the full history and tags because the matrix checks out tagged prior
+  versions with `git worktree add`; a default shallow checkout would fail every tag
+  scenario. Alone, the two suites take well under a minute.
+- **The release cut** — the full profile is run locally on the merge commit before
+  tagging ([17-validation-checklist.md](17-validation-checklist.md) §10). The
+  scheduled job bounds how stale heavy coverage of `main` can get; it does not
+  replace the full run on the commit being tagged.
 
-Both exit non-zero on failure. The full profile includes stress and upgrade coverage.
+Why a schedule rather than a required gate: `heavy-suites-recent` reads verified spine receipts and is warn-severity,
+and `maddu ci pin` refuses warn-severity gates — so nothing can make "the heavy suites
+ran recently" a required check. CI has to run the suites itself.
+
+Every step exits non-zero on failure.
 
 ## Adding a scenario
 

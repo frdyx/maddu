@@ -11,6 +11,123 @@ narrative summary.
 
 ---
 
+## [v1.138.0] · 2026-09-13 · a budget that names its profile, and CI that runs what it lacks
+
+The last release of the 2026-09-07 audit remediation. Closes register findings F1
+and F2 (cluster F, "budget and CI coverage").
+
+### The latency budget judged every run against a quick-era number
+
+`docs/audit/governance-budget.json` carried one self-test baseline, 115 s, set in
+v1.93.0 for a 113-task suite. Before this release the quick profile had grown to
+237 tasks and the full profile to 240 (239 / 242 with the two row files added
+here), and the audit read only `durationMs` from the last-run report — never
+the `profile` the report already records. Every full run was judged
+508 % over a quick baseline, so `maddu audit` WARNed on every run and the signal
+meant nothing.
+
+- **Per-profile baselines.** `selfTest.profiles.<profile> = { baselineMs,
+  tolerancePct }`; `latencyVerdict` takes the report's profile and selects its own
+  baseline. Re-baselined from measured runs on the reference Windows workstation
+  (quick 521–713 s over nine runs, full 667–702 s over four; the larger platform
+  wins) with the Linux numbers noted beside them (GitHub ubuntu quick ≈444 s, WSL
+  quick 363 s): quick 600 s, full 720 s, tolerance 50 %.
+- **Every latency state is visible.** Before, a `SKIP` printed nothing and a
+  fresh checkout's "no run recorded" was indistinguishable from "within budget".
+  The check now always carries a `latency <STATE>: …` clause: `OK`, `WARN`,
+  `SKIP` (no run recorded) and a new `UNSUPPORTED` — a run DID happen but its
+  profile (smoke, or a report that predates profile recording) has no baseline,
+  which is a gap in the manifest or the report and is surfaced as WARN rather
+  than folded into a PASS.
+
+### The two suites nothing ran
+
+The pull-request rail runs the quick profile, which excludes exactly four tasks:
+the meta-runner, the browser smoke (its own job), and the two heavy suites —
+`stress-harness` and `upgrade-matrix`. Nothing ran those two anywhere but an
+operator's machine, `heavy-suites-recent` is warn-severity and therefore can
+never be a required gate, and the docs described a `npm run test:full` CI step
+that no workflow executed.
+
+- **`.github/workflows/maddu-heavy.yml`** runs both suites on `ubuntu-latest`
+  weekly (Mondays 04:00 UTC) and on `workflow_dispatch`, with `fetch-depth: 0` +
+  `fetch-tags: true` because the matrix checks out tagged prior versions
+  (`v0.16.0`, `v0.17.1`, `v0.18.0`) via `git worktree add` — a default shallow,
+  tagless checkout fails every tag scenario. Alone, the suites take 18 s + 9 s on
+  Linux; the OOM kills recorded in the v1.137.0 ledger row were the whole full
+  profile under memory pressure, not these two.
+- **Docs say what runs.** `docs/26` "Running both in CI" describes the real
+  split (quick per PR, heavy weekly, full at the release cut); `docs/17` §10
+  sign-off now states that a local full self-test run precedes tagging;
+  `docs/46` states that warn-severity gates are never pinnable and why that
+  makes a schedule the only way to get heavy coverage; and the
+  `heavy-suites-recent` prose in `docs/26` and `docs/20` no longer claims the
+  gate "reads the last-run files" — it has read verified spine receipts since
+  audit P3, with the last-run file only a fresh-install-vs-missing-receipts
+  tiebreaker.
+
+### What the rows assert
+
+Two new row files, authored red-first by Codex from a written contract, never
+shown the implementation: `scripts/test/budget-profile.mjs` (per-profile
+selection through the real `latencyVerdict`; `UNSUPPORTED` distinct from `SKIP`;
+the REAL `maddu audit budget` rendering each state by name against a controlled
+last-run file) and `scripts/test/heavy-ci-coverage.mjs` (a workflow with
+`on.schedule` that runs both heavy scripts and fetches tags — the required tags
+derived from `upgrade-matrix.mjs` at row time; the docs clauses on both the
+source tree and the generated twin). Controls pin that PR CI still runs the quick
+profile with `--fail-on-skip` and that the manifest rewrite leaves the count half
+green. The legacy latency rows in `governance-budget.mjs` were moved to the new
+signature.
+
+### Premises that did not survive
+
+The contract's P4 claimed a smoke run was "silent" today; Codex refuted it — a
+smoke run with a duration is judged against the flat baseline and prints "within
+… baseline", only the no-file case is silent — and the smoke row was written
+against the contracted wording (profile named, not budgeted) instead. The
+inference that the heavy suites are heavy did not survive either (see above).
+
+### What the review caught
+
+Round 1 of the diff funnel was NOT CLEAN: one major, four minor, two
+pre-existing. The major was the previous release's oracle doing its job — the
+new `LATENCY_LEVELS` table was exported with no external reader, and the
+v1.137.0 `export-liveness` row (quick profile, required CI) went red on it. It
+is module-local now. The minors were all in the rows and the record: 2b treated
+a `;` inside a quoted string as a shell boundary, so an `echo "…; node
+scripts/test/stress-harness.mjs"` counted as running the suite; 2c read
+`fetch-tags: true` out of an inline comment; the 1e rows accepted a renderer
+that dropped every state name and folded UNSUPPORTED into PASS; and the task
+counts quoted above were the base's, not the branch's. Each row defect now has
+a negative control driven through the real inspector (2f, 2g), each control was
+shown to fail with its mechanism removed, and the 1e rows pin both the check
+level and the exact `latency <STATE>:` clause, with an over-budget WARN case
+added. The two pre-existing findings were fixed rather than recorded: a
+waiver-carried count WARN silently dropped the latency clause (now it rides
+along, and a row drives the real audit with a fixture manifest to prove it), and
+the `heavy-suites-recent` prose omitted that the matrix receipt must also be
+within 30 days and that a stress run must have passed.
+
+Round 2 was NOT CLEAN with three minors, and the reviewer said plainly — as
+the prompt asked it to — that two of the three landed inside the round-1 fixes;
+the third was an independent defect in the original row that predates round 1.
+All three were one class: shell lexing by regex over raw text. Blanking quoted
+spans got the echo case right and everything else wrong — a quoted `"--only"`
+vanished, so a partial run passed as full coverage; `node
+"scripts/test/stress-harness.mjs"` was rejected as not a suite; and stripping
+YAML comments before masking re-exposed an echoed command with a `#` inside its
+quotes. The row now reads a `run:` line the way a shell does (a small tokenizer:
+simple commands split at unquoted separators, an unquoted `#` ends the line,
+quotes decoded) and strips YAML comments only outside quoted scalars, with a
+positive control (quoted paths and a quoted `#` in a `with:` value are
+recognised) and a negative one (a quoted `--only`/`--scenario` or an echoed
+command is not coverage). The funnel stopped at round 2 under the standing
+rule — terminal items fixed, findings inside the previous round's fixes — rather
+than run a third round over its own patches.
+
+---
+
 ## [v1.137.0] · 2026-09-09 · declarations with no observer
 
 Code that nothing could reach, and style rules nothing could match. Closes
