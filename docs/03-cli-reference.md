@@ -1199,6 +1199,8 @@ that share the prefix but are never read from the environment.
 | `MADDU_WORKTREE_LOCK_WAIT_MS` | `lib/worktree-lock.mjs` | how long a worktree attach/detach waits for the publish lock before refusing. |
 | `MADDU_WORKTREE_RECOVER_COOLDOWN_MS` | `lib/worktrees.mjs` | minimum spacing between two runs of the workspace-wide `janitor:worktrees` recovery trigger (the auto-fired sweep), checked inside the global lock. A manual `lane worktree --recover` is not rate-limited by it. |
 | `MADDU_PRICING_AUTHORITY` | `lib/runtimes.mjs` spawn → wrappers | the pricing authority declared on the runtime descriptor. The spawn path sets it on the worker (an inherited value is discarded) and the wrapper stamps it on each `TOKEN_USAGE_REPORTED` row so the price's provenance is on the record. |
+| `MADDU_PORT` | `lib/bridge-bootstrap.mjs` | the port the bridge binds when `--port` is not given (validated; falls back to 4177). |
+| `MADDU_PARENT_SESSION_ID` | `register`, `session register` | ambient parent for a child registration you may set in a spawned shell; malformed or unknown → dropped with a note (see [44-session-hooks.md](44-session-hooks.md)). |
 
 ### Set BY Máddu on spawned workers (read them, do not set them)
 
@@ -1211,9 +1213,7 @@ that share the prefix but are never read from the environment.
 | `MADDU_REPO_ROOT` | `lib/runtimes.mjs` spawn, `lib/review.mjs` | the repo root a worker or reviewer subprocess acts on; wrappers append token usage to that spine (falls back to cwd). |
 | `MADDU_SLICE_EVENT_ID` | `lib/review.mjs` | the slice-stop event a spawned reviewer is reviewing. |
 | `MADDU_MODEL_HINT` | `lib/runtimes.mjs` spawn | the resolved model preference for this spawn's stage (see [25-model-routing.md](25-model-routing.md)). |
-| `MADDU_PARENT_SESSION_ID` | `register`, `session register` | ambient parent for a child registration; malformed or unknown → dropped with a note (see [44-session-hooks.md](44-session-hooks.md)). |
 | `MADDU_COORDINATOR_PLAN_ID`, `MADDU_COORDINATOR_PHASE`, `MADDU_COORDINATOR_ID` | `lib/coordinator.mjs` spawn | set on each phase worker the coordinator spawns: the plan, the phase name and the coordinator run id, so a worker can record which phase it is executing (see [33-loops-and-coordinator.md](33-loops-and-coordinator.md)). |
-| `MADDU_PORT` | `lib/bridge-bootstrap.mjs` | the port the bridge binds when `--port` is not given (validated; falls back to 4177). |
 
 ### Test seams
 

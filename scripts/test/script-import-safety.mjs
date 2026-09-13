@@ -67,22 +67,27 @@ function run(root, args) {
 // files: a quiet write to a generated doc, a screenshot, or a temp dir under
 // the fixture is a side effect too. Snapshot = every file's size + mtime +
 // (for the two artifacts a script legitimately owns) bytes.
+// funnel r2 #1: every entry counts — directories too (an import that creates
+// an empty directory is a side effect), and nothing under the fixture is
+// excluded (the fixture is a copied source tree with no dependency install;
+// if it ever gains one, a write there is still a write).
 async function walk(dir, rel = '') {
   const out = [];
   let entries = [];
   try { entries = await readdir(dir, { withFileTypes: true }); } catch (err) { if (err.code === 'ENOENT') return out; throw err; }
   for (const entry of entries) {
     const path = rel ? `${rel}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) { if (entry.name !== 'node_modules') out.push(...await walk(join(dir, entry.name), path)); }
-    else if (entry.isFile()) out.push(path);
+    if (entry.isDirectory()) { out.push({ path: `${path}/`, dir: true }); out.push(...await walk(join(dir, entry.name), path)); }
+    else if (entry.isFile()) out.push({ path, dir: false });
   }
   return out;
 }
 
 async function snapshot(root) {
-  const files = await walk(root);
+  const entries = await walk(root);
   const map = new Map();
-  for (const path of files) {
+  for (const { path, dir } of entries) {
+    if (dir) { map.set(path, { dir: true }); continue; }
     const st = await stat(join(root, path), { bigint: true });
     const rec = { size: st.size, mtime: st.mtimeNs };
     if (WATCH.includes(path)) rec.bytes = await readFile(join(root, path));

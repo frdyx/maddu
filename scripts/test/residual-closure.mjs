@@ -105,6 +105,18 @@ try {
   // not an identifier the code reads; the family's real members are censused
   // on their own. Surfaced when the doc side moved to whole-token matching.
   const envNames = (text) => [...text.matchAll(/\bMADDU_[A-Z0-9_]+\b/g)].map((m) => m[0]).filter((n) => !n.endsWith('_'));
+  // funnel r2 #2 — ONE predicate per census, used by the real row AND its
+  // prefix-collision control, so a regression to substring matching in the
+  // row is what the control observes (a control over a private copy of the
+  // regex could stay green while the row rotted).
+  const missingRoutesIn = (docText, routes) => {
+    const documented = new Set([...docText.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0]));
+    return routes.filter((path) => !documented.has(path));
+  };
+  const missingNamesIn = (docText, names) => {
+    const documented = new Set(docText.match(/\bMADDU_[A-Z0-9_]+\b/g) || []);
+    return names.filter((name) => !documented.has(name));
+  };
   const codeEnv = sorted((await Promise.all(codeFiles.map(read))).flatMap(envNames));
   if (!codeEnv.length) throw new Error('empty environment census');
   const sharedDocs = (await Promise.all([
@@ -125,13 +137,14 @@ try {
       `cockpit literals=${cockpitPaths.size}; missing=${unfetched.join(', ') || 'none'}`);
 
     const endpoints = await read(`${tree}/05-bridge-endpoints.md`);
-    // funnel r1 #6: a documented path is a whole token, never a substring —
-    // `/bridge/trust/snapshot` must not vouch for `/bridge/trust`.
-    const documentedRoutes = new Set([...endpoints.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0]));
-    const missingRoutes = exactRoutes.filter((path) => !documentedRoutes.has(path));
+    // funnel r1 #6 / r2 #2: a documented path is a whole token, never a
+    // substring — `/bridge/trust/snapshot` must not vouch for `/bridge/trust`
+    // — and the control drives the SAME predicate the row uses, so reverting
+    // the row to substring matching turns the control red.
+    const missingRoutes = missingRoutesIn(endpoints, exactRoutes);
     ok(`2b ${tree} [control] a route documented only as a longer path's prefix is still missing`,
-      !new Set([...'/bridge/trust/snapshot'.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0])).has('/bridge/trust'),
-      'token set built from a snapshot-only doc does not contain /bridge/trust');
+      missingRoutesIn('/bridge/trust/snapshot', ['/bridge/trust']).length === 1,
+      'the row predicate reports /bridge/trust missing from a snapshot-only doc');
     ok(`2b ${tree} documents every exact server route`, missingRoutes.length === 0,
       `exact routes=${exactRoutes.length}; missing (${missingRoutes.length})=${missingRoutes.join(', ') || 'none'}`);
 
@@ -178,13 +191,13 @@ try {
     // The contract's census is textual: a name counts when its literal
     // appears anywhere in shipped docs (including documented family members).
     const documentedEnv = docText + '\n' + sharedDocs;
-    // funnel r1 #6: identifier boundaries on the doc side too — `MADDU_LANE_ID`
-    // in a doc must not vouch for `MADDU_LANE` (the code census already bounds).
-    const documentedNames = new Set(documentedEnv.match(/\bMADDU_[A-Z0-9_]+\b/g) || []);
-    const missingEnv = codeEnv.filter((name) => !documentedNames.has(name));
+    // funnel r1 #6 / r2 #2: identifier boundaries on the doc side too —
+    // `MADDU_LANE_ID` in a doc must not vouch for `MADDU_LANE` — and the control
+    // drives the SAME predicate the row uses.
+    const missingEnv = missingNamesIn(documentedEnv, codeEnv);
     ok(`2e ${tree} [control] a name documented only as a longer identifier's prefix is still missing`,
-      !new Set('see MADDU_LANE_ID'.match(/\bMADDU_[A-Z0-9_]+\b/g) || []).has('MADDU_LANE'),
-      'token set built from a LANE_ID-only doc does not contain MADDU_LANE');
+      missingNamesIn('see MADDU_LANE_ID', ['MADDU_LANE']).length === 1,
+      'the row predicate reports MADDU_LANE missing from a LANE_ID-only doc');
     ok(`2e ${tree} shipped docs name every MADDU_* identifier in code directories`, missingEnv.length === 0,
       `derived names=${codeEnv.length}; missing (${missingEnv.length})=${missingEnv.join(', ') || 'none'}`);
     const endpointPaths = new Set([...endpoints.matchAll(/\/bridge\/[A-Za-z0-9_/-]+/g)].map((m) => m[0]));

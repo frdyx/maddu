@@ -121,6 +121,22 @@ descriptions over-promised), two gate versions recalled instead of derived
 (now whole tokens, with prefix-collision controls) plus a write oracle that
 watched two files (now the whole fixture tree).
 
+Round 2 took three attempts: the machine's memory was low enough (the WSL
+virtual machine holding most of it after the earlier full-profile runs) that
+the harness killed two review shells and the surviving reviewer could no
+longer spawn commands. The third attempt reported before it, too, lost the
+ability to run anything: NOT CLEAN with three minors, and the reviewer stated
+that all three sat inside the round-1 fixes — the whole-fixture write oracle
+ignored directories and excluded `node_modules`; the two prefix-collision
+controls tested private regexes rather than the row's own predicate, so a
+row regressed to substring matching would have left them green; and two
+operator-settable variables were filed under "set by Máddu, do not set". All
+three fixed; the controls now drive the row's predicate and were shown to go
+red with it reverted. The funnel stopped there under the standing rule. The
+reviewer's coverage limitation is on the record: its handler and tag
+rechecks were cut short by the process-start failures, so this round is
+narrower than round 1.
+
 ---
 
 ## [v1.138.0] · 2026-09-13 · a budget that names its profile, and CI that runs what it lacks
