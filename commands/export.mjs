@@ -46,6 +46,31 @@ function collectHeaders(headerFlag) {
   return headers;
 }
 
+// The endpoint as it may be SHOWN (v1.143.0, P0 audit A4-002). The URL a user
+// passes can carry credentials — `https://user:token@collector/…` or an api key
+// in the query — and the sent/FAILED banners used to echo it verbatim into
+// terminal scrollback and CI logs, while the payload one call away was scrubbed
+// twice. Userinfo becomes `***`, every query VALUE becomes `***` (keys stay so
+// the operator can still recognise the collector), host/path/port are kept. A
+// string that is not a URL gets its `//user:pw@` masked by a fallback. Pure;
+// never throws; the real endpoint is still used for the POST.
+export function maskEndpointForDisplay(raw) {
+  if (typeof raw !== 'string') return String(raw);
+  try {
+    const u = new URL(raw);
+    if (u.username) u.username = '***';
+    if (u.password) u.password = '***';
+    if (u.search) {
+      const masked = new URLSearchParams();
+      for (const [k] of new URLSearchParams(u.search)) masked.append(k, '***');
+      u.search = masked.toString();
+    }
+    return u.toString();
+  } catch {
+    return raw.replace(/\/\/[^/@\s]+@/g, '//***@');
+  }
+}
+
 async function post(endpoint, payload, headers) {
   if (typeof fetch !== 'function') throw new Error('global fetch is unavailable (needs Node ≥ 18)');
   const res = await fetch(endpoint, {
@@ -76,6 +101,25 @@ export default async function exportCmd(argv) {
 
   const endpoint = typeof flags.endpoint === 'string' ? flags.endpoint : null;
   const headers = endpoint ? collectHeaders(flags.header) : {};
+  // What the operator sees (v1.143.0, A4-002): the banners and any error text
+  // name the endpoint ONLY in masked form. Node's fetch refuses a URL that embeds
+  // credentials and its error message echoes the whole URL — so an embedded
+  // user:token used to leak through that message even though the POST never
+  // happened. Refuse it here, masked, and point at --header.
+  const shownEndpoint = endpoint ? maskEndpointForDisplay(endpoint) : null;
+  const maskMessage = (msg) => {
+    let s = String(msg == null ? '' : msg);
+    if (endpoint && shownEndpoint && endpoint !== shownEndpoint) s = s.split(endpoint).join(shownEndpoint);
+    return s.replace(/\/\/[^/@\s]+@/g, '//***@');
+  };
+  if (endpoint) {
+    let credentialed = false;
+    try { const u = new URL(endpoint); credentialed = !!(u.username || u.password); } catch { /* not a URL — fetch will say so, masked */ }
+    if (credentialed) {
+      err(`${ANSI.fail}maddu export: --endpoint must not embed credentials${ANSI.reset} (${shownEndpoint}) — fetch refuses them; pass them with --header "Authorization: …" instead`);
+      process.exit(2);
+    }
+  }
   const service = typeof flags.service === 'string' ? flags.service : 'maddu';
   const pretty = !!flags.pretty && !flags.follow; // pretty is for one-shot reads
   const since = typeof flags.since === 'string' ? flags.since : null;
@@ -93,12 +137,12 @@ export default async function exportCmd(argv) {
       try {
         r = await post(endpoint, payload, headers);
       } catch (e) {
-        err(`${ANSI.fail}FAILED${ANSI.reset}  ${events.length} record(s) → ${endpoint}  ${ANSI.dim}${e.message}${ANSI.reset}`);
+        err(`${ANSI.fail}FAILED${ANSI.reset}  ${events.length} record(s) → ${shownEndpoint}  ${ANSI.dim}${maskMessage(e && e.message)}${ANSI.reset}`);
         process.exitCode = 1;
         return { count: 0, delivered: false };
       }
       const rej = r.rejected ? ` · ${ANSI.warn}${r.rejected} rejected${ANSI.reset}` : '';
-      err(`${r.ok ? ANSI.pass + 'sent' : ANSI.fail + 'FAILED'}${ANSI.reset}  ${events.length} record(s) → ${endpoint}  ${ANSI.dim}HTTP ${r.status}${ANSI.reset}${rej}`);
+      err(`${r.ok ? ANSI.pass + 'sent' : ANSI.fail + 'FAILED'}${ANSI.reset}  ${events.length} record(s) → ${shownEndpoint}  ${ANSI.dim}HTTP ${r.status}${ANSI.reset}${rej}`);
       if (!r.ok) process.exitCode = 1;
       return { count: events.length, delivered: r.ok };
     }

@@ -11,6 +11,28 @@ narrative summary.
 
 ---
 
+## [v1.143.0] · 2026-09-20 · an export that never shows its credentials
+
+Third of the six P0-audit fixes (finding A4-002). `maddu export --otel
+--endpoint <url>` printed the raw endpoint in its sent/FAILED banners, so a
+URL carrying credentials — `https://user:token@collector/…` or an api key in
+the query — landed in terminal scrollback and CI logs while the payload one
+call away was scrubbed twice. Implementing the fix found a second channel the
+audit had not named: Node's `fetch` refuses a URL that embeds credentials, and
+its error message echoes the whole URL, so an embedded token leaked through the
+error text even though the POST never happened.
+
+Now: the banners and any error text name the endpoint only through
+`maskEndpointForDisplay` (userinfo → `***`, every query value → `***`,
+keys/host/path kept); a URL with embedded credentials is refused up front with
+exit 2 and a pointer to `--header "Authorization: …"`, which is where
+credentials belonged all along. The real endpoint is still used for the POST.
+
+Red first: `scripts/test/export-endpoint-mask.mjs` — seven unit vectors plus
+two hermetic runs of the real CLI (embedded credentials; api key in the query
+against a refused port). 9/12 at the baseline, 15/15 now.
+---
+
 ## [v1.142.0] · 2026-09-20 · a lock that reads nothing until it is taken
 
 Second of the six P0-audit fixes (finding A1-001). Merely importing
