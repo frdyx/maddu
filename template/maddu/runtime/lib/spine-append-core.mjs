@@ -2,11 +2,11 @@
 // (spine.mjs) and the standalone token-usage wrapper (runtimes/_wrapper-common.mjs).
 // Roadmap #12c phase 1.
 //
-// SCOPE: this module owns ONLY the sync-mode partitioned append — writing into
-// `.maddu/events/by-replica/<replicaId>/` under the per-partition append funnel
-// with a strictly-valid `prev_hash` chain computed INSIDE the lock. The DEFAULT
-// single-machine append path stays in spine.mjs / _wrapper-common.mjs and is
-// untouched by this module — sync mode is opt-in (replica.json present).
+// SCOPE: the locked, `prev_hash`-chained append primitives for BOTH layouts — the
+// sync-mode partitioned append (appendPartitioned) and, since v1.98.0 (audit P1),
+// the DEFAULT flat append (appendFlatChained) every flat writer routes through.
+// ACKNOWLEDGEMENT LEVEL: a resolved append = handed to the OS, no fsync; process-
+// crash safe, not power-loss safe — full statement in spine.mjs above append().
 //
 // It imports ONLY Node stdlib + append-lock.mjs (also stdlib-only). It pulls in NO
 // catalog/defaults logic, so the worker-subprocess token wrapper can import it

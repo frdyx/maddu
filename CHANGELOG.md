@@ -11,6 +11,30 @@ narrative summary.
 
 ---
 
+## [v1.141.0] · 2026-09-20 · say what an append promises
+
+First of the six legacy fixes the P0 audit proposed
+(`docs/rfc/2026-09-20-p0-baseline-audit.md`, findings A2-004 / A5-003).
+Nothing had stated what a successful spine append promises. It now does, once,
+above `append()` in `spine.mjs`: the stored line was handed to the operating
+system (the O_APPEND write completed and the lock was released); nothing on the
+path calls fsync, so the record survives this process dying but not a kernel
+crash or power loss before the OS flushes it, and no signal distinguishes those
+outcomes afterwards. The torn-tail detector covers a write interrupted
+mid-syscall, never a completed-then-lost line. A caller that needs a stronger
+level adds its own durable acknowledgement (RFC ADR-003 / ADR-011).
+
+Two headers that had outlived the v1.98.0 flat-lock cutover are corrected:
+`append-lock.mjs` no longer says the default flat append is lock-free, and
+`spine-append-core.mjs` no longer says it owns only the sync-mode append —
+both paths take the same funnel and compute `prev_hash` inside the lock.
+
+Comment-only; no behaviour changes. `spine-append-core.mjs` stays at its
+1577-line structural-mass baseline (the ratchet counts every line, comments
+included), which is why the full statement lives in `spine.mjs` and the core
+module carries a nine-line pointer.
+---
+
 ## [v1.140.0] · 2026-09-20 · a runtime for products, decided before it is built
 
 Máddu has governed the agents that *build* software. A 2026-09-18 design plan
