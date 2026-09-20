@@ -112,6 +112,23 @@ async function main() {
       await writeFile(segPath(tmp), [lines[0], lines[1]].join('\n') + '\n');
       const tail = await verify.verifySpine(tmp);
       ok('documented limit: a truncated tail verifies clean (unkeyed forward chain cannot see a dropped suffix)', chainIssues(tail).length === 0 && tail.events === 2, JSON.stringify(chainIssues(tail)));
+
+      // editing ONLY the last line (its own prev_hash intact) is likewise undetected (docs/34 §11)
+      await writeFile(segPath(tmp), [lines[0], lines[1], lines[2].replace('"hello"', '"hellx"')].join('\n') + '\n');
+      const tailEdit = await verify.verifySpine(tmp);
+      ok('documented limit: a tail-only edit that keeps its own prev_hash verifies clean', chainIssues(tailEdit).length === 0 && tailEdit.counts.FAIL === 0 && tailEdit.events === 3, JSON.stringify(chainIssues(tailEdit)));
+
+      // an unterminated final line (crash mid-write) IS detected and excluded from the chain
+      await writeFile(segPath(tmp), lines.join('\n') + '\n' + lines[2].slice(0, 40));
+      const torn = await verify.verifySpine(tmp);
+      const tornIssues = torn.issues.filter((i) => i.kind === 'torn_trailing_line');
+      ok('torn trailing line → torn_trailing_line FAIL; the three committed lines still count', tornIssues.length === 1 && tornIssues[0].level === 'FAIL' && torn.events === 3 && chainIssues(torn).length === 0, JSON.stringify(torn.issues.map((i) => `${i.kind}:${i.level}`)));
+
+      // a well-linked line that reuses an existing id → duplicate_id FAIL (not a chain issue)
+      const dupEv = JSON.parse(lines[2]); dupEv.prev_hash = core.hashLine(lines[2]);
+      await writeFile(segPath(tmp), [...lines, JSON.stringify(dupEv)].join('\n') + '\n');
+      const dup = await verify.verifySpine(tmp);
+      ok('well-linked duplicate event id → duplicate_id FAIL, chain itself clean', dup.issues.some((i) => i.kind === 'duplicate_id' && i.level === 'FAIL') && chainIssues(dup).length === 0, JSON.stringify(dup.issues.map((i) => `${i.kind}:${i.level}`)));
     } finally { await rm(tmp, { recursive: true, force: true }); }
   }
 

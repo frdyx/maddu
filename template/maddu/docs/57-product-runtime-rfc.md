@@ -225,6 +225,48 @@ compatibility tests. Per-module reuse verdicts (`reusable-as-is`,
 recorded in the P0 audit and updated there when a module is actually
 extracted.
 
+### ADR-011 — Core candidate set and declared legacy residuals
+
+**Decision.** The modules a future `runtime/core` may share, at the pinned
+baseline, are `event-schema.mjs`, the hashing/`prev_hash` functions of
+`spine-append-core.mjs`, `id-grammar.mjs`, and `secret-scan.mjs` — all pure,
+import-clean, and now pinned by `scripts/test/runtime-core-import-boundary.mjs`.
+`append-lock.mjs` belongs to `runtime/execution` (it reads the hostname and
+an environment variable at module load; the boundary test pins those reads
+shrink-only). `spine.mjs` and `verify.mjs` are excluded from `core` until
+importing them no longer installs the mutation-witness object on
+`globalThis`, or `verify` imports `EVENT_TYPES`/`hashLine` from the core
+instead of the façade. Extraction is copy-behind-compatibility-tests, never
+a move.
+
+The following are **declared legacy residuals** of the development spine,
+unchanged in the CLI and never inherited by the runtime: chain-local hashes;
+undetected suffix truncation, tail-only edit, and well-linked forged tail;
+WARN-only timestamp ordering across producers; an unauthenticated,
+self-declared `actor`; buffered (no fsync) acknowledgement; no operation-id
+idempotency on `append()`; best-effort `GATE_RAN` receipts; the bridge's
+approval-respond route, which appends a decision for any id behind the
+loopback token and is not the model for ADR-005. Runtime v1 (P2–P4) must
+satisfy the opposite of each. A `design-decision` verdict in the P0 audit
+records that a residual is documented for the CLI; it never clears a runtime
+acceptance row. No economy code exists at the baseline: P6 starts from a new
+settlement store, never from `autonomy.mjs`.
+
+**Why.** P0 audit findings A1-001, A1-002, A2-001…005, A3-001, A5-001,
+A7-001 and the completeness critic's package-boundary and residuals ADRs.
+
+### ADR-012 — Audit evidence rule
+
+**Decision.** Every read-only audit packet reads files from a detached
+worktree (or `git show <pin>:<path>`) at the pinned commit, records the
+revision per file, and anchors only against that revision. The coordinator's
+mutable checkout is not audit evidence. Commits landed after the pin are
+reviewed as their own packets.
+
+**Why.** P0 audit finding A8-001: the checkout advanced three commits during
+the round while auditors read the working tree; their byte-identity checks
+against the pin saved the conclusions, but only by luck of scope.
+
 ## 5. Non-goals for the first release
 
 - A Máddu-hosted service, agent marketplace, token, payment system, or

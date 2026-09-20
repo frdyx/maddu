@@ -104,6 +104,7 @@ function probeScript(files) {
   return `
     import { readdirSync, existsSync } from 'node:fs';
     const out = { imported: [], errors: [] };
+    const globalsBefore = new Set(Object.getOwnPropertyNames(globalThis));
     ${files.map((f) => `try { const m = await import(${JSON.stringify(pathToFileURL(path.join(LIB, f)).href)}); out.imported.push([${JSON.stringify(f)}, Object.keys(m).length]); globalThis.__m = { ...(globalThis.__m || {}), [${JSON.stringify(f)}]: m }; } catch (e) { out.errors.push([${JSON.stringify(f)}, String(e && e.message || e)]); }`).join('\n')}
     try {
       const core = globalThis.__m['spine-append-core.mjs'], schema = globalThis.__m['event-schema.mjs'], id = globalThis.__m['id-grammar.mjs'], scan = globalThis.__m['secret-scan.mjs'];
@@ -114,6 +115,7 @@ function probeScript(files) {
         redact: scan.redactText('plain text'),
       };
     } catch (e) { out.errors.push(['calls', String(e && e.message || e)]); }
+    out.newGlobals = Object.getOwnPropertyNames(globalThis).filter((k) => !globalsBefore.has(k) && k !== '__m');
     out.cwdEntries = readdirSync(process.cwd());
     out.homeEntries = readdirSync(process.env.HOME);
     out.madduInCwd = existsSync('.maddu'); out.gitInCwd = existsSync('.git');
@@ -146,6 +148,7 @@ async function runtimeProbe() {
     ok('probe: import wrote nothing into the working directory', Array.isArray(out.cwdEntries) && out.cwdEntries.length === 0, JSON.stringify(out.cwdEntries));
     ok('probe: import wrote nothing into HOME', Array.isArray(out.homeEntries) && out.homeEntries.length === 0, JSON.stringify(out.homeEntries));
     ok('probe: no .maddu/ or .git/ materialised in cwd', out.madduInCwd === false && out.gitInCwd === false);
+    ok('probe: importing the candidate set adds no globalThis property (spine.mjs/verify.mjs are excluded for exactly this — A1-002)', Array.isArray(out.newGlobals) && out.newGlobals.length === 0, JSON.stringify(out.newGlobals));
     ok('probe: stderr silent (no discovery warnings, no lock chatter)', res.stderr.trim() === '', res.stderr.slice(0, 300));
   } finally {
     await rm(cwd, { recursive: true, force: true });

@@ -23,7 +23,7 @@ before any of that code does. No runtime behaviour changes.
 
 ### The RFC (docs/57)
 
-`docs/57-product-runtime-rfc.md` is the decision record: ten ADRs (charter
+`docs/57-product-runtime-rfc.md` is the decision record: twelve ADRs (charter
 fit — a separately scoped contract, the hard rules keep governing the framework
 layer, host adapters stay host-owned; one opt-in subpath export of the existing
 package; in-memory + experimental file store with an explicit acknowledgement
@@ -32,7 +32,7 @@ event namespace with the legacy hash preimage frozen first; shadow first and
 fail-closed when enforced, single-use bound decision handles; economy off by
 default with credits, reliability, integrity incidents and authority as four
 records; host-issued principal lineage; references-only evidence; recommendation
-only; characterize before sharing code), the trust boundary, the contracts, the
+only; characterize before sharing code; the core candidate set with the legacy residuals declared rather than inherited; an audit evidence rule), the trust boundary, the contracts, the
 threat-model delta, work packages P0–P8 and the V01–V27 verification matrix.
 Every row is marked proposed. The full plan is kept verbatim under
 `docs/rfc/` (repo-only; linked by URL so the docs-indexed gate keeps resolving).
@@ -56,7 +56,7 @@ six small legacy fixes as candidates that need the operator's authorization
 
 ### Characterization before extraction (P1)
 
-Two self-test scripts pin, at the baseline, what runtime work must never change
+Three self-test scripts pin, at the baseline, what runtime work must never change
 as a side effect (audit A7-002 found no byte- or hash-level vector existed —
 the chain tests recomputed their expectations from the same run):
 
@@ -69,16 +69,26 @@ the chain tests recomputed their expectations from the same run):
   the following line; a stripped `prev_hash` → `chain_stripped` FAIL; the
   documented limit that a dropped tail verifies clean; exact redaction bytes for
   four secret shapes and by-reference pass-through for clean data; the id
-  grammar. 54 assertions.
+  grammar; a tail-only edit (clean, the documented residual), a torn trailing
+  line (`torn_trailing_line` FAIL) and a well-linked duplicate id
+  (`duplicate_id` FAIL). 57 assertions.
 - `scripts/test/runtime-core-import-boundary.mjs`: for the candidate core set
   (`spine-append-core`, `append-lock`, `event-schema`, `id-grammar`,
   `secret-scan`) the import graph stays inside allowed Node builtins and the
   set, ambient reads are pinned shrink-only (A1-001: `append-lock` reads
   `os.hostname()` and `MADDU_LOCK_BODYLESS_GRACE_MS` at load), and a child node
   imports every module from a fresh non-git directory with a scrubbed
-  environment, calls the pure entry points and writes nothing. 43 assertions.
+  environment, calls the pure entry points, writes nothing and adds no
+  `globalThis` property. 44 assertions.
+- `scripts/test/legacy-boundary-characterization.mjs`: pins two behaviours the
+  audit confirmed so their fix PRs show as intentional diffs — a `GATE_RAN`
+  receipt append that throws is swallowed (verdict returned, no receipt,
+  nothing on the result says so; a control run lands one), and
+  `POST /bridge/approvals/respond` appends a decision for a never-requested
+  id twice with `200` while `spine verify` flags both rows as
+  `orphan_approval_decided` afterwards. 11 assertions.
 
-Both are auto-discovered by the quick profile and run in CI.
+All three are auto-discovered by the quick profile and run in CI.
 ---
 
 ## [v1.139.0] · 2026-09-13 · what the verify round left open
