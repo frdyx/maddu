@@ -673,6 +673,20 @@ labelled a limitation; any confirmed critical/high finding is resolved or
 explicitly blocks its release boundary; public messaging separates
 implemented functionality from roadmap.
 
+## 15.1 Implementation status
+
+| Package | Status | Where | Notes |
+|---|---|---|---|
+| P0 | done | `docs/rfc/2026-09-20-p0-baseline-audit.md` | Findings register, verdicts, six legacy fix PRs (v1.141.0–v1.146.0) |
+| P1 | done | `scripts/test/legacy-evidence-vectors.mjs`, `runtime-core-import-boundary.mjs`, `legacy-boundary-characterization.mjs` | Legacy contracts pinned; candidate set boundary is a ratchet |
+| P2 | slice 1 landed (v1.147.0) | `runtime/core/{canonical,envelope,reduce,verify}.mjs`, `runtime/execution/store.mjs`, `runtime/index.mjs` as `maddu/runtime` | Canonical encoding + fixture vectors, envelope, reducer, six-dimension verifier, append-store contract with `MemoryStore` and experimental `FileStore`. Producer authority and external witness report `not_supplied`; no economy code. Tenant scoping is by run file and identity tuple only — cross-tenant lookup isolation (V16) is P4's adapter work |
+| P3–P8 | not started | — | — |
+
+The `runtime` module may import nothing else in the repository and is
+imported only by its tests (`.maddu/config/architecture.json`). Consumers
+reach it through `import … from 'maddu/runtime'`; the deep-import fallback
+`./*` keeps every pre-v1.147.0 import path working.
+
 ## 16. Provenance
 
 Plan authored 2026-09-18; baseline `227c69d3b0606ebfe9a4f441483dfa46512f655f`
