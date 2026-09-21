@@ -53,7 +53,14 @@ import { open, readFile, unlink } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
-const HOST = hostname();
+// Lazy (v1.142.0, P0 audit A1-001): the local hostname is resolved on the first
+// lock acquire, never at module load, so importing this file reads no machine
+// state — a precondition for sharing it with the product runtime (docs/57 ADR-011).
+let HOST_CACHE = null;
+function localHost() {
+  if (HOST_CACHE === null) HOST_CACHE = hostname();
+  return HOST_CACHE;
+}
 const POLL_MS = 25;
 // A legit holder writes its owner record in the VERY NEXT await after open('wx') —
 // microseconds normally, at most a few ms even under a congested event loop. A lock
@@ -72,11 +79,15 @@ const POLL_MS = 25;
 // second writer), while lowering it would widen the fork window, so values at
 // or below the default (and garbage) are ignored.
 const DEFAULT_BODYLESS_GRACE_MS = 80 * POLL_MS;
+// Read at ACQUIRE time (v1.142.0, A1-001), not at module load: importing this
+// file reads no environment; each acquire evaluates the raise-only knob afresh.
 function bodylessGraceMs() {
   const raw = Number(process.env.MADDU_LOCK_BODYLESS_GRACE_MS);
   return Number.isFinite(raw) && raw > DEFAULT_BODYLESS_GRACE_MS ? raw : DEFAULT_BODYLESS_GRACE_MS;
 }
-const BODYLESS_GRACE_POLLS = Math.round(bodylessGraceMs() / POLL_MS);
+function bodylessGracePolls() {
+  return Math.round(bodylessGraceMs() / POLL_MS);
+}
 // Emit an onWait progress callback roughly once per second so a genuinely stuck
 // holder is visible to the operator rather than silently hanging.
 const WAIT_LOG_EVERY = Math.max(1, Math.round(1000 / POLL_MS));
@@ -113,7 +124,7 @@ async function readLock(lockPath) {
 // Steal a lock ONLY if we can prove its holder is a same-host, dead pid, and the
 // lock is still the exact record we read (nonce-guarded). Returns true if stolen.
 async function tryStealDead(lockPath, rec) {
-  if (!rec || rec.host !== HOST) return false; // cross-host: never auto-steal
+  if (!rec || rec.host !== localHost()) return false; // cross-host: never auto-steal
   if (pidAlive(rec.pid) !== false) return false; // only PROVEN-dead
   const cur = await readLock(lockPath);
   if (!cur || cur.ownerId !== rec.ownerId) return false; // it changed under us
@@ -139,10 +150,11 @@ function sleep(ms) {
 // safe because nothing was written, so no chain fork can result.
 export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = Infinity } = {}) {
   const ownerId = nonce();
+  const gracePolls = bodylessGracePolls(); // evaluated per acquire, never at import (A1-001)
   const body = JSON.stringify({
     ownerId,
     pid: process.pid,
-    host: HOST,
+    host: localHost(),
     startedAt: new Date().toISOString(),
   });
   let waited = 0;
@@ -169,7 +181,7 @@ export async function acquireAppendLock(lockPath, { onWait = null, maxWaitMs = I
         // written microseconds after open) or a holder that DIED between open('wx')
         // and writing its record (no `pid` to prove dead). After a short grace of
         // consecutive empty reads, reclaim it — otherwise it would hang forever.
-        if (++nullReads >= BODYLESS_GRACE_POLLS) {
+        if (++nullReads >= gracePolls) {
           try { await unlink(lockPath); } catch { /* someone else reclaimed it */ }
           nullReads = 0;
           reclaimed = true;

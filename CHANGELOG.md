@@ -11,6 +11,25 @@ narrative summary.
 
 ---
 
+## [v1.142.0] · 2026-09-20 · a lock that reads nothing until it is taken
+
+Second of the six P0-audit fixes (finding A1-001). Merely importing
+`append-lock.mjs` used to read the machine hostname and the
+`MADDU_LOCK_BODYLESS_GRACE_MS` environment variable at module load — harmless
+for the CLI, but exactly the ambient read the runtime RFC forbids in anything
+the product runtime may share (ADR-011). Both reads now happen when a lock is
+acquired: the hostname is resolved once on the first acquire and cached, the
+raise-only grace knob is evaluated on every acquire. Lock semantics are
+unchanged (same nonce record, same same-host dead-pid steal, same bodyless
+grace).
+
+Red first: `runtime-core-import-boundary` gained a child-process probe that
+wraps `process.env` in a recording Proxy and patches `os.hostname` (then
+`module.syncBuiltinESMExports()` so the module's named import sees the
+patch), imports the lock, and snapshots the reads — {grace:1, hostname:1} at
+the baseline, {0, 0} now — with a control that acquiring a lock does read both.
+---
+
 ## [v1.141.0] · 2026-09-20 · say what an append promises
 
 First of the six legacy fixes the P0 audit proposed

@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { hermeticEnv } from './_hermetic-env.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LIB = path.resolve(__dirname, '..', '..', 'template', 'maddu', 'runtime', 'lib');
@@ -156,9 +157,68 @@ async function runtimeProbe() {
   }
 }
 
+// Fix 2 of the P0 audit (A1-001): append-lock.mjs must not read the hostname or
+// MADDU_LOCK_BODYLESS_GRACE_MS when IMPORTED — only when a lock is acquired. A
+// child node wraps process.env in a recording Proxy and patches os.hostname (then
+// module.syncBuiltinESMExports() so the module's named import sees the patch),
+// imports append-lock.mjs, snapshots the reads, then acquires + releases a lock in
+// a scratch dir as the control that the seams observe real reads.
+function lazyReadsProbeScript() {
+  return `
+    import os from 'node:os';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { mkdtempSync, rmSync } from 'node:fs';
+    import { join } from 'node:path';
+    const reads = { env: [], hostname: 0 };
+    const realEnv = process.env;
+    process.env = new Proxy(realEnv, {
+      get(t, k) { if (typeof k === 'string') reads.env.push(k); return t[k]; },
+      has(t, k) { return k in t; },
+      ownKeys(t) { return Reflect.ownKeys(t); },
+      getOwnPropertyDescriptor(t, k) { return Reflect.getOwnPropertyDescriptor(t, k); },
+    });
+    const realHostname = os.hostname;
+    os.hostname = function patchedHostname() { reads.hostname++; return realHostname(); };
+    syncBuiltinESMExports();
+    const mod = await import(${JSON.stringify(pathToFileURL(path.join(LIB, 'append-lock.mjs')).href)});
+    const snap = () => ({ grace: reads.env.filter((k) => k === 'MADDU_LOCK_BODYLESS_GRACE_MS').length, hostname: reads.hostname });
+    const atImport = snap();
+    const dir = mkdtempSync(join(os.tmpdir(), 'maddu-lazy-lock-'));
+    try {
+      const lock = await mod.acquireAppendLock(join(dir, '.append.lock'));
+      await lock.release();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const afterAcquire = snap();
+    console.log(JSON.stringify({ atImport, afterAcquire }));
+  `;
+}
+
+async function lazyReadsProbe() {
+  const res = await new Promise((resolve) => {
+    // hermeticEnv(): the probe records READS of process.env inside the child, so
+    // it needs the ambient PATH/TMPDIR but must not carry the host session
+    // identity (hermetic-env-census forbids a bare `...process.env` spread).
+    const child = spawn(process.execPath, ['--input-type=module', '-e', lazyReadsProbeScript()], { cwd: os.tmpdir(), env: hermeticEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: -2, stdout, stderr: stderr + '\n[timeout 20s]' }); }, 20000);
+    child.stdout.on('data', (b) => { stdout += b; });
+    child.stderr.on('data', (b) => { stderr += b; });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    child.on('error', (err) => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: err.message }); });
+  });
+  ok('lazy-reads probe: child exited 0', res.code === 0, res.code === 0 ? '' : `code ${res.code} ${res.stderr.slice(-300)}`);
+  let out = null;
+  try { out = JSON.parse(res.stdout.trim().split('\n').pop()); } catch {}
+  ok('lazy-reads probe: emitted a JSON report', !!out, out ? '' : res.stdout.slice(-200));
+  if (!out) return;
+  ok('append-lock.mjs: importing it reads neither os.hostname() nor MADDU_LOCK_BODYLESS_GRACE_MS (A1-001)', out.atImport.hostname === 0 && out.atImport.grace === 0, JSON.stringify(out.atImport));
+  ok('control: acquiring a lock DOES read both (the seams observe real reads)', out.afterAcquire.hostname >= 1 && out.afterAcquire.grace >= 1, JSON.stringify(out.afterAcquire));
+}
+
 async function main() {
   await staticChecks();
   await runtimeProbe();
+  await lazyReadsProbe();
   console.log('');
   console.log(`runtime-core-import-boundary: ${passed} pass - ${failed} fail`);
   if (failed > 0) process.exit(1);
