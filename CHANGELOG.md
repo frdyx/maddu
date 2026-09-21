@@ -11,6 +11,29 @@ narrative summary.
 
 ---
 
+## [v1.144.0] · 2026-09-21 · a checkpoint the spine saw first
+
+Fourth of the six P0-audit fixes (finding A5-002). `createCheckpoint()` wrote
+its own index row in `.maddu/checkpoints/index.ndjson` FIRST and appended
+`CHECKPOINT_CREATED` second; `createWorktree` and `removeCheckpoint` had the
+same order. A crash between the two left a checkpoint that `maddu checkpoint
+list / show / rollback` would act on but the spine had never recorded — the
+reverse of "derived ≠ projected" (hard rule 2), and nothing detected it.
+
+Now every checkpoint writer appends its spine event first and treats the index
+as a rebuildable cache. If the index write fails after the append, the error
+names the recorded id (`CHECKPOINT_INDEX_WRITE_FAILED`) instead of losing the
+checkpoint. `listCheckpoints` reconciles the index against the spine on every
+read: a `CHECKPOINT_CREATED` with no index row is listed (marked
+`indexed:false`, branch and subject unknown), a `CHECKPOINT_REMOVED` hides the
+checkpoint whatever the index says, a `CHECKPOINT_WORKTREE_CREATED` restores
+the worktree flag. Normal checkpoints list exactly as before.
+
+Red first: `scripts/test/checkpoint-spine-first.mjs` — 4/11 at the baseline
+(index path made a directory: no spine record; index row truncated: checkpoint
+gone; spine removed but index present: still listed), 11/11 now.
+---
+
 ## [v1.143.0] · 2026-09-20 · an export that never shows its credentials
 
 Third of the six P0-audit fixes (finding A4-002). `maddu export --otel

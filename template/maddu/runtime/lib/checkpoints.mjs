@@ -2,8 +2,14 @@
 //
 // A checkpoint is a git tag (`maddu/checkpoint/<id>`) at the current HEAD,
 // plus an optional worktree under `.maddu/checkpoints/<id>/` for inspection.
-// Metadata persists in `.maddu/checkpoints/index.ndjson` (append-only) and
-// each create/remove emits a CHECKPOINT_* event.
+// Each create/worktree/remove emits its CHECKPOINT_* event FIRST; the metadata
+// index `.maddu/checkpoints/index.ndjson` (append-only) is written second and
+// is a rebuildable cache, never the source of truth (v1.144.0, P0 audit
+// A5-002 — the old order left a crash window with an indexed checkpoint the
+// spine had never seen). listCheckpoints reconciles the index against the
+// spine: a CHECKPOINT_CREATED with no index row is listed (`indexed:false`,
+// branch/subject unknown), a CHECKPOINT_REMOVED hides the checkpoint whatever
+// the index says, a CHECKPOINT_WORKTREE_CREATED restores the worktree flag.
 //
 // Rollback is intentionally NOT auto-executed in Slice 17. We append a
 // CHECKPOINT_ROLLBACK_REQUESTED event and return the recovery commands as a
@@ -13,7 +19,7 @@
 import { mkdir, readFile, writeFile, appendFile, stat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathsFor } from './paths.mjs';
-import { append, EVENT_TYPES, makeId } from './spine.mjs';
+import { append, readAll, EVENT_TYPES, makeId } from './spine.mjs';
 import { redactText, redactLeaves } from './secret-scan.mjs';
 // v1.93.0 (roadmap #12a phase 4): the low-level git-subprocess idiom moved to
 // git-exec.mjs so worktrees.mjs reuses the exact same runner. gitAvailable is
@@ -46,7 +52,7 @@ async function ensureDir(repoRoot) {
 export async function listCheckpoints(repoRoot) {
   await ensureDir(repoRoot);
   let text = '';
-  try { text = await readFile(indexFile(repoRoot), 'utf8'); } catch { return []; }
+  try { text = await readFile(indexFile(repoRoot), 'utf8'); } catch { text = ''; }
   const map = new Map();
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -56,6 +62,32 @@ export async function listCheckpoints(repoRoot) {
       else if (row.kind === 'remove' && row.id) map.delete(row.id);
     } catch {}
   }
+  // Reconcile against the spine (v1.144.0): the index is a cache of what the
+  // spine recorded. Anything the spine created and never removed is listed even
+  // if its index row is missing; anything the spine removed is hidden even if
+  // the index still carries it. Event order is spine order, so a re-created id
+  // cannot occur (ids are minted per create) and last-wins is well defined.
+  let events = [];
+  try { events = await readAll(repoRoot); } catch { events = []; }
+  const fromSpine = new Map();
+  for (const ev of events) {
+    const d = ev && ev.data ? ev.data : {};
+    if (ev.type === EVENT_TYPES.CHECKPOINT_CREATED && d.id) {
+      fromSpine.set(d.id, {
+        v: 1, id: d.id, ts: ev.ts, lane: ev.lane || null, title: d.title || null,
+        commit: d.commit || null, branch: null, subject: null, tag: d.tag || (TAG_PREFIX + d.id),
+        hasWorktree: false, createdBy: ev.actor || null, indexed: false,
+      });
+    } else if (ev.type === EVENT_TYPES.CHECKPOINT_WORKTREE_CREATED && d.id && fromSpine.has(d.id)) {
+      const c = fromSpine.get(d.id);
+      c.hasWorktree = true;
+      c.worktreePath = d.path || worktreePath(repoRoot, d.id);
+    } else if (ev.type === EVENT_TYPES.CHECKPOINT_REMOVED && d.id) {
+      fromSpine.delete(d.id);
+      map.delete(d.id); // the spine says removed — the index does not get a vote
+    }
+  }
+  for (const [id, derived] of fromSpine) if (!map.has(id)) map.set(id, derived);
   return Array.from(map.values()).sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
 }
 
@@ -103,13 +135,23 @@ export async function createCheckpoint(repoRoot, { lane = null, title = null, by
     hasWorktree: false,
     createdBy: by
   };
-  await writeRecord(repoRoot, { v: 1, kind: 'put', checkpoint: record });
+  // Spine first (A5-002): the record of the checkpoint is the event; the index
+  // row is a cache written afterwards. If the index write fails, the checkpoint
+  // exists (tag + event) and `maddu checkpoint list` derives it from the spine.
   await append(repoRoot, {
     type: EVENT_TYPES.CHECKPOINT_CREATED,
     actor: by, lane,
     ...(triggeredBy ? { triggered_by: triggeredBy } : {}),
     data: { id, commit: record.commit, title: record.title, tag, ...(triggeredBy ? { triggered_by: triggeredBy } : {}) }
   });
+  try {
+    await writeRecord(repoRoot, { v: 1, kind: 'put', checkpoint: record });
+  } catch (err) {
+    const e = new Error(`checkpoint ${id} is recorded on the spine (CHECKPOINT_CREATED) and tagged, but its index row could not be written: ${err && err.message ? err.message : err}. \`maddu checkpoint list\` derives it from the spine.`);
+    e.code = 'CHECKPOINT_INDEX_WRITE_FAILED';
+    e.checkpointId = id;
+    throw e;
+  }
   return record;
 }
 
@@ -125,12 +167,12 @@ export async function createWorktree(repoRoot, id, by = null) {
   cp.hasWorktree = true;
   cp.worktreePath = dir;
   cp.updatedAt = new Date().toISOString();
-  await writeRecord(repoRoot, { v: 1, kind: 'put', checkpoint: cp });
-  await append(repoRoot, {
+  await append(repoRoot, { // spine first (A5-002)
     type: EVENT_TYPES.CHECKPOINT_WORKTREE_CREATED,
     actor: by, lane: cp.lane,
     data: { id, path: dir }
   });
+  await writeRecord(repoRoot, { v: 1, kind: 'put', checkpoint: cp });
   return { ok: true, path: dir };
 }
 
@@ -174,11 +216,11 @@ export async function removeCheckpoint(repoRoot, id, by = null) {
     try { await gitRun(['worktree', 'remove', '--force', worktreePath(repoRoot, id)], repoRoot, 10000); } catch {}
     try { await rm(worktreePath(repoRoot, id), { recursive: true, force: true }); } catch {}
   }
-  await writeRecord(repoRoot, { v: 1, kind: 'remove', id });
-  await append(repoRoot, {
+  await append(repoRoot, { // spine first (A5-002)
     type: EVENT_TYPES.CHECKPOINT_REMOVED,
     actor: by, lane: cp.lane, data: { id }
   });
+  await writeRecord(repoRoot, { v: 1, kind: 'remove', id });
   return { removed: true };
 }
 
