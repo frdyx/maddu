@@ -11,6 +11,78 @@ narrative summary.
 
 ---
 
+## [v1.150.0] · 2026-09-21 · the standalone synthetic pilot (RFC P5)
+
+The fourth runtime slice under `docs/57` (§11 pilot, §7.4 receipts, §14
+metrics, ADR-008, V11/V13/V14/V15): the observation adapters, the portable
+receipt, baseline measurement and shape-based minimization, exercised end to
+end by a synthetic pilot against the public `maddu/runtime` surface. Nothing
+under `runtime/` imports anything else in the repository; the pilot's host
+side lives in a test fixture and touches no network, provider or clock.
+
+- `runtime/execution/observe.mjs` — `referenceContext()` records context
+  selection as `{ kind, ref, digest?, bytes? }` only (a body key is refused;
+  a `ref` carrying a credential or personal-data shape is **refused**, never
+  stored redacted). `observeModelCall()` writes `MODEL_CALL_STARTED` /
+  `MODEL_CALL_FINISHED` with the host-declared metadata, the output's digest
+  and byte length and token counts — the prompt and the output never enter
+  the evidence; metadata with a prompt/messages/output/… key or a secret
+  shape is refused before anything is written; a throw is `failure` with a
+  minimized message, no output or a non-canonical output is `failure`,
+  exceeding the bound is `unknown` and the late output is not returned; a
+  host `commit()` can replace the plain digest with a keyed commitment
+  (ADR-008). The call is observed from the host side (`observed: 'host'`);
+  a model's own claims stay data (V14).
+- `runtime/core/minimize.mjs` — `minimize()` redacts listed shapes (private
+  key blocks, credentials in URLs, bearer tokens, JWTs, vendor and cloud
+  keys, key=value secrets, e-mail, card-like and phone-like digit runs),
+  reports each redaction by path, is idempotent, and ships
+  `MINIMIZE_LIMITS`: shape-based, false positives named, never a complete
+  privacy boundary (§8).
+- `runtime/core/receipt.mjs` — `exportReceipt()` builds the portable bundle:
+  events byte for byte, head, count, terminal, manifest and digests, the
+  **known omissions** (`raw_bodies`, `producer_keys`, `external_witness`,
+  `signature`), host `exportedAt`/`exporter`, `authority: 'unsigned'`, and
+  its own digest. It **fails closed** when any payload string carries a
+  secret shape unless `minimize: true` is passed; the redacted copy counts
+  its redactions and lists `redacted_strings`. `verifyReceipt()` checks the
+  bundle's own integrity (digest, count, head, run, gate set, manifest), then
+  the six verifier dimensions; a redacted copy reports bytes and sequence as
+  `limited` and is at most `unverified`; `authority` is always listed under
+  limits — an unsigned import is non-authoritative (§7.4).
+- `runtime/core/measure.mjs` — `measureRun()` counts what the evidence
+  states: checks by result, model calls by outcome, decisions with
+  **wouldBlock** (shadow) distinct from **blocked** (enforced), escalations,
+  approvals, actions with `unknown` and `unresolved` explicit, outputs
+  delivered, evidence bytes. No rates, no latency, no clock.
+- One new digest domain, `maddu.runtime.v1/receipt`; every earlier domain,
+  vector and verifier byte is unchanged.
+- The pilot: `scripts/test/__fixtures__/runtime-pilot-host.mjs` (a synthetic
+  document with a hostile line, a scripted model client, an in-memory CRM
+  with an idempotency table and a crash-after-effect switch, an outbox that
+  refuses to stream undecided output, the pilot's gates and policy —
+  labelled `SIMULATED`) and `scripts/test/runtime-pilot-synthetic.mjs`:
+  the happy path (trusted context before init → references → observed model
+  call → three gates → shadow draft → enforced release escalates →
+  streaming refused before the decision (V13) → human approval → exact
+  artifact delivered once → CRM side effect crashes after the effect (V11)
+  → retry refused → reconciled from host state → `verified` → receipt
+  exports clean, verifies, survives a JSON round trip → fresh store reads
+  the same run → measurements pinned → byte-deterministic replay), the
+  would-block path (echoed hostile line: identity unchanged on every event,
+  no-pii and faithfulness fail, shadow would-block measured, enforced
+  release escalates and a human approval **cannot** override the failing
+  gates, nothing delivered, the e-mail never entered the evidence), and the
+  provider outage (failure recorded with the key minimized, the run failed
+  `incomplete`, no success credit anywhere).
+
+Tests: `runtime-core-minimize-measure` (32), `runtime-core-receipt` (20),
+`runtime-execution-observe` (32), `runtime-pilot-synthetic` (26). Signed
+receipts, producer keys and an external witness remain `not_supplied` and
+say so. No CLI, bridge, cockpit or development-spine behaviour changes.
+
+---
+
 ## [v1.149.0] · 2026-09-21 · decision policy and the protected boundary (RFC P4)
 
 The third runtime slice under `docs/57` (ADR-005, §6.2 steps 5–8, §8 failure

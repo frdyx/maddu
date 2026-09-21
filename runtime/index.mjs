@@ -34,3 +34,11 @@ export {
 } from './execution/decision.mjs';
 
 export { PERFORM_OUTCOMES, execute, release, reconcile, unresolvedOperations } from './execution/boundary.mjs';
+
+export { MINIMIZE_VERSION, MINIMIZE_LIMITS, PATTERNS as MINIMIZE_PATTERNS, minimize } from './core/minimize.mjs';
+
+export { MEASURE_VERSION, measureRun } from './core/measure.mjs';
+
+export { RECEIPT_CONTRACT, KNOWN_OMISSIONS, ReceiptError, receiptDigest, receiptBytes, exportReceipt, verifyReceipt } from './core/receipt.mjs';
+
+export { EVIDENCE_POLICIES, DEFAULT_MODEL_CALL_TIMEOUT_MS, referenceContext, observeModelCall } from './execution/observe.mjs';
