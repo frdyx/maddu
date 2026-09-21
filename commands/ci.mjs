@@ -211,18 +211,10 @@ export default async function ciCmd(argv) {
   // gate that can never red, is itself a RED — otherwise a required guarantee can
   // silently vanish and CI stays green. Checked against the POST-OVERRIDE resolved
   // runs (runGates already dedupes by id, operator wins), never raw definitions.
-  const runsById = new Map();
-  for (const r of runs) runsById.set(r.gateId, (runsById.get(r.gateId) || 0) + 1);
-  const requiredIntegrity = [];
-  if (profile.requiredGates) {
-    for (const id of profile.requiredGates) {
-      const count = runsById.get(id) || 0;
-      const run = runs.find((r) => r.gateId === id);
-      if (count === 0) requiredIntegrity.push(`${id} (required but no runnable gate resolves)`);
-      else if (count > 1) requiredIntegrity.push(`${id} (required id resolves to ${count} gates)`);
-      else if (run && run.severity === 'warn') requiredIntegrity.push(`${id} (required but warn-severity — can never fail)`);
-    }
-  }
+  // v1.146.0 (P0 audit A3-002): the resolver lives in runtime/lib/required-gates.mjs
+  // and is shared with the goal-done / plan-complete check, which used to omit it.
+  const requiredGatesLib = await loadLib('required-gates.mjs');
+  const requiredIntegrity = requiredGatesLib.requiredGateIntegrity(runs, profile.requiredGates).map((f) => f.message);
 
   const red = strict ? failed : failedRequired;
   const exitCode = (red.length || requiredIntegrity.length) ? 1 : 0;

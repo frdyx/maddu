@@ -11,6 +11,32 @@ narrative summary.
 
 ---
 
+## [v1.146.0] · 2026-09-21 · a required gate that cannot run is red everywhere
+
+Sixth and last of the P0-audit fixes (findings A3-002 / A3-004). `maddu goal
+done` and `maddu plan complete` refuse to close work while a pinned required
+gate is red — but a required gate whose file was missing, renamed, or failed at
+import never ran, so it never showed as red, so completion proceeded and
+`GOAL_COMPLETED` recorded `gatesFailed: 0`. `maddu ci` had treated exactly
+that case as RED since audit P4 ("required but no runnable gate resolves"); the
+completion check claimed to mirror `ci` exactly and did not.
+
+The resolver now lives in one shared module,
+`template/maddu/runtime/lib/required-gates.mjs` (`requiredGateIntegrity`:
+unresolved, ambiguous, or warn-severity required ids), and both commands call
+it over the same post-override runs. Under strict governance an unresolvable
+required id blocks completion and is named; under standard it is counted and
+printed; unpinned repos are untouched. An operator gate that throws at import
+(its run is keyed by file path, never by the id it meant to provide) now
+leaves its required id unresolved and blocks, closing A3-004 by the same rule.
+
+Red first: `scripts/test/completion-required-gates.mjs` — pure vectors plus
+fixture repos (missing required id under strict and standard; import-broken
+operator gate; a real builtin id as control). 8/12 at the baseline, 12/12 now;
+`ci-command`, `gates-before-done`, `required-gates-fail-capable` unchanged
+and green.
+---
+
 ## [v1.145.0] · 2026-09-21 · a decision that binds to a request
 
 Fifth of the six P0-audit fixes (finding A3-001). `POST
