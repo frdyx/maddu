@@ -1,0 +1,196 @@
+{
+  "pinnedAt": {
+    "commit": "227c69d3b0606ebfe9a4f441483dfa46512f655f",
+    "version": "1.139.0",
+    "eventContractVersion": "1.21.0",
+    "contractFingerprint": "ba204ab3",
+    "flatLockVersion": "1.98.0"
+  },
+  "hashLine": {
+    "algorithm": "sha256 over the exact stored NDJSON line as UTF-8, trailing CR stripped, hex digest",
+    "vectors": [
+      {
+        "name": "empty string",
+        "input": "",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "ascii line",
+        "input": "{\"v\":1,\"id\":\"evt_20260101000000_000001\",\"ts\":\"2026-01-01T00:00:00.000Z\",\"type\":\"DOCTOR_REPORT\",\"actor\":null,\"lane\":null,\"data\":{\"counts\":{}}}",
+        "sha256": "e04805f8d8d5a8d26607d91483a8bdd8b49562e66cea783c5b8d039c6a4685d6"
+      },
+      {
+        "name": "trailing CR is stripped (CRLF copy hashes identically)",
+        "input": "{\"v\":1,\"data\":{}}\r",
+        "sha256": "aa415e62161de1e072a6da4a2f67a4d87e9a321b6f57f77243a567a31cdde455"
+      },
+      {
+        "name": "interior CR is NOT stripped",
+        "input": "{\"v\":1,\r\"data\":{}}",
+        "sha256": "67910b23b7218564bbe39a00dab6a5905d474e09b07f9ecfddf6c3bc933f10a4"
+      },
+      {
+        "name": "unicode (NFC) line",
+        "input": "{\"v\":1,\"data\":{\"lane\":\"Máddu ✓\"}}",
+        "sha256": "71a67be8815d00780218dba4452dcf976f66e065fb412a55bc2dcab327533b47"
+      },
+      {
+        "name": "unicode (NFD) line hashes differently",
+        "input": "{\"v\":1,\"data\":{\"lane\":\"Máddu ✓\"}}",
+        "sha256": "9f939df396699dc25169013ee9948f99dcdd66cdc57794238da5d715e4c7fc33"
+      },
+      {
+        "name": "non-string input is coerced via String()",
+        "input": 12345,
+        "sha256": "5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5"
+      }
+    ]
+  },
+  "storedLine": {
+    "keyOrder": [
+      "v",
+      "id",
+      "ts",
+      "type",
+      "actor",
+      "lane",
+      "data"
+    ],
+    "optionalAfterData": [
+      "triggered_by",
+      "ws"
+    ],
+    "last": "prev_hash",
+    "idGrammar": "evt_<ts14 digits from the ISO timestamp>_<hex, 2*bytes chars; default bytes=3>",
+    "idExample": {
+      "ts": "2026-09-20T12:34:56.789Z",
+      "prefix": "evt",
+      "bytes": 3,
+      "tsPart": "20260920123456",
+      "shape": "^evt_[0-9]{14}_[0-9a-f]{6}$"
+    },
+    "wsStamp": "The live writer bootstraps a workspace identity on the first append: the genesis line is ws-less by protocol; every later stored line carries ws (^ws_[a-f0-9]{16}$) after data/triggered_by and before prev_hash, so the stamp is part of the prev_hash preimage. The frozen strictSegment below is a ws-less hand-written chain, which the verifier also accepts."
+  },
+  "strictSegment": {
+    "note": "FRAMEWORK_INSTALLED >= FLAT_LOCK_VERSION genesis makes the chain strict: an interior edit is a chain_broken FAIL at the following line.",
+    "lines": [
+      "{\"v\":1,\"id\":\"evt_20260920000000_a00001\",\"ts\":\"2026-09-20T00:00:00.000Z\",\"type\":\"FRAMEWORK_INSTALLED\",\"actor\":null,\"lane\":null,\"data\":{\"version\":\"1.98.0\",\"files\":0},\"prev_hash\":null}",
+      "{\"v\":1,\"id\":\"evt_20260920000001_a00002\",\"ts\":\"2026-09-20T00:00:01.000Z\",\"type\":\"SESSION_REGISTERED\",\"actor\":\"ses_20260920000001_aaaaaa\",\"lane\":null,\"data\":{\"role\":\"implementer\"},\"prev_hash\":\"2d12a2608a4b459ef38561da3c1205a9863813c9e5bf45a6186a91c30d7e44ea\"}",
+      "{\"v\":1,\"id\":\"evt_20260920000002_a00003\",\"ts\":\"2026-09-20T00:00:02.000Z\",\"type\":\"INBOX_MESSAGE\",\"actor\":\"ses_20260920000001_aaaaaa\",\"lane\":\"general\",\"data\":{\"text\":\"hello\"},\"triggered_by\":{\"rule\":\"fixture\",\"eventId\":\"evt_20260920000001_a00002\"},\"prev_hash\":\"b5f82707470eee7b41d6736ffba8c9cc3e61b153ca8bd83bac2eba6fea3f1b59\"}"
+    ],
+    "prevHashes": [
+      null,
+      "2d12a2608a4b459ef38561da3c1205a9863813c9e5bf45a6186a91c30d7e44ea",
+      "b5f82707470eee7b41d6736ffba8c9cc3e61b153ca8bd83bac2eba6fea3f1b59"
+    ],
+    "verifyClean": {
+      "chainIssues": 0,
+      "counts": {
+        "WARN": 0,
+        "FAIL": 0
+      }
+    },
+    "tamperedLine2": {
+      "issues": [
+        {
+          "kind": "chain_broken",
+          "level": "FAIL",
+          "line": 3
+        }
+      ]
+    }
+  },
+  "redactDataPayload": [
+    {
+      "name": "clean payload passes by reference",
+      "input": {
+        "text": "hello",
+        "n": 1,
+        "nested": {
+          "ok": true
+        }
+      },
+      "output": {
+        "text": "hello",
+        "n": 1,
+        "nested": {
+          "ok": true
+        }
+      },
+      "sameReference": true,
+      "storedLine": "{\"text\":\"hello\",\"n\":1,\"nested\":{\"ok\":true}}"
+    },
+    {
+      "name": "anthropic-shaped key in free text",
+      "input": {
+        "text": "token sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA end"
+      },
+      "output": {
+        "text": "token [REDACTED:anthropic-api-key] end"
+      },
+      "sameReference": false,
+      "storedLine": "{\"text\":\"token [REDACTED:anthropic-api-key] end\"}"
+    },
+    {
+      "name": "github fine-grained token",
+      "input": {
+        "note": "github_pat_1111111111111111111111_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "output": {
+        "note": "[REDACTED:github-fine-grained-token]"
+      },
+      "sameReference": false,
+      "storedLine": "{\"note\":\"[REDACTED:github-fine-grained-token]\"}"
+    },
+    {
+      "name": "sensitive key name with long single-token value",
+      "input": {
+        "apiKey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "output": {
+        "apiKey": "[REDACTED:value-under-sensitive-key]"
+      },
+      "sameReference": false,
+      "storedLine": "{\"apiKey\":\"[REDACTED:value-under-sensitive-key]\"}"
+    },
+    {
+      "name": "PEM block",
+      "input": {
+        "blob": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----"
+      },
+      "output": {
+        "blob": "[REDACTED:private-key-block]"
+      },
+      "sameReference": false,
+      "storedLine": "{\"blob\":\"[REDACTED:private-key-block]\"}"
+    }
+  ],
+  "idGrammar": [
+    {
+      "input": "ses_20260920000001_aaaaaa",
+      "isSid": true,
+      "isRefId": true
+    },
+    {
+      "input": "evt_20260920000001_a00002",
+      "isSid": false,
+      "isRefId": true
+    },
+    {
+      "input": "ses_x y",
+      "isSid": false,
+      "isRefId": false
+    },
+    {
+      "input": true,
+      "isSid": false,
+      "isRefId": false
+    },
+    {
+      "input": "",
+      "isSid": false,
+      "isRefId": false
+    }
+  ],
+  "_note": "Characterization vectors for the LEGACY development-spine evidence contract (RFC docs/57, ADR-004/ADR-010, work package P1). Frozen at the pinned commit with the real primitives; a diff here means the stored-line bytes, the prev_hash preimage, the redaction sweep, or the id grammar changed — which the RFC forbids as a side effect of runtime work. Refresh only in a change whose purpose is that contract change."
+}

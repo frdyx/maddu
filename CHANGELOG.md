@@ -11,6 +11,86 @@ narrative summary.
 
 ---
 
+## [v1.140.0] · 2026-09-20 · a runtime for products, decided before it is built
+
+Máddu has governed the agents that *build* software. A 2026-09-18 design plan
+proposes a second entry path: an opt-in runtime that an AI-powered product
+embeds to record model/tool activity as typed evidence, run fail-closed checks,
+and bind consequential actions at the host's real release boundary — and,
+later and separately, a shadow contribution economy. This release ships the
+decisions, the baseline audit, and the characterization tests that must exist
+before any of that code does. No runtime behaviour changes.
+
+### The RFC (docs/57)
+
+`docs/57-product-runtime-rfc.md` is the decision record: twelve ADRs (charter
+fit — a separately scoped contract, the hard rules keep governing the framework
+layer, host adapters stay host-owned; one opt-in subpath export of the existing
+package; in-memory + experimental file store with an explicit acknowledgement
+level and no durability claim before conformance tests; a new `maddu.runtime.v1`
+event namespace with the legacy hash preimage frozen first; shadow first and
+fail-closed when enforced, single-use bound decision handles; economy off by
+default with credits, reliability, integrity incidents and authority as four
+records; host-issued principal lineage; references-only evidence; recommendation
+only; characterize before sharing code; the core candidate set with the legacy residuals declared rather than inherited; an audit evidence rule), the trust boundary, the contracts, the
+threat-model delta, work packages P0–P8 and the V01–V27 verification matrix.
+Every row is marked proposed. The full plan is kept verbatim under
+`docs/rfc/` (repo-only; linked by URL so the docs-indexed gate keeps resolving).
+
+### The P0 baseline audit (docs/rfc/2026-09-20-p0-baseline-audit.md)
+
+Eight scoped read-only auditors (A1 SDK isolation … A8 adoption/charter fit)
+plus a code-path cartographer ran on a lower-cost model against the pinned
+commit `227c69d`, each with an explicit file scope, a mandatory negative case
+and the plan's structured finding format; critical/high findings went to
+adversarial refuters on the session model; a completeness critic closed the
+round; the coordinator re-opened every anchor and labelled each finding
+`confirmed`, `design-decision`, `needs-reproduction` or `not-supported`. Two
+escalations were settled by reading the files the auditors were not given:
+`maddu ci` already fails closed when a pinned required gate resolves to no
+runnable gate — the blind spot is confined to the `goal done` / `plan complete`
+completion check — and the bridge is loopback-only with a write token, so a
+replayed approval decision needs same-machine token access. The report lists
+six small legacy fixes as candidates that need the operator's authorization
+(they change CLI behaviour) and does not apply any of them.
+
+### Characterization before extraction (P1)
+
+Three self-test scripts pin, at the baseline, what runtime work must never change
+as a side effect (audit A7-002 found no byte- or hash-level vector existed —
+the chain tests recomputed their expectations from the same run):
+
+- `scripts/test/legacy-evidence-vectors.mjs` + a frozen fixture: `hashLine`
+  vectors (UTF-8, trailing CR stripped, interior CR kept, NFC/NFD distinct);
+  the stored-line key order `v,id,ts,type,actor,lane,data[,triggered_by][,ws],
+  prev_hash` and the ws-stamp rules (genesis ws-less; `ws_<16 hex>` on every
+  later line, inside the `prev_hash` preimage); a strict three-line segment that
+  verifies clean byte for byte; a one-byte interior edit → `chain_broken` FAIL at
+  the following line; a stripped `prev_hash` → `chain_stripped` FAIL; the
+  documented limit that a dropped tail verifies clean; exact redaction bytes for
+  four secret shapes and by-reference pass-through for clean data; the id
+  grammar; a tail-only edit (clean, the documented residual), a torn trailing
+  line (`torn_trailing_line` FAIL) and a well-linked duplicate id
+  (`duplicate_id` FAIL). 57 assertions.
+- `scripts/test/runtime-core-import-boundary.mjs`: for the candidate core set
+  (`spine-append-core`, `append-lock`, `event-schema`, `id-grammar`,
+  `secret-scan`) the import graph stays inside allowed Node builtins and the
+  set, ambient reads are pinned shrink-only (A1-001: `append-lock` reads
+  `os.hostname()` and `MADDU_LOCK_BODYLESS_GRACE_MS` at load), and a child node
+  imports every module from a fresh non-git directory with a scrubbed
+  environment, calls the pure entry points, writes nothing and adds no
+  `globalThis` property. 44 assertions.
+- `scripts/test/legacy-boundary-characterization.mjs`: pins two behaviours the
+  audit confirmed so their fix PRs show as intentional diffs — a `GATE_RAN`
+  receipt append that throws is swallowed (verdict returned, no receipt,
+  nothing on the result says so; a control run lands one), and
+  `POST /bridge/approvals/respond` appends a decision for a never-requested
+  id twice with `200` while `spine verify` flags both rows as
+  `orphan_approval_decided` afterwards. 11 assertions.
+
+All three are auto-discovered by the quick profile and run in CI.
+---
+
 ## [v1.139.0] · 2026-09-13 · what the verify round left open
 
 The 2026-09-13 verify-only round over the audit register classified 12 of its
