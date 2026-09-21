@@ -26,4 +26,11 @@ export { EVIDENCE_CLASSES, DEFAULT_BOUND, MAX_TIMEOUT_MS, LifecycleError, GateRe
 
 export { gateSetDigest, freezeGateSet, bindManifest } from './lifecycle/manifest.mjs';
 
-export { Run, createRuntime } from './lifecycle/run.mjs';
+export { RESERVED_TYPES, Run, createRuntime } from './lifecycle/run.mjs';
+
+export {
+  HANDLE_VERSION, DEFAULT_TTL_MS, MAX_TTL_MS, APPROVAL_DECISIONS,
+  freezePolicy, actionDigest, hmacSigner, encodeHandle, verifyHandle, decide, recordApproval,
+} from './execution/decision.mjs';
+
+export { PERFORM_OUTCOMES, execute, release, reconcile, unresolvedOperations } from './execution/boundary.mjs';

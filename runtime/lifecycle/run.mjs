@@ -47,8 +47,14 @@ import { freezeGateSet, bindManifest } from './manifest.mjs';
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const HEX64_RE = /^[0-9a-f]{64}$/;
 const IDENTITY_KEYS = ['tenant', 'product', 'principal', 'agentVersion'];
-// Event types the lifecycle owns; record() refuses them.
-const RESERVED_TYPES = Object.freeze(['RUN_STARTED', 'RUN_COMPLETED', 'RUN_FAILED', 'RUN_CANCELLED', 'CHECK_STARTED', 'CHECK_FINISHED']);
+// Event types the lifecycle (P3) and the decision/boundary functions (P4,
+// runtime/execution) own; record() refuses them. A public record() of a
+// decision, an approval or an action is not an enforcement API.
+export const RESERVED_TYPES = Object.freeze([
+  'RUN_STARTED', 'RUN_COMPLETED', 'RUN_FAILED', 'RUN_CANCELLED', 'CHECK_STARTED', 'CHECK_FINISHED',
+  'ACTION_PROPOSED', 'ACTION_DECIDED', 'ACTION_STARTED', 'ACTION_FINISHED',
+  'APPROVAL_REQUESTED', 'APPROVAL_DECIDED', 'OUTPUT_DECIDED', 'OUTPUT_DELIVERY_OBSERVED', 'OUTCOME_RECONCILED',
+]);
 const ACK_RANK = { buffered: 0, written: 1, durable: 2 };
 
 function isId(v) { return typeof v === 'string' && ID_RE.test(v); }
