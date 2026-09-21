@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { hermeticEnv } from './_hermetic-env.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LIB = path.resolve(__dirname, '..', '..', 'template', 'maddu', 'runtime', 'lib');
@@ -194,7 +195,10 @@ function lazyReadsProbeScript() {
 
 async function lazyReadsProbe() {
   const res = await new Promise((resolve) => {
-    const child = spawn(process.execPath, ['--input-type=module', '-e', lazyReadsProbeScript()], { cwd: os.tmpdir(), env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    // hermeticEnv(): the probe records READS of process.env inside the child, so
+    // it needs the ambient PATH/TMPDIR but must not carry the host session
+    // identity (hermetic-env-census forbids a bare `...process.env` spread).
+    const child = spawn(process.execPath, ['--input-type=module', '-e', lazyReadsProbeScript()], { cwd: os.tmpdir(), env: hermeticEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: -2, stdout, stderr: stderr + '\n[timeout 20s]' }); }, 20000);
     child.stdout.on('data', (b) => { stdout += b; });
