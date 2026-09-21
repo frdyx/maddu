@@ -30,6 +30,17 @@ async function readRequiredGates(repoRoot) {
   return null;
 }
 
+// The shared fail-closed resolver (template/maddu/runtime/lib/required-gates.mjs),
+// loaded like every other runtime lib. If the lib is absent (a pre-v1.146.0
+// install mid-upgrade) the resolution check is skipped — the same fail-open
+// posture as the rest of this file, never a throw.
+async function requiredIntegrityFor(runs, required) {
+  try {
+    const lib = await loadLib('required-gates.mjs');
+    return lib?.requiredGateIntegrity ? lib.requiredGateIntegrity(runs, required) : [];
+  } catch { return []; }
+}
+
 // Pure tier decision. Given the enforcement tier, the --force flag, and how many
 // critical/safety gates failed, decide whether completion proceeds and whether
 // gates even need running. Kept pure so the branching is unit-tested directly.
@@ -61,17 +72,31 @@ export async function checkGatesBeforeDone(repoRoot, { force = false } = {}) {
     // neutral; recording denials/gate-runs is a separate, deferred concern).
     const res = await gatesLib.runGates(repoRoot, { emitEvents: false });
     const runs = res.runs || [];
-    // Blocking mirrors `maddu ci` EXACTLY: only pinned-required gates block, and a
-    // repo with NO pinned profile blocks on nothing (ci is green there without
+    // Blocking mirrors `maddu ci`: only pinned-required gates block, and a repo
+    // with NO pinned profile blocks on nothing (ci is green there without
     // --strict). This keeps the source checkout's non-required env fails — and any
     // unprofiled consumer — from being trapped out of `goal done` / `plan complete`.
+    //
+    // Two kinds of red, both as in `ci` (v1.146.0, P0 audit A3-002 / A3-004):
+    //   • a required gate that RAN and failed;
+    //   • a required id that does not RESOLVE to exactly one fail-capable gate —
+    //     file missing or renamed, an operator override that threw at import
+    //     (its run is keyed by file path, never by the id it meant to provide),
+    //     a duplicate resolution, or a warn-severity gate. Until v1.146.0 this
+    //     case produced no run, so no failure, so completion proceeded — the
+    //     required guarantee had silently vanished. requiredGateIntegrity is the
+    //     single shared resolver, so the two commands cannot drift again.
     const required = await readRequiredGates(repoRoot);
     const blockingFails = Array.isArray(required)
       ? runs.filter((r) => r.status === 'fail' && required.includes(r.gateId))
       : [];
-    const failCount = blockingFails.length;
+    const integrity = await requiredIntegrityFor(runs, required);
+    const failed = [
+      ...blockingFails.map((r) => ({ gateId: r.gateId, message: r.message })),
+      ...integrity.map((f) => ({ gateId: f.gateId, message: f.message, resolution: f.reason })),
+    ];
+    const failCount = failed.length;
     const post = gateVerdict({ enforcement, force, failCount });
-    const failed = blockingFails.map((r) => ({ gateId: r.gateId, message: r.message }));
     return { ...post, enforcement, failCount, warnCount: res.warnCount || 0, failed: failCount ? failed : undefined };
   } catch {
     return { proceed: true, error: true }; // fail-open: never trap completion on our own error
