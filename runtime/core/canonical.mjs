@@ -170,4 +170,7 @@ export const DOMAINS = Object.freeze({
   SUBJECT: 'maddu.runtime.v1/subject',
   HEAD: 'maddu.runtime.v1/head',
   MANIFEST: 'maddu.runtime.v1/manifest',
+  // P3: a registered gate's implementation identity, and a frozen set of them.
+  GATE: 'maddu.runtime.v1/gate',
+  GATE_SET: 'maddu.runtime.v1/gate_set',
 });

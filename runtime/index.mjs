@@ -21,3 +21,9 @@ export { RUN_STATUS, reduceRun, reduceRunCanonical } from './core/reduce.mjs';
 export { DIMENSIONS, STATUSES, VERDICTS, manifestDigest, verifyRun } from './core/verify.mjs';
 
 export { ACK_LEVELS, DEFAULT_MAX_QUEUE, StoreError, BaseStore, MemoryStore, FileStore } from './execution/store.mjs';
+
+export { EVIDENCE_CLASSES, DEFAULT_BOUND, MAX_TIMEOUT_MS, LifecycleError, GateRegistry, implementationDigest, runGate, isPass } from './lifecycle/checks.mjs';
+
+export { gateSetDigest, freezeGateSet, bindManifest } from './lifecycle/manifest.mjs';
+
+export { Run, createRuntime } from './lifecycle/run.mjs';
