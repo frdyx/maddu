@@ -11,6 +11,55 @@ narrative summary.
 
 ---
 
+## [v1.151.0] · 2026-09-21 · distribution and docs for the embedded runtime (RFC P8)
+
+The runtime track's last package under `docs/57` (§12 row P8, §15 runtime
+MVP, V01/V25/V27): the public typed entry point, the adoption page, the
+README's second entry path, and an external-consumer fixture that proves
+the packed artifact works from outside the repository. No runtime behaviour
+changes; no economy code.
+
+- `runtime/index.d.ts` — hand-written types for every named export of
+  `maddu/runtime`, pinning the contract strings (`maddu.runtime.v1`,
+  `maddu.canonical.v1`, `maddu.runtime.receipt.v1`,
+  `maddu.runtime.decision.v1`). `package.json` `exports["./runtime"]`
+  gains a `types` condition; the default stays `runtime/index.mjs`. The
+  runtime is published under the existing `maddu` package (ADR-002); no
+  separate package name is claimed.
+- `docs/58-embedded-runtime.md` — *Embed Máddu in an AI-powered product*:
+  what the runtime is and is not, install and the only supported specifier,
+  the lifecycle in one page from the synthetic pilot, **supported modes**
+  (in-memory store; **experimental** file store with its ack levels; shadow
+  vs enforced boundaries; approval binding; single-use signed handles;
+  **unsigned** receipts; producer keys, witness, signatures and the economy
+  **not supplied**), the tested guarantees V01–V16/V25/V27 each with its
+  stated limit, the compatibility policy (contract strings are the surface,
+  additive within v1, a breaking change bumps the string and ships new
+  vectors), the threat-model delta with residuals, the pilot's baseline
+  counts (no latency, accuracy or savings claim) and the claims statement
+  the fixture audits. Linked from `00-index.md`.
+- README — "Two ways in": *use Máddu while building software* beside
+  *embed Máddu in an AI-powered product (opt-in)*, the latter stating
+  unsigned receipts, the experimental file store, no economy and no
+  performance claims; the documentation section links docs/58.
+- `scripts/test/runtime-external-consumer.mjs` — `npm pack` the checkout
+  under a hermetic environment and a private npm cache; the tarball carries
+  every `runtime/**` file and the d.ts and none of the tests or `.maddu/`;
+  a fresh consumer installs it **offline**, imports `maddu/runtime` only
+  and runs a mini pilot to a verified receipt, creating no files and no
+  `.maddu/` (V01) even under a hostile `MADDU_*` environment; the d.ts
+  declares every export of `runtime/index.mjs`; reinstalling in place still
+  runs (no earlier contract exists to migrate from); README and docs/58 are
+  audited for a signed receipt, a shipped economy, a latency/accuracy/
+  savings figure, production-grade storage or exactly-once (V27).
+
+Tests: `runtime-external-consumer` (16). With this, P0–P5 and P8 of the
+runtime track are on main; P6–P7 (the optional shadow economy) stay
+unstarted pending the operator's go/no-go on the P5 evidence (§15: "do not
+ship the economy yet" is a valid result).
+
+---
+
 ## [v1.150.0] · 2026-09-21 · the standalone synthetic pilot (RFC P5)
 
 The fourth runtime slice under `docs/57` (§11 pilot, §7.4 receipts, §14

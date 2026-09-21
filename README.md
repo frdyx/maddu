@@ -128,6 +128,12 @@ For any non-trivial feature or fix, the agent reaches for a **pipeline** by defa
 
 > **Power users & CI:** the verbose CLI is always there — it's what the slash commands dispatch under the hood. `./maddu/run start`, `./maddu/run register`, `./maddu/run slice-stop "…"`. Full walkthrough → [docs/01-getting-started.md](docs/01-getting-started.md).
 
+### Two ways in
+
+| Use Máddu **while building software** | Embed Máddu **in an AI-powered product** (opt-in) |
+|---|---|
+| The CLI, the slash commands, the cockpit and the bridge above: lanes, slice-stops, approvals, gates and the hash-chained spine that governs *agent development*. | `import … from 'maddu/runtime'`: a dependency-free evidence runtime your product calls. Per-run hash-chained events; registered checks whose `error` / `timeout` / `unknown` never read as `pass`; decisions bound to the exact artifact behind a single-use signed handle; a portable, **unsigned** receipt an independent verifier re-checks offline; a synthetic pilot as the reference integration. In-memory store supported, file store experimental, no economy, no performance claims. → [docs/58-embedded-runtime.md](docs/58-embedded-runtime.md) |
+
 ## The operator surface
 
 Inside Claude Code or Codex CLI, you drive everything from one line:
@@ -411,7 +417,7 @@ Full text and rationale → [docs/hard-rules.md](docs/hard-rules.md).
 | [Five-minute tour](docs/18-first-slice.md) — for new operators | [Hard rules](docs/hard-rules.md) — the 8+1 invariants | [Bridge endpoints](docs/05-bridge-endpoints.md) — full HTTP surface | [Troubleshooting](docs/13-troubleshooting.md) — common fixes |
 | [Cockpit tour](docs/04-cockpit-tour.md) — every route | [Governance](docs/20-governance.md) — gates, scope-lock, triggers | [Architecture](docs/15-architecture.md) — two-process model, tamper-detection | [Threat model](docs/34-threat-model.md) — the boundaries Máddu defends |
 
-Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Full version history → [CHANGELOG.md](CHANGELOG.md).
+Embedding the runtime in a product → [docs/58-embedded-runtime.md](docs/58-embedded-runtime.md) (supported modes, tested guarantees and their limits, compatibility policy); its design → [docs/57-product-runtime-rfc.md](docs/57-product-runtime-rfc.md). Design tokens, typography, motion → [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md). Full version history → [CHANGELOG.md](CHANGELOG.md).
 
 ## Why the name
 
