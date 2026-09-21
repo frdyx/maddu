@@ -3,6 +3,7 @@
   "modules": [
     { "name": "bin", "paths": ["bin/**"] },
     { "name": "commands", "paths": ["commands/**"] },
+    { "name": "runtime", "paths": ["runtime/**"] },
     { "name": "scripts", "paths": ["scripts/**"] },
     { "name": "runtime-libs", "paths": ["template/maddu/runtime/lib/**"] },
     { "name": "gates", "paths": ["template/maddu/runtime/gates/**"] },
@@ -20,7 +21,8 @@
     { "from": "plugins", "allow": ["runtime-libs"] },
     { "from": "cockpit", "allow": [] },
     { "from": "runtime-libs", "allow": [] },
-    { "from": "scripts", "allow": ["commands", "runtime-libs", "gates", "bridge", "cockpit"] },
+    { "from": "runtime", "allow": [] },
+    { "from": "scripts", "allow": ["commands", "runtime-libs", "gates", "bridge", "cockpit", "runtime"] },
     { "from": "agent-briefs", "allow": [] },
     { "from": "docs", "allow": [] }
   ],

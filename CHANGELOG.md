@@ -11,6 +11,50 @@ narrative summary.
 
 ---
 
+## [v1.147.0] · 2026-09-21 · the runtime evidence core (RFC P2, slice 1)
+
+First runtime code under the product-runtime RFC (`docs/57`, ADR-002/003/004):
+a new `runtime/` tree, published as the opt-in subpath export `maddu/runtime`
+(`package.json` gains its first `exports` map; every existing deep import keeps
+working through `./*`). Nothing under `runtime/` imports the development
+spine, the CLI or the bridge, and `.maddu/config/architecture.json` pins that
+(`runtime` may import nothing; only `scripts` may import `runtime`).
+
+- `runtime/core/canonical.mjs` — canonical JSON (sorted keys, finite numbers,
+  rejects undefined/BigInt/Date/cycles/duplicate keys) and domain-separated
+  sha256 digests. Pinned by `scripts/test/__fixtures__/runtime-canonical-
+  vectors.json`, which an independent implementation must reproduce byte for
+  byte.
+- `runtime/core/envelope.mjs` — the `maddu.runtime.v1` envelope: identity tuple
+  (tenant, product, principal, agentVersion), per-run `seq`, `prev` commitment,
+  explicit producer, bounded payload (64 KiB), closed runtime vocabulary plus
+  namespaced `app.*` events.
+- `runtime/core/reduce.mjs` — pure reducer; same events → byte-identical state
+  (V03). Gaps, broken links, replays, events after the terminal, double starts
+  and foreign runs are reported and the run is `incomplete`/`invalid`, never
+  repaired (V04).
+- `runtime/core/verify.mjs` — six-dimension verifier (bytes, sequence, gate
+  coverage against a manifest, producer authority, external witness,
+  availability). Every unsupplied input is `not_supplied`, damage is
+  `limited`; the verdict is `verified` only when bytes, sequence, coverage and
+  availability all pass. Producer keys and witnesses are not implemented in
+  this slice and say so.
+- `runtime/execution/store.mjs` — the append-store contract: per-run
+  serialisation, `expectedHead` compare-and-swap, one operation key per run
+  (V12), terminal closes the run, explicit ack level (`buffered` for
+  `MemoryStore`; `durable` after fdatasync, or `written` when the platform
+  cannot sync the directory, for the experimental `FileStore`). A torn tail
+  or corrupt line is reported with the readable prefix served unchanged and
+  appends refused (`torn_tail`); the store never rewrites bytes (V05).
+
+Tests: `runtime-core-canonical` (74), `runtime-core-envelope-reduce` (72),
+`runtime-execution-store` (62) — tamper, gap, replay, concurrency (41 parallel
+appends), stale head, duplicate operation, torn tail, corrupt line, cross-
+instance reload. No CLI, bridge or cockpit behaviour changes; the development
+spine and its legacy vectors are untouched.
+
+---
+
 ## [v1.146.0] · 2026-09-21 · a required gate that cannot run is red everywhere
 
 Sixth and last of the P0-audit fixes (findings A3-002 / A3-004). `maddu goal

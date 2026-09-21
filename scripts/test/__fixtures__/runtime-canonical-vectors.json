@@ -1,0 +1,231 @@
+{
+  "contract": "maddu.canonical.v1",
+  "encode": [
+    {
+      "name": "empty object",
+      "value": {},
+      "canonical": "{}",
+      "eventDigest": "88936bbd44d7dddd32081cd3b49978d56114317c9a5a7b2754fbb0fe97ec49cb",
+      "payloadDigest": "750577a00dc8977d00681d2d515aff16271adcef143f52a08cb1f4d5114f033b"
+    },
+    {
+      "name": "key order is code-unit sorted",
+      "value": {
+        "1": 5,
+        "b": 1,
+        "a": 2,
+        "B": 3,
+        "aa": 4
+      },
+      "canonical": "{\"1\":5,\"B\":3,\"a\":2,\"aa\":4,\"b\":1}",
+      "eventDigest": "2573b787e2918ba5bd7139b8e7ea4a0406024dd545a781901328643c084d6284",
+      "payloadDigest": "25d34f0e89ba23b7502a291d6a15d0369dde627088345d9a27c541d8dcbe0f7d"
+    },
+    {
+      "name": "nested sort and arrays keep order",
+      "value": {
+        "z": [
+          3,
+          1,
+          2
+        ],
+        "y": {
+          "d": null,
+          "c": [
+            true,
+            false
+          ]
+        }
+      },
+      "canonical": "{\"y\":{\"c\":[true,false],\"d\":null},\"z\":[3,1,2]}",
+      "eventDigest": "8fdf2730019bda4dcccf50735c8994931f1dd2c99e3d94292671577f06365a51",
+      "payloadDigest": "5d30414db8a646e9b0665365198c08f94d24780be6cc34dafa6749aaf4f67d37"
+    },
+    {
+      "name": "negative zero is zero",
+      "value": {
+        "n": 0
+      },
+      "canonical": "{\"n\":0}",
+      "eventDigest": "d48dad286c4bd9c2e24f22d195b2861cfb54fd48893c859e21a47c6e6574a4cb",
+      "payloadDigest": "42849825a4319a00c6fc8a7f99c7f58ae47ed51427d0a18d96e15737e36411e4"
+    },
+    {
+      "name": "shortest round-trip numbers",
+      "value": {
+        "a": 1e+21,
+        "b": 0.1,
+        "c": 1e-7,
+        "d": 123456789012345680000
+      },
+      "canonical": "{\"a\":1e+21,\"b\":0.1,\"c\":1e-7,\"d\":123456789012345680000}",
+      "eventDigest": "72bf0cfa835d0b84d4d2978e329d939a7081223804f3928514dc9ff8d9c42c5f",
+      "payloadDigest": "f9cf6bc6df6aedb4c7f918fe8767f1b355f4674f62aea818686faa4ded5aa75f"
+    },
+    {
+      "name": "string escaping",
+      "value": {
+        "s": "a\"b\\c\n\t\u0001 😀"
+      },
+      "canonical": "{\"s\":\"a\\\"b\\\\c\\n\\t\\u0001 😀\"}",
+      "eventDigest": "eec28e132b0798a592fc95167d0507ec928bc7dd35262ca8fc02eed2038d1c03",
+      "payloadDigest": "33adb4d4697e527baa4caa00181b5e906be5e22789f8ab20c0bc53eeec7d007e"
+    },
+    {
+      "name": "unicode not normalised",
+      "value": {
+        "nfc": "é",
+        "nfd": "é"
+      },
+      "canonical": "{\"nfc\":\"é\",\"nfd\":\"é\"}",
+      "eventDigest": "39726c1c1a1a0c00c7722abbcdc1d5bc8e6ccfded01ca655ebd42b891e052fe2",
+      "payloadDigest": "9fd7f7f348726da7dd43f2dc60620c6f3946e26537689d7e05f0b45c1a8d06d0"
+    },
+    {
+      "name": "top-level array",
+      "value": [
+        {
+          "b": 1,
+          "a": 1
+        },
+        "x",
+        null
+      ],
+      "canonical": "[{\"a\":1,\"b\":1},\"x\",null]",
+      "eventDigest": "973d6db35902451e4aef1ccf93d1e3bd32eaf9ecb325f5ddb7d0e8c2e8fe0c66",
+      "payloadDigest": "3090b8a4a7c50946fcdf396f210fdec0ae50d2ffa524d211ac9676163e37f22c"
+    },
+    {
+      "name": "top-level scalar",
+      "value": "plain",
+      "canonical": "\"plain\"",
+      "eventDigest": "13004c4d10fec6475b2dd80429dc4e524ed9131dad7cfff66e5cbf14423e09e3",
+      "payloadDigest": "0d07adecb93a1ba35c2253c231558f82c7de86003662230d240b4488f347c050"
+    }
+  ],
+  "reject": [
+    {
+      "name": "NaN",
+      "source": "({ n: NaN })",
+      "code": "non_finite_number",
+      "path": "$.n"
+    },
+    {
+      "name": "Infinity",
+      "source": "([Infinity])",
+      "code": "non_finite_number",
+      "path": "$[0]"
+    },
+    {
+      "name": "undefined property",
+      "source": "({ a: undefined })",
+      "code": "undefined_value",
+      "path": "$.a"
+    },
+    {
+      "name": "BigInt",
+      "source": "({ a: 1n })",
+      "code": "bigint_value",
+      "path": "$.a"
+    },
+    {
+      "name": "Date",
+      "source": "({ d: new Date(0) })",
+      "code": "non_plain_object",
+      "path": "$.d"
+    },
+    {
+      "name": "Map",
+      "source": "(new Map())",
+      "code": "non_plain_object",
+      "path": "$"
+    },
+    {
+      "name": "typed array",
+      "source": "({ b: new Uint8Array(2) })",
+      "code": "non_plain_object",
+      "path": "$.b"
+    },
+    {
+      "name": "function",
+      "source": "({ f: () => 1 })",
+      "code": "function_value",
+      "path": "$.f"
+    },
+    {
+      "name": "cycle",
+      "source": "(() => { const o = { a: {} }; o.a.back = o; return o; })()",
+      "code": "cycle",
+      "path": "$.a.back"
+    },
+    {
+      "name": "sparse array",
+      "source": "([1, , 3])",
+      "code": "sparse_array",
+      "path": "$[1]"
+    },
+    {
+      "name": "__proto__ own key",
+      "source": "(JSON.parse('{\"__proto__\": 1}'))",
+      "code": "forbidden_key",
+      "path": "$"
+    }
+  ],
+  "decodeReject": [
+    {
+      "name": "duplicate key",
+      "text": "{\"a\":1,\"a\":2}",
+      "code": "duplicate_key"
+    },
+    {
+      "name": "nested duplicate key",
+      "text": "{\"a\":{\"b\":1,\"b\":2}}",
+      "code": "duplicate_key"
+    },
+    {
+      "name": "duplicate key after array",
+      "text": "{\"a\":[{\"x\":1}],\"a\":2}",
+      "code": "duplicate_key"
+    },
+    {
+      "name": "whitespace is not canonical",
+      "text": "{\"a\": 1}",
+      "code": "not_canonical"
+    },
+    {
+      "name": "unsorted keys are not canonical",
+      "text": "{\"b\":1,\"a\":2}",
+      "code": "not_canonical"
+    },
+    {
+      "name": "exponent form is not canonical",
+      "text": "{\"a\":1E2}",
+      "code": "not_canonical"
+    },
+    {
+      "name": "invalid json",
+      "text": "{\"a\":",
+      "code": "invalid_json"
+    },
+    {
+      "name": "not text",
+      "text": null,
+      "code": "not_text"
+    }
+  ],
+  "domains": {
+    "EVENT": "maddu.runtime.v1/event",
+    "PAYLOAD": "maddu.runtime.v1/payload",
+    "SUBJECT": "maddu.runtime.v1/subject",
+    "HEAD": "maddu.runtime.v1/head",
+    "MANIFEST": "maddu.runtime.v1/manifest"
+  },
+  "domainSeparation": {
+    "value": {
+      "a": 1
+    },
+    "event": "18d418a2ab6a48f6d554d0016d5ff38d8df28180390d6abd66aedd766990a21e",
+    "payload": "b8a214efdffe514bf2b4db9f3d520d4ecc7a8724135beb0b76e0c2ef956d5fbc",
+    "subject": "bb99c74cd07b34d85f980d5dddeee67c3efc696f20817513c6319f838854c5d7"
+  }
+}
