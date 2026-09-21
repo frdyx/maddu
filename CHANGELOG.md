@@ -11,6 +11,59 @@ narrative summary.
 
 ---
 
+## [v1.148.0] · 2026-09-21 · run lifecycle and gate registry (RFC P3)
+
+The second runtime slice under `docs/57` (§6.2 lifecycle, §7.3 gate result
+contract, V06–V08): `runtime/lifecycle/` over the P2 store, exported through
+`maddu/runtime`. Nothing under `runtime/` imports anything else in the
+repository; the host still supplies every id and timestamp.
+
+- `runtime/lifecycle/checks.mjs` — `GateRegistry`: a gate is registered
+  through trusted configuration with an id, version, evidence class
+  (`deterministic` / `model_judged` / `human_review`, labelled apart), a time
+  and subject-size bound, and its check. The registry computes an
+  **implementation digest** over the declaration and the check's source (an
+  opaque bound/native function must bring an explicit digest), so a same-id
+  gate whose body, version or bound changed is a different gate. `runGate()`
+  is the only path from a check to a result and can never yield `pass` unless
+  the check returned `pass`: a throw is `error/threw`, exceeding the bound is
+  `timeout`, `undefined`/`true`/`'PASS'`/`'ok'` is `error/bad_result`, a
+  check may not assign `error`/`timeout`/`unknown` to itself,
+  `not_applicable` needs the gate's declared permission, cancellation is
+  `unknown/cancelled`, and a late result after a timeout is ignored.
+- `runtime/lifecycle/manifest.mjs` — `freezeGateSet()` pins the gates a run
+  opens against (ids, versions, implementation digests; fails closed on an
+  unregistered id), `bindManifest()` binds a required-gate manifest to one
+  exact subject and reuses the P2 verifier's `manifestDigest()` bytes, so a
+  P2 verifier reads P3 runs unchanged. Two new digest domains,
+  `maddu.runtime.v1/gate` and `/gate_set`; every existing domain and vector
+  is untouched.
+- `runtime/lifecycle/run.mjs` — `createRuntime({ store, gates, newId, now })`
+  and the `Run` handle. `startRun()` is idempotent per (run, key): the same
+  key and identity resumes without a second `RUN_STARTED`, a different key,
+  identity or gate set is `idempotency_mismatch`, and a concurrent double
+  start loses the store's compare-and-swap into the same rule. `evaluate()`
+  writes one `CHECK_STARTED`/`CHECK_FINISHED` pair per gate, each bound to the
+  subject digest, the frozen gate-set digest and the gate's implementation
+  digest, producer `check`, `causes` → the start id. A gate missing from the
+  live registry or one whose implementation digest moved is `unknown` and
+  its code never runs (V06); a refused evidence append is
+  `unknown/persist_failed` and the remaining gates are `not_evaluated`
+  without running (V07). `cancel()` aborts in-flight checks and lands
+  `RUN_CANCELLED` ahead of whatever they would have written; `complete()`
+  and `fail()` are the other terminals. `passed` is an input to a decision,
+  never a permission — decision policy is P4.
+
+Tests: `runtime-lifecycle-checks` (62), `runtime-lifecycle-run` (53) —
+registry digests, every non-pass path of the runner, frozen gate set,
+manifest binding, idempotent and concurrent start, redeploy with a missing and
+a changed gate, sink refusal mid-evaluation, cancellation mid-check, stale
+handle recovery, byte-identical streams from identical host input, FileStore
+re-read verifying `verified`. No CLI, bridge, cockpit or development-spine
+behaviour changes.
+
+---
+
 ## [v1.147.0] · 2026-09-21 · the runtime evidence core (RFC P2, slice 1)
 
 First runtime code under the product-runtime RFC (`docs/57`, ADR-002/003/004):
