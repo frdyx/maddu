@@ -11,6 +11,31 @@ narrative summary.
 
 ---
 
+## [v1.145.0] · 2026-09-21 · a decision that binds to a request
+
+Fifth of the six P0-audit fixes (finding A3-001). `POST
+/bridge/approvals/respond` appended an `APPROVAL_DECIDED` for any
+`approvalId` — never requested, or already decided — and did so again on a
+retry, while `maddu approval respond` had always refused both. The cockpit
+and every other bridge caller reached the route behind the loopback origin
+check and the per-boot capability token, so this was a consistency gap
+between two write paths rather than an open door, but a replayed or stale
+decision still landed permanently on the spine and only `spine verify`
+noticed afterwards (`orphan_approval_decided`, `duplicate_approval_decided`).
+
+The route now checks the projection exactly as the CLI does: an unknown id is
+refused with `404`, an already-decided one with `409` (whether an operator or a
+policy decided it), and an open request gets exactly one decision whose lane
+and tool come from the request, not from the caller's body. The same
+check-then-append shape as the CLI; single-use consumption inside the append
+lock is the runtime RFC's decision handle (ADR-005), not this route.
+
+Red first: the A3-001 characterization in
+`scripts/test/legacy-boundary-characterization.mjs` flipped to the intended
+behaviour (7/11 at the baseline, 11/11 now); `bridge-routes-approvals` gained
+a 404 row; `docs/05` documents the two refusals.
+---
+
 ## [v1.144.0] · 2026-09-21 · a checkpoint the spine saw first
 
 Fourth of the six P0-audit fixes (finding A5-002). `createCheckpoint()` wrote

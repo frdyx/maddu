@@ -115,7 +115,7 @@ instead of fishing fields out of `/bridge/status`.
 | GET | `/bridge/approvals` | — | `{open[], ledger[], policies[]}` |
 | GET | `/bridge/approvals/<id>` | — | `{status: 'open'|'decided', ...}` |
 | POST | `/bridge/approvals/request` | `{tool, sessionId?, lane?, action?, summary?, payload?}` | `{approvalId, status, decision?, autoDecided, autoDecideSource?, open?}` |
-| POST | `/bridge/approvals/respond` | `{approvalId, decision, actor?, lane?, reason?, tool?}` | `{ok, event}` |
+| POST | `/bridge/approvals/respond` | `{approvalId, decision, actor?, reason?}` | `{ok, event}` · `404` unknown id · `409` already decided (lane/tool are taken from the request, not the body — v1.145.0) |
 | POST | `/bridge/approvals/policies` | `{tool, decision, actor?, lane?}` | `{ok, event}` |
 
 `decision` is one of `allow-once`, `allow-always`, `deny`, `deny-always` (request/respond) or `allow-always`, `deny`, `clear` (policies).

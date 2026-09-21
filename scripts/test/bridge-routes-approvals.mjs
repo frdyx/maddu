@@ -60,6 +60,16 @@ ok('exports routeApprovals', typeof routeApprovals === 'function');
   const h = await routeApprovals({ req: emptyReq('POST'), res, path: '/bridge/approvals/respond', repoRoot });
   ok('respond without approvalId → 400', h === true && res.cap.status === 400);
 }
+// v1.145.0 (P0 audit A3-001): a decision binds to a real, still-open request.
+// An unknown id is refused with 404 BEFORE any spine append — checked against
+// the source checkout's own projection with an id that cannot exist there.
+{
+  const res = mkRes();
+  const body = Buffer.from(JSON.stringify({ approvalId: 'evt_00000000000000_000000', decision: 'allow-once' }));
+  const req = { method: 'POST', headers: {}, async *[Symbol.asyncIterator]() { yield body; } };
+  const h = await routeApprovals({ req, res, path: '/bridge/approvals/respond', repoRoot });
+  ok('respond for an unknown approvalId → 404 (no append)', h === true && res.cap.status === 404, String(res.cap.status));
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
