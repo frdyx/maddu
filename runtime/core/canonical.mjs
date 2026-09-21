@@ -173,4 +173,7 @@ export const DOMAINS = Object.freeze({
   // P3: a registered gate's implementation identity, and a frozen set of them.
   GATE: 'maddu.runtime.v1/gate',
   GATE_SET: 'maddu.runtime.v1/gate_set',
+  // P4: an action's exact binding, and the preimage a decision handle is signed over.
+  ACTION: 'maddu.runtime.v1/action',
+  DECISION: 'maddu.runtime.v1/decision',
 });

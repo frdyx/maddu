@@ -11,6 +11,63 @@ narrative summary.
 
 ---
 
+## [v1.149.0] · 2026-09-21 · decision policy and the protected boundary (RFC P4)
+
+The third runtime slice under `docs/57` (ADR-005, §6.2 steps 5–8, §8 failure
+rules, V08–V11, V16): `runtime/execution/{decision,boundary}.mjs` over the P3
+lifecycle, exported through `maddu/runtime`. Nothing under `runtime/` imports
+anything else in the repository; the host supplies ids, timestamps and the
+signing key.
+
+- `runtime/execution/decision.mjs` — `freezePolicy()` pins per-boundary mode
+  (`enforced`, `requireApproval`, `ttlMs`). `decide()` is the only path to an
+  `ACTION_DECIDED` and to a handle: the action is bound exactly by
+  `actionDigest` over operation, boundary, parameters and resource version
+  (one `ACTION_PROPOSED` per operation; different parameters later is a
+  binding mismatch, V08); gate coverage is read from the **run's evidence**,
+  never from an object the caller hands back, and `fail`/`error`/`timeout`/
+  `unknown`/missing all withhold; a boundary that requires approval escalates
+  through one `APPROVAL_REQUESTED` and `recordApproval()` writes the human's
+  `APPROVAL_DECIDED` (producer `human`, single use, expiring) before the
+  decision completes (V09). Shadow boundaries record `decision: allow` with
+  `wouldDecide: withhold` and `enforced: false`, so would-block is measured,
+  not hidden. On allow a **handle** is issued: the binding (run, tenant,
+  principal, operation, boundary, subject digest, action digest, resource
+  version, manifest, gate set, policy version, expiry, decision event id)
+  under an HMAC by a host-supplied signer; `hmacSigner()` is a stdlib helper
+  the host may replace with its KMS. `verifyHandle()` checks the MAC in
+  constant time before trusting any field.
+- `runtime/execution/boundary.mjs` — `execute()` re-verifies the handle,
+  re-binds it to this run, tenant, principal, boundary, policy version, gate
+  set and to the parameters and resource version presented **now**, checks
+  expiry by the host clock, and lets the host's `authorize()` deny (anything
+  but `true` refuses, V10). Every refusal has zero side effects. The handle
+  is consumed by `ACTION_STARTED` under the store's one-operation-key rule,
+  so a replay is `unresolved` (crash window: reconcile, never re-perform,
+  V11) or `already_executed` (V09). A throwing or ill-typed `perform()` is
+  outcome `unknown`, never failure or rollback; a refused `ACTION_FINISHED`
+  append leaves the operation unresolved with the intent on record.
+  `release()` is the output boundary: the artifact presented now must
+  re-digest to the handle's subject digest (V08), `OUTPUT_DECIDED` consumes,
+  `OUTPUT_DELIVERY_OBSERVED` records delivery. `reconcile()` appends
+  `OUTCOME_RECONCILED` from durable host state for a started or
+  finished-unknown operation, never to `unknown`.
+- `run.record()` now refuses the action, approval, output and reconcile
+  families as well: a public `record('ACTION_DECIDED')` is not an enforcement
+  API. Two new digest domains, `maddu.runtime.v1/action` and `/decision`;
+  every earlier domain, vector and verifier byte is unchanged.
+
+Tests: `runtime-decision-policy` (51), `runtime-boundary-execute` (40) —
+forged, edited, truncated and re-keyed handles; evidence-only coverage;
+approvals with expiry, withhold and binding mismatch; zero side effects on
+every refusal; single-use consumption; perform throw and bad return; sink
+refusal after the effect; reconcile; release binding; a full
+decide → execute → release → complete run verifying `verified`. Decision
+policy stays host-owned data; no CLI, bridge, cockpit or development-spine
+behaviour changes.
+
+---
+
 ## [v1.148.0] · 2026-09-21 · run lifecycle and gate registry (RFC P3)
 
 The second runtime slice under `docs/57` (§6.2 lifecycle, §7.3 gate result
