@@ -6,10 +6,18 @@
 // In team-sync mode each replica writes only its own partition
 // (`.maddu/events/by-replica/<replicaId>/`). For `verify` to be allowed to treat
 // an intra-partition `prev_hash` fork as FATAL on import, that partition must have
-// a STRICTLY valid single-writer chain. The default single-machine spine append
-// path is deliberately lock-free (see spine.mjs:461-473) and is UNCHANGED by this
-// module — the funnel is taken ONLY in sync mode, and only around one partition's
-// read-then-write.
+// a STRICTLY valid single-writer chain. Originally (roadmap #12c) the funnel was
+// taken ONLY in sync mode and the default flat append stayed lock-free; since
+// v1.98.0 (audit P1) the flat path takes it too — spine-append-core.mjs
+// appendFlatChained() is the single locked+chained flat primitive that
+// spine.append() and the token wrapper route through — so EVERY writer, flat or
+// partitioned, computes `prev_hash` inside this lock. The critical section is
+// always one tail read + one O_APPEND write. (The stale "lock-free by design"
+// wording here outlived that change until v1.141.0.)
+//
+// This lock ORDERS writers; it says nothing about durability. What a resolved
+// append promises (handed to the OS, not fsync'd) is stated once, in spine.mjs
+// above append() under ACKNOWLEDGEMENT LEVEL.
 //
 // The real contenders for one partition are same-host only: the long-lived bridge
 // (runtime/server.js) + a short-lived CLI invocation. A replica never writes

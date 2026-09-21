@@ -612,6 +612,24 @@ async function lastEventLine(paths) {
   return null;
 }
 
+// ── ACKNOWLEDGEMENT LEVEL (v1.141.0, P0 audit A2-004 / A5-003) ──
+//
+// A resolved append() — and the primitives beneath it, appendFlatChained() and
+// appendPartitioned() in spine-append-core.mjs — means the stored line was
+// handed to the operating system: the O_APPEND write(2) completed and the append
+// lock was released. Nothing on this path calls fsync/fdatasync. The record
+// therefore survives the death of THIS PROCESS (the bytes sit in the OS page
+// cache), but NOT a kernel crash or power loss before the OS flushes them — and
+// no signal distinguishes those outcomes afterwards: a fully-written line lost by
+// the OS is byte-indistinguishable from a legitimately shorter chain. The
+// torn-tail detector (lastEventLineInDir / verify's torn_trailing_line) covers
+// the OTHER failure — a write interrupted mid-syscall that left an unterminated
+// final line — never a completed-then-lost one. This is the honest contract of a
+// local, files-only, git-versioned development spine. A caller that needs a
+// stronger level (a product-runtime evidence store) adds its own durable
+// acknowledgement rather than assuming one here — docs/57-product-runtime-rfc.md
+// ADR-003 and ADR-011.
+//
 // `maxWaitMs` bounds how long the APPEND LOCK is waited for, not the write.
 // Default Infinity — every existing caller is unchanged. A caller that must
 // stay responsive (the PreToolUse denial witness) passes a bound so a lock
