@@ -176,4 +176,6 @@ export const DOMAINS = Object.freeze({
   // P4: an action's exact binding, and the preimage a decision handle is signed over.
   ACTION: 'maddu.runtime.v1/action',
   DECISION: 'maddu.runtime.v1/decision',
+  // P5: a portable receipt bundle's own integrity digest.
+  RECEIPT: 'maddu.runtime.v1/receipt',
 });
