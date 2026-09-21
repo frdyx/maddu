@@ -40,7 +40,12 @@ async function newRepo() {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'maddu-chk-'));
   const git = (args) => execFileSync('git', args, { cwd: tmp, stdio: 'pipe', encoding: 'utf8' });
   git(['init', '-q']);
-  git(['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'fixture: genesis']);
+  // Repo-local identity: createCheckpoint runs `git tag -a`, which needs a
+  // committer identity just as a commit does. A `-c` on the genesis commit
+  // alone is not enough on a runner with no global git config (CI).
+  git(['config', 'user.name', 'fixture']);
+  git(['config', 'user.email', 'fixture@example.invalid']);
+  git(['commit', '-q', '--allow-empty', '-m', 'fixture: genesis']);
   await mkdir(path.join(tmp, '.maddu', 'events'), { recursive: true });
   return tmp;
 }
