@@ -85,23 +85,31 @@ async function main() {
     } finally { await rm(tmp, { recursive: true, force: true }); }
   }
 
-  // ── 2. /bridge/approvals/respond for a never-requested id (A3-001) ──
+  // ── 2. /bridge/approvals/respond binds to a real, still-open request (A3-001) ──
+  // FLIPPED in v1.145.0 (fix 5): at the baseline this route appended a decision
+  // for ANY approvalId, twice over, and only `spine verify` noticed afterwards.
+  // It now checks the projection like the CLI: unknown → 404, decided → 409,
+  // open → one APPROVAL_DECIDED carrying the request's lane and tool.
   {
     const tmp = await newTmp();
     try {
-      const approvalId = 'evt_20260920000000_000000';
+      const unknownId = 'evt_20260920000000_000000';
+      const r0 = mkRes();
+      const h0 = await routeApprovals({ req: jsonReq({ approvalId: unknownId, decision: 'allow-once' }), res: r0, path: '/bridge/approvals/respond', repoRoot: tmp });
+      ok('respond for a never-requested approvalId → 404 and no append', h0 === true && r0.cap.status === 404 && (await eventLines(tmp)).length === 0, String(r0.cap.status));
+
+      const request = await spine.append(tmp, { type: 'APPROVAL_REQUESTED', actor: 'ses_fixture', lane: 'general', data: { tool: 'install', action: 'npm install left-pad', summary: null, payload: null } });
       const r1 = mkRes();
-      const h1 = await routeApprovals({ req: jsonReq({ approvalId, decision: 'allow-once' }), res: r1, path: '/bridge/approvals/respond', repoRoot: tmp });
-      ok('CHARACTERIZATION (A3-001): respond for a never-requested approvalId → 200', h1 === true && r1.cap.status === 200, String(r1.cap.status));
+      const h1 = await routeApprovals({ req: jsonReq({ approvalId: request.id, decision: 'allow-once', lane: 'spoofed-lane', tool: 'spoofed-tool' }), res: r1, path: '/bridge/approvals/respond', repoRoot: tmp });
+      ok('respond for an open request → 200 {ok, event}', h1 === true && r1.cap.status === 200, String(r1.cap.status));
+      const decidedOnce = (await eventLines(tmp)).filter((e) => e.type === 'APPROVAL_DECIDED' && e.data.approvalId === request.id);
+      ok('the decision carries the request\'s lane and tool, not the caller\'s body values', decidedOnce.length === 1 && decidedOnce[0].lane === 'general' && decidedOnce[0].data.tool === 'install', JSON.stringify(decidedOnce.map((d) => [d.lane, d.data.tool])));
+
       const r2 = mkRes();
-      const h2 = await routeApprovals({ req: jsonReq({ approvalId, decision: 'deny' }), res: r2, path: '/bridge/approvals/respond', repoRoot: tmp });
-      ok('CHARACTERIZATION (A3-001): a second, conflicting respond for the same id → 200 again', h2 === true && r2.cap.status === 200, String(r2.cap.status));
-      const decided = (await eventLines(tmp)).filter((e) => e.type === 'APPROVAL_DECIDED' && e.data.approvalId === approvalId);
-      ok('CHARACTERIZATION (A3-001): two APPROVAL_DECIDED rows appended for the same never-requested id', decided.length === 2 && decided[0].data.decision === 'allow-once' && decided[1].data.decision === 'deny', JSON.stringify(decided.map((d) => d.data.decision)));
+      const h2 = await routeApprovals({ req: jsonReq({ approvalId: request.id, decision: 'deny' }), res: r2, path: '/bridge/approvals/respond', repoRoot: tmp });
+      ok('a second, conflicting respond for the same id → 409 and no second row', h2 === true && r2.cap.status === 409 && (await eventLines(tmp)).filter((e) => e.type === 'APPROVAL_DECIDED').length === 1, String(r2.cap.status));
       const v = await verify.verifySpine(tmp);
-      const orphans = v.issues.filter((i) => i.kind === 'orphan_approval_decided');
-      ok('detection after the fact: spine verify flags BOTH rows as orphan_approval_decided FAIL', orphans.length === 2 && orphans.every((i) => i.level === 'FAIL'), JSON.stringify(v.issues.map((i) => `${i.kind}:${i.level}`)));
-      ok('detection after the fact: the duplicate-decision rule does not fire for a never-requested id (orphan is the only signal)', !v.issues.some((i) => /duplicate_approval/.test(i.kind)), JSON.stringify(v.issues.map((i) => i.kind)));
+      ok('spine verify sees no orphan or duplicate decision', !v.issues.some((i) => /approval/.test(i.kind)), JSON.stringify(v.issues.map((i) => `${i.kind}:${i.level}`)));
     } finally { await rm(tmp, { recursive: true, force: true }); }
   }
 
