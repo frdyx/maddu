@@ -11,6 +11,31 @@ narrative summary.
 
 ---
 
+## [v1.152.0] · 2026-09-22 · docs: say what shipped
+
+Documentation only. After the runtime track landed (v1.140.0–v1.151.0), a
+fresh audit found four authored pages still describing the plan instead of
+the territory. No code, event bytes, gates, CLI or runtime behaviour change.
+
+- `docs/00-index.md` — the RFC row no longer opens with "Proposed, not
+  implemented"; it states that the runtime track (P0–P5, P8) is implemented,
+  the optional economy (P6–P7) is not started, and points to §15.1 and to
+  docs/58.
+- `docs/57-product-runtime-rfc.md` §6.3 — the API sketch is kept as written
+  on 2026-09-20, now under a status note naming the shipped surface and the
+  three ways it differs (decisions are functions over the run handle, not
+  methods on it; observation likewise; a policy is frozen data passed to
+  `decide`, not a registry the runtime holds).
+- `docs/34-threat-model.md` — a new closing section, *The embedded runtime*,
+  mapping each threat RFC §10 added to the suite that tests it and to what
+  remains the host's, and restating the administrator residual as a
+  cooperation boundary.
+- `docs/15-architecture.md` — the file layout now shows the second module
+  tree, `runtime/`, beside the development harness, and names the
+  architecture contract that keeps them apart.
+
+---
+
 ## [v1.151.0] · 2026-09-21 · distribution and docs for the embedded runtime (RFC P8)
 
 The runtime track's last package under `docs/57` (§12 row P8, §15 runtime

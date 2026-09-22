@@ -330,10 +330,24 @@ Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/)).
 9. Optional settlement consumes attributable terminal evidence. It cannot
    authorize or retroactively legitimize an action.
 
-### 6.3 Illustrative API shape — not implemented
+### 6.3 Illustrative API shape — the pre-implementation sketch
+
+> **Status (v1.151.0).** This sketch is kept as written on 2026-09-20 so the
+> decisions above can be read against it. The implemented surface is
+> `maddu/runtime` (`runtime/index.mjs`, types in `runtime/index.d.ts`) and
+> is documented in [58-embedded-runtime.md](58-embedded-runtime.md). It
+> differs from the sketch in three ways: decisions are separate functions
+> (`decide`, `execute`, `release`, `reconcile`) that take the run handle
+> rather than methods on it, so a run object never carries enforcement
+> authority; `observeModelCall` and `referenceContext` are likewise
+> functions over the run; and a policy is frozen data passed to `decide`,
+> not a registry the runtime holds. Cancellation, typed errors, retry
+> behaviour and durability acknowledgements — the open items named below —
+> are specified in the P3 and P4 CHANGELOG entries and pinned by their
+> suites.
 
 ```ts
-// Design sketch only. No package with this contract exists.
+// Design sketch only (2026-09-20). The shipped surface is in docs/58.
 const runtime = createRuntime({
   store: hostEvidenceStore,
   policies: approvedPolicyRegistry,

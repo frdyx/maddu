@@ -821,3 +821,32 @@ maddu trust report
 
 See also: `docs/06-hard-rules.md` for the 8+1 immutable rules; the
 cockpit `Trust` route at `?` → Trust for the live posture view.
+
+## The embedded runtime (v1.147.0–v1.151.0)
+
+The fifteen scenarios above cover the **developer-machine** posture: the
+CLI, the bridge, the cockpit and the spine under `.maddu/`. The opt-in
+embedded runtime (`maddu/runtime`, [58-embedded-runtime.md](58-embedded-runtime.md))
+runs inside a **product process** instead, and the RFC that designed it
+([57-product-runtime-rfc.md](57-product-runtime-rfc.md) §10) listed the
+threats that posture adds. Each is now a tested row rather than a scenario
+here, because the runtime's attack surface is an API a host calls, not a
+process an operator runs:
+
+| Threat the runtime adds | Where it is tested | What remains the host's |
+|---|---|---|
+| Model or tool output injects tenant ids, paths or policy text | `runtime-execution-observe`, pilot scenario B | identity comes from the host context; nothing parses model output for it |
+| A decision handle is forged, reused, or replayed with a changed scope | `runtime-decision-policy`, `runtime-boundary-execute` | custody of the signing key |
+| An action runs after a missing gate, a throwing gate, or a swallowed evidence append | `runtime-lifecycle-run`, `runtime-boundary-execute` | a check that spawns its own side effects |
+| A receipt is replaced wholesale or has its tail dropped | `runtime-core-receipt` | receipts are **unsigned**; the verifier says so on every result |
+| A handle or approval is reused across runs or tenants | `runtime-boundary-execute` | store-level tenant isolation in the host's adapter |
+| A crash between intent, effect and receipt duplicates the effect | `runtime-boundary-execute`, pilot scenario A | the durable idempotency state that `reconcile()` reads |
+| Concurrent appends, a stale writer, a torn write | `runtime-execution-store` | multi-process fencing in the host's adapter |
+| Output streams past a boundary that promised pre-release checks | pilot scenario A | the outbox is the host's; the runtime only makes the decided artifact the one with a handle |
+| A public claim exceeds the tested scope | `runtime-external-consumer` | — |
+
+The residual the RFC names as a non-goal stays a non-goal: a host
+administrator who controls the process, the credentials and the store can
+bypass an in-process runtime. That is a cooperation boundary, not an
+isolation boundary (RFC §6.1), and docs/58 says so under *Threat-model
+delta*.

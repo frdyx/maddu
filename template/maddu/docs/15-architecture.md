@@ -70,6 +70,21 @@ The crucial property: **every write goes through the spine first**. Projections 
     └── harness/                     # Node-only harness scripts
 ```
 
+**Not in this layout: the embedded product runtime.** Since v1.147.0 the
+`maddu` package carries a second, independent module tree, `runtime/` at
+the package root, published as the subpath export `maddu/runtime` (types in
+`runtime/index.d.ts`). It is what an AI-powered product imports from
+`node_modules`; `maddu init` and `maddu upgrade` never copy it into a
+repository, and it has nothing to do with the `maddu/runtime/` directory
+above, which is the development harness's bridge and libraries. The two
+trees do not import each other: `.maddu/config/architecture.json` declares
+the `runtime` module as importing nothing else in the repository and
+importable only by its tests, and the `architecture-contract` gate enforces
+that on every run of `maddu ci`. The runtime reads no git repository, no
+`.maddu/` state and no environment; its evidence lives wherever the host's
+store adapter puts it. What it is and what it guarantees →
+[58-embedded-runtime.md](58-embedded-runtime.md).
+
 ## Subprocess workers
 
 When the bridge spawns a worker via `POST /bridge/runtimes/<name>/spawn`:
