@@ -604,5 +604,12 @@
     "fixed_in": "1.151.0",
     "consumer_impact": "maddu/runtime resolves types through package.json exports (runtime/index.d.ts, every named export declared, contract strings pinned). docs/58-embedded-runtime.md is the adoption surface: supported modes (in-memory; experimental file store; shadow/enforced; approval binding; single-use signed handles; unsigned receipts; producer keys, witness, signatures and economy not supplied), tested guarantees with limits, compatibility policy, threat-model delta with residuals, pilot baseline counts. README gains the two-ways-in entry. No runtime behaviour changes; no new package name.",
     "ledger_ref": "branch claude/p8-distribution-docs off main (v1.150.0, b2a6ca6). Test: runtime-external-consumer 16/16 (npm pack under a hermetic env, offline install into a fresh consumer, mini pilot to a verified receipt via maddu/runtime only, no files or .maddu created, hostile MADDU_* env ignored, d.ts covers every export, in-place reinstall, README + docs/58 claims audit)."
+  },
+  {
+    "symptom": "After the runtime track shipped (v1.140.0–v1.151.0) four authored docs still described the plan instead of what exists: the docs index called the RFC \"Proposed, not implemented\"; RFC §6.3 said no package with this contract exists; the threat model (docs/34) had no runtime section although RFC §10 promised one per shipped package; the architecture doc (docs/15) did not mention the second module tree under runtime/ or the contract that keeps it apart from the harness.",
+    "area": "docs / index / RFC status / threat model / architecture",
+    "fixed_in": "1.152.0",
+    "consumer_impact": "Documentation only. No code, event bytes, gates, CLI or runtime behaviour change. Readers of the index, the RFC, the threat model and the architecture page now see the shipped state with pointers to docs/58 and the suites that test each runtime threat.",
+    "ledger_ref": "branch claude/docs-runtime-shipped off main (v1.151.0, 524207a). Verified by generate --check (mirror), docs-indexed gate, and the runtime-external-consumer claims audit (README/docs/58 unchanged)."
   }
 ]
