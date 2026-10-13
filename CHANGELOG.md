@@ -60,19 +60,22 @@ animations the same detector flagged. No CLI, bridge, event or gate change.
   workflow node, is paint-only; it carries a one-line
   `impeccable-disable-next-line` marker with that reason rather than a
   config ignore that would hide real width or height animations.
-- **New row** `scripts/test/cockpit-no-side-stripes.mjs`. It resolves the
-  border declarations of each CSS rule and each inline style the way CSS
-  does (shorthands in any order, 1–4-value `border-width/-style/-color`,
-  logical sides, CSS's defaults for what a shorthand omits) and fails on a
-  visible left or right border of 2 px+ that is wider than the top edge or
-  a different colour from it — in `cockpit.css`, `.html` style blocks and
-  attributes, and every `.js` string literal, camelCase style property and
-  `setProperty` call (comments and regex literals skipped). Red at base (22
-  stripes); 23 planted stripe shapes caught and 16 harmless ones passed,
-  including the transparent selection marker, `blockquote` rules, full
-  borders, `none`/`hidden` styles and commented-out code. Known limit: a
-  border composed across separate rules is not resolved. Authored by the
-  implementer, not a separate actor; hardened after the Codex review.
+- **New row** `scripts/test/cockpit-no-side-stripes.mjs` — a regression
+  tripwire for the ways cockpit code writes borders, not a CSS engine.
+  Within one rule or one inline style it reads border shorthands in any
+  token order (with CSS's defaults for what they omit), the 1–4-value box
+  forms, `border-inline*` and the longhands, and fails on a visible left or
+  right border of 2 px+ that is wider than the top edge or spelled in a
+  different colour. It reads `cockpit.css`, `.html` style blocks, attributes
+  and scripts, and `.js` through a small lexer (comments and regex literals
+  skipped, escapes decoded): inline styles, `style="…"` in markup strings,
+  CSS rule strings, camelCase style properties and `setProperty`. Red at base
+  (22 stripes); 33 planted stripe shapes caught and 20 harmless ones passed,
+  and breaking any of 13 branches turns it red. Its header lists the known
+  limits: borders composed across rules, `!important`, CSS-wide keywords,
+  colours compared as text, units beyond px/em/rem, right-to-left sides and
+  several properties set through one JS object. Authored by the implementer,
+  not a separate actor; hardened over two Codex rounds.
 - Goldens re-captured for auth, imports, decisions, oversight and
   portfolio: nine attribute swaps, nothing else. `docs/DESIGN-SYSTEM.md`
   gains *Tone surfaces*.

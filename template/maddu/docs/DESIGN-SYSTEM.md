@@ -223,13 +223,14 @@ and border share the top edge.
   pill in the row says the tone in words.
 - **Never a stripe.** A 2 px+ coloured border down one side of a surface is the
   most recognisable tell of generated UI. `scripts/test/cockpit-no-side-stripes.mjs`
-  resolves each rule's (and each inline style's) border declarations the way CSS
-  does and fails on a visible left or right border of 2 px+ that is wider than
-  the top edge or a different colour from it. Two shapes are allowed: the
-  transparent left border that only the *selected* item in a list colours
-  (rail, workbench list, docs nav), and a rule that styles a `blockquote`
-  itself. A border composed across separate rules is not resolved, so keep a
-  surface's border declarations in one rule.
+  is the tripwire: within one rule or one inline style it fails on a visible
+  left or right border of 2 px+ that is wider than the top edge or a different
+  colour from it. Two shapes are allowed: the transparent left border that only
+  the *selected* item in a list colours (rail, workbench list, docs nav), and a
+  rule that styles a `blockquote` itself. It is not a CSS engine — its header
+  lists what it does not resolve (borders composed across rules, `!important`,
+  colours compared as text, among others) — so keep a surface's border
+  declarations together in one rule.
 
 ---
 
