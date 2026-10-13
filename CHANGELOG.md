@@ -67,15 +67,19 @@ animations the same detector flagged. No CLI, bridge, event or gate change.
   forms, `border-inline*` and the longhands, and fails on a visible left or
   right border of 2 px+ that is wider than the top edge or spelled in a
   different colour. It reads `cockpit.css`, `.html` style blocks, attributes
-  and scripts, and `.js` through a small lexer (comments and regex literals
-  skipped, escapes decoded): inline styles, `style="…"` in markup strings,
-  CSS rule strings, camelCase style properties and `setProperty`. Red at base
-  (22 stripes); 33 planted stripe shapes caught and 20 harmless ones passed,
-  and breaking any of 13 branches turns it red. Its header lists the known
-  limits: borders composed across rules, `!important`, CSS-wide keywords,
-  colours compared as text, units beyond px/em/rem, right-to-left sides and
-  several properties set through one JS object. Authored by the implementer,
-  not a separate actor; hardened over two Codex rounds.
+  and scripts, and `.js` through a small lexer that skips comments and most
+  regex literals: inline styles, `style="…"` in markup strings, CSS rule
+  strings, camelCase style properties and `setProperty`. Red at base (22
+  stripes); 33 planted stripe shapes caught and 20 harmless ones passed, and
+  breaking any of 14 branches turns it red. It is a heuristic with listed
+  gaps — its header names every known limit and whether it misses a stripe
+  or raises a false alarm (borders composed across rules, `!important`,
+  CSS-wide keywords, colours compared as text, units beyond px/em/rem,
+  right-to-left sides, several properties set through one JS object, and a
+  handful of quoting and lexing corner cases). Authored by the implementer,
+  not a separate actor. Codex reviewed it over three rounds (0 major
+  findings in any); the last round's minor edge cases are recorded in that
+  list rather than chased further.
 - Goldens re-captured for auth, imports, decisions, oversight and
   portfolio: nine attribute swaps, nothing else. `docs/DESIGN-SYSTEM.md`
   gains *Tone surfaces*.

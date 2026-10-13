@@ -37,23 +37,48 @@
 //     typographic rule of a quotation. A list that also names something else,
 //     a descendant of a blockquote, or `:has(blockquote)` is not exempt.
 //
-// KNOWN LIMITS — each can make the row MISS a stripe unless marked (flags):
-//   - borders composed across separate rules are not resolved;
+// KNOWN LIMITS. Each says which way it errs: MISSES (a real stripe passes) or
+// FLAGS (a border that draws no side stripe fails). Accepted residuals after
+// three Codex review rounds; none affects syntax the cockpit uses today.
+//   CSS resolution
+//   - borders composed across separate rules are not resolved: misses
+//     (`.a{border:1px solid}` + `.a{border-left-width:3px}`), and flags a
+//     stripe a later rule removes (`.x{border-left:3px solid red}`
+//     `.x{border-left:none}`);
 //   - `!important` priority, invalid values and CSS-wide keywords
-//     (initial/inherit/unset/revert) are read as ordinary values;
+//     (initial/inherit/unset/revert) are read as ordinary values: misses or
+//     flags, depending on which declaration wins in the browser;
 //   - colours are compared as text: only the keyword `transparent` is
 //     transparent, so `rgba(…, 0)`, `#rrggbb00` and a var() falling back to
 //     transparent count as colours (flags), and one colour spelled two ways
 //     counts as two (flags);
-//   - widths are read in px, em/rem at 16 px and thin/medium/thick; anything
-//     else counts as 3 px;
-//   - logical sides map left-to-right (the cockpit is LTR; `direction` is
-//     ignored);
-//   - in JS, each camelCase property is resolved on its own, so several
-//     border properties set through one object (`Object.assign(el.style, {…})`)
-//     are not combined (misses, or flags a later override); braces inside a
-//     comment or regex within a `${…}` can unbalance the interpolation; any
-//     string that spells out a stripe counts, even prose (flags).
+//   - widths are read in px, em/rem at 16 px and thin/medium/thick; any other
+//     unit counts as 3 px (flags `0pt`; misses a wide `pt` stripe beside an
+//     equal-looking top);
+//   - logical sides map left-to-right and `direction` is ignored: misses or
+//     flags in a right-to-left rule;
+//   - comment removal runs before string recognition, so a quoted `/*` … `*/`
+//     (`content:"/*"`) can erase real declarations: misses;
+//   - quoted values are blanked before rules are read, so an attribute
+//     selector with a quoted value (`blockquote[data-kind="quote"]`) is not
+//     recognised as styling a blockquote: flags;
+//   JS and HTML sources
+//   - each camelCase property is resolved on its own, so several border
+//     properties set through one object (`Object.assign(el.style, {…})`) are
+//     not combined: misses, or flags a later override;
+//   - a regex literal is recognised only after a token that makes it
+//     unambiguous; after `)` (`if (x) /re/`) it is read as a string: flags or
+//     misses;
+//   - hex, unicode and single-character escapes are decoded, but a line
+//     continuation (`\` + newline) is kept: misses;
+//   - any `<` in a string makes it markup, read only for `style="…"`
+//     attributes (`'--label:"<";border-left:3px solid red'`): misses;
+//   - in .html, `<!--` / `-->` are removed before scripts are extracted, so
+//     the delimiters inside a script's strings erase the code between them:
+//     misses;
+//   - braces inside a comment or regex within a `${…}` unbalance the
+//     interpolation: misses or flags;
+//   - any string that spells out a stripe counts, even prose: flags.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
@@ -321,7 +346,9 @@ const MUST_FLAG = [
   ['cockpit-views-x.js', 'const re = () => /"/; node.style.borderLeft = \'3px solid red\';'],
   ['cockpit-views-x.js', "host.innerHTML = '<div style=\"border-left: 3px solid red\">{count}</div>';"],
   ['cockpit-views-x.js', "host.innerHTML = '<div style=\"border-left:3px solid red\" data-note=\"border-left:none\"></div>';"],
-  ['cockpit-views-x.js', "const css = '.n { border-left: 3px solid red; }';"],
+  // Two rules in one string: only rule-wise parsing keeps .n's stripe (a flat
+  // declaration read would let .o's `none` override it).
+  ['cockpit-views-x.js', "const css = '.n { border-left: 3px solid red; } .o { border-left: none; }';"],
   ['x.html', '<div style="border-left:3px solid red">x</div>'],
   ['x.html', '<style>.o { border-left: 3px solid red; }</style>'],
   ['x.html', "<script>node.style.borderLeft = '3px solid red';</script>"],
