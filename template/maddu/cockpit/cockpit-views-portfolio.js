@@ -45,7 +45,7 @@ function projectCard(c) {
   const lastAge = humanAge(c && typeof c.lastSliceAgeMs === 'number' ? c.lastSliceAgeMs : null);
   const accent = drift ? 'var(--m-danger)' : (approvals > 0 || stuck > 0) ? 'var(--m-warn)' : 'var(--m-accent)';
 
-  return el('div', { style: `border:1px solid var(--m-line);border-left:3px solid ${accent};border-radius:var(--m-radius-sm,6px);padding:12px 14px;min-width:240px;flex:1 1 260px;max-width:360px;` }, [
+  return el('div', { class: 'm-tone', style: `--m-tone:${accent};padding:12px 14px;min-width:240px;flex:1 1 260px;max-width:360px;` }, [
     el('div', { style: 'display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;' }, [
       el('span', { style: 'font-family:var(--m-font-mono);font-size:13px;color:var(--m-fg-0);font-weight:600;' }, project),
       el('span', { style: `font-size:18px;font-weight:600;color:${percent === 100 ? 'var(--m-ok)' : 'var(--m-fg-1)'};` }, percent == null ? '—' : `${percent}%`),
@@ -93,7 +93,7 @@ export function renderPortfolio(ctx) {
         const kind = n && typeof n.kind === 'string' ? n.kind : 'attention';
         const detail = n && typeof n.detail === 'string' ? n.detail : kind;
         const color = kind === 'drift' || kind === 'stuck' ? 'var(--m-danger)' : 'var(--m-warn)';
-        return el('div', { style: `border:1px solid var(--m-line);border-left:3px solid ${color};border-radius:var(--m-radius-sm,6px);padding:8px 12px;` }, [
+        return el('div', { class: 'm-tone', style: `--m-tone:${color};padding:8px 12px;` }, [
           el('span', { style: `font-family:var(--m-font-mono);font-size:11px;color:${color};text-transform:uppercase;letter-spacing:.1em;margin-right:8px;` }, kind),
           el('span', { style: 'font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-1);' }, label),
           el('span', { style: 'font-size:12px;color:var(--m-fg-2);margin-left:8px;' }, detail),

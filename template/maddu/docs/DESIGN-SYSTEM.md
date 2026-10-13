@@ -201,6 +201,32 @@ Reference implementation: `.m-card` in the marketing landing page (lives in the
 bottom-left, matching its dual-corner glow exactly. Cockpit panels that carry a
 corner glow adopt the same pairing.
 
+### Tone surfaces
+
+How a surface says ok / warn / danger / accent. **The 1 px top hairline takes
+the tone, and a glow of the same hue lights the top-right corner.** It is the
+`.view .panel` signature with the hue swapped, so it obeys the law above: glow
+and border share the top edge.
+
+- **How.** Set `--m-tone` on the element (`--m-ok`, `--m-warn`, `--m-danger`,
+  `--m-accent`, `--m-accent-2`, `--m-fg-3`). `--m-tone-glow` derives from it on
+  the same element (a top-right radial at 10 % of the tone, fading out by 60 %)
+  and goes first in the background stack. `--m-tone` is registered with
+  `@property` as a `<color>`, so a live surface that changes tone (the
+  conductor's next command) cross-fades hairline and glow together. A view that
+  builds a surface inline uses the class form:
+  `class: 'm-tone', style: '--m-tone:var(--m-ok)'`.
+- **Nested status** inside a toned surface (the proposal card's enforcer line)
+  is a chip, not a second lit surface: tinted fill plus a tinted 1 px edge, the
+  pill language.
+- **Table rows** don't take a tone surface. The row stays neutral and the state
+  pill in the row says the tone in words.
+- **Never a stripe.** A 2 px+ coloured border down one side of a surface is the
+  most recognisable tell of generated UI. `scripts/test/cockpit-no-side-stripes.mjs`
+  fails on one in `cockpit.css` or in any inline view style. Two shapes are
+  allowed: the transparent left border that only the *selected* item in a list
+  colours (rail, workbench list, docs nav), and a `blockquote`'s rule.
+
 ---
 
 ## Motion

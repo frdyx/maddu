@@ -162,7 +162,7 @@ export function renderOversight(ctx) {
       // assert a false "chain BROKEN".
       mount.appendChild(el('div', { style: 'font-size:12px;color:var(--m-fg-3);' }, 'Record not loaded — run `maddu spine verify`.'));
     } else {
-      mount.appendChild(el('div', { style: `border:1px solid var(--m-line);border-left:3px solid ${intact ? 'var(--m-ok)' : 'var(--m-danger)'};border-radius:var(--m-radius-sm,6px);padding:10px 14px;` }, [
+      mount.appendChild(el('div', { class: 'm-tone', style: `--m-tone:${intact ? 'var(--m-ok)' : 'var(--m-danger)'};padding:10px 14px;` }, [
         el('div', { style: 'display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;' }, [
           el('span', { style: `font-size:14px;color:${intact ? 'var(--m-ok)' : 'var(--m-danger)'};` }, intact ? '✓' : '⚠'),
           el('span', { style: 'font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-1);' },
