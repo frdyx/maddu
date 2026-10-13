@@ -60,12 +60,19 @@ animations the same detector flagged. No CLI, bridge, event or gate change.
   workflow node, is paint-only; it carries a one-line
   `impeccable-disable-next-line` marker with that reason rather than a
   config ignore that would hide real width or height animations.
-- **New row** `scripts/test/cockpit-no-side-stripes.mjs`: no left/right or
-  inline-start/end border of 2 px+ with a colour in `cockpit.css` or any
-  inline view style. Red at base (22 stripes); controls catch 4 planted CSS
-  and 3 planted inline-JS shapes and pass the allowed ones (transparent
-  selection marker, blockquote, 1 px edges, comments). Authored by the
-  implementer, not a separate actor.
+- **New row** `scripts/test/cockpit-no-side-stripes.mjs`. It resolves the
+  border declarations of each CSS rule and each inline style the way CSS
+  does (shorthands in any order, 1–4-value `border-width/-style/-color`,
+  logical sides, CSS's defaults for what a shorthand omits) and fails on a
+  visible left or right border of 2 px+ that is wider than the top edge or
+  a different colour from it — in `cockpit.css`, `.html` style blocks and
+  attributes, and every `.js` string literal, camelCase style property and
+  `setProperty` call (comments and regex literals skipped). Red at base (22
+  stripes); 23 planted stripe shapes caught and 16 harmless ones passed,
+  including the transparent selection marker, `blockquote` rules, full
+  borders, `none`/`hidden` styles and commented-out code. Known limit: a
+  border composed across separate rules is not resolved. Authored by the
+  implementer, not a separate actor; hardened after the Codex review.
 - Goldens re-captured for auth, imports, decisions, oversight and
   portfolio: nine attribute swaps, nothing else. `docs/DESIGN-SYSTEM.md`
   gains *Tone surfaces*.
