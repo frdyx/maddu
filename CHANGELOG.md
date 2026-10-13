@@ -11,6 +11,81 @@ narrative summary.
 
 ---
 
+## [v1.153.0] · 2026-10-13 · tone without side stripes
+
+Cockpit design. A thick coloured border down one side of a card is the most
+recognisable tell of generated UI, and the cockpit had twenty-two: the
+nineteen impeccable's `side-tab` rule reported (thirteen in `cockpit.css`,
+six in inline view styles) and three thinner 2 px ones its per-line
+thresholds let through. They are gone, and so are the four layout-property
+animations the same detector flagged. No CLI, bridge, event or gate change.
+
+- **Tone surfaces.** A surface now says ok / warn / danger / accent with its
+  1 px top hairline plus a glow of the same hue in the top-right corner —
+  the `.view .panel` signature with the hue swapped, so glow and border share
+  the lit edge as the glow-reactive law requires. One registered
+  `@property --m-tone` (`<color>`) drives both, so a live surface that
+  changes tone (the conductor's next command) cross-fades them together.
+  `--m-tone-glow` derives on each element; `.m-tone` is the class form for
+  surfaces a view builds inline. Converted: toast, approval card,
+  conductor next-command, boss strip tile and next line, proposal card
+  (hover keeps the tone hairline), team-sync contention, docs TOC and
+  backlinks, the auth/imports token-boundary notes, the decisions and
+  oversight chain-integrity strips, and the portfolio cards and
+  needs-the-human rows. `.view .panel` became tone-aware with a
+  byte-equal default (6 % of `--m-accent-2` is `--m-accent-2-glow-bg`).
+- **Where a tone surface is wrong, no tone.** Claims-table rows drop both
+  the stripe and their dead `tone-*` class — the state pill already says
+  the tone in words, and `cockpit-style-liveness` caught the orphaned
+  modifier. The proposal card's nested enforcer line becomes a tinted
+  status chip (the pill language), not a second lit surface. Docs code
+  blocks and the prose lead line go neutral.
+- **Kept by design:** the transparent 2 px left border that only the
+  *selected* item in the rail, workbench list and docs nav colours
+  (selection state on a list row, not decoration on a card), and the docs
+  blockquote rule.
+- **Rail collapse** no longer animates `max-height`: `.rail-group` is a
+  two-row grid animating `grid-template-rows` `auto 1fr` ↔ `auto 0fr`,
+  with `align-content: start` (without it the head row stretched from
+  31 px to 138 px mid-collapse — measured frame by frame). The 800 px cap a
+  long group could hit is gone, and collapsed links take
+  `visibility: hidden` after the 200 ms so they leave the tab order, as
+  `aria-expanded="false"` already said.
+- **Bar fills** lose `transition: width`. It never ran: `bar()` and
+  `segBar()` build each fill at its final width and views rebuild on poll
+  (a `transitionrun` probe saw 0 runs across 12 bars on three routes over
+  36 s). No visible change, and no grow-in replaces it — it would replay
+  on every poll.
+- The one remaining detector hit, a `stroke-width` transition on an SVG
+  workflow node, is paint-only; it carries a one-line
+  `impeccable-disable-next-line` marker with that reason rather than a
+  config ignore that would hide real width or height animations.
+- **New row** `scripts/test/cockpit-no-side-stripes.mjs` — a regression
+  tripwire for the ways cockpit code writes borders, not a CSS engine.
+  Within one rule or one inline style it reads border shorthands in any
+  token order (with CSS's defaults for what they omit), the 1–4-value box
+  forms, `border-inline*` and the longhands, and fails on a visible left or
+  right border of 2 px+ that is wider than the top edge or spelled in a
+  different colour. It reads `cockpit.css`, `.html` style blocks, attributes
+  and scripts, and `.js` through a small lexer that skips comments and most
+  regex literals: inline styles, `style="…"` in markup strings, CSS rule
+  strings, camelCase style properties and `setProperty`. Red at base (22
+  stripes); 33 planted stripe shapes caught and 20 harmless ones passed, and
+  breaking any of 14 branches turns it red. It is a heuristic with listed
+  gaps — its header names every known limit and whether it misses a stripe
+  or raises a false alarm (borders composed across rules, `!important`,
+  CSS-wide keywords, colours compared as text, units beyond px/em/rem,
+  right-to-left sides, several properties set through one JS object, and a
+  handful of quoting and lexing corner cases). Authored by the implementer,
+  not a separate actor. Codex reviewed it over three rounds (0 major
+  findings in any); the last round's minor edge cases are recorded in that
+  list rather than chased further.
+- Goldens re-captured for auth, imports, decisions, oversight and
+  portfolio: nine attribute swaps, nothing else. `docs/DESIGN-SYSTEM.md`
+  gains *Tone surfaces*.
+
+---
+
 ## [v1.152.0] · 2026-09-22 · docs: say what shipped
 
 Documentation only. After the runtime track landed (v1.140.0–v1.151.0), a

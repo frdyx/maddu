@@ -91,7 +91,7 @@ export function renderDecisions(ctx) {
     const tampered = typeof v.tampered === 'number' ? v.tampered : 0;
     const contract = typeof v.contractVersion === 'string' ? v.contractVersion : null;
     if (events !== null) {
-      mount.appendChild(el('div', { style: `border:1px solid var(--m-line);border-left:3px solid ${intact ? 'var(--m-ok)' : 'var(--m-danger)'};border-radius:var(--m-radius-sm,6px);padding:8px 12px;margin-bottom:14px;` }, [
+      mount.appendChild(el('div', { class: 'm-tone', style: `--m-tone:${intact ? 'var(--m-ok)' : 'var(--m-danger)'};padding:8px 12px;margin-bottom:14px;` }, [
         el('span', { style: `font-size:13px;color:${intact ? 'var(--m-ok)' : 'var(--m-danger)'};` }, intact ? '✓' : '⚠'),
         el('span', { style: 'font-family:var(--m-font-mono);font-size:12px;color:var(--m-fg-1);margin-left:8px;' },
           `chain ${intact ? 'verified' : 'BROKEN'} · ${events} events · ${tampered} tampered${contract ? ` · contract ${contract}` : ''}`),

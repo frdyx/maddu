@@ -626,7 +626,9 @@ function renderClaimsTable(claims, reload, ctx) {
     const leaseLabel = c.leaseSeconds
       ? (c.leaseLeftMs == null ? `${c.leaseSeconds}s` : (c.leaseLeftMs < 0 ? `expired ${formatAge(-c.leaseLeftMs)}` : `${formatAge(c.leaseLeftMs)} left`))
       : '—';
-    const row = el('div', { class: `claims-row tone-${tone}` }, [
+    // The tone rides on the state pill below, in words; the row itself stays
+    // neutral (no side stripe — scripts/test/cockpit-no-side-stripes.mjs).
+    const row = el('div', { class: 'claims-row' }, [
       el('span', { class: 'claims-lane' }, c.lane),
       el('span', { class: 'claims-session' }, c.sessionLabel || c.sessionId),
       el('span', { class: 'claims-focus' }, c.focus || '—'),

@@ -575,7 +575,7 @@ export function renderAuth(ctx) {
   root.appendChild(el('h2', {}, 'Auth'));
   root.appendChild(el('p', {}, ROUTE_META.auth.description));
 
-  const note = el('div', { class: 'panel', style: 'border-left:3px solid var(--m-accent-warm);' }, [
+  const note = el('div', { class: 'panel', style: '--m-tone:var(--m-accent-warm);' }, [
     el('div', { class: 'panel-title', style: 'color:var(--m-accent-warm);' }, 'TOKEN BOUNDARY'),
     el('div', { class: 'event-actor', style: 'margin-top:6px;color:var(--m-fg-2);' }, [
       'Raw key values are never returned by /bridge/auth. The cockpit only sees label + last-4 chars. ',
@@ -721,7 +721,7 @@ export function renderImports(ctx) {
   root.appendChild(el('h2', {}, 'Imports'));
   root.appendChild(el('p', {}, ROUTE_META.imports.description));
 
-  root.appendChild(el('div', { class: 'panel', style: 'border-left:3px solid var(--m-accent-warm);' }, [
+  root.appendChild(el('div', { class: 'panel', style: '--m-tone:var(--m-accent-warm);' }, [
     el('div', { class: 'panel-title', style: 'color:var(--m-accent-warm);' }, 'TOKEN BOUNDARY'),
     el('div', { class: 'event-actor', style: 'margin-top:6px;color:var(--m-fg-2);' },
       'Any payload containing a key-shaped string is rejected entirely. The rejection log records the JSON path and pattern name only — never the value.'
