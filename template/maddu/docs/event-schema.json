@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.21.0",
+  "x-contractVersion": "1.22.0",
   "type": "object",
   "required": [
     "v",
@@ -222,7 +222,8 @@
         "MODEL_PROMOTION_APPROVED",
         "MODEL_RELEASED",
         "MODEL_ROLLED_BACK",
-        "HARNESS_CAPABILITY_OBSERVED"
+        "HARNESS_CAPABILITY_OBSERVED",
+        "SESSION_PARENT_ACKNOWLEDGED"
       ]
     },
     "actor": {
@@ -7334,6 +7335,38 @@
                   "string",
                   "null"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "SESSION_PARENT_ACKNOWLEDGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "An operator acknowledged, with a recorded reason, earlier session registrations whose parentSessionId resolves to no session on this spine (e.g. a parent id leaked in from another repo); verify reports exactly the listed earlier references as WARN instead of FAIL.",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "schemaVersion": {
+                "type": "number"
+              },
+              "parentSessionId": {
+                "type": "string"
+              },
+              "eventIds": {
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
               }
             }
           }

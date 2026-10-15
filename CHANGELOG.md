@@ -11,6 +11,102 @@ narrative summary.
 
 ---
 
+## [v1.154.0] · 2026-10-14 · a way out of a permanent unknown-parent FAIL
+
+Spine integrity. Session registrations recorded before v1.112.0 could name
+a `parentSessionId` that was registered in another repo's spine: an
+ambient `MADDU_PARENT_SESSION_ID` leaked across repos. Since v1.112.0
+(PR-B) registration drops a parent this spine never registered; it keeps
+one only when it can't read the session list. The old references stay on
+the append-only spine, and
+`spine verify` failed each one as `unknown_parent_session` with no way to
+clear it. One consumer (just upgraded from v1.92.2) had ten of them, all
+naming the same parent. Doctor stayed red for good, and every check that
+needs a verified chain stayed off: acceptance proofs, heavy-suite and
+project-test recency ("cannot trust recency from an unverified chain").
+
+- **`maddu spine acknowledge --parent-session <sid> --reason "…"`** appends
+  `SESSION_PARENT_ACKNOWLEDGED {schemaVersion, parentSessionId, eventIds,
+  reason}`.
+  - `eventIds` are the exact references the verifier flags for that parent
+    right now.
+  - The reason is required and secret-scanned, and a hit is refused.
+  - The verb then re-runs the verifier and checks every occurrence it
+    targeted; an id can occur twice. It finds each one by its position,
+    including one that a concurrent `spine sync init` moved into a replica
+    partition (the move keeps segment names and line numbers).
+    - An occurrence that another acknowledgement covered first, as when two
+      runs overlap, counts as done and is reported.
+    - So does one that no longer names an unknown parent because the
+      parent's registration is on the spine now, as after a sync imports it
+      (`resolved` in `--json`).
+    - One still unacknowledged makes the verb name the recorded event and
+      that reference, and exit 1. On a synced spine, this happens when a
+      reference from a replica whose clock runs ahead sorts after the
+      acknowledgement.
+  - It mirrors `maddu model regression ack`.
+- **`maddu spine acknowledge --list`** (read-only, `--json`) groups the
+  verifier's own `unknown_parent_session` findings by parent, with ids,
+  time span and how many are already acknowledged. Each row carries the
+  verifier's own level, event type and time.
+- **Verifier.** Each listed reference becomes
+  `unknown_parent_session_acknowledged` **WARN**, naming the
+  acknowledgement, so it stays on record. The rule is narrow:
+  - It covers only references that come *before* the acknowledgement, in
+    append order, or in merged order on a synced spine. A later reference
+    to the same parent is reported again: a FAIL, or a WARN on a synced
+    spine, where every merged-order referential finding is a WARN.
+  - It never touches another issue kind.
+  - A malformed acknowledgement (including a `schemaVersion` other than 1),
+    or one with no reason, is ignored as a whole, with a WARN.
+  - An id that matches nothing is a WARN of its own, and the event's other
+    ids still apply (`session_parent_ack_{malformed,unreasoned,unmatched}`).
+  - None of these is a FAIL, because that would recreate the trap.
+  - `unknown_parent_session` issues now carry `parentSessionId`,
+    `eventType` and `ts` as fields.
+- **Never ahead of time.** A parent with no current reference is refused
+  (exit 1). A rerun with nothing left to acknowledge is a declared no-op
+  (exit 0, no event). An explicit `--session` is validated on every path,
+  and a malformed one exits 2.
+- **The verifier stays self-contained.** The other option was to downgrade
+  when the parent appears in another registered workspace's spine. It was
+  rejected because the result would then depend on which repos a given
+  machine has registered, the same spine could verify differently on two
+  clones, and a parent found elsewhere still doesn't make the reference
+  valid here. Confirming the cross-repo origin is the operator's judgment,
+  and the reason records it.
+- **Where you'd look.** `spine verify` and doctor's `spine integrity` gate
+  name `maddu spine acknowledge --list` when these FAILs are present. The
+  gate scans a capped prefix of a large spine. When that prefix holds an
+  `unknown_parent_session` FAIL, the gate verifies the whole spine once
+  before reporting it, so an acknowledgement past the cap still counts.
+- Event contract **1.22.0** (one new frozen type, additive → minor;
+  baseline refreshed). `spine acknowledge --list` is a declared read
+  shape; the flag allowlist is regenerated.
+- Docs: `03-cli-reference` (`maddu spine`), `13-troubleshooting`
+  (`unknown_parent_session` and the three ack kinds), `34-threat-model`
+  (scenario 12: an acknowledgement is a downgrade the actor can write;
+  what bounds it, and what it does not prove), generated `event-schema`,
+  and the README's contract pins (196 types, v1.22.0).
+- The flag is `--parent-session`, not `--parent`. `--parent` is reserved
+  for "the parent of the session being registered", owned by `register`
+  and `session` only (a test enforces this). Here the value is a target,
+  so it gets a distinct name instead of loosening that rule.
+- Tests: new `spine-parent-ack`, 94 checks:
+  - the scope and position rules, ignored invalid acknowledgements and a
+    merged-order sync case;
+  - the real CLI through list, usage errors, refusals, success, the
+    idempotent rerun and the no-breach check;
+  - rows added from the Codex review: the `schemaVersion` rule, per-id
+    application, an acknowledgement past the gate's cap, a synced spine's
+    WARN level and clock skew, a duplicate id in `--list` and in the
+    read-back, an overlapping run's acknowledgement, and `--session` on
+    every path;
+  - read-back rows from its third round, each staging the race on a real
+    spine: a `sync init` between the scan and the append, a parent whose
+    registration a sync imported, mixed coverage of one id's two copies,
+    and per-event counts of unmatched ids.
+
 ## [v1.153.0] · 2026-10-13 · tone without side stripes
 
 Cockpit design. A thick coloured border down one side of a card is the most

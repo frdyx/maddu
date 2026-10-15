@@ -50,7 +50,7 @@ Commands:
   import         Subcommands: submit | scan | list | rejections. (Phase D2)
   workspace      Subcommands: add | list | remove | activate | show. (Multi-workspace cockpit)
   global         Subcommands: cron <add|list|show|enable|disable|remove> | policy <add|list|remove>. (Multi-workspace, machine-scope)
-  spine          Subcommands: verify [--json] | show <eventId>. Integrity check + event lookup against the append-only spine.
+  spine          Subcommands: verify [--json] | show <eventId> | acknowledge --list | acknowledge --parent-session <sid> --reason "…" | anchor | identity | oversight | sync | import. Integrity check + event lookup against the append-only spine.
   goal           Subcommands: set --objective "…" [--constraint "…" …] | show. (Governance Phase 1)
   phase          Subcommands: set --name "…" [--notes "…"] [--tier strict|standard|relaxed] | clear | show. A --tier makes the phase sterile: effective governance escalates while it is active. (v1.91.0)
   brief          Turn-start orientation digest. Writes .maddu/state/orientation.json + handoff.md. [--json] (Governance Phase 1)

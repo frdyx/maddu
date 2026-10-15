@@ -14,6 +14,8 @@
 //   maddu spine oversight [--json]         # the non-coder readout — skills fed vs
 //                                          #   WITHHELD (plain-language), on-goal drift,
 //                                          #   record-intact + independently checkable
+//   maddu spine acknowledge --list [--json]            # unknown parentSessionId refs (read-only)
+//   maddu spine acknowledge --parent-session <sid> --reason "…" # → SESSION_PARENT_ACKNOWLEDGED (v1.154.0)
 
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
@@ -59,9 +61,13 @@ export default async function spine(argv) {
   const repoRoot = await resolveRepoRoot(lib.paths);
 
   if (!sub) {
-    console.error('Usage: maddu spine <verify|show|oversight|anchor|identity|sync|import> [args]');
+    console.error('Usage: maddu spine <verify|show|oversight|anchor|identity|acknowledge|sync|import> [args]');
     process.exit(2);
   }
+
+  // ── acknowledge (v1.154.0) ── the append-only way out of a permanent
+  // unknown_parent_session FAIL; see spineAcknowledge below.
+  if (sub === 'acknowledge') return spineAcknowledge(lib, repoRoot, rest);
 
   // ── workspace identity (S2, v1.117.0) ──
   // `identity show` — read-only resolution readout (authority, mode, cache).
@@ -603,6 +609,14 @@ export default async function spine(argv) {
       console.log(`  ${levelTag(issue.level)}  ${ANSI.dim}${issue.kind}${ANSI.reset}  ${where}`);
       console.log(`        ${issue.detail}`);
     }
+    // A FAIL kind with an append-only remedy of its own — name it where the
+    // operator is already looking (v1.154.0).
+    const orphanParents = fails.filter((i) => i.kind === 'unknown_parent_session').length;
+    if (orphanParents) {
+      console.log();
+      console.log(`  ${ANSI.dim}${orphanParents} unknown_parent_session FAIL${orphanParents === 1 ? '' : 's'}: if the parent was registered in another repo (an ambient`);
+      console.log(`  MADDU_PARENT_SESSION_ID that leaked across repos), review with \`maddu spine acknowledge --list\`.${ANSI.reset}`);
+    }
     console.log();
     console.log(`  ${ANSI.bold}Summary:${ANSI.reset}  ${result.events} events · ${result.segments.length} segment${result.segments.length === 1 ? '' : 's'} · ${ANSI.fail}${result.counts.FAIL} fail${result.counts.FAIL === 1 ? '' : 's'}${ANSI.reset} · ${ANSI.warn}${result.counts.WARN} warn${result.counts.WARN === 1 ? '' : 's'}${ANSI.reset}`);
     process.exit(result.counts.FAIL > 0 ? 1 : 0);
@@ -641,7 +655,7 @@ export default async function spine(argv) {
     process.exit(0);
   }
 
-  console.error(`maddu spine: unknown subcommand "${sub}" (expected: verify | show | oversight | sync | import)`);
+  console.error(`maddu spine: unknown subcommand "${sub}" (expected: verify | show | oversight | anchor | identity | acknowledge | sync | import)`);
   process.exit(2);
 }
 
@@ -969,5 +983,256 @@ async function runAssessCeremony(lib, sa, repoRoot, sha, seqFlag) {
   console.log();
   console.log(`${levelTag('PASS')}  recorded ${ANSI.accent}${ev.id}${ANSI.reset}  ASSURANCE_ASSESSED level anchored`);
   console.log(`  ${ANSI.dim}non-authoritative — ledger note only; anyone consuming this must re-run the ceremony themselves.${ANSI.reset}`);
+  process.exit(0);
+}
+
+// Where one flagged reference sits. The same event id can occur twice (a
+// duplicate across replicas), so the read-back keys each occurrence by its
+// position, not by its id.
+const occurrenceKey = (o) => [o.replicaId ?? '', o.segment ?? '', o.line ?? '', o.eventId].join('\u0000');
+
+// The read-back after `spine acknowledge` appends: class every occurrence the
+// verb targeted against what verify reports now.
+//   applied   — acknowledged by this event;
+//   elsewhere — acknowledged by another event, such as an overlapping run that
+//               appended first (covered);
+//   resolved  — no longer flagged, and the parent is registered on the spine
+//               now (a sync imported its registration), so nothing is owed;
+//   pending   — still an unknown_parent_session, or gone with nothing to
+//               explain it.
+// An occurrence is found by its position. A `spine sync init` between the scan
+// and the append renames the flat segments into the new replica's partition,
+// keeping file names and line numbers, so a flat target is also looked for at
+// its segment and line in a partition. Copies there decide together: when they
+// disagree the occurrence stays pending, never matched by id alone.
+// A pending occurrence read in a synced spine's merged order carries
+// `mergedOrder: true`; sorting after the acknowledgement (its replica's clock
+// ahead) is then the likely cause. `unmatchedOwn` counts this event's
+// session_parent_ack_unmatched WARNs. Pure, and exported for the suite.
+export function classifyAckReadback(targets, issues, eventId, { parentSessionId = null, parentRegistered = false } = {}) {
+  const findings = issues.filter((i) => (i.kind === 'unknown_parent_session' || i.kind === 'unknown_parent_session_acknowledged')
+    && (parentSessionId === null || i.parentSessionId === parentSessionId));
+  const byKey = new Map(findings.map((i) => [occurrenceKey(i), i]));
+  const used = new Set();
+  const found = targets.map((t) => {
+    const i = byKey.get(occurrenceKey(t));
+    if (i) used.add(i);
+    return i ? [i] : null;
+  });
+  targets.forEach((t, n) => {
+    if (found[n] || t.replicaId) return;
+    const moved = findings.filter((i) => !used.has(i) && i.replicaId && i.segment === t.segment && i.line === t.line && i.eventId === t.eventId);
+    if (moved.length) found[n] = moved;
+  });
+  const out = { applied: [], elsewhere: [], resolved: [], pending: [] };
+  targets.forEach((t, n) => {
+    const copies = found[n] || [];
+    const same = copies.every((i) => i.kind === copies[0].kind && (i.acknowledgedBy || null) === (copies[0].acknowledgedBy || null));
+    const i = copies.length && same ? copies[0] : null;
+    if (i && i.kind === 'unknown_parent_session_acknowledged') {
+      if (i.acknowledgedBy === eventId) out.applied.push(t);
+      else out.elsewhere.push({ ...t, acknowledgedBy: i.acknowledgedBy || null });
+    } else if (!copies.length && parentRegistered) {
+      out.resolved.push(t);
+    } else {
+      out.pending.push({ ...t, mergedOrder: copies.some((c) => !!c.mergedOrder) });
+    }
+  });
+  const unique = (list) => [...new Set(list.map((o) => o.eventId))];
+  const unapplied = unique(out.pending);
+  out.ids = {
+    applied: unique(out.applied).filter((id) => !unapplied.includes(id)),
+    unapplied,
+    alreadyAcknowledged: out.elsewhere.map((o) => ({ eventId: o.eventId, acknowledgedBy: o.acknowledgedBy })),
+    resolved: unique(out.resolved).filter((id) => !unapplied.includes(id)),
+  };
+  out.unmatchedOwn = issues.filter((i) => i.kind === 'session_parent_ack_unmatched' && i.eventId === eventId).length;
+  out.ok = unapplied.length === 0;
+  return out;
+}
+
+// `maddu spine acknowledge` (v1.154.0). Session registrations recorded before
+// the v1.112.0 CP5 guard can name a parentSessionId that was registered in
+// ANOTHER repo's spine — an ambient MADDU_PARENT_SESSION_ID leaked across
+// repos. verify FAILs each one as unknown_parent_session and, the spine being
+// append-only, would FAIL forever, taking every check that needs a verified
+// chain down with it. This verb appends SESSION_PARENT_ACKNOWLEDGED: the
+// parent, the exact earlier event ids the verifier flags for it right now, and
+// the operator's reason. verify then reports those references as WARN.
+//
+// It reads only THIS repo's spine — never another workspace's — so the verdict
+// stays reproducible on any clone. It never pre-acknowledges: a parent with no
+// current reference is refused, and a reference that comes after the
+// acknowledgement is reported again (FAIL; WARN in a synced spine's merged
+// order, like every referential finding there).
+//
+//   --list [--json]                           read-only: what can be acknowledged
+//   --parent-session <sid> --reason "…" [--json]      append the acknowledgement
+async function spineAcknowledge(lib, repoRoot, rest) {
+  const { flags, positional } = parseFlags(rest);
+  const ACK_FLAGS = new Set(['parent-session', 'reason', 'list', 'json', 'session']);
+  const unknown = Object.keys(flags).filter((f) => !ACK_FLAGS.has(f));
+  const boolBad = ['list', 'json'].some((f) => flags[f] !== undefined && flags[f] !== true);
+  const parentBad = flags['parent-session'] !== undefined && (typeof flags['parent-session'] !== 'string' || !lib.spine.isRefId(flags['parent-session']));
+  const reasonBad = flags.reason !== undefined && typeof flags.reason !== 'string';
+  const modeBad = flags.list ? (flags['parent-session'] !== undefined || flags.reason !== undefined) : flags['parent-session'] === undefined;
+  if (unknown.length || boolBad || parentBad || reasonBad || modeBad || (positional && positional.length)) {
+    console.error('Usage: maddu spine acknowledge --list [--json]');
+    console.error('       maddu spine acknowledge --parent-session <sessionId> --reason "…" [--json]');
+    if (unknown.length) console.error(`  unknown flag(s): ${(await redactFlagNames(unknown)).map((f) => `--${f}`).join(', ')}`);
+    if (parentBad) console.error('  --parent-session requires a session id (the unknown parentSessionId verify reports)');
+    if (reasonBad) console.error('  --reason requires text');
+    if (!flags.list && flags['parent-session'] === undefined) console.error('  run --list first to see which parents can be acknowledged');
+    process.exit(2);
+  }
+  if (!lib.verify) {
+    console.error('verify.mjs not found in this install. Run `maddu upgrade` to enable spine verification.');
+    process.exit(2);
+  }
+  const json = !!flags.json;
+  const refuse = (msg, code = 1) => {
+    if (json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+    else console.error(`${ANSI.fail}Refused:${ANSI.reset} ${msg}`);
+    process.exit(code);
+  };
+
+  // An explicit --session is checked before any path can exit 0, so a malformed
+  // one is the same usage error whether or not anything is left to acknowledge.
+  // A session that simply doesn't resolve is not an error: the event is then
+  // appended with no actor (docs/34, scenario 12).
+  let actor = null;
+  try { actor = await resolveSessionId(repoRoot, flags, lib.sessionActive); }
+  catch (e) {
+    if (e && e.name === 'InvalidExplicitId') refuse(e.message, 2);
+    actor = null;
+  }
+
+  // Group the verifier's own findings by parent — the verifier is the single
+  // authority on what is an unknown parent, so this never re-derives it. Each
+  // row takes its level, type and time from the issue itself: in merged order
+  // (a synced spine) the level is WARN, and an id lookup could land on another
+  // event that carries the same id.
+  const scan = async () => {
+    const res = await lib.verify.verifySpine(repoRoot, { maxEvents: Infinity });
+    const byParent = new Map();
+    for (const i of res.issues) {
+      if (i.kind !== 'unknown_parent_session' && i.kind !== 'unknown_parent_session_acknowledged') continue;
+      if (typeof i.parentSessionId !== 'string') continue;
+      if (!byParent.has(i.parentSessionId)) byParent.set(i.parentSessionId, { pending: [], acknowledged: [] });
+      const row = { eventId: i.eventId, level: i.level, ts: i.ts ?? null, type: i.eventType ?? null,
+        segment: i.segment ?? null, line: i.line ?? null, replicaId: i.replicaId ?? null };
+      if (i.kind === 'unknown_parent_session') byParent.get(i.parentSessionId).pending.push(row);
+      else byParent.get(i.parentSessionId).acknowledged.push({ ...row, acknowledgedBy: i.acknowledgedBy || null });
+    }
+    return { res, byParent };
+  };
+
+  if (flags.list) {
+    const { res, byParent } = await scan();
+    const parents = [...byParent.entries()].map(([parentSessionId, g]) => ({ parentSessionId, ...g }));
+    if (json) {
+      process.stdout.write(JSON.stringify({ parents, counts: res.counts }, null, 2) + '\n');
+      process.exit(0);
+    }
+    console.log(`${ANSI.bold}Máddu spine acknowledge${ANSI.reset}  ${repoRoot}`);
+    console.log();
+    if (!parents.length) {
+      console.log(`  ${levelTag('PASS')}  no unknown parentSessionId references — nothing to acknowledge`);
+      process.exit(0);
+    }
+    for (const p of parents) {
+      console.log(`  ${ANSI.accent}${p.parentSessionId}${ANSI.reset}  ${p.pending.length} unacknowledged · ${p.acknowledged.length} acknowledged`);
+      if (p.pending.length) {
+        const tss = p.pending.map((r) => r.ts).filter(Boolean).sort();
+        if (tss.length) console.log(`    ${ANSI.dim}${fmtTs(tss[0])} → ${fmtTs(tss[tss.length - 1])}${ANSI.reset}`);
+        for (const r of p.pending) console.log(`    ${levelTag(r.level || 'FAIL')}  ${r.eventId}  ${ANSI.dim}${r.type || ''}${ANSI.reset}`);
+        console.log(`    ${ANSI.dim}if it was registered in another repo: maddu spine acknowledge --parent-session ${p.parentSessionId} --reason "…"${ANSI.reset}`);
+      }
+      for (const by of [...new Set(p.acknowledged.map((r) => r.acknowledgedBy))]) {
+        console.log(`    ${levelTag('WARN')}  ${p.acknowledged.filter((r) => r.acknowledgedBy === by).length} acknowledged by ${by}`);
+      }
+    }
+    process.exit(0);
+  }
+
+  const parent = flags['parent-session'];
+  const reason = flags.reason;
+  if (typeof reason !== 'string' || !reason.trim()) refuse('--reason "…" is required — the recorded judgment is the point', 2);
+  // The reason lands on the append-only spine; a pasted credential would be
+  // permanent. Same refuse-on-hit gate as `model regression ack`, fail closed.
+  let scanLib = null;
+  try { scanLib = await loadSecretScan(); } catch { /* handled below */ }
+  if (!scanLib || typeof scanLib.redactText !== 'function') refuse('secret scanner unavailable — the reason cannot be checked before it lands on the spine');
+  if (scanLib.redactText(reason).text !== reason) refuse('--reason contains a secret-shaped value — remove it; there is no skip flag');
+
+  const { byParent } = await scan();
+  const group = byParent.get(parent);
+  if (!group) refuse(`no unknown_parent_session reference names ${parent} on this spine — nothing to acknowledge (this verb never acknowledges ahead of time)`);
+  if (!group.pending.length) {
+    const { loadLibOptional } = await import('./_libroot.mjs');
+    (await loadLibOptional('mutation-witness.mjs'))?.witnessNoop?.('idempotent-parent-already-acknowledged');
+    if (json) {
+      process.stdout.write(JSON.stringify({ ok: true, already: true, parentSessionId: parent, acknowledged: group.acknowledged.length }) + '\n');
+      process.exit(0);
+    }
+    console.log(`nothing to acknowledge — all ${group.acknowledged.length} reference(s) to ${parent} are already acknowledged`);
+    process.exit(0);
+  }
+
+  const eventIds = [...new Set(group.pending.map((r) => r.eventId))];
+  let ev;
+  try {
+    ev = await lib.spine.append(repoRoot, {
+      type: lib.spine.EVENT_TYPES.SESSION_PARENT_ACKNOWLEDGED,
+      actor: actor || null,
+      lane: null,
+      data: { schemaVersion: 1, parentSessionId: parent, eventIds, reason },
+    });
+  } catch (e) {
+    refuse(`append failed: ${e?.message || e}`);
+  }
+  // Read back what verify says now, and check every occurrence the verb
+  // targeted, so the operator sees the effect rather than our claim of it.
+  // Covered by another acknowledgement first (an overlapping run), or resolved
+  // because the parent's registration is on the spine now, counts as done.
+  // Still unacknowledged is a failed application (exit 1): on a synced spine
+  // an acknowledgement sorts by its timestamp, so a reference from a replica
+  // whose clock runs ahead can land after it.
+  const after = await lib.verify.verifySpine(repoRoot, { maxEvents: Infinity });
+  let parentRegistered = false;
+  try {
+    const T = lib.spine.EVENT_TYPES;
+    parentRegistered = (await lib.spine.readAll(repoRoot))
+      .some((e) => e && (e.type === T.SESSION_REGISTERED || e.type === T.SESSION_AUTO_REGISTERED) && e.actor === parent);
+  } catch { /* unreadable: nothing is called resolved */ }
+  const rb = classifyAckReadback(group.pending, after.issues, ev.id, { parentSessionId: parent, parentRegistered });
+  const { applied, unapplied, alreadyAcknowledged, resolved } = rb.ids;
+  if (json) {
+    process.stdout.write(JSON.stringify({ ok: rb.ok, event: ev.id, parentSessionId: parent, eventIds, applied, alreadyAcknowledged, resolved, unapplied, verify: after.counts }, null, 2) + '\n');
+    process.exit(rb.ok ? 0 : 1);
+  }
+  const counts = `spine verify now: ${ANSI.fail}${after.counts.FAIL} fail${after.counts.FAIL === 1 ? '' : 's'}${ANSI.reset} · ${ANSI.warn}${after.counts.WARN} warn${after.counts.WARN === 1 ? '' : 's'}${ANSI.reset}`;
+  const coveredBy = [...new Set(alreadyAcknowledged.map((o) => o.acknowledgedBy))].join(', ');
+  const notes = [
+    alreadyAcknowledged.length ? `${alreadyAcknowledged.length} reference(s) were already acknowledged by ${coveredBy}, which got there first.` : '',
+    resolved.length ? `${resolved.length} reference(s) no longer name an unknown parent: ${parent} is registered on this spine now (a sync can import it), so they need no acknowledgement.` : '',
+    rb.unmatchedOwn ? `${rb.unmatchedOwn} of this event's ids matched no earlier unacknowledged reference, and verify shows each as a session_parent_ack_unmatched WARN.` : '',
+  ].filter(Boolean);
+  if (!rb.ok) {
+    console.error(`${ANSI.fail}Not applied:${ANSI.reset} recorded ${ev.id}, but ${unapplied.length} reference(s) to ${parent} are still unacknowledged:`);
+    for (const id of unapplied) console.error(`  ${id}`);
+    if (rb.pending.every((o) => o.mergedOrder)) {
+      console.error(`  They sort after the acknowledgement in the synced spine's merged order, which happens when their replica's clock is ahead. \`maddu spine acknowledge --list\` shows them; an acknowledgement that sorts after them covers them.`);
+    } else {
+      console.error(`  Run \`maddu spine verify\` to see how they are reported now.`);
+    }
+    for (const note of notes) console.error(`  ${note}`);
+    console.error(`  ${counts}`);
+    process.exit(1);
+  }
+  console.log(`${levelTag('PASS')}  acknowledged ${applied.length} reference(s) to ${ANSI.accent}${parent}${ANSI.reset}  ${ANSI.dim}(${ev.id})${ANSI.reset}`);
+  for (const note of notes) console.log(`  ${note}`);
+  console.log(`  ${counts}`);
+  console.log(`  ${ANSI.dim}The references stay on record as WARN unknown_parent_session_acknowledged; a later reference to this parent is reported again.${ANSI.reset}`);
   process.exit(0);
 }
