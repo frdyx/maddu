@@ -28,13 +28,15 @@ export function makeReferentialStep(ctx) {
 
   // An unknown parentSessionId is pushed as a FAIL and remembered, because a
   // later SESSION_PARENT_ACKNOWLEDGED may downgrade it in place. The issue
-  // carries the parent as a structured field so a caller (the acknowledge
-  // verb) can group by it without parsing the detail text.
+  // carries the parent, and the flagged event's own type and time, as
+  // structured fields, so a caller (the acknowledge verb) can group and
+  // describe it without parsing the detail text or looking the id up again:
+  // an id lookup can land on another event that carries the same id.
   const unknownParent = (ev, segName, lineNo) => {
     const parent = ev.data.parentSessionId;
     const it = issue('FAIL', 'unknown_parent_session',
       `${ev.id}: ${ev.type} references unknown parentSessionId ${parent}`,
-      { segment: segName, line: lineNo, eventId: ev.id, parentSessionId: parent });
+      { segment: segName, line: lineNo, eventId: ev.id, parentSessionId: parent, eventType: ev.type, ts: ev.ts ?? null });
     push(it);
     if (!parentOrphans.has(ev.id)) parentOrphans.set(ev.id, []);
     parentOrphans.get(ev.id).push({ issue: it, parentSessionId: parent, acknowledgedBy: null });
@@ -110,25 +112,30 @@ export function makeReferentialStep(ctx) {
           // the v1.112.0 CP5 guard. The spine is append-only, so this is the
           // only way such a FAIL can ever clear.
           //
-          // Scope is exact: each listed event id must already have been seen
-          // (it PRECEDES this event) as an unacknowledged reference to the
-          // SAME parent. Nothing later and no other issue kind is touched, so
-          // a fresh leak to an acknowledged parent still FAILs. A downgraded
-          // reference stays visible as a WARN naming this event.
+          // Scope is exact, and applied per listed id: each id must already
+          // have been seen (it PRECEDES this event) as an unacknowledged
+          // reference to the SAME parent. Nothing later and no other issue
+          // kind is touched, so a fresh leak to an acknowledged parent is
+          // reported again. A downgraded reference stays visible as a WARN
+          // naming this event; an id that matches nothing is a WARN of its own,
+          // and the event's other ids still apply.
           //
-          // A malformed or reasonless acknowledgement is ignored with a WARN,
-          // not a FAIL: it downgrades nothing, so nothing is hidden, and a
-          // FAIL here would recreate the permanent-FAIL trap this event exists
-          // to escape. (MODEL_REGRESSION_ACKNOWLEDGED FAILs instead; there the
-          // ack is a precondition for promotion, here it only relieves one.)
+          // A malformed or reasonless acknowledgement is ignored as a whole,
+          // with a WARN, not a FAIL: it downgrades nothing, so nothing is
+          // hidden, and a FAIL here would recreate the permanent-FAIL trap this
+          // event exists to escape. (MODEL_REGRESSION_ACKNOWLEDGED FAILs
+          // instead; there the ack is a precondition for promotion, here it
+          // only relieves one.) The shape is frozen at schemaVersion 1, and a
+          // version this verifier doesn't know is malformed too: it must not
+          // downgrade on a guess about what that version means.
           const d = ev.data || {};
           const where = { segment: segName, line: lineNo, eventId: ev.id };
           const parent = d.parentSessionId;
           const ids = d.eventIds;
-          if (typeof parent !== 'string' || !parent || !Array.isArray(ids) || ids.length === 0
+          if (d.schemaVersion !== 1 || typeof parent !== 'string' || !parent || !Array.isArray(ids) || ids.length === 0
               || !ids.every((x) => typeof x === 'string' && x)) {
             push(issue('WARN', 'session_parent_ack_malformed',
-              `${ev.id}: SESSION_PARENT_ACKNOWLEDGED needs data.parentSessionId and a non-empty data.eventIds string array — ignored, nothing acknowledged`,
+              `${ev.id}: SESSION_PARENT_ACKNOWLEDGED needs data.schemaVersion 1, data.parentSessionId and a non-empty data.eventIds string array — ignored, nothing acknowledged`,
               where));
             break;
           }

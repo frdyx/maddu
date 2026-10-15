@@ -16,8 +16,9 @@ narrative summary.
 Spine integrity. Session registrations recorded before v1.112.0 could name
 a `parentSessionId` that was registered in another repo's spine: an
 ambient `MADDU_PARENT_SESSION_ID` leaked across repos. Since v1.112.0
-(PR-B) registration drops a parent this spine never registered, but the
-old references stay on the append-only spine, and
+(PR-B) registration drops a parent this spine never registered; it keeps
+one only when it can't read the session list. The old references stay on
+the append-only spine, and
 `spine verify` failed each one as `unknown_parent_session` with no way to
 clear it. One consumer (just upgraded from v1.92.2) had ten of them, all
 naming the same parent. Doctor stayed red for good, and every check that
@@ -25,28 +26,40 @@ needs a verified chain stayed off: acceptance proofs, heavy-suite and
 project-test recency ("cannot trust recency from an unverified chain").
 
 - **`maddu spine acknowledge --parent-session <sid> --reason "…"`** appends
-  `SESSION_PARENT_ACKNOWLEDGED {parentSessionId, eventIds, reason}`.
-  `eventIds` are the exact references the verifier flags for that parent
-  right now. The reason is required and secret-scanned, and a hit is
-  refused. Afterwards the verb re-runs the verifier and prints the new
-  counts. It mirrors `maddu model regression ack`.
+  `SESSION_PARENT_ACKNOWLEDGED {schemaVersion, parentSessionId, eventIds,
+  reason}`.
+  - `eventIds` are the exact references the verifier flags for that parent
+    right now.
+  - The reason is required and secret-scanned, and a hit is refused.
+  - The verb then re-runs the verifier and checks that the new event
+    acknowledged every listed reference. If some stay unacknowledged, it
+    names the recorded event and those references, and exits 1. On a synced
+    spine, a reference from a replica whose clock runs ahead sorts after
+    the acknowledgement.
+  - It mirrors `maddu model regression ack`.
 - **`maddu spine acknowledge --list`** (read-only, `--json`) groups the
   verifier's own `unknown_parent_session` findings by parent, with ids,
-  time span and how many are already acknowledged.
+  time span and how many are already acknowledged. Each row carries the
+  verifier's own level, event type and time.
 - **Verifier.** Each listed reference becomes
   `unknown_parent_session_acknowledged` **WARN**, naming the
   acknowledgement, so it stays on record. The rule is narrow:
   - It covers only references that come *before* the acknowledgement, in
-    append order, or in merged order on a synced spine. A later leak to
-    the same parent still FAILs.
+    append order, or in merged order on a synced spine. A later reference
+    to the same parent is reported again: a FAIL, or a WARN on a synced
+    spine, where every merged-order referential finding is a WARN.
   - It never touches another issue kind.
-  - A malformed, reasonless or non-matching acknowledgement is ignored with
-    a WARN (`session_parent_ack_{malformed,unreasoned,unmatched}`). It
-    isn't a FAIL, because that would recreate the trap.
-  - `unknown_parent_session` issues now carry `parentSessionId` as a field.
+  - A malformed acknowledgement (including a `schemaVersion` other than 1),
+    or one with no reason, is ignored as a whole, with a WARN.
+  - An id that matches nothing is a WARN of its own, and the event's other
+    ids still apply (`session_parent_ack_{malformed,unreasoned,unmatched}`).
+  - None of these is a FAIL, because that would recreate the trap.
+  - `unknown_parent_session` issues now carry `parentSessionId`,
+    `eventType` and `ts` as fields.
 - **Never ahead of time.** A parent with no current reference is refused
   (exit 1). A rerun with nothing left to acknowledge is a declared no-op
-  (exit 0, no event).
+  (exit 0, no event). An explicit `--session` is validated on every path,
+  and a malformed one exits 2.
 - **The verifier stays self-contained.** The other option was to downgrade
   when the parent appears in another registered workspace's spine. It was
   rejected because the result would then depend on which repos a given
@@ -55,7 +68,10 @@ project-test recency ("cannot trust recency from an unverified chain").
   valid here. Confirming the cross-repo origin is the operator's judgment,
   and the reason records it.
 - **Where you'd look.** `spine verify` and doctor's `spine integrity` gate
-  name `maddu spine acknowledge --list` when these FAILs are present.
+  name `maddu spine acknowledge --list` when these FAILs are present. The
+  gate scans a capped prefix of a large spine. When that prefix holds an
+  `unknown_parent_session` FAIL, the gate verifies the whole spine once
+  before reporting it, so an acknowledgement past the cap still counts.
 - Event contract **1.22.0** (one new frozen type, additive → minor;
   baseline refreshed). `spine acknowledge --list` is a declared read
   shape; the flag allowlist is regenerated.
@@ -68,10 +84,14 @@ project-test recency ("cannot trust recency from an unverified chain").
   for "the parent of the session being registered", owned by `register`
   and `session` only (a test enforces this). Here the value is a target,
   so it gets a distinct name instead of loosening that rule.
-- Tests: new `spine-parent-ack` (56 checks: the scope and position rules,
-  ignored invalid acknowledgements, a merged-order sync case, and the real
-  CLI through list, usage errors, refusals, success, the idempotent rerun
-  and the no-breach check).
+- Tests: new `spine-parent-ack`, 77 checks:
+  - the scope and position rules, ignored invalid acknowledgements and a
+    merged-order sync case;
+  - the real CLI through list, usage errors, refusals, success, the
+    idempotent rerun and the no-breach check;
+  - rows added from the Codex review: the `schemaVersion` rule, per-id
+    application, an acknowledgement past the gate's cap, a synced spine's
+    WARN level and clock skew, a duplicate id, and `--session` on every path.
 
 ## [v1.153.0] · 2026-10-13 · tone without side stripes
 

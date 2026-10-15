@@ -188,17 +188,23 @@ Common findings + remediation:
 - **`chain_broken` / `chain_stripped` / `chain_fork` / `chain_gap`** — the forward `prev_hash` chain is mismatched, missing a key, or forked. Severity depends on whether the chain is *post-cutover* (it shows a `FRAMEWORK_INSTALLED`/`FRAMEWORK_UPGRADED` at/after v1.98.0, or a `SPINE_CUTOVER` anchor). On a post-cutover (locked) chain a mismatch is **`chain_broken` FAIL** and a missing `prev_hash` key is **`chain_stripped` FAIL** — genuine tampering, since the funnel lock precludes a benign fork. On a pre-cutover / legacy chain the same shapes are only **`chain_fork` WARN** (an old lock-free concurrent fork or a hand edit) and **`chain_gap` WARN** (a pre-v1.14.0 keyless writer). Inspect the surrounding events; the record is never auto-repaired. Note the unkeyed limits (threat model scenario 11): a determined actor who recomputes the whole forward chain, or truncates the tail, verifies clean.
 - **`duplicate_lane_release`** — a lane release followed a valid claim that was already released. This is WARN; current `maddu lane release` treats unclaimed releases as a no-op so new duplicates should not be written.
 - **`orphan_lane_release`** — a lane release has no historical matching claim. This is FAIL; inspect the lane history and either restore the missing claim or remove the bad release after operator review.
-- **`unknown_parent_session`** *(acknowledgeable since v1.154.0)* — a `SESSION_REGISTERED` / `SESSION_AUTO_REGISTERED` names a `parentSessionId` that this spine never registered. The usual cause is a session started from another repo's session: its `MADDU_PARENT_SESSION_ID` was inherited, so the new repo recorded a parent that only exists in the other repo's `.maddu/events/`. Since v1.112.0, registration drops such a parent, so new cases stop, but the old references stay FAIL forever. Hand-editing a post-cutover spine would only turn them into `chain_broken`. To clear them:
+- **`unknown_parent_session`** *(acknowledgeable since v1.154.0)* — a `SESSION_REGISTERED` / `SESSION_AUTO_REGISTERED` names a `parentSessionId` that this spine never registered. The usual cause is a session started from another repo's session: its `MADDU_PARENT_SESSION_ID` was inherited, so the new repo recorded a parent that only exists in the other repo's `.maddu/events/`. Since v1.112.0, registration drops such a parent. It keeps one only when it can't read the session list, so new cases are rare, but the old references stay FAIL forever. Hand-editing a post-cutover spine would only turn them into `chain_broken`. To clear them:
 
   ```bash
   $ ./maddu/run spine acknowledge --list
   # confirm the parent belongs to another repo, for example:
   #   grep -l <parent-sid> ../<other-repo>/.maddu/events/*.ndjson
-  $ ./maddu/run spine acknowledge --parent-session <parent-sid> --reason "registered in <other-repo>; MADDU_PARENT_SESSION_ID leaked before v1.112"
+  $ ./maddu/run spine acknowledge --parent-session <parent-sid> --reason "registered in <other-repo>; MADDU_PARENT_SESSION_ID leaked across repos"
   ```
 
-  This appends one `SESSION_PARENT_ACKNOWLEDGED` event. The references then show as **`unknown_parent_session_acknowledged` WARN**, doctor's `spine integrity` turns green (warn), and the checks it was holding back run again. A reference written *after* the acknowledgement still FAILs. If the parent can't be accounted for, leave the FAIL alone and investigate instead: a parent id that resolves nowhere may mean a session was fabricated.
-- **`session_parent_ack_malformed` / `session_parent_ack_unreasoned` / `session_parent_ack_unmatched`** — WARN. An acknowledgement was ignored, or listed an id that was not an earlier unacknowledged reference to that parent. Nothing was downgraded. `maddu spine acknowledge` never writes these shapes, so look for a hand-written event.
+  This appends one `SESSION_PARENT_ACKNOWLEDGED` event. The references then show as **`unknown_parent_session_acknowledged` WARN**. Doctor's `spine integrity` turns green (warn), and the checks it was holding back run again.
+  - A reference that comes *after* the acknowledgement is reported again: a FAIL, or a WARN on a synced spine.
+  - On a large spine, doctor's gate scans a capped prefix. When that prefix holds an `unknown_parent_session` FAIL, the gate verifies the whole spine before reporting it, so an acknowledgement past the cap still counts.
+  - If the parent can't be accounted for, leave the FAIL alone and investigate instead: a parent id that resolves nowhere may mean a session was fabricated.
+- **`session_parent_ack_malformed` / `session_parent_ack_unreasoned`** — WARN. An acknowledgement was ignored as a whole, and nothing it lists was downgraded. It lacks `schemaVersion` 1, a parent, a non-empty id list, or a reason. `maddu spine acknowledge` never writes these shapes, so look for a hand-written event.
+- **`session_parent_ack_unmatched`** — WARN. One id that an acknowledgement lists is not an earlier, unacknowledged reference to that parent. The event's other ids still apply.
+  - On a hand-written event, check the id.
+  - From `maddu spine acknowledge` itself, it means the reference sorted after the acknowledgement on a synced spine, because its replica's clock is ahead. The verb reports this case and exits 1.
 
 No `maddu spine repair` exists by design — the spine is sacred. Remediation is always manual, via `maddu checkpoint rollback`, or, for `unknown_parent_session` only, an appended acknowledgement.
 

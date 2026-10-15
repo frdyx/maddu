@@ -75,6 +75,7 @@ function run(repo, args) {
   }
 }
 const parseJson = (s) => { try { return JSON.parse(s); } catch { return null; } };
+const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '');
 
 async function main() {
   const spine = await import(pathToFileURL(path.join(LIB, 'spine.mjs')).href);
@@ -270,6 +271,118 @@ async function main() {
       const unwitnessed = (await spine.readAll(tmp)).filter((e) => e.type === 'MUTATION_UNWITNESSED');
       ok('no mutation-witness breach (no-op declared, --list read-shaped)', breaches.length === 0 && unwitnessed.length === 0,
         `${breaches.join(',')} ${unwitnessed.map((e) => JSON.stringify(e.data)).join(' ')}`);
+    }
+
+    console.log('spine-parent-ack: D. review round 1');
+    {
+      // Only the schemaVersion this verifier knows (1) can downgrade anything.
+      const tmp = await newTmp(); tmps.push(tmp);
+      const a = await autoReg(tmp, 'ses_a', PARENT);
+      await spine.append(tmp, { type: 'SESSION_PARENT_ACKNOWLEDGED', actor: null, lane: null,
+        data: { schemaVersion: 2, parentSessionId: PARENT, eventIds: [a.id], reason: 'a version this verifier does not know' } });
+      await spine.append(tmp, { type: 'SESSION_PARENT_ACKNOWLEDGED', actor: null, lane: null,
+        data: { parentSessionId: PARENT, eventIds: [a.id], reason: 'no version at all' } });
+      const res = await verify.verifySpine(tmp);
+      ok('an acknowledgement whose schemaVersion is not 1, or missing, is malformed and downgrades nothing',
+        of(res, 'session_parent_ack_malformed').length === 2
+          && of(res, 'unknown_parent_session').some((i) => i.eventId === a.id && i.level === 'FAIL') && consistent(res),
+        JSON.stringify(res.issues.map((i) => `${i.level} ${i.kind}`)));
+    }
+
+    {
+      // One acknowledgement listing a matching id and an unmatched one applies per id.
+      const tmp = await newTmp(); tmps.push(tmp);
+      const a = await autoReg(tmp, 'ses_a', PARENT);
+      await ack(tmp, { parentSessionId: PARENT, eventIds: [a.id, 'evt_20260101000000_000000'], reason: 'one real id, one not' });
+      const res = await verify.verifySpine(tmp);
+      ok('the matching id is acknowledged and the unmatched id in the same event is a WARN',
+        of(res, 'unknown_parent_session_acknowledged').some((i) => i.eventId === a.id)
+          && of(res, 'session_parent_ack_unmatched').length === 1 && res.counts.FAIL === 0 && consistent(res));
+    }
+
+    {
+      // The doctor gate scans a capped prefix. A reference inside the prefix
+      // whose acknowledgement lies past the cap must still clear.
+      const tmp = await newTmp(); tmps.push(tmp);
+      const a = await autoReg(tmp, 'ses_a', PARENT);
+      for (let n = 0; n < 4; n++) await reg(tmp, `ses_fill${n}`);
+      await ack(tmp, { parentSessionId: PARENT, eventIds: [a.id], reason: 'acknowledged past the cap' });
+      const smallCap = { verifySpine: (root, o = {}) => verify.verifySpine(root, { ...o, maxEvents: o.maxEvents === Infinity ? Infinity : 3 }) };
+      const g = await gate.run({ verify: smallCap, repoRoot: tmp });
+      ok('the spine-integrity gate clears a reference whose acknowledgement lies past its cap', g.ok === true, g.message);
+    }
+
+    // A synced spine. Replica repA's clock runs far ahead, so its reference
+    // sorts AFTER an acknowledgement written now; this checkout is repB.
+    const synced = async (rows) => {
+      const tmp = await newTmp(); tmps.push(tmp);
+      await mkdir(path.join(tmp, '.maddu', 'config'), { recursive: true });
+      await writeFile(path.join(tmp, '.maddu', 'config', 'replica.json'), JSON.stringify({ replicaId: 'repB' }));
+      const line = (o) => JSON.stringify({ v: 1, id: o.id, ts: o.ts, type: o.type, actor: o.actor ?? null, lane: null, data: o.data });
+      for (const [rid, evs] of Object.entries(rows)) {
+        const dir = path.join(tmp, '.maddu', 'events', 'by-replica', rid);
+        await mkdir(dir, { recursive: true });
+        await writeFile(path.join(dir, '000000000001.ndjson'), evs.map(line).join('\n') + '\n');
+      }
+      return tmp;
+    };
+    const orphanRow = (id, ts) => ({ id, ts, type: 'SESSION_AUTO_REGISTERED', actor: `ses_${id.slice(-6)}`,
+      data: { sessionId: `ses_${id.slice(-6)}`, parentSessionId: PARENT, source: 'cli', label: 'x', role: 'implementer' } });
+    const repBRow = { id: 'evt_20260930120000_bbbb00', ts: '2026-09-30T12:00:00.000Z', type: 'SESSION_REGISTERED', actor: 'ses_bbbb00',
+      data: { focus: null, label: 'x', role: 'implementer', runtime: null } };
+    {
+      const ahead = 'evt_20990101000000_aaaa01';
+      const tmp = await synced({ repA: [orphanRow(ahead, '2099-01-01T00:00:00.000Z')], repB: [repBRow] });
+
+      const list = parseJson(run(tmp, ['spine', 'acknowledge', '--list', '--json']).stdout);
+      const row = list?.parents?.find((x) => x.parentSessionId === PARENT)?.pending?.[0];
+      ok('--list reports the verifier\'s own level (WARN in merged order), not a fixed FAIL', row && row.level === 'WARN', JSON.stringify(row));
+      const human = stripAnsi(run(tmp, ['spine', 'acknowledge', '--list']).stdout);
+      ok('--list (human) tags a merged-order reference WARN', /WARN\s+evt_20990101000000_aaaa01/.test(human) && !/FAIL\s+evt_20990101000000_aaaa01/.test(human), human.slice(0, 300));
+
+      const r = run(tmp, ['spine', 'acknowledge', '--parent-session', PARENT, '--reason', 'clock-skewed replica', '--json']);
+      const j = parseJson(r.stdout);
+      ok('an acknowledgement that applied to none of its references exits 1 and lists them as unapplied',
+        r.code === 1 && j?.ok === false && Array.isArray(j?.unapplied) && j.unapplied.includes(ahead), `code ${r.code} ${r.stdout.slice(0, 300)}`);
+      ok('the failed application still names the event it recorded',
+        typeof j?.event === 'string' && (await spine.readAll(tmp)).some((e) => e.type === 'SESSION_PARENT_ACKNOWLEDGED' && e.id === j.event));
+    }
+
+    {
+      // A duplicate id across replicas: --list describes the registration the
+      // verifier flagged, not whichever event last carried that id.
+      const dup = 'evt_20260930120000_dddd01';
+      const tmp = await synced({
+        repA: [orphanRow(dup, '2026-09-30T12:00:00.000Z')],
+        repB: [{ id: dup, ts: '2026-09-30T13:00:00.000Z', type: 'SLICE_STOP', actor: null, data: { summary: 'same id, another event' } }],
+      });
+      const list = parseJson(run(tmp, ['spine', 'acknowledge', '--list', '--json']).stdout);
+      const row = list?.parents?.find((x) => x.parentSessionId === PARENT)?.pending?.find((x) => x.eventId === dup);
+      ok('--list rows carry the flagged event\'s own type and time', row && row.type === 'SESSION_AUTO_REGISTERED' && row.ts === '2026-09-30T12:00:00.000Z', JSON.stringify(row));
+    }
+
+    {
+      // An explicit --session is validated on every path, including the ones
+      // that exit before anything is appended.
+      const tmp = await newTmp(); tmps.push(tmp);
+      const a = await autoReg(tmp, 'ses_a', PARENT);
+      const bad = [['--session'], ['--session='], ['--session', 'bad id!'], ['--session', 'ses_x', '--session', 'ses_y']];
+      const shapes = [
+        ['pending', ['spine', 'acknowledge', '--parent-session', PARENT, '--reason', 'x']],
+        ['--list', ['spine', 'acknowledge', '--list']],
+      ];
+      for (const [label, base] of shapes) {
+        for (const b of bad) {
+          const r = run(tmp, [...base, ...b]);
+          ok(`a malformed --session exits 2 (${label}: ${b.join(' ')})`, r.code === 2, `code ${r.code} ${r.stderr.slice(0, 160)}`);
+        }
+      }
+      ok('no malformed --session appended anything', (await ackCount(tmp)) === 0);
+      await ack(tmp, { parentSessionId: PARENT, eventIds: [a.id], reason: 'acknowledged' });
+      for (const b of bad) {
+        const r = run(tmp, ['spine', 'acknowledge', '--parent-session', PARENT, '--reason', 'x', ...b]);
+        ok(`a malformed --session exits 2 on the no-op path too (${b.join(' ')})`, r.code === 2, `code ${r.code} ${r.stderr.slice(0, 160)}`);
+      }
     }
   } finally {
     for (const t of tmps) await rm(t, { recursive: true, force: true }).catch(() => {});

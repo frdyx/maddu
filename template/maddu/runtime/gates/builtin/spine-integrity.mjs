@@ -11,7 +11,16 @@ export default {
       return { ok: true, message: 'verifier not available (legacy install)', evidence: null };
     }
     try {
-      const r = await ctx.verify.verifySpine(ctx.repoRoot, { maxEvents: SPINE_CAP });
+      let r = await ctx.verify.verifySpine(ctx.repoRoot, { maxEvents: SPINE_CAP });
+      // v1.154.0 — an unknown_parent_session FAIL inside the capped prefix may be
+      // acknowledged by a SESSION_PARENT_ACKNOWLEDGED past the cap, which the
+      // capped scan never reaches. Before reporting such a FAIL, verify the
+      // whole spine once, so an acknowledged reference doesn't keep doctor red.
+      // The full pass runs only in this case.
+      if (r.capped && r.counts.FAIL > 0
+          && (r.issues || []).some((i) => i.level === 'FAIL' && i.kind === 'unknown_parent_session')) {
+        r = await ctx.verify.verifySpine(ctx.repoRoot, { maxEvents: Infinity });
+      }
       // audit P1 — check FAILs BEFORE the capped early-return: a tampering FAIL found
       // within the first SPINE_CAP events must red the gate even though the scan
       // stopped early (previously a capped run returned ok:true and discarded it).
@@ -19,7 +28,7 @@ export default {
         const fails = r.counts.FAIL, warns = r.counts.WARN;
         const wpart = warns > 0 ? ` · ${warns} warn${warns === 1 ? '' : 's'}` : '';
         const cpart = r.capped ? ` (within first ${SPINE_CAP.toLocaleString()})` : '';
-        // v1.154.0 — the one FAIL kind with a sanctioned append-only remedy.
+        // v1.154.0 — a FAIL kind with an append-only remedy of its own.
         const orphanParents = (r.issues || []).filter((i) => i.level === 'FAIL' && i.kind === 'unknown_parent_session').length;
         const opart = orphanParents
           ? `; ${orphanParents} ${orphanParents === 1 ? 'is' : 'are'} unknown_parent_session — if the parent lives in another repo, see \`maddu spine acknowledge --list\``
