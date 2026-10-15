@@ -204,7 +204,9 @@ Common findings + remediation:
 - **`session_parent_ack_malformed` / `session_parent_ack_unreasoned`** — WARN. An acknowledgement was ignored as a whole, and nothing it lists was downgraded. It lacks `schemaVersion` 1, a parent, a non-empty id list, or a reason. `maddu spine acknowledge` never writes these shapes, so look for a hand-written event.
 - **`session_parent_ack_unmatched`** — WARN. One id that an acknowledgement lists is not an earlier, unacknowledged reference to that parent. The event's other ids still apply.
   - On a hand-written event, check the id.
-  - From `maddu spine acknowledge` itself, it means the reference sorted after the acknowledgement on a synced spine, because its replica's clock is ahead. The verb reports this case and exits 1.
+  - From `maddu spine acknowledge` itself, there are two causes, and the verb reports each:
+    - Another acknowledgement covered the reference first, because two runs overlapped. The reference is acknowledged, and the verb treats it as done.
+    - On a synced spine, the reference sorts after the acknowledgement because its replica's clock is ahead. The reference stays unacknowledged, and the verb exits 1.
 
 No `maddu spine repair` exists by design — the spine is sacred. Remediation is always manual, via `maddu checkpoint rollback`, or, for `unknown_parent_session` only, an appended acknowledgement.
 

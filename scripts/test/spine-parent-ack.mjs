@@ -384,6 +384,47 @@ async function main() {
         ok(`a malformed --session exits 2 on the no-op path too (${b.join(' ')})`, r.code === 2, `code ${r.code} ${r.stderr.slice(0, 160)}`);
       }
     }
+
+    console.log('spine-parent-ack: E. review round 2');
+    {
+      // The same id twice across replicas: one copy sorts before the new
+      // acknowledgement, the other (its replica's clock ahead) after it. The
+      // read-back checks each occurrence, so the uncovered copy is reported.
+      const dupX = 'evt_20260930120000_eeee01';
+      const later = orphanRow(dupX, '2099-01-01T00:00:00.000Z');
+      const tmp = await synced({
+        repA: [orphanRow(dupX, '2026-09-30T12:00:00.000Z')],
+        repB: [repBRow],
+        repC: [{ ...later, actor: 'ses_eeee02', data: { ...later.data, sessionId: 'ses_eeee02' } }],
+      });
+      const r = run(tmp, ['spine', 'acknowledge', '--parent-session', PARENT, '--reason', 'duplicate id across replicas', '--json']);
+      const j = parseJson(r.stdout);
+      ok('a duplicate id whose later copy stays unacknowledged is reported as not applied (exit 1)',
+        r.code === 1 && j?.ok === false && Array.isArray(j?.unapplied) && j.unapplied.includes(dupX), `code ${r.code} ${r.stdout.slice(0, 300)}`);
+    }
+
+    {
+      // Two runs overlap: both scanned the same pending reference, and the
+      // other run appended first and covered it, so this run's entry is
+      // unmatched. The read-back must class the reference as covered, not as
+      // still unacknowledged.
+      const { classifyAckReadback } = await import(pathToFileURL(path.join(ROOT, 'commands', 'spine.mjs')).href);
+      const tmp = await newTmp(); tmps.push(tmp);
+      const a = await autoReg(tmp, 'ses_a', PARENT);
+      const before = await verify.verifySpine(tmp);
+      const targets = of(before, 'unknown_parent_session')
+        .map((i) => ({ eventId: i.eventId, segment: i.segment, line: i.line, replicaId: i.replicaId ?? null }));
+      const first = await ack(tmp, { parentSessionId: PARENT, eventIds: [a.id], reason: 'the other run' });
+      const mine = await ack(tmp, { parentSessionId: PARENT, eventIds: [a.id], reason: 'this run' });
+      const after = await verify.verifySpine(tmp);
+      const out = typeof classifyAckReadback === 'function' ? classifyAckReadback(targets, after.issues, mine.id) : null;
+      ok('a reference another acknowledgement covered first is classed as covered elsewhere, not pending',
+        !!out && out.pending.length === 0 && out.applied.length === 0 && out.elsewhere.length === 1 && out.elsewhere[0].acknowledgedBy === first.id,
+        JSON.stringify(out));
+      const theirs = typeof classifyAckReadback === 'function' ? classifyAckReadback(targets, after.issues, first.id) : null;
+      ok('the same reference reads as applied for the run that covered it',
+        !!theirs && theirs.applied.length === 1 && theirs.pending.length === 0 && theirs.elsewhere.length === 0, JSON.stringify(theirs));
+    }
   } finally {
     for (const t of tmps) await rm(t, { recursive: true, force: true }).catch(() => {});
   }

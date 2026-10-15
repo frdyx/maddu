@@ -31,11 +31,14 @@ project-test recency ("cannot trust recency from an unverified chain").
   - `eventIds` are the exact references the verifier flags for that parent
     right now.
   - The reason is required and secret-scanned, and a hit is refused.
-  - The verb then re-runs the verifier and checks that the new event
-    acknowledged every listed reference. If some stay unacknowledged, it
-    names the recorded event and those references, and exits 1. On a synced
-    spine, a reference from a replica whose clock runs ahead sorts after
-    the acknowledgement.
+  - The verb then re-runs the verifier and checks every occurrence it
+    targeted; an id can occur twice.
+    - An occurrence that another acknowledgement covered first, as when two
+      runs overlap, counts as done and is reported.
+    - One still unacknowledged makes the verb name the recorded event and
+      that reference, and exit 1. On a synced spine, this happens when a
+      reference from a replica whose clock runs ahead sorts after the
+      acknowledgement.
   - It mirrors `maddu model regression ack`.
 - **`maddu spine acknowledge --list`** (read-only, `--json`) groups the
   verifier's own `unknown_parent_session` findings by parent, with ids,
@@ -84,14 +87,16 @@ project-test recency ("cannot trust recency from an unverified chain").
   for "the parent of the session being registered", owned by `register`
   and `session` only (a test enforces this). Here the value is a target,
   so it gets a distinct name instead of loosening that rule.
-- Tests: new `spine-parent-ack`, 77 checks:
+- Tests: new `spine-parent-ack`, 80 checks:
   - the scope and position rules, ignored invalid acknowledgements and a
     merged-order sync case;
   - the real CLI through list, usage errors, refusals, success, the
     idempotent rerun and the no-breach check;
   - rows added from the Codex review: the `schemaVersion` rule, per-id
     application, an acknowledgement past the gate's cap, a synced spine's
-    WARN level and clock skew, a duplicate id, and `--session` on every path.
+    WARN level and clock skew, a duplicate id in `--list` and in the
+    read-back, an overlapping run's acknowledgement, and `--session` on
+    every path.
 
 ## [v1.153.0] · 2026-10-13 · tone without side stripes
 

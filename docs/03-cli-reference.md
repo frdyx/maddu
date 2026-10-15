@@ -431,7 +431,9 @@ The verifier is strictly read-only. If it flags an issue, the operator decides r
 
 - `--list` is read-only. It groups the verifier's own `unknown_parent_session` findings by parent and shows the event ids, the time span, and how many are already acknowledged. Each row carries the level the verifier gave it: FAIL, or WARN on a synced spine, where every merged-order referential finding is a WARN.
 - `--parent-session <sid> --reason "…"` appends `SESSION_PARENT_ACKNOWLEDGED {schemaVersion, parentSessionId, eventIds, reason}`. `eventIds` holds the exact references the verifier flags for that parent right now. `--reason` is required and secret-scanned, and a hit is refused, since the text lands on the spine for good.
-- After appending, the verb re-runs the verifier and checks that the new event acknowledged every listed reference. On a synced spine, a reference from a replica whose clock runs ahead sorts after the acknowledgement and stays unacknowledged. The verb then names the recorded event and the unapplied references, and exits 1.
+- After appending, the verb re-runs the verifier and checks every occurrence it targeted; an id can occur twice.
+  - An occurrence that another acknowledgement covered first, as when two runs overlap, counts as done, and the verb says so.
+  - An occurrence that is still unacknowledged makes the verb name the recorded event and the unapplied references, and exit 1. On a synced spine, this happens when a reference from a replica whose clock runs ahead sorts after the acknowledgement.
 
 After the event, `verify` reports each listed reference as **`unknown_parent_session_acknowledged` WARN** naming the acknowledgement, so the reference stays on record. The rule is narrow on purpose:
 

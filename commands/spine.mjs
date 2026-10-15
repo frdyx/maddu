@@ -986,6 +986,38 @@ async function runAssessCeremony(lib, sa, repoRoot, sha, seqFlag) {
   process.exit(0);
 }
 
+// Where one flagged reference sits. The same event id can occur twice (a
+// duplicate across replicas), so the read-back keys each occurrence by its
+// position, not by its id.
+const occurrenceKey = (o) => [o.replicaId ?? '', o.segment ?? '', o.line ?? '', o.eventId].join('\u0000');
+
+// The read-back after `spine acknowledge` appends: class every occurrence the
+// verb targeted against what verify reports now.
+//   applied   — acknowledged by this event;
+//   elsewhere — acknowledged by another event, such as an overlapping run that
+//               appended first (covered; this event's entry is an unmatched WARN);
+//   pending   — still an unknown_parent_session, or no longer found.
+// A pending occurrence read in a synced spine's merged order carries
+// `mergedOrder: true`; sorting after the acknowledgement (its replica's clock
+// ahead) is then the likely cause. Pure, and exported for the suite.
+export function classifyAckReadback(targets, issues, eventId) {
+  const now = new Map();
+  for (const i of issues) {
+    if (i.kind === 'unknown_parent_session' || i.kind === 'unknown_parent_session_acknowledged') now.set(occurrenceKey(i), i);
+  }
+  const out = { applied: [], elsewhere: [], pending: [] };
+  for (const t of targets) {
+    const i = now.get(occurrenceKey(t));
+    if (i && i.kind === 'unknown_parent_session_acknowledged') {
+      if (i.acknowledgedBy === eventId) out.applied.push(t);
+      else out.elsewhere.push({ ...t, acknowledgedBy: i.acknowledgedBy || null });
+    } else {
+      out.pending.push({ ...t, mergedOrder: !!(i && i.mergedOrder) });
+    }
+  }
+  return out;
+}
+
 // `maddu spine acknowledge` (v1.154.0). Session registrations recorded before
 // the v1.112.0 CP5 guard can name a parentSessionId that was registered in
 // ANOTHER repo's spine — an ambient MADDU_PARENT_SESSION_ID leaked across
@@ -1054,7 +1086,8 @@ async function spineAcknowledge(lib, repoRoot, rest) {
       if (i.kind !== 'unknown_parent_session' && i.kind !== 'unknown_parent_session_acknowledged') continue;
       if (typeof i.parentSessionId !== 'string') continue;
       if (!byParent.has(i.parentSessionId)) byParent.set(i.parentSessionId, { pending: [], acknowledged: [] });
-      const row = { eventId: i.eventId, level: i.level, ts: i.ts ?? null, type: i.eventType ?? null };
+      const row = { eventId: i.eventId, level: i.level, ts: i.ts ?? null, type: i.eventType ?? null,
+        segment: i.segment ?? null, line: i.line ?? null, replicaId: i.replicaId ?? null };
       if (i.kind === 'unknown_parent_session') byParent.get(i.parentSessionId).pending.push(row);
       else byParent.get(i.parentSessionId).acknowledged.push({ ...row, acknowledgedBy: i.acknowledgedBy || null });
     }
@@ -1125,30 +1158,41 @@ async function spineAcknowledge(lib, repoRoot, rest) {
   } catch (e) {
     refuse(`append failed: ${e?.message || e}`);
   }
-  // Read back what verify says now, and check it, so the operator sees the
-  // effect rather than our claim of it. On a synced spine an acknowledgement
-  // sorts by its timestamp: a reference from a replica whose clock runs ahead
-  // can land after it and stay unacknowledged. That is a failed application
-  // (exit 1), reported with the event that was recorded.
+  // Read back what verify says now, and check every occurrence the verb
+  // targeted, so the operator sees the effect rather than our claim of it.
+  // Covered by another acknowledgement first (an overlapping run) counts as
+  // done. Still unacknowledged is a failed application (exit 1): on a synced
+  // spine an acknowledgement sorts by its timestamp, so a reference from a
+  // replica whose clock runs ahead can land after it.
   const after = await lib.verify.verifySpine(repoRoot, { maxEvents: Infinity });
-  const appliedIds = new Set(after.issues
-    .filter((i) => i.kind === 'unknown_parent_session_acknowledged' && i.acknowledgedBy === ev.id)
-    .map((i) => i.eventId));
-  const applied = eventIds.filter((id) => appliedIds.has(id));
-  const unapplied = eventIds.filter((id) => !appliedIds.has(id));
+  const rb = classifyAckReadback(group.pending, after.issues, ev.id);
+  const unapplied = [...new Set(rb.pending.map((o) => o.eventId))];
+  const applied = [...new Set(rb.applied.map((o) => o.eventId))].filter((id) => !unapplied.includes(id));
+  const alreadyAcknowledged = rb.elsewhere.filter((o) => !unapplied.includes(o.eventId))
+    .map((o) => ({ eventId: o.eventId, acknowledgedBy: o.acknowledgedBy }));
   if (json) {
-    process.stdout.write(JSON.stringify({ ok: unapplied.length === 0, event: ev.id, parentSessionId: parent, eventIds, applied, unapplied, verify: after.counts }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ ok: unapplied.length === 0, event: ev.id, parentSessionId: parent, eventIds, applied, alreadyAcknowledged, unapplied, verify: after.counts }, null, 2) + '\n');
     process.exit(unapplied.length ? 1 : 0);
   }
   const counts = `spine verify now: ${ANSI.fail}${after.counts.FAIL} fail${after.counts.FAIL === 1 ? '' : 's'}${ANSI.reset} · ${ANSI.warn}${after.counts.WARN} warn${after.counts.WARN === 1 ? '' : 's'}${ANSI.reset}`;
+  const coveredBy = [...new Set(alreadyAcknowledged.map((o) => o.acknowledgedBy))].join(', ');
+  const coveredNote = alreadyAcknowledged.length
+    ? `${alreadyAcknowledged.length} reference(s) were already acknowledged by ${coveredBy}, which got there first; this event's entries for them show as unmatched WARNs.`
+    : '';
   if (unapplied.length) {
-    console.error(`${ANSI.fail}Not applied:${ANSI.reset} recorded ${ev.id}, but ${unapplied.length} of ${eventIds.length} reference(s) to ${parent} are still unacknowledged:`);
+    console.error(`${ANSI.fail}Not applied:${ANSI.reset} recorded ${ev.id}, but ${unapplied.length} reference(s) to ${parent} are still unacknowledged:`);
     for (const id of unapplied) console.error(`  ${id}`);
-    console.error(`  On a synced spine they sort after the acknowledgement (their replica's clock is ahead). \`maddu spine acknowledge --list\` shows them; a later acknowledgement that sorts after them covers them.`);
+    if (rb.pending.every((o) => o.mergedOrder)) {
+      console.error(`  They sort after the acknowledgement in the synced spine's merged order, which happens when their replica's clock is ahead. \`maddu spine acknowledge --list\` shows them; an acknowledgement that sorts after them covers them.`);
+    } else {
+      console.error(`  Run \`maddu spine verify\` to see how they are reported now.`);
+    }
+    if (coveredNote) console.error(`  ${coveredNote}`);
     console.error(`  ${counts}`);
     process.exit(1);
   }
-  console.log(`${levelTag('PASS')}  acknowledged ${eventIds.length} reference(s) to ${ANSI.accent}${parent}${ANSI.reset}  ${ANSI.dim}(${ev.id})${ANSI.reset}`);
+  console.log(`${levelTag('PASS')}  acknowledged ${applied.length} reference(s) to ${ANSI.accent}${parent}${ANSI.reset}  ${ANSI.dim}(${ev.id})${ANSI.reset}`);
+  if (coveredNote) console.log(`  ${coveredNote}`);
   console.log(`  ${counts}`);
   console.log(`  ${ANSI.dim}The references stay on record as WARN unknown_parent_session_acknowledged; a later reference to this parent is reported again.${ANSI.reset}`);
   process.exit(0);
