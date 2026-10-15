@@ -19,9 +19,14 @@ export default {
         const fails = r.counts.FAIL, warns = r.counts.WARN;
         const wpart = warns > 0 ? ` · ${warns} warn${warns === 1 ? '' : 's'}` : '';
         const cpart = r.capped ? ` (within first ${SPINE_CAP.toLocaleString()})` : '';
+        // v1.154.0 — the one FAIL kind with a sanctioned append-only remedy.
+        const orphanParents = (r.issues || []).filter((i) => i.level === 'FAIL' && i.kind === 'unknown_parent_session').length;
+        const opart = orphanParents
+          ? `; ${orphanParents} ${orphanParents === 1 ? 'is' : 'are'} unknown_parent_session — if the parent lives in another repo, see \`maddu spine acknowledge --list\``
+          : '';
         return {
           ok: false,
-          message: `${fails} fail${fails === 1 ? '' : 's'}${wpart}${cpart} — run \`maddu spine verify\` for detail`,
+          message: `${fails} fail${fails === 1 ? '' : 's'}${wpart}${cpart} — run \`maddu spine verify\` for detail${opart}`,
           evidence: { counts: r.counts, capped: r.capped },
         };
       }

@@ -409,6 +409,8 @@ $ maddu spine anchor [--status]     # stamp a spine receipt into Bitcoin via Ope
 $ maddu spine anchor --assess       # operator consume ceremony: record an assurance level (v1.110.0)
 $ maddu spine identity show         # workspace identity (v1.117.0): derived from the genesis line, stamped into every event's hash preimage
 $ maddu spine identity resolve --keep <ws_...>   # operator ceremony for sync-mode identity conflicts
+$ maddu spine acknowledge --list [--json]        # unknown parentSessionId references, grouped by parent (read-only, v1.154.0)
+$ maddu spine acknowledge --parent-session <sid> --reason "…" [--json]   # → SESSION_PARENT_ACKNOWLEDGED (v1.154.0)
 $ maddu spine oversight [--json]    # non-technical readout: skills fed/withheld + why, on-goal, record-intact (v1.97.0 — see 52-oversight.md)
 $ maddu spine sync init [--json]    # opt into git-native team sync (one-time per checkout)
 $ maddu spine sync [--json]         # audited round-trip: commit own segments → pull → validate → push
@@ -424,6 +426,20 @@ Exit code: `0` on a clean run or WARN-only run; `1` if any FAIL. `--json` emits 
 `maddu doctor` calls into the verifier on every run, up to a 50k-event cap (configurable in the verifier's `maxEvents` option). Above the cap, doctor emits a `WARN` pointing at `maddu spine verify` for the full pass — keeps doctor fast on long-running repos without dropping the check entirely.
 
 The verifier is strictly read-only. If it flags an issue, the operator decides remediation (manual edit + slice-stop, `maddu checkpoint rollback`, etc.). There is no `maddu spine repair` — and won't be, by design.
+
+`acknowledge` *(v1.154.0)* is the one sanctioned, append-only remedy, and it covers exactly one finding: `unknown_parent_session`. A session registration names a `parentSessionId` that this spine never registered. That happens when an ambient `MADDU_PARENT_SESSION_ID` from a session in *another* repo leaks into this one. Since v1.112.0, registration drops a parent this spine never registered, so new cases stop, but references written before that stay on the append-only spine, and each one is a permanent FAIL that also keeps every check needing a verified chain switched off (acceptance proofs, test-recency gates).
+
+- `--list` is read-only. It groups the verifier's own `unknown_parent_session` findings by parent and shows the event ids, the time span, and how many are already acknowledged.
+- `--parent-session <sid> --reason "…"` appends `SESSION_PARENT_ACKNOWLEDGED {parentSessionId, eventIds, reason}`. `eventIds` holds the exact references the verifier flags for that parent right now. `--reason` is required and secret-scanned, and a hit is refused, since the text lands on the spine for good. The verb then re-runs the verifier and prints the new counts.
+
+After the event, `verify` reports each listed reference as **`unknown_parent_session_acknowledged` WARN** naming the acknowledgement, so the reference stays on record. The rule is narrow on purpose:
+
+- It only covers references that come *before* the acknowledgement. A later leak to the same parent is a new FAIL.
+- It never touches another issue kind.
+- It never acknowledges ahead of time. A parent with no current reference is refused (exit 1), and a rerun with nothing left to acknowledge is a no-op (exit 0, no event).
+- An acknowledgement that is malformed, has no reason, or names ids that don't match is ignored with a WARN. It isn't a FAIL, because a FAIL would recreate the trap this event exists to escape.
+
+The verifier stays self-contained: it never reads another workspace's spine to decide, so the result is the same on every clone. Confirming that the parent really lives in another repo is the operator's judgment, and the reason records it. Exit codes: `0` ok / no-op, `1` refused, `2` usage.
 
 `sync init` *(#12c)* opts this checkout into git-native team sync: secret-gate scan, mint a replicaId, migrate the flat segments into `.maddu/events/by-replica/<replicaId>/`, write the (never-committed) `.maddu/config/replica.json`, template `.gitignore`/`.gitattributes` marker blocks. `sync` runs the audited round-trip — commit own partition segments (explicit pathspec) → pull → `import`-validate → push (explicit refspec, pre-push path+content audit refuses any non-sync-owned commit). `import` is the read-only validator over every partition after a pull: chain forks, structural damage, within-partition duplicate ids, and secret hits are fatal; cross-partition id collisions and quarantined torn lines are tolerated and reported. All three exit `0` on ok, `1` on refusal (`2` when the subcommand itself is malformed or the install predates team-sync); `--json` emits the machine report. See [49-team-sync.md](49-team-sync.md) for the model, the audit, and the failure vocabulary.
 

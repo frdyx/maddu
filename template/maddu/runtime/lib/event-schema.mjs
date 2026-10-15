@@ -252,7 +252,20 @@
 // produced it. Framework-minted names on a framework-owned event type (the
 // 1.17.0 ownership argument); a new event type → additive → minor bump;
 // baseline refreshed with this change.
-export const EVENT_CONTRACT_VERSION = '1.21.0';
+//
+// 1.22.0 (2026-10-14, v1.154.0) — added SESSION_PARENT_ACKNOWLEDGED: the
+// append-only way out of a permanent `unknown_parent_session` FAIL. Session
+// registrations recorded before the v1.112.0 CP5 guard can name a parent that
+// was registered in ANOTHER repo's spine (an ambient MADDU_PARENT_SESSION_ID
+// leaked across repos); the spine cannot be edited, so the FAIL never cleared
+// and every check that reads a verified chain stayed suppressed. The event
+// names the parent, the exact earlier event ids, and a required reason; the
+// verifier downgrades only those references, and only when they precede it.
+// The verifier stays self-contained: it never consults another workspace's
+// spine to decide. Frozen with schemaVersion, like MODEL_REGRESSION_ACKNOWLEDGED
+// (the pattern it mirrors). A new event type → additive → minor bump; baseline
+// refreshed with this change.
+export const EVENT_CONTRACT_VERSION = '1.22.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -483,6 +496,7 @@ export const EVENT_SCHEMA = {
   MODEL_RELEASED: { summary: "A checkpoint approved to released was recorded as released with a rollback plan.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', rollback_plan: 'string' }, frozen: true },
   MODEL_ROLLED_BACK: { summary: "A released checkpoint was rolled back to an earlier stage.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', reverted_to: 'string' }, frozen: true },
   HARNESS_CAPABILITY_OBSERVED: { summary: "A harness's native hook surface was compared against the repo-versioned capability manifest — an observation, not an enforcement receipt.", data: { harness: 'string', status: 'string', cliVersion: 'string|null', manifestVersion: 'string', capabilities: 'array', enforcementCeiling: 'string', drift: 'string|null', probeFailure: 'string|null', volatile: 'object|null', configPath: 'string|null', configs: 'array', workRoot: 'string|null' } },
+  SESSION_PARENT_ACKNOWLEDGED: { summary: "An operator acknowledged, with a recorded reason, earlier session registrations whose parentSessionId resolves to no session on this spine (e.g. a parent id leaked in from another repo); verify reports exactly the listed earlier references as WARN instead of FAIL.", data: { schemaVersion: 'number', parentSessionId: 'string', eventIds: 'array', reason: 'string' }, frozen: true },
 };
 
 // Parity + shape validation used by the event-schema-complete gate and the

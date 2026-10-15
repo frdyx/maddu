@@ -20,7 +20,11 @@
 // CHECKED — child must resolve to a prior anchor (severity in parens):
 //   APPROVAL_DECIDED                         → APPROVAL_REQUESTED                 (FAIL)
 //   SESSION_{HEARTBEAT,CLOSED,AUTO_CLOSED,STALE_DETECTED} → SESSION_REGISTERED/AUTO_REGISTERED (FAIL/WARN)
-//   SESSION_{REGISTERED,AUTO_REGISTERED}.parentSessionId  → prior session        (FAIL)
+//   SESSION_{REGISTERED,AUTO_REGISTERED}.parentSessionId  → prior session        (FAIL;
+//       downgraded in place to WARN unknown_parent_session_acknowledged when a LATER
+//       SESSION_PARENT_ACKNOWLEDGED lists that event id for that parent) [v1.154.0]
+//   SESSION_PARENT_ACKNOWLEDGED.eventIds     → earlier unacknowledged unknown-parent refs (WARN unmatched;
+//       malformed / reasonless → WARN and ignored) [v1.154.0]
 //   LANE_RELEASED                            → active or historical LANE_CLAIMED  (FAIL for never-claimed, WARN for duplicate release)
 //   TASK_{UPDATED,COMPLETED}                 → TASK_CREATED                       (FAIL)
 //   WORKER_{HEARTBEAT,EXITED,KILLED}         → WORKER_SPAWNED                     (WARN)
@@ -158,12 +162,26 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
     result.issues.push(it);
     result.counts[it.level]++;
   };
+  // Retroactive reclassification (v1.154.0). An append-only acknowledgement
+  // arrives AFTER the references it covers, so the one forward pass changes
+  // the already-pushed issue in place and moves its count. Only the
+  // SESSION_PARENT_ACKNOWLEDGED rule calls this, and only to downgrade.
+  const reclassify = (it, level, kind, detail) => {
+    result.counts[it.level]--;
+    it.level = level;
+    it.kind = kind;
+    if (detail) it.detail = detail;
+    result.counts[it.level]++;
+  };
 
   // ── Single forward pass: parse, envelope, refs, monotonicity ──
   const ids = new Map();              // eventId → { segment, line }
   const requestedApprovals = new Set();  // APPROVAL_REQUESTED ids
   const decidedApprovals = new Set();    // approvalIds that have ≥1 APPROVAL_DECIDED
   const registeredSessions = new Set();  // SESSION_REGISTERED actors
+  // eventId → [{ issue, parentSessionId, acknowledgedBy }] for every
+  // unknown_parent_session pushed so far (SESSION_PARENT_ACKNOWLEDGED, v1.154.0)
+  const parentOrphans = new Map();
   const closedSessions = new Set();
   const createdTasks = new Set();
   const spawnedWorkers = new Set();
@@ -225,7 +243,7 @@ export async function verifySpine(repoRoot, { maxEvents = Infinity, collectEvent
   // structures above by reference; `state` carries the one reassigned value.
   const refState = { installedAt: null };
   const referentialStep = makeReferentialStep({
-    MODEL_ALLOWING, MODEL_STAGE_LADDER, approvalDecisionById, closedSessions, createdPlans, createdTasks, decidedApprovals, declaredSlices, enqueuedActions, invokedAdvisors, issue, laneClaims, laneEverClaimed, lcKey, liveSchedules, modelApprovedProposals, modelCheckpoints, modelDatasets, modelEvals, modelProposals, modelRegressionEvals, modelReleased, modelRunsCompleted, modelRunsStarted, modelStages, openedTeams, planPhases, push, registeredSessions, requestedApprovals, reviewedSlices, sliceStopIds, spawnedWorkers, startedCoordinators, startedLoops, startedPipelines, worktreeAttachments, worktreeEverAttached, worktreeLivePaths, worktreePendingDetach,
+    MODEL_ALLOWING, MODEL_STAGE_LADDER, approvalDecisionById, closedSessions, createdPlans, createdTasks, decidedApprovals, declaredSlices, enqueuedActions, invokedAdvisors, issue, laneClaims, laneEverClaimed, lcKey, liveSchedules, modelApprovedProposals, modelCheckpoints, modelDatasets, modelEvals, modelProposals, modelRegressionEvals, modelReleased, modelRunsCompleted, modelRunsStarted, modelStages, openedTeams, parentOrphans, planPhases, push, reclassify, registeredSessions, requestedApprovals, reviewedSlices, sliceStopIds, spawnedWorkers, startedCoordinators, startedLoops, startedPipelines, worktreeAttachments, worktreeEverAttached, worktreeLivePaths, worktreePendingDetach,
     state: refState,
   });
 

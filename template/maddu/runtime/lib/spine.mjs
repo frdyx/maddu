@@ -459,7 +459,17 @@ export const EVENT_TYPES = {
   //   data: { harness, status, cliVersion, manifestVersion, capabilities,
   //           enforcementCeiling, drift, probeFailure, volatile, configPath,
   //           configs: [{ path, status }], workRoot }
-  HARNESS_CAPABILITY_OBSERVED:  'HARNESS_CAPABILITY_OBSERVED'
+  HARNESS_CAPABILITY_OBSERVED:  'HARNESS_CAPABILITY_OBSERVED',
+  // v1.154.0 — `maddu spine acknowledge --parent-session <sid> --reason "…"`: an
+  // operator's recorded judgment that EARLIER session registrations name a
+  // parentSessionId this spine never registered (the ambient
+  // MADDU_PARENT_SESSION_ID leaked in from another repo before the v1.112.0 CP5
+  // guard). The spine is append-only, so without this the verifier's
+  // unknown_parent_session FAIL is permanent. verify downgrades exactly the
+  // listed references that PRECEDE the event to a WARN naming it — never a
+  // later one, never any other issue kind. Frozen data shape (schemaVersion 1):
+  //   { schemaVersion, parentSessionId, eventIds: [evt_…], reason }
+  SESSION_PARENT_ACKNOWLEDGED:  'SESSION_PARENT_ACKNOWLEDGED'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

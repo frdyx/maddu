@@ -1,6 +1,6 @@
 {
-  "version": "1.21.0",
-  "fingerprint": "ba204ab3",
+  "version": "1.22.0",
+  "fingerprint": "11d04dab",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1277,6 +1277,15 @@
         "frozen": false,
         "data": {
           "focus": "string|null"
+        }
+      },
+      "SESSION_PARENT_ACKNOWLEDGED": {
+        "frozen": true,
+        "data": {
+          "eventIds": "array",
+          "parentSessionId": "string",
+          "reason": "string",
+          "schemaVersion": "number"
         }
       },
       "SESSION_REGISTERED": {

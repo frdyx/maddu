@@ -19,12 +19,26 @@ export function makeReferentialStep(ctx) {
     laneEverClaimed, lcKey, liveSchedules, modelApprovedProposals,
     modelCheckpoints, modelDatasets, modelEvals, modelProposals,
     modelRegressionEvals, modelReleased, modelRunsCompleted, modelRunsStarted,
-    modelStages, openedTeams, planPhases, push,
+    modelStages, openedTeams, parentOrphans, planPhases, push, reclassify,
     registeredSessions, requestedApprovals, reviewedSlices, sliceStopIds,
     spawnedWorkers, startedCoordinators, startedLoops, startedPipelines,
     worktreeAttachments, worktreeEverAttached, worktreeLivePaths, worktreePendingDetach,
   } = ctx;
   const state = ctx.state;
+
+  // An unknown parentSessionId is pushed as a FAIL and remembered, because a
+  // later SESSION_PARENT_ACKNOWLEDGED may downgrade it in place. The issue
+  // carries the parent as a structured field so a caller (the acknowledge
+  // verb) can group by it without parsing the detail text.
+  const unknownParent = (ev, segName, lineNo) => {
+    const parent = ev.data.parentSessionId;
+    const it = issue('FAIL', 'unknown_parent_session',
+      `${ev.id}: ${ev.type} references unknown parentSessionId ${parent}`,
+      { segment: segName, line: lineNo, eventId: ev.id, parentSessionId: parent });
+    push(it);
+    if (!parentOrphans.has(ev.id)) parentOrphans.set(ev.id, []);
+    parentOrphans.get(ev.id).push({ issue: it, parentSessionId: parent, acknowledgedBy: null });
+  };
 
   return function referentialStep(ev, segName, lineNo, tsMs) {
       switch (ev.type) {
@@ -74,9 +88,7 @@ export function makeReferentialStep(ctx) {
           // SESSION_REGISTERED / SESSION_AUTO_REGISTERED actor. Old events
           // without the field remain valid (forward-compat).
           if (ev.data && ev.data.parentSessionId && !registeredSessions.has(ev.data.parentSessionId)) {
-            push(issue('FAIL', 'unknown_parent_session',
-              `${ev.id}: SESSION_REGISTERED references unknown parentSessionId ${ev.data.parentSessionId}`,
-              { segment: segName, line: lineNo, eventId: ev.id }));
+            unknownParent(ev, segName, lineNo);
           }
           break;
 
@@ -87,11 +99,63 @@ export function makeReferentialStep(ctx) {
           // parentSessionId referential check applies.
           if (ev.actor) registeredSessions.add(ev.actor);
           if (ev.data && ev.data.parentSessionId && !registeredSessions.has(ev.data.parentSessionId)) {
-            push(issue('FAIL', 'unknown_parent_session',
-              `${ev.id}: SESSION_AUTO_REGISTERED references unknown parentSessionId ${ev.data.parentSessionId}`,
-              { segment: segName, line: lineNo, eventId: ev.id }));
+            unknownParent(ev, segName, lineNo);
           }
           break;
+
+        case 'SESSION_PARENT_ACKNOWLEDGED': {
+          // An operator's recorded judgment that earlier registrations name a
+          // parent this spine never registered — typically an ambient
+          // MADDU_PARENT_SESSION_ID that leaked in from another repo before
+          // the v1.112.0 CP5 guard. The spine is append-only, so this is the
+          // only way such a FAIL can ever clear.
+          //
+          // Scope is exact: each listed event id must already have been seen
+          // (it PRECEDES this event) as an unacknowledged reference to the
+          // SAME parent. Nothing later and no other issue kind is touched, so
+          // a fresh leak to an acknowledged parent still FAILs. A downgraded
+          // reference stays visible as a WARN naming this event.
+          //
+          // A malformed or reasonless acknowledgement is ignored with a WARN,
+          // not a FAIL: it downgrades nothing, so nothing is hidden, and a
+          // FAIL here would recreate the permanent-FAIL trap this event exists
+          // to escape. (MODEL_REGRESSION_ACKNOWLEDGED FAILs instead; there the
+          // ack is a precondition for promotion, here it only relieves one.)
+          const d = ev.data || {};
+          const where = { segment: segName, line: lineNo, eventId: ev.id };
+          const parent = d.parentSessionId;
+          const ids = d.eventIds;
+          if (typeof parent !== 'string' || !parent || !Array.isArray(ids) || ids.length === 0
+              || !ids.every((x) => typeof x === 'string' && x)) {
+            push(issue('WARN', 'session_parent_ack_malformed',
+              `${ev.id}: SESSION_PARENT_ACKNOWLEDGED needs data.parentSessionId and a non-empty data.eventIds string array — ignored, nothing acknowledged`,
+              where));
+            break;
+          }
+          if (typeof d.reason !== 'string' || !d.reason.trim()) {
+            push(issue('WARN', 'session_parent_ack_unreasoned',
+              `${ev.id}: SESSION_PARENT_ACKNOWLEDGED carries no reason — the recorded judgment is the point; ignored, nothing acknowledged`,
+              where));
+            break;
+          }
+          for (const id of new Set(ids)) {
+            const pending = (parentOrphans.get(id) || [])
+              .filter((o) => o.parentSessionId === parent && !o.acknowledgedBy);
+            if (!pending.length) {
+              push(issue('WARN', 'session_parent_ack_unmatched',
+                `${ev.id}: ${id} is not an earlier, unacknowledged reference to unknown parentSessionId ${parent} — nothing to acknowledge for it`,
+                where));
+              continue;
+            }
+            for (const o of pending) {
+              o.acknowledgedBy = ev.id;
+              reclassify(o.issue, 'WARN', 'unknown_parent_session_acknowledged',
+                `${o.issue.detail} — acknowledged by ${ev.id} (\`maddu spine show ${ev.id}\` for the recorded reason)`);
+              o.issue.acknowledgedBy = ev.id;
+            }
+          }
+          break;
+        }
 
         case 'SESSION_STALE_DETECTED':
           // Janitor observation (Phase 5). No state transition — the

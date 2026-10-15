@@ -608,6 +608,25 @@ same breath: the guarantee is scoped to the **declared sets** and to the
   approving a bad change, and entirely on local, fork, and
   unprotected-branch workflows. `.github/CODEOWNERS` in this repo is
   documentation of the trusted computing base, nothing more.
+- **An acknowledgement is a downgrade the actor can write itself
+  (v1.154.0).** `maddu spine acknowledge --parent-session <sid> --reason
+  "…"` appends `SESSION_PARENT_ACKNOWLEDGED`. After that, `spine verify`
+  reports the listed `unknown_parent_session` references as WARN, not
+  FAIL, so doctor goes green and the checks that need a verified chain run
+  again. It exists because those references, written before v1.112.0 when
+  a parent id leaked in from another repo, could never clear on an
+  append-only spine. It is bounded:
+  - It covers one issue kind only, and only the exact references that come
+    before the event.
+  - A later reference to the same parent still FAILs.
+  - A reason is required, and the event records the acting session.
+  - The downgraded references stay listed as WARN, each naming the event.
+
+  What it does not do: verify that the parent really lived in another
+  repo. That is the operator's judgment, and the verifier deliberately
+  reads no other workspace. An agent could therefore use it to clear a
+  parent reference it fabricated. The attributed event and the remaining
+  WARNs are the signal; review them like any other re-baseline.
 
 **The honest claim:** Máddu is a **cooperative accountability system
 inside the repository's existing authority boundary.** It records
