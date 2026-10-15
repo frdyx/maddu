@@ -33,6 +33,11 @@
 //        no mutation-witness breach);
 //      • `spine verify` names the remedy; the spine-integrity gate names it
 //        while red and goes green after.
+//   D–F. rows from the Codex review's three rounds: the schemaVersion rule,
+//      per-id application, the gate's cap, a synced spine's level and clock
+//      skew, duplicate ids, an overlapping run, --session on every path, and
+//      the read-back after a concurrent sync init, an imported parent, and
+//      mixed coverage of one id's two copies.
 //
 // Exit codes: 0 = OK, 1 = assertion failed, 2 = harness error.
 
@@ -424,6 +429,148 @@ async function main() {
       const theirs = typeof classifyAckReadback === 'function' ? classifyAckReadback(targets, after.issues, first.id) : null;
       ok('the same reference reads as applied for the run that covered it',
         !!theirs && theirs.applied.length === 1 && theirs.pending.length === 0 && theirs.elsewhere.length === 0, JSON.stringify(theirs));
+    }
+
+    console.log('spine-parent-ack: F. review round 3');
+    // Each row stages the race on a real spine: the verb's scan (targets), then
+    // whatever another process does before its append, then the read-back.
+    const sync = await import(pathToFileURL(path.join(LIB, 'spine-sync.mjs')).href);
+    const { classifyAckReadback: classify } = await import(pathToFileURL(path.join(ROOT, 'commands', 'spine.mjs')).href);
+    const canClassify = typeof classify === 'function';
+    const targetsOf = (res) => of(res, 'unknown_parent_session')
+      .map((i) => ({ eventId: i.eventId, segment: i.segment, line: i.line, replicaId: i.replicaId ?? null }));
+    const rawAck = (id, ts, eventIds) => ({ id, ts, type: 'SESSION_PARENT_ACKNOWLEDGED', actor: null,
+      data: { schemaVersion: 1, parentSessionId: PARENT, eventIds, reason: 'fixture' } });
+    {
+      // `spine sync init` runs between the scan and the append. It renames the
+      // flat segment into the new replica's partition, keeping the file name
+      // and the line numbers. The acknowledgement applies there, and the
+      // read-back has to find the reference at its new place.
+      const tmp = await newTmp(); tmps.push(tmp);
+      const a = await autoReg(tmp, 'ses_a', PARENT);
+      const targets = targetsOf(await verify.verifySpine(tmp));
+      const init = await sync.syncInit(tmp);
+      const mine = await ack(tmp, { parentSessionId: PARENT, eventIds: [a.id], reason: 'sync init ran between the scan and the append' });
+      const after = await verify.verifySpine(tmp);
+      const moved = of(after, 'unknown_parent_session_acknowledged').find((i) => i.eventId === a.id);
+      ok('(setup) sync init moved the reference into a replica partition, where this event acknowledged it',
+        init.ok === true && targets.length === 1 && targets[0].replicaId === null
+          && !!moved && typeof moved.replicaId === 'string' && moved.segment === targets[0].segment && moved.line === targets[0].line && moved.acknowledgedBy === mine.id,
+        JSON.stringify({ init, targets, moved }));
+      const out = canClassify ? classify(targets, after.issues, mine.id, { parentSessionId: PARENT }) : null;
+      ok('a reference that sync init moved reads as applied, not unapplied',
+        !!out && out.ok === true && out.applied.length === 1 && out.pending.length === 0
+          && Array.isArray(out.ids?.unapplied) && out.ids.unapplied.length === 0 && out.ids.applied?.includes(a.id),
+        JSON.stringify(out));
+    }
+
+    {
+      // A sync imports the parent's own registration, which sorts before the
+      // reference in merged order. The reference resolves and needs no
+      // acknowledgement, and this event's entry for it matches nothing.
+      const x = 'evt_20260930120000_ffff01';
+      const tmp = await synced({ repA: [orphanRow(x, '2026-09-30T12:00:00.000Z')], repB: [repBRow] });
+      const targets = targetsOf(await verify.verifySpine(tmp));
+      const imported = path.join(tmp, '.maddu', 'events', 'by-replica', 'repC');
+      await mkdir(imported, { recursive: true });
+      await writeFile(path.join(imported, '000000000001.ndjson'), JSON.stringify({ v: 1, id: 'evt_20260930110000_cccc01',
+        ts: '2026-09-30T11:00:00.000Z', type: 'SESSION_REGISTERED', actor: PARENT, lane: null,
+        data: { focus: null, label: 'x', role: 'implementer', runtime: null } }) + '\n');
+      const mine = await ack(tmp, { parentSessionId: PARENT, eventIds: [x], reason: 'the parent was imported meanwhile' });
+      const after = await verify.verifySpine(tmp);
+      ok('(setup) the imported registration resolves the reference, and this event\'s entry for it is unmatched',
+        targets.length === 1 && !of(after, 'unknown_parent_session').some((i) => i.eventId === x)
+          && !of(after, 'unknown_parent_session_acknowledged').some((i) => i.eventId === x)
+          && of(after, 'session_parent_ack_unmatched').some((i) => i.eventId === mine.id),
+        JSON.stringify(after.issues.map((i) => `${i.level} ${i.kind} ${i.eventId}`)));
+      const out = canClassify ? classify(targets, after.issues, mine.id, { parentSessionId: PARENT, parentRegistered: true }) : null;
+      ok('a reference whose parent is registered now reads as resolved, which counts as done',
+        !!out && out.ok === true && out.resolved?.length === 1 && out.pending.length === 0
+          && out.ids?.resolved?.includes(x) && Array.isArray(out.ids?.unapplied) && out.ids.unapplied.length === 0,
+        JSON.stringify(out));
+      ok('the read-back counts this event\'s own unmatched entries', !!out && out.unmatchedOwn === 1, JSON.stringify(out));
+      const blind = canClassify ? classify(targets, after.issues, mine.id, { parentSessionId: PARENT }) : null;
+      ok('a reference that vanished with no registered parent to explain it stays unapplied',
+        !!blind && blind.ok === false && blind.pending.length === 1 && (blind.resolved || []).length === 0 && blind.ids?.unapplied?.includes(x),
+        JSON.stringify(blind));
+    }
+
+    {
+      // The same id twice. Another run's acknowledgement covers the earlier
+      // copy; the later copy, whose replica's clock is ahead, stays pending.
+      // The covered copy is still reported, with the event that covered it.
+      const x = 'evt_20260930120000_ffff02';
+      const later = orphanRow(x, '2099-01-01T00:00:00.000Z');
+      const tmp = await synced({
+        repA: [orphanRow(x, '2026-09-30T12:00:00.000Z')],
+        repB: [repBRow],
+        repC: [{ ...later, actor: 'ses_ffff03', data: { ...later.data, sessionId: 'ses_ffff03' } }],
+      });
+      const targets = targetsOf(await verify.verifySpine(tmp));
+      const first = await ack(tmp, { parentSessionId: PARENT, eventIds: [x], reason: 'the other run' });
+      const mine = await ack(tmp, { parentSessionId: PARENT, eventIds: [x], reason: 'this run' });
+      const after = await verify.verifySpine(tmp);
+      ok('(setup) both copies were targeted', targets.length === 2 && targets.every((t) => t.eventId === x), JSON.stringify(targets));
+      const out = canClassify ? classify(targets, after.issues, mine.id, { parentSessionId: PARENT }) : null;
+      ok('a covered copy is reported even while another copy of its id is pending',
+        !!out && out.ok === false && out.ids?.unapplied?.includes(x)
+          && Array.isArray(out.ids?.alreadyAcknowledged) && out.ids.alreadyAcknowledged.some((o) => o.eventId === x && o.acknowledgedBy === first.id),
+        JSON.stringify(out));
+      // This run's only id found nothing left to cover; the other run's matched.
+      const theirs = canClassify ? classify(targets, after.issues, first.id, { parentSessionId: PARENT }) : null;
+      ok('unmatched entries are counted per event', !!out && !!theirs && out.unmatchedOwn === 1 && theirs.unmatchedOwn === 0,
+        JSON.stringify({ mine: out?.unmatchedOwn, theirs: theirs?.unmatchedOwn }));
+    }
+
+    {
+      // Merged order: the earlier copy, run A's acknowledgement, the later copy,
+      // run B's acknowledgement. Both runs scanned both copies. A covers the
+      // earlier one and B the later one, so neither event has an unmatched id.
+      const x = 'evt_20260930120000_ffff04';
+      const ackA = rawAck('evt_20260930130000_aaaa04', '2026-09-30T13:00:00.000Z', [x]);
+      const ackB = rawAck('evt_20260930150000_bbbb04', '2026-09-30T15:00:00.000Z', [x]);
+      const later = orphanRow(x, '2026-09-30T14:00:00.000Z');
+      const tmp = await synced({
+        repA: [orphanRow(x, '2026-09-30T12:00:00.000Z')],
+        repB: [repBRow, ackA, ackB],
+        repC: [{ ...later, actor: 'ses_ffff05', data: { ...later.data, sessionId: 'ses_ffff05' } }],
+      });
+      const seg = '000000000001.ndjson';
+      const targets = [{ eventId: x, segment: seg, line: 1, replicaId: 'repA' }, { eventId: x, segment: seg, line: 1, replicaId: 'repC' }];
+      const after = await verify.verifySpine(tmp);
+      ok('(setup) A covered the earlier copy, B the later one, and verify reports no unmatched id',
+        of(after, 'unknown_parent_session_acknowledged').some((i) => i.replicaId === 'repA' && i.acknowledgedBy === ackA.id)
+          && of(after, 'unknown_parent_session_acknowledged').some((i) => i.replicaId === 'repC' && i.acknowledgedBy === ackB.id)
+          && of(after, 'session_parent_ack_unmatched').length === 0,
+        JSON.stringify(after.issues.map((i) => `${i.level} ${i.kind} ${i.eventId} ${i.replicaId || ''} ${i.acknowledgedBy || ''}`)));
+      const out = canClassify ? classify(targets, after.issues, ackB.id, { parentSessionId: PARENT }) : null;
+      ok('mixed coverage reads as done, and the read-back counts no unmatched entry for it',
+        !!out && out.ok === true && out.applied.length === 1 && out.elsewhere.length === 1 && out.unmatchedOwn === 0,
+        JSON.stringify(out));
+    }
+
+    {
+      // The flat-to-partition match is by segment and line. When two
+      // partitions hold that id at that position (a teammate's replica made
+      // from the same flat history), the copies decide together: all
+      // acknowledged by this event is applied, and any disagreement is pending.
+      const seg = '000000000001.ndjson';
+      const x = 'evt_20260930120000_ffff06';
+      const target = [{ eventId: x, segment: seg, line: 1, replicaId: null }];
+      const copy = (replicaId, kind, acknowledgedBy) => ({ level: 'WARN', kind, eventId: x, segment: seg, line: 1, replicaId,
+        parentSessionId: PARENT, mergedOrder: true, ...(acknowledgedBy ? { acknowledgedBy } : {}) });
+      const agree = canClassify ? classify(target, [copy('repA', 'unknown_parent_session_acknowledged', 'evt_mine'),
+        copy('repC', 'unknown_parent_session_acknowledged', 'evt_mine')], 'evt_mine', { parentSessionId: PARENT }) : null;
+      ok('copies at the moved position that all name this event read as applied',
+        !!agree && agree.ok === true && agree.applied.length === 1, JSON.stringify(agree));
+      const split = canClassify ? classify(target, [copy('repA', 'unknown_parent_session_acknowledged', 'evt_mine'),
+        copy('repC', 'unknown_parent_session')], 'evt_mine', { parentSessionId: PARENT, parentRegistered: true }) : null;
+      ok('copies at the moved position that disagree read as pending, never resolved',
+        !!split && split.ok === false && split.pending.length === 1 && (split.resolved || []).length === 0, JSON.stringify(split));
+      const other = canClassify ? classify(target, [{ ...copy('repA', 'unknown_parent_session'), parentSessionId: OTHER }],
+        'evt_mine', { parentSessionId: PARENT }) : null;
+      ok('a copy that names another parent is not this reference', !!other && other.ok === false && other.pending.length === 1
+        && other.pending[0].mergedOrder === false, JSON.stringify(other));
     }
   } finally {
     for (const t of tmps) await rm(t, { recursive: true, force: true }).catch(() => {});

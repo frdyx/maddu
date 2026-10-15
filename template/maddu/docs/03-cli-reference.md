@@ -431,9 +431,11 @@ The verifier is strictly read-only. If it flags an issue, the operator decides r
 
 - `--list` is read-only. It groups the verifier's own `unknown_parent_session` findings by parent and shows the event ids, the time span, and how many are already acknowledged. Each row carries the level the verifier gave it: FAIL, or WARN on a synced spine, where every merged-order referential finding is a WARN.
 - `--parent-session <sid> --reason "…"` appends `SESSION_PARENT_ACKNOWLEDGED {schemaVersion, parentSessionId, eventIds, reason}`. `eventIds` holds the exact references the verifier flags for that parent right now. `--reason` is required and secret-scanned, and a hit is refused, since the text lands on the spine for good.
-- After appending, the verb re-runs the verifier and checks every occurrence it targeted; an id can occur twice.
+- After appending, the verb re-runs the verifier and checks every occurrence it targeted; an id can occur twice. It finds each occurrence by its position. That includes one a concurrent `spine sync init` moved into a replica partition, since the move keeps segment names and line numbers.
   - An occurrence that another acknowledgement covered first, as when two runs overlap, counts as done, and the verb says so.
-  - An occurrence that is still unacknowledged makes the verb name the recorded event and the unapplied references, and exit 1. On a synced spine, this happens when a reference from a replica whose clock runs ahead sorts after the acknowledgement.
+  - So does one that no longer names an unknown parent because the parent's registration is on the spine now, as after a sync imports it. `--json` lists these as `resolved`.
+  - An occurrence that is still unacknowledged makes the verb name the recorded event and the unapplied references, and exit 1. On a synced spine, this happens when a reference from a replica whose clock runs ahead sorts after the acknowledgement. An occurrence that is gone with no registered parent to explain it is reported the same way, and `maddu spine verify` shows the current findings.
+  - When some of the event's ids matched nothing, the verb says how many show as `session_parent_ack_unmatched` WARNs.
 
 After the event, `verify` reports each listed reference as **`unknown_parent_session_acknowledged` WARN** naming the acknowledgement, so the reference stays on record. The rule is narrow on purpose:
 

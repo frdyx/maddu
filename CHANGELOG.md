@@ -32,9 +32,14 @@ project-test recency ("cannot trust recency from an unverified chain").
     right now.
   - The reason is required and secret-scanned, and a hit is refused.
   - The verb then re-runs the verifier and checks every occurrence it
-    targeted; an id can occur twice.
+    targeted; an id can occur twice. It finds each one by its position,
+    including one that a concurrent `spine sync init` moved into a replica
+    partition (the move keeps segment names and line numbers).
     - An occurrence that another acknowledgement covered first, as when two
       runs overlap, counts as done and is reported.
+    - So does one that no longer names an unknown parent because the
+      parent's registration is on the spine now, as after a sync imports it
+      (`resolved` in `--json`).
     - One still unacknowledged makes the verb name the recorded event and
       that reference, and exit 1. On a synced spine, this happens when a
       reference from a replica whose clock runs ahead sorts after the
@@ -87,7 +92,7 @@ project-test recency ("cannot trust recency from an unverified chain").
   for "the parent of the session being registered", owned by `register`
   and `session` only (a test enforces this). Here the value is a target,
   so it gets a distinct name instead of loosening that rule.
-- Tests: new `spine-parent-ack`, 80 checks:
+- Tests: new `spine-parent-ack`, 94 checks:
   - the scope and position rules, ignored invalid acknowledgements and a
     merged-order sync case;
   - the real CLI through list, usage errors, refusals, success, the
@@ -96,7 +101,11 @@ project-test recency ("cannot trust recency from an unverified chain").
     application, an acknowledgement past the gate's cap, a synced spine's
     WARN level and clock skew, a duplicate id in `--list` and in the
     read-back, an overlapping run's acknowledgement, and `--session` on
-    every path.
+    every path;
+  - read-back rows from its third round, each staging the race on a real
+    spine: a `sync init` between the scan and the append, a parent whose
+    registration a sync imported, mixed coverage of one id's two copies,
+    and per-event counts of unmatched ids.
 
 ## [v1.153.0] · 2026-10-13 · tone without side stripes
 

@@ -995,26 +995,59 @@ const occurrenceKey = (o) => [o.replicaId ?? '', o.segment ?? '', o.line ?? '', 
 // verb targeted against what verify reports now.
 //   applied   — acknowledged by this event;
 //   elsewhere — acknowledged by another event, such as an overlapping run that
-//               appended first (covered; this event's entry is an unmatched WARN);
-//   pending   — still an unknown_parent_session, or no longer found.
+//               appended first (covered);
+//   resolved  — no longer flagged, and the parent is registered on the spine
+//               now (a sync imported its registration), so nothing is owed;
+//   pending   — still an unknown_parent_session, or gone with nothing to
+//               explain it.
+// An occurrence is found by its position. A `spine sync init` between the scan
+// and the append renames the flat segments into the new replica's partition,
+// keeping file names and line numbers, so a flat target is also looked for at
+// its segment and line in a partition. Copies there decide together: when they
+// disagree the occurrence stays pending, never matched by id alone.
 // A pending occurrence read in a synced spine's merged order carries
 // `mergedOrder: true`; sorting after the acknowledgement (its replica's clock
-// ahead) is then the likely cause. Pure, and exported for the suite.
-export function classifyAckReadback(targets, issues, eventId) {
-  const now = new Map();
-  for (const i of issues) {
-    if (i.kind === 'unknown_parent_session' || i.kind === 'unknown_parent_session_acknowledged') now.set(occurrenceKey(i), i);
-  }
-  const out = { applied: [], elsewhere: [], pending: [] };
-  for (const t of targets) {
-    const i = now.get(occurrenceKey(t));
+// ahead) is then the likely cause. `unmatchedOwn` counts this event's
+// session_parent_ack_unmatched WARNs. Pure, and exported for the suite.
+export function classifyAckReadback(targets, issues, eventId, { parentSessionId = null, parentRegistered = false } = {}) {
+  const findings = issues.filter((i) => (i.kind === 'unknown_parent_session' || i.kind === 'unknown_parent_session_acknowledged')
+    && (parentSessionId === null || i.parentSessionId === parentSessionId));
+  const byKey = new Map(findings.map((i) => [occurrenceKey(i), i]));
+  const used = new Set();
+  const found = targets.map((t) => {
+    const i = byKey.get(occurrenceKey(t));
+    if (i) used.add(i);
+    return i ? [i] : null;
+  });
+  targets.forEach((t, n) => {
+    if (found[n] || t.replicaId) return;
+    const moved = findings.filter((i) => !used.has(i) && i.replicaId && i.segment === t.segment && i.line === t.line && i.eventId === t.eventId);
+    if (moved.length) found[n] = moved;
+  });
+  const out = { applied: [], elsewhere: [], resolved: [], pending: [] };
+  targets.forEach((t, n) => {
+    const copies = found[n] || [];
+    const same = copies.every((i) => i.kind === copies[0].kind && (i.acknowledgedBy || null) === (copies[0].acknowledgedBy || null));
+    const i = copies.length && same ? copies[0] : null;
     if (i && i.kind === 'unknown_parent_session_acknowledged') {
       if (i.acknowledgedBy === eventId) out.applied.push(t);
       else out.elsewhere.push({ ...t, acknowledgedBy: i.acknowledgedBy || null });
+    } else if (!copies.length && parentRegistered) {
+      out.resolved.push(t);
     } else {
-      out.pending.push({ ...t, mergedOrder: !!(i && i.mergedOrder) });
+      out.pending.push({ ...t, mergedOrder: copies.some((c) => !!c.mergedOrder) });
     }
-  }
+  });
+  const unique = (list) => [...new Set(list.map((o) => o.eventId))];
+  const unapplied = unique(out.pending);
+  out.ids = {
+    applied: unique(out.applied).filter((id) => !unapplied.includes(id)),
+    unapplied,
+    alreadyAcknowledged: out.elsewhere.map((o) => ({ eventId: o.eventId, acknowledgedBy: o.acknowledgedBy })),
+    resolved: unique(out.resolved).filter((id) => !unapplied.includes(id)),
+  };
+  out.unmatchedOwn = issues.filter((i) => i.kind === 'session_parent_ack_unmatched' && i.eventId === eventId).length;
+  out.ok = unapplied.length === 0;
   return out;
 }
 
@@ -1160,26 +1193,32 @@ async function spineAcknowledge(lib, repoRoot, rest) {
   }
   // Read back what verify says now, and check every occurrence the verb
   // targeted, so the operator sees the effect rather than our claim of it.
-  // Covered by another acknowledgement first (an overlapping run) counts as
-  // done. Still unacknowledged is a failed application (exit 1): on a synced
-  // spine an acknowledgement sorts by its timestamp, so a reference from a
-  // replica whose clock runs ahead can land after it.
+  // Covered by another acknowledgement first (an overlapping run), or resolved
+  // because the parent's registration is on the spine now, counts as done.
+  // Still unacknowledged is a failed application (exit 1): on a synced spine
+  // an acknowledgement sorts by its timestamp, so a reference from a replica
+  // whose clock runs ahead can land after it.
   const after = await lib.verify.verifySpine(repoRoot, { maxEvents: Infinity });
-  const rb = classifyAckReadback(group.pending, after.issues, ev.id);
-  const unapplied = [...new Set(rb.pending.map((o) => o.eventId))];
-  const applied = [...new Set(rb.applied.map((o) => o.eventId))].filter((id) => !unapplied.includes(id));
-  const alreadyAcknowledged = rb.elsewhere.filter((o) => !unapplied.includes(o.eventId))
-    .map((o) => ({ eventId: o.eventId, acknowledgedBy: o.acknowledgedBy }));
+  let parentRegistered = false;
+  try {
+    const T = lib.spine.EVENT_TYPES;
+    parentRegistered = (await lib.spine.readAll(repoRoot))
+      .some((e) => e && (e.type === T.SESSION_REGISTERED || e.type === T.SESSION_AUTO_REGISTERED) && e.actor === parent);
+  } catch { /* unreadable: nothing is called resolved */ }
+  const rb = classifyAckReadback(group.pending, after.issues, ev.id, { parentSessionId: parent, parentRegistered });
+  const { applied, unapplied, alreadyAcknowledged, resolved } = rb.ids;
   if (json) {
-    process.stdout.write(JSON.stringify({ ok: unapplied.length === 0, event: ev.id, parentSessionId: parent, eventIds, applied, alreadyAcknowledged, unapplied, verify: after.counts }, null, 2) + '\n');
-    process.exit(unapplied.length ? 1 : 0);
+    process.stdout.write(JSON.stringify({ ok: rb.ok, event: ev.id, parentSessionId: parent, eventIds, applied, alreadyAcknowledged, resolved, unapplied, verify: after.counts }, null, 2) + '\n');
+    process.exit(rb.ok ? 0 : 1);
   }
   const counts = `spine verify now: ${ANSI.fail}${after.counts.FAIL} fail${after.counts.FAIL === 1 ? '' : 's'}${ANSI.reset} · ${ANSI.warn}${after.counts.WARN} warn${after.counts.WARN === 1 ? '' : 's'}${ANSI.reset}`;
   const coveredBy = [...new Set(alreadyAcknowledged.map((o) => o.acknowledgedBy))].join(', ');
-  const coveredNote = alreadyAcknowledged.length
-    ? `${alreadyAcknowledged.length} reference(s) were already acknowledged by ${coveredBy}, which got there first; this event's entries for them show as unmatched WARNs.`
-    : '';
-  if (unapplied.length) {
+  const notes = [
+    alreadyAcknowledged.length ? `${alreadyAcknowledged.length} reference(s) were already acknowledged by ${coveredBy}, which got there first.` : '',
+    resolved.length ? `${resolved.length} reference(s) no longer name an unknown parent: ${parent} is registered on this spine now (a sync can import it), so they need no acknowledgement.` : '',
+    rb.unmatchedOwn ? `${rb.unmatchedOwn} of this event's ids matched no earlier unacknowledged reference, and verify shows each as a session_parent_ack_unmatched WARN.` : '',
+  ].filter(Boolean);
+  if (!rb.ok) {
     console.error(`${ANSI.fail}Not applied:${ANSI.reset} recorded ${ev.id}, but ${unapplied.length} reference(s) to ${parent} are still unacknowledged:`);
     for (const id of unapplied) console.error(`  ${id}`);
     if (rb.pending.every((o) => o.mergedOrder)) {
@@ -1187,12 +1226,12 @@ async function spineAcknowledge(lib, repoRoot, rest) {
     } else {
       console.error(`  Run \`maddu spine verify\` to see how they are reported now.`);
     }
-    if (coveredNote) console.error(`  ${coveredNote}`);
+    for (const note of notes) console.error(`  ${note}`);
     console.error(`  ${counts}`);
     process.exit(1);
   }
   console.log(`${levelTag('PASS')}  acknowledged ${applied.length} reference(s) to ${ANSI.accent}${parent}${ANSI.reset}  ${ANSI.dim}(${ev.id})${ANSI.reset}`);
-  if (coveredNote) console.log(`  ${coveredNote}`);
+  for (const note of notes) console.log(`  ${note}`);
   console.log(`  ${counts}`);
   console.log(`  ${ANSI.dim}The references stay on record as WARN unknown_parent_session_acknowledged; a later reference to this parent is reported again.${ANSI.reset}`);
   process.exit(0);
