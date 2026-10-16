@@ -144,19 +144,71 @@ async function* walk(dir, rel = '') {
 // Untracked-but-not-ignored files are deliberately KEPT: a forbidden import in
 // a file you just created must be caught before you commit it, not after.
 // Only what git is explicitly told to ignore is dropped.
-async function gitVisibleFiles(repoRoot) {
-  const r = await gitRun(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], repoRoot);
-  if (!r || r.code !== 0) return null;
-  const set = new Set();
-  for (const p of r.stdout.split('\0')) {
-    const rel = p.trim();
-    if (rel) set.add(rel);
+//
+// Since the mass scan reads this listing too (v1.155.0), a file it misses is a
+// monolith that can grow unnoticed, so it has to name every file git can see:
+//   - only empty NUL-separated records are dropped; a name can start or end
+//     with a space;
+//   - a submodule (a gitlink) or an untracked nested repository (`dir/`) is a
+//     single entry, so its own listing is read and added under its prefix,
+//     keeping its own ignore rules. With no repository inside, or when that
+//     listing fails, everything under the prefix counts;
+//   - names are compared the way git compares them here (visibilitySet).
+const NESTED_REPO_DEPTH = 4;
+
+async function listVisible(root, depth) {
+  const staged = await gitRun(['ls-files', '-z', '--stage'], root);
+  const others = await gitRun(['ls-files', '-z', '--others', '--exclude-standard'], root);
+  if (!staged || staged.code !== 0 || !others || others.code !== 0) return null;
+  const out = { paths: [], prefixes: [] };
+  const nested = [];
+  for (const rec of staged.stdout.split('\0')) {
+    const tab = rec.indexOf('\t');
+    if (tab < 0) continue;
+    (rec.startsWith('160000 ') ? nested : out.paths).push(rec.slice(tab + 1));
   }
+  for (const p of others.stdout.split('\0')) {
+    if (!p) continue;
+    if (p.endsWith('/')) nested.push(p.slice(0, -1));
+    else out.paths.push(p);
+  }
+  for (const n of nested) {
+    const inner = join(root, n);
+    const isRepo = depth < NESTED_REPO_DEPTH && await stat(join(inner, '.git')).then(() => true, () => false);
+    const sub = isRepo ? await listVisible(inner, depth + 1) : null;
+    if (!sub) { out.prefixes.push(`${n}/`); continue; }
+    for (const q of sub.paths) out.paths.push(`${n}/${q}`);
+    for (const q of sub.prefixes) out.prefixes.push(`${n}/${q}`);
+  }
+  return out;
+}
+
+async function gitVisibleFiles(repoRoot) {
+  const listed = await listVisible(repoRoot, 0);
+  if (!listed) return null;
   // An EMPTY listing from a successful call means "this directory holds no
   // files git can see". Treating that as "git could not answer" would silently
   // reinstate the bug in exactly the repo shape it matters least to guess in,
-  // so it is returned as the empty set, not as null.
-  return set;
+  // so it is returned as an empty set, not as null.
+  const cfg = await gitRun(['config', '--bool', '--get-regexp', '^core\\.(ignorecase|precomposeunicode)$'], repoRoot);
+  const on = (name) => !!cfg && cfg.code === 0 && cfg.stdout.split('\n').some((l) => l.trim() === `core.${name} true`);
+  return visibilitySet(listed.paths, { prefixes: listed.prefixes, ignoreCase: on('ignorecase'), unicode: on('precomposeunicode') });
+}
+
+// Membership by the rules git applies to names on this checkout. Under
+// core.ignoreCase (a case-insensitive filesystem) git can keep `src/Big.mjs` in
+// its index while the disk says `src/big.mjs`; under core.precomposeUnicode
+// (macOS) git lists precomposed names while the disk can hand back decomposed
+// ones. Each fold applies only when the checkout says so, so a case-sensitive
+// checkout keeps names exact. Callers report the walk's own path.
+export function visibilitySet(paths, { prefixes = [], ignoreCase = false, unicode = false } = {}) {
+  const key = (p) => {
+    const k = unicode ? p.normalize('NFC') : p;
+    return ignoreCase ? k.toLowerCase() : k;
+  };
+  const keys = new Set(paths.map(key));
+  const under = prefixes.map(key);
+  return { size: keys.size, has: (rel) => { const k = key(rel); return keys.has(k) || under.some((pre) => k.startsWith(pre)); } };
 }
 
 export async function scanFiles(repoRoot, ignore = []) {
@@ -500,7 +552,15 @@ function countLines(body) {
 
 // Scan code files for line/byte mass + exact duplicates. `ignore` is a list of
 // RegExp (repo-relative path matchers). Returns files sorted largest-first.
+//
+// The file set is the dependency scan's (scanFiles): what git can see, tracked
+// plus untracked-but-not-ignored, or the raw walk when git can't answer. Until
+// v1.155.0 the mass scan walked the raw tree. From a checkout with worktrees
+// under the excluded .claude/worktrees/, or a gitignored folder of copies,
+// doctor counted those copies as new monoliths and duplicates: red on files no
+// commit can fix and CI never sees.
 export async function scanMass(repoRoot, { maxLines = MASS_MAX_LINES, ignore = [] } = {}) {
+  const visible = await gitVisibleFiles(repoRoot);
   const files = [];
   const byHash = new Map();
   for await (const rel of walk(repoRoot)) {
@@ -508,6 +568,7 @@ export async function scanMass(repoRoot, { maxLines = MASS_MAX_LINES, ignore = [
     const ext = dot < 0 ? '' : rel.slice(dot);
     if (!SOURCE_EXTS.includes(ext)) continue;
     if (ignore.some((re) => re.test(rel))) continue;
+    if (visible && !visible.has(rel)) continue; // gitignored — not part of the repo
     let body;
     try { body = await readFile(join(repoRoot, rel), 'utf8'); } catch { continue; }
     const lines = countLines(body);

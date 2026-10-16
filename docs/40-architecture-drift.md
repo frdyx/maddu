@@ -105,6 +105,19 @@ generated mirrors (docs, agent briefs) are intentionally excluded so they don't
 register as duplicates. The baseline is `mass-baseline.json` (tracked, like the
 contract, so CI enforces it).
 
+Both scans, the import graph and the mass, read the files git can see: tracked
+files, plus untracked files that git doesn't ignore. An untracked file matched
+by `.gitignore` or `.git/info/exclude` is skipped, such as another worktree's
+checkout under `.claude/worktrees/` or a scratch folder of copies, so it doesn't
+count as a monolith or a duplicate. Ignore rules never apply to a file git
+already tracks, so a tracked file under an ignored path still counts.
+Submodules and nested repositories are read through their own listings, with
+their own ignore rules, and names compare the way git compares them on the
+checkout (`core.ignoreCase`, `core.precomposeUnicode`). When git is missing,
+the directory isn't a repository, or a git call fails, both scans walk the
+whole tree instead, ignored files included. (The mass scan read ignored files
+until v1.155.0.)
+
 ## Scope (MVP)
 
 This is the **code import graph** — modules, layers, cycles. Runtime/service

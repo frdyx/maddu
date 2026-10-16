@@ -11,18 +11,24 @@ import { spawn } from 'node:child_process';
 
 // Run `git ...args` in cwd, return { code, stdout, stderr } (+ error on spawn
 // failure). Never throws; a nonzero code / spawn error is data, not an
-// exception — callers decide how to surface it.
-export function gitRun(args, cwd, timeoutMs = 10000) {
+// exception — callers decide how to surface it. `spawnImpl` is injectable for
+// tests.
+export function gitRun(args, cwd, timeoutMs = 10000, { spawnImpl = spawn } = {}) {
   return new Promise((resolve) => {
     let stdout = '', stderr = '', resolved = false;
     let child;
-    try { child = spawn('git', args, { cwd }); }
+    try { child = spawnImpl('git', args, { cwd }); }
     catch (e) { return resolve({ code: -1, error: e.message, stdout, stderr }); }
     const timer = setTimeout(() => { if (!resolved) { try { child.kill(); } catch {} } }, timeoutMs);
     child.on('error', (e) => { if (resolved) return; resolved = true; clearTimeout(timer); resolve({ code: -1, error: e.message, stdout, stderr }); });
     child.on('close', (code) => { if (resolved) return; resolved = true; clearTimeout(timer); resolve({ code, stdout, stderr }); });
-    child.stdout.on('data', (b) => { stdout += b.toString('utf8'); });
-    child.stderr.on('data', (b) => { stderr += b.toString('utf8'); });
+    // Decode each stream as a whole: a multi-byte character whose bytes land
+    // in two chunks would otherwise become two replacement characters (a file
+    // name that then matches nothing).
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (s) => { stdout += s; });
+    child.stderr.on('data', (s) => { stderr += s; });
   });
 }
 
