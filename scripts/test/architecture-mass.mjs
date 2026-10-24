@@ -21,7 +21,7 @@ import { join, dirname } from 'node:path';
 import * as architecture from '../../template/maddu/runtime/lib/architecture.mjs';
 import { gitRun } from '../../template/maddu/runtime/lib/git-exec.mjs';
 
-const { scanMass, evaluateMass, writeMassBaseline, loadMassBaseline, visibilitySet } = architecture;
+const { scanMass, evaluateMass, writeMassBaseline, loadMassBaseline, visibilitySet, gitBoolConfig } = architecture;
 
 let passed = 0;
 let failed = 0;
@@ -251,6 +251,72 @@ async function main() {
       ok('a file under a gitlink with no repository inside counts', big.includes('components/stale/big.mjs'), JSON.stringify(big));
     } finally {
       await rm(nroot, { recursive: true, force: true });
+    }
+  }
+
+  // ── config read: precedence + failure fallback (v1.155.0, Codex R2 2 & 4) ───
+  //
+  // Folding (core.ignoreCase / core.precomposeUnicode) must follow git's own
+  // precedence (the last/effective value), and a config query that FAILS must
+  // read null so the raw walk applies — never a silent false (exact matching).
+  {
+    ok('gitBoolConfig is exported', typeof gitBoolConfig === 'function');
+    const f = typeof gitBoolConfig === 'function';
+    // Deterministic, git-free: an injected spawn that returns a fixed exit.
+    const fake = (code, out = '', errMsg) => () => {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => {};
+      setImmediate(() => {
+        if (out) child.stdout.write(out);
+        child.stdout.end(); child.stderr.end();
+        setImmediate(() => errMsg ? child.emit('error', new Error(errMsg)) : child.emit('close', code));
+      });
+      return child;
+    };
+    ok('a set true config reads true', f && (await gitBoolConfig('x', 'core.ignoreCase', { spawnImpl: fake(0, 'true\n') })) === true);
+    ok('a set false config reads false', f && (await gitBoolConfig('x', 'core.ignoreCase', { spawnImpl: fake(0, 'false\n') })) === false);
+    ok('an unset config (exit 1, empty) reads false, not a failure', f && (await gitBoolConfig('x', 'core.ignoreCase', { spawnImpl: fake(1, '') })) === false);
+    ok('a config query that spawn-errors reads null so the raw walk applies', f && (await gitBoolConfig('x', 'core.ignoreCase', { spawnImpl: fake(0, '', 'boom') })) === null);
+    ok('a fatal config exit (128) reads null', f && (await gitBoolConfig('x', 'core.ignoreCase', { spawnImpl: fake(128, '') })) === null);
+
+    // Precedence against real git: an overridden true→false reads false (last
+    // wins). The old `--get-regexp` + `.some(... true)` wrongly folded here.
+    const proot = await mkdtemp(join(tmpdir(), 'maddu-mass-cfgprec-'));
+    try {
+      await gitIn(proot, ['init', '-q']);
+      await gitIn(proot, ['config', '--add', 'core.ignoreCase', 'true']);
+      await gitIn(proot, ['config', '--add', 'core.ignoreCase', 'false']);
+      ok('config precedence: an overridden true then false reads false (last wins)',
+        f && (await gitBoolConfig(proot, 'core.ignoreCase')) === false);
+    } finally { await rm(proot, { recursive: true, force: true }); }
+  }
+
+  // ── scan discovers from cwd, not an inherited GIT_DIR (v1.155.0, R2 5) ──────
+  //
+  // A git hook runs with GIT_DIR/GIT_WORK_TREE pointing at the invoking repo.
+  // Left in place, a scan subprocess answers about THAT repo, not the one under
+  // cwd. With them pointed at a DIFFERENT empty repo, the buggy scan listed
+  // nothing and the target's tracked monolith vanished; cleared, it is found.
+  {
+    const eroot = await mkdtemp(join(tmpdir(), 'maddu-mass-env-'));
+    const other = await mkdtemp(join(tmpdir(), 'maddu-mass-env-other-'));
+    const saved = { d: process.env.GIT_DIR, w: process.env.GIT_WORK_TREE, i: process.env.GIT_INDEX_FILE };
+    try {
+      await gitIn(eroot, ['init', '-q']);
+      await put(eroot, 'src/big.mjs', lines(200));
+      await gitIn(eroot, ['add', 'src/big.mjs']);
+      await gitIn(other, ['init', '-q']);
+      process.env.GIT_DIR = join(other, '.git');
+      process.env.GIT_WORK_TREE = other;
+      delete process.env.GIT_INDEX_FILE;
+      const big = oversizePaths(await scanMass(eroot, { maxLines: 100 }));
+      ok('a scan ignores an inherited GIT_DIR/GIT_WORK_TREE and discovers from cwd', big.includes('src/big.mjs'), JSON.stringify(big));
+    } finally {
+      if (saved.d === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = saved.d;
+      if (saved.w === undefined) delete process.env.GIT_WORK_TREE; else process.env.GIT_WORK_TREE = saved.w;
+      if (saved.i === undefined) delete process.env.GIT_INDEX_FILE; else process.env.GIT_INDEX_FILE = saved.i;
+      await rm(eroot, { recursive: true, force: true });
+      await rm(other, { recursive: true, force: true });
     }
   }
 }

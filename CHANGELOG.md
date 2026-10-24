@@ -11,6 +11,39 @@ narrative summary.
 
 ---
 
+## [v1.155.0] · 2026-10-16 · the mass scan reads only what git can see
+
+Architecture. Since v1.120.0 the import scan has read only the files git can
+see; the mass scan behind `maddu architecture mass` and the `architecture-mass`
+gate still walked the raw tree. In a checkout with Claude worktrees under the
+excluded `.claude/worktrees/`, or a gitignored folder of copies, it counted
+those copies as monoliths and duplicates. On the operator's main checkout that
+meant 3,024 files scanned instead of 647 and 653 duplicate groups instead of 0,
+with eight "new" monoliths — so doctor, audit and `goal done` showed
+`architecture-mass` red on files no commit can fix and CI never sees.
+
+- `scanMass` now uses the same file set as the import scan: tracked files, plus
+  untracked files git doesn't ignore (`.gitignore`, `.git/info/exclude`);
+  submodules and nested repositories through their own listings. When git can't
+  answer, it falls back to the raw walk. An untracked file git doesn't ignore
+  still counts, so a new monolith is caught before it is committed.
+- Names compare the way git does on the checkout. `core.ignoreCase` and
+  `core.precomposeUnicode` are read with git's own precedence (`--bool --get`,
+  the last/effective value); a folding-config query that *fails* falls back to
+  the raw walk instead of silently assuming exact matching.
+- Scan subprocesses no longer inherit `GIT_DIR` / `GIT_WORK_TREE` /
+  `GIT_INDEX_FILE`, so a scan run from a git hook discovers each repository from
+  its own cwd rather than answering about the hook's repository. `gitRun` gains
+  an optional `env` for callers that must not inherit the repository selection.
+- `docs/40-architecture-drift.md` documents the scoped raw-walk fallback and
+  three fail-safe limits (per-repository folding settings, a four-level nesting
+  depth, and JavaScript case folding of a few distinct Windows filenames — each
+  can over-count an ignored file, never hide a visible one).
+- Tests: `architecture-mass` reads the file set and the four R2 fixes
+  (36 → 44 rows); the mass baseline needs no change.
+
+---
+
 ## [v1.154.0] · 2026-10-14 · a way out of a permanent unknown-parent FAIL
 
 Spine integrity. Session registrations recorded before v1.112.0 could name

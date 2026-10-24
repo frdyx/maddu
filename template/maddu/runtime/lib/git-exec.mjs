@@ -12,12 +12,14 @@ import { spawn } from 'node:child_process';
 // Run `git ...args` in cwd, return { code, stdout, stderr } (+ error on spawn
 // failure). Never throws; a nonzero code / spawn error is data, not an
 // exception — callers decide how to surface it. `spawnImpl` is injectable for
-// tests.
-export function gitRun(args, cwd, timeoutMs = 10000, { spawnImpl = spawn } = {}) {
+// tests. `env`, when given, replaces the child's environment (callers that must
+// not inherit the parent's repository selection — GIT_DIR, GIT_WORK_TREE,
+// GIT_INDEX_FILE — pass a cleaned copy); omitted, the child inherits as before.
+export function gitRun(args, cwd, timeoutMs = 10000, { spawnImpl = spawn, env } = {}) {
   return new Promise((resolve) => {
     let stdout = '', stderr = '', resolved = false;
     let child;
-    try { child = spawnImpl('git', args, { cwd }); }
+    try { child = spawnImpl('git', args, env ? { cwd, env } : { cwd }); }
     catch (e) { return resolve({ code: -1, error: e.message, stdout, stderr }); }
     const timer = setTimeout(() => { if (!resolved) { try { child.kill(); } catch {} } }, timeoutMs);
     child.on('error', (e) => { if (resolved) return; resolved = true; clearTimeout(timer); resolve({ code: -1, error: e.message, stdout, stderr }); });

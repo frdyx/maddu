@@ -156,9 +156,24 @@ async function* walk(dir, rel = '') {
 //   - names are compared the way git compares them here (visibilitySet).
 const NESTED_REPO_DEPTH = 4;
 
+// The scan always discovers each repository from its own cwd, never from an
+// inherited repository selection. A git hook runs with GIT_DIR, GIT_WORK_TREE
+// and GIT_INDEX_FILE pointing at the repo that invoked it; left in place, a
+// nested `git ls-files` (or the config read) would answer about THAT repo, not
+// the submodule under cwd, and silently drop its files. Clear them for every
+// scan subprocess so discovery follows cwd. (v1.155.0, Codex R2 finding 5.)
+function scanGitEnv() {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  return env;
+}
+
 async function listVisible(root, depth) {
-  const staged = await gitRun(['ls-files', '-z', '--stage'], root);
-  const others = await gitRun(['ls-files', '-z', '--others', '--exclude-standard'], root);
+  const env = scanGitEnv();
+  const staged = await gitRun(['ls-files', '-z', '--stage'], root, 10000, { env });
+  const others = await gitRun(['ls-files', '-z', '--others', '--exclude-standard'], root, 10000, { env });
   if (!staged || staged.code !== 0 || !others || others.code !== 0) return null;
   const out = { paths: [], prefixes: [] };
   const nested = [];
@@ -190,9 +205,30 @@ async function gitVisibleFiles(repoRoot) {
   // files git can see". Treating that as "git could not answer" would silently
   // reinstate the bug in exactly the repo shape it matters least to guess in,
   // so it is returned as an empty set, not as null.
-  const cfg = await gitRun(['config', '--bool', '--get-regexp', '^core\\.(ignorecase|precomposeunicode)$'], repoRoot);
-  const on = (name) => !!cfg && cfg.code === 0 && cfg.stdout.split('\n').some((l) => l.trim() === `core.${name} true`);
-  return visibilitySet(listed.paths, { prefixes: listed.prefixes, ignoreCase: on('ignorecase'), unicode: on('precomposeunicode') });
+  // Names compare the way git does on this checkout. core.ignoreCase and
+  // core.precomposeUnicode are read with git's own precedence (`--get` returns
+  // the last/effective value, not every scoped entry). A query that FAILS
+  // (spawn error, timeout, unexpected exit) is not "unset": we cannot know how
+  // git folds names here, so fall back to the raw walk rather than silently
+  // assuming exact matching. (v1.155.0, Codex R2 findings 2 and 4.)
+  const env = scanGitEnv();
+  const ignoreCase = await gitBoolConfig(repoRoot, 'core.ignoreCase', { env });
+  const unicode = await gitBoolConfig(repoRoot, 'core.precomposeUnicode', { env });
+  if (ignoreCase === null || unicode === null) return null;
+  return visibilitySet(listed.paths, { prefixes: listed.prefixes, ignoreCase, unicode });
+}
+
+// Read one boolean git config key with git's own precedence. Returns true/false
+// when set (`--bool --get` yields the effective value), false when the key is
+// unset (git exits 1 with no output), and null when the query itself failed
+// (spawn error, timeout, unexpected nonzero), so the caller can fall back to the
+// raw walk instead of assuming exact matching. `opts` flows to gitRun
+// (spawnImpl/env injectable for tests).
+export async function gitBoolConfig(repoRoot, key, opts = {}) {
+  const r = await gitRun(['config', '--bool', '--get', key], repoRoot, 10000, opts);
+  if (r && r.code === 0) return r.stdout.trim() === 'true';
+  if (r && r.code === 1 && !r.error && r.stdout.trim() === '') return false; // unset
+  return null; // query failed
 }
 
 // Membership by the rules git applies to names on this checkout. Under
