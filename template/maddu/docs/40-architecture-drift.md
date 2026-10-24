@@ -105,6 +105,40 @@ generated mirrors (docs, agent briefs) are intentionally excluded so they don't
 register as duplicates. The baseline is `mass-baseline.json` (tracked, like the
 contract, so CI enforces it).
 
+Both scans, the import graph and the mass, read the files git can see: tracked
+files, plus untracked files that git doesn't ignore. An untracked file matched
+by `.gitignore` or `.git/info/exclude` is skipped, such as another worktree's
+checkout under `.claude/worktrees/` or a scratch folder of copies, so it doesn't
+count as a monolith or a duplicate. Ignore rules never apply to a file git
+already tracks, so a tracked file under an ignored path still counts.
+Submodules and nested repositories are read through their own listings, with
+their own ignore rules, and names compare the way git compares them on the
+checkout (`core.ignoreCase` and `core.precomposeUnicode`, read with git's own
+precedence — the last/effective value). The fallback to the raw walk — every
+file counted, ignored ones included — is scoped to what failed: if git is
+missing, the top directory isn't a repository, the root listing fails, or the
+folding-config query fails, the whole tree is walked; if only a *nested*
+repository's listing fails (or it holds no repository), only that subtree's
+prefix counts, and ignored files elsewhere stay excluded. (The mass scan read
+ignored files until v1.155.0.)
+
+Known limits (all fail safe — each can count an ignored file that git would
+drop, never hide a file git can see):
+
+- **Per-repository folding settings.** The folding config is read at each
+  scanned repository's own root, but a nested repository whose
+  `core.ignoreCase` / `core.precomposeUnicode` differ from its parent is still
+  compared under the setting read at that nested root, not a boundary-aware
+  blend; a name that folds one way in the parent and another in the child can
+  be admitted.
+- **Nested depth.** Nested repositories are followed four levels deep; one
+  nested deeper than that has its whole prefix counted (its own ignore rules
+  are not read at that depth).
+- **Unicode case folding.** Name folding uses JavaScript case folding, which
+  treats a few distinct Windows filenames as equal (e.g. `K` and the Kelvin
+  sign `K`, U+212A, which NTFS keeps distinct); the effect is at most one extra
+  ignored file counted, never a visible file hidden.
+
 ## Scope (MVP)
 
 This is the **code import graph** — modules, layers, cycles. Runtime/service
