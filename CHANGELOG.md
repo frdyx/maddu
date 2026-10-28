@@ -11,6 +11,45 @@ narrative summary.
 
 ---
 
+## [v1.156.0] · 2026-10-28 · the shared redactor catches five more secret shapes
+
+Secrets. `redactText` in `secret-scan.mjs` is the one redactor behind the spine
+write boundary, worker spawns, logs, blueprints, the state stores and the
+spine-sync secret scan. An independent refuter in the v2 Goalflow run (residual
+R4) found five common shapes it left in clear text, and the run had to patch its
+own copy. Operator decision D-030 fixes them at the source, so every surface
+gets them.
+
+- **JWT** — three base64url segments, the first starting `eyJ` →
+  `[REDACTED:jwt]`. The signature may be empty (an unsigned token).
+- **URL userinfo** — only the password goes, so the URL stays readable:
+  `postgres://app:[REDACTED:url-userinfo]@db/app`. An empty user name
+  (`redis://:pw@…`) and a raw `@` in the password are handled.
+- **Password values** — after a key ending in `password`/`passwd` and `=` or
+  `:`, or in `pwd` and `=`: `DB_PASSWORD=[REDACTED:password]`,
+  `--password=…`, `Pwd=…;` in a connection string, a quoted value whole.
+  Deliberately left alone: the shell's `pwd: error …` line, `/etc/passwd: …`,
+  `PWD=`/`OLDPWD=` paths, and a JSON-quoted key (`"password": "…"`), which
+  stays the key-aware rule's job (16+ characters, as before).
+- **npm** (`npm_` + 36) → `[REDACTED:npm-token]`, **Hugging Face** (`hf_` + 30
+  or more) → `[REDACTED:huggingface-token]`. Env names such as
+  `npm_config_cache` and `hf_hub_download` don't match.
+- JWTs, URL passwords and password values are redacted *before* the
+  high-entropy pass. Before, `bearer: eyJ…` with a 40+ character header lost
+  only the header and stored the payload and signature.
+- The spine-sync scan runs `redactText` over JSON-encoded lines, so a backslash
+  (a JSON escape) never starts a password value or sits in a URL user or
+  password: the scan can't flag what the write boundary left alone. On the
+  operator's spine (19,897 lines) the new patterns flag nothing.
+- `scanArgv` refuses the new shapes in tool argv and `safeImport` rejects them,
+  as for every canonical pattern. Code or prose that spells out a credential
+  shape (`password: required`) can be over-redacted.
+- Tests: `payload-redaction` gains a positive row and a near-miss negative
+  control per shape (69/26 before the fix, 95/0 after), and 11 mutation controls
+  each turn one row red.
+
+---
+
 ## [v1.155.0] · 2026-10-16 · the mass scan reads only what git can see
 
 Architecture. Since v1.120.0 the import scan has read only the files git can

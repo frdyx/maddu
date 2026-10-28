@@ -28,6 +28,11 @@ export const PATTERN_TYPES = [
   'slack-token',
   'google-api-key',
   'stripe-secret-key',
+  'npm-token',
+  'huggingface-token',
+  'jwt',
+  'url-userinfo',
+  'password',
   'private-key-block',
   'high-entropy-adjacent-to-secret-key',
   'value-under-sensitive-key',
@@ -81,7 +86,51 @@ const PATTERNS = [
   // Stripe — live/test secret + restricted keys (underscore form; no collision
   // with OpenAI's hyphenated `sk-`).
   { type: 'stripe-secret-key', re: /\b[rs]k_(?:live|test)_[0-9A-Za-z]{16,}\b/ },
+
+  // npm access token — `npm_` + exactly 36 alnum chars (env names such as
+  // `npm_config_cache` break on the next underscore).
+  { type: 'npm-token', re: /\bnpm_[A-Za-z0-9]{36}\b/ },
+
+  // Hugging Face user access token — `hf_` + 30 or more alnum chars.
+  { type: 'huggingface-token', re: /\bhf_[A-Za-z0-9]{30,}\b/ },
+
+  // ── Value-anchored shapes (`early: true`). redactText applies these BEFORE
+  // the high-entropy pass, which stops at `.`/`-`/`_` and would otherwise take
+  // only part of the value: on `bearer: eyJ…` just a long JWT header (payload
+  // and signature left behind), on `password=<base64>!tail` everything but the
+  // tail. The last two match ONLY the value (lookbehind), so the key or URL
+  // around it stays readable. Each skips a value that is already
+  // `[REDACTED:…]`, so a second pass finds nothing. spine-sync scans the
+  // JSON-encoded spine lines with redactText too, and that line scan must not
+  // flag what the write boundary left alone: so a backslash (a JSON escape,
+  // e.g. `password:\n…`) never starts a password value, and never sits in a
+  // URL's user or password (where `…:8080\nadmin@…` would join two lines).
+
+  // JWT — three base64url segments, the first a JSON header (`{"` → `eyJ`).
+  // The signature may be empty: an unsigned (`alg: none`) token is still a
+  // bearer credential to a lax verifier.
+  { type: 'jwt', re: /\beyJ[A-Za-z0-9_-]{7,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*/, early: true },
+
+  // The password in URL userinfo (`scheme://user:pass@host`, user may be
+  // empty). It runs to the LAST `@` before the path, as URL parsers split a
+  // raw `@` in the password.
+  { type: 'url-userinfo', re: /(?<=[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s:@\/?#\\]*:)(?!\[REDACTED:)[^\s\/?#\\]+(?=@)/, early: true },
+
+  // The value after a key ending in `password`/`passwd` + `=` or `:`, or in
+  // `pwd` + `=` (`DB_PASSWORD=…`, `password: "…"`, `--password=…`, `Pwd=…;` in a
+  // connection string). A quoted value is taken whole; an unquoted one runs to
+  // whitespace, a quote, `;` or `&`. Deliberately not matched:
+  //   - `pwd:` — the shell's `pwd: error retrieving current directory`;
+  //   - a key after a path separator — `/etc/passwd: Permission denied`;
+  //   - a `pwd` value that is a path — the shell's `PWD=/home/…`, `OLDPWD=C:\…`;
+  //   - a JSON-quoted key (`"password": "…"`) — object values are the
+  //     key-aware rule's job (see SENSITIVE_VALUE_RE below).
+  { type: 'password', re: /(?<=(?<![\/\\])(?:password|passwd)[ \t]*[=:][ \t]*)(?!\\|\[REDACTED:)(?:"(?:[^"\\\n]|\\.)+"|'(?:[^'\\\n]|\\.)+'|["']?[^\s'"`;&]+)/i, early: true },
+  { type: 'password', re: /(?<=pwd[ \t]*=[ \t]*)(?!\\|\[REDACTED:|["']?(?:[\/~.]|[A-Za-z]:[\/\\]))(?:"(?:[^"\\\n]|\\.)+"|'(?:[^'\\\n]|\\.)+'|["']?[^\s'"`;&]+)/i, early: true },
 ];
+
+const EARLY_PATTERNS = PATTERNS.filter((p) => p.early);
+const LATE_PATTERNS = PATTERNS.filter((p) => !p.early);
 
 // High-entropy fallback: a long base64-ish string ONLY when adjacent to
 // a known sensitive key name on the same arg. The "adjacent" check is
@@ -132,7 +181,8 @@ export function scanArgv(argv) {
 // into a prompt, or a `.env` line read off disk). Reuses the SAME canonical
 // PATTERNS as scanArgv — one source of truth for "what a secret looks like" —
 // applied globally so every occurrence becomes `[REDACTED:<pattern_type>]`.
-// The matched value is replaced in place, NEVER returned.
+// The matched value is replaced in place, NEVER returned. (The url-userinfo and
+// password patterns match only the value, so their key or URL stays.)
 //
 // Returns { text, redactions } where redactions is a count keyed by
 // pattern_type. Deterministic (same input → same output), so callers that
@@ -141,22 +191,29 @@ export function redactText(input) {
   let text = typeof input === 'string' ? input : String(input ?? '');
   const redactions = {};
   const bump = (t) => { redactions[t] = (redactions[t] || 0) + 1; };
+  const sweep = (entries) => {
+    for (const { type, re } of entries) {
+      const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+      text = text.replace(g, () => { bump(type); return `[REDACTED:${type}]`; });
+    }
+  };
 
-  // High-entropy value adjacent to a sensitive key name FIRST: keep the key
-  // name + separator, redact only the value so the surrounding line stays
-  // readable. Running this before the prefix patterns means a value sitting
-  // after `aws_secret_access_key=` is scrubbed even though that prefix pattern
-  // matches only the key name.
+  // Value-anchored shapes first, so the high-entropy pass can't take only part
+  // of one (see the `early` note on PATTERNS).
+  sweep(EARLY_PATTERNS);
+
+  // High-entropy value adjacent to a sensitive key name BEFORE the prefix
+  // patterns: keep the key name + separator, redact only the value so the
+  // surrounding line stays readable. Running this before the prefix patterns
+  // means a value sitting after `aws_secret_access_key=` is scrubbed even
+  // though that prefix pattern matches only the key name.
   const gHE = new RegExp(`(${SENSITIVE_KEY_NAMES}\\s*[=:]\\s*['"]?)([A-Za-z0-9+/=]{40,})`, 'ig');
   text = text.replace(gHE, (_m, head) => {
     bump('high-entropy-adjacent-to-secret-key');
     return `${head}[REDACTED:high-entropy-adjacent-to-secret-key]`;
   });
 
-  for (const { type, re } of PATTERNS) {
-    const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
-    text = text.replace(g, () => { bump(type); return `[REDACTED:${type}]`; });
-  }
+  sweep(LATE_PATTERNS);
   return { text, redactions };
 }
 
@@ -219,9 +276,11 @@ function deepRedactLeaves(v) {
 // regex cannot cross the JSON quotes. So a string value of ≥16 non-whitespace
 // chars sitting under a key matching SENSITIVE_KEY_NAMES is redacted whole
 // (keys are always preserved — see deepRedactLeaves rationale). Short values
-// (`password: "hunter2"`) deliberately don't match — tight + high-confidence,
-// same philosophy as PATTERNS. Framework fields like `checkpointKey` don't
-// match the key list (verified against the live spine: zero hits).
+// under an object key (`{ password: "hunter2" }`) deliberately don't match —
+// tight + high-confidence, same philosophy as PATTERNS. (The same pair written
+// as TEXT, `password: hunter2` in a string leaf, is the `password` pattern's.)
+// Framework fields like `checkpointKey` don't match the key list (verified
+// against the live spine: zero hits).
 const SENSITIVE_KEY_RE = new RegExp(SENSITIVE_KEY_NAMES, 'i');
 const SENSITIVE_VALUE_RE = /^\S{16,}$/;
 
