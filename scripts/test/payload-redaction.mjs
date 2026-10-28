@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { append, EVENT_TYPES, hashLine } from '../../template/maddu/runtime/lib/spine.mjs';
 import { appendTokenUsage, logWrapperError } from '../../template/maddu/runtime/lib/runtimes/_wrapper-common.mjs';
-import { redactDataPayload, redactText, redactLeaves, matchSecretType } from '../../template/maddu/runtime/lib/secret-scan.mjs';
+import { redactDataPayload, redactText, redactLeaves, matchSecretType, scanArgv, PATTERN_TYPES } from '../../template/maddu/runtime/lib/secret-scan.mjs';
 import { send as mailboxSend } from '../../template/maddu/runtime/lib/mailbox.mjs';
 import { curate } from '../../template/maddu/runtime/lib/briefings.mjs';
 import { saveSkill, readSkill } from '../../template/maddu/runtime/lib/skills.mjs';
@@ -214,6 +214,85 @@ async function main() {
     ok(cfg.clientSecretEnvVar === 'MY_ENV_NAME_1234', 'redactLeaves: config env-var NAME value preserved');
     ok(cfg.refreshTokenUrl === 'https://example/oauth/refresh', 'redactLeaves: config URL preserved');
     ok(cfg.apiKeyValue.startsWith('[REDACTED:'), 'redactLeaves: literal secret in a config value scrubbed');
+
+    // ── 9d. v1.156.0 (R4) shapes an independent refuter found unredacted: JWT,
+    //        URL-userinfo password, password/passwd/pwd values, npm_ and hf_
+    //        tokens. A positive row and a near-miss negative control per shape. ──
+    const R4 = {
+      // Built by concatenation so no complete token sits in the source.
+      jwt: 'eyJ' + 'hbGciOiJIUzI1NiJ9' + '.' + 'eyJ' + 'zdWIiOiIxMjM0NTY3ODkwIn0' + '.' + 'SflKxwRJSMeKKF2QT4fw' + 'pMeJf36POk6yJV_adQssw5c',
+      // A header of 40+ base64 chars: the high-entropy pass alone would take
+      // only the header and leave payload + signature behind.
+      jwtLongHeader: 'eyJ' + 'A'.repeat(45) + '.' + 'eyJ' + 'P'.repeat(30) + '.' + 'S'.repeat(43),
+      urlPw: 'pg' + 'Pa55word9',
+      npm: 'npm_' + 'A1b2C3d4E5'.repeat(3) + 'F6g7H8',       // npm_ + 36
+      hf: 'hf_' + 'Q1r2S3t4U5'.repeat(3) + 'v6w7x8y9',        // hf_ + 38
+    };
+    const same = (s) => redactText(s).text === s;
+
+    // JWT
+    const jwtR = redactText(`Authorization: Bearer ${R4.jwt}`).text;
+    ok(jwtR === 'Authorization: Bearer [REDACTED:jwt]', `jwt: whole token redacted, header line kept (${jwtR})`);
+    ok(matchSecretType(R4.jwt) === 'jwt', 'jwt: classified as jwt');
+    const jwtHE = redactText(`bearer: ${R4.jwtLongHeader}`).text;
+    ok(jwtHE === 'bearer: [REDACTED:jwt]', `jwt: a long header is not split off by the high-entropy pass (${jwtHE})`);
+    const jwtTwoSeg = 'eyJ' + 'hbGciOiJIUzI1NiJ9' + '.' + 'eyJ' + 'zdWIiOiIxIn0';
+    ok(same(`two segments ${jwtTwoSeg} only, and a bare eyJ in prose`), 'jwt negative: a two-segment eyJ string stays');
+
+    // URL userinfo — only the password goes; scheme, user, host stay readable.
+    const urlR = redactText(`DATABASE_URL=postgres://app:${R4.urlPw}@db.internal:5432/app`).text;
+    ok(urlR === 'DATABASE_URL=postgres://app:[REDACTED:url-userinfo]@db.internal:5432/app', `url-userinfo: only the password redacted (${urlR})`);
+    ok(redactText(`redis://:${R4.urlPw}@cache:6379/0`).text === 'redis://:[REDACTED:url-userinfo]@cache:6379/0', 'url-userinfo: empty user name');
+    ok(redactText(`https://bot:p@${R4.urlPw}@host.example/x`).text === 'https://bot:[REDACTED:url-userinfo]@host.example/x',
+      'url-userinfo: a raw @ in the password is redacted up to the last @');
+    ok(matchSecretType(`https://bot:${R4.urlPw}@host.example`) === 'url-userinfo', 'url-userinfo: classified');
+    ok(same('clone https://alice@example.com/repo.git or git@github.com:frdyx/maddu.git, bridge http://127.0.0.1:4177/bridge/status, see https://host.example:8080/a@b'),
+      'url-userinfo negative: user-only, scp-style, host:port and an @ in the path stay');
+
+    // password / passwd / pwd values
+    const pwR = redactText('DB_PASSWORD=hunter2').text;
+    ok(pwR === 'DB_PASSWORD=[REDACTED:password]', `password: env-line value redacted, key kept (${pwR})`);
+    ok(redactText('password: "correct horse battery"').text === 'password: [REDACTED:password]', 'password: quoted value with spaces redacted whole');
+    ok(redactText('run --password=hunter2 now').text === 'run --password=[REDACTED:password] now', 'password: CLI flag value');
+    ok(redactText('Server=db;Uid=sa;Pwd=s3cr3t;Database=app').text === 'Server=db;Uid=sa;Pwd=[REDACTED:password];Database=app', 'pwd: connection-string value');
+    ok(redactText('passwd: s3cr3t').text === 'passwd: [REDACTED:password]', 'passwd: value after a colon');
+    ok(matchSecretType('password=hunter2') === 'password', 'password: classified');
+    const pwLong = redactText(`password=${FAKE.longValue}!tail`).text;
+    ok(pwLong === 'password=[REDACTED:password]', `password: a long value is redacted whole, no tail past the base64 run (${pwLong})`);
+    ok(same('rotate the password before Friday; passwordless: true; password_file: /run/secrets/db'),
+      'password negative: prose, and keys that only start with password, stay');
+    ok(same('PWD=/home/dev/app OLDPWD=C:\\Users\\dev pwd: error retrieving current directory; /etc/passwd: Permission denied'),
+      'pwd/passwd negative: shell working-directory env, the pwd error line and /etc/passwd stay');
+    // JSON escapes: the spine-sync line scan runs redactText over JSON-encoded
+    // event lines, so an escape after the separator must not read as a value.
+    ok(same(JSON.stringify({ note: 'Password:\nrotate it' })), 'password negative: an escaped newline after the colon in a JSON line stays');
+    ok(same(JSON.stringify({ note: 'bridge http://host.example:8080\nadmin@example.com, see http://x.example\nops:standby@pager.example' })),
+      'url-userinfo negative: an escaped newline in a JSON line does not join a URL to a later @');
+
+    // npm
+    const npmR = redactText(`//registry.npmjs.org/:_authToken=${R4.npm}`).text;
+    ok(npmR === '//registry.npmjs.org/:_authToken=[REDACTED:npm-token]', `npm-token: redacted (${npmR})`);
+    ok(matchSecretType(R4.npm) === 'npm-token', 'npm-token: classified');
+    ok(same('npm_x npm_config_cache npm_package_version npm_' + 'a'.repeat(35)), 'npm-token negative: env names and a 35-char body stay');
+
+    // Hugging Face
+    const hfR = redactText(`HF_TOKEN=${R4.hf}`).text;
+    ok(hfR === 'HF_TOKEN=[REDACTED:huggingface-token]', `huggingface-token: redacted (${hfR})`);
+    ok(matchSecretType(R4.hf) === 'huggingface-token', 'huggingface-token: classified');
+    ok(same('from huggingface_hub import hf_hub_download; hf_' + 'b'.repeat(29)), 'huggingface-token negative: hf_hub_download and a 29-char body stay');
+
+    // Every surface: the spine write boundary, argv refusal, the pattern list,
+    // and a second pass that is byte-stable and finds nothing.
+    const r4Mix = `creds ${R4.jwt} DB_PASSWORD=hunter2 postgres://app:${R4.urlPw}@db/app ${R4.npm} ${R4.hf}`;
+    const r4Ev = JSON.stringify(await append(repo, { type: EVENT_TYPES.SLICE_STOP, data: { summary: r4Mix } }));
+    ok(![R4.jwt, 'hunter2', R4.urlPw, R4.npm, R4.hf].some((s) => r4Ev.includes(s)), 'write boundary: no R4 shape stored raw');
+    ok(r4Ev.includes('postgres://app:[REDACTED:url-userinfo]@db/app'), 'write boundary: URL kept readable');
+    ok(scanArgv(['commit', '-m', `wip ${R4.npm}`])?.patternType === 'npm-token', 'argv: an npm token is refused');
+    ok(scanArgv(['commit', '-m', 'docs: rotate the password weekly']) === null, 'argv negative: prose about passwords is not refused');
+    for (const t of ['jwt', 'url-userinfo', 'password', 'npm-token', 'huggingface-token']) ok(PATTERN_TYPES.includes(t), `PATTERN_TYPES lists ${t}`);
+    const r4Once = redactText(r4Mix);
+    const r4Twice = redactText(r4Once.text);
+    ok(r4Twice.text === r4Once.text && Object.keys(r4Twice.redactions).length === 0, 'R4 shapes: a second pass is byte-stable and finds nothing');
 
     // ── 10. Newly-wrapped state stores redact at their OWN write boundary ──
     // active-session pointer (session.active.json)
