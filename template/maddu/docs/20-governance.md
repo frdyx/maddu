@@ -51,6 +51,7 @@ export default {
   label: 'human label shown by doctor',
   severity: 'critical' | 'safety' | 'warn',
   description: 'one-line description',
+  phase: 'pre-plan',                    // optional (v1.157.0) — see below
   run: async (ctx) => ({
     ok: true | false,
     status: 'ok' | 'warn' | 'fail',      // optional override
@@ -63,6 +64,76 @@ export default {
 `ctx` includes `{ repoRoot, paths, spine, projections, verify, project }` and, when the runner is invoked from `slice-stop`, also `sliceId` and `touchedPaths`.
 
 Each run emits one `GATE_RAN` event per gate. The cockpit's **Gates** route and `GET /bridge/gates?limit=N` surface recent history.
+
+### Tracking host gates (v1.157.0)
+
+Operator gates are source, so a host project can commit them where Máddu
+discovers them. The `maddu-state-untracked` gate counts `.maddu/gates/` as
+durable, like `.maddu/config/`, and no longer fails on a tracked
+`.maddu/gates/*.mjs`. The `.gitignore` block `maddu init` writes still ignores
+`.maddu/*`, so tracking is opt-in. Re-include the folder:
+
+```gitignore
+!.maddu/gates/
+```
+
+Once tracked, a gate change shows in `git diff` and in a PR, and CODEOWNERS can
+cover it. That is the reason to do it: an untracked gate in that folder can
+shadow a builtin and nobody sees it (see [34-threat-model.md](34-threat-model.md),
+scenario 12).
+
+### Gates that refuse a command: `phase` (v1.157.0)
+
+By default a gate judges after the fact: `doctor` and `ci run` run it (`audit`
+runs only its own fixed list of gates).
+A gate that declares a `phase` also runs **before** a command acts, and can
+refuse it. The one phase today is `pre-plan`:
+
+- `maddu plan new` runs every gate with `phase: 'pre-plan'` (or an array that
+  includes it) before it mints the plan.
+- In that run `ctx.mode` is `'plan'`, `ctx.goal` is the `--goal` value (or
+  `null`), and `ctx.plan` is `{ title, phases, goal }`, the plan about to be
+  created. These keys are added to the normal context; they never replace
+  `repoRoot`, `spine` or any other key the runner sets.
+- A failing gate (`fail` status) refuses the command. Nothing is appended except
+  the `GATE_RAN` receipts. The command exits **2** when a refusing gate's
+  evidence carries `verdict: 'hold'` (waiting on the operator), **1** otherwise.
+  A failing `warn`-severity gate prints a warning and doesn't refuse.
+- A gate file in either gate folder that fails to load also refuses: it has no
+  readable phase, and it may have been a pre-plan gate.
+- Gates without a phase don't run, so `plan new` behaves as before in a repo
+  that declares none and whose gate files all load.
+- The gates are read from the state root's `.maddu/gates/`. In an attached lane
+  worktree that is the primary checkout, not the worktree's own copy, so a
+  branch can't weaken the gate that judges its own plan. A gate added on a
+  branch applies to `plan new` once it reaches the primary.
+- If the installed runtime predates phases (no `GATE_PHASES` export from its
+  gate runner), `plan new` runs no gates. It refuses with "run `maddu upgrade`"
+  when any gate file declares a phase or fails to load, and otherwise goes
+  ahead.
+
+A phased gate is still an ordinary gate. In `doctor` and `ci` it runs like any
+other, with no `ctx.mode`, so the same gate can catch a plan created around it
+(for example by appending through the library) after the fact:
+
+```js
+export default {
+  id: 'intake-before-plan',
+  severity: 'safety',
+  phase: 'pre-plan',
+  run: async (ctx) => {
+    const ready = await intakeComplete(ctx.repoRoot);       // your rule
+    if (ctx.mode === 'plan') {
+      return ready
+        ? { ok: true, message: 'intake complete' }
+        : { ok: false, message: 'intake not complete', evidence: { verdict: 'hold' } };
+    }
+    return { ok: true, message: 'audit-mode check …' };     // after the fact
+  },
+};
+```
+
+From the library: `runGates(root, { phase: 'pre-plan', ctxExtra: { … } })`.
 
 ### GATE_RAN outcome states (v1.101.0)
 

@@ -265,7 +265,20 @@
 // spine to decide. Frozen with schemaVersion, like MODEL_REGRESSION_ACKNOWLEDGED
 // (the pattern it mirrors). A new event type → additive → minor bump; baseline
 // refreshed with this change.
-export const EVENT_CONTRACT_VERSION = '1.22.0';
+//
+// 1.23.0 (2026-11-01, v1.157.0, system1 U3) — added OPERATOR_FEEDBACK: the
+// operator judged an output (`target` an event id, `verdict` the judgment) or
+// left a note. Host projects emit it; Máddu ships no producer, so its
+// disposition is dormant with that reason. Before it existed a host had to ride
+// INBOX_MESSAGE with a private `kind`, and no other spine reader could tell
+// feedback from mail. `kind` and `digest` are listed without `?` (a producer
+// writes them on every event), and no text field is listed on purpose: the
+// text should live where it can be deleted, with only its digest on the spine.
+// That is the PRODUCER's obligation — like every type here, `data` is an open
+// object and neither spine.append nor the schema refuses an extra `text` key.
+// Not frozen — no schemaVersion yet, so additive fields stay a minor change. A new event type → additive → minor bump;
+// baseline refreshed with this change.
+export const EVENT_CONTRACT_VERSION = '1.23.0';
 
 // The shared envelope — every spine event carries exactly these top-level keys.
 // Single source of truth for BOTH the generated JSON Schema / Markdown envelope
@@ -497,6 +510,7 @@ export const EVENT_SCHEMA = {
   MODEL_ROLLED_BACK: { summary: "A released checkpoint was rolled back to an earlier stage.", data: { schemaVersion: 'number', manifestPath: 'string', manifestHash: 'string', model_id: 'string', checkpointKey: 'string', reverted_to: 'string' }, frozen: true },
   HARNESS_CAPABILITY_OBSERVED: { summary: "A harness's native hook surface was compared against the repo-versioned capability manifest — an observation, not an enforcement receipt.", data: { harness: 'string', status: 'string', cliVersion: 'string|null', manifestVersion: 'string', capabilities: 'array', enforcementCeiling: 'string', drift: 'string|null', probeFailure: 'string|null', volatile: 'object|null', configPath: 'string|null', configs: 'array', workRoot: 'string|null' } },
   SESSION_PARENT_ACKNOWLEDGED: { summary: "An operator acknowledged, with a recorded reason, earlier session registrations whose parentSessionId resolves to no session on this spine (e.g. a parent id leaked in from another repo); verify reports exactly the listed earlier references as WARN instead of FAIL.", data: { schemaVersion: 'number', parentSessionId: 'string', eventIds: 'array', reason: 'string' }, frozen: true },
+  OPERATOR_FEEDBACK: { summary: "The operator judged an output or left a note; the producer names the feedback text by digest instead of carrying it (the spine does not check).", data: { kind: 'string', target: 'string?', verdict: 'string?', digest: 'string', tags: 'array?' } },
 };
 
 // Parity + shape validation used by the event-schema-complete gate and the

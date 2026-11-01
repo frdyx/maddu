@@ -589,7 +589,11 @@ same breath: the guarantee is scoped to the **declared sets** and to the
   gitignored, so a shadow gate never reaches a PR diff or a CI checkout
   (**CODEOWNERS structurally cannot cover a gitignored path**): shadowing
   is a LOCAL-ONLY threat to local `maddu ci`/`doctor` verdicts, and on the
-  local machine it is currently an UNWATCHED one.
+  local machine it is currently an UNWATCHED one. Since v1.157.0 a host can
+  opt out of that blind spot: `maddu-state-untracked` accepts a tracked
+  `.maddu/gates/`, so re-including it in `.gitignore` (`!.maddu/gates/`)
+  puts every gate file, a shadow included, in `git status`, PR diffs and
+  CODEOWNERS' reach. The default install still ignores it.
 - **The PreToolUse hook does not participate.** It decides on ritual state
   only and is fail-open by law (`lib/discipline.mjs`); it does not know
   which file is being edited. An actor able to disable or modify the hook

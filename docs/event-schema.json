@@ -3,7 +3,7 @@
   "$id": "https://github.com/frdyx/maddu/blob/main/docs/event-schema.json",
   "title": "Máddu spine event",
   "description": "The published contract for a single append-only spine event. Generated from template/maddu/runtime/lib/event-schema.mjs — do not edit by hand. Data fields are typed when present; the payload is open (extra keys are valid, additive-only within a MAJOR).",
-  "x-contractVersion": "1.22.0",
+  "x-contractVersion": "1.23.0",
   "type": "object",
   "required": [
     "v",
@@ -223,7 +223,8 @@
         "MODEL_RELEASED",
         "MODEL_ROLLED_BACK",
         "HARNESS_CAPABILITY_OBSERVED",
-        "SESSION_PARENT_ACKNOWLEDGED"
+        "SESSION_PARENT_ACKNOWLEDGED",
+        "OPERATOR_FEEDBACK"
       ]
     },
     "actor": {
@@ -7367,6 +7368,41 @@
               },
               "reason": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "OPERATOR_FEEDBACK"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The operator judged an output or left a note; the producer names the feedback text by digest instead of carrying it (the spine does not check).",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "verdict": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array"
               }
             }
           }

@@ -3,7 +3,7 @@
 <!-- GENERATED FILE — do not edit. Source: template/maddu/runtime/lib/event-schema.mjs.
      Regenerate: `node scripts/generate.mjs`. Policed by the `generated-artifacts-current` gate. -->
 
-**Contract version:** `1.22.0` · **Event types:** 196
+**Contract version:** `1.23.0` · **Event types:** 197
 
 The spine is an append-only NDJSON event log. Every event shares one envelope;
 each `type` constrains its `data` payload. Data fields are **typed when present**
@@ -34,7 +34,7 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 - **MINOR** — add an event type, or add a listed field to an existing type.
 - **PATCH** — summary/wording only; no shape change.
 
-## Events (196)
+## Events (197)
 
 | Event | Summary | Data fields |
 | --- | --- | --- |
@@ -234,3 +234,4 @@ The contract version (`EVENT_CONTRACT_VERSION`) moves by:
 | `MODEL_ROLLED_BACK` 🔒 | A released checkpoint was rolled back to an earlier stage. | `schemaVersion: number`, `manifestPath: string`, `manifestHash: string`, `model_id: string`, `checkpointKey: string`, `reverted_to: string` |
 | `HARNESS_CAPABILITY_OBSERVED` | A harness's native hook surface was compared against the repo-versioned capability manifest — an observation, not an enforcement receipt. | `harness: string`, `status: string`, `cliVersion: string\|null`, `manifestVersion: string`, `capabilities: array`, `enforcementCeiling: string`, `drift: string\|null`, `probeFailure: string\|null`, `volatile: object\|null`, `configPath: string\|null`, `configs: array`, `workRoot: string\|null` |
 | `SESSION_PARENT_ACKNOWLEDGED` 🔒 | An operator acknowledged, with a recorded reason, earlier session registrations whose parentSessionId resolves to no session on this spine (e.g. a parent id leaked in from another repo); verify reports exactly the listed earlier references as WARN instead of FAIL. | `schemaVersion: number`, `parentSessionId: string`, `eventIds: array`, `reason: string` |
+| `OPERATOR_FEEDBACK` | The operator judged an output or left a note; the producer names the feedback text by digest instead of carrying it (the spine does not check). | `kind: string`, `target: string?`, `verdict: string?`, `digest: string`, `tags: array?` |

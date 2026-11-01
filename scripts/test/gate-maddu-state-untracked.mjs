@@ -3,8 +3,8 @@
 //
 // Policy A: the rebuildable/volatile parts of .maddu/ (spine, projections,
 // sessions, runtime dirs) should NOT be git-tracked; durable artifacts
-// (config/, skills/, plans/, wiki/, lanes/catalog.json, the architecture
-// baseline) should. This drives the gate against throwaway git repos: a clean
+// (config/, gates/, skills/, plans/, wiki/, lanes/catalog.json, the
+// architecture baseline) should. This drives the gate against throwaway git repos: a clean
 // (durable-only) tree passes; a tree that tracks runtime state warns with the
 // exact `git rm -r --cached` remediation; a non-git dir skips.
 //
@@ -52,6 +52,16 @@ async function main() {
   const rClean = await gate.run({ repoRoot: clean });
   ok('durable-only tree passes', rClean.ok === true, rClean.message);
 
+  // ── host gates are source (v1.157.0, system1 U1) → tracked .maddu/gates/ PASSES ──
+  // discoverGates reads operator gates from .maddu/gates/, so a host that wants
+  // its gates reviewed and versioned has to track them exactly there.
+  const hostGates = await seedRepo({
+    '.maddu/config/ci.json': '{}',
+    '.maddu/gates/host-gate.mjs': 'export default { id: "host-gate", run: async () => ({ ok: true }) };\n',
+  });
+  const rHost = await gate.run({ repoRoot: hostGates });
+  ok('tracked .maddu/gates/*.mjs passes', rHost.ok === true, rHost.message);
+
   // ── tracks runtime state → WARN with remediation ──
   const leaky = await seedRepo({
     '.maddu/config/triggers.json': '{}',
@@ -79,7 +89,18 @@ async function main() {
   const rBad = await gate.run({ repoRoot: join(plain, 'does-not-exist-xyz') });
   ok('unresolvable git error → FAIL (fail-closed)', rBad.ok === false && /git error/.test(rBad.message), rBad.message);
 
-  await Promise.all([clean, leaky, plain].map((d) => rm(d, { recursive: true, force: true })));
+  // The allowlist names .maddu/gates/ and nothing beside it: a tracked spine
+  // next to tracked host gates still fails.
+  const gatesPlusSpine = await seedRepo({
+    '.maddu/gates/host-gate.mjs': 'export default { id: "host-gate", run: async () => ({ ok: true }) };\n',
+    '.maddu/events/000000000001.ndjson': '{"type":"X"}\n',
+  });
+  const rGs = await gate.run({ repoRoot: gatesPlusSpine });
+  ok('tracked .maddu/events still fails beside tracked gates', rGs.ok === false
+    && rGs.evidence?.untrackCommand.includes('.maddu/events')
+    && !rGs.evidence.untrackCommand.includes('.maddu/gates'), rGs.evidence?.untrackCommand);
+
+  await Promise.all([clean, leaky, plain, hostGates, gatesPlusSpine].map((d) => rm(d, { recursive: true, force: true })));
 }
 
 try {
