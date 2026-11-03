@@ -469,7 +469,15 @@ export const EVENT_TYPES = {
   // listed references that PRECEDE the event to a WARN naming it — never a
   // later one, never any other issue kind. Frozen data shape (schemaVersion 1):
   //   { schemaVersion, parentSessionId, eventIds: [evt_…], reason }
-  SESSION_PARENT_ACKNOWLEDGED:  'SESSION_PARENT_ACKNOWLEDGED'
+  SESSION_PARENT_ACKNOWLEDGED:  'SESSION_PARENT_ACKNOWLEDGED',
+  // v1.157.0 (system1 U3) — the operator judged an output or left a note. Host
+  // projects emit it (Máddu ships no producer); before it existed they rode
+  // INBOX_MESSAGE with private `kind` values no other spine reader knew. The
+  // producer names the feedback text by digest instead of carrying it, so the
+  // text can be erased later without touching append-only history (append
+  // does not check this; it is the producer's obligation):
+  //   { kind, target?, verdict?, digest, tags? }
+  OPERATOR_FEEDBACK:            'OPERATOR_FEEDBACK'
 };
 
 export const STUCK_THRESHOLD_MS = 15000;

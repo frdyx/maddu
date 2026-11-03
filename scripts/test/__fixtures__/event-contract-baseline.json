@@ -1,6 +1,6 @@
 {
-  "version": "1.22.0",
-  "fingerprint": "11d04dab",
+  "version": "1.23.0",
+  "fingerprint": "3e4a2d9d",
   "shape": {
     "envelope": {
       "actor": "string|null",
@@ -1026,6 +1026,16 @@
           "surface": "string",
           "verb": "string|null",
           "via": "string"
+        }
+      },
+      "OPERATOR_FEEDBACK": {
+        "frozen": false,
+        "data": {
+          "digest": "string",
+          "kind": "string",
+          "tags": "array?",
+          "target": "string?",
+          "verdict": "string?"
         }
       },
       "PENDING_ACTION_DRAINED": {

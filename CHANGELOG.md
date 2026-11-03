@@ -11,6 +11,46 @@ narrative summary.
 
 ---
 
+## [v1.157.0] · 2026-11-01 · host gates can be tracked, can refuse `plan new`, and feedback has its own event
+
+Three gaps system1, a host project on 1.156.0, worked around on its own side
+(its proposals U1–U3, `docs/upstream/README.md` there). Fixed here so every
+host gets them.
+
+- **U1: tracked host gates.** `maddu-state-untracked` lists `.maddu/gates/` as
+  durable. Before, a tracked `.maddu/gates/*.mjs` failed the gate, so a host
+  couldn't version its gates in the one folder Máddu reads them from. The
+  `.gitignore` block `init` writes is unchanged: tracking stays opt-in
+  (`!.maddu/gates/`).
+- **U2: a gate can refuse `plan new`.** A gate may declare
+  `phase: 'pre-plan'` (or an array). `runGates` gains a `phase` filter and a
+  `ctxExtra` option that adds keys to the context without replacing any.
+  `plan new` runs the pre-plan gates first, with `ctx.mode = 'plan'`,
+  `ctx.goal` and `ctx.plan`; any failure refuses with nothing appended but the
+  `GATE_RAN` receipts, exit 2 for `verdict: 'hold'`, 1 otherwise. A gate file
+  that fails to import is kept in a phase run and fails it, since it may have
+  been a pre-plan gate. Without a phase filter nothing changes, so a phased
+  gate still runs in `doctor` and `ci`. About 100 ms per `plan new` for the gate
+  import. The runner advertises `GATE_PHASES`; when the installed runtime is
+  older and lacks it, `plan new` only discovers gates and refuses (exit 1,
+  "run `maddu upgrade`") if any gate file declares a phase or fails to load,
+  instead of letting the old runner run every gate outside plan mode. In an
+  attached lane worktree the pre-plan gates come from the state root, the
+  primary checkout, so a branch can't edit the gate that judges its own plan.
+- **U3: `OPERATOR_FEEDBACK`.** A registered spine event type for "the operator
+  judged an output or left a note": `{ kind, target?, verdict?, digest, tags? }`.
+  The producer names the text by digest instead of carrying it; the spine
+  doesn't check, as with every type's open `data`. Hosts emit it; Máddu ships no
+  producer, so its disposition is dormant. Event contract 1.22.0 → 1.23.0
+  (minor, a new type); baseline and the generated `event-schema.{md,json}`
+  refreshed.
+- A gate file that fails to import now says `could not load gate file <path>`
+  instead of `gate threw: g.run is not a function`.
+
+Tests: `gate-maddu-state-untracked` (2 new rows), `gate-pre-plan` (new, 28
+rows), `event-operator-feedback` (new, 11 rows). Each new row failed on
+1.156.0. Upgrade notes for hosts: `docs/14-upgrading.md`.
+
 ## [v1.156.0] · 2026-10-28 · the shared redactor catches five more secret shapes
 
 Secrets. `redactText` in `secret-scan.mjs` is the one redactor behind the spine

@@ -9,8 +9,18 @@
 //     id: 'kebab-case-id',
 //     severity: 'critical' | 'safety' | 'warn',
 //     description: 'one-line description',
+//     phase: 'pre-plan' | ['pre-plan', ...],   // optional (v1.157.0)
 //     run: async (ctx) => ({ ok, message, evidence }),
 //   }
+//
+// `phase` (v1.157.0, system1 U2) names a command a gate may REFUSE before it
+// acts. `runGates({ phase })` runs only gates that declare that phase; today the
+// one phase is 'pre-plan', which `plan new` runs before it mints a plan, with
+// ctx.mode = 'plan' and the plan it is about to create. A phased gate is still an
+// ordinary gate: with no `phase` filter (doctor, ci) it runs like any other, with
+// no ctx.mode, so it can also catch a bypass after the fact. GATE_PHASES is the
+// capability a caller checks first: a runner without it ignores `phase` and
+// would run every gate.
 //
 // ctx = { repoRoot, roots, paths, spine, projections, project, verify, readMadduJson, frameworkVersion }
 //
@@ -30,6 +40,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUILTIN_DIR = join(__dirname, '..', 'gates', 'builtin');
+
+// The phases this runner's `phase` filter understands (see the header).
+export const GATE_PHASES = Object.freeze(['pre-plan']);
 
 async function loadGate(absPath) {
   try {
@@ -99,11 +112,19 @@ export async function runGates(repoRoot, opts = {}) {
   // cwd-derived resolution below, because a caller iterating explicit targets
   // (`doctor --all`) must not have the invoker's standing worktree paired
   // onto a workspace it merely shares a state root with.
-  const { onlyId, severity, emitEvents = true, ctx: ctxOverride = null, attribution = null, roots: rootsOverride = null } = opts;
+  // opts.phase (v1.157.0) — run only gates that declare this phase (see the
+  // header). opts.ctxExtra — keys a phase caller adds on top of the built
+  // context (`plan new` passes { mode, goal, plan }); it can add keys, never
+  // replace one the runner set, so a caller can't hand gates a different
+  // repoRoot or spine than the one the receipts are written against.
+  const { onlyId, severity, phase = null, ctxExtra = null, emitEvents = true, ctx: ctxOverride = null, attribution = null, roots: rootsOverride = null } = opts;
 
   // Build the gate execution context. Lazy-load spine/projections/verify
   // (matches commands/_spine.mjs:loadSpineLib resolution).
   const ctx = ctxOverride || (await buildCtx(repoRoot, rootsOverride));
+  if (ctxExtra && typeof ctxExtra === 'object') {
+    for (const [k, v] of Object.entries(ctxExtra)) if (!(k in ctx)) ctx[k] = v;
+  }
   // HYDRATE roots on custom contexts (funnel r9 #1): ctxOverride callers
   // (slice-stop's completion gates) predate the pair, and stamping their
   // receipts with `repoRoot` would misattribute a worktree's verdict to the
@@ -123,8 +144,14 @@ export async function runGates(repoRoot, opts = {}) {
 
   const all = await discoverGates(repoRoot);
   const gates = all.filter((g) => {
+    // A file that failed to load has no declared phase, and it may have been a
+    // gate OF this phase: keep it so it fails the phase, rather than letting a
+    // syntax error turn a refusal into a pass. Checked before the other
+    // filters, which it can't satisfy either (no severity; its id is a path).
+    if (phase && g.__loadError) return true;
     if (onlyId && g.id !== onlyId) return false;
     if (severity && g.severity !== severity) return false;
+    if (phase && !gatePhases(g).includes(phase)) return false;
     return true;
   });
 
@@ -133,10 +160,14 @@ export async function runGates(repoRoot, opts = {}) {
   for (const g of gates) {
     const startedAt = Date.now();
     let result;
-    try {
-      result = await g.run(ctx);
-    } catch (err) {
-      result = { ok: false, message: `gate threw: ${err.message}`, evidence: { error: err.stack || String(err) } };
+    if (g.__loadError) {
+      result = { ok: false, message: `could not load gate file ${g.id}: ${g.error?.message || g.error}`, evidence: { error: g.error?.stack || String(g.error) } };
+    } else {
+      try {
+        result = await g.run(ctx);
+      } catch (err) {
+        result = { ok: false, message: `gate threw: ${err.message}`, evidence: { error: err.stack || String(err) } };
+      }
     }
     const durationMs = Date.now() - startedAt;
     const ts = new Date().toISOString();
@@ -225,6 +256,14 @@ async function resolveGateRoots(paths, repoRoot) {
     }
   } catch {}
   return { workRoot: repoRoot, stateRoot: repoRoot };
+}
+
+// A gate's declared phases: a string or an array of strings; anything else is
+// no phase at all.
+function gatePhases(g) {
+  if (typeof g.phase === 'string') return [g.phase];
+  if (Array.isArray(g.phase)) return g.phase.filter((p) => typeof p === 'string');
+  return [];
 }
 
 function validRootsPair(p) {

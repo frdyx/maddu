@@ -774,6 +774,12 @@ $ maddu plan complete <plan-id> [--summary "..."]
 $ maddu plan cancel <plan-id> [--reason "..."]
 $ maddu plan kanban
 #
+# v1.157.0: `plan new` first runs every gate that declares
+# `phase: 'pre-plan'`. A failing one refuses the plan: its id and message go
+# to stderr, nothing but its GATE_RAN receipt is appended, and the exit is 2
+# when its evidence says `verdict: 'hold'`, 1 otherwise. See
+# 20-governance.md "Gates that refuse a command".
+#
 # v1.1.1: plan id is the first positional argument across every verb;
 # `--plan <id>` is also accepted as an alias. Phase identifier is
 # `--phase <id>` (preferred); `--name <id>` is a deprecated alias that

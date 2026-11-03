@@ -8,8 +8,10 @@
 // predate it and prints the exact, non-destructive `git rm -r --cached`
 // remediation. WARN severity — advisory, never blocks.
 //
-// Durable, intentionally-tracked artifacts are allowlisted: config/, skills/,
-// plans/, wiki/, lanes/catalog.json, and an architecture mass-baseline.
+// Durable, intentionally-tracked artifacts are allowlisted: config/, gates/,
+// skills/, plans/, wiki/, lanes/catalog.json, and an architecture mass-baseline.
+// gates/ joined in v1.157.0: discoverGates reads operator gates from there, so a
+// host that wants its gates reviewed and versioned has to track them in place.
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -18,6 +20,7 @@ const exec = promisify(execFile);
 
 const DURABLE_PREFIXES = [
   '.maddu/config/',
+  '.maddu/gates/', // host gates are source: they travel with the repo
   '.maddu/skills/',
   '.maddu/plans/',
   '.maddu/wiki/',

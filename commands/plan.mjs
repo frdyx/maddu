@@ -109,6 +109,44 @@ async function guardPlanRef(fn) {
   }
 }
 
+// Gates that declare phase 'pre-plan' may refuse `plan new` (v1.157.0, system1
+// U2). They run before the plan is minted, with ctx.mode 'plan' and the plan
+// about to be created; each run is a GATE_RAN receipt like any other. Any
+// failure refuses with nothing appended but those receipts: exit 2 when a gate's
+// evidence says verdict 'hold' (waiting on the operator), exit 1 otherwise
+// (broken). A warn-severity gate that fails is printed and does not refuse.
+//
+// The runner comes from the installed runtime when there is one, and a runner
+// older than 1.157.0 ignores `phase`: it would run EVERY gate, none of them in
+// plan mode. So without GATE_PHASES the gates are only discovered, never run.
+// No phased gate (and no gate file that failed to load, which may have been
+// one) → nothing to enforce, go ahead; otherwise refuse until the runtime is
+// upgraded, rather than enforce the gate wrongly or not at all.
+async function refuseOnPrePlanGates(repoRoot, { title, phases, goal, sessionId }) {
+  const gates = await loadLib('gates.mjs');
+  if (!Array.isArray(gates.GATE_PHASES) || !gates.GATE_PHASES.includes('pre-plan')) {
+    const found = await gates.discoverGates(repoRoot);
+    const phased = found.filter((g) => g.__loadError || (g.phase !== undefined && g.phase !== null));
+    if (phased.length === 0) return;
+    console.error(`${ANSI.fail}refused${ANSI.reset}  the installed Máddu runtime predates gate phases, and ${phased.length} gate file${phased.length === 1 ? '' : 's'} may declare one: ${phased.map((g) => g.id).join(', ')}`);
+    console.error(`${ANSI.dim}run \`maddu upgrade\` so plan new can run its pre-plan gates; no plan was created${ANSI.reset}`);
+    process.exit(1);
+  }
+  const pre = await gates.runGates(repoRoot, {
+    phase: 'pre-plan',
+    ctxExtra: { mode: 'plan', goal, plan: { title, phases, goal } },
+    attribution: { actor: sessionId || null },
+  });
+  for (const r of pre.runs.filter((x) => x.status === 'warn')) {
+    console.error(`${ANSI.warn}warn${ANSI.reset}  ${r.gateId}: ${r.message}`);
+  }
+  const blocked = pre.runs.filter((x) => x.status === 'fail');
+  if (blocked.length === 0) return;
+  for (const r of blocked) console.error(`${ANSI.fail}refused${ANSI.reset}  ${r.gateId}: ${r.message}`);
+  console.error(`${ANSI.dim}plan new refused by ${blocked.length} pre-plan gate${blocked.length === 1 ? '' : 's'}; no plan was created${ANSI.reset}`);
+  process.exit(blocked.some((r) => r.evidence?.verdict === 'hold') ? 2 : 1);
+}
+
 function printPlanHelp() {
   console.log([
     'usage: maddu plan <subcommand> [args]',
@@ -161,6 +199,7 @@ export default async function planCmd(argv) {
       }
     }
     const goal = typeof flags.goal === 'string' ? flags.goal : null;
+    await refuseOnPrePlanGates(repoRoot, { title, phases, goal, sessionId });
     const r = await guardPlanRef(() => plans.createPlan(repoRoot, { title, phases, goal, by: sessionId }));
     console.log(`${ANSI.pass}created${ANSI.reset}  ${r.planId}  "${title}"  (${phases.length} phase${phases.length === 1 ? '' : 's'})`);
     console.log(`  ${ANSI.dim}artifact: ${r.dir.replace(repoRoot, '').replace(/^[\\/]/, '')}/plan.md${ANSI.reset}`);

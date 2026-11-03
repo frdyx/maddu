@@ -221,7 +221,8 @@ export const EVENT_DISPOSITIONS = {
   MODEL_RELEASED: { disp: 'dormant', reason: "fires only on `maddu model release` after an approved promotion to released (phase 3)" },
   MODEL_ROLLED_BACK: { disp: 'dormant', reason: "fires only on `maddu model rollback` of a released checkpoint (phase 3)" },
   HARNESS_CAPABILITY_OBSERVED: { disp: 'dormant', reason: "fires only on `maddu runtime doctor` — an operator-run observation of a harness's hook surface, not part of any automatic flow" },
-  SESSION_PARENT_ACKNOWLEDGED: { disp: 'dormant', reason: "fires only on explicit operator judgment (`maddu spine acknowledge --parent-session … --reason …`) — absent unless a spine holds unknown_parent_session references, which registration has dropped since the v1.112.0 CP5 guard (except when it can't read the session list)" },
+  OPERATOR_FEEDBACK: { disp: 'dormant', reason: "host-emitted — Máddu ships no producer; host projects append it when the operator judges an output or leaves a note (system1 U3, v1.157.0)" },
+  SESSION_PARENT_ACKNOWLEDGED: { disp: 'dormant', reason: "fires only on explicit operator judgment(`maddu spine acknowledge --parent-session … --reason …`) — absent unless a spine holds unknown_parent_session references, which registration has dropped since the v1.112.0 CP5 guard (except when it can't read the session list)" },
 };
 
 export const DISP_KINDS = new Set(['active', 'dormant', 'plugin']);
