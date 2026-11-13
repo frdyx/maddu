@@ -11,7 +11,7 @@
 // absent both, work root and state root are the same directory and behavior
 // is exactly the legacy `findRepoRoot`.
 
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 const MARK = '.maddu';
@@ -96,6 +96,41 @@ export async function resolveRoots(startDir = process.cwd(), env = process.env) 
     throw new Error(`${workRoot} has neither ${MARK}/ nor a readable ${STATE_ROOT_POINTER}`);
   }
   return { workRoot, stateRoot: workRoot, redirected: false };
+}
+
+// The git COMMON dir of the checkout at `root` (the shared `.git` every
+// worktree of one repository points into), read from the filesystem only — no
+// git process, so a hook can afford it on every tool call. `.git` is a
+// directory in a primary checkout, or a `gitdir: <path>` file in a linked
+// worktree whose admin dir carries a `commondir` file. Returns an absolute
+// path, or null when `root` is not a git checkout we can read.
+// The result is canonicalized with realpath, so a checkout reached through a
+// junction or symlink compares equal to the physical path its worktrees name.
+export async function gitCommonDir(root) {
+  const canon = async (p) => { try { return await realpath(p); } catch { return null; } };
+  const dotGit = join(resolve(root), '.git');
+  if (await isDir(dotGit)) return canon(dotGit);
+  if (!(await isFile(dotGit))) return null;
+  try {
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, 'utf8'));
+    if (!m) return null;
+    const adminDir = isAbsolute(m[1]) ? m[1] : resolve(dirname(dotGit), m[1]);
+    const commonFile = join(adminDir, 'commondir');
+    if (!(await isFile(commonFile))) return canon(adminDir);
+    const raw = (await readFile(commonFile, 'utf8')).split(/\r?\n/)[0].trim();
+    if (!raw) return null;
+    return canon(isAbsolute(raw) ? raw : resolve(adminDir, raw));
+  } catch { return null; }
+}
+
+// True when two checkouts are worktrees of the SAME git repository. Unknown
+// (either side unreadable) is false: callers use this to admit a root, and an
+// unprovable kinship must never admit one.
+export async function sameGitRepository(a, b) {
+  const [ca, cb] = await Promise.all([gitCommonDir(a), gitCommonDir(b)]);
+  if (!ca || !cb) return false;
+  const norm = (p) => (process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p));
+  return norm(ca) === norm(cb);
 }
 
 export function pathsFor(repoRoot) {

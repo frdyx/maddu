@@ -178,6 +178,8 @@ $ ./maddu/run session close --handoff "wrap"           # clears the cache
 
 The cache is a *UX hint*, not source of truth — the spine is authoritative. If the cache points at a session that's already closed in the spine, the CLI clears the file and exits 3 with a helpful message. `maddu doctor` proactively WARNs on stale caches. If you run parallel shells against the same repo, pass `--session <id>` explicitly in each.
 
+`close` prints `closed <id> (<state root>)` whether or not stdout is a terminal *(v1.158.0)*, so a close that fell back to the cache shows which session it picked; a close that does not happen exits non-zero with the reason, and closing an already-closed session stays an idempotent success (`(already closed)`).
+
 `active` prints the cached session id (or `(no active session)` + exit 1).
 
 ## `maddu lane`

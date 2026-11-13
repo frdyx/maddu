@@ -1172,7 +1172,12 @@ export async function enforcePreTool(repoRoot, opts = {}) {
     // read. Only edit/write carry a file target; self-disable and ambiguous
     // are about the command, not a file.
     if ((kind === 'edit' || kind === 'write')
-      && classifyWriteTarget({ tool, filePath, command, cwd: opts.cwd, roots: [opts.workRoot, repoRoot] }) === 'outside')
+      && classifyWriteTarget({
+        tool, filePath, command, cwd: opts.cwd,
+        // extraRoots (v1.158.0): the hook passes the checkout it runs from, so
+        // a session recorded in a worktree still counts writes to the primary.
+        roots: [opts.workRoot, repoRoot, ...(Array.isArray(opts.extraRoots) ? opts.extraRoots.filter((r) => typeof r === 'string' && r) : [])],
+      }) === 'outside')
       return { ...ok(), sid, counterKey, mutating: false, enforcement: 'n/a', kind: 'external', action: 'allow' };
 
     const gov = await import('./governance.mjs');

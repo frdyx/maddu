@@ -134,25 +134,202 @@ export function createHookFireCore(deps) {
   // root returns NULL, which downstream reads as observed:false (unknown, no
   // commit pressure) — falling back to the primary checkout could baseline or
   // gate a worktree session against the WRONG repo's dirt.
+  // A Git Bash caller reports its cwd in MSYS spelling (`/c/Users/x`); the
+  // native resolver would not find a worktree under that spelling and the
+  // hook would silently observe the primary checkout instead — and then
+  // hand the write-target scope roots that do not contain the worktree
+  // the edit lands in. Fold the drive form first; any other POSIX-absolute
+  // spelling on Windows is a mount this process cannot map and is skipped.
+  function foldCwd(p) {
+    if (process.platform !== 'win32' || typeof p !== 'string' || p[0] !== '/') return p;
+    // A forward-slash UNC path (`//server/share/x`) is a real Windows path the
+    // native resolver accepts as-is; only MSYS drive spellings need folding.
+    if (/^\/\/[^/]/.test(p)) return p;
+    const m = /^\/([a-zA-Z])(?:\/|$)/.exec(p);
+    return m ? `${m[1].toUpperCase()}:/${p.slice(m[0].length)}` : null;
+  }
+  // Every caller passes an absolute path (resolveRoots / resolveRepoRoot
+  // results, a folded payload cwd), so `join` normalizes it without the extra
+  // `resolve` import the pr2-oracle-sentinel fixture pins against.
+  function normPath(p) {
+    const r = join(String(p));
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  }
+
+  // The STATE root this hook fire acts on (v1.158.0, eco finding A7). The hook
+  // PROCESS cwd is not where the agent works: the Claude desktop app runs a
+  // worktree session's hooks from the PRIMARY checkout while the session's own
+  // tools — and so every `maddu slice-stop` / `register` / `lane claim` it
+  // runs — execute inside the worktree. Resolving from process.cwd() put the
+  // session, its binding and its discipline counter in the primary spine,
+  // and the worktree CLI (correctly self-rooted: the worktree carries its own
+  // installed .maddu/) could never reach them, so a slice-stop there could not
+  // clear the block it was told to clear. The payload cwd is where the agent's
+  // CLI runs, so it decides — the same `resolveRoots` the CLI uses, so one cwd
+  // yields one state root whichever entry point asks. An attached lane
+  // worktree (.maddu-state-root pointer) still resolves to its primary.
+  //
+  // Admitted only when BOTH the payload cwd's checkout AND the state root it
+  // resolves to (a `.maddu-state-root` pointer may name another directory)
+  // belong to the SAME git repository as the process-cwd root, or the process
+  // cwd has no root at all: a session must never start writing sessions and
+  // counters into an unrelated repository. Anything unprovable falls back to
+  // the process-cwd root, exactly the pre-1.158 behavior.
+  //
+  // STICKY per Claude session, through its existing BINDING (no new state).
+  // The payload cwd follows the agent's `cd`; a root that moved with it would
+  // let a blocked session walk away from its counter (a fresh mint in the new
+  // root). So for every fire after SessionStart, the root is wherever this
+  // Claude session is already BOUND — searched across the repository's own
+  // checkouts (the process-cwd root, the payload root, then every other
+  // worktree of the same git repository) — and the payload cwd only decides
+  // for a caller bound nowhere. SessionStart decides from the payload cwd
+  // (or renews where MADDU_SESSION_ID is bound) and then removes this Claude
+  // id's bindings from every OTHER root, so one Claude session is bound in
+  // exactly one root of the repository. Bindings are the existing
+  // lock-protected per-root map, so concurrent sessions never share a record.
+  const CLAUDE_ID_RE = /^[\w-]{1,64}$/;
+
+  async function processAnchor(paths) {
+    try { return await paths.resolveRoots(process.cwd()); } catch { return null; }
+  }
+
+  // Admit a state root reached from `cwd`: its checkout AND (when a pointer
+  // redirects it) its state root must be the anchor's repository. With no
+  // anchor (the process sits in no Máddu repo) any resolved root is admitted.
+  async function admitRootsFrom(paths, cwd, anchor) {
+    const roots = await paths.resolveRoots(cwd);
+    if (!roots || !roots.stateRoot) return null;
+    if (!anchor) return roots.stateRoot;
+    if (typeof paths.sameGitRepository !== 'function') return null;
+    if (!(await paths.sameGitRepository(roots.workRoot, anchor.workRoot))) return null;
+    if (normPath(roots.stateRoot) !== normPath(roots.workRoot)
+      && !(await paths.sameGitRepository(roots.stateRoot, anchor.workRoot))) return null;
+    return roots.stateRoot;
+  }
+
+  // Every admitted state root of the anchor's repository: the primary checkout
+  // and each linked worktree git lists in <common>/worktrees/*/gitdir. Read
+  // from the filesystem only; unreadable entries are skipped.
+  async function repositoryStateRoots(paths, anchor) {
+    const out = [];
+    if (!anchor || typeof paths.gitCommonDir !== 'function') return out;
+    const common = await paths.gitCommonDir(anchor.workRoot);
+    if (!common) return out;
+    const { readdir, readFile } = await import('node:fs/promises');
+    const checkouts = [];
+    if (/^\.git$/i.test(basename(common))) checkouts.push(join(common, '..'));
+    try {
+      for (const name of await readdir(join(common, 'worktrees'))) {
+        try {
+          const g = (await readFile(join(common, 'worktrees', name, 'gitdir'), 'utf8')).split(/\r?\n/)[0].trim();
+          if (g) checkouts.push(join(g, '..'));
+        } catch { /* a pruned or unreadable worktree entry */ }
+      }
+    } catch { /* no linked worktrees */ }
+    for (const c of checkouts) {
+      try {
+        const r = await admitRootsFrom(paths, c, anchor);
+        if (r && !out.some((x) => normPath(x) === normPath(r))) out.push(r);
+      } catch { /* skip */ }
+    }
+    return out;
+  }
+
+  async function resolveHookRepoRoot(paths, payloadCwd, payloadClaudeId, { sessionStart = false } = {}) {
+    const fallback = await resolveRepoRoot(paths);
+    if (!paths || typeof paths.resolveRoots !== 'function') return fallback;
+    const claudeId = typeof payloadClaudeId === 'string' && CLAUDE_ID_RE.test(payloadClaudeId) ? payloadClaudeId : null;
+    try {
+      const anchor = await processAnchor(paths);
+      let payloadRoot = fallback;
+      const cwd = foldCwd(payloadCwd);
+      if (typeof cwd === 'string' && cwd) {
+        try { payloadRoot = (await admitRootsFrom(paths, cwd, anchor)) || fallback; } catch { payloadRoot = fallback; }
+      }
+      if (!claudeId) return payloadRoot;
+      const disc = await loadLib('discipline.mjs');
+      if (!disc || typeof disc.resolveMadduSession !== 'function') return payloadRoot;
+
+      // Candidates in priority order, de-duplicated by PHYSICAL path: a
+      // checkout reached through a junction/symlink and the path git lists for
+      // it are one root, or cleanup below would unbind the binding it keeps.
+      const { realpath } = await import('node:fs/promises');
+      const canon = async (p) => { try { return await realpath(p); } catch { return p; } };
+      const cands = [];
+      for (const r0 of [payloadRoot, fallback, ...(await repositoryStateRoots(paths, anchor))]) {
+        if (!r0) continue;
+        const r = await canon(r0);
+        if (!cands.some((x) => normPath(x) === normPath(r))) cands.push(r);
+      }
+      payloadRoot = await canon(payloadRoot);
+      const bound = [];
+      for (const r of cands) {
+        try {
+          const mid = await disc.resolveMadduSession(r, claudeId);
+          if (!mid) continue;
+          let at = null;
+          try { at = (await disc.resolveClaudeBindingIn?.(r, claudeId))?.boundAt ?? null; } catch {}
+          bound.push({ root: r, mid, at });
+        } catch {}
+      }
+
+      // Leave this Claude id bound in `keep` only (compare-and-remove under
+      // each root's own binding lock).
+      const unbindOthers = async (keep) => {
+        for (const b of bound) {
+          if (normPath(b.root) === normPath(keep)) continue;
+          try {
+            if (disc.withBindingTransaction && disc.unbindClaudeSessionIn) {
+              await disc.withBindingTransaction(b.root, () => disc.unbindClaudeSessionIn(b.root, claudeId, b.mid));
+            }
+          } catch { /* left behind: the selection below stays cwd-independent */ }
+        }
+      };
+
+      if (!sessionStart) {
+        if (bound.length <= 1) return bound.length ? bound[0].root : payloadRoot;
+        // More than one binding (overlapping recovery mints, or a crash
+        // between bind and unbind). The choice must not depend on the cwd, or
+        // a `cd` could select the other counter. No single blocker ranks two
+        // counters (edits, dirt and age each block on their own), so none is
+        // ranked: the EARLIEST-bound binding is chosen — fixed for the life of
+        // the bindings, whatever the cwd — and nothing is removed here, so no
+        // record is discarded. Every further edit accrues to that one. Ties
+        // fall to the cwd-independent repository order. SessionStart is the
+        // only place duplicates are cleaned up.
+        const order = (await Promise.all((await repositoryStateRoots(paths, anchor)).map(canon)));
+        const rank = (r) => { const i = order.findIndex((x) => normPath(x) === normPath(r)); return i < 0 ? order.length : i; };
+        const ts = (b) => (Number.isFinite(b.at) ? b.at : Infinity);
+        const best = bound.slice().sort((a, b) => (ts(a) - ts(b)) || (rank(a.root) - rank(b.root)))[0];
+        return best.root;
+      }
+
+      // SessionStart: renew where the pinned MADDU_SESSION_ID is bound AND
+      // still live (a continuation), else start where the agent works. Then
+      // make this Claude id's binding unique to the chosen root.
+      const envSid = process.env.MADDU_SESSION_ID;
+      let chosen = payloadRoot;
+      const renewal = envSid ? bound.find((b) => b.mid === envSid) : null;
+      if (renewal) {
+        try {
+          const { projections } = await loadSpineLib();
+          const proj = await projections.project(renewal.root);
+          if ((proj.activeSessions || []).some((s) => s && s.id === envSid)) chosen = renewal.root;
+        } catch { /* liveness unknown: start where the agent works */ }
+      }
+      await unbindOthers(chosen);
+      return chosen;
+    } catch { return fallback; }
+  }
+
   async function resolveWorkRootFrom(paths, payloadCwd, repoRoot) {
     if (!paths || typeof paths.resolveRoots !== 'function') return null;
-    const { resolve } = await import('node:path');
-    const norm = (p) => {
-      const r = resolve(String(p));
-      return process.platform === 'win32' ? r.toLowerCase() : r;
-    };
-    // A Git Bash caller reports its cwd in MSYS spelling (`/c/Users/x`); the
-    // native resolver would not find a worktree under that spelling and the
-    // hook would silently observe the primary checkout instead — and then
-    // hand the write-target scope roots that do not contain the worktree
-    // the edit lands in. Fold the drive form first; any other POSIX-absolute
-    // spelling on Windows is a mount this process cannot map and is skipped.
-    const fold = (p) => {
-      if (process.platform !== 'win32' || typeof p !== 'string' || p[0] !== '/') return p;
-      const m = /^\/([a-zA-Z])(?:\/|$)/.exec(p);
-      return m ? `${m[1].toUpperCase()}:/${p.slice(m[0].length)}` : null;
-    };
-    for (const cwd of [fold(payloadCwd), process.cwd()]) {
+    const norm = normPath;
+    // The state root itself is the last candidate (v1.158.0): a session that
+    // stays bound in a worktree while its cwd has moved elsewhere must still
+    // be observed in that worktree, or its commit pressure would vanish.
+    for (const cwd of [foldCwd(payloadCwd), process.cwd(), repoRoot]) {
       if (typeof cwd !== 'string' || !cwd) continue;
       // Per-candidate containment: a throwing payload-cwd resolution must not
       // abort the process.cwd() attempt.
@@ -445,11 +622,12 @@ export function createHookFireCore(deps) {
     try {
       seamThrow('bootstrap');
       const { paths, spine, projections, sessionActive, sessionLifecycle } = await loadSpineLib();
-      const repoRoot = await resolveRepoRoot(paths);
       const disc = await loadLib('discipline.mjs');
       seamThrow('handler');
-      // Payload FIRST — the claude id + cwd inform everything downstream.
+      // Payload FIRST — the claude id + cwd inform everything downstream,
+      // including which state root this session is recorded in.
       const payload = await readHookPayload();
+      const repoRoot = await resolveHookRepoRoot(paths, payload.cwd, payload.session_id, { sessionStart: true });
       const isRefId = spine.isRefId || (() => false);
       const isSid = spine.isSid || (() => false);
       const isClaudeId = spine.isClaudeId || (() => false);
@@ -629,10 +807,10 @@ export function createHookFireCore(deps) {
     try {
       seamThrow('bootstrap');
       const { paths, spine, sessionLifecycle } = await loadSpineLib();
-      const repoRoot = await resolveRepoRoot(paths);
       const disc = await loadLib('discipline.mjs');
       seamThrow('handler');
       const payload = await readHookPayload();
+      const repoRoot = await resolveHookRepoRoot(paths, payload.cwd, payload.session_id);
       // CP2 (PR-B): gate the claude id at the boundary (resolve/unbind self-guard
       // too); fail-open to today's behavior on a pre-PR-B lib without isClaudeId.
       const claudeId = spine.isClaudeId
@@ -679,8 +857,7 @@ export function createHookFireCore(deps) {
         // Unbind only on terminal statuses — a lock/spine-corrupt result leaves
         // an ACTIVE session; deleting its binding would orphan it.
         if (status === 'closed' || status === 'already-closed' || status === 'missing') {
-          await disc.unbindClaudeSessionIn(repoRoot, claudeId, binding.madduId);
-        }
+          await disc.unbindClaudeSessionIn(repoRoot, claudeId, binding.madduId);        }
       });
     } catch { /* CONTAINMENT: never block Claude's session end */ }
     // Witness (r2 F2): a real close appended (credited); everything else —
@@ -711,11 +888,18 @@ export function createHookFireCore(deps) {
       // throw still lands in the catch with `disc` available to witness (F6).
       disc = await loadLib('discipline.mjs');
       const { paths, projections, spine, sessionLifecycle, sessionActive } = await loadSpineLib();
+      // The process-cwd root first, so a malformed payload below still lands
+      // in the catch with a root to witness against; then the payload's cwd
+      // decides (resolveHookRepoRoot — the root the agent's own CLI uses).
       repoRoot = await resolveRepoRoot(paths);
       seamThrow('handler');
       let raw = '';
       for await (const chunk of process.stdin) raw += chunk;
       const payload = raw.trim() ? JSON.parse(raw) : {};
+      // The process-cwd root stays in the write-target scope: a session whose
+      // cwd moved must not see its own old checkout's files as "outside".
+      const processRoot = repoRoot;
+      repoRoot = await resolveHookRepoRoot(paths, payload.cwd, payload.session_id);
       tool = payload.tool_name || null;
       const ti = payload.tool_input || {};
       const filePath = ti.file_path || ti.notebook_path || null;
@@ -748,7 +932,7 @@ export function createHookFireCore(deps) {
       // read a blocker about a file the gate could not even locate. The scope
       // is not the blocker - it is context the message owes them.
       const targetScope = typeof disc?.classifyWriteTarget === 'function'
-        ? disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot] })
+        ? disc.classifyWriteTarget({ tool, filePath, command, cwd: payload.cwd, roots: [workRoot, repoRoot, processRoot] })
         : null;
       // Only a plain edit/write earns the outside exemption. A self-disable or
       // an ambiguous command is gated wherever it points — its scope is
@@ -835,6 +1019,7 @@ export function createHookFireCore(deps) {
         decision = await disc.enforcePreTool(repoRoot, {
           madduSessionId: sid, claudeSessionId, tool, filePath, command,
           nowMs: Date.now(), laneJustClaimed, workRoot, cwd: payload.cwd,
+          extraRoots: [processRoot],
         });
       }
       // Adopt the decision's counter key only when it is shape-safe (a sid
@@ -926,7 +1111,7 @@ export function createHookFireCore(deps) {
       seamThrow('bootstrap');
       const payload = await readHookPayload();
       const { paths, spine, projections } = await loadSpineLib();
-      const repoRoot = await resolveRepoRoot(paths);
+      const repoRoot = await resolveHookRepoRoot(paths, payload.cwd, payload.session_id);
       seamThrow('handler');
       const workRoot = await resolveWorkRootFrom(paths, payload.cwd, repoRoot);
       const proj = await projections.project(repoRoot);
