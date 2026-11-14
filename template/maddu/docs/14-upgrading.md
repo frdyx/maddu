@@ -7,6 +7,26 @@ See [`upgrade-policy.md`](upgrade-policy.md).
 What a release changes for a project built on Máddu, when it changes anything
 beyond Máddu's own files.
 
+### v1.158.0
+
+- **Worktree sessions record to the worktree's own spine.** A Claude Code
+  session working in a git worktree that has its own `.maddu/` now registers,
+  binds and counts discipline there, the same root its `maddu slice-stop`,
+  `register` and `lane claim` use, even when the app fires hooks from the
+  primary checkout. A slice-stop in the worktree clears the discipline block.
+  Sessions that earlier sessions of this kind left in the primary spine close
+  through the stale sweep as usual. A host tool that reads a worktree
+  session's role or binding should read the worktree's
+  `.maddu/state/` (`session.active.json`, `discipline/sessions.json`).
+  The fix is in the hook runtime, which the desktop app runs from the primary
+  checkout, so `maddu upgrade` there covers worktrees branched before it.
+  The root follows the Claude session's binding, so changing directory
+  mid-session does not move it; a new SessionStart leaves the Claude id bound
+  in one root only.
+- **`session close` prints what it closed** on every stdout. A script that
+  relied on its silence when piped will now see one `closed <id> (<root>)`
+  line.
+
 ### v1.157.0
 
 - **Host gates can be tracked.** `maddu-state-untracked` counts `.maddu/gates/`

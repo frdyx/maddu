@@ -11,6 +11,63 @@ narrative summary.
 
 ---
 
+## [v1.158.0] · 2026-11-13 · a worktree session's hooks and CLI use one state root
+
+Reported by a host project (eco, finding A7): in a Claude desktop worktree
+session the discipline hook blocked edits after 12 and demanded a slice-stop
+that could not clear it from where the agent works.
+
+- **Root cause.** The desktop app fires a worktree session's hooks with the
+  process cwd in the **primary** checkout; the payload's `cwd` and every Bash
+  call the agent makes are in the worktree. The hook core resolved its state
+  root from `process.cwd()`, so the session, its Claude binding and its
+  discipline counter landed in the primary spine. The worktree carries its own
+  installed `.maddu/`, so the CLI there resolved the worktree (correctly),
+  dropped the hook's session id as "not a live session here", recorded the
+  slice-stop against another session, and the counter never reset.
+- **Fix: worktrees with their own `.maddu/` are self-rooted, and the hook
+  follows the payload `cwd`.** `hooks fire` (session-start, pre-tool-use,
+  session-end, pre-compact) now resolves the state root from the payload's
+  `cwd` through the same `resolveRoots` the CLI uses, so one cwd gives one
+  state root whichever entry point asks. An attached lane worktree
+  (`.maddu-state-root`) still resolves to its primary. The payload root is
+  adopted only when it is a worktree of the same git repository as the
+  process-cwd root (read from `.git`/`commondir` and canonicalized with
+  `realpath`, no git process), and so is the state root it resolves to (a
+  `.maddu-state-root` pointer at an unrelated repo is refused), or when the
+  process cwd is in no Máddu repo. Anything else keeps the old resolution.
+  New `paths.gitCommonDir` and `paths.sameGitRepository`.
+- **The root sticks to the Claude session, through its binding.** After
+  SessionStart, every fire of a Claude session uses the root its binding lives
+  in, searched across the repository's own checkouts (the primary and each
+  worktree git lists), wherever its cwd has moved; only a caller bound nowhere
+  resolves from its cwd, and a recovery mint binds it there. SessionStart
+  renews where a pinned `MADDU_SESSION_ID` is bound, otherwise starts where the
+  agent works, and removes the Claude id's bindings from every other root, so
+  it is bound in exactly one; it renews only a pinned session that is still
+  live. Should a Claude id ever be bound in two roots (overlapping recovery
+  mints), the earliest-bound one is used, independent of the cwd, and none is
+  discarded (SessionStart is the only cleanup). Candidate roots are compared
+  by physical path (`realpath`), so a checkout reached through a junction is
+  one root. A session bound in a worktree is observed there for
+  commit pressure even while its cwd is elsewhere. No new state file. So a blocked session cannot
+  leave its counter behind by `cd`-ing into another checkout. The hook's own
+  checkout stays in the write-target scope of both classifiers
+  (`enforcePreTool` gains `extraRoots`), so a worktree session's writes into
+  the primary are still counted. Forward-slash UNC payload cwds are accepted.
+- **`session close` is never silent.** It prints `closed <id> (<state root>)`
+  on every stdout, not only a TTY, so a no-id close shows which session it
+  picked. `precondition-failed` used to fall through as a success and now exits
+  1; closing an already-closed session stays an idempotent success that says
+  `(already closed)`.
+- The discipline gate is unchanged: same thresholds, same rungs, same
+  own-session-only counter reset.
+- **Known residual.** If SessionStart never fired and two recovery mints for
+  one Claude session overlap from different checkouts, the earlier-bound
+  session is used and the later one's commit pressure is not observed. That
+  is no weaker than 1.157, where every worktree session's commit pressure was
+  measured at the primary checkout; a SessionStart clears it.
+
 ## [v1.157.0] · 2026-11-01 · host gates can be tracked, can refuse `plan new`, and feedback has its own event
 
 Three gaps system1, a host project on 1.156.0, worked around on its own side

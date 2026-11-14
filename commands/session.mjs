@@ -322,6 +322,13 @@ export default async function session(argv) {
         console.error('(spine has malformed lines — close refused; run maddu spine verify)');
         process.exit(1);
       }
+      // v1.158.0: anything but a real close is a failure the caller must see.
+      // 'precondition-failed' (and any status a newer lib adds) used to fall
+      // through to the success path and exit 0 having closed nothing.
+      if (res.status !== 'closed') {
+        console.error(`session ${sessionId} was not closed (${res.status || 'unknown status'})`);
+        process.exit(1);
+      }
     } else {
       // Legacy fallback (older installed lib): direct append + unconditional
       // clear, exactly the pre-v1.111 behavior.
@@ -333,7 +340,11 @@ export default async function session(argv) {
       });
       if (sessionActive) await sessionActive.clearActiveSession(repoRoot);
     }
-    if (process.stdout.isTTY) console.log(`closed  ${sessionId}`);
+    // v1.158.0: report the close on every stdout, not only a TTY. Agents pipe
+    // their output, so a no-id close that picked the cached session used to
+    // exit 0 in silence — indistinguishable from doing nothing — and the
+    // session it did NOT close (the one the caller meant) kept its role.
+    console.log(`closed  ${sessionId}  (${repoRoot})`);
     // Learn candidate detection at the session boundary (usage-audit Tier 5)
     // — same containment contract as the slice-stop hook-in (post-append,
     // try/catch isolated, bounded window, raced deadline, READ-ONLY preview;
